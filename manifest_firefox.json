@@ -1,0 +1,81 @@
+{
+  "manifest_version": 2,
+  "name": "BestiaryArena SuperMod Loader",
+  "version": "1.0.0",
+  "description": "Private mod loader for Bestiary Arena - Load and manage custom mods through local files and various sources.",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-34.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "browser_action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "34": "assets/icons/icon-34.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.bestiaryarena.com/*", 
+        "*://bestiaryarena.com/*"
+      ],
+      "js": ["content/injector.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "*://*.bestiaryarena.com/*", 
+        "*://bestiaryarena.com/*"
+      ],
+      "js": ["content/utility_injector.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "*://*.bestiaryarena.com/*", 
+        "*://bestiaryarena.com/*"
+      ],
+      "js": ["mods/Super Mods/DashboardButton.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "permissions": [
+    "storage",
+    "tabs",
+    "*://*.bestiaryarena.com/*",
+    "*://bestiaryarena.com/*",
+    "https://*.bestiaryarena.com/*",
+    "https://bestiaryarena.com/*",
+    "http://*.bestiaryarena.com/*",
+    "http://bestiaryarena.com/*",
+    "*://*.gist.githubusercontent.com/*",
+    "*://gist.githubusercontent.com/*"
+  ],
+  "web_accessible_resources": [
+    "content/client.js", 
+    "content/local_mods.js", 
+    "content/utility_injector.js",
+    "content/ba-sandbox-utils.mjs",
+    "assets/icons/*", 
+    "assets/js/*",
+    "assets/fonts/*",
+    "assets/locales/*", 
+    "mods/*"
+  ],
+  "options_page": "dashboard/dashboard.html",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "bestiaryarena-supermodloader@private.local",
+      "strict_min_version": "78.0"
+    }
+  }
+} 

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BestiaryArena SuperMod Loader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>BestiaryArena SuperMod Loader</h1>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <!-- Dashboard button removed -->
+    </div>
+  </header>
+  
+  <main>
+    <section id="local-mods">
+      <h2>All Mods</h2>
+      <div id="official-mods-section">
+        <h3>Official Mods</h3>
+        <div id="official-mods-list"></div>
+      </div>
+      <div id="super-mods-section" style="margin-top:24px;">
+        <h3>Super Mods</h3>
+        <div id="super-mods-list"></div>
+      </div>
+      <div id="user-mods-section" style="margin-top:24px;">
+        <h3>User-generated Mods</h3>
+        <div id="user-mods-list"></div>
+      </div>
+    </section>
+  </main>
+  
+  <section id="debug-tools-section" style="border-top: 1px solid #313244; margin-top: 20px; padding-top: 10px;">
+    <h2>Debug Tools</h2>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <button id="check-api-btn" class="secondary-button">Check BestiaryModAPI</button>
+      <button id="log-storage-btn" class="secondary-button">Log Storage Contents</button>
+    </div>
+  </section>
+  
+  <footer>
+    <p>Version 1.0.0</p>
+  </footer>
+  
+  <script src="../assets/js/localization.js"></script>
+  <script type="module" src="popup.js"></script>
+</body>
+</html> 
