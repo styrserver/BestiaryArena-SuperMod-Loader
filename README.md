@@ -1,8 +1,6 @@
 # BestiaryArena SuperMod Loader
 
-A private browser extension that allows loading and managing custom mods for the Bestiary Arena game. This extension provides a framework for creating, loading, and managing mods that can extend the game's functionality.
-
-![Mod Loader in Action](docs/images/loaded_mods_injected.png)
+A browser extension that allows loading and managing custom mods for the Bestiary Arena game. This extension is a clone of the original Bestiary Arena Mod Loader with reworked mod loading, including advanced Super Mods like Cyclopedia and Hunt Analyzer. It provides a framework for creating, loading, and managing mods that can extend the game's functionality.
 
 ## Features
 
@@ -12,13 +10,28 @@ A private browser extension that allows loading and managing custom mods for the
 - **Internationalization**: Built-in translation support for mods
 - **Game API Access**: Safe access to game state and functions
 - **Developer-Friendly**: Comprehensive documentation and examples
+- **Super Mods**: Advanced mods with comprehensive game enhancement features
 
-## Installation
+### Firefox Installation
+
+Download here: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+
+### Firefox Installation (Alternative)
 
 1. Clone this repository or download it as a ZIP file
 2. Open Firefox and navigate to `about:debugging`
 3. Click "This Firefox" tab
 4. Click "Load Temporary Add-on" and select the `manifest_firefox.json` file
+
+## Chromium Installation
+
+1. Download the extension files from the [GitHub repository](https://github.com/styrserver/BestiaryArena-SuperMod-Loader)
+2. Unzip the files to a location on your computer
+3. Open your Chrome-based browser (Chrome, Edge, Brave, etc.)
+4. Go to `chrome://extensions/` in your browser
+5. Enable "Developer mode" using the toggle in the top-right corner
+6. Click "Load unpacked" and select the folder containing the extension files
+7. The extension icon should now appear in your browser toolbar
 
 ## Using the Mod Loader
 
@@ -28,13 +41,7 @@ To access the Mod Loader interface, click the extension icon in your browser too
 
 ### Extension Popup Interface
 
-The extension provides a user-friendly popup interface for managing your mods:
-
-| Extension Popup Interface |  |
-|-------------|----------------------|
-| ![Popup Main Screen](docs/images/popup_screen_1.png) | ![Popup Config Screen](docs/images/popup_screen_2.png) |
-
-The popup interface allows you to enable/disable mods and access configuration options quickly.
+The extension provides a user-friendly popup interface for managing your mods. The popup interface allows you to enable/disable mods and access configuration options quickly.
 
 ### Loading Mods
 
@@ -145,24 +152,49 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 
 The extension comes with several powerful example mods that demonstrate different features:
 
+### Super Mods
+
+These are advanced mods that provide comprehensive game enhancement features:
+
+#### Cyclopedia
+A comprehensive game data viewer and player profile manager:
+- View detailed monster and equipment information
+- Access your player profile and statistics
+- Browse your inventory and collection
+- Track your progress and achievements
+- Search and filter game data efficiently
+
+#### Hunt Analyzer
+Advanced autoplay and loot tracking system:
+- Track detailed statistics from autoplay sessions
+- Monitor gold, dust, and item drops
+- Analyze creature and equipment drop rates
+- View session summaries and performance metrics
+- Export data for further analysis
+
+#### Dashboard Button
+Quick access to the mod dashboard:
+- Provides easy access to all mod features
+- Integrates seamlessly with the game interface
+- Streamlines mod management
+
+### Official Mods
+
+These are the core mods that provide essential gameplay enhancements:
+
 ### UI Components Showcase
-![UI Components Showcase](docs/images/ui_showcase_example_mod.png)
 
 Demonstrates all available UI components provided by the mod loader, allowing developers to see how components look and function within the game's environment. Includes examples of monster portraits, item portraits, room list items, and modals with proper styling.
 
 ### Custom Display
-![Custom Display Settings](docs/images/custom_disply_settings.png)
 
 Enhances game visuals with two powerful features:
 - **Performance Mode**: Strips down graphics for better performance on low-end devices.
-  ![Performance Mode Applied](docs/images/performance_mode_applied.png)
 - **Map Grid**: Adds a coordinate grid overlay to help with positioning and planning.
-  ![Grid Layout Applied](docs/images/grid_layout_applied.png)
 
 Both features can be customized with extensive settings for colors, visibility, and display options.
 
 ### Hero Editor
-![Hero Editor](docs/images/hero_editor.png)
 
 A powerful tool that allows players to:
 - Edit monster stats directly in the game
@@ -173,7 +205,6 @@ A powerful tool that allows players to:
 Perfect for testing different monster and equipment combinations without having to collect and level them in-game.
 
 ### Setup Manager
-![Setup Manager](docs/images/setup_manager.png)
 
 Allows players to save, load, and manage team configurations for different maps. Features include:
 - Multiple saved team setups per map
@@ -183,7 +214,6 @@ Allows players to save, load, and manage team configurations for different maps.
 - Integration with the game's auto-configure button
 
 ### Team Copier
-![Team Copier](docs/images/team_copier.png)
 
 Enables sharing team configurations with other players through:
 - Copying team setup as JSON command
@@ -193,7 +223,6 @@ Enables sharing team configurations with other players through:
 - History of recently used seeds
 
 ### Monster Tier List
-![Monster Tier List](docs/images/monster_usage_tier_list_mod.png)
 
 Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios. Features include:
 - Sortable tier list of monsters
@@ -202,7 +231,6 @@ Analyzes monster usage patterns and displays statistics and rankings, helping pl
 - Visual representation of monster effectiveness
 
 ### Item Tier List
-![Item Tier List](docs/images/item_tier_lis_mod.png)
 
 Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts. The mod shows:
 - Item effectiveness by tier
@@ -211,7 +239,6 @@ Displays equipment statistics and rankings, allowing players to compare items an
 - Visual quality indicators
 
 ### Highscore Improvements
-![Highscore Improvements](docs/images/highscore_improvements_mod.png)
 
 Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements. Features include:
 - Detailed performance analysis
@@ -219,15 +246,55 @@ Enhances the game's highscore display with additional statistics, improved sorti
 - Room-by-room breakdown of performance
 - Visual indicators for time differences
 
+### Turbo Mode
+
+Speed up gameplay for faster testing and grinding:
+- Increase game speed for faster progression
+- Customizable speed multipliers
+- Real-time tick display
+- Perfect for testing strategies quickly
+- Great for farming and grinding sessions
+
 ## Contributing
 
 Contributions are welcome! If you have a mod you'd like to share or improvements to the extension, please read our [Contribution Guidelines](CONTRIBUTING.md).
 
+## Frequently Asked Questions
+
+### Is this extension safe to use?
+Yes! The mod loader doesn't modify any game files directly. It only adds features to your browser's version of the game. In case you have any doubts, the source code is fully available for inspection and review on GitHub.
+
+### Will using mods get me banned?
+This mod loader is designed for enhancing single-player gameplay. It was all made with consent from Alexandre Regali Seleghim (Xandjiji) which is the creator of Bestiary Arena.
+
+### Do I need to update the extension?
+Occasionally, you may need to update the extension when new game versions are released. Check the GitHub repository for updates.
+
+### Can I create my own mods?
+Yes! If you know JavaScript, you can create your own mods. Check the [Mod Development Guide](docs/mod_development_guide.md) for technical details.
+
+### How do I report bugs or suggest features?
+Visit the [GitHub Issues page](https://github.com/TheMegafuji/bestiary-arena-mod-loader/issues) to report bugs or suggest new features.
+
+## Troubleshooting
+
+If you encounter any issues:
+
+- **Mods not appearing?** Make sure you're on the Bestiary Arena website and the extension is enabled.
+- **Game performance issues?** Try using the Performance Mode mod to improve game speed.
+- **Extension not working after game update?** Check for extension updates on GitHub.
+- **Specific mod not working?** Disable and re-enable the mod, or refresh the page.
+- **Turbo Mode not working?** Make sure you're in a game session and try refreshing the page.
+- **Board Analyzer issues?** Ensure you're in sandbox mode and have a valid board configuration.
+
 ## Credits
 
-### Developers
+### Original Developers
 - [TheMegafuji](https://github.com/TheMegafuji/) (In-game name: **megafuji**)
 - [MathiasBynens](https://github.com/mathiasbynens) (In-game name: **mathiasbynens**)
+
+### SuperMod Loader Maintainer
+- [Muhamad](https://bestiaryarena.com/profile/muhamad) - Creator and maintainer of the Bestiary Arena SuperMod Loader
 
 ### Special Thanks
 This project has been developed with the express consent and approval of the original Bestiary Arena game developer:
