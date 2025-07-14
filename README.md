@@ -12,7 +12,7 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 - **Developer-Friendly**: Comprehensive documentation and examples
 - **Super Mods**: Advanced mods with comprehensive game enhancement features
 
-### Firefox Installation
+## Firefox Installation
 
 Download here: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
 
