@@ -1,4 +1,4 @@
-# Thanks to - [TheMegafuji](https://github.com/TheMegafuji/) and [MathiasBynens](https://github.com/mathiasbynens)for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader
+# Thanks to - [TheMegafuji](https://github.com/TheMegafuji/) and [MathiasBynens](https://github.com/mathiasbynens) for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader
 
 # BestiaryArena SuperMod Loader
 
