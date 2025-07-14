@@ -1,3 +1,5 @@
+# Thanks to - [TheMegafuji](https://github.com/TheMegafuji/) and [MathiasBynens](https://github.com/mathiasbynens)for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader
+
 # BestiaryArena SuperMod Loader
 
 A browser extension that allows loading and managing custom mods for the Bestiary Arena game. This extension is a clone of the original Bestiary Arena Mod Loader with reworked mod loading, including advanced Super Mods like Cyclopedia and Hunt Analyzer. It provides a framework for creating, loading, and managing mods that can extend the game's functionality.
