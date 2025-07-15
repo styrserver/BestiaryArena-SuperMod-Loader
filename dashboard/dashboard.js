@@ -1,7 +1,7 @@
 // Cross-browser API shim for extension APIs
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
-console.log('DEBUG: browserAPI:', window.browserAPI, 'chrome:', typeof chrome, 'browser:', typeof browser);
+if (window.DEBUG) console.log('DEBUG: browserAPI:', window.browserAPI, 'chrome:', typeof chrome, 'browser:', typeof browser);
 
 // Topnav navigation logic
 // Switches visible section when topnav item is clicked
@@ -100,7 +100,6 @@ import { getLocalMods } from '../mods/modsLoader.js';
 // --- NEW: Automatically register all mods in /mods on dashboard load ---
 async function scanAndRegisterLocalMods() {
   // List of mod files in /mods (hardcoded, since browser JS can't read directory)
-  // Updated: Exclude Unused Mods (Guilds.js, Map_Editor.js, Simulator(TESTER).js)
   const modFiles = [
     // Official Mods
     { name: 'Bestiary_Automator.js', enabled: false },
@@ -119,7 +118,8 @@ async function scanAndRegisterLocalMods() {
     // Super Mods
     { name: 'Cyclopedia.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
-    { name: 'DashboardButton.js', enabled: true }
+    { name: 'DashboardButton.js', enabled: true },
+    { name: 'Dice_Roller.js', enabled: true }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -197,30 +197,56 @@ if (textarea) {
 }
 
 // Update setEditorContent to show/hide the Save button in the header
-function setEditorContent(title, content, editable, onSave) {
+function setEditorContent(title, content, editable, onSave, downloadName) {
   const editorHeader = document.querySelector('.editor-header');
   const editorTextarea = document.getElementById('code-editor-textarea');
   const saveBtn = document.getElementById('editor-save-btn');
   editorHeader.querySelector('span').textContent = title || 'Code Editor';
   editorTextarea.value = content || '';
   editorTextarea.readOnly = !editable;
-  if (editable) {
+  // Hide Save/Download button if content is blank or is the default placeholder
+  const isPlaceholder = !content || content.trim() === '' || content.trim() === 'Select a mod and click Edit to view or edit code...';
+  if (isPlaceholder) {
+    saveBtn.style.display = 'none';
+    saveBtn.onclick = null;
+  } else if (editable) {
     saveBtn.style.display = '';
+    saveBtn.textContent = 'Save';
     saveBtn.onclick = () => {
       if (onSave) onSave(editorTextarea.value);
     };
   } else {
-    saveBtn.style.display = 'none';
-    saveBtn.onclick = null;
+    saveBtn.style.display = '';
+    saveBtn.textContent = 'Download';
+    saveBtn.onclick = () => {
+      // Download the script as a file
+      const blob = new Blob([editorTextarea.value], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = downloadName || 'script.js';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    };
   }
   updateEditorLineNumbers();
 }
 
-const superModNames = [
-  'Cyclopedia.js',
-  'Hunt Analyzer.js',
-  'DashboardButton.js'
-];
+  const superModNames = [
+    'Cyclopedia.js',
+    'Hunt Analyzer.js',
+    'DashboardButton.js',
+    'Dice_Roller.js'
+  ];
+
+  const hiddenMods = [
+    'inventory-tooltips.js',
+    'DashboardButton.js'
+  ];
 
 // Helper to normalize mod names for comparison
 function normalizeModName(name) {
@@ -228,12 +254,20 @@ function normalizeModName(name) {
 }
 
 async function renderMods(fileMods) {
-  console.log('DEBUG: fileMods returned from getLocalMods:', fileMods);
+  if (window.DEBUG) console.log('DEBUG: fileMods returned from getLocalMods:', fileMods);
   const manualMods = await getManualMods();
   officialModsList.innerHTML = '';
   superModsList.innerHTML = '';
   userModsList.innerHTML = '';
-  fileMods.forEach(mod => {
+  
+  const visibleMods = fileMods.filter(mod => {
+    const modFileName = mod.name.split('/').pop();
+    return !hiddenMods.some(hidden => 
+      normalizeModName(hidden) === normalizeModName(modFileName)
+    );
+  });
+  
+  visibleMods.forEach(mod => {
     // Robust comparison for Super Mods
     const modFileName = mod.name.split('/').pop(); // Get just the filename
     const isSuper = superModNames.some(
@@ -245,25 +279,18 @@ async function renderMods(fileMods) {
     nameSpan.className = 'mod-name';
     nameSpan.textContent = modFileName.replace('.js', '').replace(/_/g, ' ');
     const editBtn = document.createElement('button');
-    editBtn.innerHTML = '<span>Edit</span>';
+    editBtn.innerHTML = '<span>' + (isSuper || true ? 'View' : 'Edit') + '</span>';
     editBtn.className = 'unified-btn mod-action-btn';
     editBtn.style.marginLeft = '16px';
     editBtn.onclick = async () => {
       const content = await fetchFileModContent(mod.name);
-      setEditorContent(mod.displayName || mod.name, content, true, (newContent) => {
-        // Save logic: download as file (same as before)
-        const blob = new Blob([newContent], { type: 'text/javascript' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = mod.name;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 100);
-      });
+      setEditorContent(
+        mod.displayName || mod.name,
+        content,
+        false, // read-only for official and super mods
+        null,
+        mod.name // pass filename for download
+      );
     };
     card.appendChild(nameSpan);
     card.appendChild(editBtn);
@@ -289,7 +316,9 @@ async function renderMods(fileMods) {
         mods[idx].content = newContent;
         await saveManualMods(mods);
         fetchAndRenderMods();
-      });
+        if (window.toast) window.toast('Script saved!');
+        else alert('Script saved!');
+      }, mod.name);
     };
     const deleteBtn = document.createElement('button');
     deleteBtn.textContent = 'Delete';
@@ -300,6 +329,7 @@ async function renderMods(fileMods) {
         mods.splice(idx, 1);
         await saveManualMods(mods);
         fetchAndRenderMods();
+        setEditorContent('Code Editor', '', false, null); // Clear the code editor
       }
     };
     card.appendChild(nameSpan);

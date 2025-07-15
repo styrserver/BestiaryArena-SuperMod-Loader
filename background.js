@@ -15,7 +15,16 @@
  * See documentation below for each function.
  */
 // Polyfill for browser API (Firefox/Chromium separation)
-const browserAPI = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null);
+const browserAPI = (function() {
+  if (typeof browser !== 'undefined') {
+    return browser;
+  } else if (typeof chrome !== 'undefined') {
+    return chrome;
+  } else {
+    console.error('No browser API available');
+    return null;
+  }
+})();
 
 const scriptCache = {};
 
@@ -509,6 +518,33 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'getModContent') {
+    try {
+      const modUrl = browserAPI.runtime.getURL(message.modName);
+      console.log(`Background: Fetching mod content from: ${modUrl}`);
+      
+      fetch(modUrl)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+          return response.text();
+        })
+        .then(content => {
+          console.log(`Background: Successfully loaded mod content, length: ${content.length} bytes`);
+          sendResponse({ success: true, content });
+        })
+        .catch(error => {
+          console.error(`Background: Error fetching mod content:`, error);
+          sendResponse({ success: false, error: error.message });
+        });
+    } catch (error) {
+      console.error(`Background: Error getting mod URL:`, error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true;
+  }
+
   if (message.action === 'executeScript') {
     browserAPI.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs[0]) {
@@ -653,28 +689,17 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         scripts: enabledScripts
       });
       
-      // Then send and execute local mods with a delay
+      // OPTIMIZATION: Only register local mods, let the content script handle execution
       setTimeout(() => {
         getLocalMods().then(localMods => {
           console.log(`Sending ${localMods.length} local mods to ready tab:`, 
             localMods.map(m => `${m.name}: ${m.enabled}`));
           
-          // Send registration message first
+          // Send registration message only - content script will handle execution
           browserAPI.tabs.sendMessage(sender.tab.id, {
             action: 'registerLocalMods',
             mods: localMods
           });
-          
-          // Execute enabled mods after a short delay
-          setTimeout(() => {
-            localMods.filter(mod => mod.enabled).forEach(mod => {
-              console.log(`Auto-executing local mod in ready tab: ${mod.name}`);
-              browserAPI.tabs.sendMessage(sender.tab.id, {
-                action: 'executeLocalMod',
-                name: mod.name
-              });
-            });
-          }, 700);
         });
       }, 500);
     });
@@ -691,7 +716,12 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'openDashboard') {
-    browserAPI.tabs.create({ url: browserAPI.runtime.getURL('dashboard/dashboard.html') });
+    const dashboardUrl = browserAPI.runtime.getURL('dashboard/dashboard.html');
+    if (browserAPI.tabs && typeof browserAPI.tabs.create === 'function') {
+      browserAPI.tabs.create({ url: dashboardUrl });
+    }
+    // Do not return true here
+    return;
   }
 });
 
@@ -733,14 +763,7 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                       mods: localMods
                     });
                     
-                    // Only execute enabled mods
-                    localMods.filter(mod => mod.enabled).forEach(mod => {
-                      console.log(`Auto-executing local mod: ${mod.name}`);
-                      browserAPI.tabs.sendMessage(tabId, {
-                        action: 'executeLocalMod',
-                        name: mod.name
-                      });
-                    });
+                    // OPTIMIZATION: Content script will handle execution automatically
                   });
                 }, 1000);
               }).catch(error => {
@@ -785,14 +808,7 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                         mods: localMods
                       });
                       
-                      // Only execute enabled mods
-                      localMods.filter(mod => mod.enabled).forEach(mod => {
-                        console.log(`Auto-executing local mod: ${mod.name}`);
-                        browserAPI.tabs.sendMessage(tabId, {
-                          action: 'executeLocalMod',
-                          name: mod.name
-                        });
-                      });
+                      // OPTIMIZATION: Content script will handle execution automatically
                     });
                   }, 1000);
                 } else {
@@ -813,23 +829,11 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
               console.log(`Found ${localMods.length} local mods with states:`, 
                 localMods.map(m => `${m.name}: ${m.enabled}`));
               
-              // Send registration message first
+              // Send registration message only - content script will handle execution
               browserAPI.tabs.sendMessage(tabId, {
                 action: 'registerLocalMods',
                 mods: localMods
               });
-              
-              // Ensure a delay before executing mods
-              setTimeout(() => {
-                // Only execute enabled mods
-                localMods.filter(mod => mod.enabled).forEach(mod => {
-                  console.log(`Auto-executing local mod: ${mod.name}`);
-                  browserAPI.tabs.sendMessage(tabId, {
-                    action: 'executeLocalMod',
-                    name: mod.name
-                  });
-                });
-              }, 500);
             });
           }
         });

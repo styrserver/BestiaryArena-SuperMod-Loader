@@ -13,6 +13,24 @@ import { getLocalMods } from '../mods/modsLoader.js';
 
 const MANUAL_MODS_KEY = 'manualMods';
 
+async function getManualMods() {
+  return new Promise(resolve => {
+    if (!window.browserAPI || !window.browserAPI.storage || !window.browserAPI.storage.local) {
+      // Fallback to localStorage if browserAPI not available
+      try {
+        const stored = localStorage.getItem(MANUAL_MODS_KEY);
+        resolve(stored ? JSON.parse(stored) : []);
+      } catch (e) {
+        resolve([]);
+      }
+      return;
+    }
+    window.browserAPI.storage.local.get([MANUAL_MODS_KEY], result => {
+      resolve(result[MANUAL_MODS_KEY] || []);
+    });
+  });
+}
+
 const DEBUG = false; // Set to true for development
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -75,16 +93,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 let isLoadingMods = false;
 
 async function loadLocalMods() {
-  if (isLoadingMods) return; // Prevent recursive calls
   isLoadingMods = true;
   try {
-    const mods = await getLocalMods();
+    // Fetch official/super mods as before
+    const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
+    let mods = response && response.success ? response.mods : [];
+
+    // Fetch user-generated mods
+    const manualMods = await getManualMods();
+    const userMods = manualMods.map(mod => ({
+      name: `User Mods/${mod.name}.js`,
+      displayName: mod.name,
+      isLocal: true,
+      enabled: mod.enabled !== false,
+      type: 'manual',
+      content: mod.content
+    }));
+
+    // Combine all mods
+    mods = [...mods, ...userMods];
+
     renderLocalMods(mods);
   } catch (error) {
     showError('Error loading local mods: ' + error.message);
-  } finally {
-    isLoadingMods = false;
   }
+  isLoadingMods = false;
 }
 
 function renderLocalMods(mods) {
@@ -107,8 +140,14 @@ function renderLocalMods(mods) {
   }
 
   const superModNames = [
-    'Hunt Analyzer.js',
     'Cyclopedia.js',
+    'Hunt Analyzer.js',
+    'DashboardButton.js',
+    'Dice_Roller.js'
+  ];
+
+  const hiddenMods = [
+    'inventory-tooltips.js',
     'DashboardButton.js'
   ];
 
@@ -116,7 +155,14 @@ function renderLocalMods(mods) {
     return name.replace(/\s+/g, '').toLowerCase();
   }
 
-  mods.forEach(mod => {
+  const visibleMods = mods.filter(mod => {
+    const modFileName = mod.name.split('/').pop();
+    return !hiddenMods.some(hidden => 
+      normalizeModName(hidden) === normalizeModName(modFileName)
+    );
+  });
+
+  visibleMods.forEach(mod => {
     const modCard = document.createElement('div');
     modCard.className = 'script-card local-mod-card';
     modCard.dataset.name = mod.name;
@@ -169,7 +215,9 @@ function renderLocalMods(mods) {
     const isSuper = superModNames.some(
       n => normalizeModName(n) === normalizeModName(modFileName)
     );
-    if (isSuper && superModsList) {
+    if (mod.type === 'manual' && userModsList) {
+      userModsList.appendChild(modCard);
+    } else if (isSuper && superModsList) {
       superModsList.appendChild(modCard);
     } else if (officialModsList) {
       officialModsList.appendChild(modCard);

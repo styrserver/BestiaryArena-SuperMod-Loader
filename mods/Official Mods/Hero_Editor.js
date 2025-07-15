@@ -1,5 +1,5 @@
 // Hero Editor Mod for Bestiary Arena
-console.log('Hero Editor Mod initializing...');
+if (window.DEBUG) console.log('Hero Editor Mod initializing...');
 
 // Configuration
 const defaultConfig = {
@@ -14,13 +14,13 @@ let equipmentMap = null;
 
 // Wait for the utility functions to be available from the API
 document.addEventListener('utility-api-ready', () => {
-  console.log('Hero Editor: Utility API is ready');
+  if (window.DEBUG) console.log('Hero Editor: Utility API is ready');
   
   // Get the equipment map from the API
   if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.maps) {
     // Convert the Map to a regular object for easier use in this mod
     equipmentMap = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds;
-    console.log('Hero Editor: Equipment map loaded from API');
+    if (window.DEBUG) console.log('Hero Editor: Equipment map loaded from API');
   }
 });
 
@@ -198,12 +198,12 @@ function getSerializedBoard() {
     // Method 1: Use the raw function directly from window if available
     if (typeof window.$serializeBoard === 'function') {
       boardData = JSON.parse(window.$serializeBoard());
-      console.log('Used window.$serializeBoard directly for board data');
+      if (window.DEBUG) console.log('Used window.$serializeBoard directly for board data');
     } 
     // Method 2: Use the function from the API if available
     else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
       boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-      console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
+      if (window.DEBUG) console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
     }
     else {
       console.error('No serialization method available');
@@ -223,13 +223,13 @@ function configureBoard(boardData) {
     // Method 1: Use the raw function directly from window if available
     if (typeof window.$configureBoard === 'function') {
       window.$configureBoard(boardData);
-      console.log('Used window.$configureBoard directly for board configuration');
+      if (window.DEBUG) console.log('Used window.$configureBoard directly for board configuration');
       return true;
     } 
     // Method 2: Use the function from the API if available
     else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.configureBoard) {
       window.BestiaryModAPI.utility.configureBoard(boardData);
-      console.log('Used BestiaryModAPI.utility.configureBoard for board configuration');
+      if (window.DEBUG) console.log('Used BestiaryModAPI.utility.configureBoard for board configuration');
       return true;
     }
     else {
@@ -277,7 +277,7 @@ function showHeroEditorModal() {
     
     // If the board is empty, we need to try to create board entries based on boardConfig
     if (originalBoardData.board.length === 0 && boardContext.boardConfig) {
-      console.log('No hero data found in serializeBoard output, attempting to create from board config');
+      if (window.DEBUG) console.log('No hero data found in serializeBoard output, attempting to create from board config');
       
       // Look for player pieces in the board configuration
       boardContext.boardConfig.forEach(piece => {
@@ -320,7 +320,7 @@ function showHeroEditorModal() {
       throw new Error('No hero data found. Make sure you have heroes on the board.');
     }
     
-    console.log('Original board data:', originalBoardData);
+    if (window.DEBUG) console.log('Original board data:', originalBoardData);
     
     // Create a deep copy for editing
     const editableBoardData = JSON.parse(JSON.stringify(originalBoardData));
@@ -993,24 +993,24 @@ function showHeroEditorModal() {
                 
                 // Convert level to experience if it's different from original
                 if (piece.monster && piece.monster.level) {
-                  console.log(`Monster level before configure: ${piece.monster.level}`);
+                  if (window.DEBUG) console.log(`Monster level before configure: ${piece.monster.level}`);
                   // Calculate the experience needed for this level
                   const expNeeded = globalThis.state.utils.expAtLevel(piece.monster.level);
                   piece.monster.exp = expNeeded;
-                  console.log(`Calculated experience for level ${piece.monster.level}: ${expNeeded}`);
+                  if (window.DEBUG) console.log(`Calculated experience for level ${piece.monster.level}: ${expNeeded}`);
                 }
               });
               
               // Add detailed debug logging
-              console.log('DETAILED BOARD DATA:');
+              if (window.DEBUG) console.log('DETAILED BOARD DATA:');
               updatedBoardData.board.forEach((piece, index) => {
-                console.log(`Piece ${index}:`, JSON.stringify(piece));
+                if (window.DEBUG) console.log(`Piece ${index}:`, JSON.stringify(piece));
               });
               
-              console.log('Updated board data:', updatedBoardData);
+              if (window.DEBUG) console.log('Updated board data:', updatedBoardData);
               
               // Apply the updated board data
-              console.log('About to call configureBoard with data:', updatedBoardData);
+              if (window.DEBUG) console.log('About to call configureBoard with data:', updatedBoardData);
 
               // Create a custom board configuration directly (test solution)
               const testData = {
@@ -1025,7 +1025,7 @@ function showHeroEditorModal() {
                 })
               };
 
-              console.log('Modified board data for testing:', testData);
+              if (window.DEBUG) console.log('Modified board data for testing:', testData);
               const success = configureBoard(testData);
               
               if (success) {

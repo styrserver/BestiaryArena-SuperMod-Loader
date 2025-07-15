@@ -1037,7 +1037,8 @@ if (typeof browserAPI === 'undefined') {
             // Create container
             const container = document.createElement('div');
             container.className = 'relative overflow-hidden frame-pressed-1 surface-dark';
-            container.style.cssText = `position: relative; height: ${options.height || 300}px; --radix-scroll-area-corner-width: 0px; --radix-scroll-area-corner-height: 0px;`;
+            const heightValue = options.height ? (typeof options.height === 'number' ? `${options.height}px` : options.height) : '300px';
+            container.style.cssText = `position: relative; height: ${heightValue}; --radix-scroll-area-corner-width: 0px; --radix-scroll-area-corner-height: 0px;`;
             
             // Create scroll view with game-styled scrollbar
             const scrollView = document.createElement('div');

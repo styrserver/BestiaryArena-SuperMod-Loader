@@ -1130,7 +1130,7 @@ function createAutoplayAnalyzerPanel() {
 
     // Start resizing on mousedown near edge/corner
     panel.addEventListener('mousedown', function(e) {
-        console.log('Current mode:', currentLayoutMode);
+        if (window.DEBUG) console.log('Current mode:', currentLayoutMode);
         if (currentLayoutMode === LAYOUT_MODES.MINIMIZED) {
             const layout = LAYOUT_DIMENSIONS[LAYOUT_MODES.MINIMIZED];
             panel.style.width = layout.width + 'px';
@@ -2041,11 +2041,11 @@ if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
     testButton.style.cursor = "pointer";
     testButton.addEventListener("click", createAutoplayAnalyzerPanel);
     document.body.appendChild(testButton);
-    console.log("[Hunt Analyzer] Fallback test button added."); // Added prefix
+    if (window.DEBUG) console.log("[Hunt Analyzer] Fallback test button added.");
 }
 
 // Initial script execution setup.
-console.log("[Hunt Analyzer] Hunt Analyzer script initialized."); // Added prefix
+if (window.DEBUG) console.log("[Hunt Analyzer] Hunt Analyzer script initialized.");
 
 // Add these functions before createAutoplayAnalyzerPanel()
 function savePanelSettings(panel) {

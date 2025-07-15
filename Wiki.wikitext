@@ -4,11 +4,9 @@ Welcome to the Bestiary Arena SuperMod Loader wiki! This guide explains what the
 
 == What is the Bestiary Arena SuperMod Loader? ==
 
-The Bestiary Arena SuperMod Loader is a browser extension that allows you to enhance your gameplay experience with custom mods. These mods add new features, tools, and visual improvements to the game without modifying the game files directly.
+The Bestiary Arena SuperMod Loader is a clone of Bestiary Arena Mod Loader with reworked mod loading, including Cyclopedia and Hunt Analyzer. These mods add new features, tools, and visual improvements to the game without modifying the game files directly.
 
 [https://www.youtube.com/watch?v=ljcwCeqoop0 Watch the promotional video]
-
-[[File:Loader in Action.png|none|thumb|Mod Loader in Action]]
 
 == Installation Guide ==
 
@@ -32,35 +30,80 @@ After installing the extension:
 # Configure mods by clicking their settings icon (if available)
 # Enjoy your enhanced gameplay experience!
 
-[[File:popup_screen_1.png|none|thumb|300px|Popup Main Screen]] [[File:popup_screen_2.png|none|thumb|300px|Popup Config Screen]]
-
 == Available Mods ==
 
 The extension comes with several powerful mods that you can use right away:
 
-=== Custom Display ===
+=== Super Mods ===
+
+These are advanced mods that provide comprehensive game enhancement features:
+
+==== Cyclopedia ====
+
+A comprehensive game data viewer and player profile manager:
+* View detailed monster and equipment information
+* Access your player profile and statistics
+* Browse your inventory and collection
+* Track your progress and achievements
+* Search and filter game data efficiently
+
+==== Hunt Analyzer ====
+
+Advanced autoplay and loot tracking system:
+* Track detailed statistics from autoplay sessions
+* Monitor gold, dust, and item drops
+* Analyze creature and equipment drop rates
+* View session summaries and performance metrics
+* Export data for further analysis
+
+==== Dashboard Button ====
+
+Quick access to the mod dashboard:
+* Provides easy access to all mod features
+* Integrates seamlessly with the game interface
+* Streamlines mod management
+
+=== Official Mods ===
+
+These are the core mods that provide essential gameplay enhancements:
+
+==== Bestiary Automator ====
+
+Automate repetitive tasks to streamline your gameplay:
+* Auto-refill stamina when running low
+* Automatically collect rewards and level-up bonuses
+* Handle day care management automatically
+* Customizable automation settings
+* Saves time on routine tasks
+
+==== Board Analyzer ====
+
+Advanced board analysis and testing tool:
+* Run multiple simulations to test team configurations
+* Analyze board performance with statistical data
+* Test different monster and equipment combinations
+* Generate detailed performance reports
+* Optimize your team strategy with data-driven insights
+
+==== Custom Display ====
 
 This mod enhances the game's visuals with two main features:
 
-==== Performance Mode ====
+===== Performance Mode =====
 
 Improves game performance on slower computers by simplifying graphics:
 * Reduces visual effects for smoother gameplay
 * Customizable options for names, HP bars, and more
 * Great for laptops or older computers
 
-[[File:performance_mode_applied.png|none|thumb|Performance Mode Applied]]
-
-==== Map Grid ====
+===== Map Grid =====
 
 Adds a coordinate grid overlay to help with positioning:
 * Displays row and column coordinates
 * Customizable colors and font size
 * Helps with precise monster placement
 
-[[File:grid_layout_applied.png|none|thumb|Grid Layout Applied]]
-
-=== Hero Editor ===
+==== Hero Editor ====
 
 A powerful tool that lets you experiment with different monster stats and equipment:
 * Edit monster stats directly in the game
@@ -68,49 +111,7 @@ A powerful tool that lets you experiment with different monster stats and equipm
 * Test different combinations without grinding
 * Great for planning your team strategy
 
-[[File:hero_editor.png|none|thumb|Hero Editor]]
-
-=== Setup Manager ===
-
-Allows you to save and load different team configurations:
-* Save multiple team setups for different maps
-* Quickly switch between configurations
-* Give your setups custom names
-* Never lose your best team combinations again
-
-[[File:setup_manager.png|none|thumb|Setup Manager]]
-
-=== Team Copier ===
-
-Share your team configurations with friends or save them for later:
-* Copy your team setup as a shareable code
-* Generate links to share with others
-* Open shared configurations with one click
-* Include game seeds for exact replays
-
-[[File:team_copier.png|none|thumb|Team Copier]]
-
-=== Monster Tier List ===
-
-See which monsters perform best in different situations:
-* View sorted rankings of monsters
-* Check usage statistics across room types
-* See win rates and performance metrics
-* Find the most effective monsters for your strategy
-
-[[File:monster_usage_tier_list_mod.png|none|thumb|Monster Tier List]]
-
-=== Item Tier List ===
-
-Compare equipment and find the best items:
-* See item effectiveness by tier
-* Find optimal stat combinations
-* Get best-in-slot recommendations
-* Make better equipment choices
-
-[[File:item_tier_lis_mod.png|none|thumb|Item Tier List]]
-
-=== Highscore Improvements ===
+==== Highscore Improvements ====
 
 Get more detailed information about your performance:
 * See detailed performance stats
@@ -118,7 +119,55 @@ Get more detailed information about your performance:
 * Get a room-by-room breakdown
 * Find where you can improve
 
-[[File:highscore_improvements_mod.png|none|thumb|Highscore Improvements]]
+==== Item Tier List ====
+
+Compare equipment and find the best items:
+* See item effectiveness by tier
+* Find optimal stat combinations
+* Get best-in-slot recommendations
+* Make better equipment choices
+
+==== Monster Tier List ====
+
+See which monsters perform best in different situations:
+* View sorted rankings of monsters
+* Check usage statistics across room types
+* See win rates and performance metrics
+* Find the most effective monsters for your strategy
+
+==== Setup Manager ====
+
+Allows you to save and load different team configurations:
+* Save multiple team setups for different maps
+* Quickly switch between configurations
+* Give your setups custom names
+* Never lose your best team combinations again
+
+==== Team Copier ====
+
+Share your team configurations with friends or save them for later:
+* Copy your team setup as a shareable code
+* Generate links to share with others
+* Open shared configurations with one click
+* Include game seeds for exact replays
+
+==== Tick Tracker ====
+
+Track and analyze game ticks for performance optimization:
+* Monitor game tick timing and performance
+* Track completion times for different strategies
+* Analyze efficiency of different approaches
+* Export tick data for analysis
+* Helps optimize your gameplay speed
+
+==== Turbo Mode ====
+
+Speed up gameplay for faster testing and grinding:
+* Increase game speed for faster progression
+* Customizable speed multipliers
+* Real-time tick display
+* Perfect for testing strategies quickly
+* Great for farming and grinding sessions
 
 == Frequently Asked Questions ==
 
@@ -145,15 +194,21 @@ If you encounter any issues:
 # '''Game performance issues?''' Try using the Performance Mode mod to improve game speed.
 # '''Extension not working after game update?''' Check for extension updates on GitHub.
 # '''Specific mod not working?''' Disable and re-enable the mod, or refresh the page.
+# '''Turbo Mode not working?''' Make sure you're in a game session and try refreshing the page.
+# '''Board Analyzer issues?''' Ensure you're in sandbox mode and have a valid board configuration.
 
 == Credits ==
 
-The Bestiary Arena SuperMod Loader was created and is maintained by:
+The original Bestiary Arena Mod Loader was created by:
 
 * [https://github.com/TheMegafuji/ TheMegafuji] (In-game name: '''megafuji''')
 * [https://github.com/mathiasbynens MathiasBynens] (In-game name: '''mathiasbynens''')
 
-Thank you to these developers for their work on bringing enhanced gameplay features to Bestiary Arena!
+The Bestiary Arena SuperMod Loader was created and is maintained by:
+
+* [https://bestiaryarena.com/profile/muhamad Muhamad]
+
+Thank you to these Megafuji and Mathias Bynens for their work on bringing enhanced gameplay features to Bestiary Arena!
 
 == Additional Resources ==
 

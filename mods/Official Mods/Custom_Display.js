@@ -1,5 +1,5 @@
 // Custom Display Mod for Bestiary Arena
-console.log('Custom Display Mod initializing...');
+if (window.DEBUG) console.log('Custom Display Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -139,7 +139,7 @@ function monitorGameState() {
         
         // If game state changed, reapply performance mode
         if (currentGameStarted !== lastGameStarted) {
-          console.log(`Game state changed: ${lastGameStarted} -> ${currentGameStarted}`);
+          if (window.DEBUG) console.log(`Game state changed: ${lastGameStarted} -> ${currentGameStarted}`);
           lastGameStarted = currentGameStarted;
           
           // Small delay to let the game update the DOM
@@ -152,7 +152,7 @@ function monitorGameState() {
       // Also listen for new game events
       globalThis.state.board.on('newGame', (event) => {
         if (!config.performance.enabled) return;
-        console.log('New game detected, reapplying performance mode');
+        if (window.DEBUG) console.log('New game detected, reapplying performance mode');
         
         // Small delay to let the game update the DOM
         setTimeout(() => {
@@ -191,7 +191,7 @@ function monitorGameState() {
       }
       
       if (needsReapply) {
-        console.log('DOM changes detected, reapplying performance mode');
+        if (window.DEBUG) console.log('DOM changes detected, reapplying performance mode');
         reapplyPerformanceMode();
       }
     });
@@ -935,7 +935,7 @@ function createConfigPanel() {
 
 // Initialize UI
 function init() {
-  console.log('Custom Display initializing UI...');
+  if (window.DEBUG) console.log('Custom Display initializing UI...');
 
   // Add the performance mode toggle button
   api.ui.addButton({
@@ -978,7 +978,7 @@ function init() {
     gridOverlay = createGridOverlay();
   }
   
-  console.log('Custom Display UI initialized');
+  if (window.DEBUG) console.log('Custom Display UI initialized');
 }
 
 // Initialize the mod

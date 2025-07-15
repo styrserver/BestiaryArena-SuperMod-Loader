@@ -1,5 +1,5 @@
 // Setup Manager Mod for Bestiary Arena
-console.log('Setup Manager Mod initializing...');
+if (window.DEBUG) console.log('Setup Manager Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -220,7 +220,7 @@ function getCurrentTeamSetup() {
 function saveConfigToStorage() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config.savedSetups));
-    console.log('Saved setups to localStorage:', config.savedSetups);
+    if (window.DEBUG) console.log('Saved setups to localStorage:', config.savedSetups);
     
     // Also save via the mod config API
     api.service.updateScriptConfig(context.hash, config);
@@ -236,12 +236,12 @@ function loadConfigFromStorage() {
     if (savedData) {
       const parsedData = JSON.parse(savedData);
       config.savedSetups = parsedData;
-      console.log('Loaded setups from localStorage:', config.savedSetups);
+      if (window.DEBUG) console.log('Loaded setups from localStorage:', config.savedSetups);
       
       // Also update the mod config
       api.service.updateScriptConfig(context.hash, config);
     } else {
-      console.log('No saved setups found in localStorage');
+      if (window.DEBUG) console.log('No saved setups found in localStorage');
     }
   } catch (error) {
     console.error('Error loading configurations from localStorage:', error);
@@ -347,7 +347,7 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
         const playerContext = globalThis.state.player.getSnapshot().context;
         const originalSetup = playerContext.boardConfigs[mapId];
         
-        console.log('Loading original setup for map:', mapId, originalSetup);
+        if (window.DEBUG) console.log('Loading original setup for map:', mapId, originalSetup);
         
         // Apply the setup with the player's saved configuration
         if (originalSetup && Array.isArray(originalSetup) && originalSetup.length > 0) {
@@ -365,7 +365,7 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
             // Check if our button is still there
             const existingButton = document.querySelector(`#${BUTTON_ID}`);
             if (!existingButton) {
-              console.log('Auto-configure button disappeared after loading Original setup, recreating it');
+              if (window.DEBUG) console.log('Auto-configure button disappeared after loading Original setup, recreating it');
               if (config.autoAttachToButton) {
                 attachToAutoconfigureButton();
               } else {
@@ -396,8 +396,7 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
     // Ensure the setup is in the correct format - must be an array
     const setupArray = Array.isArray(savedSetup.setup) ? savedSetup.setup : [savedSetup.setup];
     
-    // Log the setup array for debugging
-    console.log('Loading team setup:', setupArray);
+    if (window.DEBUG) console.log('Loading team setup:', setupArray);
     
     // Apply the setup
     globalThis.state.board.send({
@@ -1035,7 +1034,7 @@ function attachToAutoconfigureButton() {
       const buttonElement = document.querySelector('button.frame-1-blue.surface-blue');
       
       if (buttonElement && buttonElement.textContent && buttonElement.textContent.includes('Autoconfigurar')) {
-        console.log('Found autoconfigure button');
+        if (window.DEBUG) console.log('Found autoconfigure button');
         
         // Store the original button
         originalButtonElement = buttonElement;
@@ -1055,7 +1054,7 @@ function attachToAutoconfigureButton() {
         const svgContent = buttonElement.innerHTML.split('</svg>')[0] + '</svg>';
         buttonElement.innerHTML = svgContent + ' ' + t('setupManager');
         
-        console.log('Autoconfigure button modified');
+        if (window.DEBUG) console.log('Autoconfigure button modified');
       } else {
         // Button not found, try again in a moment
         setTimeout(findButton, 1000);
@@ -1078,7 +1077,7 @@ function restoreAutoconfigureButton() {
     const svgContent = originalButtonElement.innerHTML.split('</svg>')[0] + '</svg>';
     originalButtonElement.innerHTML = svgContent + ' Autoconfigurar';
     
-    console.log('Restored original autoconfigure button');
+    if (window.DEBUG) console.log('Restored original autoconfigure button');
   }
 }
 
@@ -1095,7 +1094,7 @@ function createExtensionButton() {
         showSetupManagerModal();
       }
     });
-    console.log('Created extension button for Setup Manager');
+    if (window.DEBUG) console.log('Created extension button for Setup Manager');
   } catch (error) {
     console.error('Error creating extension button:', error);
   }
@@ -1105,7 +1104,7 @@ function createExtensionButton() {
 
 // Update the init function to load configurations from localStorage
 function init() {
-  console.log('Setup Manager initializing...');
+  if (window.DEBUG) console.log('Setup Manager initializing...');
   
   // Create notification container
   createNotificationContainer();
@@ -1136,7 +1135,7 @@ function init() {
   // Always create the extension button
   createExtensionButton();
   
-  console.log('Setup Manager initialized');
+  if (window.DEBUG) console.log('Setup Manager initialized');
 }
 
 // Wait for the game to be ready before initializing
@@ -1219,7 +1218,7 @@ function createMonsterPortrait(monsterInfo) {
 
 // Function to force close all open modals
 function forceCloseAllModals() {
-  console.log("Force closing all modals...");
+  if (window.DEBUG) console.log("Force closing all modals...");
   
   // Try to close the tracked activeModal first with the API
   if (activeModal && typeof activeModal.close === 'function') {
@@ -1234,7 +1233,7 @@ function forceCloseAllModals() {
   // Find all open dialog elements
   const allDialogs = document.querySelectorAll('div[role="dialog"][data-state="open"]');
   allDialogs.forEach(dialog => {
-    console.log("Found open modal to close:", dialog);
+    if (window.DEBUG) console.log("Found open modal to close:", dialog);
     
     // Change state to closed
     dialog.setAttribute('data-state', 'closed');
@@ -1243,7 +1242,7 @@ function forceCloseAllModals() {
     setTimeout(() => {
       if (dialog.parentNode) {
         dialog.parentNode.removeChild(dialog);
-        console.log("Modal removed successfully");
+        if (window.DEBUG) console.log("Modal removed successfully");
       }
     }, 50);
   });
@@ -1252,7 +1251,7 @@ function forceCloseAllModals() {
   document.querySelectorAll('.modal-overlay, .fixed.inset-0').forEach(overlay => {
     if (overlay && overlay.parentNode) {
       overlay.parentNode.removeChild(overlay);
-      console.log("Modal overlay removed");
+      if (window.DEBUG) console.log("Modal overlay removed");
     }
   });
   

@@ -1,29 +1,8 @@
 // Dashboard Button Mod
-console.log('DashboardButton initializing...');
+if (window.DEBUG) console.log('DashboardButton initializing...');
 
 function openDashboardInNewTab() {
-  console.log('[DashboardButton] openDashboardInNewTab called');
-  if (typeof browser !== 'undefined' && browser.runtime && browser.runtime.sendMessage) {
-    console.log('[DashboardButton] Using browser.runtime.sendMessage');
-    browser.runtime.sendMessage({ action: 'openDashboard' });
-  } else if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-    console.log('[DashboardButton] Using chrome.runtime.sendMessage');
-    chrome.runtime.sendMessage({ action: 'openDashboard' });
-  } else {
-    // fallback: open extension page dynamically if possible, else fallback to relative path
-    let dashboardUrl;
-    if (window.browser && window.browser.runtime && typeof window.browser.runtime.getURL === 'function') {
-      dashboardUrl = window.browser.runtime.getURL('dashboard/dashboard.html');
-      console.log('[DashboardButton] Fallback: using window.browser.runtime.getURL:', dashboardUrl);
-    } else if (window.chrome && window.chrome.runtime && typeof window.chrome.runtime.getURL === 'function') {
-      dashboardUrl = window.chrome.runtime.getURL('dashboard/dashboard.html');
-      console.log('[DashboardButton] Fallback: using window.chrome.runtime.getURL:', dashboardUrl);
-    } else {
-      dashboardUrl = 'dashboard/dashboard.html';
-      console.log('[DashboardButton] Fallback: using plain relative path:', dashboardUrl);
-    }
-    window.open(dashboardUrl, '_blank');
-  }
+  window.postMessage({ type: 'OPEN_SUPERMOD_DASHBOARD' }, '*');
 }
 
 function addDashboardHeaderButton() {

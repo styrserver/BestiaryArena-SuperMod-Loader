@@ -1,9 +1,9 @@
 // DOM Improved Highscore mod for Bestiary Arena
-console.log('Improved Highscore Mod initializing...');
+if (window.DEBUG) console.log('Improved Highscore Mod initializing...');
 
 // Create the Highscore button using the API
 if (api) {
-  console.log('BestiaryModAPI available in Improved Highscore Mod');
+  if (window.DEBUG) console.log('BestiaryModAPI available in Improved Highscore Mod');
   
   // Create button to show highscore modal
   window.highscoreButton = api.ui.addButton({
@@ -14,7 +14,7 @@ if (api) {
     onClick: showImprovementsModal
   });
   
-  console.log('Highscore improvement button added');
+  if (window.DEBUG) console.log('Highscore improvement button added');
 } else {
   console.error('BestiaryModAPI not available in Improved Highscore Mod');
 }
@@ -235,7 +235,7 @@ function createTabs(tickContent, rankContent) {
 
 // Function to show improvement opportunities modal
 async function showImprovementsModal() {
-  console.log('Showing improvement opportunities modal...');
+  if (window.DEBUG) console.log('Showing improvement opportunities modal...');
   
   try {
     ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
@@ -323,7 +323,7 @@ async function showImprovementsModal() {
       ]
     });
     
-    console.log('Improvement opportunities modal displayed successfully');
+    if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
   } catch (error) {
     console.error('Error showing improvement opportunities:', error);
     
@@ -341,7 +341,7 @@ async function showImprovementsModal() {
   }
 }
 
-console.log('Improved Highscore Mod initialization complete');
+if (window.DEBUG) console.log('Improved Highscore Mod initialization complete');
 
 // Export control functions
 exports = {

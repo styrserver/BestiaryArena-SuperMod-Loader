@@ -1,5 +1,5 @@
 // Tick Tracker Mod for Bestiary Arena
-console.log('Tick Tracker Mod initializing...');
+if (window.DEBUG) console.log('Tick Tracker Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -107,7 +107,7 @@ function createTickWidget() {
   // Look for the autoplay widget container
   const autoplayContainer = document.querySelector(".widget-bottom[data-minimized='false']");
   if (!autoplayContainer) {
-    console.log("No autoplay widget container found");
+    if (window.DEBUG) console.log("No autoplay widget container found");
     return null;
   }
   
@@ -325,13 +325,13 @@ function startTracking() {
     return;
   }
   
-  console.log('Starting tick tracking...');
+  if (window.DEBUG) console.log('Starting tick tracking...');
   isTracking = true;
   
   try {
     // Listen for new game events to subscribe to onGameEnd
     globalThis.state.board.on('newGame', (event) => {
-      console.log('New game event detected');
+      if (window.DEBUG) console.log('New game event detected');
       
       const world = event.world;
       if (world && world.onGameEnd && typeof world.onGameEnd.subscribe === 'function') {
@@ -346,16 +346,16 @@ function startTracking() {
         
         // Subscribe to game end event
         onGameEndUnsubscribe = world.onGameEnd.subscribe((winner) => {
-          console.log(`Game ended with winner: ${winner}`);
+          if (window.DEBUG) console.log(`Game ended with winner: ${winner}`);
           
           try {
             // Get current tick count from tick engine
             const currentTick = world.tickEngine.getCurrentTick();
-            console.log(`Game ended with ${currentTick} ticks`);
+            if (window.DEBUG) console.log(`Game ended with ${currentTick} ticks`);
             
             // Get seed from RNG
             const seed = world.RNG.seed;
-            console.log(`Game seed: ${seed}`);
+            if (window.DEBUG) console.log(`Game seed: ${seed}`);
             
             // Get grade if available (may not be in all game modes)
             let grade = null;
@@ -366,7 +366,7 @@ function startTracking() {
               grade = timerContext.readableGrade;
               rankPoints = timerContext.rankPoints;
             } catch (e) {
-              console.log('Could not get grade from gameTimer:', e);
+              if (window.DEBUG) console.log('Could not get grade from gameTimer:', e);
             }
             
             // Record the tick data
@@ -438,7 +438,7 @@ function stopTracking() {
   // Remove widget if exists
   removeWidget();
   
-  console.log('Tick tracking stopped');
+  if (window.DEBUG) console.log('Tick tracking stopped');
 }
 
 // Toggle tick tracking
@@ -478,7 +478,7 @@ function saveTickHistory() {
 function loadTickHistory() {
   if (config.tickHistory && Array.isArray(config.tickHistory)) {
     tickHistory = config.tickHistory;
-    console.log(`Loaded ${tickHistory.length} tick history entries`);
+    if (window.DEBUG) console.log(`Loaded ${tickHistory.length} tick history entries`);
   }
 }
 
@@ -625,10 +625,10 @@ function setupWidgetObserver() {
         const autoplayContainer = document.querySelector(".widget-bottom[data-minimized='false']");
         
         if (autoplayContainer && !document.getElementById(WIDGET_ID)) {
-          console.log('Autoplay container detected, adding widget');
+          if (window.DEBUG) console.log('Autoplay container detected, adding widget');
           createOrUpdateWidget();
         } else if (!autoplayContainer && document.getElementById(WIDGET_ID)) {
-          console.log('Autoplay container removed, removing widget');
+          if (window.DEBUG) console.log('Autoplay container removed, removing widget');
           removeWidget();
         }
       }
@@ -643,12 +643,12 @@ function setupWidgetObserver() {
     attributeFilter: ['data-minimized'] 
   });
   
-  console.log('Widget observer set up');
+  if (window.DEBUG) console.log('Widget observer set up');
 }
 
 // Initialize the mod
 function init() {
-  console.log('Tick Tracker initializing...');
+  if (window.DEBUG) console.log('Tick Tracker initializing...');
   
   // Load saved tick history
   loadTickHistory();
@@ -680,7 +680,7 @@ function init() {
     startTracking();
   }
   
-  console.log('Tick Tracker initialized');
+  if (window.DEBUG) console.log('Tick Tracker initialized');
 }
 
 // Initialize the mod

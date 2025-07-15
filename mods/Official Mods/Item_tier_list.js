@@ -1,9 +1,9 @@
 // DOM Item Tier List mod for Bestiary Arena
-console.log('Item Tier List Pretty Mod initializing...');
+if (window.DEBUG) console.log('Item Tier List Pretty Mod initializing...');
 
 // Create the Tier List button using the API
 if (api) {
-  console.log('BestiaryModAPI available in Item Tier List Pretty Mod');
+  if (window.DEBUG) console.log('BestiaryModAPI available in Item Tier List Pretty Mod');
   
   // Create button to show tier list modal
   window.tierListButton = api.ui.addButton({
@@ -14,14 +14,14 @@ if (api) {
     onClick: showItemTierListModal
   });
   
-  console.log('Item Tier List button added');
+  if (window.DEBUG) console.log('Item Tier List button added');
 } else {
   console.error('BestiaryModAPI not available in Item Tier List Pretty Mod');
 }
 
 // Function to show tier list modal
 function showItemTierListModal() {
-  console.log('Showing item tier list modal...');
+  if (window.DEBUG) console.log('Showing item tier list modal...');
   
   try {
     const { equips, boardConfigs } = globalThis.state.player.getSnapshot().context;
@@ -211,7 +211,7 @@ function showItemTierListModal() {
       ]
     });
     
-    console.log('Item tier list modal displayed successfully');
+    if (window.DEBUG) console.log('Item tier list modal displayed successfully');
   } catch (error) {
     console.error('Error showing item tier list:', error);
     
@@ -228,7 +228,7 @@ function showItemTierListModal() {
   }
 }
 
-console.log('Item Tier List Mod initialization complete');
+if (window.DEBUG) console.log('Item Tier List Mod initialization complete');
 
 // Export control functions
 exports = {

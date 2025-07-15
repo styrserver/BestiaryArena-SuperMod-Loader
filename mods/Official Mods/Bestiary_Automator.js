@@ -1,6 +1,6 @@
 // Bestiary Automator Mod for Bestiary Arena
 // Code by MathiasBynens and TheMegafuji
-console.log('Bestiary Automator initializing...');
+if (window.DEBUG) console.log('Bestiary Automator initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -144,7 +144,7 @@ const refillStaminaIfNeeded = async () => {
     const stamina = Number(staminaElement.textContent);
     if (stamina >= config.minimumStaminaWithoutRefill) return;
     
-    console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
+    if (window.DEBUG) console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
     
     elStamina.click();
     await sleep(500);
@@ -153,7 +153,7 @@ const refillStaminaIfNeeded = async () => {
     clickButtonWithText('close');
     await sleep(500);
   } catch (error) {
-    console.error('[Bestiary Automator] Error refilling stamina:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error refilling stamina:', error);
   }
 };
 
@@ -165,7 +165,7 @@ const takeRewardsIfAvailable = async () => {
     const available = document.querySelector('button[aria-haspopup="menu"]:has(.animate-ping)');
     if (!available) return;
     
-    console.log('[Bestiary Automator] Taking rewards');
+    if (window.DEBUG) console.log('[Bestiary Automator] Taking rewards');
     
     // Open rewards menu
     globalThis.state.menu.send({
@@ -183,7 +183,7 @@ const takeRewardsIfAvailable = async () => {
     clickButtonWithText('close');
     await sleep(500);
   } catch (error) {
-    console.error('[Bestiary Automator] Error taking rewards:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error taking rewards:', error);
   }
 };
 
@@ -195,7 +195,7 @@ const handleDayCare = async () => {
     const dayCareBlip = document.querySelector('div[data-radix-scroll-area-viewport]:has(div:not(.text-invalid) > .animate-ping)');
     if (!dayCareBlip) return;
     
-    console.log('[Bestiary Automator] Handling day care');
+    if (window.DEBUG) console.log('[Bestiary Automator] Handling day care');
     
     clickButtonWithText('inventory');
     await sleep(500);
@@ -210,7 +210,7 @@ const handleDayCare = async () => {
     clickButtonWithText('close');
     await sleep(500);
   } catch (error) {
-    console.error('[Bestiary Automator] Error handling day care:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error handling day care:', error);
   }
 };
 
@@ -231,7 +231,7 @@ const updateRequiredStamina = () => {
         (3 <= staminaRequired && staminaRequired <= 18)
       ) {
         config.minimumStaminaWithoutRefill = staminaRequired;
-        console.log(`[Bestiary Automator] Setting minimum stamina without refill to ${staminaRequired}`);
+        if (window.DEBUG) console.log(`[Bestiary Automator] Setting minimum stamina without refill to ${staminaRequired}`);
         
         // Save the new value to config
         api.service.updateScriptConfig(context.hash, { 
@@ -242,7 +242,7 @@ const updateRequiredStamina = () => {
       }
     }
   } catch (error) {
-    console.error('[Bestiary Automator] Error updating required stamina:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error updating required stamina:', error);
   }
 };
 
@@ -252,7 +252,7 @@ let automationInterval = null;
 const startAutomation = () => {
   if (automationInterval) return;
   
-  console.log('[Bestiary Automator] Starting automation loop');
+  if (window.DEBUG) console.log('[Bestiary Automator] Starting automation loop');
   
   // Run immediately once
   runAutomationTasks();
@@ -272,7 +272,7 @@ const startAutomation = () => {
 const stopAutomation = () => {
   if (!automationInterval) return;
   
-  console.log('[Bestiary Automator] Stopping automation loop');
+  if (window.DEBUG) console.log('[Bestiary Automator] Stopping automation loop');
   
   clearInterval(automationInterval);
   automationInterval = null;
@@ -293,7 +293,7 @@ const runAutomationTasks = async () => {
     updateRequiredStamina();
     await refillStaminaIfNeeded();
   } catch (error) {
-    console.error('[Bestiary Automator] Error in automation tasks:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
 };
 
@@ -457,7 +457,7 @@ const createButtons = () => {
 
 // Initialize the mod
 function init() {
-  console.log('[Bestiary Automator] Initializing UI...');
+  if (window.DEBUG) console.log('[Bestiary Automator] Initializing UI...');
   
   // Create the buttons
   createButtons();
@@ -470,7 +470,7 @@ function init() {
     startAutomation();
   }
   
-  console.log('[Bestiary Automator] Initialization complete');
+  if (window.DEBUG) console.log('[Bestiary Automator] Initialization complete');
 }
 
 // Initialize the mod
