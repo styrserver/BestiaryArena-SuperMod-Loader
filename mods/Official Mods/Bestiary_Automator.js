@@ -265,7 +265,8 @@ const startAutomation = () => {
     text: '',
     icon: '⚡',
     primary: true,
-    tooltip: t('statusEnabled')
+    tooltip: t('statusEnabled'),
+    style: { background: 'var(--primary-color, #22c55e)' }
   });
 };
 
@@ -284,6 +285,13 @@ const stopAutomation = () => {
     primary: false,
     tooltip: t('statusDisabled')
   });
+  
+  // Manually restore the regular background
+  const btn = document.getElementById(BUTTON_ID);
+  if (btn) {
+    btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+    btn.style.color = "#ffe066";
+  }
 };
 
 const runAutomationTasks = async () => {
@@ -487,6 +495,17 @@ context.exports = {
       primary: config.enabled,
       tooltip: config.enabled ? t('statusEnabled') : t('statusDisabled')
     });
+    
+    // Manually handle the background styling
+    const btn = document.getElementById(BUTTON_ID);
+    if (btn) {
+      if (config.enabled) {
+        btn.style.background = "var(--primary-color, #22c55e)";
+      } else {
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+        btn.style.color = "#ffe066";
+      }
+    }
     
     // Start or stop automation based on enabled state
     if (config.enabled) {

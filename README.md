@@ -180,6 +180,13 @@ Quick access to the mod dashboard:
 - Integrates seamlessly with the game interface
 - Streamlines mod management
 
+#### Dice Roller
+Automates dice rolling for stat rerolling:
+- Automatically clicks the roll button and checks for target stats
+- Lets you set target values for each stat
+- Stops rolling when a desired stat value is reached
+- Displays roll count and status in a custom panel
+
 ### Official Mods
 
 These are the core mods that provide essential gameplay enhancements:
