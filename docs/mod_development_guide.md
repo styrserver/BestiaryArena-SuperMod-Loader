@@ -427,6 +427,39 @@ const modal = api.ui.components.createModal({
 modal.close();
 ```
 
+### Custom Modal Size Example
+
+To set a custom modal size (e.g., 700x400), set the width and height in createModal, then update the dialog and content element styles after creation:
+
+```javascript
+const contentDiv = document.createElement('div')
+const modal = api.ui.components.createModal({
+  title: 'Custom Modal',
+  width: 700,
+  height: 400,
+  content: contentDiv,
+  buttons: [{ text: 'Close', primary: true }]
+})
+setTimeout(() => {
+  const dialog = document.querySelector('div[role="dialog"][data-state="open"]')
+  if (dialog) {
+    dialog.style.width = '700px'
+    dialog.style.minWidth = '700px'
+    dialog.style.maxWidth = '700px'
+    dialog.style.height = '400px'
+    dialog.style.minHeight = '400px'
+    dialog.style.maxHeight = '400px'
+    const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body')
+    if (contentElem) {
+      contentElem.style.width = '700px'
+      contentElem.style.height = '400px'
+      contentElem.style.display = 'flex'
+      contentElem.style.flexDirection = 'column'
+    }
+  }
+}, 100)
+```
+
 ### Scroll Container
 
 The scroll container provides a scrollable area with a custom scrollbar that matches the game's style:

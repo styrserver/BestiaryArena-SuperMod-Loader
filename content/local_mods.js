@@ -215,7 +215,9 @@ async function listAllModFiles() {
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
-      'Super Mods/Dice_Roller.js'
+      'Super Mods/Dice_Roller.js',
+      'Super Mods/Yasir Extension.js',
+      'Super Mods/Dice_Roller2.0.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods];
   } catch (e) {
@@ -254,6 +256,7 @@ const defaultEnabledMods = [
   'Official Mods/Team_Copier.js',
   'Official Mods/Tick_Tracker.js',
   'Official Mods/Turbo Mode.js',
+  'Super Mods/Yasir Extension.js',
   // All super mods enabled by default, so no need to list them
 ];
 

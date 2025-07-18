@@ -24,7 +24,7 @@ if (!api) {
 
 const STAT_NAMES = {
   hp: 'Hitpoints',
-  ad: 'Attack',
+  ad: 'Attack Damage',
   ap: 'Ability Power',
   arm: 'Armor',
   mr: 'Magic Resist'
@@ -97,8 +97,8 @@ function renderDiceRollerPanelNextToWidget() {
   panel.id = 'dice-roller-panel';
   panel.style.flexShrink = '0';
   panel.style.flexGrow = '0';
-  panel.style.width = '180px';
-  panel.style.maxWidth = '180px';
+  panel.style.width = '200px';
+  panel.style.maxWidth = '200px';
   panel.style.height = '300px';
   panel.style.minHeight = '300px';
   panel.style.boxSizing = 'border-box';
@@ -130,7 +130,7 @@ function renderDiceRollerPanelNextToWidget() {
     row.style.width = '100%';
     
     const labelEl = document.createElement('span');
-    labelEl.textContent = label.split(' ')[0] + ':';
+    labelEl.textContent = label + ':';
     row.appendChild(labelEl);
     
     const input = document.createElement('input');
