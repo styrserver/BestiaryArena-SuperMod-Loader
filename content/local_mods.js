@@ -215,7 +215,7 @@ async function listAllModFiles() {
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
-      'Super Mods/Dice_Roller.js'
+      'Super Mods/Dice_Roller2.0.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods];
   } catch (e) {
@@ -236,7 +236,7 @@ async function listAllModFiles() {
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
-      'Super Mods/Dice_Roller.js'
+      'Super Mods/Dice_Roller2.0.js'
     ];
   }
 }
