@@ -52,7 +52,7 @@
   
   // API request throttling
   let lastApiCall = 0;
-  const API_THROTTLE_DELAY = 100; // Minimum 100ms between API calls
+  const API_THROTTLE_DELAY = 200; // Minimum 200ms between API calls (increased from 100)
 
   // Module-scoped state instead of global pollution
   let diceRulesConfig = {};
@@ -254,7 +254,8 @@
 
   // Utility function to update dice button states
   function updateDiceButtonStates(selectedDice) {
-    const diceButtons = document.querySelectorAll('.focus-style-visible');
+    // Use DOMCache for performance
+    const diceButtons = DOMCache.get('.focus-style-visible') ? [ ...document.querySelectorAll('.focus-style-visible') ] : [];
     let diceButtonIndex = 0;
     diceButtons.forEach((btn) => {
       const diceSprite = btn.querySelector(`.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID}`);
@@ -1201,7 +1202,6 @@
 // 5. Autoroll Logic
 // =======================
   async function autoroll(selectedGameId, requiredDiceTier, availableStats, updateRollStatus, rerenderDetails) {
-    
     // Validate dice selection using utility function
     try {
       validateDiceSelection([requiredDiceTier], availableStats);
@@ -1209,9 +1209,7 @@
       updateRollStatus(error.message);
       throw error;
     }
-    
     updateRollStatus(`Rolling ${availableStats.join(', ')} with tier ${requiredDiceTier} dice...`);
-    
     // Throttle API calls to prevent overwhelming the server
     const now = Date.now();
     const timeSinceLastCall = now - lastApiCall;
@@ -1219,7 +1217,6 @@
       await new Promise(resolve => setTimeout(resolve, API_THROTTLE_DELAY - timeSinceLastCall));
     }
     lastApiCall = Date.now();
-    
     const requestBody = {
       "0": {
         "json": {
@@ -1230,18 +1227,74 @@
       }
     };
     let response;
-    try {
-      response = await fetch(API_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-game-version": "1"
-        },
-        body: JSON.stringify(requestBody)
-      });
-    } catch (err) {
-      console.error('[Stats Roller] Fetch error:', err);
-      throw err;
+    let retryCount = 0;
+    let wasRateLimited = false;
+    // Add a variable to hold the rate-limited animation interval
+    let rateLimitedInterval = null;
+    while (true) {
+      try {
+        response = await fetch(API_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-game-version": "1"
+          },
+          body: JSON.stringify(requestBody)
+        });
+      } catch (err) {
+        console.error('[Stats Roller] Fetch error:', err);
+        throw err;
+      }
+      if (response.status !== 429) {
+        // If we were rate-limited before, restore button text to 'Autorolling...'
+        if (wasRateLimited && typeof window !== 'undefined') {
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+          if (autoRollBtn) {
+            autoRollBtn.textContent = 'Autorolling...';
+            if (rateLimitedInterval) {
+              clearInterval(rateLimitedInterval);
+              rateLimitedInterval = null;
+            }
+          }
+          wasRateLimited = false;
+        }
+        break;
+      }
+      // Handle 429 Too Many Requests
+      retryCount++;
+      if (retryCount > 5) {
+        // Update autoroll button to show rate limit
+        if (typeof window !== 'undefined') {
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+          if (autoRollBtn) {
+            let dotCount = 1;
+            autoRollBtn.textContent = 'Rate-limited.';
+            if (rateLimitedInterval) clearInterval(rateLimitedInterval);
+            rateLimitedInterval = setInterval(() => {
+              dotCount = (dotCount % 3) + 1;
+              autoRollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+            }, 400);
+          }
+        }
+        throw new Error('Rate limit reached too many times.');
+      }
+      const retryAfter = response.headers.get('Retry-After');
+      const waitTime = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000; // fallback 2s
+      // Update autoroll button to show rate limit
+      if (typeof window !== 'undefined') {
+        const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+        if (autoRollBtn) {
+          let dotCount = 1;
+          autoRollBtn.textContent = 'Rate-limited.';
+          if (rateLimitedInterval) clearInterval(rateLimitedInterval);
+          rateLimitedInterval = setInterval(() => {
+            dotCount = (dotCount % 3) + 1;
+            autoRollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+          }, 400);
+        }
+      }
+      wasRateLimited = true;
+      await new Promise(res => setTimeout(res, waitTime));
     }
     let data;
     try {
@@ -1270,6 +1323,18 @@
       throw new Error(`API Error: ${data[0].error.message || 'Unknown error'}`);
     }
     // Update the UI with the new stats
+    // If we were rate-limited before, restore button text to 'Autorolling...'
+    if (wasRateLimited && typeof window !== 'undefined') {
+      const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+      if (autoRollBtn) {
+        autoRollBtn.textContent = 'Autorolling...';
+        if (rateLimitedInterval) {
+          clearInterval(rateLimitedInterval);
+          rateLimitedInterval = null;
+        }
+      }
+      wasRateLimited = false;
+    }
     updateRollStatus('Roll complete!');
     return data;
   }
@@ -1342,6 +1407,7 @@
     
     // Stats being rolled status
     const statsStatusDiv = document.createElement('div');
+    statsStatusDiv.className = 'dice-roller-status-area';
     statsStatusDiv.style.fontSize = '10px';
     statsStatusDiv.style.color = '#ffffff';
     statsStatusDiv.style.textAlign = 'left';
@@ -1789,6 +1855,10 @@
         setTimeout(() => {
           updateStatusDisplays();
         }, 0);
+        if (typeof window !== 'undefined' && rateLimitedInterval) {
+          clearInterval(rateLimitedInterval);
+          rateLimitedInterval = null;
+        }
       }
     };
     return col;
@@ -1985,6 +2055,14 @@
             stopCheckbox.type = 'checkbox';
             stopCheckbox.checked = !!render.stopWhenChangingDice;
             stopCheckbox.onchange = () => {
+              if (!stopCheckbox.checked && !contCheckbox.checked) {
+                // Prevent both from being unchecked
+                stopCheckbox.checked = true;
+                // Visual cue: flash background
+                stopCheckboxWrapper.style.background = '#ffcccc';
+                setTimeout(() => { stopCheckboxWrapper.style.background = ''; }, 200);
+                return;
+              }
               if (stopCheckbox.checked) {
                 render.stopWhenChangingDice = true;
                 render.continuouslyChangeDice = false;
@@ -2005,6 +2083,13 @@
             contCheckbox.type = 'checkbox';
             contCheckbox.checked = !!render.continuouslyChangeDice;
             contCheckbox.onchange = () => {
+              if (!contCheckbox.checked && !stopCheckbox.checked) {
+                // Prevent both from being unchecked
+                contCheckbox.checked = true;
+                contCheckboxWrapper.style.background = '#ffcccc';
+                setTimeout(() => { contCheckboxWrapper.style.background = ''; }, 200);
+                return;
+              }
               if (contCheckbox.checked) {
                 render.continuouslyChangeDice = true;
                 render.stopWhenChangingDice = false;
@@ -2053,6 +2138,19 @@
             speedWrapper.appendChild(speedUnit);
             
             row2.appendChild(speedWrapper);
+            
+            // Add rate-limit warning below speed input
+            const rateLimitWarning = document.createElement('div');
+            rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 334ms or higher to avoid being rate-limited.';
+            rateLimitWarning.style.fontSize = '11px';
+            rateLimitWarning.style.fontStyle = 'italic';
+            rateLimitWarning.style.color = '#ff9800';
+            rateLimitWarning.style.marginTop = '2px';
+            rateLimitWarning.style.marginLeft = '2px';
+            rateLimitWarning.style.paddingLeft = '12px';
+            rateLimitWarning.style.paddingRight = '12px';
+            row2.appendChild(rateLimitWarning);
+            
             col.appendChild(row2);
             return col;
           })()
@@ -2129,17 +2227,8 @@
             contentWrapper.style.flex = '1 1 0';
           }
           // Add version display
-          const versionDiv = document.createElement('div');
-          versionDiv.textContent = 'v1.1.1';
-          versionDiv.style.position = 'absolute';
-          versionDiv.style.bottom = '8px';
-          versionDiv.style.right = '16px';
-          versionDiv.style.fontSize = '11px';
-          versionDiv.style.color = '#888';
-          versionDiv.style.opacity = '0.7';
-          versionDiv.style.pointerEvents = 'none';
-          versionDiv.style.userSelect = 'none';
-          dialog.appendChild(versionDiv);
+          // versionDiv.textContent = 'v1.1.1';
+          // ... existing code ...
         }
       }, 0);
     }, 50);
@@ -2182,7 +2271,8 @@
     addAutoDiceButton();
   }
   function addAutoDiceButton() {
-    const inventoryContainer = document.querySelector('.container-inventory-4');
+    // Use DOMCache for inventory container
+    const inventoryContainer = DOMCache.get('.container-inventory-4');
     if (!inventoryContainer) return;
     if (inventoryContainer.querySelector('.auto-inventory-button')) return;
     const spriteItems = inventoryContainer.querySelectorAll(`.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID}`);
