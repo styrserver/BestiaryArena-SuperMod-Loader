@@ -1503,6 +1503,15 @@
         let selectedDiceTier = getSelectedDiceTier();
         let availableStats = getAvailableStats();
         // --- Add validation for stat/dice combination ---
+        if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
+          // Show error in stats area temporarily
+          const originalText = statsStatusDiv.textContent;
+          statsStatusDiv.textContent = 'Please select at least one dice to roll.';
+          setTimeout(() => {
+            statsStatusDiv.textContent = originalText;
+          }, 2000);
+          return;
+        }
         const minDice = Math.min(...selectedDice);
         const maxStats = 6 - minDice;
         const currentDiceRulesConfig = initializeDiceRulesConfig();
@@ -2119,6 +2128,18 @@
             contentWrapper.style.flexDirection = 'column';
             contentWrapper.style.flex = '1 1 0';
           }
+          // Add version display
+          const versionDiv = document.createElement('div');
+          versionDiv.textContent = 'v1.1.1';
+          versionDiv.style.position = 'absolute';
+          versionDiv.style.bottom = '8px';
+          versionDiv.style.right = '16px';
+          versionDiv.style.fontSize = '11px';
+          versionDiv.style.color = '#888';
+          versionDiv.style.opacity = '0.7';
+          versionDiv.style.pointerEvents = 'none';
+          versionDiv.style.userSelect = 'none';
+          dialog.appendChild(versionDiv);
         }
       }, 0);
     }, 50);

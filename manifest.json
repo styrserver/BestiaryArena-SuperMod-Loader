@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Private mod loader for Bestiary Arena - Load and manage custom mods through local files and various sources.",
   "icons": {
     "16": "assets/icons/icon-16.png",
