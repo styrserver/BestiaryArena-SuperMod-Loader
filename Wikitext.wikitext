@@ -1,5 +1,10 @@
-= Thanks =
-Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader
+'''Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader'''
+
+________________________
+
+[https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ Firefox] installation: 
+
+[https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation: 
 
 = BestiaryArena SuperMod Loader =
 
@@ -7,23 +12,29 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 
 == Features ==
 * '''Mod Management''': Load mods from local files or GitHub Gists
-* '''Configuration System''': Save and manage mod configurations between sessions
+* '''Configuration System''': Save and manage mod configurations between sessions, with improved support for advanced mod settings
 * '''Standardized UI Components''': Game-styled UI elements for consistency across mods
+* '''Session Widget''': Real-time session stats for mods like Autoseller (e.g., sold/squeezed counts, gold/dust earned)
 * '''Internationalization''': Built-in translation support for mods
 * '''Game API Access''': Safe access to game state and functions
 * '''Developer-Friendly''': Comprehensive documentation and examples
 * '''Super Mods''': Advanced mods with comprehensive game enhancement features
 
-== Firefox Installation ==
-Download here: [https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/]
+== Installation ==
+[https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ Firefox] installation:
+
+[https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation: 
+
+== Alternative Installation ==
 
 === Firefox Installation (Alternative) ===
+# Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
 # Clone this repository or download it as a ZIP file
 # Open Firefox and navigate to <code>about:debugging</code>
 # Click "This Firefox" tab
 # Click "Load Temporary Add-on" and select the <code>manifest_firefox.json</code> file
 
-== Chromium Installation ==
+=== Chromium Installation (Alternative) ===
 # Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
 # Unzip the files to a location on your computer
 # Open your Chrome-based browser (Chrome, Edge, Brave, etc.)
@@ -49,7 +60,7 @@ There are two ways to load mods:
 You can enable, disable, and configure mods from the mod loader interface. Each mod can have its own configuration settings, which are saved between sessions.
 
 == Mod Development ==
-Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the [[docs/mod_development_guide.md|Mod Development Guide]] for detailed information on creating mods.
+Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the Mod Development Guide for detailed information on creating mods.
 
 === Basic Mod Template ===
 <syntaxhighlight lang="javascript">
@@ -119,25 +130,29 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>injector.js</code> - Injects the client code into the game page
 ** <code>local_mods.js</code> - Manages local mods
 * <code>docs/</code> - Documentation for mod developers
-* <code>mods/</code> - Local mod files
+* <code>database/</code> - Stores persistent data and tooltips used by mods (e.g., <code>media.txt</code>, <code>inventory-tooltips.js</code>)
+* <code>mods/</code> - Local mod files, organized as follows:
+** <code>Official Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.
+** <code>Super Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
+** <code>Unused Mods/</code> - Mods that are not currently active or are for development/testing purposes.
 * <code>popup/</code> - Extension popup UI
 * <code>background.js</code> - Background script for the extension
 * <code>manifest.json</code> - Extension manifest
 
-== Documentation ==
-* [[docs/mod_development_guide.md|Mod Development Guide]] - Comprehensive guide for mod developers
-* [[docs/ui_management.md|UI Management API]] - Documentation for the UI Management API
-* [[docs/ui_components.md|UI Components Documentation]] - Documentation for the UI Components
-* [[docs/client_api.md|Client API Documentation]] - Complete reference for the game's Client API
-* [[docs/game_state_api.md|Game State API Documentation]] - Complete reference for accessing and modifying game state
-
-== Example Mods ==
+== Mods ==
 The extension comes with several powerful example mods that demonstrate different features:
 
 === Super Mods ===
-These are advanced mods that provide comprehensive game enhancement features:
+These are advanced mods that provide comprehensive game enhancement features. All Super Mods listed below are included by default in this loader:
 
-==== Cyclopedia ====
+=== Autoseller ===
+Automatically sells or squeezes creatures based on gene thresholds and user settings. Features include:
+* Configurable gene thresholds for selling and squeezing
+* Minimum count triggers for batch actions
+* Session widget displaying sold/squeezed counts and rewards
+* Integrated with the mod loader's configuration system
+
+=== Cyclopedia ===
 A comprehensive game data viewer and player profile manager:
 * View detailed monster and equipment information
 * Access your player profile and statistics
@@ -145,7 +160,7 @@ A comprehensive game data viewer and player profile manager:
 * Track your progress and achievements
 * Search and filter game data efficiently
 
-==== Hunt Analyzer ====
+=== Hunt Analyzer ===
 Advanced autoplay and loot tracking system:
 * Track detailed statistics from autoplay sessions
 * Monitor gold, dust, and item drops
@@ -153,13 +168,13 @@ Advanced autoplay and loot tracking system:
 * View session summaries and performance metrics
 * Export data for further analysis
 
-==== Dashboard Button ====
+=== Dashboard Button ===
 Quick access to the mod dashboard:
 * Provides easy access to all mod features
 * Integrates seamlessly with the game interface
 * Streamlines mod management
 
-==== Dice Roller ====
+=== Dice Roller ===
 Automates dice rolling for stat rerolling:
 * Automatically clicks the roll button and checks for target stats
 * Lets you set target values for each stat
@@ -167,10 +182,22 @@ Automates dice rolling for stat rerolling:
 * Displays roll count and status in a custom panel
 
 === Official Mods ===
-These are the core mods that provide essential gameplay enhancements:
+These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
 
-=== UI Components Showcase ===
-Demonstrates all available UI components provided by the mod loader, allowing developers to see how components look and function within the game's environment. Includes examples of monster portraits, item portraits, room list items, and modals with proper styling.
+=== Bestiary Automator ===
+Automates routine gameplay actions to streamline your Bestiary Arena experience. Features include:
+* Automatic stamina refilling when low
+* Auto-collection of available rewards
+* Automatic handling of Day Care tasks
+* Customizable automation settings for safe and efficient play
+
+=== Tick Tracker ===
+Tracks and displays the number of game ticks (and optionally milliseconds) for each session. Features include:
+* Real-time tick tracking widget
+* History of recent tick counts
+* Option to show milliseconds conversion
+* Copy and clear tick history with a single click
+* Useful for speedrunners and performance analysis
 
 === Custom Display ===
 Enhances game visuals with two powerful features:
@@ -233,8 +260,11 @@ Speed up gameplay for faster testing and grinding:
 * Perfect for testing strategies quickly
 * Great for farming and grinding sessions
 
+=== Example Mods ===
+Some mods in the <code>Unused Mods/</code> folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+
 == Contributing ==
-Contributions are welcome! If you have a mod you'd like to share or improvements to the extension, please read our [[CONTRIBUTING.md|Contribution Guidelines]].
+Contributions are welcome! If you have a mod you'd like to share or improvements to the extension, please read our Contribution Guidelines.
 
 == Frequently Asked Questions ==
 === Is this extension safe to use? ===
@@ -247,10 +277,10 @@ This mod loader is designed for enhancing single-player gameplay. It was all mad
 Occasionally, you may need to update the extension when new game versions are released. Check the GitHub repository for updates.
 
 === Can I create my own mods? ===
-Yes! If you know JavaScript, you can create your own mods. Check the [[docs/mod_development_guide.md|Mod Development Guide]] for technical details.
+Yes! If you know JavaScript, you can create your own mods. Check the Mod Development Guide for technical details.
 
 === How do I report bugs or suggest features? ===
-Visit the [https://github.com/TheMegafuji/bestiary-arena-mod-loader/issues GitHub Issues page] to report bugs or suggest new features.
+Visit the Discord to report bugs or suggest new features.
 
 == Troubleshooting ==
 If you encounter any issues:
@@ -258,6 +288,7 @@ If you encounter any issues:
 * '''Game performance issues?''' Try using the Performance Mode mod to improve game speed.
 * '''Extension not working after game update?''' Check for extension updates on GitHub.
 * '''Specific mod not working?''' Disable and re-enable the mod, or refresh the page.
+* '''Autoseller session widget not updating?''' Ensure the mod is enabled and you have completed at least one battle for stats to appear.
 * '''Turbo Mode not working?''' Make sure you're in a game session and try refreshing the page.
 * '''Board Analyzer issues?''' Ensure you're in sandbox mode and have a valid board configuration.
 

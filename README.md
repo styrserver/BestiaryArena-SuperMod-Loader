@@ -7,8 +7,9 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 ## Features
 
 - **Mod Management**: Load mods from local files or GitHub Gists
-- **Configuration System**: Save and manage mod configurations between sessions
+- **Configuration System**: Save and manage mod configurations between sessions, with improved support for advanced mod settings
 - **Standardized UI Components**: Game-styled UI elements for consistency across mods
+- **Session Widget**: Real-time session stats for mods like Autoseller (e.g., sold/squeezed counts, gold/dust earned)
 - **Internationalization**: Built-in translation support for mods
 - **Game API Access**: Safe access to game state and functions
 - **Developer-Friendly**: Comprehensive documentation and examples
@@ -137,7 +138,11 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `injector.js` - Injects the client code into the game page
   - `local_mods.js` - Manages local mods
 - `docs/` - Documentation for mod developers
-- `mods/` - Local mod files
+- `database/` - Stores persistent data and tooltips used by mods (e.g., `media.txt`, `inventory-tooltips.js`)
+- `mods/` - Local mod files, organized as follows:
+  - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
+  - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
+  - `Unused Mods/` - Mods that are not currently active or are for development/testing purposes.
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
 - `manifest.json` - Extension manifest
@@ -150,15 +155,22 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - [Client API Documentation](docs/client_api.md) - Complete reference for the game's Client API
 - [Game State API Documentation](docs/game_state_api.md) - Complete reference for accessing and modifying game state
 
-## Example Mods
+## Mods
 
-The extension comes with several powerful example mods that demonstrate different features:
+The extension comes with several powerful mods that demonstrate different features:
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features:
+These are advanced mods that provide comprehensive game enhancement features. All Super Mods listed below are included by default in this loader:
 
-#### Cyclopedia
+### Autoseller
+Automatically sells or squeezes creatures based on gene thresholds and user settings. Features include:
+- Configurable gene thresholds for selling and squeezing
+- Minimum count triggers for batch actions
+- Session widget displaying sold/squeezed counts and rewards
+- Integrated with the mod loader's configuration system
+
+### Cyclopedia
 A comprehensive game data viewer and player profile manager:
 - View detailed monster and equipment information
 - Access your player profile and statistics
@@ -166,7 +178,7 @@ A comprehensive game data viewer and player profile manager:
 - Track your progress and achievements
 - Search and filter game data efficiently
 
-#### Hunt Analyzer
+### Hunt Analyzer
 Advanced autoplay and loot tracking system:
 - Track detailed statistics from autoplay sessions
 - Monitor gold, dust, and item drops
@@ -174,13 +186,13 @@ Advanced autoplay and loot tracking system:
 - View session summaries and performance metrics
 - Export data for further analysis
 
-#### Dashboard Button
+### Dashboard Button
 Quick access to the mod dashboard:
 - Provides easy access to all mod features
 - Integrates seamlessly with the game interface
 - Streamlines mod management
 
-#### Dice Roller
+### Dice Roller
 Automates dice rolling for stat rerolling:
 - Automatically clicks the roll button and checks for target stats
 - Lets you set target values for each stat
@@ -189,32 +201,30 @@ Automates dice rolling for stat rerolling:
 
 ### Official Mods
 
-These are the core mods that provide essential gameplay enhancements:
+These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
 
-### UI Components Showcase
-
-Demonstrates all available UI components provided by the mod loader, allowing developers to see how components look and function within the game's environment. Includes examples of monster portraits, item portraits, room list items, and modals with proper styling.
+### Bestiary Automator
+Automates routine gameplay actions to streamline your Bestiary Arena experience. Features include:
+- Automatic stamina refilling when low
+- Auto-collection of available rewards
+- Automatic handling of Day Care tasks
+- Customizable automation settings for safe and efficient play
 
 ### Custom Display
-
 Enhances game visuals with two powerful features:
-- **Performance Mode**: Strips down graphics for better performance on low-end devices.
-- **Map Grid**: Adds a coordinate grid overlay to help with positioning and planning.
-
+- Performance Mode: Strips down graphics for better performance on low-end devices.
+- Map Grid: Adds a coordinate grid overlay to help with positioning and planning.
 Both features can be customized with extensive settings for colors, visibility, and display options.
 
 ### Hero Editor
-
 A powerful tool that allows players to:
 - Edit monster stats directly in the game
 - Modify equipment attributes (stat type, tier)
 - Apply changes instantly to the game board
 - Save and load custom setups
-
 Perfect for testing different monster and equipment combinations without having to collect and level them in-game.
 
 ### Setup Manager
-
 Allows players to save, load, and manage team configurations for different maps. Features include:
 - Multiple saved team setups per map
 - Easy switching between configurations
@@ -223,7 +233,6 @@ Allows players to save, load, and manage team configurations for different maps.
 - Integration with the game's auto-configure button
 
 ### Team Copier
-
 Enables sharing team configurations with other players through:
 - Copying team setup as JSON command
 - Generating sharable links (compact or readable)
@@ -232,7 +241,6 @@ Enables sharing team configurations with other players through:
 - History of recently used seeds
 
 ### Monster Tier List
-
 Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios. Features include:
 - Sortable tier list of monsters
 - Usage statistics across different room types
@@ -240,7 +248,6 @@ Analyzes monster usage patterns and displays statistics and rankings, helping pl
 - Visual representation of monster effectiveness
 
 ### Item Tier List
-
 Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts. The mod shows:
 - Item effectiveness by tier
 - Stat optimizations for different monsters
@@ -248,7 +255,6 @@ Displays equipment statistics and rankings, allowing players to compare items an
 - Visual quality indicators
 
 ### Highscore Improvements
-
 Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements. Features include:
 - Detailed performance analysis
 - Potential time improvements compared to top scores
@@ -256,13 +262,25 @@ Enhances the game's highscore display with additional statistics, improved sorti
 - Visual indicators for time differences
 
 ### Turbo Mode
-
 Speed up gameplay for faster testing and grinding:
 - Increase game speed for faster progression
 - Customizable speed multipliers
 - Real-time tick display
 - Perfect for testing strategies quickly
 - Great for farming and grinding sessions
+
+### Board Analyzer
+Analyzes and simulates board setups for optimal strategies and performance. Useful for advanced planning and testing.
+
+### Tick Tracker
+Tracks and displays the number of game ticks (and optionally milliseconds) for each session. Features include:
+- Real-time tick tracking widget
+- History of recent tick counts
+- Option to show milliseconds conversion
+- Copy and clear tick history with a single click
+- Useful for speedrunners and performance analysis
+
+Note: The UI Components Showcase mod and other example mods are available in the `Unused Mods/` folder as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
 
 ## Contributing
 
@@ -293,6 +311,7 @@ If you encounter any issues:
 - **Game performance issues?** Try using the Performance Mode mod to improve game speed.
 - **Extension not working after game update?** Check for extension updates on GitHub.
 - **Specific mod not working?** Disable and re-enable the mod, or refresh the page.
+- **Autoseller session widget not updating?** Ensure the mod is enabled and you have completed at least one battle for stats to appear.
 - **Turbo Mode not working?** Make sure you're in a game session and try refreshing the page.
 - **Board Analyzer issues?** Ensure you're in sandbox mode and have a valid board configuration.
 
