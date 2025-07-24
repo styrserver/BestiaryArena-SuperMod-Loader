@@ -18,6 +18,7 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 ## Installation
 
 Firefox: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+
 Chromium: https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd
 
 ### Firefox Installation (Alternative)
