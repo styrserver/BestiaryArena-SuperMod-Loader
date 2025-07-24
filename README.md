@@ -21,19 +21,20 @@ Firefox: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-l
 
 Chromium: https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd
 
+## Alternative Installation
+
 ### Firefox Installation (Alternative)
+1. Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
+2. Clone this repository or download it as a ZIP file
+3. Open Firefox and navigate to <code>about:debugging</code>
+4. Click "This Firefox" tab
+5. Click "Load Temporary Add-on" and select the <code>manifest_firefox.json</code> file
 
-1. Clone this repository or download it as a ZIP file
-2. Open Firefox and navigate to `about:debugging`
-3. Click "This Firefox" tab
-4. Click "Load Temporary Add-on" and select the `manifest_firefox.json` file
-
-## Chromium Installation (Alternative)
-
-1. Download the extension files from the [GitHub repository](https://github.com/styrserver/BestiaryArena-SuperMod-Loader)
+### Chromium Installation (Alternative)
+1. Download the extension files from the [https://github.com/styrserver/BestiaryArena-SuperMod-Loader GitHub repository]
 2. Unzip the files to a location on your computer
 3. Open your Chrome-based browser (Chrome, Edge, Brave, etc.)
-4. Go to `chrome://extensions/` in your browser
+4. Go to <code>chrome://extensions/</code> in your browser
 5. Enable "Developer mode" using the toggle in the top-right corner
 6. Click "Load unpacked" and select the folder containing the extension files
 7. The extension icon should now appear in your browser toolbar
