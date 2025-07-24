@@ -15,9 +15,10 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 - **Developer-Friendly**: Comprehensive documentation and examples
 - **Super Mods**: Advanced mods with comprehensive game enhancement features
 
-## Firefox Installation
+## Installation
 
-Download here: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+Firefox: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/
+Chromium: https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd
 
 ### Firefox Installation (Alternative)
 
@@ -26,7 +27,7 @@ Download here: https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supe
 3. Click "This Firefox" tab
 4. Click "Load Temporary Add-on" and select the `manifest_firefox.json` file
 
-## Chromium Installation
+## Chromium Installation (Alternative)
 
 1. Download the extension files from the [GitHub repository](https://github.com/styrserver/BestiaryArena-SuperMod-Loader)
 2. Unzip the files to a location on your computer
