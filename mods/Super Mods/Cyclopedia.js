@@ -78,6 +78,8 @@ const GAME_DATA = {
   ],
 
   UNOBTAINABLE_CREATURES: [
+    'Black Knight',
+    'Dead Tree',
     'Earth Crystal',
     'Energy Crystal',
     'Lavahole',
@@ -88,7 +90,7 @@ const GAME_DATA = {
   ],
 
   ALL_CREATURES: [
-    'Amazon', 'Banshee', 'Bear', 'Black Knight', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
+    'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
     'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
     'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
     'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
@@ -780,6 +782,8 @@ const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
     }
   }
   cyclopediaState.monsterNameMapBuilt = true;
+  
+  // Hardcode stats for Old Giant Spider
   const entry = cyclopediaState.monsterNameMap.get('old giant spider');
   if (entry && entry.monster && entry.monster.metadata && entry.monster.metadata.baseStats) {
     entry.monster.metadata.baseStats = {
@@ -790,6 +794,87 @@ const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
       magicResist: 30
     };
   }
+  
+  // Hardcode stats for Black Knight
+  const blackKnightEntry = cyclopediaState.monsterNameMap.get('black knight');
+  if (blackKnightEntry && blackKnightEntry.monster && blackKnightEntry.monster.metadata) {
+    blackKnightEntry.monster.metadata.baseStats = {
+      hp: 4800,
+      ad: 66,
+      ap: 0,
+      armor: 975,
+      magicResist: 975
+    };
+    // Set level to 300
+    if (blackKnightEntry.monster.metadata) {
+      blackKnightEntry.monster.metadata.level = 300;
+    }
+  }
+  
+  // Hardcode stats for Dead Tree
+  const deadTreeEntry = cyclopediaState.monsterNameMap.get('dead tree');
+  if (deadTreeEntry && deadTreeEntry.monster && deadTreeEntry.monster.metadata) {
+    deadTreeEntry.monster.metadata.baseStats = {
+      hp: 7000,
+      ad: 0,
+      ap: 0,
+      armor: 700,
+      magicResist: 700
+    };
+    // Set level to 100
+    if (deadTreeEntry.monster.metadata) {
+      deadTreeEntry.monster.metadata.level = 100;
+    }
+  }
+  
+  // Hardcode stats for Earth Crystal
+  const earthCrystalEntry = cyclopediaState.monsterNameMap.get('earth crystal');
+  if (earthCrystalEntry && earthCrystalEntry.monster && earthCrystalEntry.monster.metadata) {
+    earthCrystalEntry.monster.metadata.baseStats = {
+      hp: 350,
+      ad: 0,
+      ap: 0,
+      armor: 350,
+      magicResist: 350
+    };
+    // Set level to 50
+    if (earthCrystalEntry.monster.metadata) {
+      earthCrystalEntry.monster.metadata.level = 50;
+    }
+  }
+  
+  // Hardcode stats for Energy Crystal
+  const energyCrystalEntry = cyclopediaState.monsterNameMap.get('energy crystal');
+  if (energyCrystalEntry && energyCrystalEntry.monster && energyCrystalEntry.monster.metadata) {
+    energyCrystalEntry.monster.metadata.baseStats = {
+      hp: 350,
+      ad: 0,
+      ap: 0,
+      armor: 150,
+      magicResist: 30
+    };
+    // Set level to 50
+    if (energyCrystalEntry.monster.metadata) {
+      energyCrystalEntry.monster.metadata.level = 50;
+    }
+  }
+  
+  // Hardcode stats for Magma Crystal
+  const magmaCrystalEntry = cyclopediaState.monsterNameMap.get('magma crystal');
+  if (magmaCrystalEntry && magmaCrystalEntry.monster && magmaCrystalEntry.monster.metadata) {
+    magmaCrystalEntry.monster.metadata.baseStats = {
+      hp: 350,
+      ad: 0,
+      ap: 0,
+      armor: 350,
+      magicResist: 350
+    };
+    // Set level to 50
+    if (magmaCrystalEntry.monster.metadata) {
+      magmaCrystalEntry.monster.metadata.level = 50;
+    }
+  }
+  
   return cyclopediaState.monsterNameMap;
 });
 
