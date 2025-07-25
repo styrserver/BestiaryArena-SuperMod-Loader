@@ -568,43 +568,78 @@
                 }
                 return;
             }
-            const { toSqueeze } = getEligibleMonsters(settings, monsters);
+            let { toSqueeze } = getEligibleMonsters(settings, monsters);
             if (!toSqueeze.length) {
                 return;
             }
-            // --- Session stats update ---
-            autosellerSessionStats.squeezedCount += toSqueeze.length;
-            autosellerSessionStats.squeezedDust += toSqueeze.length * 5; // Assume 1 squeezed = 5 dust
-            updateAutosellerSessionWidget();
-            // --- End session stats update ---
-            const ids = toSqueeze.map(m => m.id).filter(Boolean);
-            if (!ids.length) {
-                return;
-            }
-            const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
-            const body = JSON.stringify({ "0": { json: ids } });
-            const resp = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'content-type': 'application/json',
-                    'X-Game-Version': '1',
-                },
-                credentials: 'include',
-                body
-            });
-            if (!resp.ok) {
-                const msg = `[Autoseller][DEBUG] Squeeze API failed: HTTP ${resp.status}`;
-                console.warn(msg);
-                if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                    api.ui.components.createModal({
-                        title: 'Autoseller Error',
-                        content: `<p>Squeeze API failed. (HTTP ${resp.status})</p>`,
-                        buttons: [{ text: 'OK', primary: true }]
-                    });
+            
+            // --- Batching logic: max 20 per 10 seconds ---
+            const BATCH_SIZE = 20;
+            const BATCH_DELAY_MS = 10000;
+            
+            for (let i = 0; i < toSqueeze.length; i += BATCH_SIZE) {
+                const batch = toSqueeze.slice(i, i + BATCH_SIZE);
+                // Process the entire batch at once since the API expects an array
+                const ids = batch.map(m => m.id).filter(Boolean);
+                if (!ids.length) {
+                    continue;
                 }
-                return;
+                
+                const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
+                const body = JSON.stringify({ "0": { json: ids } });
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json',
+                        'X-Game-Version': '1',
+                    },
+                    credentials: 'include',
+                    body
+                });
+                
+                if (!resp.ok) {
+                    const msg = `[Autoseller] Squeeze API failed: HTTP ${resp.status}`;
+                    console.warn(msg);
+                    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
+                        api.ui.components.createModal({
+                            title: 'Autoseller Error',
+                            content: `<p>Squeeze API failed. (HTTP ${resp.status})</p>`,
+                            buttons: [{ text: 'OK', primary: true }]
+                        });
+                    }
+                    continue;
+                }
+                
+                let apiResponse;
+                try { 
+                    apiResponse = await resp.json(); 
+                } catch (e) { 
+                    apiResponse = '[Non-JSON response]'; 
+                }
+                
+                // Check if we got a valid response with dustDiff
+                if (
+                    apiResponse &&
+                    Array.isArray(apiResponse) &&
+                    apiResponse[0]?.result?.data?.json?.dustDiff != null
+                ) {
+                    const dustReceived = apiResponse[0].result.data.json.dustDiff;
+                    const squeezedCount = Math.floor(dustReceived / 10); // 10 dust per creature
+                    
+                    // --- Session stats update ---
+                    autosellerSessionStats.squeezedCount += squeezedCount;
+                    autosellerSessionStats.squeezedDust += dustReceived;
+                    updateAutosellerSessionWidget();
+                    // --- End session stats update ---
+                    
+                    removeMonstersFromLocalInventory(ids);
+                }
+                
+                if (i + BATCH_SIZE < toSqueeze.length) {
+                    // Wait 10 seconds before next batch
+                    await new Promise(res => setTimeout(res, BATCH_DELAY_MS));
+                }
             }
-            removeMonstersFromLocalInventory(ids);
         } catch (e) {
             console.warn('[Autoseller][DEBUG] Squeeze error:', e);
             if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {

@@ -266,11 +266,13 @@ function clamp(val, min, max) {
  * This function now clears existing content and redraws everything as a single, combined, sorted list.
  */
 function renderAllSessions() {
+    // Check if the panel is open first
+    if (!document.getElementById(PANEL_ID)) {
+        return; // Silently return if panel is not open
+    }
+    
     if (!cachedLootDiv || !cachedCreatureDropDiv || !cachedTotalGoldDisplayElement || !cachedTotalDustDisplayElement) {
-        // Only log a warning if the panel is actually not open
-        if (!document.getElementById(PANEL_ID)) {
-            console.warn("[Hunt Analyzer] Render target divs or gold/dust display elements not available. Panel might not be open.");
-        }
+        console.warn("[Hunt Analyzer] Render target divs or gold/dust display elements not available. Panel might not be open.");
         return;
     }
 
