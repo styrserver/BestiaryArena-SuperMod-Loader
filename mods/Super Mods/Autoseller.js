@@ -142,7 +142,6 @@
             }
             const data = await resp.json();
             const monsters = data?.[0]?.result?.data?.json?.monsters || [];
-            console.log('[Autoseller][DEBUG] Monsters from server profile API:', monsters);
             return monsters;
         } catch (e) {
             console.error('[Autoseller][DEBUG] Error fetching server monsters:', e);
@@ -264,13 +263,7 @@
         desc.style.color = '#cccccc';
         desc.style.fontSize = '13px';
         descWrapper.appendChild(desc);
-        const tooltip = document.createElement('span');
-        tooltip.textContent = 'ⓘ';
-        tooltip.style.cursor = 'pointer';
-        tooltip.style.fontSize = '15px';
-        tooltip.style.color = '#ffe066';
-        tooltip.title = opts.tooltip;
-        descWrapper.appendChild(tooltip);
+
         const row1 = document.createElement('div');
         row1.style.display = 'flex';
         row1.style.alignItems = 'center';
@@ -285,7 +278,7 @@
         label.textContent = opts.label;
         label.className = 'pixel-font-16';
         label.style.fontWeight = 'bold';
-        label.style.fontSize = '16px';
+        label.style.fontSize = '14px';
         label.style.color = '#ffffff';
         label.style.marginRight = '8px';
         row1.appendChild(checkbox);
@@ -300,7 +293,7 @@
         inputLabel.className = 'pixel-font-16';
         inputLabel.style.marginRight = '6px';
         inputLabel.style.fontWeight = 'bold';
-        inputLabel.style.fontSize = '16px';
+        inputLabel.style.fontSize = '14px';
         inputLabel.style.color = '#cccccc';
         row2.appendChild(inputLabel);
         const inputMin = document.createElement('input');
@@ -360,7 +353,7 @@
         minCountLabel.className = 'pixel-font-16';
         minCountLabel.style.marginRight = '6px';
         minCountLabel.style.fontWeight = 'bold';
-        minCountLabel.style.fontSize = '16px';
+        minCountLabel.style.fontSize = '14px';
         minCountLabel.style.color = '#cccccc';
         row3.appendChild(minCountLabel);
         const minCountInput = document.createElement('input');
@@ -557,16 +550,6 @@
     // Add delay tracking variables
     let lastAutosellerRun = 0;
     const AUTOSELLER_MIN_DELAY_MS = 5000; // 5 seconds
-    function updateAutosellerSessionWidget() {
-        const widget = document.getElementById('autoseller-session-widget');
-        if (!widget || !widget._statEls) return;
-        const statEls = widget._statEls;
-        if (statEls.soldCount) statEls.soldCount.textContent = `Sold: ${autosellerSessionStats.soldCount}`;
-        if (statEls.soldGold) statEls.soldGold.textContent = `Gold: ${autosellerSessionStats.soldGold}`;
-        if (statEls.squeezedCount) statEls.squeezedCount.textContent = `Squeezed: ${autosellerSessionStats.squeezedCount}`;
-        if (statEls.squeezedDust) statEls.squeezedDust.textContent = `Dust: ${autosellerSessionStats.squeezedDust}`;
-    }
-    // Patch sell/squeeze logic to update session stats and widget
     async function squeezeEligibleMonsters(monsters) {
         try {
             const settings = getCachedSettings();
@@ -594,9 +577,6 @@
             autosellerSessionStats.squeezedDust += toSqueeze.length * 5; // Assume 1 squeezed = 5 dust
             updateAutosellerSessionWidget();
             // --- End session stats update ---
-            toSqueeze.forEach(m => {
-                console.log(`[Autoseller] SQUEEZE: id=${m.id}, stats total=${getGenes(m)}`);
-            });
             const ids = toSqueeze.map(m => m.id).filter(Boolean);
             if (!ids.length) {
                 return;
@@ -663,9 +643,6 @@
             // --- Session stats update ---
             // (removed old commented-out code)
             // --- End session stats update ---
-            toSell.forEach(m => {
-                console.log(`[Autoseller] SELL: id=${m.id}, stats total=${getGenes(m)}`);
-            });
             // --- Batching logic: max 20 per 10 seconds ---
             const BATCH_SIZE = 20;
             const BATCH_DELAY_MS = 10000;
@@ -676,7 +653,6 @@
                     const id = m.id;
                     const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
                     const body = JSON.stringify({ "0": { json: id } });
-                    console.log('[Autoseller][DEBUG] Selling monster with ID:', id, 'Payload:', body);
                     const resp = await fetch(url, {
                         method: 'POST',
                         headers: {
@@ -726,10 +702,6 @@
                 }
             }
             const player = globalThis.state?.player;
-            const before = player?.getSnapshot?.().context?.monsters;
-            console.log('[Autoseller][DEBUG] Local monsters before:', before);
-            const after = player?.getSnapshot?.().context?.monsters;
-            console.log('[Autoseller][DEBUG] Local monsters after:', after);
         } catch (e) {
             console.warn('[Autoseller][DEBUG] Sell error:', e);
             if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
@@ -942,7 +914,7 @@
             let modalInstance = api.ui.components.createModal({
                 title: 'Autoseller',
                 width: 600,
-                height: 500,
+                height: 410,
                 content: columnsWrapper,
                 buttons: [
                     {
@@ -983,12 +955,12 @@
                     dialog.style.width = '600px';
                     dialog.style.minWidth = '600px';
                     dialog.style.maxWidth = '600px';
-                    dialog.style.height = '500px';
-                    dialog.style.minHeight = '500px';
-                    dialog.style.maxHeight = '500px';
+                    dialog.style.height = '410px';
+                    dialog.style.minHeight = '410px';
+                    dialog.style.maxHeight = '410px';
                     const contentElem = dialog.querySelector('.widget-bottom');
                     if (contentElem) {
-                        contentElem.style.height = '420px';
+                        contentElem.style.height = '330px';
                         contentElem.style.display = 'flex';
                         contentElem.style.flexDirection = 'column';
                         contentElem.style.justifyContent = 'flex-start';
@@ -1030,26 +1002,172 @@
     // =======================
     // 8. Autoseller Session Widget
     // =======================
+    function injectAutosellerWidgetStyles() {
+        if (!document.getElementById('autoseller-widget-css')) {
+            const style = document.createElement('style');
+            style.id = 'autoseller-widget-css';
+            style.textContent = `
+            #autoseller-session-widget {
+                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+                border: 6px solid transparent;
+                border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+                border-radius: 6px;
+                box-shadow: 0 2px 12px 0 #000a;
+                min-width: 240px;
+                max-width: 320px;
+                font-family: 'Satoshi', 'Trebuchet MS', Arial, sans-serif;
+                overflow: visible;
+                position: relative;
+            }
+            #autoseller-session-widget .widget-top {
+                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+                font-family: var(--font-filled);
+                font-size: 16px;
+                line-height: 1;
+                letter-spacing: .0625rem;
+                word-spacing: -.1875rem;
+                padding-left: .25rem;
+                padding-right: .25rem;
+                color: rgb(144 144 144/var(--tw-text-opacity,1));
+                height: 20px;
+                min-height: 20px;
+                max-height: 20px;
+                letter-spacing: 1px;
+                display: flex;
+                align-items: center;
+                border-bottom: none;
+                margin-bottom: 0;
+                position: relative;
+                z-index: 1;
+                overflow: visible;
+            }
+            #autoseller-session-widget .minimize-btn {
+                margin-left: auto;
+                border: none;
+                background: transparent;
+                color: rgb(144 144 144/var(--tw-text-opacity,1));
+                border-radius: 3px;
+                font-family: var(--font-filled);
+                font-size: 16px;
+                line-height: 1;
+                letter-spacing: .0625rem;
+                word-spacing: -.1875rem;
+                padding-left: .25rem;
+                padding-right: .25rem;
+                cursor: pointer;
+                width: 24px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.2s;
+            }
+            #autoseller-session-widget .minimize-btn:hover {
+                background: #fff2;
+            }
+            #autoseller-session-widget .stat-row {
+                display: grid;
+                grid-template-columns: 80px 60px 60px;
+                grid-template-rows: 1fr 6px 1fr;
+                gap: 0;
+                justify-content: center;
+                margin: 0;
+                align-items: stretch;
+                width: 100%;
+                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+                box-sizing: border-box;
+                min-height: 70px;
+            }
+            #autoseller-session-widget .separator {
+                grid-column: 1 / -1;
+                grid-row: 2;
+                height: 6px;
+                margin: 0;
+                background: transparent;
+                border: none;
+                opacity: 0.3;
+                width: 100%;
+                min-width: 100%;
+                max-width: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #autoseller-session-widget .separator::after {
+                content: '';
+                width: 100%;
+                height: 1px;
+                background: #ffe066;
+            }
+            #autoseller-session-widget .stat-label {
+                font-family: pixel-font-16, monospace;
+                font-size: 13px;
+                color: #fff;
+                font-weight: bold;
+                margin-bottom: 0;
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                text-align: left;
+                width: 100%;
+            }
+            #autoseller-session-widget .stat-value {
+                font-family: pixel-font-16, monospace;
+                font-size: 12px;
+                color: #ffe066;
+                font-weight: bold;
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                text-align: left;
+                width: 100%;
+            }
+            #autoseller-session-widget .stat-icon {
+                width: 14px;
+                height: 14px;
+                vertical-align: middle;
+                margin-right: 3px;
+            }
+            #autoseller-session-widget .stat-label:nth-child(1) { grid-area: 1 / 1; }
+            #autoseller-session-widget .stat-value:nth-child(2) { grid-area: 1 / 2; }
+            #autoseller-session-widget .stat-value:nth-child(3) { grid-area: 1 / 3; }
+            #autoseller-session-widget .separator:nth-child(4) { grid-area: 2 / 1 / 2 / 4; }
+            #autoseller-session-widget .stat-label:nth-child(5) { grid-area: 3 / 1; }
+            #autoseller-session-widget .stat-value:nth-child(6) { grid-area: 3 / 2; }
+            #autoseller-session-widget .stat-value:nth-child(7) { grid-area: 3 / 3; }
+            
+
+            `;
+            document.head.appendChild(style);
+        }
+    }
+
     function createAutosellerSessionWidget() {
-        if (document.getElementById('autoseller-session-widget')) return;
+        injectAutosellerWidgetStyles();
+        const settings = getCachedSettings();
+        const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
+        const existingWidget = document.getElementById('autoseller-session-widget');
+        if (!shouldShowWidget) {
+            if (existingWidget && existingWidget.parentNode) existingWidget.parentNode.removeChild(existingWidget);
+            return;
+        }
+        if (existingWidget) return;
         const autoplayContainer = document.querySelector('.widget-bottom[data-minimized="false"]');
         if (!autoplayContainer) return;
         const widget = document.createElement('div');
-        widget.className = 'mt-1.5';
+        widget.className = '';
         widget.id = 'autoseller-session-widget';
+        // Header
         const header = document.createElement('div');
-        header.className = 'widget-top widget-top-text flex items-center gap-1.5';
+        header.className = 'widget-top';
         header.appendChild(document.createTextNode('Autoseller Session'));
         const minimizeBtn = document.createElement('button');
-        minimizeBtn.className = 'ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-black/40';
+        minimizeBtn.className = 'minimize-btn';
         minimizeBtn.title = 'Minimize';
         minimizeBtn.innerHTML = '−';
-        minimizeBtn.style.border = '1px solid #888';
-        minimizeBtn.style.background = 'transparent';
-        minimizeBtn.style.borderRadius = '0';
-        minimizeBtn.style.fontWeight = 'bold';
-        minimizeBtn.style.fontSize = '16px';
-        minimizeBtn.style.cursor = 'pointer';
         let minimized = false;
         minimizeBtn.onclick = () => {
             minimized = !minimized;
@@ -1058,97 +1176,177 @@
         };
         header.appendChild(minimizeBtn);
         widget.appendChild(header);
+        // Body
         const body = document.createElement('div');
         body.className = 'widget-bottom p-0';
-        body.style.padding = '4px 0 8px 0';
         body.style.display = 'flex';
         body.style.flexDirection = 'column';
         body.style.justifyContent = 'center';
         body.style.height = '100%';
+        // Stat row - using grid layout
         const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.flexDirection = 'row';
-        row.style.justifyContent = 'flex-start';
-        row.style.alignItems = 'center';
-        row.style.gap = '16px';
-        row.style.margin = '0';
-        const slotData = [
-            { type: 'sold', label: 'Sold', value: 0, extra: 'Gold', extraValue: 0 },
-            { type: 'squeezed', label: 'Squeezed', value: 0, extra: 'Dust', extraValue: 0 }
-        ];
+        row.className = 'stat-row';
+        
         widget._statEls = {};
-        slotData.forEach(evt => {
-            const slotDiv = document.createElement('div');
-            slotDiv.className = 'container-slot surface-darker';
-            slotDiv.style.border = '4px solid transparent';
-            slotDiv.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch';
-            slotDiv.style.borderRadius = '6px';
-            slotDiv.style.width = '100px';
-            slotDiv.style.height = '90px';
-            slotDiv.style.display = 'flex';
-            slotDiv.style.flexDirection = 'column';
-            slotDiv.style.alignItems = 'center';
-            slotDiv.style.justifyContent = 'center';
-            slotDiv.style.padding = '10px 6px';
-            slotDiv.style.position = 'relative';
-            slotDiv.style.margin = '0 8px';
-            const countDiv = document.createElement('div');
-            countDiv.style.fontSize = '13px';
-            countDiv.style.fontWeight = 'bold';
-            countDiv.style.color = '#fff';
-            countDiv.style.marginBottom = '12px';
-            countDiv.id = `autoseller-session-${evt.type}-count`;
-            countDiv.textContent = `${evt.label}: ${evt.value}`;
-            slotDiv.appendChild(countDiv);
-            const extraDiv = document.createElement('div');
-            extraDiv.style.fontSize = '12px';
-            extraDiv.style.fontWeight = 'bold';
-            extraDiv.style.color = '#fff';
-            extraDiv.id = `autoseller-session-${evt.type}-${evt.extra.toLowerCase()}`;
-            extraDiv.textContent = `${evt.extra}: ${evt.extraValue}`;
-            slotDiv.appendChild(extraDiv);
-            row.appendChild(slotDiv);
-            widget._statEls[`${evt.type}Count`] = countDiv;
-            widget._statEls[`${evt.type}${evt.extra}`] = extraDiv;
-        });
-        row.style.margin = '24px 0 0 0';
+        
+        // Create grid elements in order: Sold label, Sold count, Sold Gold, Squeezed label, Squeezed count, Squeezed Dust
+        
+        // Sold label (row 1, col 1)
+        const soldLabel = document.createElement('div');
+        soldLabel.className = 'stat-label';
+        soldLabel.textContent = 'Sold:';
+        row.appendChild(soldLabel);
+        
+        // Sold count (row 1, col 2)
+        const soldCount = document.createElement('div');
+        soldCount.className = 'stat-value';
+        soldCount.id = 'autoseller-session-sold-count';
+        soldCount.textContent = '0';
+        row.appendChild(soldCount);
+        widget._statEls.soldCount = soldCount;
+        
+        // Helper function to create stat elements with icons
+        function createStatWithIcon(id, iconSrc, iconAlt, amount) {
+            const statEl = document.createElement('div');
+            statEl.className = 'stat-value';
+            statEl.id = id;
+            
+            const icon = document.createElement('img');
+            icon.src = iconSrc;
+            icon.alt = iconAlt;
+            icon.className = 'stat-icon';
+            
+            const amountEl = document.createElement('span');
+            amountEl.textContent = amount;
+            
+            statEl.appendChild(icon);
+            statEl.appendChild(amountEl);
+            return statEl;
+        }
+        
+        // Sold Gold (row 1, col 3)
+        const soldGold = createStatWithIcon(
+            'autoseller-session-sold-gold',
+            'https://bestiaryarena.com/assets/icons/goldpile.png',
+            'Gold',
+            '0'
+        );
+        row.appendChild(soldGold);
+        widget._statEls.soldGold = soldGold;
+        
+        // Separator (row 2)
+        const separator = document.createElement('div');
+        separator.className = 'separator my-2.5';
+        separator.setAttribute('role', 'none');
+        row.appendChild(separator);
+        
+        // Squeezed label (row 3, col 1)
+        const squeezedLabel = document.createElement('div');
+        squeezedLabel.className = 'stat-label';
+        squeezedLabel.textContent = 'Squeezed:';
+        row.appendChild(squeezedLabel);
+        
+        // Squeezed count (row 3, col 2)
+        const squeezedCount = document.createElement('div');
+        squeezedCount.className = 'stat-value';
+        squeezedCount.id = 'autoseller-session-squeezed-count';
+        squeezedCount.textContent = '0';
+        row.appendChild(squeezedCount);
+        widget._statEls.squeezedCount = squeezedCount;
+        
+        // Squeezed Dust (row 3, col 3)
+        const squeezedDust = createStatWithIcon(
+            'autoseller-session-squeezed-dust',
+            'https://bestiaryarena.com/assets/icons/dust.png',
+            'Dust',
+            '0'
+        );
+        row.appendChild(squeezedDust);
+        widget._statEls.squeezedDust = squeezedDust;
         body.appendChild(row);
         widget.appendChild(body);
         if (autoplayContainer) autoplayContainer.appendChild(widget);
     }
 
+    // Cache previous values to avoid unnecessary DOM updates
+    let lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
+    
     function updateAutosellerSessionWidget() {
         const widget = document.getElementById('autoseller-session-widget');
         if (!widget || !widget._statEls) return;
+        
         const statEls = widget._statEls;
-        if (statEls.soldCount) statEls.soldCount.textContent = `Sold: ${autosellerSessionStats.soldCount}`;
-        if (statEls.soldGold) statEls.soldGold.textContent = `Gold: ${autosellerSessionStats.soldGold}`;
-        if (statEls.squeezedCount) statEls.squeezedCount.textContent = `Squeezed: ${autosellerSessionStats.squeezedCount}`;
-        if (statEls.squeezedDust) statEls.squeezedDust.textContent = `Dust: ${autosellerSessionStats.squeezedDust}`;
+        const currentValues = {
+            soldCount: autosellerSessionStats.soldCount,
+            soldGold: autosellerSessionStats.soldGold,
+            squeezedCount: autosellerSessionStats.squeezedCount,
+            squeezedDust: autosellerSessionStats.squeezedDust
+        };
+        
+        // Only update DOM if values have changed
+        if (currentValues.soldCount !== lastUpdateValues.soldCount && statEls.soldCount) {
+            statEls.soldCount.textContent = `${currentValues.soldCount}`;
+            lastUpdateValues.soldCount = currentValues.soldCount;
+        }
+        
+        if (currentValues.soldGold !== lastUpdateValues.soldGold && statEls.soldGold) {
+            const goldText = statEls.soldGold.querySelector('span');
+            if (goldText) goldText.textContent = `${currentValues.soldGold}`;
+            lastUpdateValues.soldGold = currentValues.soldGold;
+        }
+        
+        if (currentValues.squeezedCount !== lastUpdateValues.squeezedCount && statEls.squeezedCount) {
+            statEls.squeezedCount.textContent = `${currentValues.squeezedCount}`;
+            lastUpdateValues.squeezedCount = currentValues.squeezedCount;
+        }
+        
+        if (currentValues.squeezedDust !== lastUpdateValues.squeezedDust && statEls.squeezedDust) {
+            const dustText = statEls.squeezedDust.querySelector('span');
+            if (dustText) dustText.textContent = `${currentValues.squeezedDust}`;
+            lastUpdateValues.squeezedDust = currentValues.squeezedDust;
+        }
     }
 
     // Inject the widget when autoplay UI appears
     let autosellerWidgetObserver = null;
+    let observerSetupAttempts = 0;
+    const MAX_OBSERVER_ATTEMPTS = 10;
+    
     function setupAutosellerWidgetObserver() {
-        if (autosellerWidgetObserver) return;
+        if (autosellerWidgetObserver || observerSetupAttempts >= MAX_OBSERVER_ATTEMPTS) return;
+        
+        observerSetupAttempts++;
         createAutosellerSessionWidget();
         updateAutosellerSessionWidget();
+        
         if (typeof MutationObserver !== 'undefined') {
-            autosellerWidgetObserver = new MutationObserver(() => {
-                const autoplayContainer = document.querySelector('.widget-bottom[data-minimized="false"]');
-                const widgetExists = !!document.getElementById('autoseller-session-widget');
-                if (autoplayContainer && !widgetExists) {
-                    autosellerWidgetObserver.disconnect();
-                    createAutosellerSessionWidget();
-                    updateAutosellerSessionWidget();
-                    autosellerWidgetObserver.observe(document.body, {
-                        childList: true,
-                        subtree: true,
-                        attributes: true,
-                        attributeFilter: ['data-minimized']
-                    });
+            autosellerWidgetObserver = new MutationObserver((mutations) => {
+                // Debounce observer calls to prevent excessive processing
+                if (autosellerWidgetObserver._debounceTimer) {
+                    clearTimeout(autosellerWidgetObserver._debounceTimer);
                 }
+                
+                autosellerWidgetObserver._debounceTimer = setTimeout(() => {
+                    const autoplayContainer = document.querySelector('.widget-bottom[data-minimized="false"]');
+                    const settings = getCachedSettings();
+                    const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
+                    const widgetExists = !!document.getElementById('autoseller-session-widget');
+                    
+                    if (autoplayContainer && shouldShowWidget && !widgetExists) {
+                        createAutosellerSessionWidget();
+                        updateAutosellerSessionWidget();
+                    } else if ((!autoplayContainer || !shouldShowWidget) && widgetExists) {
+                        // Remove widget if it exists and shouldn't be shown
+                        const widget = document.getElementById('autoseller-session-widget');
+                        if (widget && widget.parentNode) {
+                            widget.parentNode.removeChild(widget);
+                            // Reset cached values when widget is removed
+                            lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
+                        }
+                    }
+                }, 100); // 100ms debounce
             });
+            
             autosellerWidgetObserver.observe(document.body, {
                 childList: true,
                 subtree: true,
@@ -1164,7 +1362,7 @@
     function initAutoseller() {
         console.log(`[${modName}] Loaded.`);
         addAutosellerNavButton();
-        setupAutosellerWidgetObserver(); // <--- Inject widget observer
+        setupAutosellerWidgetObserver();
         let lastProcessedBattleKey = null;
         if (globalThis.state.board && globalThis.state.board.subscribe) {
             globalThis.state.board.subscribe(async ({ context }) => {
@@ -1173,22 +1371,18 @@
                 const seed = serverResults.seed;
                 const gameTicks = serverResults.rewardScreen.gameTicks;
                 const battleKey = `${seed}:${gameTicks}`;
-                if (battleKey === lastProcessedBattleKey) return; // Already scheduled/processed
-                lastProcessedBattleKey = battleKey; // Mark as scheduled
+                if (battleKey === lastProcessedBattleKey) return;
+                lastProcessedBattleKey = battleKey;
                 const inventorySnapshot = await fetchServerMonsters();
                 const waitSeconds = gameTicks / 16;
                 setTimeout(async () => {
                     const now = Date.now();
                     if (now - lastAutosellerRun < AUTOSELLER_MIN_DELAY_MS) {
-                        console.log('[Autoseller] Skipping run: waiting for server to update.');
                         return;
                     }
                     lastAutosellerRun = now;
-                    // Clear sold IDs for this session (removed to avoid state conflicts)
-                    console.log('[Autoseller] Wait elapsed. Running squeezeEligibleMonsters and sellEligibleMonsters.');
                     const settings = getCachedSettings();
                     if (!settings.autosellChecked && !settings.autosqueezeChecked) {
-                        console.log('[Autoseller] Both autosell and autosqueeze are disabled. Skipping execution.');
                         return;
                     }
                     await squeezeEligibleMonsters(inventorySnapshot);
@@ -1230,4 +1424,4 @@
         };
     }
 
-})(); 
+})();
