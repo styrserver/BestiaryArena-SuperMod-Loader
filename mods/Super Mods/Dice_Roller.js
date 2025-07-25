@@ -1229,8 +1229,7 @@
     let response;
     let retryCount = 0;
     let wasRateLimited = false;
-    // Add a variable to hold the rate-limited animation interval
-    let rateLimitedInterval = null;
+    // rateLimitedInterval is now declared in the broader scope
     while (true) {
       try {
         response = await fetch(API_ENDPOINT, {
@@ -1531,9 +1530,10 @@
     row3.appendChild(buttonWrapper);
     col.appendChild(row3);
     
-    // Autoroll button logic
-    let autorolling = false;
-    let autorollAttempt = 0;
+      // Autoroll button logic
+  let autorolling = false;
+  let autorollAttempt = 0;
+  let rateLimitedInterval = null; // Move this variable to the broader scope
     
     autoRollBtn.onclick = async () => {
       if (!autorolling) {
@@ -1855,7 +1855,8 @@
         setTimeout(() => {
           updateStatusDisplays();
         }, 0);
-        if (typeof window !== 'undefined' && rateLimitedInterval) {
+        // Clear any rate-limited animation interval
+        if (rateLimitedInterval) {
           clearInterval(rateLimitedInterval);
           rateLimitedInterval = null;
         }

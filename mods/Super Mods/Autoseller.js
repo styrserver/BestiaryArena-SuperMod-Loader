@@ -9,29 +9,291 @@
     // =======================
     // 1. Configuration & Constants
     // =======================
+    /** @const {string} The name of this mod */
     const modName = "Autoseller";
-    const modDescription = "Automatically sells selected items. (WIP)";
+    
+    /** @const {string} Description of what this mod does */
+    const modDescription = "Automatically sells selected items.";
+    
+    // =======================
+    // 1.1. Constants
+    // =======================
+    const AUTOSELLER_MIN_DELAY_MS = 5000; // 5 seconds minimum between autoseller runs
+    const BATCH_SIZE = 20; // Maximum monsters per API batch
+    const BATCH_DELAY_MS = 10000; // 10 seconds delay between batches
+    const MAX_OBSERVER_ATTEMPTS = 10; // Maximum attempts to setup widget observer
+    const OBSERVER_DEBOUNCE_MS = 100; // Debounce time for mutation observer
+    const SETTINGS_SAVE_DELAY_MS = 300; // Debounce time for settings save
+    
+    // UI Constants
+    const UI_CONSTANTS = {
+        MODAL_WIDTH: 600,
+        MODAL_HEIGHT: 410,
+        MODAL_CONTENT_HEIGHT: 330,
+        COLUMN_WIDTH: 240,
+        COLUMN_MIN_WIDTH: 220,
+        RESPONSIVE_BREAKPOINT: 600,
+        INPUT_WIDTH: 48,
+        INPUT_STEP: 1,
+        MIN_COUNT_MIN: 1,
+        MIN_COUNT_MAX: 20,
+        GENE_MIN: 5,
+        GENE_MAX: 100,
+        SQUEEZE_GENE_MIN: 80,
+        SQUEEZE_GENE_MAX: 100,
+        SELL_GENE_MIN: 5,
+        SELL_GENE_MAX: 79
+    };
+    
+    // API Constants
+    const API_CONSTANTS = {
+        RETRY_ATTEMPTS: 2,
+        RETRY_DELAY_BASE: 1000,
+        GAME_VERSION: '1',
+        DUST_PER_CREATURE: 10
+    };
+    
+    // Default Settings
+    const DEFAULT_SETTINGS = {
+        autosellChecked: false,
+        autosqueezeChecked: false,
+        autosellGenesMin: UI_CONSTANTS.SELL_GENE_MIN,
+        autosellGenesMax: UI_CONSTANTS.SELL_GENE_MAX,
+        autosqueezeGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
+        autosqueezeGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
+        autosellMinCount: 1,
+        autosqueezeMinCount: 1
+    };
+    
+    // =======================
+    // 1.2. Logging & Debugging
+    // =======================
+    /**
+     * Log levels for different types of messages
+     * @enum {string}
+     */
+    const LOG_LEVELS = {
+        DEBUG: 'debug',
+        INFO: 'info',
+        WARN: 'warn',
+        ERROR: 'error'
+    };
+    
+    /**
+     * Enhanced logging utility with levels and debugging capabilities
+     * @type {Object}
+     */
+    const logger = {
+        // Current log level (can be changed via settings)
+        level: LOG_LEVELS.INFO,
+        
+        // Debug mode flag
+        debugMode: false,
+        
+        // Performance tracking
+        performance: new Map(),
+        
+        /**
+         * Set the current log level
+         * @param {string} level - Log level to set
+         */
+        setLevel(level) {
+            if (Object.values(LOG_LEVELS).includes(level)) {
+                this.level = level;
+                this.debugMode = level === LOG_LEVELS.DEBUG;
+            }
+        },
+        
+        /**
+         * Check if a log level should be displayed
+         * @param {string} level - Log level to check
+         * @returns {boolean} Whether the level should be logged
+         */
+        shouldLog(level) {
+            const levels = Object.values(LOG_LEVELS);
+            const currentIndex = levels.indexOf(this.level);
+            const messageIndex = levels.indexOf(level);
+            return messageIndex >= currentIndex;
+        },
+        
+        /**
+         * Format log message with timestamp and context
+         * @param {string} level - Log level
+         * @param {string} functionName - Function name
+         * @param {string} message - Log message
+         * @returns {string} Formatted log message
+         */
+        formatMessage(level, functionName, message) {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            return `[${timestamp}][${modName}][${level.toUpperCase()}][${functionName}] ${message}`;
+        },
+        
+        /**
+         * Log a debug message
+         * @param {string} functionName - Function name
+         * @param {string} message - Debug message
+         * @param {*} [data] - Optional data to log
+         */
+        debug: (functionName, message, data = null) => {
+            if (logger.shouldLog(LOG_LEVELS.DEBUG)) {
+                const logMessage = logger.formatMessage(LOG_LEVELS.DEBUG, functionName, message);
+                if (data) {
+                    console.debug(logMessage, data);
+                } else {
+                    console.debug(logMessage);
+                }
+            }
+        },
+        
+        /**
+         * Log an info message
+         * @param {string} functionName - Function name
+         * @param {string} message - Info message
+         * @param {*} [data] - Optional data to log
+         */
+        info: (functionName, message, data = null) => {
+            if (logger.shouldLog(LOG_LEVELS.INFO)) {
+                const logMessage = logger.formatMessage(LOG_LEVELS.INFO, functionName, message);
+                if (data) {
+                    console.info(logMessage, data);
+                } else {
+                    console.info(logMessage);
+                }
+            }
+        },
+        
+        /**
+         * Log a warning message
+         * @param {string} functionName - Function name
+         * @param {string} message - Warning message
+         * @param {Error} [error=null] - Optional error object
+         */
+        warn: (functionName, message, error = null) => {
+            if (logger.shouldLog(LOG_LEVELS.WARN)) {
+                const logMessage = logger.formatMessage(LOG_LEVELS.WARN, functionName, message);
+                if (error) {
+                    console.warn(logMessage, error);
+                } else {
+                    console.warn(logMessage);
+                }
+            }
+        },
+        
+        /**
+         * Log an error message
+         * @param {string} functionName - Function name
+         * @param {string} message - Error message
+         * @param {Error} [error=null] - Optional error object
+         */
+        error: (functionName, message, error = null) => {
+            if (logger.shouldLog(LOG_LEVELS.ERROR)) {
+                const logMessage = logger.formatMessage(LOG_LEVELS.ERROR, functionName, message);
+                if (error) {
+                    console.error(logMessage, error);
+                } else {
+                    console.error(logMessage);
+                }
+            }
+        },
+        
+        /**
+         * Start performance timing for a function
+         * @param {string} functionName - Function name to time
+         */
+        startTimer: (functionName) => {
+            if (logger.debugMode) {
+                logger.performance.set(functionName, performance.now());
+            }
+        },
+        
+        /**
+         * End performance timing for a function
+         * @param {string} functionName - Function name that was timed
+         */
+        endTimer: (functionName) => {
+            if (logger.debugMode) {
+                const startTime = logger.performance.get(functionName);
+                if (startTime) {
+                    const duration = performance.now() - startTime;
+                    logger.debug(functionName, `Execution time: ${duration.toFixed(2)}ms`);
+                    logger.performance.delete(functionName);
+                }
+            }
+        },
+        
+        /**
+         * Log current state for debugging
+         * @param {string} functionName - Function name
+         */
+        logState: (functionName) => {
+            if (logger.debugMode) {
+                logger.debug(functionName, 'Current state:', {
+                    sessionStats: stateManager.getSessionStats(),
+                    errorStats: stateManager.getErrorStats(),
+                    settings: getCachedSettings()
+                });
+            }
+        },
+        
+        /**
+         * Get debug information
+         * @returns {Object} Debug information object
+         */
+        getDebugInfo: () => ({
+            logLevel: logger.level,
+            debugMode: logger.debugMode,
+            sessionStats: stateManager.getSessionStats(),
+            errorStats: stateManager.getErrorStats(),
+            settings: getCachedSettings(),
+            performance: Object.fromEntries(logger.performance)
+        })
+    };
+    
+    // Backward compatibility - keep the old errorHandler for existing code
+    const errorHandler = {
+        warn: logger.warn,
+        error: logger.error,
+        info: logger.info
+    };
+    
     let autosellerSettingsCache = null;
+    
     function getCachedSettings() {
-        // Prefer context.config if available
+        // Return cached settings if available
+        if (autosellerSettingsCache) return autosellerSettingsCache;
+        
+        // Try to get settings from mod loader context first
         if (typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0) {
-            autosellerSettingsCache = { ...context.config };
+            autosellerSettingsCache = { ...DEFAULT_SETTINGS, ...context.config };
             return autosellerSettingsCache;
         }
-        if (autosellerSettingsCache) return autosellerSettingsCache;
+        
+        // Fallback to localStorage
         try {
-            autosellerSettingsCache = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
-        } catch { autosellerSettingsCache = {}; }
+            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
+            autosellerSettingsCache = { ...DEFAULT_SETTINGS, ...stored };
+        } catch (e) { 
+            errorHandler.warn('getCachedSettings', 'Failed to parse settings from localStorage', e);
+            errorStats.localStorageErrors++;
+            autosellerSettingsCache = { ...DEFAULT_SETTINGS }; 
+        }
+        
         return autosellerSettingsCache;
     }
+    
     function setCachedSettings(newSettings) {
         autosellerSettingsCache = { ...autosellerSettingsCache, ...newSettings };
+        
         // Save to localStorage for backward compatibility
         debouncedSaveSettings();
-        // If mod loader API is available, update context.config as well
+        
+        // Update mod loader context if available
         if (typeof api !== 'undefined' && api.service && typeof context !== 'undefined' && context.hash) {
             api.service.updateScriptConfig(context.hash, autosellerSettingsCache);
         }
+        
+        // Update navigation button color when settings change
+        updateAutosellerNavButtonColor();
     }
     function debounce(fn, delay) {
         let timer;
@@ -43,13 +305,13 @@
     const debouncedSaveSettings = debounce(() => {
         try {
             localStorage.setItem('autoseller-settings', JSON.stringify(autosellerSettingsCache));
-        } catch (e) {}
-    }, 300);
+        } catch (e) {
+            errorHandler.warn('debouncedSaveSettings', 'Failed to save settings to localStorage', e);
+            errorStats.localStorageErrors++;
+        }
+    }, SETTINGS_SAVE_DELAY_MS);
     if (!localStorage.getItem('autoseller-settings') && !(typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0)) {
-        autosellerSettingsCache = {
-            autosellChecked: false,
-            autosqueezeChecked: false
-        };
+        autosellerSettingsCache = { ...DEFAULT_SETTINGS };
         localStorage.setItem('autoseller-settings', JSON.stringify(autosellerSettingsCache));
     } else {
         getCachedSettings();
@@ -58,39 +320,35 @@
     // =======================
     // 2. Utility Functions
     // =======================
-    function getLevelFromExp(exp) {
-        const EXP_TABLE = [
-            [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-            [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-            [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-            [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-            [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-            [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-            [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-            [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-        ];
-        if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) {
-            return 1;
-        }
-        for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
-            if (exp >= EXP_TABLE[i][1]) {
-                return EXP_TABLE[i][0];
-            }
-        }
-        return 1;
-    }
-    function getRarityFromStats(stats) {
-        const statSum = (stats.hp || 0) + (stats.ad || 0) + (stats.ap || 0) + (stats.armor || 0) + (stats.magicResist || 0);
-        let rarity = 1;
-        if (statSum >= 80) rarity = 5;
-        else if (statSum >= 70) rarity = 4;
-        else if (statSum >= 60) rarity = 3;
-        else if (statSum >= 50) rarity = 2;
-        return rarity;
-    }
+    /**
+     * Calculate the total gene percentage for a monster
+     * @param {Object} m - Monster object
+     * @param {number} [m.hp=0] - Health points
+     * @param {number} [m.ad=0] - Attack damage
+     * @param {number} [m.ap=0] - Ability power
+     * @param {number} [m.armor=0] - Armor
+     * @param {number} [m.magicResist=0] - Magic resistance
+     * @returns {number} Total gene percentage (0-100)
+     */
     function getGenes(m) {
         return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
     }
+    /**
+     * Filter monsters based on autosell and autosqueeze settings
+     * @param {Object} settings - User settings object
+     * @param {boolean} settings.autosellChecked - Whether autosell is enabled
+     * @param {number} settings.autosellGenesMin - Minimum genes for selling
+     * @param {number} settings.autosellGenesMax - Maximum genes for selling
+     * @param {boolean} settings.autosqueezeChecked - Whether autosqueeze is enabled
+     * @param {number} settings.autosqueezeGenesMin - Minimum genes for squeezing
+     * @param {number} settings.autosqueezeGenesMax - Maximum genes for squeezing
+     * @param {number} settings.autosellMinCount - Minimum count to trigger selling
+     * @param {number} settings.autosqueezeMinCount - Minimum count to trigger squeezing
+     * @param {Array<Object>} monsters - Array of monster objects
+     * @returns {Object} Object containing arrays of monsters to squeeze and sell
+     * @returns {Array<Object>} returns.toSqueeze - Monsters eligible for squeezing
+     * @returns {Array<Object>} returns.toSell - Monsters eligible for selling
+     */
     function getEligibleMonsters(settings, monsters) {
         const nonLocked = monsters.filter(m => !m.locked);
         const sellEnabled = settings['autosellChecked'];
@@ -109,51 +367,117 @@
     }
 
     // =======================
-    // 3. Inventory Management
+    // 3. API Utilities
+    // =======================
+    /**
+     * Make an API request with retry logic and error handling
+     * @param {string} url - The API endpoint URL
+     * @param {Object} [options={}] - Request options
+     * @param {string} [options.method='GET'] - HTTP method
+     * @param {Object} [options.body] - Request body (will be JSON stringified)
+     * @param {Object} [options.headers={}] - Additional headers
+     * @param {number} [retries=API_CONSTANTS.RETRY_ATTEMPTS] - Number of retry attempts
+     * @returns {Promise<Object>} Response object with success status and data
+     * @returns {boolean} returns.success - Whether the request was successful
+     * @returns {number} [returns.status] - HTTP status code (if available)
+     * @returns {*} [returns.data] - Response data (if successful)
+     * @returns {Error} [returns.error] - Error object (if failed)
+     */
+    async function apiRequest(url, options = {}, retries = API_CONSTANTS.RETRY_ATTEMPTS) {
+        logger.startTimer('apiRequest');
+        const { method = 'GET', body, headers = {} } = options;
+        
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const requestOptions = {
+                    method,
+                    credentials: 'include',
+                    headers: {
+                        'content-type': 'application/json',
+                        'X-Game-Version': API_CONSTANTS.GAME_VERSION,
+                        ...headers
+                    },
+                    ...(body && { body: JSON.stringify(body) })
+                };
+                
+                const resp = await fetch(url, requestOptions);
+                
+                // Try to parse response data regardless of status code
+                let data = null;
+                try {
+                    data = await resp.json();
+                } catch (parseError) {
+                    // If we can't parse JSON, that's a real error
+                    if (attempt === retries) {
+                        errorHandler.error('apiRequest', 'Failed to parse response as JSON', parseError);
+                        logger.endTimer('apiRequest');
+                        return { success: false, error: parseError, data: null };
+                    }
+                    errorHandler.warn('apiRequest', `Attempt ${attempt + 1} failed to parse response, retrying...`, parseError);
+                    await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
+                    continue;
+                }
+                
+                if (!resp.ok) {
+                    const errorMsg = `API request failed: HTTP ${resp.status}`;
+                    
+                    // Only retry on 5xx server errors, not 4xx client errors
+                    if (resp.status >= 500 && attempt < retries) {
+                        errorHandler.warn('apiRequest', `${errorMsg}, attempt ${attempt + 1} failed, retrying...`);
+                        await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
+                        continue;
+                    }
+                    
+                    // For 404 responses, check if we have valid data (this happens with squeeze API)
+                    if (resp.status === 404 && data && Array.isArray(data) && data[0]?.result?.data?.json) {
+                        logger.endTimer('apiRequest');
+                        return { success: true, status: resp.status, data };
+                    }
+                    
+                    // Don't log 404 as error since they're expected for already processed items
+                    if (resp.status === 404) {
+                        errorHandler.info('apiRequest', `API request returned 404 (expected for already processed items)`);
+                    } else {
+                        errorHandler.error('apiRequest', errorMsg);
+                    }
+                    return { success: false, status: resp.status, data };
+                }
+                
+                logger.endTimer('apiRequest');
+                return { success: true, status: resp.status, data };
+                
+            } catch (e) {
+                if (attempt === retries) {
+                    errorHandler.error('apiRequest', 'Final attempt failed', e);
+                    logger.endTimer('apiRequest');
+                    return { success: false, error: e, data: null };
+                }
+                errorHandler.warn('apiRequest', `Attempt ${attempt + 1} failed, retrying...`, e);
+                await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
+            }
+        }
+    }
+    
+    // =======================
+    // 4. Inventory Management
     // =======================
     async function fetchServerMonsters() {
-        try {
-            const myName = globalThis.state?.player?.getSnapshot?.().context?.name;
-            if (!myName) {
-                const msg = '[Autoseller][DEBUG] Could not determine player name.';
-                console.warn(msg);
-                if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                    api.ui.components.createModal({
-                        title: 'Autoseller Error',
-                        content: '<p>Could not determine player name. Please make sure you are logged in.</p>',
-                        buttons: [{ text: 'OK', primary: true }]
-                    });
-                }
-                return [];
-            }
-            const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
-            const resp = await fetch(url, { credentials: 'include' });
-            if (!resp.ok) {
-                const msg = `[Autoseller][DEBUG] Error fetching server monsters: HTTP ${resp.status}`;
-                console.error(msg);
-                if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                    api.ui.components.createModal({
-                        title: 'Autoseller Error',
-                        content: `<p>Failed to fetch your monster inventory from the server. (HTTP ${resp.status})</p>`,
-                        buttons: [{ text: 'OK', primary: true }]
-                    });
-                }
-                return [];
-            }
-            const data = await resp.json();
-            const monsters = data?.[0]?.result?.data?.json?.monsters || [];
-            return monsters;
-        } catch (e) {
-            console.error('[Autoseller][DEBUG] Error fetching server monsters:', e);
-            if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                api.ui.components.createModal({
-                    title: 'Autoseller Error',
-                    content: `<p>Failed to fetch your monster inventory from the server.<br>${e && e.message ? e.message : e}</p>`,
-                    buttons: [{ text: 'OK', primary: true }]
-                });
-            }
+        const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+        if (!myName) {
+            errorHandler.warn('fetchServerMonsters', 'Could not determine player name.');
             return [];
         }
+        
+        const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
+        const result = await apiRequest(url);
+        
+        if (!result.success) {
+            errorStats.fetchErrors++;
+            return [];
+        }
+        
+        const monsters = result.data?.[0]?.result?.data?.json?.monsters || [];
+        return monsters;
     }
     window.fetchServerMonsters = fetchServerMonsters;
     function removeMonstersFromLocalInventory(idsToRemove) {
@@ -168,28 +492,94 @@
                 }),
             });
         } catch (e) {
-            console.warn('[Autoseller] Failed to update local inventory:', e);
-        }
-    }
-    async function syncLocalInventoryWithServer() {
-        const monsters = await fetchServerMonsters();
-        try {
-            const player = globalThis.state?.player;
-            if (!player) return;
-            player.send({
-                type: "setState",
-                fn: (prev) => ({
-                    ...prev,
-                    monsters: monsters
-                }),
-            });
-        } catch (e) {
-            console.warn('[Autoseller] Failed to sync local inventory:', e);
+            errorHandler.warn('removeMonstersFromLocalInventory', `Failed to update local inventory for IDs: ${idsToRemove}`, e);
         }
     }
 
     // =======================
-    // 4. UI Component Creation
+    // 4. UI Utilities
+    // =======================
+    function createElement(tag, options = {}) {
+        const element = document.createElement(tag);
+        
+        // Apply styles
+        if (options.styles) {
+            Object.assign(element.style, options.styles);
+        }
+        
+        // Apply attributes
+        if (options.attributes) {
+            Object.entries(options.attributes).forEach(([key, value]) => {
+                element.setAttribute(key, value);
+            });
+        }
+        
+        // Apply classes
+        if (options.className) {
+            element.className = options.className;
+        }
+        
+        // Set text content
+        if (options.text) {
+            element.textContent = options.text;
+        }
+        
+        // Set inner HTML
+        if (options.html) {
+            element.innerHTML = options.html;
+        }
+        
+        // Add event listeners
+        if (options.events) {
+            Object.entries(options.events).forEach(([event, handler]) => {
+                element.addEventListener(event, handler);
+            });
+        }
+        
+        // Append children
+        if (options.children) {
+            options.children.forEach(child => {
+                if (typeof child === 'string') {
+                    element.appendChild(document.createTextNode(child));
+                } else {
+                    element.appendChild(child);
+                }
+            });
+        }
+        
+        return element;
+    }
+    
+    function createInput(options = {}) {
+        return createElement('input', {
+            attributes: {
+                type: options.type || 'text',
+                ...(options.min !== undefined && { min: options.min }),
+                ...(options.max !== undefined && { max: options.max }),
+                ...(options.step !== undefined && { step: options.step }),
+                ...(options.id && { id: options.id }),
+                ...(options.autocomplete && { autocomplete: options.autocomplete })
+            },
+            styles: {
+                width: options.width || 'auto',
+                marginRight: options.marginRight || '0',
+                textAlign: options.textAlign || 'left',
+                borderRadius: options.borderRadius || '0',
+                border: options.border || 'none',
+                background: options.background || 'transparent',
+                color: options.color || 'inherit',
+                fontWeight: options.fontWeight || 'normal',
+                fontSize: options.fontSize || 'inherit',
+                ...options.styles
+            },
+            className: options.className || 'pixel-font-16',
+            events: options.events || {},
+            ...options
+        });
+    }
+    
+    // =======================
+    // 5. UI Component Creation
     // =======================
     function createBox({title, content}) {
         const box = document.createElement('div');
@@ -250,44 +640,68 @@
         box.appendChild(contentWrapper);
         return box;
     }
-    function createSettingsSection(opts) {
-        const section = document.createElement('div');
-        const descWrapper = document.createElement('div');
-        descWrapper.style.display = 'flex';
-        descWrapper.style.alignItems = 'center';
-        descWrapper.style.gap = '6px';
-        descWrapper.style.margin = '6px 0 10px 0';
-        const desc = document.createElement('span');
-        desc.textContent = opts.desc;
-        desc.className = 'pixel-font-16';
-        desc.style.color = '#cccccc';
-        desc.style.fontSize = '13px';
-        descWrapper.appendChild(desc);
-
-        const row1 = document.createElement('div');
-        row1.style.display = 'flex';
-        row1.style.alignItems = 'center';
-        row1.style.width = '100%';
-        row1.style.marginBottom = '10px';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = opts.persistKey + '-checkbox';
-        checkbox.style.marginRight = '8px';
-        const label = document.createElement('label');
-        label.htmlFor = checkbox.id;
-        label.textContent = opts.label;
-        label.className = 'pixel-font-16';
-        label.style.fontWeight = 'bold';
-        label.style.fontSize = '14px';
-        label.style.color = '#ffffff';
-        label.style.marginRight = '8px';
-        row1.appendChild(checkbox);
-        row1.appendChild(label);
-        const row2 = document.createElement('div');
-        row2.style.display = 'flex';
-        row2.style.alignItems = 'center';
-        row2.style.width = '100%';
-        row2.style.marginBottom = '12px';
+    function createDescriptionRow(description) {
+        return createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                margin: '6px 0 10px 0'
+            },
+            children: [
+                createElement('span', {
+                    text: description,
+                    className: 'pixel-font-16',
+                    styles: {
+                        color: '#cccccc',
+                        fontSize: '13px'
+                    }
+                })
+            ]
+        });
+    }
+    
+    function createCheckboxRow(persistKey, label) {
+        const checkbox = createInput({
+            type: 'checkbox',
+            id: persistKey + '-checkbox',
+            styles: {
+                marginRight: '8px'
+            }
+        });
+        
+        const labelEl = createElement('label', {
+            attributes: { htmlFor: checkbox.id },
+            text: label,
+            className: 'pixel-font-16',
+            styles: {
+                fontWeight: 'bold',
+                fontSize: '14px',
+                color: '#ffffff',
+                marginRight: '8px'
+            }
+        });
+        
+        const row = createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                width: '100%',
+                marginBottom: '10px'
+            },
+            children: [checkbox, labelEl]
+        });
+        
+        return { row, checkbox, label: labelEl };
+    }
+    
+    function createGeneInputRow(opts) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.width = '100%';
+        row.style.marginBottom = '12px';
+        
         const inputLabel = document.createElement('span');
         inputLabel.textContent = opts.inputLabel + ': Between';
         inputLabel.className = 'pixel-font-16';
@@ -295,14 +709,15 @@
         inputLabel.style.fontWeight = 'bold';
         inputLabel.style.fontSize = '14px';
         inputLabel.style.color = '#cccccc';
-        row2.appendChild(inputLabel);
+        row.appendChild(inputLabel);
+        
         const inputMin = document.createElement('input');
         inputMin.type = 'number';
         inputMin.min = opts.inputMin;
         inputMin.max = opts.inputMax;
         inputMin.value = opts.defaultMin;
         inputMin.className = 'pixel-font-16';
-        inputMin.style.width = '48px';
+        inputMin.style.width = UI_CONSTANTS.INPUT_WIDTH + 'px';
         inputMin.style.marginRight = '4px';
         inputMin.style.textAlign = 'center';
         inputMin.style.borderRadius = '3px';
@@ -311,21 +726,23 @@
         inputMin.style.color = '#ffe066';
         inputMin.style.fontWeight = 'bold';
         inputMin.style.fontSize = '16px';
-        inputMin.step = '1';
-        row2.appendChild(inputMin);
+        inputMin.step = UI_CONSTANTS.INPUT_STEP;
+        row.appendChild(inputMin);
+        
         const andText = document.createElement('span');
         andText.textContent = 'and';
         andText.className = 'pixel-font-16';
         andText.style.margin = '0 4px';
         andText.style.color = '#cccccc';
-        row2.appendChild(andText);
+        row.appendChild(andText);
+        
         const inputMax = document.createElement('input');
         inputMax.type = 'number';
         inputMax.min = opts.inputMin;
         inputMax.max = opts.inputMax;
         inputMax.value = opts.defaultMax;
         inputMax.className = 'pixel-font-16';
-        inputMax.style.width = '48px';
+        inputMax.style.width = UI_CONSTANTS.INPUT_WIDTH + 'px';
         inputMax.style.marginRight = '4px';
         inputMax.style.textAlign = 'center';
         inputMax.style.borderRadius = '3px';
@@ -334,15 +751,33 @@
         inputMax.style.color = '#ffe066';
         inputMax.style.fontWeight = 'bold';
         inputMax.style.fontSize = '16px';
-        inputMax.step = '1';
-        row2.appendChild(inputMax);
+        inputMax.step = UI_CONSTANTS.INPUT_STEP;
+        row.appendChild(inputMax);
+        
         const percent = document.createElement('span');
         percent.textContent = '%';
         percent.className = 'pixel-font-16';
         percent.style.fontWeight = 'bold';
         percent.style.fontSize = '16px';
         percent.style.color = '#cccccc';
-        row2.appendChild(percent);
+        row.appendChild(percent);
+        
+        return { row, inputMin, inputMax };
+    }
+    
+    function createSettingsSection(opts) {
+        const section = document.createElement('div');
+        
+        // Create description row
+        const descWrapper = createDescriptionRow(opts.desc);
+        section.appendChild(descWrapper);
+        
+        // Create checkbox row
+        const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label);
+        section.appendChild(row1);
+        // Create gene input row
+        const { row: row2, inputMin, inputMax } = createGeneInputRow(opts);
+        section.appendChild(row2);
         const row3 = document.createElement('div');
         row3.style.display = 'flex';
         row3.style.alignItems = 'center';
@@ -373,10 +808,8 @@
         minCountInput.style.fontSize = '16px';
         minCountInput.step = '1';
         function validateMinCountInput() {
-            let val = parseInt(minCountInput.value, 10);
-            if (isNaN(val)) val = 1;
-            if (val < 1) val = 1;
-            if (val > 20) val = 20;
+            // Clamp value between 1 and 20
+            const val = Math.max(1, Math.min(20, parseInt(minCountInput.value, 10) || 1));
             minCountInput.value = val;
         }
         minCountInput.addEventListener('input', validateMinCountInput);
@@ -388,23 +821,18 @@
         minCountSuffix.style.color = '#cccccc';
         row3.appendChild(minCountSuffix);
         function validateInputs(e) {
-            let minVal = parseInt(inputMin.value, 10);
-            let maxVal = parseInt(inputMax.value, 10);
-            if (isNaN(minVal)) minVal = opts.inputMin;
-            if (isNaN(maxVal)) maxVal = opts.inputMax;
-            if (minVal < opts.inputMin) minVal = opts.inputMin;
-            if (maxVal > opts.inputMax) maxVal = opts.inputMax;
-            if (e && e.target === inputMin) {
-                if (minVal === maxVal) {
-                    maxVal = minVal + 1;
-                    if (maxVal > opts.inputMax) maxVal = opts.inputMax;
-                }
-            } else if (e && e.target === inputMax) {
-                if (maxVal === minVal) {
-                    minVal = maxVal - 1;
-                    if (minVal < opts.inputMin) minVal = opts.inputMin;
-                }
+            // Parse and validate min/max values
+            let minVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMin.value, 10) || opts.inputMin));
+            let maxVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMax.value, 10) || opts.inputMax));
+            
+            // Ensure min <= max with smart adjustment
+            if (e && e.target === inputMin && minVal >= maxVal) {
+                maxVal = Math.min(opts.inputMax, minVal + 1);
+            } else if (e && e.target === inputMax && maxVal <= minVal) {
+                minVal = Math.max(opts.inputMin, maxVal - 1);
             }
+            
+            // Update input values
             inputMin.value = minVal;
             inputMax.value = maxVal;
         }
@@ -490,11 +918,18 @@
         function safeGetCreatureCount(minThreshold, maxThreshold, enabled, summaryDiv, type) {
             try {
                 if (!enabled) return 0;
-                const monsters = (globalThis.state && globalThis.state.player && globalThis.state.player.getSnapshot && globalThis.state.player.getSnapshot().context.monsters) || [];
+                
+                // Simplified state access with optional chaining
+                const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
                 if (!Array.isArray(monsters)) throw new Error('Creature list unavailable');
-                return monsters.filter(m => typeof m.genes === 'number' && m.genes >= minThreshold && m.genes <= maxThreshold).length;
+                
+                return monsters.filter(m => 
+                    typeof m.genes === 'number' && 
+                    m.genes >= minThreshold && 
+                    m.genes <= maxThreshold
+                ).length;
             } catch (e) {
-                summaryDiv.textContent = type + ' error: ' + (e && e.message ? e.message : 'Unknown error');
+                summaryDiv.textContent = `${type} error: ${e?.message || 'Unknown error'}`;
                 summaryDiv.style.color = '#ff6b6b';
                 return null;
             }
@@ -538,18 +973,133 @@
     }
 
     // =======================
-    // 5. Autoseller Session Stats Logic
+    // 5. State Management
     // =======================
-    const autosellerSessionStats = {
-        soldCount: 0,
-        soldGold: 0,
-        squeezedCount: 0,
-        squeezedDust: 0
+    /**
+     * Centralized state manager for the Autoseller mod
+     * @type {Object}
+     */
+    const stateManager = {
+        // Session statistics
+        sessionStats: {
+            soldCount: 0,
+            soldGold: 0,
+            squeezedCount: 0,
+            squeezedDust: 0
+        },
+        
+        // Tracking processed monster IDs to avoid duplicates
+        processedIds: new Set(),
+        
+        // Error tracking for monitoring
+        errorStats: {
+            fetchErrors: 0,
+            squeezeErrors: 0,
+            sellErrors: 0,
+            localStorageErrors: 0
+        },
+        
+        // Timing controls
+        lastRun: 0,
+        
+        /**
+         * Update session statistics
+         * @param {string} type - Type of update ('sold' or 'squeezed')
+         * @param {number} count - Number of items processed
+         * @param {number} value - Value gained (gold or dust)
+         */
+        updateSessionStats(type, count, value) {
+            if (type === 'sold') {
+                this.sessionStats.soldCount += count;
+                this.sessionStats.soldGold += value;
+            } else if (type === 'squeezed') {
+                this.sessionStats.squeezedCount += count;
+                this.sessionStats.squeezedDust += value;
+            }
+            
+            // Trigger UI update
+            this.notifyUIUpdate();
+        },
+        
+        /**
+         * Mark monster IDs as processed
+         * @param {Array<number>} ids - Array of monster IDs
+         */
+        markProcessed(ids) {
+            ids.forEach(id => this.processedIds.add(id));
+        },
+        
+        /**
+         * Check if monster ID has been processed
+         * @param {number} id - Monster ID
+         * @returns {boolean} Whether the ID has been processed
+         */
+        isProcessed(id) {
+            return this.processedIds.has(id);
+        },
+        
+        /**
+         * Update error statistics
+         * @param {string} type - Type of error
+         */
+        updateErrorStats(type) {
+            if (this.errorStats.hasOwnProperty(type)) {
+                this.errorStats[type]++;
+            }
+        },
+        
+        /**
+         * Check if enough time has passed since last run
+         * @returns {boolean} Whether autoseller can run again
+         */
+        canRun() {
+            const now = Date.now();
+            if (now - this.lastRun < AUTOSELLER_MIN_DELAY_MS) {
+                return false;
+            }
+            this.lastRun = now;
+            return true;
+        },
+        
+        /**
+         * Reset session statistics
+         */
+        resetSession() {
+            this.sessionStats = {
+                soldCount: 0,
+                soldGold: 0,
+                squeezedCount: 0,
+                squeezedDust: 0
+            };
+            this.processedIds.clear();
+            this.notifyUIUpdate();
+        },
+        
+        /**
+         * Get current session statistics
+         * @returns {Object} Copy of current session stats
+         */
+        getSessionStats() {
+            return { ...this.sessionStats };
+        },
+        
+        /**
+         * Get current error statistics
+         * @returns {Object} Copy of current error stats
+         */
+        getErrorStats() {
+            return { ...this.errorStats };
+        },
+        
+        /**
+         * Notify UI components to update
+         */
+        notifyUIUpdate() {
+            // This will be called whenever state changes
+            // UI components can listen for these updates
+            updateAutosellerSessionWidget();
+        }
     };
-    const autosellerSoldIds = new Set();
-    // Add delay tracking variables
-    let lastAutosellerRun = 0;
-    const AUTOSELLER_MIN_DELAY_MS = 5000; // 5 seconds
     async function squeezeEligibleMonsters(monsters) {
         try {
             const settings = getCachedSettings();
@@ -559,13 +1109,6 @@
             if (!Array.isArray(monsters)) {
                 const msg = '[Autoseller][DEBUG] Could not access monster list.';
                 console.warn(msg);
-                if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                    api.ui.components.createModal({
-                        title: 'Autoseller Error',
-                        content: '<p>Could not access your monster list from the server.</p>',
-                        buttons: [{ text: 'OK', primary: true }]
-                    });
-                }
                 return;
             }
             let { toSqueeze } = getEligibleMonsters(settings, monsters);
@@ -574,8 +1117,6 @@
             }
             
             // --- Batching logic: max 20 per 10 seconds ---
-            const BATCH_SIZE = 20;
-            const BATCH_DELAY_MS = 10000;
             
             for (let i = 0; i < toSqueeze.length; i += BATCH_SIZE) {
                 const batch = toSqueeze.slice(i, i + BATCH_SIZE);
@@ -586,36 +1127,10 @@
                 }
                 
                 const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
-                const body = JSON.stringify({ "0": { json: ids } });
-                const resp = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'content-type': 'application/json',
-                        'X-Game-Version': '1',
-                    },
-                    credentials: 'include',
-                    body
-                });
+                const body = { "0": { json: ids } };
+                const result = await apiRequest(url, { method: 'POST', body });
                 
-                if (!resp.ok) {
-                    const msg = `[Autoseller] Squeeze API failed: HTTP ${resp.status}`;
-                    console.warn(msg);
-                    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                        api.ui.components.createModal({
-                            title: 'Autoseller Error',
-                            content: `<p>Squeeze API failed. (HTTP ${resp.status})</p>`,
-                            buttons: [{ text: 'OK', primary: true }]
-                        });
-                    }
-                    continue;
-                }
-                
-                let apiResponse;
-                try { 
-                    apiResponse = await resp.json(); 
-                } catch (e) { 
-                    apiResponse = '[Non-JSON response]'; 
-                }
+                const apiResponse = result.data;
                 
                 // Check if we got a valid response with dustDiff
                 if (
@@ -624,15 +1139,23 @@
                     apiResponse[0]?.result?.data?.json?.dustDiff != null
                 ) {
                     const dustReceived = apiResponse[0].result.data.json.dustDiff;
-                    const squeezedCount = Math.floor(dustReceived / 10); // 10 dust per creature
+                    const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
                     
-                    // --- Session stats update ---
-                    autosellerSessionStats.squeezedCount += squeezedCount;
-                    autosellerSessionStats.squeezedDust += dustReceived;
-                    updateAutosellerSessionWidget();
-                    // --- End session stats update ---
+                    // Update state through state manager
+                    stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
+                    stateManager.markProcessed(ids);
                     
                     removeMonstersFromLocalInventory(ids);
+                    errorHandler.info('squeezeEligibleMonsters', `Successfully squeezed ${squeezedCount} creatures for ${dustReceived} dust`);
+                } else if (!result.success && result.status === 404) {
+                    // For 404 responses without valid data, assume some monsters were already squeezed
+                    errorHandler.info('squeezeEligibleMonsters', 'Some monsters in batch may have been already squeezed or don\'t exist (HTTP 404)');
+                    // Don't remove from local inventory on 404 to be safe
+                } else if (!result.success) {
+                    errorHandler.warn('squeezeEligibleMonsters', `Squeeze API failed: HTTP ${result.status}`);
+                    continue;
+                } else {
+                    errorHandler.warn('squeezeEligibleMonsters', 'Unexpected API response format:', apiResponse);
                 }
                 
                 if (i + BATCH_SIZE < toSqueeze.length) {
@@ -641,14 +1164,8 @@
                 }
             }
         } catch (e) {
-            console.warn('[Autoseller][DEBUG] Squeeze error:', e);
-            if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                api.ui.components.createModal({
-                    title: 'Autoseller Error',
-                    content: `<p>Squeeze error:<br>${e && e.message ? e.message : e}</p>`,
-                    buttons: [{ text: 'OK', primary: true }]
-                });
-            }
+            errorHandler.warn('squeezeEligibleMonsters', 'Error', e);
+            stateManager.updateErrorStats('squeezeErrors');
         }
     }
     async function sellEligibleMonsters(monsters) {
@@ -660,18 +1177,11 @@
             if (!Array.isArray(monsters)) {
                 const msg = '[Autoseller][DEBUG] Could not access monster list.';
                 console.warn(msg);
-                if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                    api.ui.components.createModal({
-                        title: 'Autoseller Error',
-                        content: '<p>Could not access your monster list from the server.</p>',
-                        buttons: [{ text: 'OK', primary: true }]
-                    });
-                }
                 return;
             }
             let { toSell } = getEligibleMonsters(settings, monsters);
             // Filter out already processed IDs
-            toSell = toSell.filter(m => !autosellerSoldIds.has(m.id));
+            toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
             if (!toSell.length) {
                 return;
             }
@@ -679,57 +1189,39 @@
             // (removed old commented-out code)
             // --- End session stats update ---
             // --- Batching logic: max 20 per 10 seconds ---
-            const BATCH_SIZE = 20;
-            const BATCH_DELAY_MS = 10000;
             for (let i = 0; i < toSell.length; i += BATCH_SIZE) {
                 const batch = toSell.slice(i, i + BATCH_SIZE);
                 // eslint-disable-next-line no-await-in-loop
                 await Promise.all(batch.map(async (m) => {
                     const id = m.id;
                     const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
-                    const body = JSON.stringify({ "0": { json: id } });
-                    const resp = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'content-type': 'application/json',
-                            'X-Game-Version': '1',
-                        },
-                        credentials: 'include',
-                        body
-                    });
-                    if (!resp.ok) {
-                        if (resp.status === 404) {
-                            console.info(`[Autoseller] Monster ID ${id} not found on server (already sold or removed).`);
-                            autosellerSoldIds.add(id); // Mark as processed even if 404
-                        } else {
-                            const msg = `[Autoseller] Sell API failed for ID ${id}: HTTP ${resp.status}`;
-                            console.warn(msg);
-                            if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                                api.ui.components.createModal({
-                                    title: 'Autoseller Error',
-                                    content: `<p>Sell API failed for ID ${id}. (HTTP ${resp.status})</p>`,
-                                    buttons: [{ text: 'OK', primary: true }]
-                                });
-                            }
-                        }
-                        return;
-                    }
-                    let apiResponse;
-                    try { apiResponse = await resp.json(); } catch (e) { apiResponse = '[Non-JSON response]'; }
-                    // Only increment if we got a valid gold value and haven't processed this ID yet
+                    const body = { "0": { json: id } };
+                    const result = await apiRequest(url, { method: 'POST', body });
+                    
+                    const apiResponse = result.data;
+                    
+                    // Check if we got a valid response with goldValue
                     if (
-                      apiResponse &&
-                      Array.isArray(apiResponse) &&
-                      apiResponse[0]?.result?.data?.json?.goldValue != null &&
-                      !autosellerSoldIds.has(id)
+                        apiResponse &&
+                        Array.isArray(apiResponse) &&
+                        apiResponse[0]?.result?.data?.json?.goldValue != null &&
+                        !stateManager.isProcessed(id)
                     ) {
                         const goldReceived = apiResponse[0].result.data.json.goldValue;
-                        autosellerSoldIds.add(id);
-                        autosellerSessionStats.soldCount += 1;
-                        autosellerSessionStats.soldGold += goldReceived;
-                        updateAutosellerSessionWidget();
+                        
+                        // Update state through state manager
+                        stateManager.updateSessionStats('sold', 1, goldReceived);
+                        stateManager.markProcessed([id]);
+                        
+                        // Only remove from local inventory on confirmed success
+                        removeMonstersFromLocalInventory([id]);
+                    } else if (!result.success && result.status === 404) {
+                        // For 404 responses, assume monster was already sold or doesn't exist
+                        errorHandler.info('sellEligibleMonsters', `Monster ID ${id} not found on server (already sold or removed).`);
+                        stateManager.markProcessed([id]); // Mark as processed even if 404
+                    } else if (!result.success) {
+                        errorHandler.warn('sellEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
                     }
-                    removeMonstersFromLocalInventory([id]);
                 }));
                 if (i + BATCH_SIZE < toSell.length) {
                     // Wait 10 seconds before next batch
@@ -738,14 +1230,8 @@
             }
             const player = globalThis.state?.player;
         } catch (e) {
-            console.warn('[Autoseller][DEBUG] Sell error:', e);
-            if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
-                api.ui.components.createModal({
-                    title: 'Autoseller Error',
-                    content: `<p>Sell error:<br>${e && e.message ? e.message : e}</p>`,
-                    buttons: [{ text: 'OK', primary: true }]
-                });
-            }
+            errorHandler.warn('sellEligibleMonsters', 'Error', e);
+            stateManager.updateErrorStats('sellErrors');
         }
     }
 
@@ -1030,8 +1516,26 @@
             btn.onclick = openAutosellerModal;
             li.appendChild(btn);
             if (ul) ul.appendChild(li);
+            
+            // Update button color based on active state
+            updateAutosellerNavButtonColor();
         }
         tryInsert();
+    }
+    
+    function updateAutosellerNavButtonColor() {
+        const btn = document.querySelector('.autoseller-nav-btn');
+        if (!btn) return;
+        
+        const settings = getCachedSettings();
+        const isActive = settings.autosellChecked || settings.autosqueezeChecked;
+        
+        // Use inline styles to override any existing styles
+        if (isActive) {
+            btn.style.color = '#22c55e'; // Green color
+        } else {
+            btn.style.color = '#ef4444'; // Red color
+        }
     }
 
     // =======================
@@ -1190,6 +1694,8 @@
             return;
         }
         if (existingWidget) return;
+        
+        // Cache the autoplay container query
         const autoplayContainer = document.querySelector('.widget-bottom[data-minimized="false"]');
         if (!autoplayContainer) return;
         const widget = document.createElement('div');
@@ -1198,7 +1704,7 @@
         // Header
         const header = document.createElement('div');
         header.className = 'widget-top';
-        header.appendChild(document.createTextNode('Autoseller Session'));
+        header.appendChild(document.createTextNode('Autoseller session'));
         const minimizeBtn = document.createElement('button');
         minimizeBtn.className = 'minimize-btn';
         minimizeBtn.title = 'Minimize';
@@ -1307,16 +1813,12 @@
     let lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
     
     function updateAutosellerSessionWidget() {
+        // Cache the widget query
         const widget = document.getElementById('autoseller-session-widget');
         if (!widget || !widget._statEls) return;
         
         const statEls = widget._statEls;
-        const currentValues = {
-            soldCount: autosellerSessionStats.soldCount,
-            soldGold: autosellerSessionStats.soldGold,
-            squeezedCount: autosellerSessionStats.squeezedCount,
-            squeezedDust: autosellerSessionStats.squeezedDust
-        };
+        const currentValues = stateManager.getSessionStats();
         
         // Only update DOM if values have changed
         if (currentValues.soldCount !== lastUpdateValues.soldCount && statEls.soldCount) {
@@ -1342,10 +1844,105 @@
         }
     }
 
+    // =======================
+    // 8. Event Management
+    // =======================
+    /**
+     * Event manager for handling cleanup and event listeners
+     * @type {Object}
+     */
+    const eventManager = {
+        // Track all event listeners for cleanup
+        listeners: new Map(),
+        
+        // Track observers for cleanup
+        observers: new Set(),
+        
+        // Track intervals and timeouts for cleanup
+        timers: new Set(),
+        
+        /**
+         * Add an event listener with automatic cleanup tracking
+         * @param {Element} element - DOM element to attach listener to
+         * @param {string} event - Event type
+         * @param {Function} handler - Event handler function
+         * @param {Object} options - Event listener options
+         */
+        addListener(element, event, handler, options = {}) {
+            element.addEventListener(event, handler, options);
+            
+            // Track for cleanup
+            const key = `${element.id || 'anonymous'}-${event}`;
+            if (!this.listeners.has(key)) {
+                this.listeners.set(key, []);
+            }
+            this.listeners.get(key).push({ element, event, handler, options });
+        },
+        
+        /**
+         * Remove all tracked event listeners
+         */
+        removeAllListeners() {
+            this.listeners.forEach((listeners, key) => {
+                listeners.forEach(({ element, event, handler, options }) => {
+                    element.removeEventListener(event, handler, options);
+                });
+            });
+            this.listeners.clear();
+        },
+        
+        /**
+         * Add an observer with automatic cleanup tracking
+         * @param {MutationObserver} observer - Observer instance
+         */
+        addObserver(observer) {
+            this.observers.add(observer);
+        },
+        
+        /**
+         * Disconnect all tracked observers
+         */
+        disconnectAllObservers() {
+            this.observers.forEach(observer => {
+                if (observer && typeof observer.disconnect === 'function') {
+                    observer.disconnect();
+                }
+            });
+            this.observers.clear();
+        },
+        
+        /**
+         * Add a timer with automatic cleanup tracking
+         * @param {number} timerId - Timer ID from setTimeout or setInterval
+         */
+        addTimer(timerId) {
+            this.timers.add(timerId);
+        },
+        
+        /**
+         * Clear all tracked timers
+         */
+        clearAllTimers() {
+            this.timers.forEach(timerId => {
+                clearTimeout(timerId);
+                clearInterval(timerId);
+            });
+            this.timers.clear();
+        },
+        
+        /**
+         * Clean up all tracked resources
+         */
+        cleanup() {
+            this.removeAllListeners();
+            this.disconnectAllObservers();
+            this.clearAllTimers();
+        }
+    };
+    
     // Inject the widget when autoplay UI appears
     let autosellerWidgetObserver = null;
     let observerSetupAttempts = 0;
-    const MAX_OBSERVER_ATTEMPTS = 10;
     
     function setupAutosellerWidgetObserver() {
         if (autosellerWidgetObserver || observerSetupAttempts >= MAX_OBSERVER_ATTEMPTS) return;
@@ -1355,33 +1952,63 @@
         updateAutosellerSessionWidget();
         
         if (typeof MutationObserver !== 'undefined') {
+            // Track the last processed state to avoid unnecessary updates
+            let lastWidgetState = { shouldShow: false, containerExists: false };
+            
             autosellerWidgetObserver = new MutationObserver((mutations) => {
+                // Early exit if no relevant mutations
+                const hasRelevantMutations = mutations.some(mutation => {
+                    // Check for changes to autoplay container or widget
+                    return mutation.type === 'childList' || 
+                           (mutation.type === 'attributes' && mutation.attributeName === 'data-minimized');
+                });
+                
+                if (!hasRelevantMutations) return;
+                
                 // Debounce observer calls to prevent excessive processing
                 if (autosellerWidgetObserver._debounceTimer) {
                     clearTimeout(autosellerWidgetObserver._debounceTimer);
                 }
                 
-                autosellerWidgetObserver._debounceTimer = setTimeout(() => {
+                const debounceTimer = setTimeout(() => {
+                    // Cache DOM queries to avoid repeated lookups
                     const autoplayContainer = document.querySelector('.widget-bottom[data-minimized="false"]');
+                    const widget = document.getElementById('autoseller-session-widget');
+                    const widgetExists = !!widget;
+                    
                     const settings = getCachedSettings();
                     const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
-                    const widgetExists = !!document.getElementById('autoseller-session-widget');
+                    const containerExists = !!autoplayContainer;
                     
-                    if (autoplayContainer && shouldShowWidget && !widgetExists) {
+                    // Only process if state has actually changed
+                    const currentState = { shouldShow: shouldShowWidget, containerExists };
+                    if (JSON.stringify(currentState) === JSON.stringify(lastWidgetState)) {
+                        return;
+                    }
+                    
+                    lastWidgetState = currentState;
+                    
+                    if (containerExists && shouldShowWidget && !widgetExists) {
                         createAutosellerSessionWidget();
                         updateAutosellerSessionWidget();
-                    } else if ((!autoplayContainer || !shouldShowWidget) && widgetExists) {
+                    } else if ((!containerExists || !shouldShowWidget) && widgetExists) {
                         // Remove widget if it exists and shouldn't be shown
-                        const widget = document.getElementById('autoseller-session-widget');
                         if (widget && widget.parentNode) {
                             widget.parentNode.removeChild(widget);
                             // Reset cached values when widget is removed
                             lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
                         }
                     }
-                }, 100); // 100ms debounce
+                }, OBSERVER_DEBOUNCE_MS); // Observer debounce
+                
+                // Track the timer for cleanup
+                eventManager.addTimer(debounceTimer);
             });
             
+            // Track the observer for cleanup
+            eventManager.addObserver(autosellerWidgetObserver);
+            
+            // Optimize observer configuration to only watch relevant elements
             autosellerWidgetObserver.observe(document.body, {
                 childList: true,
                 subtree: true,
@@ -1398,6 +2025,12 @@
         console.log(`[${modName}] Loaded.`);
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
+        
+        // Set initial button color after a short delay to ensure DOM is ready
+        setTimeout(() => {
+            updateAutosellerNavButtonColor();
+        }, 1000);
+        
         let lastProcessedBattleKey = null;
         if (globalThis.state.board && globalThis.state.board.subscribe) {
             globalThis.state.board.subscribe(async ({ context }) => {
@@ -1411,11 +2044,9 @@
                 const inventorySnapshot = await fetchServerMonsters();
                 const waitSeconds = gameTicks / 16;
                 setTimeout(async () => {
-                    const now = Date.now();
-                    if (now - lastAutosellerRun < AUTOSELLER_MIN_DELAY_MS) {
+                    if (!stateManager.canRun()) {
                         return;
                     }
-                    lastAutosellerRun = now;
                     const settings = getCachedSettings();
                     if (!settings.autosellChecked && !settings.autosqueezeChecked) {
                         return;
@@ -1440,21 +2071,33 @@
     if (typeof exports !== 'undefined') {
         exports = {
             openSettings: openAutosellerModal,
+            getErrorStats: () => stateManager.getErrorStats(),
+            getSessionStats: () => stateManager.getSessionStats(),
+            resetSession: () => stateManager.resetSession(),
+            // Debug and logging utilities
+            setLogLevel: (level) => logger.setLevel(level),
+            getDebugInfo: () => logger.getDebugInfo(),
+            logState: () => logger.logState('exports'),
             cleanup: function() {
-                // Remove Autoseller session widget
+                // Cache DOM queries for cleanup
                 const widget = document.getElementById('autoseller-session-widget');
-                if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
-                // Disconnect MutationObserver
-                if (autosellerWidgetObserver && typeof autosellerWidgetObserver.disconnect === 'function') {
-                    autosellerWidgetObserver.disconnect();
-                    autosellerWidgetObserver = null;
-                }
-                // Remove nav button
                 const navBtn = document.querySelector('.autoseller-nav-btn');
-                if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
-                // Remove injected style
                 const style = document.getElementById('autoseller-responsive-style');
+                
+                // Remove Autoseller session widget
+                if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
+                
+                // Remove nav button
+                if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
+                
+                // Remove injected style
                 if (style && style.parentNode) style.parentNode.removeChild(style);
+                
+                // Clean up all tracked resources using event manager
+                eventManager.cleanup();
+                
+                // Reset state
+                stateManager.resetSession();
             }
         };
     }
