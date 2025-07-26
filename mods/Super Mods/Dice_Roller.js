@@ -50,9 +50,21 @@
   const API_ENDPOINT = 'https://bestiaryarena.com/api/trpc/inventory.diceManipulator?batch=1';
   const FRAME_IMAGE_URL = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
   
+  // Performance constants
+  const PERFORMANCE = {
+    DOM_CACHE_TIMEOUT: 1000,
+    INVENTORY_CACHE_TIMEOUT: 200, // Shorter timeout for inventory elements
+    API_THROTTLE_MIN: 100,
+    API_THROTTLE_MAX: 2000,
+    RATE_LIMIT_RETRY_DELAY: 2000,
+    RATE_LIMIT_MAX_RETRIES: 5,
+    ANIMATION_INTERVAL: 400
+  };
+  
   // API request throttling
   let lastApiCall = 0;
   const API_THROTTLE_DELAY = 200; // Minimum 200ms between API calls (increased from 100)
+  let rateLimitedInterval = null; // For rate limit animation
 
   // Module-scoped state instead of global pollution
   let diceRulesConfig = {};
@@ -117,7 +129,7 @@
   // DOM Caching System for Performance
   const DOMCache = {
     cache: new Map(),
-    cacheTimeout: 1000,
+    cacheTimeout: PERFORMANCE.DOM_CACHE_TIMEOUT,
 
     get: function(selector, context = document) {
       const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
@@ -132,8 +144,29 @@
       return element;
     },
 
+    getAll: function(selector, context = document) {
+      const key = `all_${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+      const cached = this.cache.get(key);
+      
+      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+        return cached.elements;
+      }
+      
+      const elements = context.querySelectorAll(selector);
+      this.cache.set(key, { elements, timestamp: Date.now() });
+      return elements;
+    },
+
     clear: function() {
       this.cache.clear();
+    },
+
+    clearSelector: function(selector) {
+      for (const key of this.cache.keys()) {
+        if (key.includes(selector)) {
+          this.cache.delete(key);
+        }
+      }
     }
   };
 
@@ -1533,7 +1566,6 @@
       // Autoroll button logic
   let autorolling = false;
   let autorollAttempt = 0;
-  let rateLimitedInterval = null; // Move this variable to the broader scope
     
     autoRollBtn.onclick = async () => {
       if (!autorolling) {
@@ -2238,8 +2270,180 @@
 // 7. Inventory Integration
 // =======================
   let inventoryObserver = null;
+  let buttonCheckInterval = null;
+  let lastButtonCheck = 0;
+  let failedAttempts = 0;
+  let hasLoggedInventoryNotFound = false;
+  const BUTTON_CHECK_INTERVAL = 1000;
+  const BUTTON_CHECK_TIMEOUT = 10000;
+  const LOG_AFTER_ATTEMPTS = 3;
+  
+  function observeInventory() {
+    if (inventoryObserver) {
+      try { inventoryObserver.disconnect(); } catch (e) {}
+      inventoryObserver = null;
+    }
+    
+    if (buttonCheckInterval) {
+      clearInterval(buttonCheckInterval);
+      buttonCheckInterval = null;
+    }
+    
+    lastButtonCheck = Date.now();
+    buttonCheckInterval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastButtonCheck > BUTTON_CHECK_TIMEOUT) {
+        clearInterval(buttonCheckInterval);
+        buttonCheckInterval = null;
+        return;
+      }
+      
+      DOMCache.clearSelector('.container-inventory-4');
+      DOMCache.clearSelector('button.focus-style-visible');
+      
+      addAutoDiceButton();
+    }, BUTTON_CHECK_INTERVAL);
+    
+    inventoryObserver = new MutationObserver((mutations) => {
+      let shouldCheck = false;
+      
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (node.classList?.contains('container-inventory-4') ||
+                node.querySelector?.('.container-inventory-4') ||
+                node.querySelector?.('button.focus-style-visible')) {
+              shouldCheck = true;
+              break;
+            }
+          }
+        }
+        
+        if (shouldCheck) break;
+      }
+      
+      if (shouldCheck) {
+        DOMCache.clearSelector('.container-inventory-4');
+        DOMCache.clearSelector('button.focus-style-visible');
+        addAutoDiceButton();
+      }
+    });
+    
+    inventoryObserver.observe(document.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: false,
+      characterData: false
+    });
+    
+    addAutoDiceButton();
+  }
+  
+  function addAutoDiceButton() {
+    if (document.querySelector('.auto-inventory-button')) {
+      failedAttempts = 0;
+      hasLoggedInventoryNotFound = false;
+      return;
+    }
+    
+    // Check if we're on the inventory page
+    const isOnInventoryPage = document.querySelector('.container-inventory-4') || 
+                             document.querySelector('[data-page="inventory"]') ||
+                             window.location.pathname.includes('inventory');
+    
+    if (!isOnInventoryPage) {
+      return; // Don't try to add button if not on inventory page
+    }
+    
+    let inventoryContainer = DOMCache.get('.container-inventory-4');
+    if (!inventoryContainer) {
+      inventoryContainer = document.querySelector('.container-inventory-4');
+    }
+    
+    if (!inventoryContainer) {
+      failedAttempts++;
+      if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
+        console.log('[DiceRoller] Inventory container not found, will retry...');
+        hasLoggedInventoryNotFound = true;
+      }
+      return;
+    }
+    
+    let spriteItems = inventoryContainer.querySelectorAll(`.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID}`);
+    if (!spriteItems.length) {
+      spriteItems = inventoryContainer.querySelectorAll(`[class*="id-${DICE_CONFIG.DICE_MANIPULATOR_ID}"]`);
+    }
+    
+    if (!spriteItems.length) {
+      failedAttempts++;
+      if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
+        console.log('[DiceRoller] Dice manipulator sprites not found, will retry...');
+        hasLoggedInventoryNotFound = true;
+      }
+      return;
+    }
+    
+    let targetButton = null;
+    
+    const lastSprite = spriteItems[spriteItems.length - 1];
+    if (lastSprite) {
+      targetButton = lastSprite.closest('button');
+    }
+    
+    if (!targetButton) {
+      for (const sprite of spriteItems) {
+        const button = sprite.closest('button');
+        if (button) {
+          targetButton = button;
+          break;
+        }
+      }
+    }
+    
+    if (!targetButton) {
+      const diceButtons = inventoryContainer.querySelectorAll(`button:has(.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID})`);
+      if (diceButtons.length > 0) {
+        targetButton = diceButtons[diceButtons.length - 1];
+      }
+    }
+    
+    if (!targetButton) {
+      failedAttempts++;
+      if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
+        console.log('[DiceRoller] Target button not found, will retry...');
+        hasLoggedInventoryNotFound = true;
+      }
+      return;
+    }
+    
+    const autoButton = document.createElement('button');
+    autoButton.className = 'focus-style-visible active:opacity-70 auto-inventory-button';
+    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="has-rarity relative grid h-full place-items-center"><div class="sprite item relative id-${DICE_CONFIG.DICE_MANIPULATOR_ID}"><div class="viewport"><img alt="${DICE_CONFIG.DICE_MANIPULATOR_ID}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5"><span class="relative" style="line-height: 1; font-size: 16px; color: #fff; font-family: inherit;" translate="no">Auto</span></div></div></div>`;
+    autoButton.addEventListener('click', () => { showAutoDiceModal(); });
+    
+    try {
+      targetButton.insertAdjacentElement('afterend', autoButton);
+      failedAttempts = 0;
+      hasLoggedInventoryNotFound = false;
+      
+      if (buttonCheckInterval) {
+        clearInterval(buttonCheckInterval);
+        buttonCheckInterval = null;
+      }
+    } catch (error) {
+      console.error('[DiceRoller] Error adding button:', error);
+    }
+  }
   
   function cleanup() {
+    if (buttonCheckInterval) {
+      clearInterval(buttonCheckInterval);
+      buttonCheckInterval = null;
+    }
+    
+    failedAttempts = 0;
+    hasLoggedInventoryNotFound = false;
+    
     if (inventoryObserver) {
       try { inventoryObserver.disconnect(); } catch (e) {}
       inventoryObserver = null;
@@ -2247,14 +2451,12 @@
     const autoButtons = document.querySelectorAll('.auto-inventory-button');
     autoButtons.forEach(btn => btn.remove());
     
-    // Clear caches and timeouts
     DOMCache.clear();
     if (statusUpdateTimeout) {
       clearTimeout(statusUpdateTimeout);
       statusUpdateTimeout = null;
     }
     
-    // Clear any global references
     if (typeof window !== 'undefined') {
       delete window.updateStatusDisplays;
       delete window.resetRollCount;
@@ -2262,31 +2464,7 @@
       delete window.DiceRollerRender;
     }
   }
-  function observeInventory() {
-    if (inventoryObserver) {
-      try { inventoryObserver.disconnect(); } catch (e) {}
-      inventoryObserver = null;
-    }
-    inventoryObserver = new MutationObserver(() => { addAutoDiceButton(); });
-    inventoryObserver.observe(document.body, { childList: true, subtree: true });
-    addAutoDiceButton();
-  }
-  function addAutoDiceButton() {
-    // Use DOMCache for inventory container
-    const inventoryContainer = DOMCache.get('.container-inventory-4');
-    if (!inventoryContainer) return;
-    if (inventoryContainer.querySelector('.auto-inventory-button')) return;
-    const spriteItems = inventoryContainer.querySelectorAll(`.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID}`);
-    if (!spriteItems.length) return;
-    const lastSprite = spriteItems[spriteItems.length - 1];
-    const targetButton = lastSprite.closest('button');
-    if (!targetButton) return;
-    const autoButton = document.createElement('button');
-    autoButton.className = 'focus-style-visible active:opacity-70 auto-inventory-button';
-    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="has-rarity relative grid h-full place-items-center"><div class="sprite item relative id-${DICE_CONFIG.DICE_MANIPULATOR_ID}"><div class="viewport"><img alt="${DICE_CONFIG.DICE_MANIPULATOR_ID}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5"><span class="relative" style="line-height: 1; font-size: 16px; color: #fff; font-family: inherit;" translate="no">Auto</span></div></div></div>`;
-    autoButton.addEventListener('click', () => { showAutoDiceModal(); });
-    targetButton.insertAdjacentElement('afterend', autoButton);
-  }
+  
 // =======================
 // 8. Cleanup & Exports
 // =======================
@@ -2302,5 +2480,4 @@
   }
   exports = {};
   
-  console.log('Dice Roller 2.0 initialization complete');
-})(); 
+})();

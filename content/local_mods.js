@@ -213,6 +213,7 @@ async function listAllModFiles() {
     ];
     const superMods = [
       'Super Mods/Autoseller.js',
+      'Super Mods/Autoscroller.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
@@ -235,6 +236,7 @@ async function listAllModFiles() {
       'Official Mods/Tick_Tracker.js',
       'Official Mods/Turbo Mode.js',
       'Super Mods/Autoseller.js',
+      'Super Mods/Autoscroller.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',

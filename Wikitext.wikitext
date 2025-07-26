@@ -181,6 +181,16 @@ Automates dice rolling for stat rerolling:
 * Stops rolling when a desired stat value is reached
 * Displays roll count and status in a custom panel
 
+=== Autoscroller ===
+Automates summon scroll usage to collect specific creatures:
+* Select target creatures from a comprehensive list
+* Choose scroll tier (grey, green, blue, purple, yellow)
+* Set stopping conditions (total creatures or tier-based targets)
+* Configurable autoscroll speed with rate-limit protection
+* Real-time tracking of found creatures and scroll usage
+* Automatic stopping when targets are reached
+* Rate-limit handling with visual feedback
+
 === Official Mods ===
 These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
 
