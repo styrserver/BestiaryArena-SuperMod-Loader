@@ -120,7 +120,9 @@ async function scanAndRegisterLocalMods() {
     { name: 'Hunt Analyzer.js', enabled: true },
     { name: 'DashboardButton.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
-    { name: 'Autoseller.js', enabled: true }
+    { name: 'Autoseller.js', enabled: true },
+    { name: 'Autoscroller.js', enabled: true },
+    { name: 'Cauldron Upgrade.js', enabled: true }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({

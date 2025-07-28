@@ -145,7 +145,8 @@ function renderLocalMods(mods) {
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',
-    'Hunt Analyzer.js'
+    'Hunt Analyzer.js',
+    'Cauldron Upgrade.js'
   ];
 
   const hiddenMods = [

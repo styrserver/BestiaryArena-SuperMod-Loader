@@ -1,14 +1,19 @@
 // Bestiary Automator Mod for Bestiary Arena
 // Code by MathiasBynens and TheMegafuji
+
+// Enable debug mode
+window.DEBUG = false;
+
 if (window.DEBUG) console.log('Bestiary Automator initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
   enabled: false,
   autoRefillStamina: true,
-  minimumStaminaWithoutRefill: 3,
+  minimumStaminaWithoutRefill: 15,
   autoCollectRewards: true,
   autoDayCare: true,
+  autoPlayAfterDefeat: true,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -34,6 +39,7 @@ const TRANSLATIONS = {
     minimumStaminaLabel: 'Minimum Stamina Without Refill',
     autoCollectRewards: 'Auto Collect Rewards',
     autoDayCare: 'Auto Handle Day Care',
+    autoPlayAfterDefeat: 'Autoplay after defeat',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -55,6 +61,7 @@ const TRANSLATIONS = {
     minimumStaminaLabel: 'Stamina Mínima Sem Reabastecimento',
     autoCollectRewards: 'Coletar Recompensas Automaticamente',
     autoDayCare: 'Cuidar Automaticamente da Creche',
+    autoPlayAfterDefeat: 'Jogar automaticamente após derrota',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -248,6 +255,104 @@ const updateRequiredStamina = () => {
 
 // Main automation loop
 let automationInterval = null;
+let gameStateObserver = null;
+let defeatToastCooldown = false;
+
+// Subscribe to board game state changes
+const subscribeToGameState = () => {
+  if (!config.autoPlayAfterDefeat) return;
+  
+  try {
+    // Subscribe to game state changes
+    if (api.game && api.game.subscribeToState) {
+      gameStateObserver = api.game.subscribeToState((state) => {
+        checkForDefeatToast();
+      });
+    } else {
+      // Fallback: use MutationObserver to watch for DOM changes
+      gameStateObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            checkForDefeatToast();
+          }
+        });
+      });
+      
+      // Start observing the document body for added nodes
+      gameStateObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+    
+    if (window.DEBUG) console.log('[Bestiary Automator] Subscribed to game state changes for autoplay after defeat');
+  } catch (error) {
+    if (window.DEBUG) console.error('[Bestiary Automator] Error subscribing to game state:', error);
+  }
+};
+
+// Unsubscribe from game state changes
+const unsubscribeFromGameState = () => {
+  if (gameStateObserver) {
+    if (api.game && api.game.unsubscribeFromState) {
+      api.game.unsubscribeFromState(gameStateObserver);
+    } else if (gameStateObserver.disconnect) {
+      gameStateObserver.disconnect();
+    }
+    gameStateObserver = null;
+    
+    if (window.DEBUG) console.log('[Bestiary Automator] Unsubscribed from game state changes');
+  }
+};
+
+// Check for defeat toast and restart if found
+const checkForDefeatToast = async () => {
+  if (!config.autoPlayAfterDefeat || defeatToastCooldown) return;
+  
+  try {
+    // Look for the defeat toast
+    const defeatToast = document.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
+    
+    if (defeatToast) {
+      const toastText = defeatToast.textContent;
+      if (toastText.includes('Autoplay stopped because your creatures were') && toastText.includes('defeated')) {
+        // Set cooldown to prevent multiple executions
+        defeatToastCooldown = true;
+        
+        if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast detected, waiting 1s then restarting...');
+        
+        // Wait 1 second
+        await sleep(1000);
+        
+        // Find and click the start button
+        const startButtons = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+        let startButton = null;
+        
+        for (const button of startButtons) {
+          if (button.textContent.trim() === 'Start') {
+            startButton = button;
+            break;
+          }
+        }
+        
+        if (startButton) {
+          startButton.click();
+          if (window.DEBUG) console.log('[Bestiary Automator] Start button clicked after defeat');
+        } else {
+          if (window.DEBUG) console.log('[Bestiary Automator] Start button not found after defeat');
+        }
+        
+        // Reset cooldown after 3 seconds to allow for future defeats
+        setTimeout(() => {
+          defeatToastCooldown = false;
+          if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast cooldown reset');
+        }, 3000);
+      }
+    }
+  } catch (error) {
+    if (window.DEBUG) console.error('[Bestiary Automator] Error checking for defeat toast:', error);
+  }
+};
 
 const startAutomation = () => {
   if (automationInterval) return;
@@ -259,6 +364,9 @@ const startAutomation = () => {
   
   // Then set up interval
   automationInterval = setInterval(runAutomationTasks, 5000);
+  
+  // Subscribe to game state for autoplay after defeat
+  subscribeToGameState();
   
   // Update button to show enabled state
   api.ui.updateButton(BUTTON_ID, {
@@ -277,6 +385,9 @@ const stopAutomation = () => {
   
   clearInterval(automationInterval);
   automationInterval = null;
+  
+  // Unsubscribe from game state changes
+  unsubscribeFromGameState();
   
   // Update button to show disabled state
   api.ui.updateButton(BUTTON_ID, {
@@ -341,12 +452,16 @@ const createConfigPanel = () => {
   // Auto day care checkbox
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('autoDayCare'), config.autoDayCare);
   
+  // Auto play after defeat checkbox
+  const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
+  
   // Add all elements to content
   content.appendChild(enabledContainer);
   content.appendChild(refillContainer);
   content.appendChild(staminaContainer);
   content.appendChild(rewardsContainer);
   content.appendChild(dayCareContainer);
+  content.appendChild(autoPlayContainer);
   
   // Create the config panel
   return api.ui.createConfigPanel({
@@ -365,6 +480,7 @@ const createConfigPanel = () => {
           config.minimumStaminaWithoutRefill = parseInt(document.getElementById('min-stamina-input').value, 10);
           config.autoCollectRewards = document.getElementById('auto-rewards-checkbox').checked;
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
+          config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           
           // Save configuration
           api.service.updateScriptConfig(context.hash, {
@@ -372,7 +488,8 @@ const createConfigPanel = () => {
             autoRefillStamina: config.autoRefillStamina,
             minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill,
             autoCollectRewards: config.autoCollectRewards,
-            autoDayCare: config.autoDayCare
+            autoDayCare: config.autoDayCare,
+            autoPlayAfterDefeat: config.autoPlayAfterDefeat
           });
           
           // Start or stop automation based on enabled state
@@ -380,6 +497,13 @@ const createConfigPanel = () => {
             startAutomation();
           } else {
             stopAutomation();
+          }
+          
+          // Update game state subscription based on autoplay setting
+          if (config.autoPlayAfterDefeat && config.enabled) {
+            subscribeToGameState();
+          } else {
+            unsubscribeFromGameState();
           }
           
           showNotification(t('settingsSaved'), 'success');
@@ -476,6 +600,11 @@ function init() {
   // Start automation if enabled in config
   if (config.enabled) {
     startAutomation();
+  }
+  
+  // Subscribe to game state if autoplay after defeat is enabled
+  if (config.autoPlayAfterDefeat && config.enabled) {
+    subscribeToGameState();
   }
   
   if (window.DEBUG) console.log('[Bestiary Automator] Initialization complete');

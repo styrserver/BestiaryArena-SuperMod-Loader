@@ -217,7 +217,8 @@ async function listAllModFiles() {
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
-      'Super Mods/Hunt Analyzer.js'
+      'Super Mods/Hunt Analyzer.js',
+      'Super Mods/Cauldron Upgrade.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods];
   } catch (e) {
@@ -240,7 +241,8 @@ async function listAllModFiles() {
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
-      'Super Mods/Hunt Analyzer.js'
+      'Super Mods/Hunt Analyzer.js',
+      'Super Mods/Cauldron Upgrade.js'
     ];
   }
 }

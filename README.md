@@ -173,6 +173,25 @@ Automatically sells or squeezes creatures based on gene thresholds and user sett
 - Session widget displaying sold/squeezed counts and rewards
 - Integrated with the mod loader's configuration system
 
+### Autoscroller
+Automates summon scroll usage to collect specific creatures:
+- Select target creatures from a comprehensive list
+- Choose scroll tier (grey, green, blue, purple, yellow)
+- Set stopping conditions (total creatures or tier-based targets)
+- Configurable autoscroll speed with rate-limit protection
+- Real-time tracking of found creatures and scroll usage
+- Automatic stopping when targets are reached
+- Rate-limit handling with visual feedback
+
+### Cauldron Upgrade
+Enhances the native Monster Cauldron interface with powerful search and filter functionality:
+- Real-time search through all monsters in your cauldron
+- Filter monsters by rarity (Grey, Green, Blue, Purple, Yellow)
+- Game-styled UI controls that integrate seamlessly with the existing interface
+- Automatic detection and enhancement of the cauldron modal
+- Efficient filtering system for managing large monster collections
+- Clean, responsive design that matches the game's aesthetic
+
 ### Cyclopedia
 A comprehensive game data viewer and player profile manager:
 - View detailed monster and equipment information
@@ -180,14 +199,6 @@ A comprehensive game data viewer and player profile manager:
 - Browse your inventory and collection
 - Track your progress and achievements
 - Search and filter game data efficiently
-
-### Hunt Analyzer
-Advanced autoplay and loot tracking system:
-- Track detailed statistics from autoplay sessions
-- Monitor gold, dust, and item drops
-- Analyze creature and equipment drop rates
-- View session summaries and performance metrics
-- Export data for further analysis
 
 ### Dashboard Button
 Quick access to the mod dashboard:
@@ -202,19 +213,20 @@ Automates dice rolling for stat rerolling:
 - Stops rolling when a desired stat value is reached
 - Displays roll count and status in a custom panel
 
-### Autoscroller
-Automates summon scroll usage to collect specific creatures:
-- Select target creatures from a comprehensive list
-- Choose scroll tier (grey, green, blue, purple, yellow)
-- Set stopping conditions (total creatures or tier-based targets)
-- Configurable autoscroll speed with rate-limit protection
-- Real-time tracking of found creatures and scroll usage
-- Automatic stopping when targets are reached
-- Rate-limit handling with visual feedback
+### Hunt Analyzer
+Advanced autoplay and loot tracking system:
+- Track detailed statistics from autoplay sessions
+- Monitor gold, dust, and item drops
+- Analyze creature and equipment drop rates
+- View session summaries and performance metrics
+- Export data for further analysis
 
 ### Official Mods
 
 These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
+
+### Board Analyzer
+Analyzes and simulates board setups for optimal strategies and performance. Useful for advanced planning and testing.
 
 ### Bestiary Automator
 Automates routine gameplay actions to streamline your Bestiary Arena experience. Features include:
@@ -237,6 +249,27 @@ A powerful tool that allows players to:
 - Save and load custom setups
 Perfect for testing different monster and equipment combinations without having to collect and level them in-game.
 
+### Highscore Improvements
+Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements. Features include:
+- Detailed performance analysis
+- Potential time improvements compared to top scores
+- Room-by-room breakdown of performance
+- Visual indicators for time differences
+
+### Item Tier List
+Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts. The mod shows:
+- Item effectiveness by tier
+- Stat optimizations for different monsters
+- Best-in-slot recommendations
+- Visual quality indicators
+
+### Monster Tier List
+Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios. Features include:
+- Sortable tier list of monsters
+- Usage statistics across different room types
+- Win rate and performance metrics
+- Visual representation of monster effectiveness
+
 ### Setup Manager
 Allows players to save, load, and manage team configurations for different maps. Features include:
 - Multiple saved team setups per map
@@ -253,26 +286,13 @@ Enables sharing team configurations with other players through:
 - Optional inclusion of game seeds for exact replays
 - History of recently used seeds
 
-### Monster Tier List
-Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios. Features include:
-- Sortable tier list of monsters
-- Usage statistics across different room types
-- Win rate and performance metrics
-- Visual representation of monster effectiveness
-
-### Item Tier List
-Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts. The mod shows:
-- Item effectiveness by tier
-- Stat optimizations for different monsters
-- Best-in-slot recommendations
-- Visual quality indicators
-
-### Highscore Improvements
-Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements. Features include:
-- Detailed performance analysis
-- Potential time improvements compared to top scores
-- Room-by-room breakdown of performance
-- Visual indicators for time differences
+### Tick Tracker
+Tracks and displays the number of game ticks (and optionally milliseconds) for each session. Features include:
+- Real-time tick tracking widget
+- History of recent tick counts
+- Option to show milliseconds conversion
+- Copy and clear tick history with a single click
+- Useful for speedrunners and performance analysis
 
 ### Turbo Mode
 Speed up gameplay for faster testing and grinding:
@@ -281,17 +301,6 @@ Speed up gameplay for faster testing and grinding:
 - Real-time tick display
 - Perfect for testing strategies quickly
 - Great for farming and grinding sessions
-
-### Board Analyzer
-Analyzes and simulates board setups for optimal strategies and performance. Useful for advanced planning and testing.
-
-### Tick Tracker
-Tracks and displays the number of game ticks (and optionally milliseconds) for each session. Features include:
-- Real-time tick tracking widget
-- History of recent tick counts
-- Option to show milliseconds conversion
-- Copy and clear tick history with a single click
-- Useful for speedrunners and performance analysis
 
 Note: The UI Components Showcase mod and other example mods are available in the `Unused Mods/` folder as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
 
