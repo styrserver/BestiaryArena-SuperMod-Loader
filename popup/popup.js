@@ -140,13 +140,13 @@ function renderLocalMods(mods) {
   }
 
   const superModNames = [
-    'Autoscroller.js',
     'Autoseller.js',
+    'Autoscroller.js',
+    'Cauldron Upgrade.js',
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',
-    'Hunt Analyzer.js',
-    'Cauldron Upgrade.js'
+    'Hunt Analyzer.js'
   ];
 
   const hiddenMods = [

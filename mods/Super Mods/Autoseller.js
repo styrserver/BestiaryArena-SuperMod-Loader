@@ -25,11 +25,18 @@
     const OBSERVER_DEBOUNCE_MS = 100; // Debounce time for mutation observer
     const SETTINGS_SAVE_DELAY_MS = 300; // Debounce time for settings save
     
+    // Rate limiting constants for selling
+    const SELL_RATE_LIMIT = {
+        MAX_MONSTERS_PER_10S: 20, // Reduced from 30 to be more conservative
+        DELAY_BETWEEN_SELLS_MS: 200, // Increased from 100ms to 200ms
+        WINDOW_SIZE_MS: 10000
+    };
+    
     // UI Constants
     const UI_CONSTANTS = {
         MODAL_WIDTH: 600,
-        MODAL_HEIGHT: 410,
-        MODAL_CONTENT_HEIGHT: 330,
+        MODAL_HEIGHT: 440,
+        MODAL_CONTENT_HEIGHT: 360,
         COLUMN_WIDTH: 240,
         COLUMN_MIN_WIDTH: 220,
         RESPONSIVE_BREAKPOINT: 600,
@@ -320,6 +327,73 @@
     // =======================
     // 2. Utility Functions
     // =======================
+    
+    // Rate limiter for selling monsters
+    const sellRateLimiter = {
+        requestTimes: [],
+        consecutive429Errors: 0,
+        last429Time: 0,
+        
+        /**
+         * Check if we can make a sell request
+         * @returns {boolean} Whether a request can be made
+         */
+        canMakeRequest() {
+            const now = Date.now();
+            // Remove requests older than 10 seconds
+            this.requestTimes = this.requestTimes.filter(time => now - time < SELL_RATE_LIMIT.WINDOW_SIZE_MS);
+            
+            // If we've had recent 429 errors, be more conservative
+            if (this.consecutive429Errors > 0 && now - this.last429Time < 30000) { // 30 seconds
+                return this.requestTimes.length < Math.max(5, SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S - this.consecutive429Errors * 5);
+            }
+            
+            return this.requestTimes.length < SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S;
+        },
+        
+        /**
+         * Record a sell request
+         */
+        recordRequest() {
+            this.requestTimes.push(Date.now());
+        },
+        
+        /**
+         * Record a 429 error and adjust rate limiting
+         */
+        record429Error() {
+            this.consecutive429Errors++;
+            this.last429Time = Date.now();
+            logger.warn('sellRateLimiter', `Rate limit hit! Consecutive 429 errors: ${this.consecutive429Errors}`);
+        },
+        
+        /**
+         * Record a successful request (reset 429 counter)
+         */
+        recordSuccess() {
+            if (this.consecutive429Errors > 0) {
+                this.consecutive429Errors = Math.max(0, this.consecutive429Errors - 1);
+            }
+        },
+        
+        /**
+         * Wait for the next available slot
+         * @returns {Promise} Promise that resolves when a slot is available
+         */
+        async waitForSlot() {
+            while (!this.canMakeRequest()) {
+                // If we have recent 429 errors, wait longer
+                let waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
+                
+                if (this.consecutive429Errors > 0) {
+                    waitTime = Math.max(waitTime, 2000 * this.consecutive429Errors); // Exponential backoff
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    };
+    
     /**
      * Calculate the total gene percentage for a monster
      * @param {Object} m - Monster object
@@ -661,6 +735,38 @@
         });
     }
     
+    function createWarningRow(warningText) {
+        return createElement('div', {
+            styles: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                margin: '4px 0 8px 0'
+            },
+            children: [
+                createElement('span', {
+                    text: '⚠️',
+                    className: 'pixel-font-16',
+                    styles: {
+                        color: '#ff6b6b',
+                        fontSize: '13px',
+                        fontWeight: 'bold'
+                    }
+                }),
+                createElement('span', {
+                    text: warningText,
+                    className: 'pixel-font-16',
+                    styles: {
+                        color: '#ff6b6b',
+                        fontSize: '13px',
+                        fontWeight: 'bold'
+                    }
+                })
+            ]
+        });
+    }
+    
     function createCheckboxRow(persistKey, label) {
         const checkbox = createInput({
             type: 'checkbox',
@@ -771,6 +877,13 @@
         // Create description row
         const descWrapper = createDescriptionRow(opts.desc);
         section.appendChild(descWrapper);
+        
+        // Add warning text about inventory
+        const warningText = opts.summaryType === 'Autosell' 
+            ? 'This will sell creatures from your inventory!'
+            : 'This will squeeze creatures from your inventory!';
+        const warningWrapper = createWarningRow(warningText);
+        section.appendChild(warningWrapper);
         
         // Create checkbox row
         const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label);
@@ -1185,50 +1298,70 @@
             if (!toSell.length) {
                 return;
             }
-            // --- Session stats update ---
-            // (removed old commented-out code)
-            // --- End session stats update ---
-            // --- Batching logic: max 20 per 10 seconds ---
-            for (let i = 0; i < toSell.length; i += BATCH_SIZE) {
-                const batch = toSell.slice(i, i + BATCH_SIZE);
-                // eslint-disable-next-line no-await-in-loop
-                await Promise.all(batch.map(async (m) => {
-                    const id = m.id;
-                    const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
-                    const body = { "0": { json: id } };
-                    const result = await apiRequest(url, { method: 'POST', body });
+            
+            logger.info('sellEligibleMonsters', `Starting to sell ${toSell.length} monsters with rate limiting`);
+            
+            // Process monsters one by one with rate limiting
+            for (const monster of toSell) {
+                const id = monster.id;
+                
+                // Wait for rate limit slot
+                await sellRateLimiter.waitForSlot();
+                
+                // Record the request
+                sellRateLimiter.recordRequest();
+                
+                const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
+                const body = { "0": { json: id } };
+                const result = await apiRequest(url, { method: 'POST', body });
+                
+                // Handle 429 rate limit errors
+                if (!result.success && result.status === 429) {
+                    sellRateLimiter.record429Error();
+                    logger.warn('sellEligibleMonsters', `Rate limited (429) for monster ${id}, backing off...`);
                     
-                    const apiResponse = result.data;
-                    
-                    // Check if we got a valid response with goldValue
-                    if (
-                        apiResponse &&
-                        Array.isArray(apiResponse) &&
-                        apiResponse[0]?.result?.data?.json?.goldValue != null &&
-                        !stateManager.isProcessed(id)
-                    ) {
-                        const goldReceived = apiResponse[0].result.data.json.goldValue;
-                        
-                        // Update state through state manager
-                        stateManager.updateSessionStats('sold', 1, goldReceived);
-                        stateManager.markProcessed([id]);
-                        
-                        // Only remove from local inventory on confirmed success
-                        removeMonstersFromLocalInventory([id]);
-                    } else if (!result.success && result.status === 404) {
-                        // For 404 responses, assume monster was already sold or doesn't exist
-                        errorHandler.info('sellEligibleMonsters', `Monster ID ${id} not found on server (already sold or removed).`);
-                        stateManager.markProcessed([id]); // Mark as processed even if 404
-                    } else if (!result.success) {
-                        errorHandler.warn('sellEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
-                    }
-                }));
-                if (i + BATCH_SIZE < toSell.length) {
-                    // Wait 10 seconds before next batch
-                    await new Promise(res => setTimeout(res, BATCH_DELAY_MS));
+                    // Wait longer before retrying this monster
+                    await new Promise(resolve => setTimeout(resolve, 5000 + (sellRateLimiter.consecutive429Errors * 2000)));
+                    continue; // Retry this monster
                 }
+                
+                const apiResponse = result.data;
+                
+                // Check if we got a valid response with goldValue
+                if (
+                    apiResponse &&
+                    Array.isArray(apiResponse) &&
+                    apiResponse[0]?.result?.data?.json?.goldValue != null &&
+                    !stateManager.isProcessed(id)
+                ) {
+                    const goldReceived = apiResponse[0].result.data.json.goldValue;
+                    
+                    // Update state through state manager
+                    stateManager.updateSessionStats('sold', 1, goldReceived);
+                    stateManager.markProcessed([id]);
+                    
+                    // Only remove from local inventory on confirmed success
+                    removeMonstersFromLocalInventory([id]);
+                    
+                    // Record successful request
+                    sellRateLimiter.recordSuccess();
+                    
+                    logger.info('sellEligibleMonsters', `Successfully sold monster ${id} for ${goldReceived} gold`);
+                } else if (!result.success && result.status === 404) {
+                    // For 404 responses, assume monster was already sold or doesn't exist
+                    errorHandler.info('sellEligibleMonsters', `Monster ID ${id} not found on server (already sold or removed).`);
+                    stateManager.markProcessed([id]); // Mark as processed even if 404
+                    sellRateLimiter.recordSuccess(); // Still count as successful request
+                } else if (!result.success) {
+                    errorHandler.warn('sellEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
+                    // Don't record success for other errors
+                }
+                
+                // Wait 100ms between each sell (additional safety)
+                await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
             }
-            const player = globalThis.state?.player;
+            
+            logger.info('sellEligibleMonsters', `Finished selling ${toSell.length} monsters`);
         } catch (e) {
             errorHandler.warn('sellEligibleMonsters', 'Error', e);
             stateManager.updateErrorStats('sellErrors');
@@ -1434,8 +1567,8 @@
             columnsWrapper.id = 'autoseller-modal-columns';
             let modalInstance = api.ui.components.createModal({
                 title: 'Autoseller',
-                width: 600,
-                height: 410,
+                width: UI_CONSTANTS.MODAL_WIDTH,
+                height: UI_CONSTANTS.MODAL_HEIGHT,
                 content: columnsWrapper,
                 buttons: [
                     {
@@ -1473,15 +1606,15 @@
                 const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
                 if (dialog) {
                     dialog.classList.remove('max-w-[300px]');
-                    dialog.style.width = '600px';
-                    dialog.style.minWidth = '600px';
-                    dialog.style.maxWidth = '600px';
-                    dialog.style.height = '410px';
-                    dialog.style.minHeight = '410px';
-                    dialog.style.maxHeight = '410px';
+                    dialog.style.width = UI_CONSTANTS.MODAL_WIDTH + 'px';
+                    dialog.style.minWidth = UI_CONSTANTS.MODAL_WIDTH + 'px';
+                    dialog.style.maxWidth = UI_CONSTANTS.MODAL_WIDTH + 'px';
+                    dialog.style.height = UI_CONSTANTS.MODAL_HEIGHT + 'px';
+                    dialog.style.minHeight = UI_CONSTANTS.MODAL_HEIGHT + 'px';
+                    dialog.style.maxHeight = UI_CONSTANTS.MODAL_HEIGHT + 'px';
                     const contentElem = dialog.querySelector('.widget-bottom');
                     if (contentElem) {
-                        contentElem.style.height = '330px';
+                        contentElem.style.height = UI_CONSTANTS.MODAL_CONTENT_HEIGHT + 'px';
                         contentElem.style.display = 'flex';
                         contentElem.style.flexDirection = 'column';
                         contentElem.style.justifyContent = 'flex-start';

@@ -116,6 +116,7 @@ async function scanAndRegisterLocalMods() {
     { name: 'Turbo Mode.js', enabled: false },
     { name: 'UIComponentsShowcase.js', enabled: false },
     // Super Mods
+    { name: 'Better_Hygenie.js', enabled: true },
     { name: 'Cyclopedia.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
     { name: 'DashboardButton.js', enabled: true },
@@ -240,8 +241,9 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
 }
 
   const superModNames = [
-    'Autoscroller.js',
     'Autoseller.js',
+    'Autoscroller.js',
+    'Cauldron Upgrade.js',
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',

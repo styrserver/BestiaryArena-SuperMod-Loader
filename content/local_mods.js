@@ -199,8 +199,8 @@ async function listAllModFiles() {
       'database/inventory-tooltips.js'
     ];
     const officialMods = [
-      'Official Mods/Bestiary_Automator.js',
       'Official Mods/Board Analyzer.js',
+      'Official Mods/Bestiary_Automator.js',
       'Official Mods/Custom_Display.js',
       'Official Mods/Hero_Editor.js',
       'Official Mods/Highscore_Improvements.js',
@@ -214,19 +214,19 @@ async function listAllModFiles() {
     const superMods = [
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
+      'Super Mods/Cauldron Upgrade.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
-      'Super Mods/Hunt Analyzer.js',
-      'Super Mods/Cauldron Upgrade.js'
+      'Super Mods/Hunt Analyzer.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods];
   } catch (e) {
     // fallback: hardcoded list
     return [
       'database/inventory-tooltips.js',
-      'Official Mods/Bestiary_Automator.js',
       'Official Mods/Board Analyzer.js',
+      'Official Mods/Bestiary_Automator.js',
       'Official Mods/Custom_Display.js',
       'Official Mods/Hero_Editor.js',
       'Official Mods/Highscore_Improvements.js',
@@ -238,11 +238,11 @@ async function listAllModFiles() {
       'Official Mods/Turbo Mode.js',
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
+      'Super Mods/Cauldron Upgrade.js',
       'Super Mods/Cyclopedia.js',
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
-      'Super Mods/Hunt Analyzer.js',
-      'Super Mods/Cauldron Upgrade.js'
+      'Super Mods/Hunt Analyzer.js'
     ];
   }
 }
