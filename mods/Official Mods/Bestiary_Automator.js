@@ -2,25 +2,53 @@
 // Code by MathiasBynens and TheMegafuji
 
 // Enable debug mode
-window.DEBUG = false;
+window.DEBUG = true;
 
 if (window.DEBUG) console.log('Bestiary Automator initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
   enabled: false,
-  autoRefillStamina: true,
+  autoRefillStamina: false,
   minimumStaminaWithoutRefill: 15,
-  autoCollectRewards: true,
-  autoDayCare: true,
-  autoPlayAfterDefeat: true,
+  autoCollectRewards: false,
+  autoDayCare: false,
+  autoPlayAfterDefeat: false,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
 };
 
-// Initialize with saved config or defaults
-const config = Object.assign({}, defaultConfig, context.config);
+// Storage key for localStorage
+const STORAGE_KEY = 'bestiary-automator-config';
+
+// Initialize config with proper priority: localStorage > context config > defaults
+let config = {};
+
+if (window.DEBUG) console.log('[Bestiary Automator] Starting config initialization...');
+if (window.DEBUG) console.log('[Bestiary Automator] Default config:', defaultConfig);
+if (window.DEBUG) console.log('[Bestiary Automator] Context config:', context.config);
+
+// First, try to load saved config from localStorage
+try {
+  const savedData = localStorage.getItem(STORAGE_KEY);
+  if (savedData) {
+    const savedConfig = JSON.parse(savedData);
+    config = Object.assign({}, defaultConfig, savedConfig);
+    if (window.DEBUG) console.log('[Bestiary Automator] Loaded saved config from localStorage:', savedConfig);
+    if (window.DEBUG) console.log('[Bestiary Automator] Final config after loading saved:', config);
+  } else {
+    if (window.DEBUG) console.log('[Bestiary Automator] No saved config found in localStorage');
+  }
+} catch (error) {
+  if (window.DEBUG) console.error('[Bestiary Automator] Error loading saved config from localStorage:', error);
+}
+
+// If no saved config, use context config or defaults
+if (Object.keys(config).length === 0) {
+  config = Object.assign({}, defaultConfig, context.config || {});
+  if (window.DEBUG) console.log('[Bestiary Automator] Using default/context config:', config);
+}
 
 // Constants
 const MOD_ID = 'bestiary-automator';
@@ -367,15 +395,6 @@ const startAutomation = () => {
   
   // Subscribe to game state for autoplay after defeat
   subscribeToGameState();
-  
-  // Update button to show enabled state
-  api.ui.updateButton(BUTTON_ID, {
-    text: '',
-    icon: '⚡',
-    primary: true,
-    tooltip: t('statusEnabled'),
-    style: { background: 'var(--primary-color, #22c55e)' }
-  });
 };
 
 const stopAutomation = () => {
@@ -388,21 +407,6 @@ const stopAutomation = () => {
   
   // Unsubscribe from game state changes
   unsubscribeFromGameState();
-  
-  // Update button to show disabled state
-  api.ui.updateButton(BUTTON_ID, {
-    text: '',
-    icon: '⚡',
-    primary: false,
-    tooltip: t('statusDisabled')
-  });
-  
-  // Manually restore the regular background
-  const btn = document.getElementById(BUTTON_ID);
-  if (btn) {
-    btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-    btn.style.color = "#ffe066";
-  }
 };
 
 const runAutomationTasks = async () => {
@@ -416,7 +420,7 @@ const runAutomationTasks = async () => {
   }
 };
 
-// Toggle automation on/off
+// Toggle automation on/off (now only used internally)
 const toggleAutomation = () => {
   config.enabled = !config.enabled;
   
@@ -437,9 +441,6 @@ const createConfigPanel = () => {
   const content = document.createElement('div');
   content.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
   
-  // Enable automation checkbox
-  const enabledContainer = createCheckboxContainer('enabled-checkbox', t('enabled'), config.enabled);
-  
   // Auto refill stamina checkbox
   const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('autoRefillStamina'), config.autoRefillStamina);
   
@@ -456,12 +457,26 @@ const createConfigPanel = () => {
   const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
   // Add all elements to content
-  content.appendChild(enabledContainer);
   content.appendChild(refillContainer);
   content.appendChild(staminaContainer);
   content.appendChild(rewardsContainer);
   content.appendChild(dayCareContainer);
   content.appendChild(autoPlayContainer);
+  
+  // Update checkboxes with current config values after creation
+  setTimeout(() => {
+    const refillCheckbox = document.getElementById('auto-refill-checkbox');
+    const rewardsCheckbox = document.getElementById('auto-rewards-checkbox');
+    const dayCareCheckbox = document.getElementById('auto-daycare-checkbox');
+    const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
+    const staminaInput = document.getElementById('min-stamina-input');
+    
+    if (refillCheckbox) refillCheckbox.checked = config.autoRefillStamina;
+    if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
+    if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
+    if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
+    if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
+  }, 100);
   
   // Create the config panel
   return api.ui.createConfigPanel({
@@ -475,7 +490,6 @@ const createConfigPanel = () => {
         primary: true,
         onClick: () => {
           // Update configuration from form values
-          config.enabled = document.getElementById('enabled-checkbox').checked;
           config.autoRefillStamina = document.getElementById('auto-refill-checkbox').checked;
           config.minimumStaminaWithoutRefill = parseInt(document.getElementById('min-stamina-input').value, 10);
           config.autoCollectRewards = document.getElementById('auto-rewards-checkbox').checked;
@@ -483,28 +497,47 @@ const createConfigPanel = () => {
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           
           // Save configuration
-          api.service.updateScriptConfig(context.hash, {
-            enabled: config.enabled,
+          const configToSave = {
             autoRefillStamina: config.autoRefillStamina,
             minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill,
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat
-          });
+          };
           
-          // Start or stop automation based on enabled state
-          if (config.enabled) {
-            startAutomation();
-          } else {
-            stopAutomation();
+          if (window.DEBUG) console.log('[Bestiary Automator] Attempting to save config:', configToSave);
+          
+          // Save to localStorage
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
+            if (window.DEBUG) console.log('[Bestiary Automator] Config saved to localStorage successfully');
+          } catch (error) {
+            if (window.DEBUG) console.error('[Bestiary Automator] Error saving config to localStorage:', error);
           }
           
+          // Also save via the mod config API for compatibility
+          if (window.DEBUG) console.log('[Bestiary Automator] Using hash:', context.hash);
+          if (window.DEBUG) console.log('[Bestiary Automator] updateScriptConfig available:', !!(api.service && api.service.updateScriptConfig));
+          
+          try {
+            api.service.updateScriptConfig(context.hash, configToSave);
+            if (window.DEBUG) console.log('[Bestiary Automator] Config saved via API successfully');
+          } catch (error) {
+            if (window.DEBUG) console.error('[Bestiary Automator] Error saving config via API:', error);
+          }
+          
+          // Always start automation when settings are saved
+          startAutomation();
+          
           // Update game state subscription based on autoplay setting
-          if (config.autoPlayAfterDefeat && config.enabled) {
+          if (config.autoPlayAfterDefeat) {
             subscribeToGameState();
           } else {
             unsubscribeFromGameState();
           }
+          
+          // Update button styling based on enabled features
+          updateAutomatorButton();
           
           showNotification(t('settingsSaved'), 'success');
         }
@@ -564,27 +597,28 @@ const createConfigPanel = () => {
 
 // Create buttons
 const createButtons = () => {
-  // Create the main toggle button
-  api.ui.addButton({
-    id: BUTTON_ID,
-    text: '',
-    icon: '⚡',
-    modId: MOD_ID,
-    tooltip: config.enabled ? t('statusEnabled') : t('statusDisabled'),
-    primary: config.enabled,
-    onClick: toggleAutomation
-  });
+  // Check if any automation features are enabled
+  const hasEnabledFeatures = config.autoRefillStamina || config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat;
   
-  // Create the configuration button
+  // Create only the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
-    text: '',
-    icon: '⚙️',
+    text: 'Automator',
     modId: MOD_ID,
     tooltip: t('configButtonTooltip'),
-    primary: false,
+    primary: hasEnabledFeatures,
     onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
   });
+  
+  // Apply custom styling if features are enabled
+  if (hasEnabledFeatures) {
+    setTimeout(() => {
+      const btn = document.getElementById(CONFIG_BUTTON_ID);
+      if (btn) {
+        btn.style.background = "var(--primary-color, #22c55e)";
+      }
+    }, 100);
+  }
 };
 
 // Initialize the mod
@@ -597,13 +631,11 @@ function init() {
   // Create the config panel
   createConfigPanel();
   
-  // Start automation if enabled in config
-  if (config.enabled) {
-    startAutomation();
-  }
+  // Always start automation on init
+  startAutomation();
   
   // Subscribe to game state if autoplay after defeat is enabled
-  if (config.autoPlayAfterDefeat && config.enabled) {
+  if (config.autoPlayAfterDefeat) {
     subscribeToGameState();
   }
   
@@ -613,28 +645,34 @@ function init() {
 // Initialize the mod
 init();
 
-// Export functionality
-context.exports = {
-  toggleAutomation,
-  updateConfig: (newConfig) => {
-    Object.assign(config, newConfig);
+// Update the Automator button style based on enabled features
+function updateAutomatorButton() {
+  if (api && api.ui) {
+    const hasEnabledFeatures = config.autoRefillStamina || config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat;
     
-    // Update UI as needed
-    api.ui.updateButton(BUTTON_ID, {
-      primary: config.enabled,
-      tooltip: config.enabled ? t('statusEnabled') : t('statusDisabled')
+    api.ui.updateButton(CONFIG_BUTTON_ID, {
+      primary: hasEnabledFeatures,
+      tooltip: t('configButtonTooltip')
     });
     
-    // Manually handle the background styling
-    const btn = document.getElementById(BUTTON_ID);
+    // Apply custom styling
+    const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
-      if (config.enabled) {
+      if (hasEnabledFeatures) {
         btn.style.background = "var(--primary-color, #22c55e)";
       } else {
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
         btn.style.color = "#ffe066";
       }
     }
+  }
+}
+
+// Export functionality
+context.exports = {
+  toggleAutomation,
+  updateConfig: (newConfig) => {
+    Object.assign(config, newConfig);
     
     // Start or stop automation based on enabled state
     if (config.enabled) {
@@ -642,5 +680,8 @@ context.exports = {
     } else {
       stopAutomation();
     }
+    
+    // Update button styling
+    updateAutomatorButton();
   }
 }; 

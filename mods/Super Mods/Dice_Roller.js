@@ -2,7 +2,7 @@
 // 0. Version & Metadata
 // =======================
 (function() {
-  console.log('Dice Roller 2.0 initializing...');
+  console.log('[Dice Roller] initializing...');
   
 // =======================
 // 1. Configuration & Constants
@@ -10,7 +10,6 @@
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
-  // Game configuration constants
   const DICE_CONFIG = {
     MIN_DICE: 1,
     MAX_DICE: 5,
@@ -50,10 +49,39 @@
   const API_ENDPOINT = 'https://bestiaryarena.com/api/trpc/inventory.diceManipulator?batch=1';
   const FRAME_IMAGE_URL = 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png';
   
-  // Performance constants
+  const PerformanceMonitor = {
+    timers: new Map(),
+    
+    start: (label) => {
+      PerformanceMonitor.timers.set(label, performance.now());
+    },
+    
+    end: (label) => {
+      const startTime = PerformanceMonitor.timers.get(label);
+      if (startTime) {
+        const duration = performance.now() - startTime;
+        PerformanceMonitor.timers.delete(label);
+        return duration;
+      }
+      return 0;
+    },
+    
+    measure: async (label, fn) => {
+      PerformanceMonitor.start(label);
+      try {
+        const result = await fn();
+        PerformanceMonitor.end(label);
+        return result;
+      } catch (error) {
+        PerformanceMonitor.end(label);
+        throw error;
+      }
+    }
+  };
+
   const PERFORMANCE = {
     DOM_CACHE_TIMEOUT: 1000,
-    INVENTORY_CACHE_TIMEOUT: 200, // Shorter timeout for inventory elements
+    INVENTORY_CACHE_TIMEOUT: 200,
     API_THROTTLE_MIN: 100,
     API_THROTTLE_MAX: 2000,
     RATE_LIMIT_RETRY_DELAY: 2000,
@@ -61,16 +89,36 @@
     ANIMATION_INTERVAL: 400
   };
   
-  // API request throttling
   let lastApiCall = 0;
-  const API_THROTTLE_DELAY = 200; // Minimum 200ms between API calls (increased from 100)
-  let rateLimitedInterval = null; // For rate limit animation
+  const API_THROTTLE_DELAY = 200;
+  let rateLimitedInterval = null;
 
-  // Module-scoped state instead of global pollution
   let diceRulesConfig = {};
   const STAT_KEYS = ['ap', 'hp', 'ad', 'armor', 'magicResist'];
   
-  // CSS Injection for cross-browser compatibility
+  const TIER_CONFIG = {
+    GREY: { name: 'Grey (5%-49%)', color: '#888888', rarity: 1 },
+    GREEN: { name: 'Green (50%-59%)', color: '#00ff00', rarity: 2 },
+    BLUE: { name: 'Blue (60%-69%)', color: '#0080ff', rarity: 3 },
+    PURPLE: { name: 'Purple (70%-79%)', color: '#8000ff', rarity: 4 },
+    YELLOW: { name: 'Yellow (80%-100%)', color: '#ffff00', rarity: 5 }
+  };
+  
+  const TIER_KEYS = Object.keys(TIER_CONFIG);
+  
+  function getCreatureTier(creature) {
+    const totalStats = (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
+    const maxPossibleStats = 5 * DICE_CONFIG.STAT_LIMIT;
+    const percentage = (totalStats / maxPossibleStats) * 100;
+    
+    if (percentage >= 80) return 'YELLOW';
+    if (percentage >= 70) return 'PURPLE';
+    if (percentage >= 60) return 'BLUE';
+    if (percentage >= 50) return 'GREEN';
+    if (percentage >= 5) return 'GREY';
+    return 'GREY';
+  }
+  
   function injectDiceRollerButtonStyles() {
     if (!document.getElementById('diceroller-btn-css')) {
       const style = document.createElement('style');
@@ -108,7 +156,6 @@
     }
   }
   
-  // Debouncing utility for status updates
   let statusUpdateTimeout = null;
   const debouncedStatusUpdate = (callback) => {
     if (statusUpdateTimeout) {
@@ -117,7 +164,42 @@
     statusUpdateTimeout = setTimeout(callback, 100);
   };
 
-  // Centralized status update function
+  const LoadingManager = {
+    show: (element, message = 'Loading...') => {
+      if (!element) return;
+      
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'dice-roller-loading';
+      loadingDiv.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        z-index: 1000;
+        font-size: 12px;
+        font-family: Arial, sans-serif;
+      `;
+      loadingDiv.textContent = message;
+      
+      element.style.position = 'relative';
+      element.appendChild(loadingDiv);
+      
+      return loadingDiv;
+    },
+    
+    hide: (element) => {
+      if (!element) return;
+      const loadingDiv = element.querySelector('.dice-roller-loading');
+      if (loadingDiv) {
+        loadingDiv.remove();
+      }
+    }
+  };
+
   const updateStatusDisplays = () => {
     debouncedStatusUpdate(() => {
       if (typeof window.updateStatusDisplays === 'function') {
@@ -126,7 +208,6 @@
     });
   };
 
-  // DOM Caching System for Performance
   const DOMCache = {
     cache: new Map(),
     cacheTimeout: PERFORMANCE.DOM_CACHE_TIMEOUT,
@@ -170,7 +251,6 @@
     }
   };
 
-  // Memoization Utilities
   const MemoizationUtils = {
     memoize: function(fn, keyFn = (...args) => JSON.stringify(args)) {
       const cache = new Map();
@@ -206,17 +286,55 @@
 // =======================
 // 2. Utility Functions
 // =======================
+  // Enhanced error boundary wrapper
+  const safeExecute = (fn, fallback, context = 'Unknown') => {
+    try {
+      return fn();
+    } catch (error) {
+      console.error(`[Dice Roller] Error in ${context}:`, error);
+      return fallback;
+    }
+  };
+
+  // Centralized error handling for status updates
+  const updateStatusWithError = (statusDiv, message, duration = 3000) => {
+    if (!statusDiv) return;
+    
+    const originalText = statusDiv.textContent;
+    statusDiv.textContent = `Error: ${message}`;
+    statusDiv.style.color = '#ff6b6b';
+    
+    setTimeout(() => {
+      if (statusDiv && statusDiv.textContent === `Error: ${message}`) {
+        statusDiv.textContent = originalText;
+        statusDiv.style.color = '#ffffff';
+      }
+    }, duration);
+  };
+
+  // Safe API call wrapper
+  const safeApiCall = async (apiFunction, errorMessage = 'API call failed') => {
+    try {
+      return await apiFunction();
+    } catch (error) {
+      console.error(`[Dice Roller] ${errorMessage}:`, error);
+      throw new Error(`${errorMessage}: ${error.message}`);
+    }
+  };
+
   // Memoized level calculation for performance
   const getLevelFromExp = MemoizationUtils.memoize((exp) => {
-    if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) {
-      return 1;
-    }
-    for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
-      if (exp >= EXP_TABLE[i][1]) {
-        return EXP_TABLE[i][0];
+    return safeExecute(() => {
+      if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) {
+        return 1;
       }
-    }
-    return 1;
+      for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
+        if (exp >= EXP_TABLE[i][1]) {
+          return EXP_TABLE[i][0];
+        }
+      }
+      return 1;
+    }, 1, 'getLevelFromExp');
   });
 
   function getRarityFromStats(stats) {
@@ -229,8 +347,19 @@
     return rarity;
   }
 
+  function getTierNumber(tierName) {
+    const tierMap = {
+      'GREY': 1,
+      'GREEN': 2,
+      'BLUE': 3,
+      'PURPLE': 4,
+      'YELLOW': 5
+    };
+    return tierMap[tierName] || 1;
+  }
+
   function getCurrentStats(selectedMonsterId) {
-    const { monsters } = globalThis.state.player.getSnapshot().context;
+    const monsters = safeGetMonsters();
     const creature = monsters.find(c => String(c.id) === String(selectedMonsterId));
     if (!creature) return {};
     return {
@@ -253,14 +382,45 @@
     }
   }, 500); // Cache for 500ms to avoid excessive state access
 
+  // Function to clear the safeGetMonsters cache
+  const clearMonstersCache = () => {
+    // Force a cache miss by calling the function with a different timestamp
+    // This is a workaround since MemoizationUtils doesn't expose cache clearing
+    safeGetMonsters.cache = new Map();
+  };
+
   function validateDiceSelection(dice, stats) {
-    if (!Array.isArray(dice) || dice.length === 0) {
+    // Input validation
+    if (!Array.isArray(dice)) {
+      throw new Error('Dice parameter must be an array');
+    }
+    if (dice.length === 0) {
       throw new Error('No dice selected');
     }
+    
+    // Validate dice values
+    const validDice = dice.every(d => Number.isInteger(d) && d >= 1 && d <= 5);
+    if (!validDice) {
+      throw new Error('Invalid dice values. Must be integers between 1 and 5');
+    }
+    
+    // Validate stats array
+    if (!Array.isArray(stats)) {
+      throw new Error('Stats parameter must be an array');
+    }
+    
     const minDice = Math.min(...dice);
     const maxStats = 6 - minDice;
+    
     if (stats.length !== maxStats) {
       throw new Error(`Invalid stat/dice combination: ${stats.length} stats for dice tier ${minDice}`);
+    }
+    
+    // Validate stat names
+    const validStats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+    const invalidStats = stats.filter(stat => !validStats.includes(stat));
+    if (invalidStats.length > 0) {
+      throw new Error(`Invalid stat names: ${invalidStats.join(', ')}`);
     }
   }
 
@@ -285,6 +445,108 @@
     }
   }
 
+  // Reusable creature button creation function
+  function createCreatureButton(creature, onSelect) {
+    const btn = document.createElement('button');
+    btn.className = 'focus-style-visible active:opacity-70';
+    btn.setAttribute('data-state', 'closed');
+    btn.setAttribute('data-gameid', creature.gameId);
+    
+    // Constrain button size to match inner content
+    btn.style.width = '34px';
+    btn.style.height = '34px';
+    btn.style.minWidth = '34px';
+    btn.style.minHeight = '34px';
+    btn.style.maxWidth = '34px';
+    btn.style.maxHeight = '34px';
+    btn.style.display = 'flex';
+    btn.style.alignItems = 'center';
+    btn.style.justifyContent = 'center';
+    btn.style.padding = '0';
+    btn.style.margin = '0';
+    btn.style.border = 'none';
+    btn.style.background = 'none';
+    btn.style.cursor = 'pointer';
+    
+    btn.onclick = () => {
+      if (onSelect) onSelect(creature.id);
+      
+      // Trigger a custom event that the parent can listen for
+      const event = new CustomEvent('creatureSelected', {
+        detail: { creatureId: creature.id, creature: creature }
+      });
+      btn.dispatchEvent(event);
+    };
+    
+    // Container slot
+    const slot = document.createElement('div');
+    slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
+    slot.setAttribute('data-highlighted', 'false');
+    slot.setAttribute('data-recent', 'false');
+    slot.setAttribute('data-multiselected', 'false');
+    slot.style.width = '34px';
+    slot.style.height = '34px';
+    slot.style.minWidth = '34px';
+    slot.style.minHeight = '34px';
+    slot.style.maxWidth = '34px';
+    slot.style.maxHeight = '34px';
+    
+    // Rarity border/background
+    const rarity = getRarityFromStats(creature);
+    const rarityDiv = document.createElement('div');
+    rarityDiv.setAttribute('role', 'none');
+    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityDiv.setAttribute('data-rarity', rarity);
+    slot.appendChild(rarityDiv);
+    
+    // Star tier icon
+    if (creature.tier) {
+      const starImg = document.createElement('img');
+      starImg.alt = 'star tier';
+      starImg.src = `/assets/icons/star-tier-${creature.tier}.png`;
+      starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+      slot.appendChild(starImg);
+    }
+    
+    // Level badge
+    const levelDiv = document.createElement('div');
+    levelDiv.className = 'creature-level-badge';
+    levelDiv.style.position = 'absolute';
+    levelDiv.style.bottom = '2px';
+    levelDiv.style.left = '2px';
+    levelDiv.style.zIndex = '3';
+    levelDiv.style.fontSize = '16px';
+    levelDiv.style.color = '#fff';
+    levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
+    levelDiv.style.letterSpacing = '0.5px';
+    levelDiv.textContent = getLevelFromExp(creature.exp);
+    slot.appendChild(levelDiv);
+    
+    // Portrait image
+    const img = document.createElement('img');
+    img.className = 'pixelated ml-auto';
+    img.alt = 'creature';
+    img.width = 34;
+    img.height = 34;
+    img.style.width = '34px';
+    img.style.height = '34px';
+    img.style.minWidth = '34px';
+    img.style.minHeight = '34px';
+    img.style.maxWidth = '34px';
+    img.style.maxHeight = '34px';
+    img.style.objectFit = 'contain';
+    img.src = `/assets/portraits/${creature.gameId}.png`;
+    slot.appendChild(img);
+    
+    // Tooltip
+    const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+    btn.title = creatureName;
+    
+    // Assemble
+    btn.appendChild(slot);
+    return btn;
+  }
+
   // Utility function to update dice button states
   function updateDiceButtonStates(selectedDice) {
     // Use DOMCache for performance
@@ -297,11 +559,18 @@
         const slot = btn.querySelector('.container-slot');
         if (slot && selectedDice.includes(diceIndex)) {
           btn.setAttribute('data-state', 'selected');
-          slot.style.boxShadow = '0 0 0 2px #00ff00';
-          slot.style.borderRadius = '0';
+          // Apply selection highlighting to the button itself, not the slot
+          btn.style.boxShadow = '0 0 0 2px #00ff00';
+          btn.style.borderRadius = '0';
+          // Ensure button stays within grid bounds
+          btn.style.position = 'relative';
+          btn.style.overflow = 'hidden';
         } else if (slot) {
           btn.setAttribute('data-state', 'closed');
-          slot.style.boxShadow = 'none';
+          btn.style.boxShadow = 'none';
+          btn.style.borderRadius = '';
+          btn.style.position = '';
+          btn.style.overflow = '';
         }
         diceButtonIndex++;
       }
@@ -367,26 +636,69 @@
 // =======================
 // 4. Core UI Functions
 // =======================
-  function getCreatureList(onSelect, selectedDice, render, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, lastStatusMessage) {
-    const col = document.createElement('div');
-    col.style.width = '100%';
-    col.style.display = 'flex';
-    col.style.flexDirection = 'column';
-    col.style.alignItems = 'center';
-    col.style.overflow = 'hidden';
-    col.style.boxSizing = 'border-box';
-    col.style.flex = '1 1 0';
-    col.style.height = '100%';
-    col.style.minHeight = '0';
-    col.style.position = 'relative';
-    // Modern scroll area as grid
+  // Create search bar component
+  function createSearchBar() {
+    const searchContainer = document.createElement('div');
+    searchContainer.style.cssText = `
+      display: flex;
+      align-items: center;
+      padding: 4px 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      margin: 4px 0;
+      width: 90%;
+      margin-left: 4px;
+      margin-right: auto;
+      box-sizing: border-box;
+    `;
+    
+    const searchInnerContainer = document.createElement('div');
+    searchInnerContainer.style.cssText = `
+      width: 100%;
+      display: flex;
+      align-items: center;
+    `;
+    
+    const searchInput = document.createElement('input');
+    searchInput.id = 'dice-roller-search';
+    searchInput.placeholder = 'Search creatures...';
+    searchInput.style.cssText = `
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 3px 6px;
+      border-radius: 2px;
+      font-size: 12px;
+      width: 100%;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+    `;
+    
+    searchInput.addEventListener('focus', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+    });
+    
+    searchInput.addEventListener('blur', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    searchInnerContainer.appendChild(searchInput);
+    searchContainer.appendChild(searchInnerContainer);
+    
+    return { searchContainer, searchInput };
+  }
+
+  // Create scroll area with custom scrollbar
+  function createScrollArea() {
     const scrollFlexWrapper = document.createElement('div');
     scrollFlexWrapper.style.display = 'flex';
     scrollFlexWrapper.style.flexDirection = 'row';
     scrollFlexWrapper.style.alignItems = 'stretch';
     scrollFlexWrapper.style.position = 'relative';
     scrollFlexWrapper.style.width = '100%';
-    scrollFlexWrapper.style.height = '100%';
+    scrollFlexWrapper.style.height = 'calc(100% - 40px)';
 
     const scrollArea = document.createElement('div');
     scrollArea.style.flex = '1 1 0';
@@ -396,10 +708,10 @@
     scrollArea.style.overflowY = 'auto';
     scrollArea.style.display = 'grid';
     scrollArea.style.gridTemplateColumns = 'repeat(6, 1fr)';
+    scrollArea.style.gridAutoRows = '34px';
     scrollArea.style.gap = '0';
-    scrollArea.style.padding = '5px 20px 5px 5px'; // Right padding: 12px scrollbar + 4px spacing + 4px right margin
+    scrollArea.style.padding = '5px 20px 5px 5px';
     scrollArea.style.background = 'rgba(40,40,40,0.96)';
-    // Hide default scrollbar completely
     scrollArea.style.scrollbarWidth = 'none';
     scrollArea.style.msOverflowStyle = 'none';
     scrollArea.style.setProperty('scrollbar-width', 'none', 'important');
@@ -408,14 +720,17 @@
     scrollArea.style.setProperty('-webkit-scrollbar-thumb', 'none', 'important');
     scrollArea.style.setProperty('-webkit-scrollbar-corner', 'none', 'important');
 
-    // Custom scrollbar element (static, not functional)
+    return { scrollFlexWrapper, scrollArea };
+  }
+
+  // Create custom scrollbar
+  function createCustomScrollbar(scrollArea) {
     const customScrollbar = document.createElement('div');
     customScrollbar.setAttribute('data-orientation', 'vertical');
     customScrollbar.className = 'scrollbar-element frame-1 surface-dark flex touch-none select-none border-0 data-[orientation="horizontal"]:h-3 data-[orientation="vertical"]:h-full data-[orientation="vertical"]:w-3 data-[orientation="horizontal"]:flex-col';
-    // Position outside the scroll area with proper spacing
     customScrollbar.style.position = 'absolute';
     customScrollbar.style.top = '0';
-    customScrollbar.style.right = '4px'; // Position 4px from right edge for better visual separation
+    customScrollbar.style.right = '4px';
     customScrollbar.style.bottom = '0';
     customScrollbar.style.width = '12px';
     customScrollbar.style.height = '100%';
@@ -425,7 +740,7 @@
     customScrollbar.style.borderRadius = '4px';
     customScrollbar.style.zIndex = '2';
     customScrollbar.style.setProperty('--radix-scroll-area-thumb-height', '82.27611940298507px');
-    // Thumb
+    
     const thumb = document.createElement('div');
     thumb.setAttribute('data-state', 'visible');
     thumb.setAttribute('data-orientation', 'vertical');
@@ -443,8 +758,7 @@
     thumb.style.margin = '3px 2px';
     thumb.style.background = 'linear-gradient(180deg, #444 0%, #333 50%, #222 100%)';
     thumb.style.transition = 'background 0.2s ease, box-shadow 0.2s ease';
-    customScrollbar.appendChild(thumb);
-
+    
     // Add hover effects
     thumb.addEventListener('mouseenter', () => {
       thumb.style.background = 'linear-gradient(180deg, #555 0%, #444 50%, #333 100%)';
@@ -458,34 +772,37 @@
       thumb.style.border = '1px solid #555';
     });
 
-    // Add only scrollArea to wrapper
-    scrollFlexWrapper.appendChild(scrollArea);
+    customScrollbar.appendChild(thumb);
+    
+    return { customScrollbar, thumb };
+  }
 
-    // --- Make custom scrollbar functional ---
+  // Setup scrollbar functionality
+  function setupScrollbarFunctionality(scrollArea, customScrollbar, thumb) {
     function updateThumb() {
       const contentHeight = scrollArea.scrollHeight;
       const visibleHeight = scrollArea.clientHeight;
       const scrollTop = scrollArea.scrollTop;
       const trackHeight = scrollArea.offsetHeight;
-      // Thumb height: proportional to visible/content
-      const thumbHeight = Math.max((visibleHeight / contentHeight) * trackHeight, 24); // min 24px
-      // Thumb position: proportional to scroll
+      const thumbHeight = Math.max((visibleHeight / contentHeight) * trackHeight, 24);
       const maxScroll = contentHeight - visibleHeight;
       const maxThumbTop = trackHeight - thumbHeight;
       const thumbTop = maxScroll > 0 ? (scrollTop / maxScroll) * maxThumbTop : 0;
       thumb.style.height = thumbHeight + 'px';
       thumb.style.transform = `translate3d(0px, ${thumbTop}px, 0px)`;
     }
-    // Sync thumb on scroll and resize
+    
     scrollArea.addEventListener('scroll', updateThumb);
     window.addEventListener('resize', updateThumb);
-    // Sync on content changes (optional, for dynamic lists)
+    
     const resizeObserver = new ResizeObserver(updateThumb);
     resizeObserver.observe(scrollArea);
+    
     // Drag logic
     let isDragging = false;
     let dragStartY = 0;
     let dragStartScroll = 0;
+    
     thumb.addEventListener('mousedown', e => {
       isDragging = true;
       dragStartY = e.clientY;
@@ -493,6 +810,7 @@
       document.body.style.userSelect = 'none';
       e.preventDefault();
     });
+    
     document.addEventListener('mousemove', e => {
       if (!isDragging) return;
       const contentHeight = scrollArea.scrollHeight;
@@ -505,10 +823,12 @@
       const scrollDelta = (deltaY / maxThumbTop) * maxScroll;
       scrollArea.scrollTop = dragStartScroll + scrollDelta;
     });
+    
     document.addEventListener('mouseup', () => {
       isDragging = false;
       document.body.style.userSelect = '';
     });
+    
     // Track click logic
     customScrollbar.addEventListener('mousedown', e => {
       if (e.target !== thumb) {
@@ -525,16 +845,194 @@
         scrollArea.scrollTop = newScroll;
       }
     });
-    // Initial thumb update
+    
     setTimeout(updateThumb, 0);
-    // Creature buttons
+  }
+
+  // Render creature list
+  function renderCreatureList(scrollArea, monsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage) {
+    if (!monsters.length) {
+      scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
+      return;
+    }
+    
+    // Optimized sorting with pre-calculated values
+    const sortedMonsters = [...monsters].map(monster => ({
+      ...monster,
+      _level: getLevelFromExp(monster.exp),
+      _statSum: (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0)
+    })).sort((a, b) => {
+      if (a._level !== b._level) return b._level - a._level;
+      const tierA = a.tier || 0;
+      const tierB = b.tier || 0;
+      if (tierA !== tierB) return tierB - tierA;
+      const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
+      if (gameIdCompare !== 0) return gameIdCompare;
+      return b._statSum - a._statSum;
+    });
+    
+    for (const creature of sortedMonsters) {
+      const btn = createCreatureButton(creature, (creatureId) => {
+        const isNewCreature = selectedGameId !== creatureId;
+        
+        if (onSelect) onSelect(creatureId);
+        
+        if (typeof updateDetailsOnly === 'function') {
+          updateDetailsOnly(creatureId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+        }
+        
+        setTimeout(() => {
+          updateStatusDisplays();
+          if (isNewCreature && typeof window.resetRollCount === 'function') {
+            window.resetRollCount();
+          }
+        }, 0);
+      });
+      
+      scrollArea.appendChild(btn);
+    }
+  }
+
+  function getCreatureList(onSelect, selectedDice, render, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, lastStatusMessage) {
+    const col = document.createElement('div');
+    col.style.width = '100%';
+    col.style.display = 'flex';
+    col.style.flexDirection = 'column';
+    col.style.alignItems = 'center';
+    col.style.overflow = 'hidden';
+    col.style.boxSizing = 'border-box';
+    col.style.flex = '1 1 0';
+    col.style.height = '100%';
+    col.style.minHeight = '0';
+    col.style.position = 'relative';
+    
+    // Create search bar
+    const { searchContainer, searchInput } = createSearchBar();
+    col.appendChild(searchContainer);
+    
+    // Create scroll area
+    const { scrollFlexWrapper, scrollArea } = createScrollArea();
+    
+    // Create custom scrollbar
+    const { customScrollbar, thumb } = createCustomScrollbar(scrollArea);
+    
+    // Setup scrollbar functionality
+    setupScrollbarFunctionality(scrollArea, customScrollbar, thumb);
+    
+    // Add scrollArea to wrapper
+    scrollFlexWrapper.appendChild(scrollArea);
+    
+    // Render initial creature list
     try {
+      const monsters = safeGetMonsters();
+      renderCreatureList(scrollArea, monsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+    } catch (e) {
+      scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">Error loading creatures.</div>';
+    }
+    
+    // Add scrollArea to wrapper and custom scrollbar
+    scrollFlexWrapper.appendChild(scrollArea);
+    scrollFlexWrapper.appendChild(customScrollbar);
+    // Setup search functionality
+    let searchTimeout = null;
+    const debouncedSearch = (value) => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+      searchTimeout = setTimeout(() => {
+        applyCreatureSearch(scrollArea, value);
+      }, 150);
+    };
+    
+    searchInput.addEventListener('input', (e) => {
+      debouncedSearch(e.target.value);
+    });
+    
+    // Listen for search events to handle creature selection
+    scrollArea.addEventListener('creatureSelected', (event) => {
+      const { creatureId, creature } = event.detail;
+      const isNewCreature = selectedGameId !== creatureId;
+      
+      if (onSelect) onSelect(creatureId);
+      
+      if (typeof updateDetailsOnly === 'function') {
+        updateDetailsOnly(creatureId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+      }
+      
+      setTimeout(() => {
+        updateStatusDisplays();
+        if (isNewCreature && typeof window.resetRollCount === 'function') {
+          window.resetRollCount();
+        }
+      }, 0);
+    });
+    
+    // Listen for search cleared events to restore full list
+    scrollArea.addEventListener('searchCleared', () => {
       const monsters = safeGetMonsters();
       if (!monsters.length) {
         scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
-        col.appendChild(scrollFlexWrapper);
-        return col;
+        return;
       }
+      
+      scrollArea.innerHTML = '';
+      scrollArea.style.display = 'grid';
+      scrollArea.style.gridTemplateColumns = 'repeat(6, 1fr)';
+      scrollArea.style.gridAutoRows = '34px';
+      scrollArea.style.gap = '0';
+      
+      renderCreatureList(scrollArea, monsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+    });
+    
+    // Clean up search timeout on cleanup
+    const originalCleanup = cleanup;
+    cleanup = function() {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+        searchTimeout = null;
+      }
+      originalCleanup();
+    };
+    
+    // Listen for search events to handle creature selection
+    scrollArea.addEventListener('creatureSelected', (event) => {
+      const { creatureId, creature } = event.detail;
+      const isNewCreature = selectedGameId !== creatureId;
+      
+      if (onSelect) onSelect(creatureId);
+      
+      if (typeof updateDetailsOnly === 'function') {
+        updateDetailsOnly(creatureId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+      }
+      
+      // Update status displays when creature changes
+      setTimeout(() => {
+        updateStatusDisplays();
+        // Reset autoroll count only when changing to a new creature
+        if (isNewCreature && typeof window.resetRollCount === 'function') {
+          window.resetRollCount();
+        }
+      }, 0);
+    });
+    
+    // Listen for search cleared events to restore full list
+    scrollArea.addEventListener('searchCleared', () => {
+      // Re-render the full creature list
+      const monsters = safeGetMonsters();
+      if (!monsters.length) {
+        scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
+        return;
+      }
+      
+      // Clear and re-render with all creatures
+      scrollArea.innerHTML = '';
+      
+              // Ensure grid layout is maintained after clearing
+        scrollArea.style.display = 'grid';
+        scrollArea.style.gridTemplateColumns = 'repeat(6, 1fr)';
+        scrollArea.style.gridAutoRows = '34px';
+        scrollArea.style.gap = '0';
+      
       // Optimized sorting with pre-calculated values
       const sortedMonsters = [...monsters].map(monster => ({
         ...monster,
@@ -553,12 +1051,29 @@
         // Stat sum (desc)
         return b._statSum - a._statSum;
       });
+      
+      // Re-create all creature buttons
       for (const creature of sortedMonsters) {
         // Create button
         const btn = document.createElement('button');
         btn.className = 'focus-style-visible active:opacity-70';
         btn.setAttribute('data-state', 'closed');
         btn.setAttribute('data-gameid', creature.gameId);
+        // Constrain button size to match inner content
+        btn.style.width = '34px';
+        btn.style.height = '34px';
+        btn.style.minWidth = '34px';
+        btn.style.minHeight = '34px';
+        btn.style.maxWidth = '34px';
+        btn.style.maxHeight = '34px';
+        btn.style.display = 'flex';
+        btn.style.alignItems = 'center';
+        btn.style.justifyContent = 'center';
+        btn.style.padding = '0';
+        btn.style.margin = '0';
+        btn.style.border = 'none';
+        btn.style.background = 'none';
+        btn.style.cursor = 'pointer';
         btn.onclick = () => {
           const isNewCreature = selectedGameId !== creature.id;
           
@@ -577,6 +1092,7 @@
             }
           }, 0);
         };
+        
         // Container slot
         const slot = document.createElement('div');
         slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
@@ -589,6 +1105,7 @@
         slot.style.minHeight = '34px';
         slot.style.maxWidth = '34px';
         slot.style.maxHeight = '34px';
+        
         // Rarity border/background
         const rarity = getRarityFromStats(creature);
         const rarityDiv = document.createElement('div');
@@ -596,6 +1113,7 @@
         rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
         rarityDiv.setAttribute('data-rarity', rarity);
         slot.appendChild(rarityDiv);
+        
         // Star tier icon
         if (creature.tier) {
           const starImg = document.createElement('img');
@@ -604,6 +1122,7 @@
           starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
           slot.appendChild(starImg);
         }
+        
         // Level badge
         const levelDiv = document.createElement('div');
         levelDiv.className = 'creature-level-badge';
@@ -617,6 +1136,7 @@
         levelDiv.style.letterSpacing = '0.5px';
         levelDiv.textContent = getLevelFromExp(creature.exp);
         slot.appendChild(levelDiv);
+        
         // Portrait image
         const img = document.createElement('img');
         img.className = 'pixelated ml-auto';
@@ -632,22 +1152,241 @@
         img.style.objectFit = 'contain';
         img.src = `/assets/portraits/${creature.gameId}.png`;
         slot.appendChild(img);
+        
         // Tooltip
         const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
         btn.title = creatureName;
+        
         // Assemble
         btn.appendChild(slot);
         scrollArea.appendChild(btn);
       }
-    } catch (e) {
-      scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">Error loading creatures.</div>';
-    }
+    });
+    
     col.appendChild(scrollFlexWrapper);
     col.appendChild(customScrollbar);
     return col;
   }
 
-  function getCreatureDetails(selectedGameId, selectedDice) {
+  function applyCreatureSearch(scrollArea, searchValue) {
+    // Input validation
+    if (!scrollArea || !(scrollArea instanceof HTMLElement)) {
+      console.error('[Dice Roller] Invalid scrollArea parameter');
+      return;
+    }
+    
+    if (typeof searchValue !== 'string') {
+      console.error('[Dice Roller] Search value must be a string');
+      return;
+    }
+    
+    const searchTerm = searchValue.toLowerCase().trim();
+    
+    console.log('[Dice Roller] Search term:', searchTerm);
+    
+    if (searchTerm && searchTerm.length > 0) {
+      // Performance optimization: Use requestAnimationFrame for smooth UI updates
+      requestAnimationFrame(() => {
+        PerformanceMonitor.start('creature-search');
+        try {
+          const monsters = safeGetMonsters();
+          console.log('[Dice Roller] Found monsters:', monsters.length);
+          
+          // Helper function to check if creature name matches search term (with wildcard support)
+          const matchesSearch = (creatureName, searchTerm) => {
+            const name = creatureName.toLowerCase();
+            const term = searchTerm.toLowerCase();
+            
+            // Handle wildcard patterns
+            if (term.includes('*')) {
+              const regexPattern = term.replace(/\*/g, '.*');
+              const regex = new RegExp(regexPattern);
+              return regex.test(name);
+            }
+            
+            // Simple substring match
+            return name.includes(term);
+          };
+          
+          // Filter and sort matching creatures directly from monster data
+          const matchingMonsters = monsters
+            .map(monster => ({
+              ...monster,
+              creatureName: getMonsterNameFromId(monster.gameId) || monster.name || monster.gameId,
+              _level: getLevelFromExp(monster.exp),
+              _statSum: (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0)
+            }))
+            .filter(monster => matchesSearch(monster.creatureName, searchTerm))
+            .sort((a, b) => {
+              // Level (desc)
+              if (a._level !== b._level) return b._level - a._level;
+              // Tier (desc)
+              const tierA = a.tier || 0;
+              const tierB = b.tier || 0;
+              if (tierA !== tierB) return tierB - tierA;
+              // Game ID (asc, string compare)
+              const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
+              if (gameIdCompare !== 0) return gameIdCompare;
+              // Stat sum (desc)
+              return b._statSum - a._statSum;
+            });
+          
+          console.log('[Dice Roller] Matching creatures:', matchingMonsters.length);
+          
+          // Performance optimization: Use DocumentFragment for batch DOM updates
+          const fragment = document.createDocumentFragment();
+          
+          // Clear the scroll area completely
+          scrollArea.innerHTML = '';
+          
+          if (matchingMonsters.length === 0) {
+          // Show "no results" message
+          const noResultsMsg = document.createElement('div');
+          noResultsMsg.className = 'no-results-message';
+          noResultsMsg.style.cssText = `
+            color: #888;
+            text-align: center;
+            padding: 20px;
+            grid-column: span 6;
+            font-style: italic;
+            font-size: 12px;
+          `;
+          noResultsMsg.textContent = `No creatures found matching "${searchValue}"`;
+          scrollArea.appendChild(noResultsMsg);
+        } else {
+          // Re-render only matching creatures
+          matchingMonsters.forEach(creature => {
+            // Create button
+            const btn = document.createElement('button');
+            btn.className = 'focus-style-visible active:opacity-70';
+            btn.setAttribute('data-state', 'closed');
+            btn.setAttribute('data-gameid', creature.gameId);
+            // Constrain button size to match inner content
+            btn.style.width = '34px';
+            btn.style.height = '34px';
+            btn.style.minWidth = '34px';
+            btn.style.minHeight = '34px';
+            btn.style.maxWidth = '34px';
+            btn.style.maxHeight = '34px';
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.padding = '0';
+            btn.style.margin = '0';
+            btn.style.border = 'none';
+            btn.style.background = 'none';
+            btn.style.cursor = 'pointer';
+            
+            // Store the original click handler parameters for later use
+            const originalOnClick = btn.onclick;
+            
+            btn.onclick = () => {
+              // This will be set up by the parent function that calls getCreatureList
+              // For now, we'll store the creature ID for the parent to handle
+              btn.setAttribute('data-creature-id', creature.id);
+              
+              // Trigger a custom event that the parent can listen for
+              const event = new CustomEvent('creatureSelected', {
+                detail: { creatureId: creature.id, creature: creature }
+              });
+              scrollArea.dispatchEvent(event);
+            };
+            
+            // Container slot
+            const slot = document.createElement('div');
+            slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
+            slot.setAttribute('data-highlighted', 'false');
+            slot.setAttribute('data-recent', 'false');
+            slot.setAttribute('data-multiselected', 'false');
+            slot.style.width = '34px';
+            slot.style.height = '34px';
+            slot.style.minWidth = '34px';
+            slot.style.minHeight = '34px';
+            slot.style.maxWidth = '34px';
+            slot.style.maxHeight = '34px';
+            
+            // Rarity border/background
+            const rarity = getRarityFromStats(creature);
+            const rarityDiv = document.createElement('div');
+            rarityDiv.setAttribute('role', 'none');
+            rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+            rarityDiv.setAttribute('data-rarity', rarity);
+            slot.appendChild(rarityDiv);
+            
+            // Star tier icon
+            if (creature.tier) {
+              const starImg = document.createElement('img');
+              starImg.alt = 'star tier';
+              starImg.src = `/assets/icons/star-tier-${creature.tier}.png`;
+              starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+              slot.appendChild(starImg);
+            }
+            
+            // Level badge
+            const levelDiv = document.createElement('div');
+            levelDiv.className = 'creature-level-badge';
+            levelDiv.style.position = 'absolute';
+            levelDiv.style.bottom = '2px';
+            levelDiv.style.left = '2px';
+            levelDiv.style.zIndex = '3';
+            levelDiv.style.fontSize = '16px';
+            levelDiv.style.color = '#fff';
+            levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
+            levelDiv.style.letterSpacing = '0.5px';
+            levelDiv.textContent = getLevelFromExp(creature.exp);
+            slot.appendChild(levelDiv);
+            
+            // Portrait image
+            const img = document.createElement('img');
+            img.className = 'pixelated ml-auto';
+            img.alt = 'creature';
+            img.width = 34;
+            img.height = 34;
+            img.style.width = '34px';
+            img.style.height = '34px';
+            img.style.minWidth = '34px';
+            img.style.minHeight = '34px';
+            img.style.maxWidth = '34px';
+            img.style.maxHeight = '34px';
+            img.style.objectFit = 'contain';
+            img.src = `/assets/portraits/${creature.gameId}.png`;
+            slot.appendChild(img);
+            
+            // Tooltip
+            btn.title = creature.creatureName;
+            
+            // Assemble
+            btn.appendChild(slot);
+            fragment.appendChild(btn);
+          });
+        }
+        
+                  // Batch append all elements at once
+          scrollArea.appendChild(fragment);
+          
+          PerformanceMonitor.end('creature-search');
+          console.log('[Dice Roller] Search complete - re-rendered grid with', matchingMonsters.length, 'creatures');
+          
+        } catch (e) {
+          PerformanceMonitor.end('creature-search');
+        console.error('Error in creature search:', e);
+        // Fallback to simple filtering
+        const creatureButtons = scrollArea.querySelectorAll('button[data-gameid]');
+        creatureButtons.forEach(btn => {
+          const creatureName = btn.title || '';
+          const isMatch = matchesSearch(creatureName, searchTerm);
+          btn.style.display = isMatch ? 'block' : 'none';
+        });
+      }
+    });
+  } else {
+    // No search term - trigger a full re-render to show all creatures
+    const event = new CustomEvent('searchCleared');
+    scrollArea.dispatchEvent(event);
+  }
+}
+
+  function getCreatureDetails(selectedGameId, selectedDice, currentTier = null) {
     // Initialize dice rules config using utility function
     const diceRulesConfig = initializeDiceRulesConfig();
     
@@ -665,7 +1404,22 @@
         div.innerText = 'Creature not found.';
         return div;
       }
-      const rarity = getRarityFromStats(creature);
+      // Use currentTier if provided (from autoroll), otherwise use global current tier, otherwise calculate from stats
+      const rarity = currentTier ? getTierNumber(currentTier) : 
+                    (window.DiceRollerCurrentTier && selectedGameId === window.DiceRollerCurrentGameId ? getTierNumber(window.DiceRollerCurrentTier) : null) ||
+                    getRarityFromStats(creature);
+      
+      // Only log tier calculations in debug mode
+      if (window.DiceRollerDebugMode === true) {
+        console.log('[Stats Roller] Portrait tier calculation:', {
+          selectedGameId,
+          currentTier,
+          globalCurrentTier: window.DiceRollerCurrentTier,
+          globalCurrentGameId: window.DiceRollerCurrentGameId,
+          calculatedRarity: rarity,
+          usingGlobalTier: window.DiceRollerCurrentTier && selectedGameId === window.DiceRollerCurrentGameId
+        });
+      }
       // Portrait above stats
       const detailsCol = document.createElement('div');
       detailsCol.style.display = 'flex';
@@ -865,27 +1619,31 @@
       
       portraitNameContainer.appendChild(nameLevelContainer);
       detailsCol.appendChild(portraitNameContainer);
+      
       // --- Combined stat/dice rules UI below portrait ---
       const combinedDiv = document.createElement('div');
       combinedDiv.style.display = 'flex';
       combinedDiv.style.flexDirection = 'column';
       combinedDiv.style.gap = '2px';
-      combinedDiv.style.marginTop = '6px';
+      combinedDiv.style.marginTop = '4px';
       combinedDiv.style.alignItems = 'stretch';
       combinedDiv.style.width = '100%';
       combinedDiv.style.maxWidth = '100%';
       combinedDiv.style.overflow = 'auto';
       combinedDiv.style.boxSizing = 'border-box';
       combinedDiv.style.padding = '0 5px';
-      // --- Stat selection limit logic ---
-      let maxStats = 5;
-      if (Array.isArray(selectedDice) && selectedDice.length > 0) {
-        const minDice = Math.min(...selectedDice);
-        maxStats = 6 - minDice;
-        if (maxStats < 1) maxStats = 1;
-      }
-      // Track all checkboxes for dynamic enable/disable
-      const checkboxElements = [];
+      
+      // Show different content based on mode
+      if (window.DiceRollerMode === 'genes') {
+        // --- Stat selection limit logic ---
+        let maxStats = 5;
+        if (Array.isArray(selectedDice) && selectedDice.length > 0) {
+          const minDice = Math.min(...selectedDice);
+          maxStats = 6 - minDice;
+          if (maxStats < 1) maxStats = 1;
+        }
+        // Track all checkboxes for dynamic enable/disable
+        const checkboxElements = [];
       function updateCheckboxStates() {
         const checkedCount = STAT_KEYS.filter(k => diceRulesConfig[k].active).length;
         checkboxElements.forEach(({checkbox, targetInput, key}) => {
@@ -1092,7 +1850,189 @@
       // After all checkboxes are created, update their states
       setTimeout(updateCheckboxStates, 0);
       detailsCol.appendChild(combinedDiv);
-      return detailsCol;
+    } else if (window.DiceRollerMode === 'tier') {
+      // --- Two Column Layout: Stats + Tier Selection ---
+      const twoColumnContainer = document.createElement('div');
+      twoColumnContainer.style.display = 'flex';
+      twoColumnContainer.style.flexDirection = 'row';
+      twoColumnContainer.style.gap = '8px';
+      twoColumnContainer.style.width = '100%';
+      twoColumnContainer.style.marginTop = '4px';
+      twoColumnContainer.style.alignItems = 'flex-start';
+      
+      // First Column: Creature Stats (25% width)
+      const statsColumn = document.createElement('div');
+      statsColumn.style.display = 'flex';
+      statsColumn.style.flexDirection = 'column';
+      statsColumn.style.gap = '2px';
+      statsColumn.style.width = '25%';
+      statsColumn.style.minWidth = '25%';
+      statsColumn.style.maxWidth = '25%';
+      statsColumn.style.alignItems = 'stretch';
+      
+      // Create stat rows with icon and value only
+      STAT_LABELS.forEach(({key, label, icon}) => {
+        const statRow = document.createElement('div');
+        statRow.style.display = 'flex';
+        statRow.style.flexDirection = 'row';
+        statRow.style.alignItems = 'center';
+        statRow.style.justifyContent = 'space-between';
+        statRow.style.gap = '3px';
+        statRow.style.width = '100%';
+        statRow.style.padding = '1px 3px';
+        statRow.style.borderRadius = '2px';
+        statRow.style.background = 'rgba(255, 255, 255, 0.05)';
+        statRow.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        
+        // Icon
+        const iconImg = document.createElement('img');
+        iconImg.src = icon;
+        iconImg.alt = label;
+        iconImg.style.width = '14px';
+        iconImg.style.height = '14px';
+        iconImg.style.display = 'inline-block';
+        iconImg.style.verticalAlign = 'middle';
+        iconImg.style.flexShrink = '0';
+        statRow.appendChild(iconImg);
+        
+        // Stat value
+        const statValue = document.createElement('span');
+        statValue.textContent = creature[key] ?? 0;
+        statValue.style.fontWeight = 'bold';
+        statValue.style.fontSize = '11px';
+        statValue.style.color = '#ffffff';
+        statValue.style.fontFamily = 'Arial, sans-serif';
+        statValue.style.textAlign = 'right';
+        statValue.style.minWidth = '18px';
+        statRow.appendChild(statValue);
+        
+        statsColumn.appendChild(statRow);
+      });
+      
+      // Second Column: Target Tier Selector (70% width)
+      const tierColumn = document.createElement('div');
+      tierColumn.style.display = 'flex';
+      tierColumn.style.flexDirection = 'column';
+      tierColumn.style.gap = '2px';
+      tierColumn.style.width = '70%';
+      tierColumn.style.minWidth = '70%';
+      tierColumn.style.maxWidth = '70%';
+      tierColumn.style.alignItems = 'stretch';
+      
+      // Initialize tier state (now supports multiple tiers)
+      if (!window.DiceRollerSelectedTier) {
+        window.DiceRollerSelectedTier = ['YELLOW']; // Array to support multiple selections
+      }
+      // Ensure it's always an array
+      if (!Array.isArray(window.DiceRollerSelectedTier)) {
+        window.DiceRollerSelectedTier = [window.DiceRollerSelectedTier];
+      }
+      
+      // Create tier buttons in a compact column
+      TIER_KEYS.forEach(tierKey => {
+        const tier = TIER_CONFIG[tierKey];
+        const tierBtn = document.createElement('button');
+        tierBtn.textContent = tier.name;
+        tierBtn.style.width = '100%';
+        tierBtn.style.height = '18px';
+        tierBtn.style.border = '1px solid #444';
+        tierBtn.style.borderRadius = '2px';
+        tierBtn.style.background = window.DiceRollerSelectedTier.includes(tierKey) ? tier.color : '#333';
+        tierBtn.style.color = window.DiceRollerSelectedTier.includes(tierKey) ? '#000' : '#fff';
+        tierBtn.style.fontSize = '11px';
+        tierBtn.style.fontWeight = 'bold';
+        tierBtn.style.fontFamily = 'Arial, sans-serif';
+        tierBtn.style.cursor = 'pointer';
+        tierBtn.style.transition = 'all 0.2s ease';
+        tierBtn.style.textShadow = window.DiceRollerSelectedTier.includes(tierKey) ? 'none' : '1px 1px 2px rgba(0,0,0,0.8)';
+        tierBtn.style.display = 'flex';
+        tierBtn.style.alignItems = 'center';
+        tierBtn.style.justifyContent = 'center';
+        tierBtn.style.padding = '0';
+        tierBtn.style.margin = '0';
+        tierBtn.style.boxSizing = 'border-box';
+        
+        // Add function to update button disabled state
+        const updateButtonDisabledState = () => {
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+          const isAutorolling = autoRollBtn && autoRollBtn.textContent === 'Autorolling...';
+          
+          if (isAutorolling) {
+            tierBtn.style.opacity = '0.5';
+            tierBtn.style.cursor = 'not-allowed';
+            tierBtn.disabled = true;
+          } else {
+            tierBtn.style.opacity = '1';
+            tierBtn.style.cursor = 'pointer';
+            tierBtn.disabled = false;
+          }
+        };
+        
+        // Initial state check
+        updateButtonDisabledState();
+        
+        // Store the update function on the button for external access
+        tierBtn.updateDisabledState = updateButtonDisabledState;
+        
+        tierBtn.addEventListener('click', () => {
+          // Check if autoroll is in progress
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+          if (autoRollBtn && autoRollBtn.textContent === 'Autorolling...') {
+            // Autoroll is in progress, don't allow tier changes
+            return;
+          }
+          
+          // Toggle tier selection (multiple tiers can be selected)
+          if (window.DiceRollerSelectedTier.includes(tierKey)) {
+            // Remove tier if already selected
+            window.DiceRollerSelectedTier = window.DiceRollerSelectedTier.filter(t => t !== tierKey);
+          } else {
+            // Add tier if not selected
+            window.DiceRollerSelectedTier.push(tierKey);
+          }
+          
+          // Update all tier buttons
+          tierColumn.querySelectorAll('button').forEach(btn => {
+            const btnTierKey = TIER_KEYS.find(key => btn.textContent === TIER_CONFIG[key].name);
+            if (btnTierKey) {
+              const btnTier = TIER_CONFIG[btnTierKey];
+              const isSelected = window.DiceRollerSelectedTier.includes(btnTierKey);
+              btn.style.background = isSelected ? btnTier.color : '#333';
+              btn.style.color = isSelected ? '#000' : '#fff';
+              btn.style.textShadow = isSelected ? 'none' : '1px 1px 2px rgba(0,0,0,0.8)';
+            }
+          });
+          
+          // Trigger re-render
+          if (typeof window.DiceRollerRender === 'function') {
+            window.DiceRollerRender();
+          }
+          
+          // Update status displays immediately
+          if (typeof window.updateStatusDisplays === 'function') {
+            window.updateStatusDisplays();
+          }
+          
+          // Force update the modal's status display
+          setTimeout(() => {
+            if (typeof window.updateStatusDisplays === 'function') {
+              window.updateStatusDisplays();
+            }
+          }, 100);
+        });
+        
+        tierColumn.appendChild(tierBtn);
+      });
+      
+      // Add columns to container
+      twoColumnContainer.appendChild(statsColumn);
+      twoColumnContainer.appendChild(tierColumn);
+      
+      detailsCol.appendChild(twoColumnContainer);
+    }
+    
+    detailsCol.appendChild(combinedDiv);
+    return detailsCol;
     } catch (e) {
       const div = document.createElement('div');
       div.innerText = 'Error loading details.' + (e && e.message ? ('\n' + e.message) : '');
@@ -1169,10 +2109,15 @@
       slot.style.overflow = 'visible';
       // Green border if activated (square, exactly around data-rarity border)
       if (Array.isArray(selectedDiceArr) && selectedDiceArr.includes(i)) {
-        slot.style.boxShadow = '0 0 0 2px #00ff00';
-        slot.style.borderRadius = '0';
+        btn.style.boxShadow = '0 0 0 2px #00ff00';
+        btn.style.borderRadius = '0';
+        btn.style.position = 'relative';
+        btn.style.overflow = 'hidden';
       } else {
-        slot.style.boxShadow = 'none';
+        btn.style.boxShadow = 'none';
+        btn.style.borderRadius = '';
+        btn.style.position = '';
+        btn.style.overflow = '';
       }
       // Rarity border
       const rarityDiv = document.createElement('div');
@@ -1234,37 +2179,162 @@
 // =======================
 // 5. Autoroll Logic
 // =======================
-  async function autoroll(selectedGameId, requiredDiceTier, availableStats, updateRollStatus, rerenderDetails) {
-    // Validate dice selection using utility function
-    try {
-      validateDiceSelection([requiredDiceTier], availableStats);
-    } catch (error) {
-      updateRollStatus(error.message);
-      throw error;
+  async function autoroll(selectedGameId, requiredDiceTier, availableStats, updateRollStatus, rerenderDetails, selectedDice) {
+    // Clear global tier tracking variables at the start of autoroll
+    window.DiceRollerCurrentTier = null;
+    window.DiceRollerCurrentGameId = null;
+    
+    console.log('[Stats Roller] Autoroll function called with:', {
+      selectedGameId,
+      requiredDiceTier,
+      availableStats,
+      selectedDice
+    });
+    
+    // Check if we're in tier mode
+    if (window.DiceRollerMode === 'tier') {
+      console.log('[Stats Roller] Tier mode - selected tiers:', window.DiceRollerSelectedTier);
+      console.log('[Stats Roller] Tier mode - selected dice:', selectedDice);
+      console.log('[Stats Roller] Tier mode - requiredDiceTier:', requiredDiceTier);
+      console.log('[Stats Roller] Tier mode - availableStats:', availableStats);
+      console.log('[Stats Roller] Tier mode - selectedDice array length:', selectedDice.length);
+      console.log('[Stats Roller] Tier mode - Math.min(...selectedDice):', selectedDice.length > 0 ? Math.min(...selectedDice) : 'no dice selected');
+      
+      // In tier mode, validate tier selection
+      if (!window.DiceRollerSelectedTier) {
+        console.log('[Stats Roller] No target tier selected');
+        updateRollStatus('Please select a target tier first.');
+        throw new Error('No target tier selected');
+      }
+      
+      console.log('[Stats Roller] Target tiers selected, checking creature...');
+      
+      // Check if creature already matches any of the selected tiers
+      const monsters = safeGetMonsters();
+      const creature = monsters.find(c => String(c.id) === String(selectedGameId));
+      if (creature) {
+        const currentTier = getCreatureTier(creature);
+        console.log('[Stats Roller] Current creature tier:', currentTier);
+        if (window.DiceRollerSelectedTier.includes(currentTier)) {
+          const tierNames = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
+          console.log('[Stats Roller] Creature already matches target tier');
+          updateRollStatus(`Creature already matches one of the target tiers: ${tierNames}`);
+          return true; // Return true to indicate success
+        }
+      }
+      
+      console.log('[Stats Roller] Starting tier upgrade...');
+      // Get current stats to show which ones will be rolled
+      const monstersForStatus = safeGetMonsters();
+      const creatureForStatus = monstersForStatus.find(c => String(c.id) === String(selectedGameId));
+      let availableStatsForStatus = ["hp", "ap", "ad", "armor", "magicResist"];
+      
+      if (creatureForStatus) {
+        availableStatsForStatus = availableStatsForStatus.filter(stat => {
+          const currentValue = creatureForStatus[stat] || 0;
+          return currentValue < DICE_CONFIG.STAT_LIMIT;
+        });
+      }
+      
+      const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
+      updateRollStatus(`Upgrading to ${targetTiers} tier... Rolling: ${availableStatsForStatus.join(', ')}`);
+    } else {
+      // In genes mode, validate dice selection using utility function
+      try {
+        validateDiceSelection([requiredDiceTier], availableStats);
+      } catch (error) {
+        updateRollStatus(error.message);
+        throw error;
+      }
+      updateRollStatus(`Rolling ${availableStats.join(', ')} with tier ${requiredDiceTier} dice...`);
     }
-    updateRollStatus(`Rolling ${availableStats.join(', ')} with tier ${requiredDiceTier} dice...`);
+    
+    console.log('[Stats Roller] Preparing API call...');
+    
     // Throttle API calls to prevent overwhelming the server
     const now = Date.now();
     const timeSinceLastCall = now - lastApiCall;
     if (timeSinceLastCall < API_THROTTLE_DELAY) {
+      console.log('[Stats Roller] Throttling API call...');
       await new Promise(resolve => setTimeout(resolve, API_THROTTLE_DELAY - timeSinceLastCall));
     }
     lastApiCall = Date.now();
-    const requestBody = {
-      "0": {
-        "json": {
-          "rarity": requiredDiceTier,
-          "manipStats": availableStats,
-          "monsterId": selectedGameId
-        }
+    
+    // Prepare request body based on mode
+    let requestBody;
+    if (window.DiceRollerMode === 'tier') {
+      // In tier mode, we need to respect individual stat limits (20) like in genes mode
+      // Get current creature stats to determine which stats are at max
+      const monsters = safeGetMonsters();
+      const creature = monsters.find(c => String(c.id) === String(selectedGameId));
+      let availableStatsForRoll = ["hp", "ap", "ad", "armor", "magicResist"];
+      
+      if (creature) {
+        // Filter out stats that are already at maximum (20)
+        availableStatsForRoll = availableStatsForRoll.filter(stat => {
+          const currentValue = creature[stat] || 0;
+          const isAtMax = currentValue >= DICE_CONFIG.STAT_LIMIT;
+          if (isAtMax) {
+            console.log(`[Stats Roller] Skipping ${stat} - already at max (${currentValue})`);
+          }
+          return !isAtMax;
+        });
       }
-    };
+      
+      // If all stats are at max, we can't improve further
+      if (availableStatsForRoll.length === 0) {
+        console.log('[Stats Roller] All stats are at maximum (20) - cannot improve tier further');
+        updateRollStatus('All stats are at maximum (20) - cannot improve tier further');
+        return true; // Return true to indicate "success" (no more improvement possible)
+      }
+      
+      // Use the same dice selection logic as genes mode
+      // Find the appropriate dice tier that can roll the number of available stats
+      const requiredStatsCount = availableStatsForRoll.length;
+      const requiredDiceTierForStats = 6 - requiredStatsCount;
+      
+      // Check if we have a dice of the required tier selected
+      if (!selectedDice.includes(requiredDiceTierForStats)) {
+        console.log(`[Stats Roller] No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
+        updateRollStatus(`Need dice tier ${requiredDiceTierForStats} to roll ${requiredStatsCount} stats. Please select appropriate dice.`);
+        throw new Error(`No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
+      }
+      
+      console.log(`[Stats Roller] Using dice tier ${requiredDiceTierForStats} for ${requiredStatsCount} stats`);
+      
+      requestBody = {
+        "0": {
+          "json": {
+            "rarity": requiredDiceTierForStats,
+            "manipStats": availableStatsForRoll, // Only roll stats that are below 20
+            "monsterId": selectedGameId
+          }
+        }
+      };
+      console.log('[Stats Roller] Tier mode request:', requestBody);
+      console.log('[Stats Roller] Rolling stats:', availableStatsForRoll);
+    } else {
+      // In genes mode, use the standard request format
+      requestBody = {
+        "0": {
+          "json": {
+            "rarity": requiredDiceTier,
+            "manipStats": availableStats,
+            "monsterId": selectedGameId
+          }
+        }
+      };
+      console.log('[Stats Roller] Genes mode request:', requestBody);
+    }
+    
     let response;
     let retryCount = 0;
     let wasRateLimited = false;
     // rateLimitedInterval is now declared in the broader scope
+    console.log('[Stats Roller] Making API call...');
     while (true) {
       try {
+        console.log('[Stats Roller] Sending request to API...');
         response = await fetch(API_ENDPOINT, {
           method: "POST",
           headers: {
@@ -1280,7 +2350,7 @@
       if (response.status !== 429) {
         // If we were rate-limited before, restore button text to 'Autorolling...'
         if (wasRateLimited && typeof window !== 'undefined') {
-          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
             autoRollBtn.textContent = 'Autorolling...';
             if (rateLimitedInterval) {
@@ -1297,7 +2367,7 @@
       if (retryCount > 5) {
         // Update autoroll button to show rate limit
         if (typeof window !== 'undefined') {
-          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
             let dotCount = 1;
             autoRollBtn.textContent = 'Rate-limited.';
@@ -1314,7 +2384,7 @@
       const waitTime = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000; // fallback 2s
       // Update autoroll button to show rate limit
       if (typeof window !== 'undefined') {
-        const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+        const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
         if (autoRollBtn) {
           let dotCount = 1;
           autoRollBtn.textContent = 'Rate-limited.';
@@ -1328,6 +2398,7 @@
       wasRateLimited = true;
       await new Promise(res => setTimeout(res, waitTime));
     }
+    
     let data;
     try {
       data = await response.json();
@@ -1338,8 +2409,10 @@
     }
     if (!response.ok) {
       console.error('[Stats Roller] API error response:', data);
+      console.error('[Stats Roller] Full error details:', JSON.stringify(data, null, 2));
       throw new Error(`API request failed: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
     }
+    
     // Update local monster state with new stats from API
     const newStats = data[0]?.result?.data?.json?.manipulatingMonster;
     if (newStats && newStats.id) {
@@ -1347,17 +2420,78 @@
       const idx = monsters.findIndex(m => String(m.id) === String(newStats.id));
       if (idx !== -1) {
         Object.assign(monsters[idx], newStats);
+        // Clear the monsters cache to ensure fresh data is retrieved
+        clearMonstersCache();
       }
-      if (typeof rerenderDetails === 'function') rerenderDetails();
+      
+      // Check if we're in tier mode and if any target tier has been achieved
+      if (window.DiceRollerMode === 'tier' && window.DiceRollerSelectedTier && window.DiceRollerSelectedTier.length > 0) {
+        const currentTier = getCreatureTier(newStats);
+        const totalStats = (newStats.hp || 0) + (newStats.ad || 0) + (newStats.ap || 0) + (newStats.armor || 0) + (newStats.magicResist || 0);
+        const maxPossibleStats = 5 * DICE_CONFIG.STAT_LIMIT;
+        const percentage = (totalStats / maxPossibleStats) * 100;
+        
+        console.log('[Stats Roller] Tier check - Current stats:', newStats);
+        console.log('[Stats Roller] Tier check - Total stats:', totalStats, 'Percentage:', percentage.toFixed(1) + '%');
+        console.log('[Stats Roller] Tier check - Current tier:', currentTier);
+        console.log('[Stats Roller] Tier check - Target tiers:', window.DiceRollerSelectedTier);
+        
+        // Store current tier and game ID globally for portrait updates
+        window.DiceRollerCurrentTier = currentTier;
+        window.DiceRollerCurrentGameId = selectedGameId;
+        console.log('[Stats Roller] Updated global tier tracking:', {
+          currentTier: window.DiceRollerCurrentTier,
+          currentGameId: window.DiceRollerCurrentGameId
+        });
+        
+        if (window.DiceRollerSelectedTier.includes(currentTier)) {
+          const achievedTier = TIER_CONFIG[currentTier];
+          updateRollStatus(`🎉 Target tier reached: ${achievedTier.name}!`);
+          console.log('[Stats Roller] Target tier achieved:', currentTier);
+          
+          // Update creature portrait before returning
+          if (typeof rerenderDetails === 'function') {
+            console.log('[Stats Roller] Calling rerenderDetails function for tier achievement...');
+            rerenderDetails();
+          }
+          
+          // Return true to indicate success and stop rolling
+          return true;
+        } else {
+          // Continue rolling - update status to show progress
+          const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
+          updateRollStatus(`Rolling... Current: ${currentTier} (${percentage.toFixed(1)}%), Targets: ${targetTiers}`);
+          console.log('[Stats Roller] Continuing to roll - current tier not in targets');
+          
+          // Update creature details after each roll in tier mode
+          if (typeof rerenderDetails === 'function') {
+            console.log('[Stats Roller] Calling rerenderDetails function for tier mode roll...');
+            rerenderDetails();
+          }
+          
+          // Return false to indicate we need to continue rolling
+          return false;
+        }
+      }
+      
+      // For genes mode or when not in tier mode, always update creature details
+      if (typeof rerenderDetails === 'function') {
+        console.log('[Stats Roller] Calling rerenderDetails function...');
+        rerenderDetails();
+      } else {
+        console.log('[Stats Roller] rerenderDetails function not provided');
+      }
     }
+    
     // Check if the API returned an error
     if (data[0]?.error) {
       throw new Error(`API Error: ${data[0].error.message || 'Unknown error'}`);
     }
+    
     // Update the UI with the new stats
     // If we were rate-limited before, restore button text to 'Autorolling...'
     if (wasRateLimited && typeof window !== 'undefined') {
-      const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn');
+      const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
       if (autoRollBtn) {
         autoRollBtn.textContent = 'Autorolling...';
         if (rateLimitedInterval) {
@@ -1367,11 +2501,12 @@
       }
       wasRateLimited = false;
     }
+    
     updateRollStatus('Roll complete!');
     return data;
   }
 
-  function getCreatureDetailsCol(selectedGameId, getSelectedDiceTier, getAvailableStats, render, selectedDice, statusMessage) {
+  function getCreatureDetailsCol(selectedGameId, getSelectedDiceTier, getAvailableStats, render, selectedDice, statusMessage, currentTier = null) {
     // Returns a column with 3 rows: row1 = creature details, row2 = Autoroll/Stop buttons, row3 = status
     const col = document.createElement('div');
     col.style.display = 'flex';
@@ -1381,7 +2516,7 @@
     col.style.justifyContent = 'stretch';
     col.style.alignItems = 'center';
     // Row 1: creature details (50%)
-    let row1 = getCreatureDetails(selectedGameId, selectedDice);
+    let row1 = getCreatureDetails(selectedGameId, selectedDice, currentTier);
     row1.style.flex = '0 0 50%';
     row1.style.height = '50%';
     row1.style.maxHeight = '50%';
@@ -1462,36 +2597,55 @@
         const diceKey = `diceManipulator${selectedDiceTier}`;
         const diceCount = inventory[diceKey] || 0;
         
-        // Get dice manipulator name based on tier
-        const diceNames = {
-          1: '(Common)',
-          2: '(Uncommon)', 
-          3: '(Rare)',
-          4: '(Mythic)',
-          5: '(Legendary)'
-        };
-        const rarityColors = {
-          1: '#888888', // Grey for Common
-          2: '#4CAF50', // Green for Uncommon
-          3: '#2196F3', // Blue for Rare
-          4: '#9C27B0', // Purple for Mythic
-          5: '#FF9800'  // Orange/Gold for Legendary
-        };
-        const rarityName = diceNames[selectedDiceTier] || '(Unknown)';
-        const rarityColor = rarityColors[selectedDiceTier] || '#888888';
-        diceStatusDiv.innerHTML = `Dice Manipulator <span style="color: ${rarityColor};">${rarityName}</span>`;
-        
-        // Update stats being rolled
-        const availableStats = getAvailableStats();
-        const statLabels = {
-          'hp': 'HP',
-          'ad': 'AD', 
-          'ap': 'AP',
-          'armor': 'ARM',
-          'magicResist': 'MR'
-        };
-        const statText = availableStats.map(stat => statLabels[stat] || stat).join(', ');
-        statsStatusDiv.textContent = `Stats: ${statText || 'None'}`;
+        // Check if we're in tier mode
+        if (window.DiceRollerMode === 'tier') {
+          // In tier mode, show tier information
+          const selectedTiers = window.DiceRollerSelectedTier;
+
+          if (selectedTiers && selectedTiers.length > 0) {
+            const tierNames = selectedTiers.map(tierKey => {
+              const tier = TIER_CONFIG[tierKey];
+              return `<span style="color: ${tier.color};">${tier.name.split(' ')[0]}</span>`;
+            }).join(', ');
+            diceStatusDiv.innerHTML = `Target Tiers: ${tierNames}`;
+            statsStatusDiv.textContent = `Mode: Tier Upgrade`;
+          } else {
+            diceStatusDiv.innerHTML = `Target Tiers: <span style="color: #888888;">None</span>`;
+            statsStatusDiv.textContent = `Mode: Tier Upgrade`;
+          }
+        } else {
+          // In genes mode, show dice manipulator information
+          // Get dice manipulator name based on tier
+          const diceNames = {
+            1: '(Common)',
+            2: '(Uncommon)', 
+            3: '(Rare)',
+            4: '(Mythic)',
+            5: '(Legendary)'
+          };
+          const rarityColors = {
+            1: '#888888', // Grey for Common
+            2: '#4CAF50', // Green for Uncommon
+            3: '#2196F3', // Blue for Rare
+            4: '#9C27B0', // Purple for Mythic
+            5: '#FF9800'  // Orange/Gold for Legendary
+          };
+          const rarityName = diceNames[selectedDiceTier] || '(Unknown)';
+          const rarityColor = rarityColors[selectedDiceTier] || '#888888';
+          diceStatusDiv.innerHTML = `Dice Manipulator <span style="color: ${rarityColor};">${rarityName}</span>`;
+          
+          // Update stats being rolled
+          const availableStats = getAvailableStats();
+          const statLabels = {
+            'hp': 'HP',
+            'ad': 'AD', 
+            'ap': 'AP',
+            'armor': 'ARM',
+            'magicResist': 'MR'
+          };
+          const statText = availableStats.map(stat => statLabels[stat] || stat).join(', ');
+          statsStatusDiv.textContent = `Stats: ${statText || 'None'}`;
+        }
       });
     }
     
@@ -1539,6 +2693,7 @@
     const autoRollBtn = document.createElement('button');
     autoRollBtn.textContent = 'Autoroll';
     autoRollBtn.className = 'diceroller-btn';
+    autoRollBtn.setAttribute('data-button-type', 'autoroll');
     autoRollBtn.style.width = '120px';
     autoRollBtn.style.padding = '6px 28px';
     autoRollBtn.style.margin = '0 4px';
@@ -1571,75 +2726,89 @@
       if (!autorolling) {
         // Start autoroll
         if (!selectedGameId) {
-          // Show error in stats area temporarily
-          const originalText = statsStatusDiv.textContent;
-          statsStatusDiv.textContent = 'Select a creature first.';
-          setTimeout(() => {
-            statsStatusDiv.textContent = originalText;
-          }, 2000);
+          updateStatusWithError(statsStatusDiv, 'Select a creature first.', 2000);
           return;
         }
+        
+        // Add loading state
+        autoRollBtn.disabled = true;
+        autoRollBtn.textContent = 'Preparing...';
+        autoRollBtn.style.opacity = '0.7';
         
         // Check if creature is locked
         const monsters = safeGetMonsters();
         const creature = monsters.find(c => String(c.id) === String(selectedGameId));
         if (creature && creature.locked) {
-          // Show error in stats area temporarily
-          const originalText = statsStatusDiv.textContent;
-          statsStatusDiv.textContent = 'Cannot autoroll locked creatures. Unlock first.';
-          setTimeout(() => {
-            statsStatusDiv.textContent = originalText;
-          }, 3000);
+          updateStatusWithError(statsStatusDiv, 'Cannot autoroll locked creatures. Unlock first.', 3000);
           return;
         }
         let lastDiceSelection = selectedDice.slice(); // Track dice selection at start
         const originalDiceSelection = selectedDice.slice(); // Save original user dice selection
         const getCheckboxState = () => ({
-          stopWhenChangingDice: typeof render.stopWhenChangingDice === 'undefined' ? true : render.stopWhenChangingDice,
-          continuouslyChangeDice: typeof render.continuouslyChangeDice === 'undefined' ? false : render.continuouslyChangeDice
+          stopWhenChangingDice: render && typeof render.stopWhenChangingDice !== 'undefined' ? render.stopWhenChangingDice : (window.DiceRollerMode === 'tier' ? false : true),
+          continuouslyChangeDice: render && typeof render.continuouslyChangeDice !== 'undefined' ? render.continuouslyChangeDice : (window.DiceRollerMode === 'tier' ? true : false)
         });
-        let selectedDiceTier = getSelectedDiceTier();
+        let selectedDiceTier = selectedDice.length > 0 ? Math.min(...selectedDice) : 1;
         let availableStats = getAvailableStats();
+        let currentDiceRulesConfig = initializeDiceRulesConfig();
+        
         // --- Add validation for stat/dice combination ---
-        if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
-          // Show error in stats area temporarily
-          const originalText = statsStatusDiv.textContent;
-          statsStatusDiv.textContent = 'Please select at least one dice to roll.';
-          setTimeout(() => {
-            statsStatusDiv.textContent = originalText;
-          }, 2000);
-          return;
-        }
-        const minDice = Math.min(...selectedDice);
-        const maxStats = 6 - minDice;
-        const currentDiceRulesConfig = initializeDiceRulesConfig();
-        const selectedStats = Object.keys(currentDiceRulesConfig).filter(key => currentDiceRulesConfig[key].active);
-        if (selectedStats.length === 0) {
-          // Show error in stats area temporarily
-          const originalText = statsStatusDiv.textContent;
-          statsStatusDiv.textContent = 'Select at least one stat to roll for.';
-          setTimeout(() => {
-            statsStatusDiv.textContent = originalText;
-          }, 2000);
-          return;
-        }
-        if (selectedStats.length !== maxStats) {
-          // Show error in stats area temporarily
-          const originalText = statsStatusDiv.textContent;
-          statsStatusDiv.textContent = `Select exactly ${maxStats} stats for dice ${minDice}.`;
-          setTimeout(() => {
-            statsStatusDiv.textContent = originalText;
-          }, 2000);
-          return;
+        console.log('[Stats Roller] Validation - Mode:', window.DiceRollerMode);
+        console.log('[Stats Roller] Validation - selectedDice:', selectedDice);
+        console.log('[Stats Roller] Validation - selectedDice.length:', selectedDice.length);
+        console.log('[Stats Roller] Validation - Array.isArray(selectedDice):', Array.isArray(selectedDice));
+        
+        if (window.DiceRollerMode === 'tier') {
+          // In tier mode, we need dice but not specific stats
+          if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
+            console.log('[Stats Roller] Validation failed - no dice selected for tier mode');
+            updateStatusWithError(statsStatusDiv, 'Please select at least one dice to roll for tier upgrade.', 2000);
+            return;
+          }
+        } else {
+          // In genes mode, validate stat/dice combination
+          if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
+            updateStatusWithError(statsStatusDiv, 'Please select at least one dice to roll.', 2000);
+            return;
+          }
+          const minDice = Math.min(...selectedDice);
+          const maxStats = 6 - minDice;
+          const selectedStats = Object.keys(currentDiceRulesConfig).filter(key => currentDiceRulesConfig[key].active);
+          if (selectedStats.length === 0) {
+            updateStatusWithError(statsStatusDiv, 'Select at least one stat to roll for.', 2000);
+            return;
+          }
+          if (selectedStats.length !== maxStats) {
+            updateStatusWithError(statsStatusDiv, `Select exactly ${maxStats} stats for dice ${minDice}.`, 2000);
+            return;
+          }
         }
         // Determine if any target is set for selected stats
-        const targetsSet = availableStats.some(stat => currentDiceRulesConfig[stat].target > 0);
+        const targetsSet = availableStats.some(stat => {
+          // In tier mode, stats are actually tier keys, so we don't check currentDiceRulesConfig
+          if (window.DiceRollerMode === 'tier') {
+            return true; // Always consider targets set in tier mode
+          }
+          // In genes mode, check if the stat exists in currentDiceRulesConfig
+          return currentDiceRulesConfig[stat] && currentDiceRulesConfig[stat].target > 0;
+        });
         autorolling = true;
         autorollCancel = false;
         autorollAttempt = 0;
         autoRollBtn.textContent = 'Autorolling...';
         autoRollBtn.disabled = true;
         stopBtn.style.display = 'inline-block';
+        
+        // Disable tier selection buttons during autoroll
+        const disableTierButtons = () => {
+          const tierButtons = document.querySelectorAll('div[role="dialog"][data-state="open"] button[style*="background"]');
+          tierButtons.forEach(btn => {
+            if (btn.updateDisabledState && typeof btn.updateDisabledState === 'function') {
+              btn.updateDisabledState();
+            }
+          });
+        };
+        disableTierButtons();
         // Only reset count if this is a new autoroll (not continuing)
         if (autorollAttempt === 0) {
           rollCountDiv.textContent = 'Autorolled (0)';
@@ -1666,7 +2835,7 @@
                 } else if (continuouslyChangeDice) {
                   // Update to new dice selection and continue
                   lastDiceSelection = selectedDice.slice();
-                  selectedDiceTier = getSelectedDiceTier();
+                  selectedDiceTier = selectedDice.length > 0 ? Math.min(...selectedDice) : 1;
                   availableStats = getAvailableStats();
                   // Update status displays
                   updateStatusDisplays();
@@ -1679,51 +2848,98 @@
                 }
               }
               try {
-                await autoroll(selectedGameId, selectedDiceTier, availableStats, msg => { 
-                                  // Update status displays after each roll
-                updateStatusDisplays();
-              }, () => {
-                // Optimized rerender - only update if modal is still open
-                const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
-                if (modal && modal.contains(col)) {
-                  const newRow1 = getCreatureDetails(selectedGameId, selectedDice);
-                  newRow1.style.flex = '0 0 50%';
-                  newRow1.style.height = '50%';
-                  newRow1.style.maxHeight = '50%';
-                  newRow1.style.overflow = 'auto';
-                  newRow1.style.minHeight = '0';
-                  col.replaceChild(newRow1, row1);
-                  row1 = newRow1;
+                const result = await autoroll(selectedGameId, selectedDiceTier, availableStats, msg => { 
+                  // Update status displays after each roll
+                  updateStatusDisplays();
+                }, () => {
+                  // Optimized rerender - only update if modal is still open
+                  const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
+                  if (modal && modal.contains(col)) {
+                    console.log('[Stats Roller] Updating creature details...');
+                    const newRow1 = getCreatureDetails(selectedGameId, selectedDice);
+                    newRow1.style.flex = '0 0 50%';
+                    newRow1.style.height = '50%';
+                    newRow1.style.maxHeight = '50%';
+                    newRow1.style.overflow = 'auto';
+                    newRow1.style.minHeight = '0';
+                    
+                    // Ensure the old row exists before replacing
+                    if (row1 && row1.parentNode) {
+                      col.replaceChild(newRow1, row1);
+                      row1 = newRow1;
+                      console.log('[Stats Roller] Creature details updated successfully');
+                    } else {
+                      console.log('[Stats Roller] Could not update creature details - row1 not found');
+                    }
+                    
+                    // Also refresh the creature list in column 1 to show updated stats
+                    const col1 = modal.querySelector('.column-content-wrapper');
+                    if (col1) {
+                      const scrollArea = col1.querySelector('div[style*="overflow-y: auto"]');
+                      if (scrollArea) {
+                        // Get current search term if any
+                        const searchInput = modal.querySelector('#dice-roller-search');
+                        const searchTerm = searchInput ? searchInput.value : '';
+                        
+                        // Clear monsters cache to ensure fresh data
+                        clearMonstersCache();
+                        
+                        // Re-apply search to refresh the creature list
+                        if (searchTerm && searchTerm.trim()) {
+                          applyCreatureSearch(scrollArea, searchTerm);
+                        } else {
+                          // Trigger a full re-render of the creature list
+                          const event = new CustomEvent('searchCleared');
+                          scrollArea.dispatchEvent(event);
+                        }
+                        console.log('[Stats Roller] Creature list refreshed successfully');
+                      }
+                    }
+                  } else {
+                    console.log('[Stats Roller] Modal not found or closed, skipping update');
+                  }
+                }, selectedDice);
+                
+                // Check if we need to continue rolling (tier mode)
+                if (window.DiceRollerMode === 'tier' && result === false) {
+                  // Continue rolling - don't break the loop
+                  continue;
+                } else if (window.DiceRollerMode === 'tier' && result === true) {
+                  // Target tier achieved - stop rolling
+                  autorolling = false;
+                  break;
                 }
-              });
               } catch (err) {
-                // Show error in stats area temporarily
-                const originalText = statsStatusDiv.textContent;
-                statsStatusDiv.textContent = 'Error: ' + err.message;
-                setTimeout(() => {
-                  statsStatusDiv.textContent = originalText;
-                }, 3000);
+                updateStatusWithError(statsStatusDiv, err.message);
                 autorolling = false;
                 break;
               }
-            // Check if target met (for each stat)
+            // Check if target met (for each stat - tier mode is handled in autoroll function)
             const monsters = safeGetMonsters();
             const creature = monsters.find(c => String(c.id) === String(selectedGameId));
             let allMet = true;
             let reachedTargets = [];
-            for (let i = 0; i < availableStats.length; i++) {
-              const stat = availableStats[i];
-              const target = currentDiceRulesConfig[stat].target;
-              if (target > 0 && (creature[stat] || 0) >= target) {
-                reachedTargets.push({ stat, diceIndex: i });
-              } else if (target > 0 && (creature[stat] || 0) < target) {
-                allMet = false;
+            
+            if (window.DiceRollerMode === 'genes') {
+              // In genes mode, check individual stat targets
+              for (let i = 0; i < availableStats.length; i++) {
+                const stat = availableStats[i];
+                // Check if the stat exists in currentDiceRulesConfig before accessing its target
+                if (currentDiceRulesConfig[stat]) {
+                  const target = currentDiceRulesConfig[stat].target;
+                  if (target > 0 && (creature[stat] || 0) >= target) {
+                    reachedTargets.push({ stat, diceIndex: i });
+                  } else if (target > 0 && (creature[stat] || 0) < target) {
+                    allMet = false;
+                  }
+                }
               }
             }
             // If in stopWhenChangingDice mode and any target is reached, stop, deselect dice/stat, and print message
             // If in continuouslyChangeDice mode and any target is reached, continue with new stats/dice
-            const { stopWhenChangingDice, continuouslyChangeDice } = getCheckboxState();
-            if (reachedTargets.length > 0) {
+            // Only apply this logic in genes mode (tier mode is handled in autoroll function)
+            if (window.DiceRollerMode === 'genes' && reachedTargets.length > 0) {
+              const { stopWhenChangingDice, continuouslyChangeDice } = getCheckboxState();
               // Deselect dice and stats for reached targets
               let msg = 'Target(s) reached: ' + reachedTargets.map(rt => rt.stat).join(', ');
               // Only uncheck the stat(s) whose target was reached
@@ -1745,8 +2961,8 @@
                 }
               }
               
-                              if (stopWhenChangingDice) {
-                  // Show message in stats area temporarily
+              if (stopWhenChangingDice) {
+                // Show message in stats area temporarily
                 const originalText = statsStatusDiv.textContent;
                 statsStatusDiv.textContent = msg + '. Autoroll stopped.';
                 setTimeout(() => {
@@ -1803,7 +3019,7 @@
                 continue;
               }
             }
-            if (allMet) {
+            if (window.DiceRollerMode === 'genes' && allMet) {
               // Show message in stats area temporarily
               const originalText = statsStatusDiv.textContent;
               statsStatusDiv.textContent = 'Target met!';
@@ -1821,7 +3037,7 @@
               break;
             }
             // Wait a bit before next roll
-            await new Promise(res => setTimeout(res, render.autorollSpeed || DICE_CONFIG.ROLL_DELAY));
+            await new Promise(res => setTimeout(res, (render && render.autorollSpeed) || DICE_CONFIG.ROLL_DELAY));
           }
         } else {
           // Single roll
@@ -1839,18 +3055,40 @@
               newRow1.style.minHeight = '0';
               col.replaceChild(newRow1, row1);
               row1 = newRow1;
+              
+              // Also refresh the creature list in column 1 to show updated stats
+              const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
+              if (modal) {
+                const col1 = modal.querySelector('.column-content-wrapper');
+                if (col1) {
+                  const scrollArea = col1.querySelector('div[style*="overflow-y: auto"]');
+                  if (scrollArea) {
+                    // Get current search term if any
+                    const searchInput = modal.querySelector('#dice-roller-search');
+                    const searchTerm = searchInput ? searchInput.value : '';
+                    
+                    // Clear monsters cache to ensure fresh data
+                    clearMonstersCache();
+                    
+                    // Re-apply search to refresh the creature list
+                    if (searchTerm && searchTerm.trim()) {
+                      applyCreatureSearch(scrollArea, searchTerm);
+                    } else {
+                      // Trigger a full re-render of the creature list
+                      const event = new CustomEvent('searchCleared');
+                      scrollArea.dispatchEvent(event);
+                    }
+                    console.log('[Stats Roller] Creature list refreshed successfully (single roll)');
+                  }
+                }
+              }
             });
             // Update roll count for single roll (only if not already counting)
             if (autorollAttempt === 0) {
               rollCountDiv.textContent = 'Autorolled (1)';
             }
           } catch (err) {
-            // Show error in stats area temporarily
-            const originalText = statsStatusDiv.textContent;
-            statsStatusDiv.textContent = 'Error: ' + err.message;
-            setTimeout(() => {
-              statsStatusDiv.textContent = originalText;
-            }, 3000);
+            updateStatusWithError(statsStatusDiv, err.message);
           } finally {
             autoRollBtn.disabled = false;
             autoRollBtn.textContent = 'Autoroll';
@@ -1861,6 +3099,17 @@
         autoRollBtn.textContent = 'Autoroll';
         autoRollBtn.disabled = false;
         stopBtn.style.display = 'none';
+        
+        // Re-enable tier selection buttons after autoroll ends
+        const enableTierButtons = () => {
+          const tierButtons = document.querySelectorAll('div[role="dialog"][data-state="open"] button[style*="background"]');
+          tierButtons.forEach(btn => {
+            if (btn.updateDisabledState && typeof btn.updateDisabledState === 'function') {
+              btn.updateDisabledState();
+            }
+          });
+        };
+        enableTierButtons();
         
         // Update status displays after autoroll ends
         setTimeout(() => {
@@ -1876,6 +3125,18 @@
         autoRollBtn.textContent = 'Autoroll';
         autoRollBtn.disabled = false;
         stopBtn.style.display = 'none';
+        
+        // Re-enable tier selection buttons after stopping
+        const enableTierButtonsOnStop = () => {
+          const tierButtons = document.querySelectorAll('div[role="dialog"][data-state="open"] button[style*="background"]');
+          tierButtons.forEach(btn => {
+            if (btn.updateDisabledState && typeof btn.updateDisabledState === 'function') {
+              btn.updateDisabledState();
+            }
+          });
+        };
+        enableTierButtonsOnStop();
+        
         // Show message in stats area temporarily
         const originalText = statsStatusDiv.textContent;
         statsStatusDiv.textContent = 'Autoroll stopped by user.';
@@ -1956,12 +3217,19 @@
       contentDiv.style.gap = '0';
       contentDiv.style.flex = '1 1 0';
       function getSelectedDiceTier() {
-        // Return the minimum selected dice manipulator as the tier (or null)
-        return selectedDice.length > 0 ? Math.min(...selectedDice) : null;
+        // Always use the selected dice tier, regardless of mode
+        return selectedDice.length > 0 ? Math.min(...selectedDice) : 1;
       }
       function getAvailableStats() {
-        const currentDiceRulesConfig = initializeDiceRulesConfig();
-        return Object.keys(currentDiceRulesConfig).filter(key => currentDiceRulesConfig[key].active);
+        // Check if we're in tier mode
+        if (window.DiceRollerMode === 'tier') {
+          // In tier mode, return the selected tiers as special stats
+          return window.DiceRollerSelectedTier && window.DiceRollerSelectedTier.length > 0 ? window.DiceRollerSelectedTier : [];
+        } else {
+          // In genes mode, return selected stats as before
+          const currentDiceRulesConfig = initializeDiceRulesConfig();
+          return Object.keys(currentDiceRulesConfig).filter(key => currentDiceRulesConfig[key].active);
+        }
       }
       
       // Create updateDetailsOnly closure that captures current state - moved outside render
@@ -2019,7 +3287,7 @@
             col.style.width = '100%';
             col.style.justifyContent = 'stretch';
             col.style.alignItems = 'center';
-            // Row 1: dice manipulators
+            // Row 1: dice manipulators (always show)
             const row1 = document.createElement('div');
             row1.style.display = 'flex';
             row1.style.flexDirection = 'column';
@@ -2050,7 +3318,12 @@
               } else {
                 selectedDice = [...selectedDice, i]; // Add if not selected
               }
-              render();
+              // Update dice button states (green borders)
+              updateDiceButtonStates(selectedDice);
+              // Only update the creature details (col3) instead of full re-render
+              if (typeof updateDetailsOnlyClosure === 'function') {
+                updateDetailsOnlyClosure();
+              }
               // Update status displays when dice selection changes
               setTimeout(() => {
                 updateStatusDisplays();
@@ -2067,18 +3340,167 @@
             separator1.style.margin = '0px 0px';
             col.appendChild(separator1);
             
-            // Row 2: Dice Rules (checkboxes)
-            // --- Add state for the checkboxes and speed ---
-            if (typeof render.stopWhenChangingDice === 'undefined') render.stopWhenChangingDice = true;
-            if (typeof render.continuouslyChangeDice === 'undefined') render.continuouslyChangeDice = false;
-            if (typeof render.autorollSpeed === 'undefined') render.autorollSpeed = 100;
+            // Row 2: Placeholder
             const row2 = document.createElement('div');
             row2.style.display = 'flex';
             row2.style.flexDirection = 'column';
-            row2.style.alignItems = 'flex-start';
-            row2.style.justifyContent = 'flex-start';
+            row2.style.alignItems = 'center';
+            row2.style.justifyContent = 'center';
             row2.style.gap = '4px';
-            row2.style.marginTop = '12px';
+            row2.style.height = '60px';
+            row2.style.flex = '0 0 60px';
+            
+            // Button container
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.flexDirection = 'row';
+            buttonContainer.style.justifyContent = 'center';
+            buttonContainer.style.alignItems = 'center';
+            buttonContainer.style.gap = '8px';
+            buttonContainer.style.width = '100%';
+            
+                  // Track selected button state - sync with global mode
+      // Initialize default mode to 'genes' if not set
+      if (!window.DiceRollerMode) {
+        window.DiceRollerMode = 'genes';
+      }
+      let selectedButton = window.DiceRollerMode;
+            
+            // Genes button
+            const genesBtn = document.createElement('button');
+            genesBtn.textContent = 'Genes';
+            genesBtn.className = 'diceroller-btn';
+            genesBtn.setAttribute('data-state', selectedButton === 'genes' ? 'selected' : 'closed');
+            genesBtn.style.setProperty('width', '60px', 'important');
+            genesBtn.style.setProperty('min-width', '60px', 'important');
+            genesBtn.style.setProperty('max-width', '60px', 'important');
+            genesBtn.style.padding = '6px 12px';
+            genesBtn.style.margin = '0 4px';
+            genesBtn.style.boxSizing = 'border-box';
+            genesBtn.style.setProperty('font-size', '12px', 'important');
+            genesBtn.style.boxShadow = selectedButton === 'genes' ? '0 0 0 2px #00ff00' : 'none';
+            genesBtn.onclick = () => {
+              // Update global mode state
+              window.DiceRollerMode = 'genes';
+              selectedButton = 'genes';
+              
+              // Update button states
+              genesBtn.setAttribute('data-state', 'selected');
+              genesBtn.style.boxShadow = '0 0 0 2px #00ff00';
+              tierBtn.setAttribute('data-state', 'closed');
+              tierBtn.style.boxShadow = 'none';
+              
+              // Re-enable checkboxes for genes mode and set defaults
+              stopCheckbox.disabled = false;
+              contCheckbox.disabled = false;
+              stopCheckboxWrapper.style.opacity = '1';
+              stopCheckboxWrapper.style.cursor = 'pointer';
+              
+              // Set default values for genes mode: "Stop when changing dice" selected
+              render.stopWhenChangingDice = true;
+              render.continuouslyChangeDice = false;
+              stopCheckbox.checked = true;
+              contCheckbox.checked = false;
+              
+              // Only update the creature details (col3) instead of full re-render
+              if (typeof updateDetailsOnlyClosure === 'function') {
+                updateDetailsOnlyClosure();
+              }
+              
+              // Update status displays
+              setTimeout(() => {
+                updateStatusDisplays();
+              }, 0);
+            };
+            buttonContainer.appendChild(genesBtn);
+            
+            // Tier button
+            const tierBtn = document.createElement('button');
+            tierBtn.textContent = 'Tier';
+            tierBtn.className = 'diceroller-btn';
+            tierBtn.setAttribute('data-state', selectedButton === 'tier' ? 'selected' : 'closed');
+            tierBtn.style.setProperty('width', '60px', 'important');
+            tierBtn.style.setProperty('min-width', '60px', 'important');
+            tierBtn.style.setProperty('max-width', '60px', 'important');
+            tierBtn.style.padding = '6px 12px';
+            tierBtn.style.margin = '0 4px';
+            tierBtn.style.boxSizing = 'border-box';
+            tierBtn.style.setProperty('font-size', '12px', 'important');
+            tierBtn.style.boxShadow = selectedButton === 'tier' ? '0 0 0 2px #00ff00' : 'none';
+            tierBtn.onclick = () => {
+              // Update global mode state
+              window.DiceRollerMode = 'tier';
+              selectedButton = 'tier';
+              
+              // Update button states
+              tierBtn.setAttribute('data-state', 'selected');
+              tierBtn.style.boxShadow = '0 0 0 2px #00ff00';
+              genesBtn.setAttribute('data-state', 'closed');
+              genesBtn.style.boxShadow = 'none';
+              
+              // For tier mode: disable "Stop when changing dice" and auto-select "Continuously change dice"
+              stopCheckbox.disabled = true;
+              contCheckbox.disabled = false;
+              stopCheckboxWrapper.style.opacity = '0.5';
+              stopCheckboxWrapper.style.cursor = 'not-allowed';
+              render.stopWhenChangingDice = false;
+              render.continuouslyChangeDice = true;
+              stopCheckbox.checked = false;
+              contCheckbox.checked = true;
+              
+              // Only update the creature details (col3) instead of full re-render
+              if (typeof updateDetailsOnlyClosure === 'function') {
+                updateDetailsOnlyClosure();
+              }
+              
+              // Update status displays
+              setTimeout(() => {
+                updateStatusDisplays();
+              }, 0);
+            };
+            buttonContainer.appendChild(tierBtn);
+            
+            row2.appendChild(buttonContainer);
+            
+            col.appendChild(row2);
+            
+            // Separator 2
+            const separator2 = document.createElement('div');
+            separator2.className = 'separator my-2.5';
+            separator2.setAttribute('role', 'none');
+            separator2.style.margin = '0px 0px';
+            col.appendChild(separator2);
+            
+            // Row 3: Dice Rules (checkboxes)
+            // --- Add state for the checkboxes and speed ---
+            if (!render) {
+              render = {
+                stopWhenChangingDice: true,
+                continuouslyChangeDice: false,
+                autorollSpeed: 100
+              };
+            } else {
+              if (typeof render.stopWhenChangingDice === 'undefined') render.stopWhenChangingDice = true;
+              if (typeof render.continuouslyChangeDice === 'undefined') render.continuouslyChangeDice = false;
+              if (typeof render.autorollSpeed === 'undefined') render.autorollSpeed = 100;
+            }
+            
+            // Set default values based on current mode
+            if (window.DiceRollerMode === 'tier') {
+              render.stopWhenChangingDice = false;
+              render.continuouslyChangeDice = true;
+            } else {
+              // Genes mode: default to "Stop when changing dice"
+              render.stopWhenChangingDice = true;
+              render.continuouslyChangeDice = false;
+            }
+            const row3 = document.createElement('div');
+            row3.style.display = 'flex';
+            row3.style.flexDirection = 'column';
+            row3.style.alignItems = 'flex-start';
+            row3.style.justifyContent = 'flex-start';
+            row3.style.gap = '4px';
+            row3.style.marginTop = '12px';
             // Checkbox 1: Stop when changing dice
             const stopCheckboxWrapper = document.createElement('label');
             stopCheckboxWrapper.style.display = 'flex';
@@ -2087,6 +3509,13 @@
             const stopCheckbox = document.createElement('input');
             stopCheckbox.type = 'checkbox';
             stopCheckbox.checked = !!render.stopWhenChangingDice;
+            // Disable "Stop when changing dice" if in tier mode
+            if (window.DiceRollerMode === 'tier') {
+              stopCheckbox.disabled = true;
+              stopCheckbox.checked = false;
+              stopCheckboxWrapper.style.opacity = '0.5';
+              stopCheckboxWrapper.style.cursor = 'not-allowed';
+            }
             stopCheckbox.onchange = () => {
               if (!stopCheckbox.checked && !contCheckbox.checked) {
                 // Prevent both from being unchecked
@@ -2106,7 +3535,7 @@
             };
             stopCheckboxWrapper.appendChild(stopCheckbox);
             stopCheckboxWrapper.appendChild(document.createTextNode('Stop when changing dice'));
-            row2.appendChild(stopCheckboxWrapper);
+            row3.appendChild(stopCheckboxWrapper);
             // Checkbox 2: Continuously change dice
             const contCheckboxWrapper = document.createElement('label');
             contCheckboxWrapper.style.display = 'flex';
@@ -2115,6 +3544,11 @@
             const contCheckbox = document.createElement('input');
             contCheckbox.type = 'checkbox';
             contCheckbox.checked = !!render.continuouslyChangeDice;
+            // Auto-select "Continuously change dice" if in tier mode
+            if (window.DiceRollerMode === 'tier') {
+              contCheckbox.checked = true;
+              contCheckbox.disabled = false;
+            }
             contCheckbox.onchange = () => {
               if (!contCheckbox.checked && !stopCheckbox.checked) {
                 // Prevent both from being unchecked
@@ -2133,7 +3567,7 @@
             };
             contCheckboxWrapper.appendChild(contCheckbox);
             contCheckboxWrapper.appendChild(document.createTextNode('Continuously change dice'));
-            row2.appendChild(contCheckboxWrapper);
+            row3.appendChild(contCheckboxWrapper);
             
             // Speed control
             const speedWrapper = document.createElement('div');
@@ -2170,7 +3604,7 @@
             speedUnit.style.color = '#fff';
             speedWrapper.appendChild(speedUnit);
             
-            row2.appendChild(speedWrapper);
+            row3.appendChild(speedWrapper);
             
             // Add rate-limit warning below speed input
             const rateLimitWarning = document.createElement('div');
@@ -2182,9 +3616,9 @@
             rateLimitWarning.style.marginLeft = '2px';
             rateLimitWarning.style.paddingLeft = '12px';
             rateLimitWarning.style.paddingRight = '12px';
-            row2.appendChild(rateLimitWarning);
+            row3.appendChild(rateLimitWarning);
             
-            col.appendChild(row2);
+            col.appendChild(row3);
             return col;
           })()
         });
@@ -2436,32 +3870,92 @@
   }
   
   function cleanup() {
-    if (buttonCheckInterval) {
-      clearInterval(buttonCheckInterval);
-      buttonCheckInterval = null;
-    }
-    
-    failedAttempts = 0;
-    hasLoggedInventoryNotFound = false;
-    
-    if (inventoryObserver) {
-      try { inventoryObserver.disconnect(); } catch (e) {}
-      inventoryObserver = null;
-    }
-    const autoButtons = document.querySelectorAll('.auto-inventory-button');
-    autoButtons.forEach(btn => btn.remove());
-    
-    DOMCache.clear();
-    if (statusUpdateTimeout) {
-      clearTimeout(statusUpdateTimeout);
-      statusUpdateTimeout = null;
-    }
-    
-    if (typeof window !== 'undefined') {
-      delete window.updateStatusDisplays;
-      delete window.resetRollCount;
-      delete window.DiceRollerSelectedDice;
-      delete window.DiceRollerRender;
+    try {
+      // Clear intervals
+      if (buttonCheckInterval) {
+        clearInterval(buttonCheckInterval);
+        buttonCheckInterval = null;
+      }
+      
+      if (rateLimitedInterval) {
+        clearInterval(rateLimitedInterval);
+        rateLimitedInterval = null;
+      }
+      
+      // Clear timeouts
+      if (statusUpdateTimeout) {
+        clearTimeout(statusUpdateTimeout);
+        statusUpdateTimeout = null;
+      }
+      
+      // Reset counters
+      failedAttempts = 0;
+      hasLoggedInventoryNotFound = false;
+      
+      // Disconnect observers
+      if (inventoryObserver) {
+        try { 
+          inventoryObserver.disconnect(); 
+        } catch (e) {
+          console.warn('[Dice Roller] Error disconnecting observer:', e);
+        }
+        inventoryObserver = null;
+      }
+      
+      // Clear DOM cache
+      try {
+        DOMCache.clear();
+      } catch (e) {
+        console.warn('[Dice Roller] Error clearing DOM cache:', e);
+      }
+      
+      // Remove auto buttons
+      try {
+        const autoButtons = document.querySelectorAll('.auto-inventory-button');
+        autoButtons.forEach(btn => {
+          try {
+            btn.remove();
+          } catch (e) {
+            console.warn('[Dice Roller] Error removing button:', e);
+          }
+        });
+      } catch (e) {
+        console.warn('[Dice Roller] Error removing auto buttons:', e);
+      }
+      
+      // Clean up global state
+      if (typeof window !== 'undefined') {
+        try {
+          // Remove global functions
+          delete window.updateStatusDisplays;
+          delete window.resetRollCount;
+          delete window.DiceRollerSelectedDice;
+          delete window.DiceRollerRender;
+          
+          // Clean up global variables
+          delete window.DiceRollerMode;
+          delete window.DiceRollerSelectedTier;
+          delete window.DiceRollerCurrentTier;
+          delete window.DiceRollerCurrentGameId;
+          delete window.DiceRollerDebugMode;
+          
+          // Clean up DiceRoller namespace
+          if (window.DiceRoller) {
+            delete window.DiceRoller.cleanup;
+            delete window.DiceRoller;
+          }
+        } catch (e) {
+          console.warn('[Dice Roller] Error cleaning global state:', e);
+        }
+      }
+      
+      // Clear module-scoped state
+      diceRulesConfig = {};
+      lastApiCall = 0;
+      
+      console.log('[Dice Roller] Cleanup completed successfully');
+    } catch (error) {
+      console.error('[Dice Roller] Error during cleanup:', error);
     }
   }
   
