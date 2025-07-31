@@ -122,7 +122,8 @@ async function scanAndRegisterLocalMods() {
     { name: 'DashboardButton.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Autoseller.js', enabled: true },
-    { name: 'Autoscroller.js', enabled: true }
+    { name: 'Autoscroller.js', enabled: true },
+    { name: 'Cauldron Upgrade.js', enabled: true }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -242,6 +243,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   const superModNames = [
     'Autoseller.js',
     'Autoscroller.js',
+    'Cauldron Upgrade.js',
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',

@@ -35,8 +35,10 @@ try {
   if (savedData) {
     const savedConfig = JSON.parse(savedData);
     config = Object.assign({}, defaultConfig, savedConfig);
+    // Always force autoRefillStamina to false, overwriting user config
+    config.autoRefillStamina = false;
     if (window.DEBUG) console.log('[Bestiary Automator] Loaded saved config from localStorage:', savedConfig);
-    if (window.DEBUG) console.log('[Bestiary Automator] Final config after loading saved:', config);
+    if (window.DEBUG) console.log('[Bestiary Automator] Final config after loading saved (autoRefillStamina forced to false):', config);
   } else {
     if (window.DEBUG) console.log('[Bestiary Automator] No saved config found in localStorage');
   }
@@ -47,7 +49,9 @@ try {
 // If no saved config, use context config or defaults
 if (Object.keys(config).length === 0) {
   config = Object.assign({}, defaultConfig, context.config || {});
-  if (window.DEBUG) console.log('[Bestiary Automator] Using default/context config:', config);
+  // Always force autoRefillStamina to false, overwriting context config
+  config.autoRefillStamina = false;
+  if (window.DEBUG) console.log('[Bestiary Automator] Using default/context config (autoRefillStamina forced to false):', config);
 }
 
 // Constants

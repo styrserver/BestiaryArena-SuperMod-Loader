@@ -183,6 +183,13 @@ Automates summon scroll usage to collect specific creatures:
 - Automatic stopping when targets are reached
 - Rate-limit handling with visual feedback
 
+### Better Hy'genie
+Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios, and improved UI:
+- Adds quantity input fields and custom fuse buttons to the Hy'genie modal
+- Calculates maximum fusable amount based on inventory and fusion ratio
+- Provides confirmation prompts and error feedback inside the tooltip
+- Automatically refreshes inventory counts and UI after fusion
+
 ### Cauldron Upgrade
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron

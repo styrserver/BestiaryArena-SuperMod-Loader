@@ -549,8 +549,11 @@
 
   // Utility function to update dice button states
   function updateDiceButtonStates(selectedDice) {
-    // Use DOMCache for performance
-    const diceButtons = DOMCache.get('.focus-style-visible') ? [ ...document.querySelectorAll('.focus-style-visible') ] : [];
+    // Restrict selection to dice buttons inside the Auto Dice Roller modal only
+    const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
+    if (!modal) return;
+    // Use DOMCache for performance but keep the scope limited to the modal
+    const diceButtons = Array.from(modal.querySelectorAll('.focus-style-visible'));
     let diceButtonIndex = 0;
     diceButtons.forEach((btn) => {
       const diceSprite = btn.querySelector(`.sprite.item.relative.id-${DICE_CONFIG.DICE_MANIPULATOR_ID}`);

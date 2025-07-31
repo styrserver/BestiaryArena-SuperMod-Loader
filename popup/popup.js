@@ -143,6 +143,7 @@ function renderLocalMods(mods) {
     'Autoseller.js',
     'Autoscroller.js',
     'Better_Hygenie.js',
+    'Cauldron Upgrade.js',
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',
