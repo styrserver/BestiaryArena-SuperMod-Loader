@@ -1,10 +1,29 @@
 // =======================
-// 0. Version & Metadata
+// Autoscroller.js - Bestiary Arena Auto Scroll Mod
+// =======================
+// Version: 2.0 (Optimized)
+// Features: 
+// - Enhanced DOM caching and memory management
+// - Advanced error handling with circuit breaker
+// - API request queuing and rate limiting
+// - Improved state management and cleanup
+//
+// MODULE INDEX:
+// 1. Configuration & Constants
+// 2. State Management
+// 3. DOM Cache Management
+// 4. Inventory Integration Variables
+// 5. Error Handling & Circuit Breaker
+// 6. API Functions & Request Queue
+// 7. Utility Functions
+// 8. Modal UI & Rendering
+// 9. Inventory Integration & Button Management
+// 10. Cleanup & Exports
 // =======================
 (function() {
   
 // =======================
-// 1. Configuration & Constants
+// MODULE 1: Configuration & Constants
 // =======================
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
@@ -16,7 +35,22 @@
     API_THROTTLE_MAX: 2000,
     RATE_LIMIT_RETRY_DELAY: 2000,
     RATE_LIMIT_MAX_RETRIES: 5,
-    ANIMATION_INTERVAL: 400
+    RATE_LIMIT_EXPONENTIAL_BACKOFF: true,
+    RATE_LIMIT_BASE_DELAY: 1000,
+    RATE_LIMIT_MAX_DELAY: 30000,
+    ANIMATION_INTERVAL: 400,
+    SELL_RETRY_DELAY: 5000,
+    SELL_MAX_RETRIES: 3
+  };
+
+  // Error handling configuration
+  const ERROR_HANDLING = {
+    MAX_CONSECUTIVE_ERRORS: 5,
+    ERROR_RECOVERY_DELAY: 5000,
+    CIRCUIT_BREAKER_THRESHOLD: 10,
+    CIRCUIT_BREAKER_TIMEOUT: 60000, // 1 minute
+    NETWORK_ERROR_RETRY_DELAY: 2000,
+    NETWORK_ERROR_MAX_RETRIES: 3
   };
   
   const SCROLL_CONFIG = {
@@ -37,75 +71,644 @@
   const SUMMON_SCROLL_API_URL = SCROLL_CONFIG.SUMMON_SCROLL_API_URL;
   const FRAME_IMAGE_URL = SCROLL_CONFIG.FRAME_IMAGE_URL;
   
-  const ALL_CREATURES = [
-    'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
-    'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
-    'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
-    'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
-    'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
-    'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
-    'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
-    'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
-  ];
+  // Lazy-loaded creature list to reduce initial memory footprint
+  let ALL_CREATURES_CACHE = null;
+  
+  function getAllCreatures() {
+    if (!ALL_CREATURES_CACHE) {
+      ALL_CREATURES_CACHE = [
+        'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
+        'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
+        'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
+        'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
+        'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
+        'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
+        'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
+        'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
+      ];
+    }
+    return ALL_CREATURES_CACHE;
+  }
 
 // =======================
-// 2. API Functions
+// MODULE 2: State Management
 // =======================
-  async function summonScroll(rarity) {
-    const now = Date.now();
-    const timeSinceLastCall = now - lastApiCall;
-    const throttleDelay = Math.max(userDefinedSpeed, PERFORMANCE.API_THROTTLE_MIN);
-    if (timeSinceLastCall < throttleDelay) {
-      await new Promise(resolve => setTimeout(resolve, throttleDelay - timeSinceLastCall));
-    }
-    lastApiCall = Date.now();
+  // Centralized state management
+  const AutoscrollerState = {
+    // Core state
+    autoscrollStats: {
+      totalScrolls: 0,
+      successfulSummons: 0,
+      targetCreatures: new Set(),
+      foundCreatures: new Map(),
+      soldMonsters: 0,
+      soldGold: 0
+    },
     
-    let response;
-    let retryCount = 0;
-    let wasRateLimited = false;
+    // UI state
+    selectedScrollTier: 1,
+    selectedCreatures: [],
+    autoscrolling: false,
     
-    while (true) {
-      if (!autoscrolling) {
-        throw new Error('Autoscroll stopped by user');
+    // Configuration state
+    stopConditions: {
+      useTotalCreatures: true,
+      totalCreaturesTarget: 15,
+      useTierSystem: false,
+      tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
+    },
+    
+    // Autosell state
+    autosellNonSelected: false,
+    
+    // Rate limiting state
+    rateLimitedSales: new Set(),
+    rateLimitedSalesRetryCount: new Map(),
+    lastRateLimitTime: 0,
+    consecutiveRateLimits: 0,
+    lastApiCall: 0,
+    userDefinedSpeed: 400,
+    rateLimitedInterval: null,
+    
+    // State validation
+    validateState() {
+      const errors = [];
+      
+      if (this.selectedScrollTier < 1 || this.selectedScrollTier > 5) {
+        errors.push('Invalid scroll tier');
       }
+      
+      if (this.stopConditions.totalCreaturesTarget < 1) {
+        errors.push('Invalid creature target');
+      }
+      
+      if (this.userDefinedSpeed < 100 || this.userDefinedSpeed > 2000) {
+        errors.push('Invalid speed setting');
+      }
+      
+      return errors;
+    },
+    
+    // State persistence
+    saveToStorage() {
+      try {
+        const stateToSave = {
+          selectedScrollTier: this.selectedScrollTier,
+          selectedCreatures: [...this.selectedCreatures],
+          stopConditions: { ...this.stopConditions },
+          userDefinedSpeed: this.userDefinedSpeed
+        };
+        localStorage.setItem('autoscroller_state', JSON.stringify(stateToSave));
+      } catch (error) {
+        console.warn('[Autoscroller] Failed to save state:', error);
+      }
+    },
+    
+    loadFromStorage() {
+      try {
+        const saved = localStorage.getItem('autoscroller_state');
+        if (saved) {
+          const state = JSON.parse(saved);
+          
+          if (state.selectedScrollTier) this.selectedScrollTier = state.selectedScrollTier;
+          if (state.selectedCreatures) this.selectedCreatures = [...state.selectedCreatures];
+          if (state.stopConditions) this.stopConditions = { ...this.stopConditions, ...state.stopConditions };
+          if (state.userDefinedSpeed) this.userDefinedSpeed = state.userDefinedSpeed;
+          
+          console.log('[Autoscroller] State loaded from storage');
+        }
+      } catch (error) {
+        console.warn('[Autoscroller] Failed to load state:', error);
+      }
+    },
+    
+    // State reset
+    reset() {
+      this.autoscrollStats = {
+        totalScrolls: 0,
+        successfulSummons: 0,
+        targetCreatures: new Set(),
+        foundCreatures: new Map(),
+        soldMonsters: 0,
+        soldGold: 0
+      };
+      
+      this.selectedScrollTier = 1;
+      this.selectedCreatures = [];
+      this.autoscrolling = false;
+      
+      this.stopConditions = {
+        useTotalCreatures: true,
+        totalCreaturesTarget: 15,
+        useTierSystem: false,
+        tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
+      };
+      
+      this.autosellNonSelected = false;
+      this.rateLimitedSales.clear();
+      this.rateLimitedSalesRetryCount.clear();
+      this.lastRateLimitTime = 0;
+      this.consecutiveRateLimits = 0;
+      this.lastApiCall = 0;
+      this.userDefinedSpeed = 400;
+      
+      if (this.rateLimitedInterval) {
+        clearInterval(this.rateLimitedInterval);
+        this.rateLimitedInterval = null;
+      }
+    },
+    
+    // State update with validation
+    update(newState) {
+      const oldState = { ...this };
+      Object.assign(this, newState);
+      
+      const errors = this.validateState();
+      if (errors.length > 0) {
+        console.warn('[Autoscroller] State validation errors:', errors);
+        Object.assign(this, oldState); // Revert on validation failure
+        return false;
+      }
+      
+      return true;
+    }
+  };
+  
+  // Legacy variable aliases for backward compatibility
+  let autoscrollStats = AutoscrollerState.autoscrollStats;
+  let selectedScrollTier = AutoscrollerState.selectedScrollTier;
+  let selectedCreatures = AutoscrollerState.selectedCreatures;
+  let autoscrolling = AutoscrollerState.autoscrolling;
+  let stopConditions = AutoscrollerState.stopConditions;
+  let autosellNonSelected = AutoscrollerState.autosellNonSelected;
+  let rateLimitedSales = AutoscrollerState.rateLimitedSales;
+  let rateLimitedSalesRetryCount = AutoscrollerState.rateLimitedSalesRetryCount;
+  let lastRateLimitTime = AutoscrollerState.lastRateLimitTime;
+  let consecutiveRateLimits = AutoscrollerState.consecutiveRateLimits;
+  let lastApiCall = AutoscrollerState.lastApiCall;
+  let userDefinedSpeed = AutoscrollerState.userDefinedSpeed;
+  let rateLimitedInterval = AutoscrollerState.rateLimitedInterval;
+  
+  // Error handling state
+  let errorState = {
+    consecutiveErrors: 0,
+    lastErrorTime: 0,
+    circuitBreakerOpen: false,
+    circuitBreakerOpenTime: 0,
+    totalErrors: 0,
+    errorTypes: new Map()
+  };
+  
+  // API request queue management
+  let apiRequestQueue = {
+    pending: [],
+    processing: false,
+    lastRequestTime: 0,
+    batchSize: 1, // Start with single requests, can be optimized later
+    maxQueueSize: 10
+  };
+  
+  // Event handling management
+  let eventHandlers = {
+    listeners: new Map(),
+    delegatedEvents: new Map(),
+    
+    // Add event listener with cleanup tracking
+    add(element, event, handler, options = {}) {
+      const key = `${event}_${element.id || element.className || 'unknown'}`;
+      if (!this.listeners.has(key)) {
+        this.listeners.set(key, []);
+      }
+      this.listeners.get(key).push({ element, event, handler, options });
+      element.addEventListener(event, handler, options);
+    },
+    
+    // Remove specific event listener
+    remove(element, event, handler) {
+      const key = `${event}_${element.id || element.className || 'unknown'}`;
+      const listeners = this.listeners.get(key);
+      if (listeners) {
+        const index = listeners.findIndex(l => l.element === element && l.handler === handler);
+        if (index !== -1) {
+          element.removeEventListener(event, handler);
+          listeners.splice(index, 1);
+        }
+      }
+    },
+    
+    // Add delegated event listener
+    addDelegated(container, selector, event, handler) {
+      const key = `${event}_${selector}`;
+      if (!this.delegatedEvents.has(key)) {
+        this.delegatedEvents.set(key, []);
+      }
+      this.delegatedEvents.get(key).push({ container, selector, event, handler });
+      
+      container.addEventListener(event, (e) => {
+        const target = e.target.closest(selector);
+        if (target && container.contains(target)) {
+          handler.call(target, e, target);
+        }
+      });
+    },
+    
+    // Clean up all event listeners
+    cleanup() {
+      // Clean up regular listeners
+      for (const [key, listeners] of this.listeners) {
+        for (const { element, event, handler } of listeners) {
+          try {
+            element.removeEventListener(event, handler);
+          } catch (error) {
+            console.warn('[Autoscroller] Error removing event listener:', error);
+          }
+        }
+      }
+      this.listeners.clear();
+      
+      // Clean up delegated events
+      this.delegatedEvents.clear();
+    }
+  };
+
+// =======================
+// MODULE 3: DOM Cache Management
+// =======================
+  const DOMCache = {
+    cache: new Map(),
+    persistentCache: new Map(), // For elements that rarely change
+    cacheTimeout: PERFORMANCE.DOM_CACHE_TIMEOUT,
+    inventoryCacheTimeout: 500, // Shorter timeout for inventory elements
+    maxCacheSize: 100, // Maximum number of cached items
+    maxPersistentCacheSize: 50, // Maximum number of persistent cached items
+
+    get: function(selector, context = document) {
+      const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+      const cached = this.cache.get(key);
+      
+      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+        return cached.element;
+      }
+      
+      const element = context.querySelector(selector);
+      this.addToCache(key, element);
+      return element;
+    },
+
+    getPersistent: function(selector, context = document) {
+      const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+      const cached = this.persistentCache.get(key);
+      
+      if (cached && cached.element && document.contains(cached.element)) {
+        return cached.element;
+      }
+      
+      const element = context.querySelector(selector);
+      if (element) {
+        this.addToPersistentCache(key, element);
+      }
+      return element;
+    },
+
+    getAll: function(selector, context = document) {
+      const key = `all_${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+      const cached = this.cache.get(key);
+      
+      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+        return cached.elements;
+      }
+      
+      const elements = context.querySelectorAll(selector);
+      this.addToCache(key, elements);
+      return elements;
+    },
+
+    clear: function() {
+      this.cache.clear();
+      this.persistentCache.clear();
+    },
+
+    clearSelector: function(selector) {
+      for (const key of this.cache.keys()) {
+        if (key.includes(selector)) {
+          this.cache.delete(key);
+        }
+      }
+      for (const key of this.persistentCache.keys()) {
+        if (key.includes(selector)) {
+          this.persistentCache.delete(key);
+        }
+      }
+    },
+
+    // New method for inventory-specific caching
+    getInventoryElement: function(selector) {
+      const key = `inventory_${selector}`;
+      const cached = this.cache.get(key);
+      
+      if (cached && Date.now() - cached.timestamp < this.inventoryCacheTimeout) {
+        return cached.element;
+      }
+      
+      const element = document.querySelector(selector);
+      this.addToCache(key, element);
+      return element;
+    },
+
+    // Clear inventory cache when inventory changes
+    clearInventoryCache: function() {
+      for (const key of this.cache.keys()) {
+        if (key.startsWith('inventory_')) {
+          this.cache.delete(key);
+        }
+      }
+    },
+
+    // Manage cache size to prevent memory leaks
+    manageCacheSize: function() {
+      // Manage regular cache
+      if (this.cache.size > this.maxCacheSize) {
+        const entries = Array.from(this.cache.entries());
+        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toRemove = entries.slice(0, this.cache.size - this.maxCacheSize);
+        toRemove.forEach(([key]) => this.cache.delete(key));
+      }
+
+      // Manage persistent cache
+      if (this.persistentCache.size > this.maxPersistentCacheSize) {
+        const entries = Array.from(this.persistentCache.entries());
+        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toRemove = entries.slice(0, this.persistentCache.size - this.maxPersistentCacheSize);
+        toRemove.forEach(([key]) => this.persistentCache.delete(key));
+      }
+    },
+
+    // Add cache entry with size management
+    addToCache: function(key, element, timestamp = Date.now()) {
+      this.cache.set(key, { element, timestamp });
+      this.manageCacheSize();
+    },
+
+    addToPersistentCache: function(key, element, timestamp = Date.now()) {
+      this.persistentCache.set(key, { element, timestamp });
+      this.manageCacheSize();
+    }
+  };
+
+// =======================
+// MODULE 4: Inventory Integration Variables
+// =======================
+  let inventoryObserver = null;
+  let buttonCheckInterval = null;
+  let lastButtonCheck = 0;
+  let failedAttempts = 0;
+  let hasLoggedInventoryNotFound = false;
+  const BUTTON_CHECK_INTERVAL = 1000;
+  const BUTTON_CHECK_TIMEOUT = 10000;
+  const LOG_AFTER_ATTEMPTS = 3;
+
+// =======================
+// MODULE 5: Error Handling & Circuit Breaker
+// =======================
+  function handleError(error, context = 'unknown') {
+    // Don't count "Autoscroll stopped by user" as an error
+    if (error.message && error.message.includes('Autoscroll stopped by user')) {
+      return { shouldStop: false, reason: null };
+    }
+    
+    const now = Date.now();
+    errorState.totalErrors++;
+    errorState.lastErrorTime = now;
+    errorState.consecutiveErrors++;
+    
+    // Track error types
+    const errorType = error.name || 'Unknown';
+    errorState.errorTypes.set(errorType, (errorState.errorTypes.get(errorType) || 0) + 1);
+    
+    console.error(`[Autoscroller] Error in ${context}:`, error);
+    
+    // Check circuit breaker
+    if (errorState.consecutiveErrors >= ERROR_HANDLING.CIRCUIT_BREAKER_THRESHOLD) {
+      errorState.circuitBreakerOpen = true;
+      errorState.circuitBreakerOpenTime = now;
+      console.warn(`[Autoscroller] Circuit breaker opened due to ${errorState.consecutiveErrors} consecutive errors`);
+      
+      const { autoscrollBtn } = getAutoscrollButtons();
+      if (autoscrollBtn) {
+        autoscrollBtn.textContent = 'Error - Circuit Open';
+        autoscrollBtn.style.color = '#ff6b6b';
+      }
+      
+      return { shouldStop: true, reason: 'circuit_breaker' };
+    }
+    
+    // Check if we should stop autoscroll
+    if (errorState.consecutiveErrors >= ERROR_HANDLING.MAX_CONSECUTIVE_ERRORS) {
+      console.warn(`[Autoscroller] Stopping autoscroll due to ${errorState.consecutiveErrors} consecutive errors`);
+      return { shouldStop: true, reason: 'max_errors' };
+    }
+    
+    return { shouldStop: false, reason: null };
+  }
+  
+  function resetErrorState() {
+    errorState.consecutiveErrors = 0;
+    errorState.circuitBreakerOpen = false;
+    errorState.circuitBreakerOpenTime = 0;
+    
+    const { autoscrollBtn } = getAutoscrollButtons();
+    if (autoscrollBtn) {
+      autoscrollBtn.style.color = '';
+    }
+  }
+  
+  function isCircuitBreakerOpen() {
+    if (!errorState.circuitBreakerOpen) return false;
+    
+    const now = Date.now();
+    if (now - errorState.circuitBreakerOpenTime >= ERROR_HANDLING.CIRCUIT_BREAKER_TIMEOUT) {
+      errorState.circuitBreakerOpen = false;
+      console.log('[Autoscroller] Circuit breaker timeout expired, resuming operations');
+      return false;
+    }
+    
+    return true;
+  }
+  
+  function handleSuccess() {
+    errorState.consecutiveErrors = 0;
+    if (errorState.circuitBreakerOpen) {
+      errorState.circuitBreakerOpen = false;
+      console.log('[Autoscroller] Circuit breaker closed due to successful operation');
+    }
+  }
+  
+  // API Queue Management
+  function addToApiQueue(request) {
+    if (apiRequestQueue.pending.length >= apiRequestQueue.maxQueueSize) {
+      console.warn('[Autoscroller] API queue full, dropping oldest request');
+      apiRequestQueue.pending.shift(); // Remove oldest request
+    }
+    apiRequestQueue.pending.push(request);
+    
+    if (!apiRequestQueue.processing) {
+      processApiQueue();
+    }
+  }
+  
+  async function processApiQueue() {
+    if (apiRequestQueue.processing || apiRequestQueue.pending.length === 0) {
+      return;
+    }
+    
+    apiRequestQueue.processing = true;
+    
+    while (apiRequestQueue.pending.length > 0 && autoscrolling) {
+      const request = apiRequestQueue.pending.shift();
       
       try {
-        response = await fetch(SUMMON_SCROLL_API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Game-Version': '1'
-          },
-          body: JSON.stringify({
-            "0": {
-              "json": {
-                "rarity": rarity
-              }
-            }
-          })
-        });
-      } catch (err) {
-        console.error('[Autoscroller] Fetch error:', err);
-        throw err;
-      }
-      
-            if (response.status !== 429) {
-        if (wasRateLimited) {
-          const { autoscrollBtn } = getAutoscrollButtons();
-          if (autoscrollBtn && autoscrolling) {
-            if (rateLimitedInterval) {
-              clearInterval(rateLimitedInterval);
-              rateLimitedInterval = null;
-            }
-            autoscrollBtn.textContent = 'Autoscrolling...';
-          }
-   
+        // Check if autoscrolling was stopped before processing
+        if (!autoscrolling) {
+          request.reject(new Error('Autoscroll stopped by user'));
+          continue;
         }
-        break;
+        
+        // Ensure minimum delay between requests
+        const now = Date.now();
+        const timeSinceLastRequest = now - apiRequestQueue.lastRequestTime;
+        const minDelay = Math.max(userDefinedSpeed, PERFORMANCE.API_THROTTLE_MIN);
+        
+        if (timeSinceLastRequest < minDelay) {
+          await new Promise(resolve => setTimeout(resolve, minDelay - timeSinceLastRequest));
+        }
+        
+        // Check again after delay
+        if (!autoscrolling) {
+          request.reject(new Error('Autoscroll stopped by user'));
+          continue;
+        }
+        
+        const result = await request.execute();
+        request.resolve(result);
+        apiRequestQueue.lastRequestTime = Date.now();
+        
+      } catch (error) {
+        // Don't log "Autoscroll stopped by user" as an error
+        if (error.message !== 'Autoscroll stopped by user') {
+          console.warn('[Autoscroller] API queue request failed:', error.message);
+        }
+        request.reject(error);
       }
+    }
+    
+    apiRequestQueue.processing = false;
+  }
+  
+  function clearApiQueue() {
+    apiRequestQueue.pending.forEach(request => {
+      request.reject(new Error('Queue cleared'));
+    });
+    apiRequestQueue.pending = [];
+    apiRequestQueue.processing = false;
+  }
+
+// =======================
+// MODULE 6: API Functions & Request Queue
+// =======================
+  async function summonScroll(rarity) {
+    return new Promise((resolve, reject) => {
+      const request = {
+        execute: async () => {
+          // Check circuit breaker
+          if (isCircuitBreakerOpen()) {
+            throw new Error('Circuit breaker is open - too many consecutive errors');
+          }
+          
+          let response;
+          let retryCount = 0;
+          let wasRateLimited = false;
+          
+          while (true) {
+            if (!autoscrolling) {
+              throw new Error('Autoscroll stopped by user');
+            }
+            
+            try {
+              response = await fetch(SUMMON_SCROLL_API_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Game-Version': '1'
+                },
+                body: JSON.stringify({
+                  "0": {
+                    "json": {
+                      "rarity": rarity
+                    }
+                  }
+                })
+              });
+            } catch (err) {
+              const errorResult = handleError(err, 'summonScroll_network');
+              if (errorResult.shouldStop) {
+                throw new Error(`Network error: ${errorResult.reason}`);
+              }
+              
+              retryCount++;
+              if (retryCount > ERROR_HANDLING.NETWORK_ERROR_MAX_RETRIES) {
+                throw new Error('Network error after max retries');
+              }
+              await new Promise(resolve => setTimeout(resolve, ERROR_HANDLING.NETWORK_ERROR_RETRY_DELAY));
+              continue;
+            }
       
-      retryCount++;
-      if (retryCount > PERFORMANCE.RATE_LIMIT_MAX_RETRIES) {
+              if (response.status !== 429) {
+          if (wasRateLimited) {
+            const { autoscrollBtn } = getAutoscrollButtons();
+            if (autoscrollBtn && autoscrolling) {
+              if (rateLimitedInterval) {
+                clearInterval(rateLimitedInterval);
+                rateLimitedInterval = null;
+              }
+              autoscrollBtn.textContent = 'Autoscrolling...';
+            }
+            // Reset rate limit tracking on success
+            consecutiveRateLimits = 0;
+            lastRateLimitTime = 0;
+          }
+          break;
+        }
+        
+        // Handle rate limiting
+        consecutiveRateLimits++;
+        lastRateLimitTime = Date.now();
+        retryCount++;
+        
+        if (retryCount > PERFORMANCE.RATE_LIMIT_MAX_RETRIES) {
+          const { autoscrollBtn } = getAutoscrollButtons();
+          if (autoscrollBtn) {
+            let dotCount = 1;
+            autoscrollBtn.textContent = 'Rate-limited.';
+            if (rateLimitedInterval) clearInterval(rateLimitedInterval);
+            rateLimitedInterval = setInterval(() => {
+              dotCount = (dotCount % 3) + 1;
+              autoscrollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
+            }, PERFORMANCE.ANIMATION_INTERVAL);
+          }
+          
+          // Instead of throwing, return a rate limit indicator
+          return { rateLimited: true, retryCount };
+        }
+        
+        // Calculate wait time with exponential backoff
+        let waitTime = PERFORMANCE.RATE_LIMIT_BASE_DELAY;
+        if (PERFORMANCE.RATE_LIMIT_EXPONENTIAL_BACKOFF) {
+          waitTime = Math.min(
+            PERFORMANCE.RATE_LIMIT_BASE_DELAY * Math.pow(2, retryCount - 1),
+            PERFORMANCE.RATE_LIMIT_MAX_DELAY
+          );
+        }
+        
         const { autoscrollBtn } = getAutoscrollButtons();
         if (autoscrollBtn) {
           let dotCount = 1;
@@ -116,41 +719,134 @@
             autoscrollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
           }, PERFORMANCE.ANIMATION_INTERVAL);
         }
-        throw new Error('Rate limit reached too many times.');
+        
+        console.log(`[Autoscroller] Rate limited, waiting ${waitTime}ms before retry ${retryCount}/${PERFORMANCE.RATE_LIMIT_MAX_RETRIES}`);
+        wasRateLimited = true;
+        await new Promise(res => setTimeout(res, waitTime));
+        lastApiCall = Date.now();
       }
       
-      const waitTime = PERFORMANCE.RATE_LIMIT_RETRY_DELAY;
-      
-      const { autoscrollBtn } = getAutoscrollButtons();
-      if (autoscrollBtn) {
-        let dotCount = 1;
-        autoscrollBtn.textContent = 'Rate-limited.';
-        if (rateLimitedInterval) clearInterval(rateLimitedInterval);
-        rateLimitedInterval = setInterval(() => {
-          dotCount = (dotCount % 3) + 1;
-          autoscrollBtn.textContent = 'Rate-limited' + '.'.repeat(dotCount);
-        }, PERFORMANCE.ANIMATION_INTERVAL);
+      let data;
+      try {
+        data = await response.json();
+      } catch (err) {
+        const errorResult = handleError(err, 'summonScroll_json_parse');
+        if (errorResult.shouldStop) {
+          throw new Error(`JSON parse error: ${errorResult.reason}`);
+        }
+        throw new Error('API returned non-JSON response');
       }
       
-      wasRateLimited = true;
-      await new Promise(res => setTimeout(res, waitTime));
-      lastApiCall = Date.now();
-    }
-    
-    let data;
+      if (!response.ok) {
+        const errorResult = handleError(new Error(`HTTP ${response.status}: ${response.statusText}`), 'summonScroll_http');
+        if (errorResult.shouldStop) {
+          throw new Error(`HTTP error: ${errorResult.reason}`);
+        }
+        throw new Error(`API request failed: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
+      }
+      
+      // Success - reset error state
+      handleSuccess();
+      
+      return data[0]?.result?.data?.json;
+        },
+        resolve,
+        reject
+      };
+      
+      addToApiQueue(request);
+    });
+  }
+  
+  /**
+   * Update the local inventory state using inventoryDiff from API response
+   */
+  function updateLocalInventoryAfterRoll(inventoryDiff) {
     try {
-      data = await response.json();
-    } catch (err) {
-      console.error('[Autoscroller] Non-JSON response:', err);
-      throw new Error('API returned non-JSON response');
+      const player = globalThis.state?.player;
+      if (!player) return;
+      
+      if (!inventoryDiff || Object.keys(inventoryDiff).length === 0) return;
+      
+      player.send({
+        type: 'setState',
+        fn: (prev) => {
+          const newState = { ...prev };
+          // Ensure nested inventory exists
+          newState.inventory = { ...prev.inventory };
+          
+          Object.entries(inventoryDiff).forEach(([itemKey, change]) => {
+            if (change === 0) return;
+            if (!newState.inventory[itemKey]) newState.inventory[itemKey] = 0;
+            newState.inventory[itemKey] = Math.max(0, newState.inventory[itemKey] + change);
+            // Mirror on root for compatibility
+            newState[itemKey] = newState.inventory[itemKey];
+          });
+          
+          return newState;
+        }
+      });
+    } catch (error) {
+      console.warn('[Autoscroller] Error updating local inventory:', error);
     }
-    
-    if (!response.ok) {
-      console.error('[Autoscroller] API error response:', data);
-      throw new Error(`API request failed: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
+  }
+  
+  /**
+   * Update the summon scroll counts in the UI to reflect current inventory
+   */
+  function updateSelectedScrollTierBorder() {
+    const scrollButtons = document.querySelectorAll('.autoscroller-scroll-button');
+    scrollButtons.forEach((btn, index) => {
+      const tier = index + 1;
+      const slot = btn.querySelector('.container-slot');
+      if (slot) {
+        if (tier === selectedScrollTier) {
+          btn.setAttribute('data-state', 'selected');
+          slot.style.boxShadow = '0 0 0 2px #00ff00';
+          slot.style.borderRadius = '0';
+        } else {
+          btn.setAttribute('data-state', 'closed');
+          slot.style.boxShadow = 'none';
+          slot.style.borderRadius = '0';
+        }
+      }
+    });
+  }
+
+  function updateSummonScrollCounts() {
+    try {
+      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      if (!playerContext) return;
+      
+      const inventory = playerContext.inventory || {};
+      
+      // Find all summon scroll count elements in the modal
+      const scrollButtons = document.querySelectorAll('.autoscroller-scroll-button');
+      
+      scrollButtons.forEach((btn, index) => {
+        const tier = index + 1; // 1-5 for summon scroll tiers
+        const key = `summonScroll${tier}`;
+        const count = inventory[key] || 0;
+        
+        // Find the count element below the button
+        const countElement = btn.parentElement?.querySelector('span[translate="no"]');
+        if (countElement) {
+          if (count === 0) {
+            countElement.textContent = '0';
+            countElement.style.color = '#888';
+            countElement.style.fontStyle = 'italic';
+            countElement.style.fontWeight = 'normal';
+          } else {
+            countElement.textContent = (count >= 1000 ? (count / 1000).toFixed(1).replace('.', ',') + 'K' : count);
+            countElement.style.color = '#fff';
+            countElement.style.fontStyle = 'normal';
+            countElement.style.fontWeight = 'bold';
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('[Autoscroller] Error updating summon scroll counts:', error);
     }
-    
-    return data[0]?.result?.data?.json;
   }
   
   function addMonsterToLocalInventory(monsterData) {
@@ -167,6 +863,23 @@
       });
     } catch (e) {
       console.warn('[Autoscroller] Failed to update local inventory:', e);
+    }
+  }
+  
+  function removeMonsterFromLocalInventory(monsterId) {
+    try {
+      const player = globalThis.state?.player;
+      if (!player) return;
+      
+      player.send({
+        type: "setState",
+        fn: (prev) => ({
+          ...prev,
+          monsters: prev.monsters.filter(m => m.id !== monsterId)
+        }),
+      });
+    } catch (e) {
+      console.warn('[Autoscroller] Failed to remove monster from local inventory:', e);
     }
   }
   
@@ -202,49 +915,15 @@
     return 1;
   }
   
-  let autoscrollStats = {
-    totalScrolls: 0,
-    successfulSummons: 0,
-    targetCreatures: new Set(),
-    foundCreatures: new Map()
-  };
-  let selectedScrollTier = 1;
-  let selectedCreatures = [];
-  let autoscrolling = false;
-  
-  let stopConditions = {
-    useTotalCreatures: true,
-    totalCreaturesTarget: 15,
-    useTierSystem: false,
-    tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
-  };
-  
-  let lastApiCall = 0;
-  let userDefinedSpeed = 100;
-  let rateLimitedInterval = null;
-  
   function resetAutoscrollState() {
-    autoscrollStats = {
-      totalScrolls: 0,
-      successfulSummons: 0,
-      targetCreatures: new Set(),
-      foundCreatures: new Map()
-    };
-    selectedScrollTier = 1;
-    selectedCreatures = [];
-    autoscrolling = false;
-    stopConditions = {
-      useTotalCreatures: true,
-      totalCreaturesTarget: 15,
-      useTierSystem: false,
-      tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
-    };
-    lastApiCall = 0;
-    userDefinedSpeed = 100;
-    if (rateLimitedInterval) {
-      clearInterval(rateLimitedInterval);
-      rateLimitedInterval = null;
-    }
+    // Use centralized state management
+    AutoscrollerState.reset();
+    
+    // Reset error state
+    resetErrorState();
+    
+    // Clear API queue
+    clearApiQueue();
   }
   
   function setUILocked(locked) {
@@ -261,7 +940,7 @@
       }
     });
     
-    const ruleInputs = document.querySelectorAll('#total-creatures-checkbox, #tier-system-checkbox, #total-creatures-input, .tier-input');
+    const ruleInputs = document.querySelectorAll('#total-creatures-checkbox, #tier-system-checkbox, #total-creatures-input, .tier-input, #autosell-checkbox');
     ruleInputs.forEach(input => {
       if (locked) {
         input.disabled = true;
@@ -380,10 +1059,8 @@
               tierCounts[tier - 1]++;
             });
             
-            const autoscrollCount = autoscrollStats.foundCreatures.get(creatureName) || 0;
-            if (autoscrollCount > 0) {
-              tierCounts[selectedScrollTier - 1] += autoscrollCount;
-            }
+            // Note: tierCounts already includes all monsters in inventory, including those added during this session
+            // No need to add autoscrollCount again as it would double-count
           }
         }
         
@@ -401,8 +1078,117 @@
     return false;
   }
   
+  /**
+   * Sell a monster by its ID using the same API as Autoseller
+   * @param {number} monsterId - The monster ID to sell
+   * @returns {Promise<Object>} API response
+   */
+  async function sellMonster(monsterId, retryCount = 0) {
+    try {
+      const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
+      const body = { "0": { json: monsterId } };
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Game-Version': '1'
+        },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`[Autoscroller] Monster ${monsterId} not found (already sold or removed)`);
+          return { success: false, status: 404, message: 'Monster not found' };
+        }
+        if (response.status === 429) {
+          console.log(`[Autoscroller] Rate limited while selling monster ${monsterId} - will retry later`);
+          
+          // Add to retry queue if we haven't exceeded max retries
+          if (retryCount < PERFORMANCE.SELL_MAX_RETRIES) {
+            rateLimitedSales.add(monsterId);
+            rateLimitedSalesRetryCount.set(monsterId, retryCount + 1);
+            
+            // Schedule retry
+            setTimeout(() => {
+              if (rateLimitedSales.has(monsterId)) {
+                console.log(`[Autoscroller] Retrying sale of monster ${monsterId} (attempt ${retryCount + 2})`);
+                sellMonster(monsterId, retryCount + 1).then(result => {
+                  if (result.success) {
+                    rateLimitedSales.delete(monsterId);
+                    rateLimitedSalesRetryCount.delete(monsterId);
+                    console.log(`[Autoscroller] Successfully sold monster ${monsterId} on retry`);
+                  } else if (result.status === 429 && retryCount + 1 < PERFORMANCE.SELL_MAX_RETRIES) {
+                    // Keep in retry queue for another attempt
+                    console.log(`[Autoscroller] Still rate limited for monster ${monsterId}, will retry again`);
+                  } else {
+                    // Remove from retry queue if max retries reached or other error
+                    rateLimitedSales.delete(monsterId);
+                    rateLimitedSalesRetryCount.delete(monsterId);
+                    console.warn(`[Autoscroller] Failed to sell monster ${monsterId} after ${retryCount + 2} attempts`);
+                  }
+                });
+              }
+            }, PERFORMANCE.SELL_RETRY_DELAY);
+          }
+          
+          return { success: false, status: 429, message: 'Rate limited' };
+        }
+        throw new Error(`Sell API failed: HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const apiResponse = data[0]?.result?.data?.json;
+      
+      if (apiResponse && apiResponse.goldValue != null) {
+        console.log(`[Autoscroller] Successfully sold monster ${monsterId} for ${apiResponse.goldValue} gold`);
+        return { success: true, goldValue: apiResponse.goldValue };
+      } else {
+        console.warn(`[Autoscroller] Unexpected sell API response format:`, apiResponse);
+        return { success: false, message: 'Unexpected response format' };
+      }
+    } catch (error) {
+      console.error(`[Autoscroller] Error selling monster ${monsterId}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  /**
+   * Check if a monster should be sold (not in selected creatures list)
+   * @param {Object} monster - Monster object from summon result
+   * @returns {boolean} Whether the monster should be sold
+   */
+  function shouldSellMonster(monster) {
+    if (!autosellNonSelected || !monster || !monster.gameId) {
+      return false;
+    }
+    
+    const monsterName = getMonsterNameFromGameId(monster.gameId);
+    if (!monsterName) {
+      console.warn('[Autoscroller] Could not determine monster name for gameId:', monster.gameId);
+      return false;
+    }
+    
+    // Check if the monster is in the selected creatures list
+    const isSelected = selectedCreatures.includes(monsterName);
+    
+    // Log the decision for debugging
+    if (autosellNonSelected) {
+      console.log(`[Autoscroller] Monster "${monsterName}" (ID: ${monster.gameId}) - Selected: ${isSelected}, Will sell: ${!isSelected}`);
+    }
+    
+    // Sell if NOT selected
+    return !isSelected;
+  }
+  
   async function autoscrollLoop() {
     try {
+      // Update UI first to ensure we have the latest inventory state
+      if (window.AutoscrollerRenderSelectedCreatures) {
+        window.AutoscrollerRenderSelectedCreatures();
+      }
+      
       if (shouldStopAutoscroll()) {
         const statusElement = document.getElementById('autoscroll-status');
         if (statusElement) {
@@ -434,10 +1220,10 @@
             message = `Target already reached: Found ${stopConditions.totalCreaturesTarget} ${reachedCreature} in inventory.`;
           } else if (reachedCreature) {
             // Target was reached after rolling some scrolls
-            message = `Target reached! Found ${stopConditions.totalCreaturesTarget} ${reachedCreature}. Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`;
+            message = `Target reached of ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`;
           } else {
             // No target reached
-            message = `Target reached! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures.`;
+            message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
           }
           statusElement.textContent = message;
         }
@@ -461,7 +1247,23 @@
       
       const result = await summonScroll(selectedScrollTier);
       
+      // Handle rate limiting response
+      if (result && result.rateLimited) {
+        console.log(`[Autoscroller] Rate limited during summon scroll, pausing autoscroll temporarily`);
+        // Wait a bit longer before continuing
+        await new Promise(resolve => setTimeout(resolve, PERFORMANCE.RATE_LIMIT_BASE_DELAY * 2));
+        return; // Return to allow the loop in startAutoscroll to continue
+      }
+      
       autoscrollStats.totalScrolls++;
+      
+      // Update local inventory using inventoryDiff from API response
+      if (result && result.inventoryDiff) {
+        updateLocalInventoryAfterRoll(result.inventoryDiff);
+        
+        // Add a small delay to ensure state update is processed
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
       
       if (result && result.summonedMonster) {
         autoscrollStats.successfulSummons++;
@@ -472,58 +1274,103 @@
           const currentCount = autoscrollStats.foundCreatures.get(monsterName) || 0;
           autoscrollStats.foundCreatures.set(monsterName, currentCount + 1);
           
+          console.log(`[Autoscroller] Found selected creature: ${monsterName} (ID: ${result.summonedMonster.gameId}). Total found in session: ${currentCount + 1}`);
+          
           if (window.AutoscrollerRenderSelectedCreatures) {
             window.AutoscrollerRenderSelectedCreatures();
           }
         }
         
         addMonsterToLocalInventory(result.summonedMonster);
-      }
-      
-          const statusElement = getAutoscrollStatusElement();
-    if (statusElement) {
-      const tierNames = ['grey', 'green', 'blue', 'purple', 'yellow'];
-      const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
-      
-      const gameState = globalThis.state?.player?.getSnapshot()?.context;
-      const monsters = gameState?.monsters || [];
-      let reachedCreature = null;
-      
-      for (const creatureName of selectedCreatures) {
-        const monsterId = getMonsterIdFromName(creatureName);
-        if (monsterId) {
-          const creatureMonsters = monsters.filter(monster => 
-            monster && monster.gameId === monsterId
-          );
-          if (creatureMonsters.length >= stopConditions.totalCreaturesTarget) {
-            reachedCreature = creatureName;
-            break;
+        
+        // Check if we should sell this monster (if it's not in selected creatures)
+        if (shouldSellMonster(result.summonedMonster)) {
+          // Get the monster ID from the summoned monster
+          const monsterId = result.summonedMonster.id;
+          if (monsterId) {
+            console.log(`[Autoscroller] Selling non-selected monster: ${getMonsterNameFromGameId(result.summonedMonster.gameId)} (ID: ${monsterId})`);
+            
+            // Add a small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            try {
+              const sellResult = await sellMonster(monsterId);
+              
+              if (sellResult.success) {
+                console.log(`[Autoscroller] Successfully sold monster for ${sellResult.goldValue} gold`);
+                // Update statistics
+                autoscrollStats.soldMonsters++;
+                autoscrollStats.soldGold += sellResult.goldValue;
+                // Remove from local inventory since it was sold
+                removeMonsterFromLocalInventory(monsterId);
+              } else if (sellResult.status === 404) {
+                console.log(`[Autoscroller] Monster was already sold or doesn't exist`);
+                // Remove from local inventory since it doesn't exist on server
+                removeMonsterFromLocalInventory(monsterId);
+              } else if (sellResult.status === 429) {
+                console.log(`[Autoscroller] Rate limited while selling - monster will remain in inventory for now`);
+                // Track this monster for potential retry later
+                rateLimitedSales.add(monsterId);
+                // Don't remove from local inventory, let it stay and try again later
+                // This prevents the monster from disappearing if we can't sell it due to rate limits
+              } else {
+                console.warn(`[Autoscroller] Failed to sell monster:`, sellResult.message || sellResult.error);
+                // For other errors, don't remove from inventory to be safe
+              }
+            } catch (sellError) {
+              console.error(`[Autoscroller] Error during autosell:`, sellError);
+              // Don't let autosell errors stop the autoscroll
+            }
           }
         }
       }
       
-      const message = reachedCreature 
-        ? `Found ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierNames[selectedScrollTier - 1] || 'unknown'} summon scrolls.`
-        : `Rolled ${autoscrollStats.totalScrolls} ${tierNames[selectedScrollTier - 1] || 'unknown'} summon scrolls. Found ${totalFound} selected creatures.`;
-      statusElement.textContent = message;
-    }
+      // Update summon scroll counts to reflect current inventory
+      updateSummonScrollCounts();
+      
+          updateStatusDisplay();
       
     } catch (error) {
-      console.error('[Autoscroller] Error during autoscroll:', error);
+      // Handle "Autoscroll stopped by user" separately - not an error
+      if (error.message.includes('Autoscroll stopped by user')) {
+        console.log('[Autoscroller] Autoscroll stopped by user');
+        return;
+      }
       
-      if (error.message.includes('Rate limit reached too many times')) {
+      const errorResult = handleError(error, 'autoscrollLoop');
+      
+      // Handle specific error types
+      if (error.message.includes('Circuit breaker is open')) {
+        console.warn('[Autoscroller] Circuit breaker is open, pausing autoscroll');
+        const statusElement = getAutoscrollStatusElement();
+        if (statusElement) {
+          statusElement.textContent = 'Paused - Too many errors. Will resume in 1 minute.';
+        }
+        await new Promise(resolve => setTimeout(resolve, ERROR_HANDLING.ERROR_RECOVERY_DELAY));
+        return;
+      }
+      
+      if (errorResult.shouldStop) {
+        console.warn(`[Autoscroller] Stopping autoscroll due to errors: ${errorResult.reason}`);
+        const statusElement = getAutoscrollStatusElement();
+        if (statusElement) {
+          statusElement.textContent = `Stopped - ${errorResult.reason === 'circuit_breaker' ? 'Too many errors' : 'Error limit reached'}`;
+        }
         stopAutoscroll();
         return;
       }
       
-      if (error.message.includes('Autoscroll stopped by user')) {
-        return;
-      }
+      // For recoverable errors, log and continue
+      console.warn('[Autoscroller] Recoverable error occurred, continuing autoscroll:', error.message);
+      await new Promise(resolve => setTimeout(resolve, ERROR_HANDLING.ERROR_RECOVERY_DELAY));
     }
   }
   
   async function startAutoscroll() {
     setUILocked(true);
+    
+    // Update summon scroll counts to reflect current inventory before starting
+    updateSummonScrollCounts();
     
     const statusElement = getAutoscrollStatusElement();
     if (statusElement) {
@@ -534,19 +1381,53 @@
       totalScrolls: 0,
       successfulSummons: 0,
       targetCreatures: new Set(selectedCreatures),
-      foundCreatures: new Map()
+      foundCreatures: new Map(),
+      soldMonsters: 0,
+      soldGold: 0
     };
     
     selectedCreatures.forEach(creature => {
       autoscrollStats.foundCreatures.set(creature, 0);
     });
     
+    // Clear rate-limited sales tracking
+    rateLimitedSales.clear();
+    rateLimitedSalesRetryCount.clear();
+    lastRateLimitTime = 0;
+    consecutiveRateLimits = 0;
+    
     while (autoscrolling) {
-      await autoscrollLoop();
-      
-      if (autoscrolling) {
-        const delay = Math.max(userDefinedSpeed, PERFORMANCE.API_THROTTLE_MIN);
-        await new Promise(resolve => setTimeout(resolve, delay));
+      try {
+        await autoscrollLoop();
+        
+        // Periodically retry failed sales
+        if (rateLimitedSales.size > 0 && autoscrolling) {
+          await retryFailedSales();
+        }
+        
+        if (autoscrolling) {
+          const delay = Math.max(userDefinedSpeed, PERFORMANCE.API_THROTTLE_MIN);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      } catch (error) {
+        console.error('[Autoscroller] Error in autoscroll loop:', error);
+        
+        // Handle specific error types
+        if (error.message.includes('Autoscroll stopped by user')) {
+          console.log('[Autoscroller] Autoscroll stopped by user');
+          break;
+        }
+        
+        if (error.message.includes('Rate limit reached too many times')) {
+          console.warn('[Autoscroller] Rate limit reached too many times, pausing temporarily');
+          // Wait longer before continuing
+          await new Promise(resolve => setTimeout(resolve, PERFORMANCE.RATE_LIMIT_MAX_DELAY));
+          continue;
+        }
+        
+        // For other errors, log and continue
+        console.warn('[Autoscroller] Non-critical error, continuing:', error.message);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Brief pause
       }
     }
   }
@@ -571,6 +1452,9 @@
     if (stopBtn) {
       stopBtn.style.display = 'none';
     }
+    
+    // Maintain scroll tier border
+    updateSelectedScrollTierBorder();
     
     const statusElement = document.getElementById('autoscroll-status');
     if (statusElement) {
@@ -599,9 +1483,9 @@
       if (reachedCreature && autoscrollStats.totalScrolls === 0) {
         message = `Target already reached: Found ${stopConditions.totalCreaturesTarget} ${reachedCreature} in inventory.`;
       } else if (reachedCreature) {
-        message = `Finished: Found ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`;
+        message = `Finished: Target reached of ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`;
       } else {
-        message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures.`;
+        message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
       }
       statusElement.textContent = message;
     }
@@ -645,51 +1529,8 @@
   }
 
 // =======================
-// 2. Utility Functions
+// MODULE 7: Utility Functions
 // =======================
-  const DOMCache = {
-    cache: new Map(),
-    cacheTimeout: PERFORMANCE.DOM_CACHE_TIMEOUT,
-
-    get: function(selector, context = document) {
-      const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
-      const cached = this.cache.get(key);
-      
-      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-        return cached.element;
-      }
-      
-      const element = context.querySelector(selector);
-      this.cache.set(key, { element, timestamp: Date.now() });
-      return element;
-    },
-
-    getAll: function(selector, context = document) {
-      const key = `all_${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
-      const cached = this.cache.get(key);
-      
-      if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-        return cached.elements;
-      }
-      
-      const elements = context.querySelectorAll(selector);
-      this.cache.set(key, { elements, timestamp: Date.now() });
-      return elements;
-    },
-
-    clear: function() {
-      this.cache.clear();
-    },
-
-    clearSelector: function(selector) {
-      for (const key of this.cache.keys()) {
-        if (key.includes(selector)) {
-          this.cache.delete(key);
-        }
-      }
-    }
-  };
-
   function getAutoscrollStatusElement() {
     return DOMCache.get('#autoscroll-status');
   }
@@ -702,31 +1543,11 @@
   }
 
   function getInventoryContainer() {
-    const selector = '.container-inventory-4';
-    const key = `${selector}_doc`;
-    const cached = DOMCache.cache.get(key);
-    
-    if (cached && Date.now() - cached.timestamp < PERFORMANCE.INVENTORY_CACHE_TIMEOUT) {
-      return cached.element;
-    }
-    
-    const element = document.querySelector(selector);
-    DOMCache.cache.set(key, { element, timestamp: Date.now() });
-    return element;
+    return DOMCache.getInventoryElement('.container-inventory-4');
   }
 
   function getSummonScrollButtons() {
-    const selector = 'button.focus-style-visible.active\\:opacity-70';
-    const key = `all_${selector}_doc`;
-    const cached = DOMCache.cache.get(key);
-    
-    if (cached && Date.now() - cached.timestamp < PERFORMANCE.INVENTORY_CACHE_TIMEOUT) {
-      return cached.elements;
-    }
-    
-    const elements = document.querySelectorAll(selector);
-    DOMCache.cache.set(key, { elements, timestamp: Date.now() });
-    return elements;
+    return DOMCache.getAll('button.focus-style-visible.active\\:opacity-70');
   }
 
   function createCreaturesBox({title, items, selectedCreature, onSelectCreature}) {
@@ -778,27 +1599,28 @@
       item.style.textAlign = 'left';
       item.style.marginBottom = '1px';
       
-      item.addEventListener('mouseenter', () => {
+      // Use event delegation for better performance
+      const handleMouseEnter = () => {
         item.style.background = 'rgba(255,255,255,0.08)';
-      });
+      };
       
-      item.addEventListener('mouseleave', () => {
+      const handleMouseLeave = () => {
         if (!item.classList.contains('autoscroller-selected')) {
           item.style.background = 'none';
         }
-      });
+      };
       
-      item.addEventListener('mousedown', () => {
+      const handleMouseDown = () => {
         item.style.background = 'rgba(255,255,255,0.18)';
-      });
+      };
       
-      item.addEventListener('mouseup', () => {
+      const handleMouseUp = () => {
         if (!item.classList.contains('autoscroller-selected')) {
           item.style.background = 'rgba(255,255,255,0.08)';
         }
-      });
+      };
       
-      item.addEventListener('click', () => {
+      const handleClick = () => {
         // Remove previous selection
         document.querySelectorAll('.autoscroller-selected').forEach(el => {
           el.classList.remove('autoscroller-selected');
@@ -814,7 +1636,14 @@
         if (onSelectCreature) {
           onSelectCreature(name);
         }
-      });
+      };
+      
+      // Add event listeners with tracking
+      eventHandlers.add(item, 'mouseenter', handleMouseEnter);
+      eventHandlers.add(item, 'mouseleave', handleMouseLeave);
+      eventHandlers.add(item, 'mousedown', handleMouseDown);
+      eventHandlers.add(item, 'mouseup', handleMouseUp);
+      eventHandlers.add(item, 'click', handleClick);
       
       // Set initial selection if this is the selected creature
       if (selectedCreature === name) {
@@ -884,7 +1713,7 @@
   }
 
 // =======================
-// 3. Modal Functions
+// MODULE 8: Modal UI & Rendering
 // =======================
   function showAutoscrollerModal() {
     injectAutoscrollerButtonStyles();
@@ -909,9 +1738,11 @@
       contentDiv.style.gap = '8px';
       contentDiv.style.flex = '1 1 0';
       
-      let availableCreatures = [...ALL_CREATURES];
+      let availableCreatures = [...getAllCreatures()];
       
       resetAutoscrollState();
+      // Always default autosell to OFF
+      autosellNonSelected = false;
       
       function render(statusMessage) {
         if (typeof statusMessage === 'string') {
@@ -944,6 +1775,8 @@
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
             }
+            // Maintain scroll tier border
+            updateSelectedScrollTierBorder();
           }
         });
         creaturesBox.style.flex = '1 1 0';
@@ -962,6 +1795,8 @@
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
             }
+            // Maintain scroll tier border
+            updateSelectedScrollTierBorder();
           }
         });
         selectedBox.style.flex = '1 1 0';
@@ -1061,12 +1896,6 @@
         totalInputRow.appendChild(totalCreaturesText);
         totalOptionDiv.appendChild(totalInputRow);
         div.appendChild(totalOptionDiv);
-        
-        const separator = document.createElement('div');
-        separator.style.height = '1px';
-        separator.style.background = '#444';
-        separator.style.margin = '4px 0';
-        div.appendChild(separator);
         
         const tierOptionDiv = document.createElement('div');
         tierOptionDiv.style.display = 'flex';
@@ -1200,12 +2029,10 @@
         speedWrapper.style.display = 'flex';
         speedWrapper.style.alignItems = 'center';
         speedWrapper.style.gap = '6px';
-        speedWrapper.style.marginTop = '12px';
+        speedWrapper.style.marginTop = '8px';
         
         const speedLabel = document.createElement('span');
         speedLabel.textContent = 'Autoscroll Speed:';
-        speedLabel.style.color = 'rgb(230, 215, 176)';
-        speedLabel.style.fontSize = '14px';
         speedWrapper.appendChild(speedLabel);
         
         const speedInput = document.createElement('input');
@@ -1222,30 +2049,34 @@
         speedInput.style.fontWeight = 'bold';
         speedInput.style.textAlign = 'left';
         speedInput.style.color = '#000';
-        speedInput.style.border = '1px solid #444';
-        speedInput.style.borderRadius = '2px';
-        speedInput.style.background = '#2a2a2a';
-        speedInput.oninput = () => {
-          userDefinedSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 100));
+        speedInput.onchange = () => {
+          userDefinedSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
           speedInput.value = userDefinedSpeed;
+          
+          // Update text color based on speed
+          if (userDefinedSpeed < 400) {
+            speedInput.style.color = '#ff6b6b';
+          } else {
+            speedInput.style.color = '#000';
+          }
         };
         
-        speedInput.onchange = () => {
-          userDefinedSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 100));
-          speedInput.value = userDefinedSpeed;
-        };
+        // Set initial color based on default speed
+        if (userDefinedSpeed < 400) {
+          speedInput.style.color = '#ff6b6b';
+        }
         speedWrapper.appendChild(speedInput);
         
         const speedUnit = document.createElement('span');
         speedUnit.textContent = 'ms';
-        speedUnit.style.color = 'rgb(230, 215, 176)';
-        speedUnit.style.fontSize = '14px';
+        speedUnit.style.color = '#fff';
         speedWrapper.appendChild(speedUnit);
         
         div.appendChild(speedWrapper);
         
+        // Add rate-limit warning below speed input
         const rateLimitWarning = document.createElement('div');
-        rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 334ms or higher to avoid being rate-limited.';
+        rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
         rateLimitWarning.style.fontSize = '11px';
         rateLimitWarning.style.fontStyle = 'italic';
         rateLimitWarning.style.color = '#ff9800';
@@ -1254,6 +2085,38 @@
         rateLimitWarning.style.paddingLeft = '12px';
         rateLimitWarning.style.paddingRight = '12px';
         div.appendChild(rateLimitWarning);
+        
+        // Add autosell checkbox below warning text
+        const autosellDiv = document.createElement('div');
+        autosellDiv.style.display = 'flex';
+        autosellDiv.style.alignItems = 'center';
+        autosellDiv.style.gap = '8px';
+        autosellDiv.style.marginTop = '8px';
+        autosellDiv.style.fontSize = '14px';
+        
+        const autosellCheckbox = document.createElement('input');
+        autosellCheckbox.type = 'checkbox';
+        autosellCheckbox.id = 'autosell-checkbox';
+        autosellCheckbox.checked = autosellNonSelected; // Use the preserved state
+        autosellCheckbox.style.width = '16px';
+        autosellCheckbox.style.height = '16px';
+        autosellCheckbox.style.margin = '0';
+        
+        const autosellLabel = document.createElement('label');
+        autosellLabel.htmlFor = 'autosell-checkbox';
+        autosellLabel.textContent = 'Autosell non-selected creatures';
+        autosellLabel.style.color = 'rgb(230, 215, 176)';
+        autosellLabel.style.cursor = 'pointer';
+        
+        autosellDiv.appendChild(autosellCheckbox);
+        autosellDiv.appendChild(autosellLabel);
+        div.appendChild(autosellDiv);
+        
+        // Add event listener for autosell checkbox
+        autosellCheckbox.addEventListener('change', () => {
+          autosellNonSelected = autosellCheckbox.checked;
+          console.log(`[Autoscroller] Autosell non-selected creatures: ${autosellNonSelected ? 'enabled' : 'disabled'}`);
+        });
         
         return div;
       }
@@ -1355,7 +2218,13 @@
               monster && monster.gameId === monsterId
             );
             
-            const totalCount = creatureMonsters.length + (autoscrollStats.foundCreatures.get(creatureName) || 0);
+            const totalCount = creatureMonsters.length;
+            
+            // Debug: Log the actual inventory count vs what was found in session
+            const sessionCount = autoscrollStats.foundCreatures.get(creatureName) || 0;
+            if (sessionCount > 0) {
+              console.log(`[Autoscroller] ${creatureName}: Inventory count = ${totalCount}, Session count = ${sessionCount}`);
+            }
             
             const tierCounts = [0, 0, 0, 0, 0];
             creatureMonsters.forEach(monster => {
@@ -1363,10 +2232,8 @@
               tierCounts[tier - 1]++;
             });
             
-            const autoscrollCount = autoscrollStats.foundCreatures.get(creatureName) || 0;
-            if (autoscrollCount > 0) {
-              tierCounts[selectedScrollTier - 1] += autoscrollCount;
-            }
+            // Note: tierCounts already includes all monsters in inventory, including those added during this session
+            // No need to add autoscrollCount again as it would double-count
             
             let targetReached = false;
             
@@ -1505,7 +2372,7 @@
         stopBtn.style.display = 'none'; // Hidden initially
         buttonWrapper.appendChild(stopBtn);
         
-        autoscrollBtn.onclick = async () => {
+        const handleAutoscrollClick = async () => {
           if (!autoscrolling) {
             // Start autoscroll
             if (selectedCreatures.length === 0) {
@@ -1564,11 +2431,14 @@
             stopBtn.style.display = 'block';
             autoscrollBtn.style.display = 'none';
             
+            // Maintain scroll tier border
+            updateSelectedScrollTierBorder();
+            
             startAutoscroll();
           }
         };
         
-        stopBtn.onclick = () => {
+        const handleStopClick = () => {
           if (autoscrolling) {
             if (rateLimitedInterval) {
               clearInterval(rateLimitedInterval);
@@ -1577,6 +2447,10 @@
             stopAutoscroll();
           }
         };
+        
+        // Add event listeners with tracking
+        eventHandlers.add(autoscrollBtn, 'click', handleAutoscrollClick);
+        eventHandlers.add(stopBtn, 'click', handleStopClick);
         
         buttonRow.appendChild(buttonWrapper);
         
@@ -1620,22 +2494,25 @@
           btn.style.padding = '0';
           btn.style.margin = '0';
           btn.style.cursor = 'pointer';
-          btn.onclick = () => {
+          const handleScrollTierClick = () => {
             const currentState = btn.getAttribute('data-state');
             
             if (currentState === 'selected') {
               return;
             }
             
+            // Clear all button states and borders
             const allButtons = row.querySelectorAll('button');
             allButtons.forEach(otherBtn => {
               otherBtn.setAttribute('data-state', 'closed');
               const otherSlot = otherBtn.querySelector('.container-slot');
               if (otherSlot) {
                 otherSlot.style.boxShadow = 'none';
+                otherSlot.style.borderRadius = '0';
               }
             });
             
+            // Set this button as selected
             btn.setAttribute('data-state', 'selected');
             selectedScrollTier = i;
             
@@ -1645,6 +2522,8 @@
               slot.style.borderRadius = '0';
             }
           };
+          
+          eventHandlers.add(btn, 'click', handleScrollTierClick);
           
           // Container slot
           const slot = document.createElement('div');
@@ -1705,6 +2584,12 @@
       
       render();
       
+      // Update summon scroll counts to reflect current inventory
+      setTimeout(() => {
+        updateSummonScrollCounts();
+        updateSelectedScrollTierBorder();
+      }, 100);
+      
       api.ui.components.createModal({
         title: 'Auto Scroller',
         width: 750,
@@ -1715,6 +2600,9 @@
           if (autoscrolling) {
             stopAutoscroll();
           }
+          
+          // Save state before resetting
+          AutoscrollerState.saveToStorage();
           resetAutoscrollState();
         }
       });
@@ -1751,17 +2639,8 @@
   }
 
 // =======================
-// 4. Inventory Integration
+// MODULE 9: Inventory Integration & Button Management
 // =======================
-  let inventoryObserver = null;
-  let buttonCheckInterval = null;
-  let lastButtonCheck = 0;
-  let failedAttempts = 0;
-  let hasLoggedInventoryNotFound = false;
-  const BUTTON_CHECK_INTERVAL = 1000;
-  const BUTTON_CHECK_TIMEOUT = 10000;
-  const LOG_AFTER_ATTEMPTS = 3;
-  
   function observeInventory() {
     if (inventoryObserver) {
       try { inventoryObserver.disconnect(); } catch (e) {}
@@ -1782,8 +2661,7 @@
         return;
       }
       
-      DOMCache.clearSelector('.container-inventory-4');
-      DOMCache.clearSelector('button.focus-style-visible');
+      DOMCache.clearInventoryCache();
       
       addAutoscrollerButton();
     }, BUTTON_CHECK_INTERVAL);
@@ -1807,8 +2685,7 @@
       }
       
       if (shouldCheck) {
-        DOMCache.clearSelector('.container-inventory-4');
-        DOMCache.clearSelector('button.focus-style-visible');
+        DOMCache.clearInventoryCache();
         addAutoscrollerButton();
       }
     });
@@ -1907,7 +2784,8 @@
     const autoButton = document.createElement('button');
     autoButton.className = 'focus-style-visible active:opacity-70 autoscroller-inventory-button';
     autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="has-rarity relative grid h-full place-items-center"><img alt="summon scroll" class="pixelated" width="32" height="32" src="https://bestiaryarena.com/assets/icons/summonscroll5.png"><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5"><span class="relative" style="line-height: 1; font-size: 16px; color: #fff; font-family: inherit;" translate="no">Auto</span></div></div></div>`;
-        autoButton.addEventListener('click', () => { showAutoscrollerModal(); });
+        const handleAutoButtonClick = () => { showAutoscrollerModal(); };
+    eventHandlers.add(autoButton, 'click', handleAutoButtonClick);
     
     try {
       targetButton.insertAdjacentElement('afterend', autoButton);
@@ -1926,7 +2804,7 @@
 
 
 // =======================
-// 5. Cleanup & Exports
+// MODULE 10: Cleanup & Exports
 // =======================
   function cleanup() {
     if (autoscrolling) {
@@ -1965,12 +2843,41 @@
       delete window.AutoscrollerRenderSelectedCreatures;
     }
     
+    // Clear all caches
     DOMCache.clear();
+    ALL_CREATURES_CACHE = null;
+    
+    // Clear API queue
+    clearApiQueue();
+    
+    // Clean up event handlers
+    eventHandlers.cleanup();
   }
   
-  if (config.enabled) {
-    observeInventory();
+  // =======================
+  // MODULE INITIALIZATION
+  // =======================
+  function initializeAutoscroller() {
+    console.log('[Autoscroller] Initializing version 2.0 (Optimized)');
+    
+    // Load saved state from storage
+    AutoscrollerState.loadFromStorage();
+    
+    // Initialize modules
+    resetAutoscrollState();
+    DOMCache.clear();
+    clearApiQueue();
+    
+    if (config.enabled) {
+      observeInventory();
+      console.log('[Autoscroller] Initialization complete');
+    } else {
+      console.log('[Autoscroller] Disabled in configuration');
+    }
   }
+  
+  // Start initialization
+  initializeAutoscroller();
   
   if (typeof exports !== 'undefined') {
     exports.cleanup = cleanup;
@@ -1983,4 +2890,112 @@
   
   exports = {};
   
+  /**
+   * Retry selling monsters that failed due to rate limiting
+   */
+  async function retryFailedSales() {
+    if (rateLimitedSales.size === 0) return;
+    
+    console.log(`[Autoscroller] Attempting to retry ${rateLimitedSales.size} failed sales`);
+    const monstersToRetry = Array.from(rateLimitedSales);
+    
+    for (const monsterId of monstersToRetry) {
+      const retryCount = rateLimitedSalesRetryCount.get(monsterId) || 0;
+      if (retryCount >= PERFORMANCE.SELL_MAX_RETRIES) {
+        console.warn(`[Autoscroller] Removing monster ${monsterId} from retry queue - max retries exceeded`);
+        rateLimitedSales.delete(monsterId);
+        rateLimitedSalesRetryCount.delete(monsterId);
+        continue;
+      }
+      
+      try {
+        const result = await sellMonster(monsterId, retryCount);
+        if (result.success) {
+          console.log(`[Autoscroller] Successfully sold monster ${monsterId} on retry`);
+          rateLimitedSales.delete(monsterId);
+          rateLimitedSalesRetryCount.delete(monsterId);
+          // Update statistics
+          autoscrollStats.soldMonsters++;
+          autoscrollStats.soldGold += result.goldValue;
+          removeMonsterFromLocalInventory(monsterId);
+        } else if (result.status === 429) {
+          console.log(`[Autoscroller] Still rate limited for monster ${monsterId}, will retry later`);
+          // Keep in retry queue
+        } else {
+          console.warn(`[Autoscroller] Failed to sell monster ${monsterId} on retry:`, result.message);
+          rateLimitedSales.delete(monsterId);
+          rateLimitedSalesRetryCount.delete(monsterId);
+        }
+      } catch (error) {
+        console.error(`[Autoscroller] Error retrying sale of monster ${monsterId}:`, error);
+        rateLimitedSales.delete(monsterId);
+        rateLimitedSalesRetryCount.delete(monsterId);
+      }
+      
+      // Small delay between retries
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  /**
+   * Update the status display with comprehensive information
+   */
+  function updateStatusDisplay() {
+    const statusElement = getAutoscrollStatusElement();
+    if (!statusElement) return;
+    
+    const tierNames = ['grey', 'green', 'blue', 'purple', 'yellow'];
+    const tierName = tierNames[selectedScrollTier - 1] || 'unknown';
+    const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
+    
+    // Debug: Log what creatures were found in this session
+    if (totalFound > 0) {
+      const foundCreaturesList = Array.from(autoscrollStats.foundCreatures.entries())
+        .filter(([name, count]) => count > 0)
+        .map(([name, count]) => `${count} ${name}`)
+        .join(', ');
+      console.log(`[Autoscroller] Session summary: Found ${foundCreaturesList} (total: ${totalFound})`);
+    }
+    
+    const gameState = globalThis.state?.player?.getSnapshot()?.context;
+    const monsters = gameState?.monsters || [];
+    let reachedCreature = null;
+    
+    for (const creatureName of selectedCreatures) {
+      const monsterId = getMonsterIdFromName(creatureName);
+      if (monsterId) {
+        const creatureMonsters = monsters.filter(monster => 
+          monster && monster.gameId === monsterId
+        );
+        if (creatureMonsters.length >= stopConditions.totalCreaturesTarget) {
+          reachedCreature = creatureName;
+          break;
+        }
+      }
+    }
+    
+    let message = reachedCreature 
+      ? `Found ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`
+      : `Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
+    
+    // Add autosell statistics if any monsters were sold
+    if (autosellNonSelected && autoscrollStats.soldMonsters > 0) {
+      message += ` Sold ${autoscrollStats.soldMonsters} non-selected creatures for ${autoscrollStats.soldGold} gold.`;
+    }
+    
+    // Add rate limit information if there are pending sales
+    if (autosellNonSelected && rateLimitedSales.size > 0) {
+      message += ` (${rateLimitedSales.size} sales pending due to rate limits)`;
+    }
+    
+    // Add rate limiting status
+    if (consecutiveRateLimits > 0) {
+      const timeSinceLastRateLimit = Date.now() - lastRateLimitTime;
+      if (timeSinceLastRateLimit < 30000) { // Show for 30 seconds after rate limit
+        message += ` [Rate limited ${consecutiveRateLimits}x]`;
+      }
+    }
+    
+    statusElement.textContent = message;
+  }
 })(); 

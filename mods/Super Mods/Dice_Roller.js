@@ -3480,12 +3480,12 @@
               render = {
                 stopWhenChangingDice: true,
                 continuouslyChangeDice: false,
-                autorollSpeed: 100
+                autorollSpeed: 400
               };
             } else {
               if (typeof render.stopWhenChangingDice === 'undefined') render.stopWhenChangingDice = true;
               if (typeof render.continuouslyChangeDice === 'undefined') render.continuouslyChangeDice = false;
-              if (typeof render.autorollSpeed === 'undefined') render.autorollSpeed = 100;
+              if (typeof render.autorollSpeed === 'undefined') render.autorollSpeed = 400;
             }
             
             // Set default values based on current mode
@@ -3597,9 +3597,21 @@
             speedInput.style.textAlign = 'left';
             speedInput.style.color = '#000';
             speedInput.onchange = () => {
-              render.autorollSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 100));
+              render.autorollSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
               speedInput.value = render.autorollSpeed;
+              
+              // Update text color based on speed
+              if (render.autorollSpeed < 400) {
+                speedInput.style.color = '#ff6b6b';
+              } else {
+                speedInput.style.color = '#000';
+              }
             };
+            
+            // Set initial color based on default speed
+            if (render.autorollSpeed < 400) {
+              speedInput.style.color = '#ff6b6b';
+            }
             speedWrapper.appendChild(speedInput);
             
             const speedUnit = document.createElement('span');
@@ -3611,7 +3623,7 @@
             
             // Add rate-limit warning below speed input
             const rateLimitWarning = document.createElement('div');
-            rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 334ms or higher to avoid being rate-limited.';
+            rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
             rateLimitWarning.style.fontSize = '11px';
             rateLimitWarning.style.fontStyle = 'italic';
             rateLimitWarning.style.color = '#ff9800';

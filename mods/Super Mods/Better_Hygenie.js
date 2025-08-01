@@ -44,8 +44,11 @@
       width: 100%;
       max-width: ${CONSTANTS.MAX_INPUT_WIDTH}px;
       height: 20px;
-      background: #2a2a2a;
-      border: 1px solid #4a4a4a;
+      background-image: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png');
+      background-size: auto;
+      background-repeat: repeat;
+      background-position: center;
+      border: none;
       color: white;
       font-family: 'Courier New', monospace;
       font-size: 12px;
@@ -56,10 +59,26 @@
       display: block;
       margin-left: auto;
       margin-right: auto;
+      position: relative;
+    }
+    
+    .better-hygenie-quantity-input::before {
+      content: '';
+      position: absolute;
+      top: -2px;
+      left: -2px;
+      right: -2px;
+      bottom: -2px;
+      background-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png');
+      background-size: 100% 100%;
+      background-repeat: no-repeat;
+      background-position: center;
+      z-index: -1;
+      border-radius: 4px;
     }
     .better-hygenie-quantity-input:focus {
       outline: none;
-      border-color: #6a6a6a;
+      box-shadow: 0 0 0 2px rgba(106, 106, 106, 0.5);
     }
     .better-hygenie-quantity-input::-webkit-inner-spin-button,
     .better-hygenie-quantity-input::-webkit-outer-spin-button {
