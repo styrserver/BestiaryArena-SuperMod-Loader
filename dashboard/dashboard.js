@@ -243,6 +243,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   const superModNames = [
     'Autoseller.js',
     'Autoscroller.js',
+    'Better_Hygenie.js',
     'Cauldron Upgrade.js',
     'Cyclopedia.js',
     'DashboardButton.js',

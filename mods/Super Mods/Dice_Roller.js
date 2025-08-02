@@ -208,6 +208,7 @@
     });
   };
 
+  // Enhanced DOMCache with better performance and error handling
   const DOMCache = {
     cache: new Map(),
     cacheTimeout: PERFORMANCE.DOM_CACHE_TIMEOUT,
@@ -238,6 +239,34 @@
       return elements;
     },
 
+    // Batch DOM queries for better performance
+    batchGet: function(selectors, context = document) {
+      const results = {};
+      const uncachedSelectors = [];
+      
+      // Check cache first
+      selectors.forEach(selector => {
+        const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+        const cached = this.cache.get(key);
+        
+        if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+          results[selector] = cached.element;
+        } else {
+          uncachedSelectors.push(selector);
+        }
+      });
+      
+      // Query uncached selectors
+      uncachedSelectors.forEach(selector => {
+        const element = context.querySelector(selector);
+        const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
+        this.cache.set(key, { element, timestamp: Date.now() });
+        results[selector] = element;
+      });
+      
+      return results;
+    },
+
     clear: function() {
       this.cache.clear();
     },
@@ -248,8 +277,21 @@
           this.cache.delete(key);
         }
       }
+    },
+
+    // Clear expired entries
+    cleanup: function() {
+      const now = Date.now();
+      for (const [key, value] of this.cache.entries()) {
+        if (now - value.timestamp > this.cacheTimeout) {
+          this.cache.delete(key);
+        }
+      }
     }
   };
+
+  // Periodic cache cleanup
+  setInterval(() => DOMCache.cleanup(), 30000);
 
   const MemoizationUtils = {
     memoize: function(fn, keyFn = (...args) => JSON.stringify(args)) {
@@ -377,7 +419,7 @@
       const { monsters } = globalThis.state.player.getSnapshot().context;
       return Array.isArray(monsters) ? monsters : [];
     } catch (error) {
-      console.error('Failed to get monsters:', error);
+      console.error('[Dice Roller] Failed to get monsters:', error);
       return [];
     }
   }, 500); // Cache for 500ms to avoid excessive state access
@@ -440,7 +482,7 @@
       const monsterData = globalThis.state.utils.getMonster(gameId);
       return monsterData && monsterData.metadata ? monsterData.metadata.name : null;
     } catch (e) {
-      console.error('Error getting monster name:', e);
+      console.error('[Dice Roller] Error getting monster name:', e);
       return null;
     }
   }
@@ -552,6 +594,7 @@
     // Restrict selection to dice buttons inside the Auto Dice Roller modal only
     const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
     if (!modal) return;
+    
     // Use DOMCache for performance but keep the scope limited to the modal
     const diceButtons = Array.from(modal.querySelectorAll('.focus-style-visible'));
     let diceButtonIndex = 0;
@@ -1185,15 +1228,12 @@
     
     const searchTerm = searchValue.toLowerCase().trim();
     
-    console.log('[Dice Roller] Search term:', searchTerm);
-    
     if (searchTerm && searchTerm.length > 0) {
       // Performance optimization: Use requestAnimationFrame for smooth UI updates
       requestAnimationFrame(() => {
         PerformanceMonitor.start('creature-search');
         try {
           const monsters = safeGetMonsters();
-          console.log('[Dice Roller] Found monsters:', monsters.length);
           
           // Helper function to check if creature name matches search term (with wildcard support)
           const matchesSearch = (creatureName, searchTerm) => {
@@ -1233,8 +1273,6 @@
               // Stat sum (desc)
               return b._statSum - a._statSum;
             });
-          
-          console.log('[Dice Roller] Matching creatures:', matchingMonsters.length);
           
           // Performance optimization: Use DocumentFragment for batch DOM updates
           const fragment = document.createDocumentFragment();
@@ -1368,11 +1406,10 @@
           scrollArea.appendChild(fragment);
           
           PerformanceMonitor.end('creature-search');
-          console.log('[Dice Roller] Search complete - re-rendered grid with', matchingMonsters.length, 'creatures');
           
         } catch (e) {
           PerformanceMonitor.end('creature-search');
-        console.error('Error in creature search:', e);
+        console.error('[Dice Roller] Error in creature search:', e);
         // Fallback to simple filtering
         const creatureButtons = scrollArea.querySelectorAll('button[data-gameid]');
         creatureButtons.forEach(btn => {
@@ -1414,7 +1451,7 @@
       
       // Only log tier calculations in debug mode
       if (window.DiceRollerDebugMode === true) {
-        console.log('[Stats Roller] Portrait tier calculation:', {
+        console.log('[Dice Roller] Portrait tier calculation:', {
           selectedGameId,
           currentTier,
           globalCurrentTier: window.DiceRollerCurrentTier,
@@ -2182,57 +2219,40 @@
 // =======================
 // 5. Autoroll Logic
 // =======================
-  async function autoroll(selectedGameId, requiredDiceTier, availableStats, updateRollStatus, rerenderDetails, selectedDice) {
+  async function autoroll(selectedGameId, requiredDiceTier, availableStats, updateRollStatus, rerenderDetails, selectedDice, checkboxState = null) {
     // Clear global tier tracking variables at the start of autoroll
     window.DiceRollerCurrentTier = null;
     window.DiceRollerCurrentGameId = null;
     
-    console.log('[Stats Roller] Autoroll function called with:', {
-      selectedGameId,
-      requiredDiceTier,
-      availableStats,
-      selectedDice
-    });
-    
     // Check if we're in tier mode
     if (window.DiceRollerMode === 'tier') {
-      console.log('[Stats Roller] Tier mode - selected tiers:', window.DiceRollerSelectedTier);
-      console.log('[Stats Roller] Tier mode - selected dice:', selectedDice);
-      console.log('[Stats Roller] Tier mode - requiredDiceTier:', requiredDiceTier);
-      console.log('[Stats Roller] Tier mode - availableStats:', availableStats);
-      console.log('[Stats Roller] Tier mode - selectedDice array length:', selectedDice.length);
-      console.log('[Stats Roller] Tier mode - Math.min(...selectedDice):', selectedDice.length > 0 ? Math.min(...selectedDice) : 'no dice selected');
-      
       // In tier mode, validate tier selection
       if (!window.DiceRollerSelectedTier) {
-        console.log('[Stats Roller] No target tier selected');
         updateRollStatus('Please select a target tier first.');
         throw new Error('No target tier selected');
       }
-      
-      console.log('[Stats Roller] Target tiers selected, checking creature...');
       
       // Check if creature already matches any of the selected tiers
       const monsters = safeGetMonsters();
       const creature = monsters.find(c => String(c.id) === String(selectedGameId));
       if (creature) {
         const currentTier = getCreatureTier(creature);
-        console.log('[Stats Roller] Current creature tier:', currentTier);
         if (window.DiceRollerSelectedTier.includes(currentTier)) {
           const tierNames = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
-          console.log('[Stats Roller] Creature already matches target tier');
           updateRollStatus(`Creature already matches one of the target tiers: ${tierNames}`);
           return true; // Return true to indicate success
         }
       }
       
-      console.log('[Stats Roller] Starting tier upgrade...');
       // Get current stats to show which ones will be rolled
       const monstersForStatus = safeGetMonsters();
       const creatureForStatus = monstersForStatus.find(c => String(c.id) === String(selectedGameId));
       let availableStatsForStatus = ["hp", "ap", "ad", "armor", "magicResist"];
       
-      if (creatureForStatus) {
+      // Check if "Continuously use same dice" is enabled for status message
+      const { continuouslyUseSameDice: statusContinuouslyUseSameDice } = checkboxState || { continuouslyUseSameDice: false };
+      
+      if (creatureForStatus && !statusContinuouslyUseSameDice) {
         availableStatsForStatus = availableStatsForStatus.filter(stat => {
           const currentValue = creatureForStatus[stat] || 0;
           return currentValue < DICE_CONFIG.STAT_LIMIT;
@@ -2240,7 +2260,10 @@
       }
       
       const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
-      updateRollStatus(`Upgrading to ${targetTiers} tier... Rolling: ${availableStatsForStatus.join(', ')}`);
+      const statusMessage = statusContinuouslyUseSameDice 
+        ? `Upgrading to ${targetTiers} tier... Rolling all stats with same dice until target reached`
+        : `Upgrading to ${targetTiers} tier... Rolling: ${availableStatsForStatus.join(', ')}`;
+      updateRollStatus(statusMessage);
     } else {
       // In genes mode, validate dice selection using utility function
       try {
@@ -2252,13 +2275,10 @@
       updateRollStatus(`Rolling ${availableStats.join(', ')} with tier ${requiredDiceTier} dice...`);
     }
     
-    console.log('[Stats Roller] Preparing API call...');
-    
     // Throttle API calls to prevent overwhelming the server
     const now = Date.now();
     const timeSinceLastCall = now - lastApiCall;
     if (timeSinceLastCall < API_THROTTLE_DELAY) {
-      console.log('[Stats Roller] Throttling API call...');
       await new Promise(resolve => setTimeout(resolve, API_THROTTLE_DELAY - timeSinceLastCall));
     }
     lastApiCall = Date.now();
@@ -2266,56 +2286,183 @@
     // Prepare request body based on mode
     let requestBody;
     if (window.DiceRollerMode === 'tier') {
-      // In tier mode, we need to respect individual stat limits (20) like in genes mode
-      // Get current creature stats to determine which stats are at max
+      // In tier mode, check if "Continuously use same dice" is enabled
+      const { continuouslyUseSameDice } = checkboxState || { continuouslyUseSameDice: false };
+      
+      // Get current creature stats
       const monsters = safeGetMonsters();
       const creature = monsters.find(c => String(c.id) === String(selectedGameId));
       let availableStatsForRoll = ["hp", "ap", "ad", "armor", "magicResist"];
+      let diceToUseForStats; // Variable to store the dice tier calculated in smart stat selection
       
-      if (creature) {
-        // Filter out stats that are already at maximum (20)
-        availableStatsForRoll = availableStatsForRoll.filter(stat => {
-          const currentValue = creature[stat] || 0;
-          const isAtMax = currentValue >= DICE_CONFIG.STAT_LIMIT;
-          if (isAtMax) {
-            console.log(`[Stats Roller] Skipping ${stat} - already at max (${currentValue})`);
+      if (continuouslyUseSameDice) {
+        // If "Continuously use same dice" is enabled, use smart stat selection logic
+        const selectedDiceTier = Math.min(...selectedDice);
+        
+        if (selectedDiceTier === 1) {
+          // Grey dice (tier 1) - roll all 5 stats
+          availableStatsForRoll = ["hp", "ap", "ad", "armor", "magicResist"];
+        } else {
+          // Higher-tier dice - select the lowest stats
+          if (creature) {
+            const stats = ['hp', 'ap', 'ad', 'armor', 'magicResist'];
+            const statValues = stats.map(stat => ({ stat, value: creature[stat] || 0 }));
+            
+            // Sort by value (lowest first) and take the required number
+            statValues.sort((a, b) => a.value - b.value);
+            const maxStatsForDice = 6 - selectedDiceTier;
+            availableStatsForRoll = statValues.slice(0, maxStatsForDice).map(item => item.stat);
+          } else {
+            // Fallback if creature not found
+            const maxStatsForDice = 6 - selectedDiceTier;
+            availableStatsForRoll = ["hp", "ap", "ad", "armor", "magicResist"].slice(0, maxStatsForDice);
           }
-          return !isAtMax;
-        });
+        }
+      } else {
+        // For "Smart stat & dice roller" in tier mode, apply smart stat selection for higher-tier dice
+        if (window.DiceRollerMode === 'tier' && checkboxState.continuouslyChangeDice && selectedDice.length > 0) {
+          // Check if we have multiple dice tiers selected (i.e., higher tier dice available)
+          const hasHigherTierDice = selectedDice.length > 1 && Math.max(...selectedDice) > Math.min(...selectedDice);
+          
+          if (hasHigherTierDice) {
+            // For "Smart stat & dice roller" with multiple dice tiers, first filter out stats at maximum
+            if (creature) {
+              availableStatsForRoll = availableStatsForRoll.filter(stat => {
+                const currentValue = creature[stat] || 0;
+                const isAtMax = currentValue >= DICE_CONFIG.STAT_LIMIT;
+                return !isAtMax;
+              });
+            }
+            
+            // Now apply smart stat selection for the remaining stats
+            if (creature && availableStatsForRoll.length > 0) {
+              const stats = ['hp', 'ap', 'ad', 'armor', 'magicResist'];
+              const statValues = stats.map(stat => ({ stat, value: creature[stat] || 0 }));
+              
+              // Filter to only include stats that are not at maximum
+              const availableStatValues = statValues.filter(item => {
+                const isAtMax = item.value >= DICE_CONFIG.STAT_LIMIT;
+                return !isAtMax;
+              });
+              
+              // Sort by value (lowest first) and take the required number
+              availableStatValues.sort((a, b) => a.value - b.value);
+              
+              // Determine how many stats we can roll with the available dice
+              const maxStatsForLowestDice = 6 - Math.min(...selectedDice);
+              const maxStatsForHighestDice = 6 - Math.max(...selectedDice);
+              
+              // Use the highest tier dice that can roll the available stats
+              if (availableStatValues.length <= maxStatsForHighestDice) {
+                // We can use the highest tier dice
+                diceToUseForStats = Math.max(...selectedDice);
+                availableStatsForRoll = availableStatValues.slice(0, availableStatValues.length).map(item => item.stat);
+              } else {
+                // Find the appropriate dice tier for the number of stats we have
+                let selectedDiceTier = null;
+                for (let i = Math.max(...selectedDice); i >= Math.min(...selectedDice); i--) {
+                  const maxStatsForThisDice = 6 - i;
+                  if (availableStatValues.length <= maxStatsForThisDice) {
+                    selectedDiceTier = i;
+                    break;
+                  }
+                }
+                
+                if (selectedDiceTier !== null) {
+                  // We found a suitable dice tier
+                  diceToUseForStats = selectedDiceTier;
+                  availableStatsForRoll = availableStatValues.slice(0, availableStatValues.length).map(item => item.stat);
+                } else {
+                  // We need to limit the stats to what the lowest tier dice can handle
+                  diceToUseForStats = Math.min(...selectedDice);
+                  availableStatsForRoll = availableStatValues.slice(0, maxStatsForLowestDice).map(item => item.stat);
+                }
+              }
+              
+              // Deselect dice that are no longer needed (lower tier dice that can't be used)
+              const diceToRemove = selectedDice.filter(dice => dice < diceToUseForStats);
+              if (diceToRemove.length > 0) {
+                // Remove the lower tier dice from selectedDice array
+                selectedDice.splice(0, selectedDice.length, ...selectedDice.filter(dice => dice >= diceToUseForStats));
+                // Update the UI to reflect the new selection
+                updateDiceButtonStates(selectedDice);
+              }
+            }
+          } else {
+            // No higher tier dice selected, but still apply smart stat selection for lowest stats
+            if (creature) {
+              const stats = ['hp', 'ap', 'ad', 'armor', 'magicResist'];
+              const statValues = stats.map(stat => ({ stat, value: creature[stat] || 0 }));
+              
+              // Sort by value (lowest first) and take the required number for the selected dice
+              statValues.sort((a, b) => a.value - b.value);
+              const selectedDiceTier = Math.min(...selectedDice);
+              const maxStatsForDice = 6 - selectedDiceTier;
+              availableStatsForRoll = statValues.slice(0, maxStatsForDice).map(item => item.stat);
+            }        }
+          } else {
+            // Standard filtering for other modes
+            if (creature) {
+              availableStatsForRoll = availableStatsForRoll.filter(stat => {
+                const currentValue = creature[stat] || 0;
+                const isAtMax = currentValue >= DICE_CONFIG.STAT_LIMIT;
+                return !isAtMax;
+              });
+            }
+          }
+        
+        // If all stats are at max, check if we should continue rolling
+        if (availableStatsForRoll.length === 0) {
+          // For "Smart stat & dice roller", continue rolling even if all stats are at max
+          // Only stop if we're not using "Smart stat & dice roller" or if we have higher tier dice available
+          const { continuouslyChangeDice } = checkboxState || { continuouslyChangeDice: false };
+          const hasHigherTierDice = selectedDice.length > 1 && Math.max(...selectedDice) > Math.min(...selectedDice);
+          
+          if (!continuouslyChangeDice || hasHigherTierDice) {
+            updateRollStatus('All stats are at maximum (20) - cannot improve tier further');
+            return true; // Return true to indicate "success" (no more improvement possible)
+          } else {
+            // For "Smart stat & dice roller" without higher tier dice, continue rolling
+            updateRollStatus('All stats at max but continuing to roll...');
+            // Don't return true - continue with the roll
+          }
+        }
       }
       
-      // If all stats are at max, we can't improve further
-      if (availableStatsForRoll.length === 0) {
-        console.log('[Stats Roller] All stats are at maximum (20) - cannot improve tier further');
-        updateRollStatus('All stats are at maximum (20) - cannot improve tier further');
-        return true; // Return true to indicate "success" (no more improvement possible)
+      // Determine which dice to use
+      let diceToUse;
+      if (continuouslyUseSameDice) {
+        // Use the originally selected dice when "Continuously use same dice" is enabled
+        diceToUse = Math.min(...selectedDice);
+      } else {
+        // Check if we already calculated the dice to use in the smart stat selection logic
+        if (typeof diceToUseForStats !== 'undefined') {
+          diceToUse = diceToUseForStats;
+        } else {
+          // Use the same dice selection logic as genes mode
+          // Find the appropriate dice tier that can roll the number of available stats
+          const requiredStatsCount = availableStatsForRoll.length;
+          const requiredDiceTierForStats = 6 - requiredStatsCount;
+          
+          // Check if we have a dice of the required tier selected
+          if (!selectedDice.includes(requiredDiceTierForStats)) {
+            updateRollStatus(`Need dice tier ${requiredDiceTierForStats} to roll ${requiredStatsCount} stats. Please select appropriate dice.`);
+            throw new Error(`No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
+          }
+          
+          diceToUse = requiredDiceTierForStats;
+        }
       }
-      
-      // Use the same dice selection logic as genes mode
-      // Find the appropriate dice tier that can roll the number of available stats
-      const requiredStatsCount = availableStatsForRoll.length;
-      const requiredDiceTierForStats = 6 - requiredStatsCount;
-      
-      // Check if we have a dice of the required tier selected
-      if (!selectedDice.includes(requiredDiceTierForStats)) {
-        console.log(`[Stats Roller] No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
-        updateRollStatus(`Need dice tier ${requiredDiceTierForStats} to roll ${requiredStatsCount} stats. Please select appropriate dice.`);
-        throw new Error(`No dice tier ${requiredDiceTierForStats} selected for ${requiredStatsCount} stats`);
-      }
-      
-      console.log(`[Stats Roller] Using dice tier ${requiredDiceTierForStats} for ${requiredStatsCount} stats`);
       
       requestBody = {
         "0": {
           "json": {
-            "rarity": requiredDiceTierForStats,
-            "manipStats": availableStatsForRoll, // Only roll stats that are below 20
+            "rarity": diceToUse,
+            "manipStats": availableStatsForRoll, // Only roll stats that are below 20 (unless continuouslyUseSameDice is enabled)
             "monsterId": selectedGameId
           }
         }
       };
-      console.log('[Stats Roller] Tier mode request:', requestBody);
-      console.log('[Stats Roller] Rolling stats:', availableStatsForRoll);
     } else {
       // In genes mode, use the standard request format
       requestBody = {
@@ -2327,17 +2474,14 @@
           }
         }
       };
-      console.log('[Stats Roller] Genes mode request:', requestBody);
     }
     
     let response;
     let retryCount = 0;
     let wasRateLimited = false;
     // rateLimitedInterval is now declared in the broader scope
-    console.log('[Stats Roller] Making API call...');
     while (true) {
       try {
-        console.log('[Stats Roller] Sending request to API...');
         response = await fetch(API_ENDPOINT, {
           method: "POST",
           headers: {
@@ -2353,7 +2497,7 @@
       if (response.status !== 429) {
         // If we were rate-limited before, restore button text to 'Autorolling...'
         if (wasRateLimited && typeof window !== 'undefined') {
-          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+          const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
             autoRollBtn.textContent = 'Autorolling...';
             if (rateLimitedInterval) {
@@ -2370,7 +2514,7 @@
       if (retryCount > 5) {
         // Update autoroll button to show rate limit
         if (typeof window !== 'undefined') {
-          const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+          const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
           if (autoRollBtn) {
             let dotCount = 1;
             autoRollBtn.textContent = 'Rate-limited.';
@@ -2387,7 +2531,7 @@
       const waitTime = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000; // fallback 2s
       // Update autoroll button to show rate limit
       if (typeof window !== 'undefined') {
-        const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+        const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
         if (autoRollBtn) {
           let dotCount = 1;
           autoRollBtn.textContent = 'Rate-limited.';
@@ -2412,7 +2556,6 @@
     }
     if (!response.ok) {
       console.error('[Stats Roller] API error response:', data);
-      console.error('[Stats Roller] Full error details:', JSON.stringify(data, null, 2));
       throw new Error(`API request failed: ${response.status} ${response.statusText} - ${JSON.stringify(data)}`);
     }
     
@@ -2434,27 +2577,16 @@
         const maxPossibleStats = 5 * DICE_CONFIG.STAT_LIMIT;
         const percentage = (totalStats / maxPossibleStats) * 100;
         
-        console.log('[Stats Roller] Tier check - Current stats:', newStats);
-        console.log('[Stats Roller] Tier check - Total stats:', totalStats, 'Percentage:', percentage.toFixed(1) + '%');
-        console.log('[Stats Roller] Tier check - Current tier:', currentTier);
-        console.log('[Stats Roller] Tier check - Target tiers:', window.DiceRollerSelectedTier);
-        
         // Store current tier and game ID globally for portrait updates
         window.DiceRollerCurrentTier = currentTier;
         window.DiceRollerCurrentGameId = selectedGameId;
-        console.log('[Stats Roller] Updated global tier tracking:', {
-          currentTier: window.DiceRollerCurrentTier,
-          currentGameId: window.DiceRollerCurrentGameId
-        });
         
         if (window.DiceRollerSelectedTier.includes(currentTier)) {
           const achievedTier = TIER_CONFIG[currentTier];
           updateRollStatus(`🎉 Target tier reached: ${achievedTier.name}!`);
-          console.log('[Stats Roller] Target tier achieved:', currentTier);
           
           // Update creature portrait before returning
           if (typeof rerenderDetails === 'function') {
-            console.log('[Stats Roller] Calling rerenderDetails function for tier achievement...');
             rerenderDetails();
           }
           
@@ -2464,12 +2596,46 @@
           // Continue rolling - update status to show progress
           const targetTiers = window.DiceRollerSelectedTier.map(tierKey => TIER_CONFIG[tierKey].name).join(', ');
           updateRollStatus(`Rolling... Current: ${currentTier} (${percentage.toFixed(1)}%), Targets: ${targetTiers}`);
-          console.log('[Stats Roller] Continuing to roll - current tier not in targets');
           
           // Update creature details after each roll in tier mode
           if (typeof rerenderDetails === 'function') {
-            console.log('[Stats Roller] Calling rerenderDetails function for tier mode roll...');
             rerenderDetails();
+            
+            // After rerenderDetails, recalculate and select lowest stats for next roll (only for higher-tier dice)
+            const { continuouslyUseSameDice } = checkboxState || {};
+            if (window.DiceRollerMode === 'tier' && !continuouslyUseSameDice && selectedDice.length > 0) {
+              const selectedDiceTier = Math.min(...selectedDice);
+              if (selectedDiceTier > 1) {
+                // For higher-tier dice, recalculate and select the lowest stats after each roll
+                const monsters = safeGetMonsters();
+                const creature = monsters.find(c => String(c.id) === String(selectedGameId));
+                
+                if (creature) {
+                  // Get current stats and find the lowest ones
+                  const stats = ['hp', 'ap', 'ad', 'armor', 'magicResist'];
+                  const statValues = stats.map(stat => ({ stat, value: creature[stat] || 0 }));
+                  
+                  // Sort by value (lowest first) and take the required number
+                  statValues.sort((a, b) => a.value - b.value);
+                  const statsToSelect = statValues.slice(0, 6 - selectedDiceTier).map(item => item.stat);
+                  
+                  // Update the dice rules config to select the lowest stats
+                  const currentDiceRulesConfig = initializeDiceRulesConfig();
+                  
+                  // Reset all stats to inactive
+                  Object.keys(currentDiceRulesConfig).forEach(key => {
+                    currentDiceRulesConfig[key].active = false;
+                  });
+                  
+                  // Activate only the lowest stats
+                  statsToSelect.forEach(stat => {
+                    if (currentDiceRulesConfig[stat]) {
+                      currentDiceRulesConfig[stat].active = true;
+                    }
+                  });
+                }
+              }
+            }
           }
           
           // Return false to indicate we need to continue rolling
@@ -2479,10 +2645,7 @@
       
       // For genes mode or when not in tier mode, always update creature details
       if (typeof rerenderDetails === 'function') {
-        console.log('[Stats Roller] Calling rerenderDetails function...');
         rerenderDetails();
-      } else {
-        console.log('[Stats Roller] rerenderDetails function not provided');
       }
     }
     
@@ -2494,7 +2657,7 @@
     // Update the UI with the new stats
     // If we were rate-limited before, restore button text to 'Autorolling...'
     if (wasRateLimited && typeof window !== 'undefined') {
-      const autoRollBtn = document.querySelector('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
+      const autoRollBtn = DOMCache.get('div[role="dialog"][data-state="open"] .diceroller-btn[data-button-type="autoroll"]');
       if (autoRollBtn) {
         autoRollBtn.textContent = 'Autorolling...';
         if (rateLimitedInterval) {
@@ -2747,24 +2910,22 @@
         }
         let lastDiceSelection = selectedDice.slice(); // Track dice selection at start
         const originalDiceSelection = selectedDice.slice(); // Save original user dice selection
-        const getCheckboxState = () => ({
-          stopWhenChangingDice: render && typeof render.stopWhenChangingDice !== 'undefined' ? render.stopWhenChangingDice : (window.DiceRollerMode === 'tier' ? false : true),
-          continuouslyChangeDice: render && typeof render.continuouslyChangeDice !== 'undefined' ? render.continuouslyChangeDice : (window.DiceRollerMode === 'tier' ? true : false)
-        });
+        const getCheckboxState = () => {
+          const state = {
+            stopWhenChangingDice: typeof window.DiceRollerStopWhenChangingDice !== 'undefined' ? window.DiceRollerStopWhenChangingDice : (render && typeof render.stopWhenChangingDice !== 'undefined' ? render.stopWhenChangingDice : (window.DiceRollerMode === 'tier' ? false : true)),
+            continuouslyChangeDice: typeof window.DiceRollerContinuouslyChangeDice !== 'undefined' ? window.DiceRollerContinuouslyChangeDice : (render && typeof render.continuouslyChangeDice !== 'undefined' ? render.continuouslyChangeDice : (window.DiceRollerMode === 'tier' ? true : false)),
+            continuouslyUseSameDice: typeof window.DiceRollerContinuouslyUseSameDice !== 'undefined' ? window.DiceRollerContinuouslyUseSameDice : (render && typeof render.continuouslyUseSameDice !== 'undefined' ? render.continuouslyUseSameDice : false)
+          };
+          return state;
+        };
         let selectedDiceTier = selectedDice.length > 0 ? Math.min(...selectedDice) : 1;
         let availableStats = getAvailableStats();
         let currentDiceRulesConfig = initializeDiceRulesConfig();
         
         // --- Add validation for stat/dice combination ---
-        console.log('[Stats Roller] Validation - Mode:', window.DiceRollerMode);
-        console.log('[Stats Roller] Validation - selectedDice:', selectedDice);
-        console.log('[Stats Roller] Validation - selectedDice.length:', selectedDice.length);
-        console.log('[Stats Roller] Validation - Array.isArray(selectedDice):', Array.isArray(selectedDice));
-        
         if (window.DiceRollerMode === 'tier') {
           // In tier mode, we need dice but not specific stats
           if (!Array.isArray(selectedDice) || selectedDice.length === 0) {
-            console.log('[Stats Roller] Validation failed - no dice selected for tier mode');
             updateStatusWithError(statsStatusDiv, 'Please select at least one dice to roll for tier upgrade.', 2000);
             return;
           }
@@ -2895,17 +3056,26 @@
                           const event = new CustomEvent('searchCleared');
                           scrollArea.dispatchEvent(event);
                         }
-                        console.log('[Stats Roller] Creature list refreshed successfully');
                       }
                     }
-                  } else {
-                    console.log('[Stats Roller] Modal not found or closed, skipping update');
                   }
-                }, selectedDice);
+                }, selectedDice, getCheckboxState());
+                
+                // Add delay for genes mode as well
+                if (window.DiceRollerMode === 'genes') {
+                  // Wait a bit before next roll
+                  const autorollSpeed = typeof window.DiceRollerAutorollSpeed !== 'undefined' ? window.DiceRollerAutorollSpeed : (render && render.autorollSpeed) || DICE_CONFIG.ROLL_DELAY;
+                  await new Promise(res => setTimeout(res, autorollSpeed));
+                }
                 
                 // Check if we need to continue rolling (tier mode)
                 if (window.DiceRollerMode === 'tier' && result === false) {
                   // Continue rolling - don't break the loop
+                  
+                  // Wait a bit before next roll
+                  const autorollSpeed = typeof window.DiceRollerAutorollSpeed !== 'undefined' ? window.DiceRollerAutorollSpeed : (render && render.autorollSpeed) || DICE_CONFIG.ROLL_DELAY;
+                  await new Promise(res => setTimeout(res, autorollSpeed));
+                  
                   continue;
                 } else if (window.DiceRollerMode === 'tier' && result === true) {
                   // Target tier achieved - stop rolling
@@ -3039,8 +3209,6 @@
               autorolling = false;
               break;
             }
-            // Wait a bit before next roll
-            await new Promise(res => setTimeout(res, (render && render.autorollSpeed) || DICE_CONFIG.ROLL_DELAY));
           }
         } else {
           // Single roll
@@ -3081,11 +3249,10 @@
                       const event = new CustomEvent('searchCleared');
                       scrollArea.dispatchEvent(event);
                     }
-                    console.log('[Stats Roller] Creature list refreshed successfully (single roll)');
                   }
                 }
               }
-            });
+            }, selectedDice, getCheckboxState());
             // Update roll count for single roll (only if not already counting)
             if (autorollAttempt === 0) {
               rollCountDiv.textContent = 'Autorolled (1)';
@@ -3316,13 +3483,52 @@
             
             // Dice manipulators
             const diceRow = getDiceManipulatorsRow(selectedDice, i => {
+              // Check if we're in Tier mode with "Continuously use same dice" enabled
+              const continuouslyUseSameDice = typeof window.DiceRollerContinuouslyUseSameDice !== 'undefined' ? window.DiceRollerContinuouslyUseSameDice : false;
+              const isTierModeWithSameDice = window.DiceRollerMode === 'tier' && continuouslyUseSameDice;
+              
               if (selectedDice.includes(i)) {
-                selectedDice = selectedDice.filter(x => x !== i); // Remove if already selected
+                // Deselect the dice
+                selectedDice = selectedDice.filter(x => x !== i);
               } else {
-                selectedDice = [...selectedDice, i]; // Add if not selected
+                // Select the dice
+                if (isTierModeWithSameDice) {
+                  // In Tier mode with "Continuously use same dice", only allow 1 dice
+                  selectedDice = [i]; // Replace all selections with just this one
+                  console.log('[Stats Roller] Tier mode with "Continuously use same dice" - limiting to single dice selection:', i);
+                } else {
+                  // Normal multi-dice selection for other modes
+                  selectedDice = [...selectedDice, i];
+                }
               }
+              
               // Update dice button states (green borders)
               updateDiceButtonStates(selectedDice);
+              
+              // In Tier mode, automatically select lowest stats for higher-tier dice
+              if (window.DiceRollerMode === 'tier' && selectedDice.length > 0) {
+                const selectedDiceTier = Math.min(...selectedDice);
+                if (selectedDiceTier > 1) {
+                  // For higher-tier dice, automatically select the lowest stats
+                  const currentDiceRulesConfig = initializeDiceRulesConfig();
+                  const statsToSelect = ['hp', 'ap', 'ad', 'armor', 'magicResist'].slice(0, 6 - selectedDiceTier);
+                  
+                  // Reset all stats to inactive
+                  Object.keys(currentDiceRulesConfig).forEach(key => {
+                    currentDiceRulesConfig[key].active = false;
+                  });
+                  
+                  // Activate only the lowest stats
+                  statsToSelect.forEach(stat => {
+                    if (currentDiceRulesConfig[stat]) {
+                      currentDiceRulesConfig[stat].active = true;
+                    }
+                  });
+                  
+                  console.log(`[Stats Roller] Tier mode with dice tier ${selectedDiceTier} - automatically selected stats:`, statsToSelect);
+                }
+              }
+              
               // Only update the creature details (col3) instead of full re-render
               if (typeof updateDetailsOnlyClosure === 'function') {
                 updateDetailsOnlyClosure();
@@ -3399,11 +3605,26 @@
               stopCheckboxWrapper.style.opacity = '1';
               stopCheckboxWrapper.style.cursor = 'pointer';
               
-              // Set default values for genes mode: "Stop when changing dice" selected
-              render.stopWhenChangingDice = true;
-              render.continuouslyChangeDice = false;
-              stopCheckbox.checked = true;
-              contCheckbox.checked = false;
+              // Update checkbox labels for genes mode
+              const stopCheckboxLabel = stopCheckboxWrapper.lastChild;
+              if (stopCheckboxLabel && stopCheckboxLabel.nodeType === Node.TEXT_NODE) {
+                stopCheckboxLabel.textContent = 'Stop when changing dice';
+              }
+              
+              // Update the "Smart stat & dice roller" checkbox label to "Continuously change dice"
+              const contCheckboxLabel = contCheckboxWrapper.lastChild;
+              if (contCheckboxLabel && contCheckboxLabel.nodeType === Node.TEXT_NODE) {
+                contCheckboxLabel.textContent = 'Continuously change dice';
+              }
+              
+              // Set default values for genes mode: "Continuously change dice" selected
+              render.stopWhenChangingDice = false;
+              render.continuouslyChangeDice = true;
+              window.DiceRollerStopWhenChangingDice = false; // Update global variable
+              window.DiceRollerContinuouslyChangeDice = true; // Update global variable
+              window.DiceRollerContinuouslyUseSameDice = false; // Update global variable
+              stopCheckbox.checked = false;
+              contCheckbox.checked = true;
               
               // Only update the creature details (col3) instead of full re-render
               if (typeof updateDetailsOnlyClosure === 'function') {
@@ -3441,15 +3662,40 @@
               genesBtn.setAttribute('data-state', 'closed');
               genesBtn.style.boxShadow = 'none';
               
-              // For tier mode: disable "Stop when changing dice" and auto-select "Continuously change dice"
-              stopCheckbox.disabled = true;
+              // For tier mode: transform "Stop when changing dice" to "Continuously use same dice"
+              stopCheckbox.disabled = false;
               contCheckbox.disabled = false;
-              stopCheckboxWrapper.style.opacity = '0.5';
-              stopCheckboxWrapper.style.cursor = 'not-allowed';
+              stopCheckboxWrapper.style.opacity = '1';
+              stopCheckboxWrapper.style.cursor = 'pointer';
+              
+              // Update checkbox labels for tier mode
+              const stopCheckboxLabel = stopCheckboxWrapper.lastChild;
+              if (stopCheckboxLabel && stopCheckboxLabel.nodeType === Node.TEXT_NODE) {
+                stopCheckboxLabel.textContent = 'Roll until target tier';
+              }
+              
+              // Update the "Continuously change dice" checkbox label back to "Smart stat & dice roller"
+              const contCheckboxLabel = contCheckboxWrapper.lastChild;
+              if (contCheckboxLabel && contCheckboxLabel.nodeType === Node.TEXT_NODE) {
+                contCheckboxLabel.textContent = 'Smart stat & dice roller';
+              }
+              
+              // Set default values for tier mode
               render.stopWhenChangingDice = false;
               render.continuouslyChangeDice = true;
+              render.continuouslyUseSameDice = false;
+              window.DiceRollerStopWhenChangingDice = false; // Update global variable
+              window.DiceRollerContinuouslyChangeDice = true; // Update global variable
+              window.DiceRollerContinuouslyUseSameDice = false; // Update global variable
               stopCheckbox.checked = false;
               contCheckbox.checked = true;
+              
+              // Default to grey dice (tier 1) for tier mode
+              if (selectedDice.length === 0 || !selectedDice.includes(1)) {
+                selectedDice = [1]; // Default to grey dice
+                // Update dice button states to reflect the default selection
+                updateDiceButtonStates(selectedDice);
+              }
               
               // Only update the creature details (col3) instead of full re-render
               if (typeof updateDetailsOnlyClosure === 'function') {
@@ -3478,13 +3724,13 @@
             // --- Add state for the checkboxes and speed ---
             if (!render) {
               render = {
-                stopWhenChangingDice: true,
-                continuouslyChangeDice: false,
+                stopWhenChangingDice: false,
+                continuouslyChangeDice: true,
                 autorollSpeed: 400
               };
             } else {
-              if (typeof render.stopWhenChangingDice === 'undefined') render.stopWhenChangingDice = true;
-              if (typeof render.continuouslyChangeDice === 'undefined') render.continuouslyChangeDice = false;
+              if (typeof render.stopWhenChangingDice === 'undefined') render.stopWhenChangingDice = false;
+              if (typeof render.continuouslyChangeDice === 'undefined') render.continuouslyChangeDice = true;
               if (typeof render.autorollSpeed === 'undefined') render.autorollSpeed = 400;
             }
             
@@ -3492,11 +3738,18 @@
             if (window.DiceRollerMode === 'tier') {
               render.stopWhenChangingDice = false;
               render.continuouslyChangeDice = true;
+              render.continuouslyUseSameDice = false; // New property for tier mode
+              window.DiceRollerContinuouslyUseSameDice = false; // Initialize global variable
             } else {
-              // Genes mode: default to "Stop when changing dice"
-              render.stopWhenChangingDice = true;
-              render.continuouslyChangeDice = false;
+              // Genes mode: default to "Continuously change dice"
+              render.stopWhenChangingDice = false;
+              render.continuouslyChangeDice = true;
+              window.DiceRollerStopWhenChangingDice = false; // Initialize global variable
+              window.DiceRollerContinuouslyChangeDice = true; // Initialize global variable
             }
+            
+            // Initialize global autoroll speed
+            window.DiceRollerAutorollSpeed = render.autorollSpeed || 400;
             const row3 = document.createElement('div');
             row3.style.display = 'flex';
             row3.style.flexDirection = 'column';
@@ -3504,40 +3757,82 @@
             row3.style.justifyContent = 'flex-start';
             row3.style.gap = '4px';
             row3.style.marginTop = '12px';
-            // Checkbox 1: Stop when changing dice
+            // Checkbox 1: Stop when changing dice / Continuously use same dice (tier mode)
             const stopCheckboxWrapper = document.createElement('label');
             stopCheckboxWrapper.style.display = 'flex';
             stopCheckboxWrapper.style.alignItems = 'center';
             stopCheckboxWrapper.style.gap = '6px';
             const stopCheckbox = document.createElement('input');
             stopCheckbox.type = 'checkbox';
-            stopCheckbox.checked = !!render.stopWhenChangingDice;
-            // Disable "Stop when changing dice" if in tier mode
+            stopCheckbox.checked = window.DiceRollerMode === 'tier' ? !!render.continuouslyUseSameDice : !!render.stopWhenChangingDice;
+
+            // Transform checkbox behavior in tier mode
             if (window.DiceRollerMode === 'tier') {
-              stopCheckbox.disabled = true;
-              stopCheckbox.checked = false;
-              stopCheckboxWrapper.style.opacity = '0.5';
-              stopCheckboxWrapper.style.cursor = 'not-allowed';
+              stopCheckbox.disabled = false;
+              stopCheckbox.checked = !!render.continuouslyUseSameDice;
+              stopCheckboxWrapper.style.opacity = '1';
+              stopCheckboxWrapper.style.cursor = 'pointer';
             }
-            stopCheckbox.onchange = () => {
-              if (!stopCheckbox.checked && !contCheckbox.checked) {
-                // Prevent both from being unchecked
-                stopCheckbox.checked = true;
-                // Visual cue: flash background
-                stopCheckboxWrapper.style.background = '#ffcccc';
-                setTimeout(() => { stopCheckboxWrapper.style.background = ''; }, 200);
-                return;
-              }
-              if (stopCheckbox.checked) {
-                render.stopWhenChangingDice = true;
-                render.continuouslyChangeDice = false;
-                contCheckbox.checked = false;
+            stopCheckbox.addEventListener('change', () => {
+              if (window.DiceRollerMode === 'tier') {
+                // In tier mode, this checkbox controls "Continuously use same dice"
+                if (!stopCheckbox.checked && !contCheckbox.checked) {
+                  // Prevent both from being unchecked
+                  stopCheckbox.checked = true;
+                  // Visual cue: flash background
+                  stopCheckboxWrapper.style.background = '#ffcccc';
+                  setTimeout(() => { stopCheckboxWrapper.style.background = ''; }, 200);
+                  return;
+                }
+                if (stopCheckbox.checked) {
+                  render.continuouslyUseSameDice = true;
+                  window.DiceRollerContinuouslyUseSameDice = true; // Store in global variable
+                  render.continuouslyChangeDice = false;
+                  window.DiceRollerContinuouslyChangeDice = false; // Update global variable
+                  contCheckbox.checked = false;
+                  
+                  // When "Continuously use same dice" is enabled, limit to single dice selection
+                  if (selectedDice.length > 1) {
+                    // Keep only the first selected dice
+                    const firstDice = selectedDice[0];
+                    selectedDice = [firstDice];
+                    // Update dice button states to reflect the single selection
+                    updateDiceButtonStates(selectedDice);
+                  } else if (selectedDice.length === 0) {
+                    // If no dice selected, default to grey dice (tier 1)
+                    selectedDice = [1];
+                    // Update dice button states to reflect the default selection
+                    updateDiceButtonStates(selectedDice);
+                  }
+                } else {
+                  render.continuouslyUseSameDice = false;
+                  window.DiceRollerContinuouslyUseSameDice = false; // Store in global variable
+                }
               } else {
-                render.stopWhenChangingDice = false;
+                // In genes mode, original behavior
+                if (!stopCheckbox.checked && !contCheckbox.checked) {
+                  // Prevent both from being unchecked
+                  stopCheckbox.checked = true;
+                  // Visual cue: flash background
+                  stopCheckboxWrapper.style.background = '#ffcccc';
+                  setTimeout(() => { stopCheckboxWrapper.style.background = ''; }, 200);
+                  return;
+                }
+                if (stopCheckbox.checked) {
+                  render.stopWhenChangingDice = true;
+                  window.DiceRollerStopWhenChangingDice = true; // Update global variable
+                  render.continuouslyChangeDice = false;
+                  window.DiceRollerContinuouslyChangeDice = false; // Update global variable
+                  contCheckbox.checked = false;
+                } else {
+                  render.stopWhenChangingDice = false;
+                  window.DiceRollerStopWhenChangingDice = false; // Update global variable
+                }
               }
-            };
+            });
+            
             stopCheckboxWrapper.appendChild(stopCheckbox);
-            stopCheckboxWrapper.appendChild(document.createTextNode('Stop when changing dice'));
+            stopCheckboxWrapper.appendChild(document.createTextNode(window.DiceRollerMode === 'tier' ? 'Roll until target tier' : 'Stop when changing dice'));
             row3.appendChild(stopCheckboxWrapper);
             // Checkbox 2: Continuously change dice
             const contCheckboxWrapper = document.createElement('label');
@@ -3547,9 +3842,9 @@
             const contCheckbox = document.createElement('input');
             contCheckbox.type = 'checkbox';
             contCheckbox.checked = !!render.continuouslyChangeDice;
-            // Auto-select "Continuously change dice" if in tier mode
+            // In tier mode, respect the render state but ensure one is always selected
             if (window.DiceRollerMode === 'tier') {
-              contCheckbox.checked = true;
+              contCheckbox.checked = !!render.continuouslyChangeDice;
               contCheckbox.disabled = false;
             }
             contCheckbox.onchange = () => {
@@ -3562,14 +3857,25 @@
               }
               if (contCheckbox.checked) {
                 render.continuouslyChangeDice = true;
-                render.stopWhenChangingDice = false;
+                window.DiceRollerContinuouslyChangeDice = true; // Update global variable
+                if (window.DiceRollerMode === 'tier') {
+                  render.continuouslyUseSameDice = false;
+                  window.DiceRollerContinuouslyUseSameDice = false; // Update global variable
+                  console.log('[Stats Roller] "Continuously change dice" enabled in tier mode - allowing multiple dice selection');
+                } else {
+                  render.stopWhenChangingDice = false;
+                  window.DiceRollerStopWhenChangingDice = false; // Update global variable
+                }
                 stopCheckbox.checked = false;
               } else {
                 render.continuouslyChangeDice = false;
+                window.DiceRollerContinuouslyChangeDice = false; // Update global variable
               }
             };
             contCheckboxWrapper.appendChild(contCheckbox);
-            contCheckboxWrapper.appendChild(document.createTextNode('Continuously change dice'));
+            // Set checkbox label based on current mode
+            const checkboxLabel = window.DiceRollerMode === 'genes' ? 'Continuously change dice' : 'Smart stat & dice roller';
+            contCheckboxWrapper.appendChild(document.createTextNode(checkboxLabel));
             row3.appendChild(contCheckboxWrapper);
             
             // Speed control
@@ -3596,17 +3902,18 @@
             speedInput.style.fontWeight = 'bold';
             speedInput.style.textAlign = 'left';
             speedInput.style.color = '#000';
-            speedInput.onchange = () => {
-              render.autorollSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
-              speedInput.value = render.autorollSpeed;
-              
-              // Update text color based on speed
-              if (render.autorollSpeed < 400) {
-                speedInput.style.color = '#ff6b6b';
-              } else {
-                speedInput.style.color = '#000';
-              }
-            };
+                          speedInput.onchange = () => {
+                render.autorollSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
+                window.DiceRollerAutorollSpeed = render.autorollSpeed; // Update global variable
+                speedInput.value = render.autorollSpeed;
+                
+                // Update text color based on speed
+                if (render.autorollSpeed < 400) {
+                  speedInput.style.color = '#ff6b6b';
+                } else {
+                  speedInput.style.color = '#000';
+                }
+              };
             
             // Set initial color based on default speed
             if (render.autorollSpeed < 400) {
@@ -3812,8 +4119,8 @@
     if (!inventoryContainer) {
       failedAttempts++;
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
-        console.log('[DiceRoller] Inventory container not found, will retry...');
-        hasLoggedInventoryNotFound = true;
+              console.log('[Dice Roller] Inventory container not found, will retry...');
+      hasLoggedInventoryNotFound = true;
       }
       return;
     }
@@ -3826,8 +4133,8 @@
     if (!spriteItems.length) {
       failedAttempts++;
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
-        console.log('[DiceRoller] Dice manipulator sprites not found, will retry...');
-        hasLoggedInventoryNotFound = true;
+              console.log('[Dice Roller] Dice manipulator sprites not found, will retry...');
+      hasLoggedInventoryNotFound = true;
       }
       return;
     }
@@ -3859,8 +4166,8 @@
     if (!targetButton) {
       failedAttempts++;
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
-        console.log('[DiceRoller] Target button not found, will retry...');
-        hasLoggedInventoryNotFound = true;
+              console.log('[Dice Roller] Target button not found, will retry...');
+      hasLoggedInventoryNotFound = true;
       }
       return;
     }
@@ -3880,7 +4187,7 @@
         buttonCheckInterval = null;
       }
     } catch (error) {
-      console.error('[DiceRoller] Error adding button:', error);
+      console.error('[Dice Roller] Error adding button:', error);
     }
   }
   
