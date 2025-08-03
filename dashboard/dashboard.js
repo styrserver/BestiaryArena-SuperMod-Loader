@@ -116,14 +116,16 @@ async function scanAndRegisterLocalMods() {
     { name: 'Turbo Mode.js', enabled: false },
     { name: 'UIComponentsShowcase.js', enabled: false },
     // Super Mods
-    { name: 'Better_Hygenie.js', enabled: true },
-    { name: 'Cyclopedia.js', enabled: true },
-    { name: 'Hunt Analyzer.js', enabled: true },
-    { name: 'DashboardButton.js', enabled: true },
-    { name: 'Dice_Roller.js', enabled: true },
     { name: 'Autoseller.js', enabled: true },
     { name: 'Autoscroller.js', enabled: true },
-    { name: 'Cauldron Upgrade.js', enabled: true }
+    { name: 'Better Cauldron.js', enabled: true },
+    { name: 'Better Highscores.js', enabled: true },
+    { name: 'Better Hy\'genie.js', enabled: true },
+    { name: 'Better Yasir.js', enabled: true },
+    { name: 'Cyclopedia.js', enabled: true },
+    { name: 'DashboardButton.js', enabled: true },
+    { name: 'Dice_Roller.js', enabled: true },
+    { name: 'Hunt Analyzer.js', enabled: true }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -243,8 +245,10 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   const superModNames = [
     'Autoseller.js',
     'Autoscroller.js',
-    'Better_Hygenie.js',
-    'Cauldron Upgrade.js',
+    'Better Cauldron.js',
+    'Better Highscores.js',
+    'Better Hy\'genie.js',
+    'Better Yasir.js',
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',

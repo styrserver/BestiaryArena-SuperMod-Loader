@@ -169,7 +169,7 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 * Provides confirmation prompts and error feedback inside the tooltip
 * Automatically refreshes inventory counts and UI after fusion
 
-=== Cauldron Upgrade ===
+=== Better Cauldron ===
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 * Real-time search through all monsters in your cauldron
 * Filter monsters by rarity (Grey, Green, Blue, Purple, Yellow)
@@ -206,6 +206,26 @@ Advanced autoplay and loot tracking system:
 * Analyze creature and equipment drop rates
 * View session summaries and performance metrics
 * Export data for further analysis
+
+=== Better Yasir ===
+Enhances the Yasir shop interface with advanced features and improved usability:
+* Add quantity input fields for buying and selling items
+* Real-time price calculations and resource tracking
+* Enhanced UI with better visual feedback and confirmation prompts
+* Automatic inventory updates after transactions
+* Support for all item types including equipment, consumables, and special items
+* Smart quantity validation and error handling
+* Seamless integration with the existing shop interface
+
+=== Better Highscores ===
+Displays real-time leaderboard information for the current map:
+* Show current map's tick and rank leaderboards in bottom left corner
+* Real-time updates when switching between maps
+* Automatic data fetching from the game's TRPC API
+* Styled leaderboard display with medal colors (gold, silver, bronze)
+* Manual refresh capability for up-to-date information
+* Minimizable interface to save screen space
+* User-friendly display of top scores and rankings
 
 === Official Mods ===
 These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
