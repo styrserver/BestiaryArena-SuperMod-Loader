@@ -34,6 +34,23 @@ async function getManualMods() {
 const DEBUG = false; // Set to true for development
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // === VERSION DISPLAY ===
+  async function updateVersionDisplay() {
+    try {
+      const manifest = await window.browserAPI.runtime.getManifest();
+      const versionElement = document.getElementById('version-display');
+      if (versionElement) {
+        versionElement.textContent = `Version ${manifest.version}`;
+      }
+    } catch (error) {
+      console.error('Failed to load manifest version:', error);
+      const versionElement = document.getElementById('version-display');
+      if (versionElement) {
+        versionElement.textContent = 'Version unknown';
+      }
+    }
+  }
+
   // === THEME SYNC WITH DASHBOARD ===
   function applyPopupTheme(themeName) {
     document.documentElement.setAttribute('data-theme', themeName || 'default');
@@ -65,6 +82,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   await i18n.init();
+  
+  // Update version display
+  await updateVersionDisplay();
   
   await loadLocalMods();
   

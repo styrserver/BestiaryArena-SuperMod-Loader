@@ -449,16 +449,28 @@
   
   // Get item price with API fallback to DOM
   function getItemPriceWithFallback(itemKey, container = null) {
-    // Try API first
+    // For dice manipulators, always use API data to ensure correct currency icon
+    if (itemKey && itemKey.startsWith('diceManipulator')) {
+      const yasirData = getYasirShopData();
+      const diceCost = yasirData?.diceCost || 0;
+      let minQuantity = 10; // Default minimum quantity
+      if (container) {
+        const itemSlot = container.querySelector(SELECTORS.ITEM_SLOT);
+        minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
+      } else {
+        // Try to find the item slot in the document if no container provided
+        const itemSlot = document.querySelector(`[data-item-key="${itemKey}"]`);
+        if (itemSlot) {
+          minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
+        }
+      }
+      const totalPrice = diceCost * minQuantity;
+      return totalPrice;
+    }
+    
+    // Try API first for other items
     const apiPrice = getItemPriceFromAPI(itemKey);
     if (apiPrice !== null) {
-      // For dice manipulators, we need to get the minimum quantity and calculate total price
-      if (itemKey && itemKey.startsWith('diceManipulator') && container) {
-        const itemSlot = container.querySelector(SELECTORS.ITEM_SLOT);
-        const minQuantity = getMinimumQuantityFromDOM(itemSlot);
-        const totalPrice = apiPrice * minQuantity;
-        return totalPrice;
-      }
       return apiPrice;
     }
     
@@ -751,15 +763,15 @@
         currencyAlt = 'dust';
       }
       
-      button.innerHTML = `<img alt="${currencyAlt}" src="${currencyIcon}" class="pixelated" width="11" height="12">${totalPrice}`;
+      button.innerHTML = `<img alt="${currencyAlt}" src="${currencyIcon}" class="pixelated" width="11" height="12">${totalPrice.toLocaleString()}`;
     } else if (actionType === 'sell') {
       // For sell buttons (exchange section), show dust icon and quantity
       const dustAmount = itemPrice * quantity;
-      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount}`;
+      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount.toLocaleString()}`;
     } else {
       // For other trade buttons, show dust icon and quantity
       const dustAmount = itemPrice * quantity;
-      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount}`;
+      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount.toLocaleString()}`;
     }
   }
   
@@ -775,15 +787,7 @@
       return 'Stone of Insight';
     }
     if (itemKey.startsWith('summonScroll')) {
-      const tier = parseInt(itemKey.replace('summonScroll',''));
-      const names = {
-        1: 'Common Summon Scroll',
-        2: 'Uncommon Summon Scroll',
-        3: 'Rare Summon Scroll',
-        4: 'Mythic Summon Scroll',
-        5: 'Legendary Summon Scroll'
-      };
-      return names[tier] || 'Summon Scroll';
+      return 'Summon Scroll';
     }
     if (itemKey.startsWith('diceManipulator')) {
       const tier = parseInt(itemKey.replace('diceManipulator',''));
@@ -889,7 +893,7 @@
     } catch (e) {}
   }
   
-  // Helper function to convert rarity number to name
+  // Helper function to convert rarity number to name for different item types
   function getRarityName(rarity) {
     const rarityNames = {
       '1': 'Common',
@@ -901,7 +905,7 @@
     return rarityNames[rarity] || 'Unknown';
   }
   
-  // Helper function to convert rarity number to name for Stone of Insight (using Cyclopedia mapping)
+  // Helper function to convert rarity number to name for Stone of Insight
   function getInsightStoneRarityName(rarity) {
     const insightStoneRarityNames = {
       '1': 'Glimpse',
@@ -911,6 +915,43 @@
       '5': 'Epiphany'
     };
     return insightStoneRarityNames[rarity] || 'Unknown';
+  }
+  
+  // Helper function to convert rarity number to name for Summon Scroll
+  function getSummonScrollRarityName(rarity) {
+    const summonScrollRarityNames = {
+      '1': 'Crude',
+      '2': 'Ordinary', 
+      '3': 'Refined',
+      '4': 'Special',
+      '5': 'Exceptional'
+    };
+    return summonScrollRarityNames[rarity] || 'Unknown';
+  }
+  
+  // Helper function to convert rarity number to name for Dice Manipulator
+  function getDiceManipulatorRarityName(rarity) {
+    const diceManipulatorRarityNames = {
+      '1': 'Common',
+      '2': 'Uncommon', 
+      '3': 'Rare',
+      '4': 'Mythic',
+      '5': 'Legendary'
+    };
+    return diceManipulatorRarityNames[rarity] || 'Unknown';
+  }
+  
+  // Unified function to get rarity name based on item type
+  function getItemRarityName(itemKey, rarity) {
+    if (itemKey && itemKey.startsWith('insightStone')) {
+      return getInsightStoneRarityName(rarity);
+    } else if (itemKey && itemKey.startsWith('summonScroll')) {
+      return getSummonScrollRarityName(rarity);
+    } else if (itemKey && itemKey.startsWith('diceManipulator')) {
+      return getDiceManipulatorRarityName(rarity);
+    } else {
+      return getRarityName(rarity);
+    }
   }
   
   // Create a proper Stone of Insight sprite with complete container structure
@@ -993,8 +1034,8 @@
       // Find and update gold display - look for the specific gold display in the Yasir modal
       const yasirModal = document.querySelector('.widget-bottom[data-better-yasir-enhanced]');
       if (yasirModal) {
-        // Look for gold display within the modal
-        const goldDisplays = yasirModal.querySelectorAll('img[src*="goldpile"], img[alt*="gold"]');
+        // Look for gold display within the modal - try multiple selectors
+        const goldDisplays = yasirModal.querySelectorAll('img[src*="goldpile"], img[alt*="gold"], img[src*="gold"]');
         goldDisplays.forEach(goldImg => {
           const goldContainer = goldImg.closest('div');
           if (goldContainer) {
@@ -1010,6 +1051,25 @@
             }
           }
         });
+        
+        // Also try to find gold displays by looking for the specific pattern in the bottom bar
+        const bottomBar = yasirModal.querySelector('.flex.items-center.justify-between, .flex.items-center.gap-4');
+        if (bottomBar) {
+          const goldElements = bottomBar.querySelectorAll('img[src*="gold"], img[alt*="gold"]');
+          goldElements.forEach(goldImg => {
+            const goldContainer = goldImg.closest('div');
+            if (goldContainer) {
+              const goldTextElement = goldContainer.querySelector('span, div') || goldContainer;
+              if (goldTextElement) {
+                const goldText = goldTextElement.textContent;
+                if (goldText && goldText.match(/\d+/)) {
+                  const newText = goldText.replace(/\d+(?:,\d+)*/, playerGold.toLocaleString());
+                  goldTextElement.textContent = newText;
+                }
+              }
+            }
+          });
+        }
       }
       
       // Find and update dust display - look for the specific dust display in the Yasir modal
@@ -1096,7 +1156,17 @@
           actionButton = tableRow.querySelector('.better-yasir-action-button');
           
           if (actionButton) {
-            isBuyAction = actionButton.textContent.includes('Buy') || actionButton.textContent.includes('dust');
+            // More reliable way to determine action type: check the table section first
+            const tableHeader = tableRow.closest('table')?.querySelector('thead th');
+            const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+            
+            if (isExchangeSection) {
+              // If we're in the exchange/sell section, it's definitely a sell action
+              isBuyAction = false;
+            } else {
+              // If we're in the buy section, it's definitely a buy action
+              isBuyAction = true;
+            }
           } else {
             // Fallback: determine action type by looking at the table header
             const tableHeader = tableRow.closest('table')?.querySelector('thead th');
@@ -1158,19 +1228,33 @@
           return;
         }
         
-        const currentQuantity = inventory[itemKey] || 0;
+        // Check if this slot is in the Buy section or Sell section
+        const tableRow = slot.closest('tr');
+        const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+        const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
         
-        // Find the quantity indicator (the "444x" text)
-        const quantityIndicator = slot.querySelector('.revert-pixel-font-spacing');
-        if (quantityIndicator) {
-          const quantitySpan = quantityIndicator.querySelector('span');
-          if (quantitySpan) {
-            quantitySpan.textContent = `${currentQuantity}x`;
+        // Only update quantities for items in the Sell section
+        // For Buy section items (like dice manipulators), preserve the original quantity display
+        if (isSellSection) {
+          const currentQuantity = inventory[itemKey] || 0;
+          
+          // Find the quantity indicator (the "444x" text)
+          const quantityIndicator = slot.querySelector('.revert-pixel-font-spacing');
+          if (quantityIndicator) {
+            const quantitySpan = quantityIndicator.querySelector('span');
+            if (quantitySpan) {
+              quantitySpan.textContent = `${currentQuantity}x`;
+              // Ensure the text is visible
+              quantitySpan.style.color = 'transparent';
+              quantitySpan.style.textShadow = '1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000';
+            }
           }
         }
+        // For Buy section items, do NOT update the quantity display
+        // This preserves the original "10x" for dice manipulators which represents the purchase quantity, not inventory
       });
       
-      // Also try a more direct approach for specific items
+      // Also try a more direct approach for specific items (only in Sell section)
       updateSpecificItemQuantities(modal, inventory);
       
     } catch (error) {
@@ -1178,31 +1262,73 @@
     }
   }
   
-  // Update specific item quantities with direct selectors
+  // Update specific item quantities with direct selectors (only for Sell section)
   function updateSpecificItemQuantities(modal, inventory) {
     try {
-      // Update Stone of Insight specifically
+      // Update Stone of Insight specifically (only in Sell section)
       if (inventory.insightStone5 !== undefined) {
         const insightStoneSlots = modal.querySelectorAll('.container-slot[data-item-key="insightStone5"]');
         
         insightStoneSlots.forEach((slot, index) => {
-          const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
-          if (quantitySpan) {
-            quantitySpan.textContent = `${inventory.insightStone5}x`;
+          // Check if this slot is in the Sell section
+          const tableRow = slot.closest('tr');
+          const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+          const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+          
+          if (isSellSection) {
+            const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
+            if (quantitySpan) {
+              quantitySpan.textContent = `${inventory.insightStone5}x`;
+            }
           }
         });
       }
       
-      // Update other items as needed
+      // Update dice manipulators specifically (only in Sell section)
       Object.entries(inventory).forEach(([itemKey, quantity]) => {
-        if (itemKey === 'insightStone5') return; // Already handled above
+        if (itemKey.startsWith('diceManipulator')) {
+          const slots = modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`);
+          if (slots.length > 0) {
+            slots.forEach((slot, index) => {
+              // Check if this slot is in the Sell section
+              const tableRow = slot.closest('tr');
+              const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+              const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+              
+              if (isSellSection) {
+                const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
+                if (quantitySpan) {
+                  quantitySpan.textContent = `${quantity}x`;
+                  // Use the same styling as Stone of Insight for consistent appearance
+                  quantitySpan.className = 'relative font-outlined-fill text-white';
+                  quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+                }
+              }
+            });
+          }
+        }
+      });
+      
+      // Update other items as needed (only in Sell section)
+      Object.entries(inventory).forEach(([itemKey, quantity]) => {
+        if (itemKey === 'insightStone5' || itemKey.startsWith('diceManipulator')) return; // Already handled above
         
         const slots = modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`);
         if (slots.length > 0) {
           slots.forEach((slot, index) => {
-            const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
-            if (quantitySpan) {
-              quantitySpan.textContent = `${quantity}x`;
+            // Check if this slot is in the Sell section
+            const tableRow = slot.closest('tr');
+            const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+            const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+            
+            if (isSellSection) {
+              const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
+              if (quantitySpan) {
+                quantitySpan.textContent = `${quantity}x`;
+                // Use the same styling as Stone of Insight for consistent appearance
+                quantitySpan.className = 'relative font-outlined-fill text-white';
+                quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+              }
             }
           });
         }
@@ -1237,37 +1363,35 @@
         if (gameState && gameState.playerState?.inventory) {
           const currentQuantity = gameState.playerState.inventory[itemKey] || 0;
           
-          // Additional safety check: prevent selling more than 50% of inventory at once
+          // Check if user has sufficient items for trade
           if (actionType === 'sell') {
             if (currentQuantity < quantity) {
               handleError(new Error('Insufficient items for trade'), { requested: quantity, available: currentQuantity, itemKey });
               return;
             }
-            
-            // Safety check: prevent selling more than 50% of available items
-            const maxSafeQuantity = Math.floor(currentQuantity * 0.5);
-            if (quantity > maxSafeQuantity) {
-              handleError(new Error(`Safety check: Cannot sell more than ${maxSafeQuantity} items (50% of available ${currentQuantity})`), { 
-                requested: quantity, 
-                maxSafe: maxSafeQuantity, 
-                available: currentQuantity, 
-                itemKey 
-              });
-              return;
-            }
-            
-            // Removed hard limit of 100 items for selling
           }
         }
         
-        // Re-validate player dust for buy actions
+        // Re-validate player resources for buy actions
         if (actionType === 'buy') {
-          const playerDust = getPlayerDust();
+          let playerResource = 0;
+          let resourceType = '';
+          
+          if (itemKey && itemKey.startsWith('diceManipulator')) {
+            // Dice manipulators use gold
+            playerResource = getPlayerGold();
+            resourceType = 'gold';
+          } else {
+            // Other items use dust
+            playerResource = getPlayerDust();
+            resourceType = 'dust';
+          }
+          
           const itemPrice = getItemPriceWithFallback(itemKey);
           const totalCost = itemPrice * quantity;
           
-          if (playerDust < totalCost) {
-            handleError(new Error('Insufficient dust for purchase'), { requested: totalCost, available: playerDust });
+          if (playerResource < totalCost) {
+            handleError(new Error(`Insufficient ${resourceType} for purchase`), { requested: totalCost, available: playerResource });
             return;
           }
         }
@@ -1313,6 +1437,15 @@
             }
           };
         }
+        
+        // Log the API call for debugging
+        console.log(`[Better Yasir] Making ${actionType} request:`, {
+          endpoint,
+          payload,
+          itemKey,
+          quantity,
+          actualQuantity
+        });
         
         // Make the actual API call
         const response = await fetch(endpoint, {
@@ -1382,6 +1515,11 @@
             inventoryDiff.dust = responseData.dustDiff;
           }
           
+          // Handle gold changes (for selling dice manipulators)
+          if (responseData.goldDiff !== undefined) {
+            inventoryDiff.gold = responseData.goldDiff;
+          }
+          
           if (Object.keys(inventoryDiff).length > 0) {
             updateLocalInventory(inventoryDiff);
           }
@@ -1409,65 +1547,88 @@
           const currentGold = getPlayerGold();
           const currentInventory = getInventoryState();
           
+          // Update resource displays first
+          updateResourceDisplays(currentGold, currentDust);
+          
+          // Update visible inventory counts
+          const modal = domUtils.findYasirModal();
+          if (modal) {
+            updateVisibleInventoryCounts(modal, currentInventory);
+          }
+          
+          // Update quantity inputs and buttons
           const inputs = document.querySelectorAll('.better-yasir-quantity-input');
           
           inputs.forEach((input, index) => {
             const container = input.closest('div.flex.items-center.gap-1\\.5');
-            if (container) {
-              const itemSlot = container.querySelector('.container-slot');
-              if (itemSlot) {
-                const slotItemKey = getItemKeyFromSlot(itemSlot);
-                const actionButton = container.querySelector('.better-yasir-action-button');
-                
-                // Improved buy/sell detection
-                let isBuyAction = false;
-                if (actionButton) {
-                  isBuyAction = actionButton.textContent.includes('Buy') || actionButton.textContent.includes('dust');
-                } else {
-                  // Fallback: determine by table section
-                  const tableRow = container.closest('tr');
-                  if (tableRow) {
-                    const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                    const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
-                    isBuyAction = !isExchangeSection;
-                  } else {
-                    // Second fallback: determine by item type (Exaltation Chest is always buy)
-                    isBuyAction = slotItemKey === 'exaltationChest';
-                  }
-                }
-                
-
-                
-                if (isBuyAction) {
-                  // For buy items, recalculate max based on available resources
-                  const itemPrice = getItemPriceWithFallback(slotItemKey, container);
-                  const maxQuantity = calculateMaxQuantity(slotItemKey, itemPrice, itemSlot, currentDust, currentGold);
-                  
-                  input.max = maxQuantity;
-                  const currentValue = parseInt(input.value) || 1;
-                  const newValue = Math.min(currentValue, Math.max(1, maxQuantity));
-                  input.value = newValue.toString();
-                  
-                  // Force input validation to run
-                  input.dispatchEvent(new Event('input'));
-                  
-                  // Update the action button text as well
-                  if (actionButton) {
-                    updateActionButtonText(actionButton, newValue, 'buy', itemPrice, slotItemKey);
-                  }
-                } else {
-                  // For sell items, use available inventory quantity
-                  const currentQuantity = currentInventory[slotItemKey] || 0;
-                  input.max = currentQuantity;
-                  const currentValue = parseInt(input.value) || 1;
-                  const newValue = Math.min(currentValue, Math.max(1, currentQuantity));
-                  input.value = newValue.toString();
-                  
-                  // Update the action button text as well
-                  if (actionButton) {
-                    updateActionButtonText(actionButton, newValue, 'sell', 10, slotItemKey);
-                  }
-                }
+            if (!container) return;
+            
+            const itemSlot = container.querySelector('.container-slot');
+            if (!itemSlot) return;
+            
+            const slotItemKey = getItemKeyFromSlot(itemSlot);
+            if (!slotItemKey) return;
+            
+            const actionButton = container.querySelector('.better-yasir-action-button');
+            
+            // Improved buy/sell detection
+            let isBuyAction = false;
+            if (actionButton) {
+              // More reliable way to determine action type: check the table section first
+              const tableRow = container.closest('tr');
+              if (tableRow) {
+                const tableHeader = tableRow.closest('table')?.querySelector('thead th');
+                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                isBuyAction = !isExchangeSection;
+              } else {
+                // Fallback: determine by item type (Exaltation Chest is always buy)
+                isBuyAction = slotItemKey === 'exaltationChest';
+              }
+            } else {
+              // Fallback: determine by table section
+              const tableRow = container.closest('tr');
+              if (tableRow) {
+                const tableHeader = tableRow.closest('table')?.querySelector('thead th');
+                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                isBuyAction = !isExchangeSection;
+              } else {
+                // Second fallback: determine by item type (Exaltation Chest is always buy)
+                isBuyAction = slotItemKey === 'exaltationChest';
+              }
+            }
+            
+            if (isBuyAction) {
+              // For buy items, recalculate max based on available resources
+              const itemPrice = getItemPriceWithFallback(slotItemKey, container);
+              const maxQuantity = calculateMaxQuantity(slotItemKey, itemPrice, itemSlot, currentDust, currentGold);
+              
+              // Ensure max is at least 1
+              const safeMax = Math.max(1, maxQuantity);
+              input.max = safeMax;
+              
+              // Get current value and ensure it's valid
+              const currentValue = parseInt(input.value) || 1;
+              const newValue = Math.min(currentValue, safeMax);
+              input.value = newValue.toString();
+              
+              // Update the action button text
+              if (actionButton) {
+                updateActionButtonText(actionButton, newValue, 'buy', itemPrice, slotItemKey);
+              }
+            } else {
+              // For sell items, use available inventory quantity
+              const currentQuantity = currentInventory[slotItemKey] || 0;
+              const safeMax = Math.max(1, currentQuantity);
+              input.max = safeMax;
+              
+              // Get current value and ensure it's valid
+              const currentValue = parseInt(input.value) || 1;
+              const newValue = Math.min(currentValue, safeMax);
+              input.value = newValue.toString();
+              
+              // Update the action button text
+              if (actionButton) {
+                updateActionButtonText(actionButton, newValue, 'sell', 10, slotItemKey);
               }
             }
           });
@@ -1623,25 +1784,133 @@
         if (tableCells.length >= 2) {
           const secondCell = tableCells[1];
           
-          // Look for Stone of Insight first
-          let insightStoneSlot = secondCell.querySelector('.sprite.item.id-21383');
-          if (insightStoneSlot) {
-            targetItemKey = 'insightStone5';
-            targetItemSlot = insightStoneSlot.closest('.container-slot');
-            this.handleInsightStoneExchange(tableCells, targetItemKey);
-          } else {
-            // Look for other items
-            const itemSlot = secondCell.querySelector('.sprite.item');
-            if (itemSlot) {
-              targetItemKey = getItemKeyFromSlot(itemSlot);
-              targetItemSlot = itemSlot.closest('.container-slot');
+          // Check Yasir location for location-specific replacements
+          const yasirData = getYasirShopData();
+          const yasirLocation = yasirData?.location;
+          
+          // Handle Carlin-specific replacement (Dust -> Summon Scroll)
+          if (yasirLocation === 'carlin' && targetItemKey === 'dust') {
+            // Look for Summon Scroll in the second cell (price cell)
+            const summonScrollImg = secondCell.querySelector('img[src*="summonscroll"]');
+            if (summonScrollImg) {
+              const srcMatch = summonScrollImg.src.match(/summonscroll(\d+)\.png/);
+              const tier = srcMatch ? srcMatch[1] : '5'; // Default to tier 5 for Carlin
+              targetItemKey = `summonScroll${tier}`;
+              
+              // Replace the Dust item with Summon Scroll in the first cell
+              const firstCell = tableCells[0];
+              const firstCellContainer = firstCell.querySelector('div.flex.items-center.gap-1\\.5');
+              if (firstCellContainer) {
+                const dustSlot = firstCellContainer.querySelector('.container-slot[data-item-key="dust"]');
+                if (dustSlot) {
+                  // Create Summon Scroll container
+                  const summonScrollContainer = document.createElement('div');
+                  summonScrollContainer.className = 'container-slot surface-darker data-[disabled=\'true\']:dithered data-[highlighted=\'true\']:unset-border-image data-[hoverable=\'true\']:hover:unset-border-image';
+                  summonScrollContainer.setAttribute('data-hoverable', 'false');
+                  summonScrollContainer.setAttribute('data-highlighted', 'false');
+                  summonScrollContainer.setAttribute('data-disabled', 'false');
+                  summonScrollContainer.setAttribute('data-item-key', targetItemKey);
+                  
+                  // Create the has-rarity container
+                  const hasRarityContainer = document.createElement('div');
+                  hasRarityContainer.className = 'has-rarity relative grid h-full place-items-center';
+                  hasRarityContainer.setAttribute('data-rarity', '5');
+                  
+                  // Create the Summon Scroll image
+                  const img = document.createElement('img');
+                  img.src = `https://bestiaryarena.com/assets/icons/summonscroll${tier}.png`;
+                  img.className = 'pixelated';
+                  img.width = '32';
+                  img.height = '32';
+                  img.alt = 'Summon Scroll';
+                  
+                  // Create the quantity indicator
+                  const quantityIndicator = document.createElement('div');
+                  quantityIndicator.className = 'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
+                  
+                  const quantitySpan = document.createElement('span');
+                  quantitySpan.className = 'relative font-outlined-fill text-white';
+                  quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+                  quantitySpan.setAttribute('translate', 'no');
+                  
+                  // Get quantity from inventory
+                  const inventory = getInventoryState();
+                  const quantity = inventory[targetItemKey] || 0;
+                  quantitySpan.textContent = `${quantity}x`;
+                  
+                  // Assemble the structure
+                  quantityIndicator.appendChild(quantitySpan);
+                  hasRarityContainer.appendChild(img);
+                  hasRarityContainer.appendChild(quantityIndicator);
+                  summonScrollContainer.appendChild(hasRarityContainer);
+                  
+                                 // Replace Dust with Summon Scroll
+               dustSlot.parentNode.replaceChild(summonScrollContainer, dustSlot);
+               targetItemSlot = summonScrollContainer;
+               
+               // Remove the Summon Scroll icon from the price cell (second cell)
+               const secondCell = tableCells[1];
+               const summonScrollIconInPrice = secondCell.querySelector('img[src*="summonscroll"]');
+               if (summonScrollIconInPrice) {
+                 const iconContainer = summonScrollIconInPrice.closest('.container-slot');
+                 if (iconContainer) {
+                   iconContainer.remove();
+                 }
+               }
+               
+               // Update text content
+               this.updateExchangeText(firstCellContainer, summonScrollContainer, targetItemKey);
+                }
+              }
+            }
+          }
+          // Handle Ankrahmun-specific replacement (Dust -> Stone of Insight)
+          else if (yasirLocation === 'ankrahmun' && targetItemKey === 'dust') {
+            // Look for Stone of Insight first
+            let insightStoneSlot = secondCell.querySelector('.sprite.item.id-21383');
+            if (insightStoneSlot) {
+              targetItemKey = 'insightStone5';
+              targetItemSlot = insightStoneSlot.closest('.container-slot');
+              this.handleInsightStoneExchange(tableCells, targetItemKey);
+            }
+          }
+          // Handle Liberty Bay-specific replacement (Dust -> Legendary Dice Manipulator)
+          else if (yasirLocation === 'libertyBay' && targetItemKey === 'dust') {
+            // Look for Legendary Dice Manipulator in the second cell
+            let legendaryDiceSlot = secondCell.querySelector('.sprite.item.id-35909');
+            if (legendaryDiceSlot) {
+              // Check if it's the legendary version (tier 5)
+              const rarityElement = legendaryDiceSlot.closest('[data-rarity]');
+              const rarity = rarityElement ? rarityElement.getAttribute('data-rarity') : '';
+              if (rarity === '5') {
+                targetItemKey = 'diceManipulator5';
+                targetItemSlot = legendaryDiceSlot.closest('.container-slot');
+                this.handleDiceManipulatorExchange(tableCells, targetItemKey);
+              }
+            }
+          }
+          // Handle other locations (default behavior)
+          else {
+            // Look for Stone of Insight first
+            let insightStoneSlot = secondCell.querySelector('.sprite.item.id-21383');
+            if (insightStoneSlot) {
+              targetItemKey = 'insightStone5';
+              targetItemSlot = insightStoneSlot.closest('.container-slot');
+              this.handleInsightStoneExchange(tableCells, targetItemKey);
             } else {
-              const summonScrollImg = secondCell.querySelector('img[src*="summonscroll"]');
-              if (summonScrollImg) {
-                const srcMatch = summonScrollImg.src.match(/summonscroll(\d+)\.png/);
-                const tier = srcMatch ? srcMatch[1] : '1';
-                targetItemKey = `summonScroll${tier}`;
-                targetItemSlot = summonScrollImg.closest('.container-slot');
+              // Look for other items
+              const itemSlot = secondCell.querySelector('.sprite.item');
+              if (itemSlot) {
+                targetItemKey = getItemKeyFromSlot(itemSlot);
+                targetItemSlot = itemSlot.closest('.container-slot');
+              } else {
+                const summonScrollImg = secondCell.querySelector('img[src*="summonscroll"]');
+                if (summonScrollImg) {
+                  const srcMatch = summonScrollImg.src.match(/summonscroll(\d+)\.png/);
+                  const tier = srcMatch ? srcMatch[1] : '1';
+                  targetItemKey = `summonScroll${tier}`;
+                  targetItemSlot = summonScrollImg.closest('.container-slot');
+                }
               }
             }
           }
@@ -1676,6 +1945,77 @@
       }
     },
     
+    // Handle Dice Manipulator exchange section (for Liberty Bay)
+    handleDiceManipulatorExchange(tableCells, targetItemKey) {
+      const firstCell = tableCells[0];
+      const secondCell = tableCells[1];
+      const firstCellContainer = firstCell.querySelector('div.flex.items-center.gap-1\\.5');
+      
+      if (firstCellContainer) {
+        const dustSlot = firstCellContainer.querySelector('.container-slot[data-item-key="dust"]');
+        if (dustSlot) {
+          const dailyItemSlot = secondCell.querySelector('.container-slot');
+          if (dailyItemSlot) {
+            const inventory = getInventoryState();
+            const diceManipulatorQuantity = inventory.diceManipulator5 || 1;
+            
+            // Create Dice Manipulator container similar to Stone of Insight
+            const diceManipulatorContainer = document.createElement('div');
+            diceManipulatorContainer.className = 'container-slot surface-darker data-[disabled=\'true\']:dithered data-[highlighted=\'true\']:unset-border-image data-[hoverable=\'true\']:hover:unset-border-image';
+            diceManipulatorContainer.setAttribute('data-hoverable', 'false');
+            diceManipulatorContainer.setAttribute('data-highlighted', 'false');
+            diceManipulatorContainer.setAttribute('data-disabled', 'false');
+            diceManipulatorContainer.setAttribute('data-item-key', targetItemKey);
+            
+            // Create the has-rarity container
+            const hasRarityContainer = document.createElement('div');
+            hasRarityContainer.className = 'has-rarity relative grid h-full place-items-center';
+            hasRarityContainer.setAttribute('data-rarity', '5');
+            
+            // Create the sprite container
+            const spriteContainer = document.createElement('div');
+            spriteContainer.className = 'sprite item relative id-35909';
+            
+            // Create the viewport
+            const viewport = document.createElement('div');
+            viewport.className = 'viewport';
+            
+            // Create the spritesheet image
+            const img = document.createElement('img');
+            img.alt = 'Dice Manipulator';
+            img.setAttribute('data-cropped', 'false');
+            img.className = 'spritesheet';
+            img.src = 'https://bestiaryarena.com/assets/ITEM/35909.png';
+            img.style.setProperty('--cropX', '0');
+            img.style.setProperty('--cropY', '0');
+            
+            // Create the quantity indicator
+            const quantityIndicator = document.createElement('div');
+            quantityIndicator.className = 'revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5';
+            
+            const quantitySpan = document.createElement('span');
+            quantitySpan.className = 'relative font-outlined-fill text-white';
+            quantitySpan.style.cssText = 'line-height: 1; font-size: 12px; font-family: Arial, sans-serif; font-weight: bold; text-shadow: 1px 1px 0px #000, -1px -1px 0px #000, 1px -1px 0px #000, -1px 1px 0px #000;';
+            quantitySpan.setAttribute('translate', 'no');
+            quantitySpan.textContent = `${diceManipulatorQuantity}x`;
+            
+            // Assemble the structure
+            quantityIndicator.appendChild(quantitySpan);
+            viewport.appendChild(img);
+            spriteContainer.appendChild(viewport);
+            hasRarityContainer.appendChild(spriteContainer);
+            hasRarityContainer.appendChild(quantityIndicator);
+            diceManipulatorContainer.appendChild(hasRarityContainer);
+            
+            dustSlot.parentNode.replaceChild(diceManipulatorContainer, dustSlot);
+            dailyItemSlot.remove();
+            
+            this.updateExchangeText(firstCellContainer, dailyItemSlot, targetItemKey);
+          }
+        }
+      }
+    },
+    
     // Update text content for exchange section
     updateExchangeText(firstCellContainer, dailyItemSlot, targetItemKey) {
       const textDivs = firstCellContainer.querySelectorAll('div:not(.container-slot):not(.better-yasir-right-side-wrapper):not(.has-rarity):not(.revert-pixel-font-spacing)');
@@ -1693,6 +2033,8 @@
             itemName = 'Stone of Insight';
           } else if (targetItemKey.startsWith('diceManipulator')) {
             itemName = 'Dice Manipulator';
+          } else if (targetItemKey.startsWith('summonScroll')) {
+            itemName = 'Summon Scroll';
           } else {
             itemName = targetItemKey.charAt(0).toUpperCase() + targetItemKey.slice(1);
           }
@@ -1702,9 +2044,7 @@
         
         textDivs.forEach((textDiv) => {
           if (!textDiv.querySelector('.sprite, .viewport, .spritesheet') && !textDiv.classList.contains('revert-pixel-font-spacing')) {
-            const rarityText = targetItemKey && targetItemKey.startsWith('insightStone') 
-              ? getInsightStoneRarityName(rarity) 
-              : getRarityName(rarity);
+            const rarityText = getItemRarityName(targetItemKey, rarity);
             textDiv.innerHTML = `${itemName}<p class="pixel-font-14 -mt-0.5 ${rarityClass}">${rarityText}</p>`;
           }
         });
@@ -1803,8 +2143,12 @@
       if (isExchangeSection) {
         itemPrice = 10; // Exchange rate is 10 dust per item
       } else {
-        itemPrice = getItemPriceWithFallback(itemKey, container);
-        if (itemPrice === 0) return; // Skip items with 0 price (out of stock)
+        // Use targetItemKey for price calculation, not the original itemKey
+        itemPrice = getItemPriceWithFallback(targetItemKey, container);
+        // For dice manipulators, don't skip if price is 0 initially - let retry mechanism handle it
+        if (itemPrice === 0 && !targetItemKey.startsWith('diceManipulator')) {
+          return; // Skip items with 0 price (out of stock), except dice manipulators
+        }
       }
       
       // Validate target item
@@ -1843,7 +2187,7 @@
         processedElements.add(container);
         
         // Retry price if needed
-        if (itemPrice === 0 && !isExchangeSection) {
+        if ((itemPrice === 0 && !isExchangeSection) || targetItemKey.startsWith('diceManipulator')) {
           setTimeout(() => {
             const retryPrice = getItemPriceWithFallback(targetItemKey, container);
             if (retryPrice > 0) {
@@ -1877,57 +2221,65 @@
         clearTimeout(validationTimeout);
       }
       
-      // For buy actions, debounce the fresh state validation
-      if (actionType === 'buy') {
-        // Immediate basic validation
-        if (value === '') {
-          quantity = 1;
-        } else {
-          quantity = parseInt(value) || 1;
-          const currentMax = parseInt(this.max) || maxQuantity;
-          if (quantity > currentMax) {
-            quantity = currentMax;
-            this.value = quantity.toString();
-          }
-        }
+      // Basic validation for all input types
+      if (value === '') {
+        quantity = 1;
+        this.value = '1';
+      } else {
+        quantity = parseInt(value) || 1;
+        const currentMax = parseInt(this.max) || maxQuantity;
         
-        // Debounced fresh state validation
+        // Only force correction if the value is way out of bounds
+        if (quantity > currentMax && currentMax > 0) {
+          quantity = currentMax;
+          this.value = quantity.toString();
+        } else if (quantity < 1) {
+          quantity = 1;
+          this.value = '1';
+        }
+      }
+      
+      // Update button text immediately - get the correct price for this item
+      let correctItemPrice = itemPrice;
+      if (itemKey && itemKey.startsWith('diceManipulator')) {
+        // For dice manipulators, get the price from API data
+        const yasirData = getYasirShopData();
+        const diceCost = yasirData?.diceCost || 0;
+        const minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
+        correctItemPrice = diceCost * minQuantity; // Price per quantity unit
+      }
+      updateActionButtonText(actionButton, quantity, actionType, correctItemPrice, itemKey);
+      
+      // For buy actions, do a delayed validation to update max if needed
+      if (actionType === 'buy') {
         validationTimeout = setTimeout(() => {
-          // Get fresh dust data (use cached function for better performance)
+          // Get fresh resource data
           const currentDust = getPlayerDust();
           const currentGold = getPlayerGold();
           
           // Recalculate max based on current resources
           const newMax = calculateMaxQuantity(itemKey, itemPrice, itemSlot, currentDust, currentGold);
           
-          // Update the input's max attribute
-          this.max = newMax;
-          
-          // Validate the current input value against the new max
-          const currentValue = parseInt(this.value) || 1;
-          if (currentValue > newMax) {
-            this.value = newMax.toString();
-            quantity = newMax;
-          } else {
-            quantity = currentValue;
+          // Only update max if it's significantly different
+          if (Math.abs(newMax - parseInt(this.max)) > 1) {
+            this.max = newMax;
+            
+            // Only force correction if current value is way out of bounds
+            const currentValue = parseInt(this.value) || 1;
+            if (currentValue > newMax && newMax > 0) {
+              this.value = newMax.toString();
+              // Get the correct price for this item
+              let correctItemPrice = itemPrice;
+              if (itemKey && itemKey.startsWith('diceManipulator')) {
+                const yasirData = getYasirShopData();
+                const diceCost = yasirData?.diceCost || 0;
+                const minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
+                correctItemPrice = diceCost * minQuantity;
+              }
+              updateActionButtonText(actionButton, newMax, actionType, correctItemPrice, itemKey);
+            }
           }
-          
-          updateActionButtonText(actionButton, quantity, actionType, itemPrice, itemKey);
-        }, 25); // 25ms debounce delay for optimal responsiveness
-      } else {
-        // For sell actions, immediate validation (no debouncing needed)
-        if (value === '') {
-          quantity = 1;
-        } else {
-          quantity = parseInt(value) || 1;
-          // Ensure quantity doesn't exceed the maximum (use current max attribute)
-          const currentMax = parseInt(this.max) || maxQuantity;
-          if (quantity > currentMax) {
-            quantity = currentMax;
-          }
-        }
-        
-        updateActionButtonText(actionButton, quantity, actionType, itemPrice, itemKey);
+        }, 100); // Longer delay to avoid interfering with typing
       }
     };
     
@@ -2008,15 +2360,11 @@
     injectStyles();
     
     // Try multiple ways to find the Yasir modal
-    let yasirTitle = null;
     let modal = null;
     
     // Method 1: Look for h2 with p containing "Yasir" and find the correct widget-bottom
-    yasirTitle = document.querySelector('h2 p');
+    const yasirTitle = document.querySelector('h2 p');
     if (yasirTitle && yasirTitle.textContent.includes('Yasir')) {
-      // Replace title with activation message in green
-      yasirTitle.textContent = "Better Yasir activated!";
-      yasirTitle.style.color = '#32cd32';
       // Look for the widget-bottom that contains both the title and the tables
       const widgetBottom = yasirTitle.closest('.widget-bottom');
       if (widgetBottom && widgetBottom.textContent.includes('Current stock')) {
@@ -2251,6 +2599,12 @@
               return;
             }
             
+            // Handle gold separately from inventory items
+            if (itemKey === 'gold') {
+              newState.gold = Math.max(0, (newState.gold || 0) + change);
+              return;
+            }
+            
             // Handle inventory items
             if (!newState.inventory[itemKey]) newState.inventory[itemKey] = 0;
             newState.inventory[itemKey] = Math.max(0, newState.inventory[itemKey] + change);
@@ -2292,6 +2646,16 @@
           // Also update input max values immediately
           refreshUIAfterAction();
         }, 50);
+      }
+      
+      // Immediate gold update if gold changed
+      if (pendingUpdates.gold !== undefined) {
+        setTimeout(() => {
+          // Get fresh gold amount and update displays immediately
+          const currentGold = getPlayerGold();
+          const currentDust = getPlayerDust();
+          updateResourceDisplays(currentGold, currentDust);
+        }, 25);
       }
       
     } catch (error) {

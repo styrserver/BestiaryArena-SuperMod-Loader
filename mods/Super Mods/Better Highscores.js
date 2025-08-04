@@ -28,13 +28,13 @@
   const config = Object.assign({}, defaultConfig, context?.config);
   
   const PERFORMANCE = {
-    DOM_CACHE_TIMEOUT: 1000,
-    API_THROTTLE_MIN: 100,
-    API_THROTTLE_MAX: 2000,
-    RATE_LIMIT_RETRY_DELAY: 2000,
+    DOM_CACHE_TIMEOUT: 100, // Reduced for faster cache refresh
+    API_THROTTLE_MIN: 50,   // Reduced for faster API calls
+    API_THROTTLE_MAX: 1000, // Reduced max throttle
+    RATE_LIMIT_RETRY_DELAY: 1000, // Reduced retry delay
     RATE_LIMIT_MAX_RETRIES: 3,
-    UPDATE_DELAY: 50,
-    REFRESH_COOLDOWN: 1000
+    UPDATE_DELAY: 10,       // Reduced for faster updates
+    REFRESH_COOLDOWN: 100   // Reduced cooldown for faster re-applications
   };
 
   const ERROR_HANDLING = {
@@ -47,26 +47,13 @@
      const UI_CONFIG = {
          CONTAINER_POSITION: {
       position: 'absolute',
-      bottom: '10px',
-      left: '10px',
-      marginBottom: '60px' // Move above the canvas when maximized
+      top: '9px',
+      left: '290px',
+      right: '110px',
+      width: '550px',
+      height: '30px'
     },
              CONTAINER_STYLE: {
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
-      backgroundSize: 'auto',
-      backgroundRepeat: 'repeat',
-      border: '8px solid transparent',
-      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 8 stretch',
-      borderRadius: '6px',
-      padding: '8px',
-      color: 'white',
-      fontFamily: "'Courier New', monospace",
-      fontSize: '12px',
-      zIndex: '999999',
-      maxWidth: '450px',
-      minWidth: '430px'
-    },
-    MINIMIZED_STYLE: {
       background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
       backgroundSize: 'auto',
       backgroundRepeat: 'repeat',
@@ -76,11 +63,11 @@
       padding: '4px',
       color: 'white',
       fontFamily: "'Courier New', monospace",
-      fontSize: '10px',
+      fontSize: '11px',
       zIndex: '999999',
-      maxWidth: '70px',
-      minWidth: '70px',
-      marginBottom: '0px' // No margin for minimized mode
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between'
     },
     COLORS: {
       GOLD: '#ffd700',
@@ -108,7 +95,6 @@
     roomNames: null,
     lastUpdateTime: 0,
     isUpdating: false,
-    isMinimized: false, // Always start maximized
     
     // Error state
     consecutiveErrors: 0,
@@ -135,8 +121,7 @@
       try {
         const stateToSave = {
           currentMapCode: this.currentMapCode,
-          lastUpdateTime: this.lastUpdateTime,
-          isMinimized: this.isMinimized
+          lastUpdateTime: this.lastUpdateTime
         };
         localStorage.setItem('better_highscores_state', JSON.stringify(stateToSave));
       } catch (error) {
@@ -152,7 +137,6 @@
           
           if (state.currentMapCode) this.currentMapCode = state.currentMapCode;
           if (state.lastUpdateTime) this.lastUpdateTime = state.lastUpdateTime;
-          if (typeof state.isMinimized === 'boolean') this.isMinimized = state.isMinimized;
           
           console.log('[Better Highscores] State loaded from storage');
         }
@@ -168,7 +152,6 @@
       this.roomNames = null;
       this.lastUpdateTime = 0;
       this.isUpdating = false;
-      this.isMinimized = false;
       this.consecutiveErrors = 0;
       this.lastErrorTime = 0;
       this.totalErrors = 0;
@@ -394,11 +377,11 @@
   }
 
   // Function to fetch leaderboard data with caching
-  async function fetchLeaderboardData(mapCode) {
+  async function fetchLeaderboardData(mapCode, forceRefresh = false) {
     const cacheKey = `leaderboard_${mapCode}`;
     const cached = BetterHighscoresState.leaderboardCache.get(cacheKey);
     
-    if (cached && Date.now() - cached.timestamp < BetterHighscoresState.cacheTimeout) {
+    if (!forceRefresh && cached && Date.now() - cached.timestamp < BetterHighscoresState.cacheTimeout) {
       return cached.data;
     }
     
@@ -442,6 +425,10 @@
 // MODULE 6: Utility Functions
 // =======================
   function getMainContainer() {
+    // Clear cache to ensure we get the latest container
+    DOMCache.clearSelector('.relative.z-0.select-none');
+    DOMCache.clearSelector('[class*="relative"]');
+    
     return DOMCache.get('.relative.z-0.select-none') || 
            DOMCache.get('[class*="relative"]') ||
            document.body;
@@ -531,13 +518,13 @@
     
     let value = entry.ticks || entry.rank;
     if (isRankLeaderboard && entry.rank !== undefined) {
-      value = `${entry.rank} (${entry.ticks || 0})`;
+      value = `${entry.rank}`;
     }
     
     return {
       color: isCurrentUser ? '#00ff00' : medalColor, // Green for current user
-      fontWeight: isMedal ? 'bold' : 'normal',
-      text: `${index === 0 ? '🥇' : index + 1 + '.'} ${isCurrentUser ? 'You 🎉' : entry.userName}`,
+      fontWeight: 'bold',
+      text: `${isCurrentUser ? 'You' : entry.userName}`,
       value: value
     };
   }
@@ -550,377 +537,150 @@
     const container = document.createElement('div');
     container.className = 'better-highscores-container';
     
-    // Apply container styles based on minimized state
-    const containerStyle = BetterHighscoresState.isMinimized ? UI_CONFIG.MINIMIZED_STYLE : UI_CONFIG.CONTAINER_STYLE;
-    Object.assign(container.style, containerStyle);
+    // Apply container styles
+    Object.assign(container.style, UI_CONFIG.CONTAINER_STYLE);
     Object.assign(container.style, UI_CONFIG.CONTAINER_POSITION);
-    
-    // Create header with minimize button
-    const headerContainer = document.createElement('div');
-    Object.assign(headerContainer.style, {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: BetterHighscoresState.isMinimized ? '0px' : '3px',
-      borderBottom: 'none',
-      paddingBottom: BetterHighscoresState.isMinimized ? '0px' : '2px',
-      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
-      backgroundSize: 'auto',
-      backgroundRepeat: 'repeat',
-      padding: '4px 8px',
-      borderRadius: '4px'
-    });
-    
-    // Map name header
-    const mapHeader = document.createElement('div');
-    Object.assign(mapHeader.style, {
-      fontWeight: 'bold',
-      fontSize: BetterHighscoresState.isMinimized ? '10px' : '12px',
-      color: UI_CONFIG.COLORS.MAP_HEADER,
-      flex: '1',
-      textAlign: 'center'
-    });
     
     // Get current rank points record and max rank points
     const maxRankPoints = getMaxRankPoints();
     const currentRankRecord = rankData && rankData.length > 0 ? rankData[0].rank : null;
     
-    let headerText = BetterHighscoresState.isMinimized ? '🥇' : (mapName || 'Unknown Map');
-    if (!BetterHighscoresState.isMinimized && maxRankPoints && currentRankRecord) {
-      const isMaxRankAchieved = currentRankRecord === maxRankPoints;
-      const rankPointsColor = isMaxRankAchieved ? '#00ff00' : '#ff4444'; // Green if max achieved, bright red otherwise
-      
-      headerText = `${mapName || 'Unknown Map'} <span style="color: ${rankPointsColor}">(${currentRankRecord}/${maxRankPoints} Rank points)</span>`;
-      mapHeader.innerHTML = headerText;
-    } else {
-      mapHeader.textContent = headerText;
-      mapHeader.style.color = UI_CONFIG.COLORS.MAP_HEADER; // Default color
-    }
+         // Create map name section
+     const mapSection = document.createElement('div');
+     Object.assign(mapSection.style, {
+       fontWeight: 'bold',
+       fontSize: '11px',
+       color: UI_CONFIG.COLORS.MAP_HEADER,
+       minWidth: '120px',
+       textAlign: 'left',
+       wordSpacing: '-1px',
+       lineHeight: '1.1'
+     });
+     
+     let mapText = mapName || 'Unknown Map';
+     if (maxRankPoints && currentRankRecord) {
+       const isMaxRankAchieved = currentRankRecord === maxRankPoints;
+       const rankPointsColor = isMaxRankAchieved ? '#00ff00' : '#ff4444';
+       mapSection.innerHTML = `${mapName || 'Unknown Map'} <span style="color: ${rankPointsColor}">(${currentRankRecord}/${maxRankPoints})</span>`;
+     } else {
+       mapSection.textContent = mapText;
+     }
     
-    // Minimize button (Windows-style)
-    const minimizeBtn = document.createElement('button');
-    minimizeBtn.className = 'better-highscores-minimize-btn';
-    minimizeBtn.id = 'better-highscores-minimize-btn';
-    Object.assign(minimizeBtn.style, {
-      background: '#2d2d2d',
-      border: '1px solid #404040',
-      color: '#ffffff',
-      cursor: 'pointer',
-      fontSize: '10px',
-      padding: '2px 6px',
-      borderRadius: '0px',
-      marginLeft: '8px',
-      fontFamily: 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif',
-      fontWeight: 'bold',
-      minWidth: '16px',
-      height: '16px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1)',
-      transition: 'all 0.1s ease'
-    });
-    
-    // Add hover effect
-    minimizeBtn.addEventListener('mouseenter', () => {
-      minimizeBtn.style.background = '#3d3d3d';
-      minimizeBtn.style.borderColor = '#505050';
-    });
-    
-    minimizeBtn.addEventListener('mouseleave', () => {
-      minimizeBtn.style.background = '#2d2d2d';
-      minimizeBtn.style.borderColor = '#404040';
-    });
-    
-    // Add click effect
-    minimizeBtn.addEventListener('mousedown', () => {
-      minimizeBtn.style.background = '#1d1d1d';
-      minimizeBtn.style.boxShadow = 'inset 0 1px 0 rgba(0,0,0,0.2)';
-    });
-    
-    minimizeBtn.addEventListener('mouseup', () => {
-      minimizeBtn.style.background = '#3d3d3d';
-      minimizeBtn.style.boxShadow = 'inset 0 1px 0 rgba(255,255,255,0.1)';
-    });
-    
-    // Button should show minus when expanded (to minimize) and square when minimized (to restore)
-    minimizeBtn.textContent = BetterHighscoresState.isMinimized ? '□' : '−';
-    minimizeBtn.title = BetterHighscoresState.isMinimized ? 'Restore' : 'Minimize';
-    
-    minimizeBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // Prevent event bubbling
-      console.log('[Better Highscores] Minimize button clicked, current state:', BetterHighscoresState.isMinimized);
-      BetterHighscoresState.isMinimized = !BetterHighscoresState.isMinimized;
-      console.log('[Better Highscores] State changed to:', BetterHighscoresState.isMinimized);
-      BetterHighscoresState.saveToStorage();
-      toggleMinimizeState(); // Use dedicated function instead of full update
-    });
-    
-    // Append elements in different order based on minimized state
-    if (BetterHighscoresState.isMinimized) {
-      // When minimized: button first, then medal
-      headerContainer.appendChild(minimizeBtn);
-      headerContainer.appendChild(mapHeader);
-    } else {
-      // When maximized: medal first, then button
-      headerContainer.appendChild(mapHeader);
-      headerContainer.appendChild(minimizeBtn);
-    }
-    container.appendChild(headerContainer);
-    
-         // Create a grid container for both leaderboards
-    const leaderboardsContainer = document.createElement('div');
-    leaderboardsContainer.className = 'better-highscores-leaderboards-container';
-    Object.assign(leaderboardsContainer.style, {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '10px',
-      alignItems: 'start'
-    });
-    
-    // Hide leaderboards container if minimized
-    if (BetterHighscoresState.isMinimized) {
-      leaderboardsContainer.style.display = 'none';
-    }
-    
-    // Tick leaderboard column
+         // Create tick leaderboard section
+     const tickSection = document.createElement('div');
+     Object.assign(tickSection.style, {
+       display: 'flex',
+       alignItems: 'center',
+       gap: '8px',
+       minWidth: '200px'
+     });
+     
      if (tickData && tickData.length > 0) {
-       const tickSection = document.createElement('div');
-       tickSection.setAttribute('data-section', 'tick');
-       tickSection.style.display = 'flex';
-       tickSection.style.flexDirection = 'column';
-       Object.assign(tickSection.style, {
-         background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
-         backgroundSize: 'auto',
-         backgroundRepeat: 'repeat',
-         border: '4px solid transparent',
-         borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
-         borderRadius: '4px',
-         padding: '8px'
+       const tickTitle = document.createElement('span');
+       Object.assign(tickTitle.style, {
+         fontWeight: 'bold',
+         color: UI_CONFIG.COLORS.TICK_TITLE,
+         fontSize: '10px'
+       });
+       tickTitle.textContent = 'Ticks';
+       tickSection.appendChild(tickTitle);
+       
+       // Show top tick entry
+       tickData.slice(0, 1).forEach((entry, index) => {
+         const formattedEntry = formatLeaderboardEntry(entry, index, false);
+         const entrySpan = document.createElement('span');
+         Object.assign(entrySpan.style, {
+           fontSize: '10px',
+           color: formattedEntry.color,
+           fontWeight: formattedEntry.fontWeight,
+           marginRight: '4px'
+         });
+         entrySpan.textContent = `${formattedEntry.text} ${formattedEntry.value}`;
+         tickSection.appendChild(entrySpan);
        });
        
-             const tickTitle = document.createElement('div');
-      Object.assign(tickTitle.style, {
-        fontWeight: 'bold',
-        color: UI_CONFIG.COLORS.TICK_TITLE,
-        marginBottom: '4px',
-        fontSize: '11px',
-        textAlign: 'center'
-      });
-      
-      tickTitle.textContent = '🏆 Tick Leaderboard';
-      tickSection.appendChild(tickTitle);
-      
-      tickData.slice(0, 5).forEach((entry, index) => {
-        const formattedEntry = formatLeaderboardEntry(entry, index, false);
-        const entryDiv = document.createElement('div');
-        Object.assign(entryDiv.style, {
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '11px',
-          marginBottom: '2px',
-          color: formattedEntry.color,
-          fontWeight: formattedEntry.fontWeight
-        });
-        entryDiv.innerHTML = `
-          <span>${formattedEntry.text}</span>
-          <span>${formattedEntry.value}</span>
-        `;
-        tickSection.appendChild(entryDiv);
-      });
-      
-      // Add user's best tick below world records (only if user doesn't hold the world record)
-      const userScores = getUserBestScores();
-      const playerSnapshot = globalThis.state.player.getSnapshot();
-      const currentUserName = playerSnapshot?.context?.name;
-      const userHoldsWorldRecord = tickData.length > 0 && tickData[0].userName === currentUserName;
-      const userTiesWorldRecord = tickData.length > 0 && userScores && userScores.bestTicks === tickData[0].ticks;
-      
-      if (userScores && userScores.bestTicks && !userHoldsWorldRecord) {
-        const userEntryDiv = document.createElement('div');
-        Object.assign(userEntryDiv.style, {
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '11px',
-          marginTop: '4px',
-          marginBottom: '2px',
-          color: userTiesWorldRecord ? '#00ff00' : '#ffa500', // Green if ties world record, orange otherwise
-          fontWeight: 'bold',
-          borderTop: `1px solid ${UI_CONFIG.COLORS.SEPARATOR}`,
-          paddingTop: '3px'
-        });
-        userEntryDiv.innerHTML = `
-          <span>${userTiesWorldRecord ? '🏅 Your Best 🎉' : '🏅 Your Best'}</span>
-          <span>${userScores.bestTicks}</span>
-        `;
-        tickSection.appendChild(userEntryDiv);
-      }
-      
-              leaderboardsContainer.appendChild(tickSection);
-      }
+       // Add user's best tick (only if user doesn't hold the world record)
+       const userScores = getUserBestScores();
+       const playerSnapshot = globalThis.state.player.getSnapshot();
+       const currentUserName = playerSnapshot?.context?.name;
+       const userHoldsWorldRecord = tickData.length > 0 && tickData[0].userName === currentUserName;
+       const userTiesWorldRecord = tickData.length > 0 && userScores && userScores.bestTicks === tickData[0].ticks;
+       
+       if (userScores && userScores.bestTicks && !userHoldsWorldRecord) {
+         const userEntrySpan = document.createElement('span');
+         Object.assign(userEntrySpan.style, {
+           fontSize: '10px',
+           color: userTiesWorldRecord ? '#00ff00' : '#ffa500', // Green if ties world record, orange otherwise
+           fontWeight: 'bold',
+           marginRight: '4px'
+         });
+         userEntrySpan.textContent = `You: ${userScores.bestTicks}`;
+         tickSection.appendChild(userEntrySpan);
+       }
+     }
     
-    // Rank leaderboard column
-    if (rankData && rankData.length > 0) {
-      const rankSection = document.createElement('div');
-      rankSection.setAttribute('data-section', 'rank');
-      rankSection.style.display = 'flex';
-      rankSection.style.flexDirection = 'column';
-      Object.assign(rankSection.style, {
-        background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
-        backgroundSize: 'auto',
-        backgroundRepeat: 'repeat',
-        border: '4px solid transparent',
-        borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
-        borderRadius: '4px',
-        padding: '8px'
-      });
-      
-      const rankTitle = document.createElement('div');
-      Object.assign(rankTitle.style, {
-        fontWeight: 'bold',
-        color: UI_CONFIG.COLORS.RANK_TITLE,
-        marginBottom: '4px',
-        fontSize: '11px',
-        textAlign: 'center'
-      });
-      
-      rankTitle.textContent = '⭐ Rank Leaderboard';
-      rankSection.appendChild(rankTitle);
-      
-      rankData.slice(0, 5).forEach((entry, index) => {
-        const formattedEntry = formatLeaderboardEntry(entry, index, true);
-        const entryDiv = document.createElement('div');
-        Object.assign(entryDiv.style, {
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '11px',
-          marginBottom: '2px',
-          color: formattedEntry.color,
-          fontWeight: formattedEntry.fontWeight
-        });
-        entryDiv.innerHTML = `
-          <span>${formattedEntry.text}</span>
-          <span>${formattedEntry.value}</span>
-        `;
-        rankSection.appendChild(entryDiv);
-      });
-      
-            // Add user's best rank below world records (only if user doesn't hold the world record)
-      const userScores = getUserBestScores();
-      const playerSnapshot = globalThis.state.player.getSnapshot();
-      const currentUserName = playerSnapshot?.context?.name;
-      const userHoldsWorldRecord = rankData.length > 0 && rankData[0].userName === currentUserName;
-      const userTiesWorldRecord = rankData.length > 0 && userScores && userScores.bestRank === rankData[0].rank;
-      
-      if (userScores && userScores.bestRank && !userHoldsWorldRecord) {
-        const userEntryDiv = document.createElement('div');
-        Object.assign(userEntryDiv.style, {
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: '11px',
-          marginTop: '4px',
-          marginBottom: '2px',
-          color: userTiesWorldRecord ? '#00ff00' : '#ffa500', // Green if ties world record, orange otherwise
-          fontWeight: 'bold',
-          borderTop: `1px solid ${UI_CONFIG.COLORS.SEPARATOR}`,
-          paddingTop: '3px'
-        });
-        userEntryDiv.innerHTML = `
-          <span>${userTiesWorldRecord ? '🏅 Your Best 🎉' : '🏅 Your Best'}</span>
-          <span>${userScores.bestRank} (?)</span>
-        `;
-        rankSection.appendChild(userEntryDiv);
-      }
+         // Create rank leaderboard section
+     const rankSection = document.createElement('div');
+     Object.assign(rankSection.style, {
+       display: 'flex',
+       alignItems: 'center',
+       gap: '8px',
+       minWidth: '200px'
+     });
+     
+     if (rankData && rankData.length > 0) {
+       const rankTitle = document.createElement('span');
+       Object.assign(rankTitle.style, {
+         fontWeight: 'bold',
+         color: UI_CONFIG.COLORS.RANK_TITLE,
+         fontSize: '10px'
+       });
+       rankTitle.textContent = 'Rank';
+       rankSection.appendChild(rankTitle);
+       
+       // Show top rank entry
+       rankData.slice(0, 1).forEach((entry, index) => {
+         const formattedEntry = formatLeaderboardEntry(entry, index, true);
+         const entrySpan = document.createElement('span');
+         Object.assign(entrySpan.style, {
+           fontSize: '10px',
+           color: formattedEntry.color,
+           fontWeight: formattedEntry.fontWeight,
+           marginRight: '4px'
+         });
+         entrySpan.textContent = `${formattedEntry.text} ${formattedEntry.value}`;
+         rankSection.appendChild(entrySpan);
+       });
+       
+       // Add user's best rank (only if user doesn't hold the world record)
+       const userScores = getUserBestScores();
+       const playerSnapshot = globalThis.state.player.getSnapshot();
+       const currentUserName = playerSnapshot?.context?.name;
+       const userHoldsWorldRecord = rankData.length > 0 && rankData[0].userName === currentUserName;
+       const userTiesWorldRecord = rankData.length > 0 && userScores && userScores.bestRank === rankData[0].rank;
+       
+       if (userScores && userScores.bestRank && !userHoldsWorldRecord) {
+         const userEntrySpan = document.createElement('span');
+         Object.assign(userEntrySpan.style, {
+           fontSize: '10px',
+           color: userTiesWorldRecord ? '#00ff00' : '#ffa500', // Green if ties world record, orange otherwise
+           fontWeight: 'bold',
+           marginRight: '4px'
+         });
+         userEntrySpan.textContent = `You: ${userScores.bestRank}`;
+         rankSection.appendChild(userEntrySpan);
+       }
+     }
     
-    leaderboardsContainer.appendChild(rankSection);
-  }
-  
-  container.appendChild(leaderboardsContainer);
-    
-
+    // Append all sections to container
+    container.appendChild(mapSection);
+    container.appendChild(tickSection);
+    container.appendChild(rankSection);
     
     return container;
   }
 
-  // Function to toggle minimize state without throttling
-  function toggleMinimizeState() {
-    console.log('[Better Highscores] toggleMinimizeState called, isMinimized:', BetterHighscoresState.isMinimized);
-    
-    if (!leaderboardContainer) {
-      console.log('[Better Highscores] No container to toggle');
-      return;
-    }
-    
-    // Update container styling
-    const containerStyle = BetterHighscoresState.isMinimized ? UI_CONFIG.MINIMIZED_STYLE : UI_CONFIG.CONTAINER_STYLE;
-    Object.assign(leaderboardContainer.style, containerStyle);
-    
-    // Apply position styling (marginBottom is handled by the container styles)
-    const positionStyle = { ...UI_CONFIG.CONTAINER_POSITION };
-    if (BetterHighscoresState.isMinimized) {
-      positionStyle.marginBottom = '0px'; // Override for minimized mode
-    }
-    Object.assign(leaderboardContainer.style, positionStyle);
-    
-    // Update the button text immediately
-    const minimizeBtn = leaderboardContainer.querySelector('.better-highscores-minimize-btn');
-    if (minimizeBtn) {
-      // Button should show minus when expanded (to minimize) and square when minimized (to restore)
-      minimizeBtn.textContent = BetterHighscoresState.isMinimized ? '□' : '−';
-      minimizeBtn.title = BetterHighscoresState.isMinimized ? 'Restore' : 'Minimize';
-    }
-    
-    // Update header styling
-    const headerContainer = leaderboardContainer.querySelector('div');
-    if (headerContainer) {
-      headerContainer.style.marginBottom = BetterHighscoresState.isMinimized ? '0px' : '3px';
-      headerContainer.style.borderBottom = BetterHighscoresState.isMinimized ? 'none' : `1px solid ${UI_CONFIG.COLORS.SEPARATOR}`;
-      headerContainer.style.paddingBottom = BetterHighscoresState.isMinimized ? '0px' : '2px';
-      
-      // Reduce left padding when minimized to move button more to the left
-      if (BetterHighscoresState.isMinimized) {
-        headerContainer.style.paddingLeft = '1px';
-        headerContainer.style.paddingRight = '2px';
-      } else {
-        headerContainer.style.paddingLeft = '8px';
-        headerContainer.style.paddingRight = '8px';
-      }
-    }
-    
-    // Update map header text and styling
-    const mapHeader = headerContainer?.querySelector('div');
-    if (mapHeader) {
-      mapHeader.style.fontSize = BetterHighscoresState.isMinimized ? '10px' : '12px';
-      
-      if (BetterHighscoresState.isMinimized) {
-        mapHeader.textContent = '🥇';
-        
-        // Reorder elements for minimized state: button first, then medal
-        const minimizeBtn = headerContainer.querySelector('.better-highscores-minimize-btn');
-        if (minimizeBtn && minimizeBtn !== headerContainer.firstChild) {
-          headerContainer.insertBefore(minimizeBtn, headerContainer.firstChild);
-        }
-      } else {
-        // For expanded state, we need to get the current rank data to show the full header
-        // We'll need to trigger a full update to get the rank points information
-        updateLeaderboards();
-        return; // Exit early since updateLeaderboards will recreate the display
-      }
-    }
-    
-    // Toggle visibility of leaderboards container
-    const leaderboardsContainer = leaderboardContainer.querySelector('.better-highscores-leaderboards-container');
-    
-    if (BetterHighscoresState.isMinimized) {
-      // Hide content
-      if (leaderboardsContainer) leaderboardsContainer.style.display = 'none';
-    } else {
-      // Show content
-      if (leaderboardsContainer) leaderboardsContainer.style.display = 'grid';
-    }
-    
-    console.log('[Better Highscores] Minimize state toggled to:', BetterHighscoresState.isMinimized);
-  }
+
 
   // Function to update leaderboards
   async function updateLeaderboards() {
@@ -950,19 +710,13 @@
         return;
       }
       
-      // When switching maps, default to maximized to avoid conflicts
-      if (mapCode !== currentMapCode) {
-        BetterHighscoresState.isMinimized = false;
-        console.log('[Better Highscores] Map switched, defaulting to maximized');
-      }
-      
       currentMapCode = mapCode;
       BetterHighscoresState.lastUpdateTime = now;
       
       const mapName = getMapName(mapCode);
       
       // Fetch leaderboard data
-      const { tickData, rankData } = await fetchLeaderboardData(mapCode);
+      const { tickData, rankData } = await fetchLeaderboardData(mapCode, false);
       
       // Remove existing container and any duplicate containers
       if (leaderboardContainer) {
@@ -978,15 +732,6 @@
         }
       });
       
-      // Remove any stray minimize buttons that might exist
-      const existingMinimizeBtns = document.querySelectorAll('.better-highscores-minimize-btn');
-      existingMinimizeBtns.forEach(btn => {
-        if (!btn.closest('.better-highscores-container')) {
-          console.log('[Better Highscores] Removing stray minimize button');
-          btn.remove();
-        }
-      });
-      
       // Create new container
       leaderboardContainer = createLeaderboardDisplay(tickData, rankData, mapName);
       console.log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
@@ -999,15 +744,6 @@
         console.log('[Better Highscores] Appending leaderboard container to main container');
         mainContainer.appendChild(leaderboardContainer);
         console.log('[Better Highscores] Leaderboard container appended successfully');
-        
-        // Debug: Check for any duplicate buttons after appending
-        setTimeout(() => {
-          const allMinimizeBtns = document.querySelectorAll('.better-highscores-minimize-btn');
-          console.log('[Better Highscores] Total minimize buttons found after append:', allMinimizeBtns.length);
-          allMinimizeBtns.forEach((btn, index) => {
-            console.log(`[Better Highscores] Minimize button ${index}:`, btn, 'Parent:', btn.parentElement);
-          });
-        }, 100);
       } else {
         console.error('[Better Highscores] Could not find main container for leaderboard injection');
       }
@@ -1069,9 +805,17 @@
              console.log(`[Better Highscores] Map changed from ${currentMapCode} to ${newMapCode}`);
              updateLeaderboards();
            }
+           
+           // Check if the main container has changed (board re-render)
+           const mainContainer = getMainContainer();
+           if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
+             console.log('[Better Highscores] Main container changed, re-applying leaderboard');
+             // Immediate re-application for fastest response
+             updateLeaderboards();
+           }
          });
         
-        // Also listen for game state changes as backup
+                // Also listen for game state changes as backup
         if (globalThis.state.game) {
           globalThis.state.game.subscribe((state) => {
             const newMapCode = state.context?.map;
@@ -1079,8 +823,52 @@
               console.log(`[Better Highscores] Game map changed from ${currentMapCode} to ${newMapCode}`);
               updateLeaderboards();
             }
+            
+            // Check if the main container has changed (game re-render)
+            const mainContainer = getMainContainer();
+            if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
+              console.log('[Better Highscores] Main container changed (game state), re-applying leaderboard');
+              // Immediate re-application for fastest response
+              updateLeaderboards();
+            }
           });
         }
+        
+                 // Listen for game timer changes to detect battle completion
+         if (globalThis.state.gameTimer) {
+           globalThis.state.gameTimer.subscribe((state) => {
+             const { currentTick, gameState } = state.context;
+             
+             // Check if game just ended (state changed from 'playing' to 'victory'/'defeat')
+             if (state.context.state !== 'initial' && state.context.state !== 'playing') {
+               console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
+               
+               // Force refresh with fresh data
+               setTimeout(async () => {
+                 const mapCode = getCurrentMapCode();
+                 if (mapCode) {
+                   try {
+                     const { tickData, rankData } = await fetchLeaderboardData(mapCode, true);
+                     
+                     // Update the existing container if it exists
+                     if (leaderboardContainer) {
+                       const mapName = getMapName(mapCode);
+                       const newContainer = createLeaderboardDisplay(tickData, rankData, mapName);
+                       
+                       // Replace the old container with the new one
+                       leaderboardContainer.replaceWith(newContainer);
+                       leaderboardContainer = newContainer;
+                       
+                       console.log('[Better Highscores] Leaderboard updated with fresh battle data');
+                     }
+                   } catch (error) {
+                     console.warn('[Better Highscores] Failed to refresh leaderboard after battle:', error);
+                   }
+                 }
+               }, 500); // Small delay to ensure game state is fully updated
+             }
+           });
+         }
         
         console.log('[Better Highscores] Initialization complete');
       } else {
