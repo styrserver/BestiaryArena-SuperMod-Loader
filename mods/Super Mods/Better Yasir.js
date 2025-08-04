@@ -633,6 +633,11 @@
     isOutOfStock(button) {
       const text = button.textContent.trim();
       return text === '' || text.includes('Out of stock') || button.disabled;
+    },
+    
+    // Format number with commas for thousands separators (cross-browser compatible)
+    formatNumberWithCommas(number) {
+      return number.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
   };
   
@@ -763,15 +768,15 @@
         currencyAlt = 'dust';
       }
       
-      button.innerHTML = `<img alt="${currencyAlt}" src="${currencyIcon}" class="pixelated" width="11" height="12">${totalPrice.toLocaleString()}`;
+      button.innerHTML = `<img alt="${currencyAlt}" src="${currencyIcon}" class="pixelated" width="11" height="12">${priceUtils.formatNumberWithCommas(totalPrice)}`;
     } else if (actionType === 'sell') {
       // For sell buttons (exchange section), show dust icon and quantity
       const dustAmount = itemPrice * quantity;
-      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount.toLocaleString()}`;
+      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${priceUtils.formatNumberWithCommas(dustAmount)}`;
     } else {
       // For other trade buttons, show dust icon and quantity
       const dustAmount = itemPrice * quantity;
-      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${dustAmount.toLocaleString()}`;
+      button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${priceUtils.formatNumberWithCommas(dustAmount)}`;
     }
   }
   
@@ -856,7 +861,7 @@
         currency = 'dust';
       }
       
-      const costText = totalCost > 0 ? ` for ${totalCost.toLocaleString()} ${currency}` : '';
+      const costText = totalCost > 0 ? ` for ${priceUtils.formatNumberWithCommas(totalCost)} ${currency}` : '';
       msgElem.textContent = `Are you sure you want to ${actionText} ${quantity} ${itemName}${costText}?`;
       msgElem.style.color = '#ff4d4d';
       actionButton.dataset.confirm = 'pending';
@@ -1045,7 +1050,7 @@
               const goldText = goldTextElement.textContent;
               if (goldText && goldText.match(/\d+/)) {
                 // Update the text content with new gold amount
-                const newText = goldText.replace(/\d+(?:,\d+)*/, playerGold.toLocaleString());
+                const newText = goldText.replace(/\d+(?:,\d+)*/, priceUtils.formatNumberWithCommas(playerGold));
                 goldTextElement.textContent = newText;
               }
             }
@@ -1062,10 +1067,10 @@
               const goldTextElement = goldContainer.querySelector('span, div') || goldContainer;
               if (goldTextElement) {
                 const goldText = goldTextElement.textContent;
-                if (goldText && goldText.match(/\d+/)) {
-                  const newText = goldText.replace(/\d+(?:,\d+)*/, playerGold.toLocaleString());
-                  goldTextElement.textContent = newText;
-                }
+                              if (goldText && goldText.match(/\d+/)) {
+                const newText = goldText.replace(/\d+(?:,\d+)*/, priceUtils.formatNumberWithCommas(playerGold));
+                goldTextElement.textContent = newText;
+              }
               }
             }
           });
@@ -1084,7 +1089,7 @@
               const dustText = dustTextElement.textContent;
               if (dustText && dustText.match(/\d+/)) {
                 // Update the text content with new dust amount
-                const newText = dustText.replace(/\d+(?:,\d+)*/, playerDust.toLocaleString());
+                const newText = dustText.replace(/\d+(?:,\d+)*/, priceUtils.formatNumberWithCommas(playerDust));
                 dustTextElement.textContent = newText;
               }
             }

@@ -93,7 +93,7 @@
   const API_THROTTLE_DELAY = 200;
   let rateLimitedInterval = null;
 
-  let diceRulesConfig = {};
+  let diceRulesConfig = null;
   const STAT_KEYS = ['ap', 'hp', 'ad', 'armor', 'magicResist'];
   
   const TIER_CONFIG = {
@@ -467,11 +467,41 @@
   }
 
   function initializeDiceRulesConfig() {
+    // Use a more persistent storage mechanism
+    if (typeof window !== 'undefined' && !window.DiceRollerConfig) {
+      window.DiceRollerConfig = {};
+    }
+    
+    // Initialize from persistent storage if available
+    if (!diceRulesConfig && window.DiceRollerConfig && window.DiceRollerConfig.diceRules) {
+      diceRulesConfig = window.DiceRollerConfig.diceRules;
+    }
+    
     if (!diceRulesConfig || Object.keys(diceRulesConfig).length === 0) {
       diceRulesConfig = {};
       STAT_KEYS.forEach(key => {
         diceRulesConfig[key] = { active: true, target: DICE_CONFIG.STAT_LIMIT };
       });
+      // Save to persistent storage
+      if (typeof window !== 'undefined') {
+        window.DiceRollerConfig = window.DiceRollerConfig || {};
+        window.DiceRollerConfig.diceRules = diceRulesConfig;
+      }
+    } else {
+      // Ensure all stat keys exist, but preserve existing target values
+      STAT_KEYS.forEach(key => {
+        if (!diceRulesConfig[key]) {
+          diceRulesConfig[key] = { active: true, target: DICE_CONFIG.STAT_LIMIT };
+        } else if (typeof diceRulesConfig[key].target === 'undefined') {
+          // If target is missing, set it to default but preserve other settings
+          diceRulesConfig[key].target = DICE_CONFIG.STAT_LIMIT;
+        }
+      });
+      // Update persistent storage
+      if (typeof window !== 'undefined') {
+        window.DiceRollerConfig = window.DiceRollerConfig || {};
+        window.DiceRollerConfig.diceRules = diceRulesConfig;
+      }
     }
     return diceRulesConfig;
   }
@@ -1853,9 +1883,54 @@
         
         // Update status displays when target value changes
         targetInput.addEventListener('input', () => {
+          // Get the input value and enforce 1-20 range
+          let newTarget = parseInt(targetInput.value) || 1;
+          
+          // Enforce min/max bounds
+          if (newTarget < 1) {
+            newTarget = 1;
+            targetInput.value = '1';
+          } else if (newTarget > 20) {
+            newTarget = 20;
+            targetInput.value = '20';
+          }
+          
+          const finalTarget = newTarget;
+          diceRulesConfig[key].target = finalTarget;
+          
+          // Save to persistent storage
+          if (typeof window !== 'undefined') {
+            window.DiceRollerConfig = window.DiceRollerConfig || {};
+            window.DiceRollerConfig.diceRules = diceRulesConfig;
+          }
+          
           setTimeout(() => {
             updateStatusDisplays();
           }, 0);
+        });
+        
+        // Also save on change event (when user finishes editing)
+        targetInput.addEventListener('change', () => {
+          // Get the input value and enforce 1-20 range
+          let newTarget = parseInt(targetInput.value) || 1;
+          
+          // Enforce min/max bounds
+          if (newTarget < 1) {
+            newTarget = 1;
+            targetInput.value = '1';
+          } else if (newTarget > 20) {
+            newTarget = 20;
+            targetInput.value = '20';
+          }
+          
+          const finalTarget = newTarget;
+          diceRulesConfig[key].target = finalTarget;
+          
+          // Save to persistent storage
+          if (typeof window !== 'undefined') {
+            window.DiceRollerConfig = window.DiceRollerConfig || {};
+            window.DiceRollerConfig.diceRules = diceRulesConfig;
+          }
         });
         // Store both checkbox and targetInput for state updates
         checkboxElements.push({checkbox, targetInput, key, row, checkmarkContainer});
@@ -1873,6 +1948,13 @@
             return;
           }
           diceRulesConfig[key].active = e.target.checked;
+          
+          // Save to persistent storage
+          if (typeof window !== 'undefined') {
+            window.DiceRollerConfig = window.DiceRollerConfig || {};
+            window.DiceRollerConfig.diceRules = diceRulesConfig;
+          }
+          
           // Update input and checkmark in place
           targetInput.disabled = !checkbox.checked;
           targetInput.style.color = checkbox.checked ? 'black' : '#888';
@@ -3019,7 +3101,6 @@
                   // Optimized rerender - only update if modal is still open
                   const modal = DOMCache.get('div[role="dialog"][data-state="open"]');
                   if (modal && modal.contains(col)) {
-                    console.log('[Stats Roller] Updating creature details...');
                     const newRow1 = getCreatureDetails(selectedGameId, selectedDice);
                     newRow1.style.flex = '0 0 50%';
                     newRow1.style.height = '50%';
@@ -3100,9 +3181,11 @@
                 // Check if the stat exists in currentDiceRulesConfig before accessing its target
                 if (currentDiceRulesConfig[stat]) {
                   const target = currentDiceRulesConfig[stat].target;
-                  if (target > 0 && (creature[stat] || 0) >= target) {
+                  const currentValue = creature[stat] || 0;
+                  
+                  if (target > 0 && currentValue === target) {
                     reachedTargets.push({ stat, diceIndex: i });
-                  } else if (target > 0 && (creature[stat] || 0) < target) {
+                  } else if (target > 0 && currentValue < target) {
                     allMet = false;
                   }
                 }
@@ -3427,7 +3510,28 @@
         
         // Create a separate function for creature selection that doesn't trigger full render
         const selectCreature = (gameId) => {
+          const previousGameId = selectedGameId;
           selectedGameId = gameId;
+          
+          // Reset dice and stats when selecting a new creature
+          if (previousGameId !== gameId) {
+            // Reset dice selection to default (all dice selected)
+            selectedDice = [1, 2, 3, 4, 5];
+            updateDiceButtonStates(selectedDice);
+            
+            // Reset stats to default (all stats active with target 20)
+            const currentDiceRulesConfig = initializeDiceRulesConfig();
+            STAT_KEYS.forEach(key => {
+              currentDiceRulesConfig[key] = { active: true, target: DICE_CONFIG.STAT_LIMIT };
+            });
+            
+            // Save to persistent storage
+            if (typeof window !== 'undefined') {
+              window.DiceRollerConfig = window.DiceRollerConfig || {};
+              window.DiceRollerConfig.diceRules = currentDiceRulesConfig;
+            }
+          }
+          
           // Use updateDetailsOnlyClosure instead of render to preserve scroll position
           if (typeof updateDetailsOnlyClosure === 'function') {
             updateDetailsOnlyClosure();
@@ -4271,8 +4375,8 @@
         }
       }
       
-      // Clear module-scoped state
-      diceRulesConfig = {};
+      // Clear module-scoped state (but preserve persistent config)
+      diceRulesConfig = null;
       lastApiCall = 0;
       
       console.log('[Dice Roller] Cleanup completed successfully');
