@@ -41,7 +41,7 @@
     
     // UI Constants
     const UI_CONSTANTS = {
-        MODAL_WIDTH: 600,
+        MODAL_WIDTH: 650,
         MODAL_HEIGHT: 440,
         MODAL_CONTENT_HEIGHT: 360,
         COLUMN_WIDTH: 240,
@@ -913,7 +913,7 @@
     // =======================
     // 5. UI Component Creation
     // =======================
-    function createBox({title, content}) {
+    function createBox({title, content, icon = null}) {
         const box = document.createElement('div');
         box.style.flex = '1 1 0';
         box.style.display = 'flex';
@@ -936,12 +936,29 @@
         titleEl.style.color = 'rgb(255, 255, 255)';
         
         const p = document.createElement('p');
-        p.textContent = title;
         p.className = 'pixel-font-16';
         p.style.margin = '0';
         p.style.padding = '0';
         p.style.textAlign = 'center';
         p.style.color = 'rgb(255, 255, 255)';
+        p.style.display = 'flex';
+        p.style.alignItems = 'center';
+        p.style.justifyContent = 'center';
+        p.style.gap = '6px';
+        
+        if (icon) {
+            const iconImg = document.createElement('img');
+            iconImg.src = icon;
+            iconImg.alt = 'Icon';
+            iconImg.width = 16;
+            iconImg.height = 16;
+            iconImg.style.verticalAlign = 'middle';
+            p.appendChild(iconImg);
+        }
+        
+        const titleText = document.createElement('span');
+        titleText.textContent = title;
+        p.appendChild(titleText);
         titleEl.appendChild(p);
         box.appendChild(titleEl);
         
@@ -986,7 +1003,41 @@
         });
     }
     
-    function createWarningRow(warningText) {
+    function createWarningRow(warningText, showTooltip = false) {
+        // Split the text to underline "ALL"
+        const parts = warningText.split('ALL');
+        const beforeAll = parts[0];
+        const afterAll = parts[1];
+        
+        const allSpan = createElement('span', { 
+            text: 'ALL',
+            styles: { 
+                textDecoration: 'underline',
+                cursor: showTooltip ? 'help' : 'default'
+            }
+        });
+        
+        if (showTooltip) {
+            // Determine if this is for autosell or autosqueeze based on the warning text
+            const isAutosell = warningText.includes('sell');
+            const tooltipText = isAutosell 
+                ? 'The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare.'
+                : 'The script will squeeze all creatures in your inventory that are:\n- Unlocked creatures,\n- Within the specified gene range,\n- Not in daycare.';
+            
+            allSpan.title = tooltipText;
+            
+            // Add hover effect
+            allSpan.addEventListener('mouseenter', () => {
+                allSpan.style.textDecoration = 'underline double';
+                allSpan.style.color = '#ff8a8a';
+            });
+            
+            allSpan.addEventListener('mouseleave', () => {
+                allSpan.style.textDecoration = 'underline';
+                allSpan.style.color = '#ff6b6b';
+            });
+        }
+        
         return createElement('div', {
             styles: {
                 display: 'flex',
@@ -1006,19 +1057,23 @@
                     }
                 }),
                 createElement('span', {
-                    text: warningText,
                     className: 'pixel-font-16',
                     styles: {
                         color: '#ff6b6b',
                         fontSize: '13px',
                         fontWeight: 'bold'
-                    }
+                    },
+                    children: [
+                        createElement('span', { text: beforeAll }),
+                        allSpan,
+                        createElement('span', { text: afterAll })
+                    ]
                 })
             ]
         });
     }
     
-    function createCheckboxRow(persistKey, label) {
+    function createCheckboxRow(persistKey, label, icon = null) {
         const checkbox = createInput({
             type: 'checkbox',
             id: persistKey + '-checkbox',
@@ -1029,15 +1084,37 @@
         
         const labelEl = createElement('label', {
             attributes: { htmlFor: checkbox.id },
-            text: label,
             className: 'pixel-font-16',
             styles: {
                 fontWeight: 'bold',
                 fontSize: '14px',
                 color: '#ffffff',
-                marginRight: '8px'
+                marginRight: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
             }
         });
+        
+        if (icon) {
+            const iconImg = createElement('img', {
+                attributes: {
+                    src: icon,
+                    alt: 'Icon',
+                    width: '14',
+                    height: '14'
+                },
+                styles: {
+                    verticalAlign: 'middle'
+                }
+            });
+            labelEl.appendChild(iconImg);
+        }
+        
+        const labelText = createElement('span', {
+            text: label
+        });
+        labelEl.appendChild(labelText);
         
         const row = createElement('div', {
             styles: {
@@ -1131,13 +1208,13 @@
         
         // Add warning text about inventory
         const warningText = opts.summaryType === 'Autosell' 
-            ? 'This will sell creatures from your inventory!'
-            : 'This will squeeze creatures from your inventory!';
-        const warningWrapper = createWarningRow(warningText);
+            ? 'This will sell ALL creatures from your inventory!'
+            : 'This will squeeze ALL creatures from your inventory!';
+        const warningWrapper = createWarningRow(warningText, true);
         section.appendChild(warningWrapper);
         
         // Create checkbox row
-        const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label);
+        const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label, opts.icon);
         section.appendChild(row1);
         // Create gene input row
         const { row: row2, inputMin, inputMax } = createGeneInputRow(opts);
@@ -1148,7 +1225,7 @@
         row3.style.width = '100%';
         row3.style.marginBottom = '12px';
         const minCountLabel = document.createElement('span');
-        minCountLabel.textContent = 'Min. count to trigger:';
+        minCountLabel.textContent = 'Trigger when:';
         minCountLabel.className = 'pixel-font-16';
         minCountLabel.style.marginRight = '6px';
         minCountLabel.style.fontWeight = 'bold';
@@ -1772,7 +1849,8 @@
                 defaultMin: 5,
                 defaultMax: 79,
                 summaryType: 'Autosell',
-                persistKey: 'autosell'
+                persistKey: 'autosell',
+                icon: 'https://bestiaryarena.com/assets/icons/goldpile.png'
             });
             const autosqueezeSection = createSettingsSection({
                 label: 'Squeeze creatures equal or below:',
@@ -1784,20 +1862,21 @@
                 defaultMin: 80,
                 defaultMax: 100,
                 summaryType: 'Autosqueeze',
-                persistKey: 'autosqueeze'
+                persistKey: 'autosqueeze',
+                icon: 'https://bestiaryarena.com/assets/icons/dust.png'
             });
-            const col1 = createBox({ title: 'Autosell', content: autosellSection });
+            const col1 = createBox({ title: 'Autosell', content: autosellSection, icon: 'https://bestiaryarena.com/assets/icons/goldpile.png' });
             col1.style.width = '240px';
             col1.style.minWidth = '240px';
             col1.style.maxWidth = '240px';
             col1.style.height = '100%';
             col1.style.flex = '0 0 240px';
-            const col2 = createBox({ title: 'Autosqueeze', content: autosqueezeSection });
-            col2.style.width = '220px';
-            col2.style.minWidth = '220px';
-            col2.style.maxWidth = '220px';
+            const col2 = createBox({ title: 'Autosqueeze', content: autosqueezeSection, icon: 'https://bestiaryarena.com/assets/icons/dust.png' });
+            col2.style.width = '240px';
+            col2.style.minWidth = '240px';
+            col2.style.maxWidth = '240px';
             col2.style.height = '100%';
-            col2.style.flex = '0 0 220px';
+            col2.style.flex = '0 0 240px';
             col2.style.borderLeft = '2px solid #ffe066';
             const columnsWrapper = document.createElement('div');
             columnsWrapper.style.display = 'flex';
