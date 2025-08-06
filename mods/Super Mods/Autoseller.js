@@ -9,34 +9,22 @@
     // =======================
     // 1. Configuration & Constants
     // =======================
-    /** @const {string} The name of this mod */
     const modName = "Autoseller";
+    const modDescription = "Automatically sells and squeezes creatures based on gene thresholds and experience levels.";
     
-    /** @const {string} Description of what this mod does */
-    const modDescription = "Automatically sells selected items.";
+    // Core timing constants
+    const AUTOSELLER_MIN_DELAY_MS = 5000;
+    const MAX_OBSERVER_ATTEMPTS = 10;
+    const OBSERVER_DEBOUNCE_MS = 100;
+    const SETTINGS_SAVE_DELAY_MS = 300;
     
-    // =======================
-    // 1.1. Constants
-    // =======================
-    const AUTOSELLER_MIN_DELAY_MS = 5000; // 5 seconds minimum between autoseller runs
-    const BATCH_SIZE = 20; // Maximum monsters per API batch
-    const BATCH_DELAY_MS = 10000; // 10 seconds delay between batches
-    const MAX_OBSERVER_ATTEMPTS = 10; // Maximum attempts to setup widget observer
-    const OBSERVER_DEBOUNCE_MS = 100; // Debounce time for mutation observer
-    const SETTINGS_SAVE_DELAY_MS = 300; // Debounce time for settings save
-    
-    // Rate limiting constants for selling
+    // Rate limiting constants for all API operations
     const SELL_RATE_LIMIT = {
-        MAX_MONSTERS_PER_10S: 20, // Reduced from 30 to be more conservative
-        DELAY_BETWEEN_SELLS_MS: 200, // Increased from 100ms to 200ms
+        MAX_MONSTERS_PER_10S: 15,
+        DELAY_BETWEEN_SELLS_MS: 300,
         WINDOW_SIZE_MS: 10000,
-        BATCH_SIZE: 5, // Process monsters in smaller batches for better responsiveness
-        BATCH_DELAY_MS: 1000, // 1 second between batches
-        // Additional rate limiting constants
-        MAX_BACKOFF_TIME_MS: 30000, // Maximum backoff time for exponential backoff
-        JITTER_MAX_MS: 1000, // Maximum jitter to add to wait times
-        BASE_BACKOFF_MULTIPLIER: 2, // Base for exponential backoff calculation
-        CONSECUTIVE_ERROR_RESET_THRESHOLD: 5 // Reset rate limiter after this many consecutive errors
+        BATCH_SIZE: 5,
+        BATCH_DELAY_MS: 1000
     };
     
     // UI Constants
@@ -117,11 +105,10 @@
     };
     
     // =======================
-    // 1.2. Logging & Debugging
+    // 2. Logging & Debugging
     // =======================
     
     const logger = {
-        init: (message) => console.log(`[${modName}] ${message}`),
         error: (functionName, message, error = null) => {
             if (error) {
                 console.error(`[${modName}][ERROR][${functionName}] ${message}`, error);
@@ -136,164 +123,60 @@
                 console.warn(`[${modName}][WARN][${functionName}] ${message}`);
             }
         },
-        info: (functionName, message) => console.info(`[${modName}][INFO][${functionName}] ${message}`)
-    };
-    
-    const errorHandler = {
-        warn: (functionName, message, error = null) => logger.warn(functionName, message, error),
-        error: (functionName, message, error = null) => logger.error(functionName, message, error),
-        info: (functionName, message) => logger.info(functionName, message)
-    };
-
-    // =======================
-    // 1.3. DOM Cache System
-    // =======================
-    
-    const domCache = {
-        elements: new Map(),
-        lastCleanup: 0,
-        cleanupInterval: 30000,
-        
-        get(selector, context = document) {
-            const key = `${selector}:${context === document ? 'doc' : context.id || 'ctx'}`;
-            
-            const now = Date.now();
-            if (now - this.lastCleanup > this.cleanupInterval) {
-                this.cleanup();
-                this.lastCleanup = now;
-            }
-            
-            if (this.elements.has(key)) {
-                const element = this.elements.get(key);
-                if (element && document.contains(element)) {
-                    return element;
-                }
-                this.elements.delete(key);
-            }
-            
-            const element = context.querySelector(selector);
-            if (element) {
-                this.elements.set(key, element);
-            }
-            
-            return element;
-        },
-        
-        getAll(selector, context = document) {
-            const now = Date.now();
-            if (now - this.lastCleanup > this.cleanupInterval) {
-                this.cleanup();
-                this.lastCleanup = now;
-            }
-            
-            return context.querySelectorAll(selector);
-        },
-        
-        invalidate(selector) {
-            const keysToDelete = [];
-            this.elements.forEach((element, key) => {
-                if (key.includes(selector)) {
-                    keysToDelete.push(key);
-                }
-            });
-            keysToDelete.forEach(key => this.elements.delete(key));
-        },
-        
-        clear() {
-            this.elements.clear();
-        },
-        
-        cleanup() {
-            const keysToDelete = [];
-            this.elements.forEach((element, key) => {
-                if (!element || !document.contains(element)) {
-                    keysToDelete.push(key);
-                }
-            });
-            keysToDelete.forEach(key => this.elements.delete(key));
+        info: (functionName, message) => {
+            console.info(`[${modName}][INFO][${functionName}] ${message}`);
         }
     };
     
-    let autosellerSettingsCache = null;
-    let settingsCacheTimestamp = 0;
-    const SETTINGS_CACHE_TTL = 30000; // 30 seconds cache TTL
-    let settingsVersion = 0; // Version counter for cache invalidation
+    // =======================
+    // 3. DOM Utilities & Settings
+    // =======================
     
-    function getCachedSettings() {
-        const now = Date.now();
+    function queryElement(selector, context = document) {
+        return context.querySelector(selector);
+    }
+    
+    function queryAllElements(selector, context = document) {
+        return context.querySelectorAll(selector);
+    }
+    
+    let settingsCache = null;
+    
+    function getSettings() {
+        if (settingsCache) return settingsCache;
         
-        // Return cached settings if still valid and version matches
-        if (autosellerSettingsCache && 
-            (now - settingsCacheTimestamp) < SETTINGS_CACHE_TTL &&
-            autosellerSettingsCache._version === settingsVersion) {
-            return autosellerSettingsCache;
-        }
-        
-        // Try to get settings from mod loader context first
         if (typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0) {
-            autosellerSettingsCache = { 
-                ...DEFAULT_SETTINGS, 
-                ...context.config,
-                _version: settingsVersion,
-                _timestamp: now
-            };
-            settingsCacheTimestamp = now;
-            return autosellerSettingsCache;
+            settingsCache = { ...DEFAULT_SETTINGS, ...context.config };
+            return settingsCache;
         }
         
-        // Fallback to localStorage
         try {
             const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
-            autosellerSettingsCache = { 
-                ...DEFAULT_SETTINGS, 
-                ...stored,
-                _version: settingsVersion,
-                _timestamp: now
-            };
-            settingsCacheTimestamp = now;
+            settingsCache = { ...DEFAULT_SETTINGS, ...stored };
         } catch (e) { 
-            logger.warn('getCachedSettings', 'Failed to parse settings from localStorage', e);
-            errorStats.localStorageErrors++;
-            autosellerSettingsCache = { 
-                ...DEFAULT_SETTINGS,
-                _version: settingsVersion,
-                _timestamp: now
-            }; 
-            settingsCacheTimestamp = now;
+            logger.warn('getSettings', 'Failed to parse settings from localStorage', e);
+            settingsCache = { ...DEFAULT_SETTINGS };
         }
         
-        return autosellerSettingsCache;
+        return settingsCache;
     }
     
     function clearSettingsCache() {
-        autosellerSettingsCache = null;
-        settingsVersion++; // Increment version to force cache refresh
+        settingsCache = null;
     }
     
-    function setCachedSettings(newSettings) {
-        // Increment version to invalidate cache
-        settingsVersion++;
+    function setSettings(newSettings) {
+        settingsCache = { ...getSettings(), ...newSettings };
         
-        // Get fresh settings and merge with new ones
-        const currentSettings = getCachedSettings();
-        autosellerSettingsCache = { 
-            ...currentSettings, 
-            ...newSettings,
-            _version: settingsVersion,
-            _timestamp: Date.now()
-        };
-        
-        // Save to localStorage for backward compatibility
         debouncedSaveSettings();
         
-        // Update mod loader context if available
         if (typeof api !== 'undefined' && api.service && typeof context !== 'undefined' && context.hash) {
-            api.service.updateScriptConfig(context.hash, autosellerSettingsCache);
+            api.service.updateScriptConfig(context.hash, settingsCache);
         }
         
-        // Update navigation button color when settings change
         updateAutosellerNavButtonColor();
     }
+    
     function debounce(fn, delay) {
         let timer;
         return function(...args) {
@@ -301,23 +184,24 @@
             timer = setTimeout(() => fn.apply(this, args), delay);
         };
     }
+    
     const debouncedSaveSettings = debounce(() => {
         try {
-            localStorage.setItem('autoseller-settings', JSON.stringify(autosellerSettingsCache));
+            localStorage.setItem('autoseller-settings', JSON.stringify(settingsCache));
         } catch (e) {
             logger.warn('debouncedSaveSettings', 'Failed to save settings to localStorage', e);
-            errorStats.localStorageErrors++;
         }
     }, SETTINGS_SAVE_DELAY_MS);
+    
     if (!localStorage.getItem('autoseller-settings') && !(typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0)) {
-        autosellerSettingsCache = { ...DEFAULT_SETTINGS };
-        localStorage.setItem('autoseller-settings', JSON.stringify(autosellerSettingsCache));
+        settingsCache = { ...DEFAULT_SETTINGS };
+        localStorage.setItem('autoseller-settings', JSON.stringify(settingsCache));
     } else {
-        getCachedSettings();
+        getSettings();
     }
 
     // =======================
-    // 2. Utility Functions
+    // 4. Utility Functions
     // =======================
     
     // Mutex for API calls to prevent race conditions
@@ -341,7 +225,7 @@
     const daycareCache = {
         data: null,
         timestamp: 0,
-        ttl: 30000, // 30 seconds cache TTL
+        ttl: 30000,
         
         isValid() {
             return this.data && (Date.now() - this.timestamp) < this.ttl;
@@ -358,198 +242,44 @@
         }
     };
     
-    /**
-     * Fetch daycare data from the server
-     * @returns {Promise<Array>} Array of monster IDs in daycare
-     */
-    async function fetchDaycareData() {
-        // Return cached data if still valid
-        if (daycareCache.isValid()) {
-            return daycareCache.data;
-        }
+    // Cache for server monsters to reduce API calls
+    const serverMonsterCache = {
+        data: null,
+        timestamp: 0,
+        ttl: 5000,
         
-        // Acquire mutex to prevent concurrent API calls
-        await apiMutex.acquire('daycare');
+        isValid() {
+            return this.data && (Date.now() - this.timestamp) < this.ttl;
+        },
         
-        try {
-                    const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
-        if (!myName) {
-            logger.warn('fetchDaycareData', 'Could not determine player name.');
-            return daycareCache.data || []; // Return cached data if available
+        set(data) {
+            this.data = data;
+            this.timestamp = Date.now();
+        },
+        
+        clear() {
+            this.data = null;
+            this.timestamp = 0;
         }
-            
-            const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
-            const result = await apiRequest(url);
-            
-            if (!result.success) {
-                stateManager.updateErrorStats('fetchErrors');
-                logger.warn('fetchDaycareData', 'API request failed, using cached data');
-                // Return cached data if available, even if stale, to avoid delays
-                return daycareCache.data || [];
-            }
-            
-            // Extract daycare data from the response
-            const profileData = result.data?.[0]?.result?.data?.json;
-            const daycareSlots = profileData?.daycareSlots || [];
-            
-            // Extract monster IDs from occupied daycare slots
-            const daycareMonsterIds = [];
-            daycareSlots.forEach(slot => {
-                if (slot.monsterId) {
-                    daycareMonsterIds.push(slot.monsterId);
-                }
-            });
-            
-            // Cache the successful result
-            daycareCache.set(daycareMonsterIds);
-            
-            return daycareMonsterIds;
-        } finally {
-            // Always release the mutex
-            apiMutex.release('daycare');
-        }
-    }
+    };
     
-    /**
-     * Check if daycare icon exists in the inventory (DOM only check)
-     * @returns {boolean} Whether any daycare icon is found in the inventory
-     */
-    function hasDaycareIconInInventory() {
-        try {
-            // Use DOM cache for better performance
-            const creatureSlots = domCache.getAll(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
-            
-            for (const slot of creatureSlots) {
-                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
-                if (daycareIcon) {
-                    return true;
-                }
-            }
-            
-            return false;
-        } catch (e) {
-            logger.warn('hasDaycareIconInInventory', 'Error checking for daycare icon in DOM', e);
-            return false;
-        }
-    }
-    
-    /**
-     * Check if a creature is in the daycare by checking DOM first, then API
-     * @param {string} monsterId - The monster ID to check
-     * @returns {Promise<boolean>} Whether the creature is in the daycare
-     */
-    async function isCreatureInDaycare(monsterId) {
-        try {
-            // Step 1: Check if the daycare icon exists in the inventory through the DOM
-            const creatureSlots = domCache.getAll(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
-            let foundDaycareIcon = false;
-            let foundMonsterInDaycare = false;
-            
-            for (const slot of creatureSlots) {
-                // Check if this slot contains the daycare icon
-                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
-                if (daycareIcon) {
-                    foundDaycareIcon = true;
-                    
-                    // Step 2: If icon exists, check if this slot contains our monster
-                    const creatureImg = slot.querySelector(UI_CONSTANTS.SELECTORS.CREATURE_IMG);
-                    if (creatureImg) {
-                        // Try to extract monster ID from the image src
-                        const srcMatch = creatureImg.src.match(/\/assets\/portraits\/(\d+)\.png$/);
-                        if (srcMatch) {
-                            const slotMonsterId = parseInt(srcMatch[1]);
-                            if (slotMonsterId === monsterId) {
-                                foundMonsterInDaycare = true;
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Step 3: If we found daycare icon but not our specific monster, check API
-            if (foundDaycareIcon && !foundMonsterInDaycare) {
-                const daycareMonsterIds = await fetchDaycareData();
-                const isInDaycare = daycareMonsterIds.includes(monsterId);
-                return isInDaycare;
-            }
-            
-            return false;
-        } catch (e) {
-            logger.warn('isCreatureInDaycare', `Error checking daycare status for monster ${monsterId}`, e);
-            return false; // Default to false to avoid blocking sales
-        }
-    }
-    
-    // Rate limiter for selling monsters
-    const sellRateLimiter = {
+    // Shared rate limiter for all API operations
+    const apiRateLimiter = {
         requestTimes: [],
-        consecutive429Errors: 0,
-        last429Time: 0,
         
-        /**
-         * Check if we can make a sell request
-         * @returns {boolean} Whether a request can be made
-         */
         canMakeRequest() {
             const now = Date.now();
-            // Remove requests older than 10 seconds
             this.requestTimes = this.requestTimes.filter(time => now - time < SELL_RATE_LIMIT.WINDOW_SIZE_MS);
-            
-            // If we've had recent 429 errors, be more conservative
-            if (this.consecutive429Errors > 0 && now - this.last429Time < 30000) { // 30 seconds
-                return this.requestTimes.length < Math.max(5, SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S - this.consecutive429Errors * 5);
-            }
-            
             return this.requestTimes.length < SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S;
         },
         
-        /**
-         * Record a sell request
-         */
         recordRequest() {
             this.requestTimes.push(Date.now());
         },
         
-        /**
-         * Record a 429 error and adjust rate limiting
-         */
-        record429Error() {
-            this.consecutive429Errors++;
-            this.last429Time = Date.now();
-        },
-        
-        /**
-         * Record a successful request (reset 429 counter)
-         */
-        recordSuccess() {
-            if (this.consecutive429Errors > 0) {
-                this.consecutive429Errors = Math.max(0, this.consecutive429Errors - 1);
-            }
-        },
-        
-        /**
-         * Wait for the next available slot
-         * @returns {Promise} Promise that resolves when a slot is available
-         */
         async waitForSlot() {
             while (!this.canMakeRequest()) {
-                // Calculate base wait time
-                let waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
-                
-                // Apply exponential backoff for 429 errors
-                if (this.consecutive429Errors > 0) {
-                    const backoffTime = Math.min(
-                        SELL_RATE_LIMIT.MAX_BACKOFF_TIME_MS, 
-                        SELL_RATE_LIMIT.BATCH_DELAY_MS * Math.pow(SELL_RATE_LIMIT.BASE_BACKOFF_MULTIPLIER, this.consecutive429Errors - 1)
-                    );
-                    waitTime = Math.max(waitTime, backoffTime);
-                }
-                
-                // Add jitter to prevent thundering herd
-                const jitter = Math.random() * SELL_RATE_LIMIT.JITTER_MAX_MS;
-                waitTime += jitter;
-                
+                const waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
                 await new Promise(resolve => setTimeout(resolve, waitTime));
             }
         }
@@ -578,20 +308,20 @@
             return { toSqueeze: [], toSell: [] };
         }
         
-        const sellEnabled = settings['autosellChecked'];
-        const squeezeEnabled = settings['autosqueezeChecked'];
+        const sellEnabled = settings.autosellChecked;
+        const squeezeEnabled = settings.autosqueezeChecked;
         
         if (!sellEnabled && !squeezeEnabled) {
             return { toSqueeze: [], toSell: [] };
         }
         
-        const sellMinGenes = settings['autosellGenesMin'] ?? 5;
-        const sellMaxGenes = settings['autosellGenesMax'] ?? 79;
-        const squeezeMinGenes = settings['autosqueezeGenesMin'] ?? 80;
-        const squeezeMaxGenes = settings['autosqueezeGenesMax'] ?? 100;
-        const sellMinCount = settings['autosellMinCount'] ?? 1;
-        const squeezeMinCount = settings['autosqueezeMinCount'] ?? 1;
-        const maxExpThreshold = settings['autosellMaxExp'] ?? 52251;
+        const sellMinGenes = settings.autosellGenesMin ?? 5;
+        const sellMaxGenes = settings.autosellGenesMax ?? 79;
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
+        const sellMinCount = settings.autosellMinCount ?? 1;
+        const squeezeMinCount = settings.autosqueezeMinCount ?? 1;
+        const maxExpThreshold = settings.autosellMaxExp ?? 52251;
         
         const toSqueeze = [];
         const toSell = [];
@@ -608,7 +338,9 @@
         for (let i = 0; i < monsterCount; i++) {
             const monster = monsters[i];
             
-            if (monster.locked) continue;
+            if (monster.locked) {
+                continue;
+            }
             
             const hp = monster.hp || 0;
             const ad = monster.ad || 0;
@@ -642,8 +374,9 @@
     }
 
     // =======================
-    // 3. API Utilities
+    // 5. API Utilities
     // =======================
+    
     async function apiRequest(url, options = {}, retries = API_CONSTANTS.RETRY_ATTEMPTS) {
         const { method = 'GET', body, headers = {} } = options;
         
@@ -662,38 +395,18 @@
                 };
                 
                 const resp = await fetch(url, requestOptions);
-                
-                let data = null;
-                try {
-                    data = await resp.json();
-                } catch (parseError) {
-                    if (attempt === retries) {
-                        errorHandler.error('apiRequest', 'Failed to parse response as JSON', parseError);
-                        return { success: false, error: parseError, data: null };
-                    }
-                    errorHandler.warn('apiRequest', `Attempt ${attempt + 1} failed to parse response, retrying...`, parseError);
-                    await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
-                    continue;
-                }
+                const data = await resp.json().catch(() => null);
                 
                 if (!resp.ok) {
-                    const errorMsg = `API request failed: HTTP ${resp.status}`;
+                    if (resp.status === 404) {
+                        return { success: false, status: resp.status, data, isNotFound: true };
+                    }
                     
                     if (resp.status >= 500 && attempt < retries) {
-                        errorHandler.warn('apiRequest', `${errorMsg}, attempt ${attempt + 1} failed, retrying...`);
                         await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
                         continue;
                     }
                     
-                    if (resp.status === 404 && data && Array.isArray(data) && data[0]?.result?.data?.json) {
-                        return { success: true, status: resp.status, data };
-                    }
-                    
-                    if (resp.status === 404) {
-                        errorHandler.info('apiRequest', `API request returned 404 (expected for already processed items)`);
-                    } else {
-                        errorHandler.error('apiRequest', errorMsg);
-                    }
                     return { success: false, status: resp.status, data };
                 }
                 
@@ -701,54 +414,122 @@
                 
             } catch (e) {
                 if (attempt === retries) {
-                    errorHandler.error('apiRequest', 'Final attempt failed', e);
                     return { success: false, error: e, data: null };
                 }
-                errorHandler.warn('apiRequest', `Attempt ${attempt + 1} failed, retrying...`, e);
                 await new Promise(resolve => setTimeout(resolve, API_CONSTANTS.RETRY_DELAY_BASE * (attempt + 1)));
             }
         }
     }
     
-    // =======================
-    // 4. Inventory Management
-    // =======================
-    
-    // Cache for server monsters to reduce API calls
-    const serverMonsterCache = {
-        data: null,
-        timestamp: 0,
-        ttl: 5000, // 5 seconds cache TTL (reduced for more frequent updates)
-        
-        isValid() {
-            return this.data && (Date.now() - this.timestamp) < this.ttl;
-        },
-        
-        set(data) {
-            this.data = data;
-            this.timestamp = Date.now();
-        },
-        
-        clear() {
-            this.data = null;
-            this.timestamp = 0;
+    async function fetchDaycareData() {
+        if (daycareCache.isValid()) {
+            return daycareCache.data;
         }
-    };
+        
+        await apiMutex.acquire('daycare');
+        
+        try {
+            const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
+            if (!myName) {
+                logger.warn('fetchDaycareData', 'Could not determine player name.');
+                return daycareCache.data || [];
+            }
+            
+            const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
+            const result = await apiRequest(url);
+            
+            if (!result.success) {
+                stateManager.updateErrorStats('fetchErrors');
+                logger.warn('fetchDaycareData', 'API request failed, using cached data');
+                return daycareCache.data || [];
+            }
+            
+            const profileData = result.data?.[0]?.result?.data?.json;
+            const daycareSlots = profileData?.daycareSlots || [];
+            
+            const daycareMonsterIds = [];
+            daycareSlots.forEach(slot => {
+                if (slot.monsterId) {
+                    daycareMonsterIds.push(slot.monsterId);
+                }
+            });
+            
+            daycareCache.set(daycareMonsterIds);
+            
+            return daycareMonsterIds;
+        } finally {
+            apiMutex.release('daycare');
+        }
+    }
     
-        async function fetchServerMonsters() {
-        // Return cached data if still valid
+    function hasDaycareIconInInventory() {
+        try {
+            const creatureSlots = queryAllElements(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
+            
+            for (const slot of creatureSlots) {
+                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
+                if (daycareIcon) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (e) {
+            logger.warn('hasDaycareIconInInventory', 'Error checking for daycare icon in DOM', e);
+            return false;
+        }
+    }
+    
+    async function isCreatureInDaycare(monsterId) {
+        try {
+            const creatureSlots = queryAllElements(UI_CONSTANTS.SELECTORS.CREATURE_SLOTS);
+            let foundDaycareIcon = false;
+            let foundMonsterInDaycare = false;
+            
+            for (const slot of creatureSlots) {
+                const daycareIcon = slot.querySelector(UI_CONSTANTS.SELECTORS.DAYCARE_ICON);
+                if (daycareIcon) {
+                    foundDaycareIcon = true;
+                    
+                    const creatureImg = slot.querySelector(UI_CONSTANTS.SELECTORS.CREATURE_IMG);
+                    if (creatureImg) {
+                        const srcMatch = creatureImg.src.match(/\/assets\/portraits\/(\d+)\.png$/);
+                        if (srcMatch) {
+                            const slotMonsterId = parseInt(srcMatch[1]);
+                            if (slotMonsterId === monsterId) {
+                                foundMonsterInDaycare = true;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (foundDaycareIcon && !foundMonsterInDaycare) {
+                const daycareMonsterIds = await fetchDaycareData();
+                const isInDaycare = daycareMonsterIds.includes(monsterId);
+                return isInDaycare;
+            }
+            
+            return false;
+        } catch (e) {
+            logger.warn('isCreatureInDaycare', `Error checking daycare status for monster ${monsterId}`, e);
+            return false;
+        }
+    }
+    
+    async function fetchServerMonsters() {
         if (serverMonsterCache.isValid()) {
             return serverMonsterCache.data;
         }
         
-        // Acquire mutex to prevent concurrent API calls
         await apiMutex.acquire('monsters');
         
         try {
             const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
             if (!myName) {
                 logger.warn('fetchServerMonsters', 'Could not determine player name.');
-                return serverMonsterCache.data || []; // Return cached data if available
+                return serverMonsterCache.data || [];
             }
             
             const url = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=${encodeURIComponent(JSON.stringify({"0":{json:myName}}))}`;
@@ -757,31 +538,26 @@
             if (!result.success) {
                 stateManager.updateErrorStats('fetchErrors');
                 logger.warn('fetchServerMonsters', 'API request failed, using cached data');
-                // Return cached data if available, even if stale, to avoid delays
                 return serverMonsterCache.data || [];
             }
             
             const monsters = result.data?.[0]?.result?.data?.json?.monsters || [];
             
-            // Cache the successful result
             serverMonsterCache.set(monsters);
             
             return monsters;
         } finally {
-            // Always release the mutex
             apiMutex.release('monsters');
         }
     }
-    window.fetchServerMonsters = fetchServerMonsters;
+    
     function removeMonstersFromLocalInventory(idsToRemove) {
         try {
-            // Validate input
             if (!Array.isArray(idsToRemove) || idsToRemove.length === 0) {
                 logger.warn('removeMonstersFromLocalInventory', 'Invalid or empty IDs array provided');
                 return;
             }
             
-            // Check if global state exists
             if (!globalThis.state) {
                 logger.warn('removeMonstersFromLocalInventory', 'Global state not available');
                 return;
@@ -793,13 +569,11 @@
                 return;
             }
             
-            // Check if player has send method
             if (typeof player.send !== 'function') {
                 logger.warn('removeMonstersFromLocalInventory', 'Player send method not available');
                 return;
             }
             
-            // Validate that monsters array exists in current state
             const currentState = player.getSnapshot?.();
             if (!currentState?.context?.monsters) {
                 logger.warn('removeMonstersFromLocalInventory', 'Monsters array not available in current state');
@@ -809,7 +583,6 @@
             player.send({
                 type: "setState",
                 fn: (prev) => {
-                    // Additional safety check for prev state
                     if (!prev || !Array.isArray(prev.monsters)) {
                         logger.warn('removeMonstersFromLocalInventory', 'Previous state or monsters array not available');
                         return prev;
@@ -822,51 +595,45 @@
                 },
             });
         } catch (e) {
-            logger.warn('removeMonstersFromLocalInventory', `Failed to update local inventory for IDs: ${idsToRemove}`, e);
+            logger.warn('removeMonstersFromLocalInventory', `Failed to update local inventory for IDs: ${idsToRemove.join(', ')}`, e);
         }
     }
 
     // =======================
-    // 4. UI Utilities
+    // 6. UI Utilities & Components
     // =======================
+    
     function createElement(tag, options = {}) {
         const element = document.createElement(tag);
         
-        // Apply styles
         if (options.styles) {
             Object.assign(element.style, options.styles);
         }
         
-        // Apply attributes
         if (options.attributes) {
             Object.entries(options.attributes).forEach(([key, value]) => {
                 element.setAttribute(key, value);
             });
         }
         
-        // Apply classes
         if (options.className) {
             element.className = options.className;
         }
         
-        // Set text content
         if (options.text) {
             element.textContent = options.text;
         }
         
-        // Set inner HTML
         if (options.html) {
             element.innerHTML = options.html;
         }
         
-        // Add event listeners
         if (options.events) {
             Object.entries(options.events).forEach(([event, handler]) => {
                 element.addEventListener(event, handler);
             });
         }
         
-        // Append children
         if (options.children) {
             options.children.forEach(child => {
                 if (typeof child === 'string') {
@@ -910,9 +677,6 @@
         });
     }
     
-    // =======================
-    // 5. UI Component Creation
-    // =======================
     function createBox({title, content, icon = null}) {
         const box = document.createElement('div');
         box.style.flex = '1 1 0';
@@ -989,6 +753,7 @@
         box.appendChild(contentWrapper);
         return box;
     }
+    
     function createDescriptionRow(description) {
         return createElement('div', {
             styles: {
@@ -1004,7 +769,6 @@
     }
     
     function createWarningRow(warningText, showTooltip = false) {
-        // Split the text to underline "ALL"
         const parts = warningText.split('ALL');
         const beforeAll = parts[0];
         const afterAll = parts[1];
@@ -1018,7 +782,6 @@
         });
         
         if (showTooltip) {
-            // Determine if this is for autosell or autosqueeze based on the warning text
             const isAutosell = warningText.includes('sell');
             const tooltipText = isAutosell 
                 ? 'The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare.'
@@ -1026,7 +789,6 @@
             
             allSpan.title = tooltipText;
             
-            // Add hover effect
             allSpan.addEventListener('mouseenter', () => {
                 allSpan.style.textDecoration = 'underline double';
                 allSpan.style.color = '#ff8a8a';
@@ -1199,31 +961,13 @@
         return { row, inputMin, inputMax };
     }
     
-    function createSettingsSection(opts) {
-        const section = document.createElement('div');
+    function createMinCountRow(opts) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.width = '100%';
+        row.style.marginBottom = '12px';
         
-        // Create description row
-        const descWrapper = createDescriptionRow(opts.desc);
-        section.appendChild(descWrapper);
-        
-        // Add warning text about inventory
-        const warningText = opts.summaryType === 'Autosell' 
-            ? 'This will sell ALL creatures from your inventory!'
-            : 'This will squeeze ALL creatures from your inventory!';
-        const warningWrapper = createWarningRow(warningText, true);
-        section.appendChild(warningWrapper);
-        
-        // Create checkbox row
-        const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label, opts.icon);
-        section.appendChild(row1);
-        // Create gene input row
-        const { row: row2, inputMin, inputMax } = createGeneInputRow(opts);
-        section.appendChild(row2);
-        const row3 = document.createElement('div');
-        row3.style.display = 'flex';
-        row3.style.alignItems = 'center';
-        row3.style.width = '100%';
-        row3.style.marginBottom = '12px';
         const minCountLabel = document.createElement('span');
         minCountLabel.textContent = 'Trigger when:';
         minCountLabel.className = 'pixel-font-16';
@@ -1231,7 +975,8 @@
         minCountLabel.style.fontWeight = 'bold';
         minCountLabel.style.fontSize = '14px';
         minCountLabel.style.color = '#cccccc';
-        row3.appendChild(minCountLabel);
+        row.appendChild(minCountLabel);
+        
         const minCountInput = document.createElement('input');
         minCountInput.type = 'number';
         minCountInput.min = 1;
@@ -1248,88 +993,64 @@
         minCountInput.style.fontWeight = 'bold';
         minCountInput.style.fontSize = '16px';
         minCountInput.step = '1';
+        
         function validateMinCountInput() {
-            // Clamp value between 1 and 20
             const val = Math.max(1, Math.min(20, parseInt(minCountInput.value, 10) || 1));
             minCountInput.value = val;
         }
+        
         minCountInput.addEventListener('input', validateMinCountInput);
         minCountInput.addEventListener('blur', validateMinCountInput);
-        row3.appendChild(minCountInput);
+        row.appendChild(minCountInput);
+        
         const minCountSuffix = document.createElement('span');
         minCountSuffix.textContent = 'creatures';
         minCountSuffix.className = 'pixel-font-16';
         minCountSuffix.style.color = '#cccccc';
-        row3.appendChild(minCountSuffix);
+        row.appendChild(minCountSuffix);
+        
+        return { row, minCountInput, validateMinCountInput };
+    }
+    
+    function createSettingsSection(opts) {
+        const section = document.createElement('div');
+        
+        const descWrapper = createDescriptionRow(opts.desc);
+        section.appendChild(descWrapper);
+        
+        const warningText = opts.summaryType === 'Autosell' 
+            ? 'This will sell ALL creatures from your inventory!'
+            : 'This will squeeze ALL creatures from your inventory!';
+        const warningWrapper = createWarningRow(warningText, true);
+        section.appendChild(warningWrapper);
+        
+        const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label, opts.icon);
+        section.appendChild(row1);
+        
+        const { row: row2, inputMin, inputMax } = createGeneInputRow(opts);
+        section.appendChild(row2);
+        
+        const { row: row3, minCountInput } = createMinCountRow(opts);
+        section.appendChild(row3);
+        
         function validateInputs(e) {
-            // Parse and validate min/max values
             let minVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMin.value, 10) || opts.inputMin));
             let maxVal = Math.max(opts.inputMin, Math.min(opts.inputMax, parseInt(inputMax.value, 10) || opts.inputMax));
             
-            // Ensure min <= max with smart adjustment
             if (e && e.target === inputMin && minVal >= maxVal) {
                 maxVal = Math.min(opts.inputMax, minVal + 1);
             } else if (e && e.target === inputMax && maxVal <= minVal) {
                 minVal = Math.max(opts.inputMin, maxVal - 1);
             }
             
-            // Update input values
             inputMin.value = minVal;
             inputMax.value = maxVal;
         }
+        
         inputMin.addEventListener('input', validateInputs);
         inputMax.addEventListener('input', validateInputs);
         inputMin.addEventListener('blur', validateInputs);
         inputMax.addEventListener('blur', validateInputs);
-        const geneValidationCleanup = () => {
-            inputMin.removeEventListener('input', validateInputs);
-            inputMax.removeEventListener('input', validateInputs);
-            inputMin.removeEventListener('blur', validateInputs);
-            inputMax.removeEventListener('blur', validateInputs);
-        };
-        
-        const minCountValidationCleanup = () => {
-            minCountInput.removeEventListener('input', validateMinCountInput);
-            minCountInput.removeEventListener('blur', validateMinCountInput);
-        };
-        
-        const settingsSaveCleanup = () => {
-            [checkbox, inputMin, inputMax, minCountInput].forEach(el => {
-                el.removeEventListener('change', saveSettings);
-            });
-        };
-        
-        const summaryUpdateCleanup = () => {
-            [checkbox, inputMin, inputMax, minCountInput].forEach(el => {
-                el.removeEventListener('input', updateSummary);
-                el.removeEventListener('change', updateSummary);
-            });
-        };
-        
-        const focusCleanup = () => {
-            [checkbox, inputMin, inputMax].forEach(el => {
-                el.removeEventListener('focus', () => {
-                    el.style.boxShadow = '0 0 0 2px #ffe066, 0 0 8px #ffe06677';
-                });
-                el.removeEventListener('blur', () => {
-                    el.style.boxShadow = '';
-                });
-                el.removeEventListener('change', () => {
-                    el.style.boxShadow = '0 0 0 2px #ffe066, 0 0 8px #ffe06677';
-                    setTimeout(() => { el.style.boxShadow = ''; }, 400);
-                });
-            });
-        };
-        
-        // Store cleanup functions for later execution
-        const cleanupFns = [
-            geneValidationCleanup,
-            minCountValidationCleanup,
-            settingsSaveCleanup,
-            summaryUpdateCleanup,
-            focusCleanup
-        ];
-        
 
         const summary = document.createElement('div');
         summary.className = 'pixel-font-16';
@@ -1383,13 +1104,13 @@
                 setTimeout(() => { el.style.boxShadow = ''; }, 400);
             });
         });
-        const saved = getCachedSettings();
+        const saved = getSettings();
         if (typeof saved[opts.persistKey + 'Checked'] === 'boolean') checkbox.checked = saved[opts.persistKey + 'Checked'];
         if (typeof saved[opts.persistKey + 'GenesMin'] === 'number') inputMin.value = saved[opts.persistKey + 'GenesMin'];
         if (typeof saved[opts.persistKey + 'GenesMax'] === 'number') inputMax.value = saved[opts.persistKey + 'GenesMax'];
         if (typeof saved[opts.persistKey + 'MinCount'] === 'number') minCountInput.value = saved[opts.persistKey + 'MinCount'];
         function saveSettings() {
-            setCachedSettings({
+            setSettings({
                 [opts.persistKey + 'Checked']: checkbox.checked,
                 [opts.persistKey + 'GenesMin']: parseInt(inputMin.value, 10),
                 [opts.persistKey + 'GenesMax']: parseInt(inputMax.value, 10),
@@ -1403,18 +1124,15 @@
             try {
                 if (!enabled) return 0;
                 
-                // Simplified state access with optional chaining
                 const monsters = globalThis.state?.player?.getSnapshot?.()?.context?.monsters || [];
                 if (!Array.isArray(monsters)) throw new Error('Creature list unavailable');
                 
-                // For sell type, we need to filter out daycare creatures
                 if (type === 'Autosell') {
                     const eligibleMonsters = [];
                     for (const monster of monsters) {
                         if (typeof monster.genes === 'number' && 
                             monster.genes >= minThreshold && 
                             monster.genes <= maxThreshold) {
-                            // Check if creature is in daycare
                             const inDaycare = await isCreatureInDaycare(monster.id);
                             if (!inDaycare) {
                                 eligibleMonsters.push(monster);
@@ -1423,7 +1141,6 @@
                     }
                     return eligibleMonsters.length;
                 } else {
-                    // For squeeze type, no daycare check needed
                     return monsters.filter(m => 
                         typeof m.genes === 'number' && 
                         m.genes >= minThreshold && 
@@ -1431,6 +1148,7 @@
                     ).length;
                 }
             } catch (e) {
+                logger.warn('safeGetCreatureCount', `Error getting creature count for ${type}: ${e?.message || 'Unknown error'}`, e);
                 summaryDiv.textContent = `${type} error: ${e?.message || 'Unknown error'}`;
                 summaryDiv.style.color = '#ff6b6b';
                 return null;
@@ -1465,12 +1183,12 @@
         section._inputMin = inputMin;
         section._inputMax = inputMax;
         section._minCountInput = minCountInput;
-        section._cleanupFns = cleanupFns;
+
         return section;
     }
 
     // =======================
-    // 5. State Management
+    // 7. State Management & Processing
     // =======================
     
     const stateManager = {
@@ -1554,291 +1272,129 @@
             updateAutosellerSessionWidget();
         }
     };
-    async function squeezeEligibleMonsters(monsters) {
+    
+    async function processEligibleMonsters(monsters, type) {
         try {
-            const settings = getCachedSettings();
-            if (!monsters) {
-                monsters = await fetchServerMonsters();
-            }
-            if (!Array.isArray(monsters)) {
-                const msg = '[Autoseller][DEBUG] Could not access monster list.';
-                console.warn(msg);
-                return;
-            }
-            let { toSqueeze } = await getEligibleMonsters(settings, monsters);
-            if (!toSqueeze.length) {
-                return;
-            }
-            
-            for (let i = 0; i < toSqueeze.length; i += BATCH_SIZE) {
-                const batch = toSqueeze.slice(i, i + BATCH_SIZE);
-                const ids = batch.map(m => m.id).filter(Boolean);
-                if (!ids.length) {
-                    continue;
-                }
-                
-                const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
-                const body = { "0": { json: ids } };
-                const result = await apiRequest(url, { method: 'POST', body });
-                
-                const apiResponse = result.data;
-                
-                if (
-                    apiResponse &&
-                    Array.isArray(apiResponse) &&
-                    apiResponse[0]?.result?.data?.json?.dustDiff != null
-                ) {
-                    const dustReceived = apiResponse[0].result.data.json.dustDiff;
-                    const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
-                    
-                    stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
-                    stateManager.markProcessed(ids);
-                    
-                    removeMonstersFromLocalInventory(ids);
-                } else if (!result.success && result.status === 404) {
-                    // Don't remove from local inventory on 404 to be safe
-                } else if (!result.success) {
-                    errorHandler.warn('squeezeEligibleMonsters', `Squeeze API failed: HTTP ${result.status}`);
-                    continue;
-                } else {
-                    errorHandler.warn('squeezeEligibleMonsters', 'Unexpected API response format:', apiResponse);
-                }
-                
-                if (i + BATCH_SIZE < toSqueeze.length) {
-                    await new Promise(res => setTimeout(res, BATCH_DELAY_MS));
-                }
-            }
-        } catch (e) {
-            logger.warn('squeezeEligibleMonsters', 'Error', e);
-            stateManager.updateErrorStats('squeezeErrors');
-            
-            logger.error('squeezeEligibleMonsters', `Failed to squeeze monsters. Error: ${e.message}`, e);
-            
-            if (monsters && Array.isArray(monsters)) {
-                // Operation failed
-            }
-        }
-    }
-    async function sellEligibleMonsters(monsters) {
-        try {
-            const settings = getCachedSettings();
+            const settings = getSettings();
             
             if (!monsters) {
                 monsters = await fetchServerMonsters();
             }
             if (!Array.isArray(monsters)) {
-                const msg = '[Autoseller][DEBUG] Could not access monster list.';
-                console.warn(msg);
-                return;
-            }
-            let { toSell } = await getEligibleMonsters(settings, monsters);
-            
-            toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
-            
-            if (!toSell.length) {
+                logger.warn(`processEligibleMonsters`, 'Could not access monster list.');
                 return;
             }
             
-            const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
-            for (let i = 0; i < toSell.length; i += batchSize) {
-                const batch = toSell.slice(i, i + batchSize);
+            let { toSqueeze, toSell } = await getEligibleMonsters(settings, monsters);
+            
+            if (type === 'sell') {
+                toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
+                if (!toSell.length) return;
                 
-                for (const monster of batch) {
-                    const id = monster.id;
+                const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
+                for (let i = 0; i < toSell.length; i += batchSize) {
+                    const batch = toSell.slice(i, i + batchSize);
                     
-                    await sellRateLimiter.waitForSlot();
-                    sellRateLimiter.recordRequest();
-                    
-                    const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
-                    const body = { "0": { json: id } };
-                    const result = await apiRequest(url, { method: 'POST', body });
-                
-                    if (!result.success && result.status === 429) {
-                        sellRateLimiter.record429Error();
-                        logger.warn('sellEligibleMonsters', `Rate limited (429) for monster ${id}, backing off...`);
+                    for (const monster of batch) {
+                        const id = monster.id;
                         
-                        await new Promise(resolve => setTimeout(resolve, 5000 + (sellRateLimiter.consecutive429Errors * 2000)));
-                        continue;
+                        await apiRateLimiter.waitForSlot();
+                        apiRateLimiter.recordRequest();
+                        
+                        const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
+                        const body = { "0": { json: id } };
+                        const result = await apiRequest(url, { method: 'POST', body });
+                    
+                        if (!result.success && result.status === 429) {
+                            logger.warn('processEligibleMonsters', `Rate limited (429) for monster ${id}, waiting...`);
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                            continue;
+                        }
+                        
+                        const apiResponse = result.data;
+                        
+                        if (
+                            apiResponse &&
+                            Array.isArray(apiResponse) &&
+                            apiResponse[0]?.result?.data?.json?.goldValue != null &&
+                            !stateManager.isProcessed(id)
+                        ) {
+                            const goldReceived = apiResponse[0].result.data.json.goldValue;
+                            
+                            stateManager.updateSessionStats('sold', 1, goldReceived);
+                            stateManager.markProcessed([id]);
+                            removeMonstersFromLocalInventory([id]);
+                        } else if (!result.success && result.status === 404) {
+                            if (result.isNotFound) {
+                                stateManager.markProcessed([id]);
+                            }
+                        } else if (!result.success) {
+                            logger.warn('processEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
+                        }
+                        
+                        await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
                     }
+                    
+                    if (i + batchSize < toSell.length) {
+                        await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                    }
+                }
+            } else if (type === 'squeeze') {
+                if (!toSqueeze.length) return;
+                
+                for (let i = 0; i < toSqueeze.length; i += SELL_RATE_LIMIT.BATCH_SIZE) {
+                    const batch = toSqueeze.slice(i, i + SELL_RATE_LIMIT.BATCH_SIZE);
+                    const ids = batch.map(m => m.id).filter(Boolean);
+                    if (!ids.length) continue;
+                    
+                    await apiRateLimiter.waitForSlot();
+                    apiRateLimiter.recordRequest();
+                    
+                    const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
+                    const body = { "0": { json: ids } };
+                    const result = await apiRequest(url, { method: 'POST', body });
                     
                     const apiResponse = result.data;
                     
                     if (
                         apiResponse &&
                         Array.isArray(apiResponse) &&
-                        apiResponse[0]?.result?.data?.json?.goldValue != null &&
-                        !stateManager.isProcessed(id)
+                        apiResponse[0]?.result?.data?.json?.dustDiff != null
                     ) {
-                        const goldReceived = apiResponse[0].result.data.json.goldValue;
+                        const dustReceived = apiResponse[0].result.data.json.dustDiff;
+                        const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
                         
-                        stateManager.updateSessionStats('sold', 1, goldReceived);
-                        stateManager.markProcessed([id]);
-                        removeMonstersFromLocalInventory([id]);
-                        sellRateLimiter.recordSuccess();
+                        stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
+                        stateManager.markProcessed(ids);
+                        removeMonstersFromLocalInventory(ids);
                     } else if (!result.success && result.status === 404) {
-                        stateManager.markProcessed([id]);
-                        sellRateLimiter.recordSuccess();
+                        if (result.isNotFound) {
+                            stateManager.markProcessed(ids);
+                        }
                     } else if (!result.success) {
-                        errorHandler.warn('sellEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
+                        logger.warn('processEligibleMonsters', `Squeeze API failed: HTTP ${result.status}`);
+                        continue;
                     }
-                    
-                    await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
-                }
                 
-                if (i + batchSize < toSell.length) {
-                    await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                    if (i + SELL_RATE_LIMIT.BATCH_SIZE < toSqueeze.length) {
+                        await new Promise(res => setTimeout(res, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                    }
                 }
             }
         } catch (e) {
-            logger.warn('sellEligibleMonsters', 'Error', e);
-            stateManager.updateErrorStats('sellErrors');
-            
-            logger.error('sellEligibleMonsters', `Failed to sell monsters. Error: ${e.message}`, e);
-            
-            if (monsters && Array.isArray(monsters)) {
-                // Operation failed
-            }
-            
-            if (e.message && e.message.includes('rate limit')) {
-                sellRateLimiter.consecutive429Errors = 0;
-                sellRateLimiter.requestTimes = [];
-            } else if (sellRateLimiter.consecutive429Errors >= SELL_RATE_LIMIT.CONSECUTIVE_ERROR_RESET_THRESHOLD) {
-                sellRateLimiter.consecutive429Errors = 0;
-                sellRateLimiter.requestTimes = [];
-            }
+            logger.error(`processEligibleMonsters`, `Failed to ${type} monsters. Error: ${e.message}`, e);
+            stateManager.updateErrorStats(`${type}Errors`);
         }
     }
 
     // =======================
-    // 6. Modal Management
+    // 8. Modal Management
     // =======================
+    
     function openAutosellerModal() {
-        // Force refresh settings cache when modal opens
         clearSettingsCache();
         
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
-            const autosellContent = document.createElement('div');
-            autosellContent.style.display = 'flex';
-            autosellContent.style.flexDirection = 'column';
-            autosellContent.style.alignItems = 'flex-start';
-            autosellContent.style.gap = '10px';
-            autosellContent.style.width = '100%';
-            const autosellRow1 = document.createElement('div');
-            autosellRow1.style.display = 'flex';
-            autosellRow1.style.alignItems = 'center';
-            autosellRow1.style.width = '100%';
-            const autosellCheckbox = document.createElement('input');
-            autosellCheckbox.type = 'checkbox';
-            autosellCheckbox.id = 'autosell-checkbox';
-            autosellCheckbox.style.marginRight = '8px';
-            const autosellLabel = document.createElement('label');
-            autosellLabel.htmlFor = 'autosell-checkbox';
-            autosellLabel.textContent = 'Sell creatures equal or below:';
-            autosellLabel.className = 'pixel-font-16';
-            autosellLabel.style.fontWeight = 'bold';
-            autosellLabel.style.fontSize = '16px';
-            autosellLabel.style.color = '#ffffff';
-            autosellLabel.style.marginRight = '8px';
-            autosellRow1.appendChild(autosellCheckbox);
-            autosellRow1.appendChild(autosellLabel);
-            autosellContent.appendChild(autosellRow1);
-            const autosellRow2 = document.createElement('div');
-            autosellRow2.style.display = 'flex';
-            autosellRow2.style.alignItems = 'center';
-            autosellRow2.style.width = '100%';
-            const autosellGenesLabel = document.createElement('span');
-            autosellGenesLabel.textContent = 'Genes';
-            autosellGenesLabel.className = 'pixel-font-16';
-            autosellGenesLabel.style.marginRight = '6px';
-            autosellGenesLabel.style.fontWeight = 'bold';
-            autosellGenesLabel.style.fontSize = '16px';
-            autosellGenesLabel.style.color = '#cccccc';
-            autosellRow2.appendChild(autosellGenesLabel);
-            const autosellGenesInput = document.createElement('input');
-            autosellGenesInput.type = 'number';
-            autosellGenesInput.min = '5';
-            autosellGenesInput.max = '100';
-            autosellGenesInput.value = '100';
-            autosellGenesInput.className = 'pixel-font-16';
-            autosellGenesInput.style.width = '60px';
-            autosellGenesInput.style.marginRight = '4px';
-            autosellGenesInput.style.textAlign = 'center';
-            autosellGenesInput.style.borderRadius = '3px';
-            autosellGenesInput.style.border = '1px solid #ffe066';
-            autosellGenesInput.style.background = '#232323';
-            autosellGenesInput.style.color = '#ffe066';
-            autosellGenesInput.style.fontWeight = 'bold';
-            autosellGenesInput.style.fontSize = '16px';
-            autosellRow2.appendChild(autosellGenesInput);
-            const autosellGenesPercent = document.createElement('span');
-            autosellGenesPercent.textContent = '%';
-            autosellGenesPercent.className = 'pixel-font-16';
-            autosellGenesPercent.style.fontWeight = 'bold';
-            autosellGenesPercent.style.fontSize = '16px';
-            autosellGenesPercent.style.color = '#cccccc';
-            autosellRow2.appendChild(autosellGenesPercent);
-            autosellContent.appendChild(autosellRow2);
-            const autosqueezeContent = document.createElement('div');
-            autosqueezeContent.style.display = 'flex';
-            autosqueezeContent.style.flexDirection = 'column';
-            autosqueezeContent.style.alignItems = 'flex-start';
-            autosqueezeContent.style.gap = '10px';
-            autosqueezeContent.style.width = '100%';
-            const autosqueezeRow1 = document.createElement('div');
-            autosqueezeRow1.style.display = 'flex';
-            autosqueezeRow1.style.alignItems = 'center';
-            autosqueezeRow1.style.width = '100%';
-            const autosqueezeCheckbox = document.createElement('input');
-            autosqueezeCheckbox.type = 'checkbox';
-            autosqueezeCheckbox.id = 'autosqueeze-checkbox';
-            autosqueezeCheckbox.style.marginRight = '8px';
-            const autosqueezeLabel = document.createElement('label');
-            autosqueezeLabel.htmlFor = 'autosqueeze-checkbox';
-            autosqueezeLabel.textContent = 'Squeeze creatures equal or below:';
-            autosqueezeLabel.className = 'pixel-font-16';
-            autosqueezeLabel.style.fontWeight = 'bold';
-            autosqueezeLabel.style.fontSize = '16px';
-            autosqueezeLabel.style.color = '#ffffff';
-            autosqueezeLabel.style.marginRight = '8px';
-            autosqueezeRow1.appendChild(autosqueezeCheckbox);
-            autosqueezeRow1.appendChild(autosqueezeLabel);
-            autosqueezeContent.appendChild(autosqueezeRow1);
-            const autosqueezeRow2 = document.createElement('div');
-            autosqueezeRow2.style.display = 'flex';
-            autosqueezeRow2.style.alignItems = 'center';
-            autosqueezeRow2.style.width = '100%';
-            const autosqueezeGenesLabel = document.createElement('span');
-            autosqueezeGenesLabel.textContent = 'Genes';
-            autosqueezeGenesLabel.className = 'pixel-font-16';
-            autosqueezeGenesLabel.style.marginRight = '6px';
-            autosqueezeGenesLabel.style.fontWeight = 'bold';
-            autosqueezeGenesLabel.style.fontSize = '16px';
-            autosqueezeGenesLabel.style.color = '#cccccc';
-            autosqueezeRow2.appendChild(autosqueezeGenesLabel);
-            const autosqueezeGenesInput = document.createElement('input');
-            autosqueezeGenesInput.type = 'number';
-            autosqueezeGenesInput.min = '80';
-            autosqueezeGenesInput.max = '100';
-            autosqueezeGenesInput.value = '100';
-            autosqueezeGenesInput.className = 'pixel-font-16';
-            autosqueezeGenesInput.style.width = '60px';
-            autosqueezeGenesInput.style.marginRight = '4px';
-            autosqueezeGenesInput.style.textAlign = 'center';
-            autosqueezeGenesInput.style.borderRadius = '3px';
-            autosqueezeGenesInput.style.border = '1px solid #ffe066';
-            autosqueezeGenesInput.style.background = '#232323';
-            autosqueezeGenesInput.style.color = '#ffe066';
-            autosqueezeGenesInput.style.fontWeight = 'bold';
-            autosqueezeGenesInput.style.fontSize = '16px';
-            autosqueezeRow2.appendChild(autosqueezeGenesInput);
-            const autosqueezeGenesPercent = document.createElement('span');
-            autosqueezeGenesPercent.textContent = '%';
-            autosqueezeGenesPercent.className = 'pixel-font-16';
-            autosqueezeGenesPercent.style.fontWeight = 'bold';
-            autosqueezeGenesPercent.style.fontSize = '16px';
-            autosqueezeGenesPercent.style.color = '#cccccc';
-            autosqueezeRow2.appendChild(autosqueezeGenesPercent);
-            autosqueezeContent.appendChild(autosqueezeRow2);
             const autosellSection = createSettingsSection({
                 label: 'Sell creatures equal or below:',
                 inputLabel: 'Genes',
@@ -1852,6 +1408,7 @@
                 persistKey: 'autosell',
                 icon: 'https://bestiaryarena.com/assets/icons/goldpile.png'
             });
+            
             const autosqueezeSection = createSettingsSection({
                 label: 'Squeeze creatures equal or below:',
                 inputLabel: 'Genes',
@@ -1865,19 +1422,30 @@
                 persistKey: 'autosqueeze',
                 icon: 'https://bestiaryarena.com/assets/icons/dust.png'
             });
-            const col1 = createBox({ title: 'Autosell', content: autosellSection, icon: 'https://bestiaryarena.com/assets/icons/goldpile.png' });
+            
+            const col1 = createBox({ 
+                title: 'Autosell', 
+                content: autosellSection, 
+                icon: 'https://bestiaryarena.com/assets/icons/goldpile.png' 
+            });
             col1.style.width = '240px';
             col1.style.minWidth = '240px';
             col1.style.maxWidth = '240px';
             col1.style.height = '100%';
             col1.style.flex = '0 0 240px';
-            const col2 = createBox({ title: 'Autosqueeze', content: autosqueezeSection, icon: 'https://bestiaryarena.com/assets/icons/dust.png' });
+            
+            const col2 = createBox({ 
+                title: 'Autosqueeze', 
+                content: autosqueezeSection, 
+                icon: 'https://bestiaryarena.com/assets/icons/dust.png' 
+            });
             col2.style.width = '240px';
             col2.style.minWidth = '240px';
             col2.style.maxWidth = '240px';
             col2.style.height = '100%';
             col2.style.flex = '0 0 240px';
             col2.style.borderLeft = '2px solid #ffe066';
+            
             const columnsWrapper = document.createElement('div');
             columnsWrapper.style.display = 'flex';
             columnsWrapper.style.flexDirection = 'row';
@@ -1898,6 +1466,7 @@
             col2.style.flex = '1 1 220px';
             col2.style.borderLeft = '2px solid #ffe066';
             col2.style.marginTop = '0';
+            
             if (!document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE)) {
                 const style = document.createElement('style');
                 style.id = UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE;
@@ -1910,7 +1479,9 @@
                 `;
                 document.head.appendChild(style);
             }
+            
             columnsWrapper.id = 'autoseller-modal-columns';
+            
             let modalInstance = api.ui.components.createModal({
                 title: 'Autoseller',
                 width: UI_CONSTANTS.MODAL_WIDTH,
@@ -1939,26 +1510,13 @@
                     }
                 ]
             });
+            
             if (modalInstance && typeof modalInstance.onClose === 'function') {
                 modalInstance.onClose(() => {
-                    // Execute cleanup functions to prevent memory leaks
-                    [col1, col2].forEach(col => {
-                        if (col && col.firstChild && col.firstChild._cleanupFns) {
-                            col.firstChild._cleanupFns.forEach(fn => {
-                                try {
-                                    fn();
-                                } catch (e) {
-                                    logger.warn('modalCleanup', 'Error during cleanup', e);
-                                }
-                            });
-                        }
-                    });
-                    
-                    // Clear references to prevent memory leaks
-                    cachedWidget = null;
-                    cachedStatEls = null;
+                    // Modal cleanup handled automatically
                 });
             }
+            
             setTimeout(() => {
                 const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
                 if (dialog) {
@@ -1982,12 +1540,12 @@
     }
 
     // =======================
-    // 7. UI Injection
+    // 9. UI Injection
     // =======================
+    
     function addAutosellerNavButton() {
         function tryInsert() {
-            // Use DOM cache for better performance
-            const nav = domCache.get('nav.shrink-0');
+            const nav = queryElement('nav.shrink-0');
             if (!nav) {
                 setTimeout(tryInsert, 500);
                 return;
@@ -1999,7 +1557,6 @@
                 return;
             }
             
-            // Check if button already exists
             if (ul.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`)) return;
             
             const li = document.createElement('li');
@@ -2014,27 +1571,25 @@
             li.appendChild(btn);
             ul.appendChild(li);
             
-            // Update button color based on active state
             updateAutosellerNavButtonColor();
         }
         tryInsert();
     }
     
     function updateAutosellerNavButtonColor() {
-        // Use DOM cache for better performance
-        const btn = domCache.get(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+        const btn = queryElement(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
         if (!btn) return;
         
-        const settings = getCachedSettings();
+        const settings = getSettings();
         const isActive = settings.autosellChecked || settings.autosqueezeChecked;
         
-        // Use inline styles to override any existing styles
-        btn.style.color = isActive ? '#22c55e' : '#ef4444'; // Green or Red color
+        btn.style.color = isActive ? '#22c55e' : '#ef4444';
     }
 
     // =======================
-    // 8. Autoseller Session Widget
+    // 10. Autoseller Session Widget
     // =======================
+    
     function injectAutosellerWidgetStyles() {
         if (!document.getElementById('autoseller-widget-css')) {
             const style = document.createElement('style');
@@ -2179,16 +1734,13 @@
     }
 
     function createAutosellerSessionWidget() {
-        injectAutosellerWidgetStyles();
-        const settings = getCachedSettings();
+        const settings = getSettings();
         const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
         
-        // Use DOM cache for better performance
-        const existingWidget = domCache.get(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+        const existingWidget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
         if (!shouldShowWidget) {
             if (existingWidget && existingWidget.parentNode) {
                 existingWidget.parentNode.removeChild(existingWidget);
-                domCache.invalidate(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
                 // Reset session stats when widget is removed
                 stateManager.resetSession();
             }
@@ -2209,9 +1761,7 @@
         }
         
         if (!autoplayContainer) {
-            logger.warn('createAutosellerSessionWidget', 'Could not find autoplay session container');
-            // Debug: log available containers
-            const allWidgetBottoms = document.querySelectorAll('.widget-bottom');
+            // Don't log warning - this is expected when autoplay is not active
             return;
         }
         const widget = document.createElement('div');
@@ -2240,6 +1790,9 @@
             </div>
         `;
         
+        // Inject styles when widget is actually created
+        injectAutosellerWidgetStyles();
+        
         // Reset session stats when widget is created
         stateManager.resetSession();
         forceWidgetUpdate = true;
@@ -2256,188 +1809,33 @@
         autoplayContainer.appendChild(widget);
     }
 
-    // Cache previous values to avoid unnecessary DOM updates
-    let lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
-    
-    // Flag to force update when widget is recreated
-    let forceWidgetUpdate = false;
-    
-    // Cache DOM elements to reduce queries
-    let cachedWidget = null;
-    let cachedStatEls = null;
-    
-    // Batch update queue for better performance
-    let updateQueue = [];
-    let isUpdateScheduled = false;
+
     
     function updateAutosellerSessionWidget() {
-        // Use cached widget or query once with DOM cache
-        if (!cachedWidget) {
-            cachedWidget = domCache.get(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
-            if (!cachedWidget) {
-                return;
-            }
-            cachedStatEls = cachedWidget._statEls;
-            if (!cachedStatEls) {
-                return;
-            }
-        }
+        const widget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+        if (!widget) return;
         
-        // Verify widget still exists
-        if (!document.contains(cachedWidget)) {
-            cachedWidget = null;
-            cachedStatEls = null;
-            domCache.invalidate(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
-            return;
-        }
+        const statEls = widget._statEls;
+        if (!statEls) return;
         
         const currentValues = stateManager.getSessionStats();
         
-        // Force update if widget was just recreated
-        if (forceWidgetUpdate) {
-            lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
-            forceWidgetUpdate = false;
+        // Update stats directly
+        if (statEls.soldCount) statEls.soldCount.textContent = `${currentValues.soldCount}`;
+        if (statEls.soldGold) {
+            const goldText = statEls.soldGold.querySelector('span');
+            if (goldText) goldText.textContent = `${currentValues.soldGold}`;
         }
-        
-        // Collect all updates that need to be made
-        const updates = [];
-        
-        if (currentValues.soldCount !== lastUpdateValues.soldCount && cachedStatEls.soldCount) {
-            updates.push(() => {
-                cachedStatEls.soldCount.textContent = `${currentValues.soldCount}`;
-                lastUpdateValues.soldCount = currentValues.soldCount;
-            });
-        }
-        
-        if (currentValues.soldGold !== lastUpdateValues.soldGold && cachedStatEls.soldGold) {
-            updates.push(() => {
-                const goldText = cachedStatEls.soldGold.querySelector('span');
-                if (goldText) goldText.textContent = `${currentValues.soldGold}`;
-                lastUpdateValues.soldGold = currentValues.soldGold;
-            });
-        }
-        
-        if (currentValues.squeezedCount !== lastUpdateValues.squeezedCount && cachedStatEls.squeezedCount) {
-            updates.push(() => {
-                cachedStatEls.squeezedCount.textContent = `${currentValues.squeezedCount}`;
-                lastUpdateValues.squeezedCount = currentValues.squeezedCount;
-            });
-        }
-        
-        if (currentValues.squeezedDust !== lastUpdateValues.squeezedDust && cachedStatEls.squeezedDust) {
-            updates.push(() => {
-                const dustText = cachedStatEls.squeezedDust.querySelector('span');
-                if (dustText) dustText.textContent = `${currentValues.squeezedDust}`;
-                lastUpdateValues.squeezedDust = currentValues.squeezedDust;
-            });
-        }
-        
-        // Add updates to queue
-        if (updates.length > 0) {
-            updateQueue.push(...updates);
-        }
-        
-        // Schedule batch update if not already scheduled
-        if (!isUpdateScheduled && updateQueue.length > 0) {
-            isUpdateScheduled = true;
-            requestAnimationFrame(() => {
-                // Process all queued updates
-                updateQueue.forEach(update => update());
-                updateQueue = [];
-                isUpdateScheduled = false;
-            });
+        if (statEls.squeezedCount) statEls.squeezedCount.textContent = `${currentValues.squeezedCount}`;
+        if (statEls.squeezedDust) {
+            const dustText = statEls.squeezedDust.querySelector('span');
+            if (dustText) dustText.textContent = `${currentValues.squeezedDust}`;
         }
     }
 
     // =======================
-    // 8. Event Management & Memory Optimization
+    // 11. Widget Observer
     // =======================
-    
-    const eventManager = {
-        listeners: new Map(),
-        observers: new Set(),
-        timers: new Set(),
-        
-        listenerCount: 0,
-        observerCount: 0,
-        timerCount: 0,
-        
-        addListener(element, event, handler, options = {}) {
-            const optimizedOptions = {
-                passive: true,
-                ...options
-            };
-            
-            element.addEventListener(event, handler, optimizedOptions);
-            
-            const key = `${element.id || 'anonymous'}-${event}`;
-            if (!this.listeners.has(key)) {
-                this.listeners.set(key, []);
-            }
-            this.listeners.get(key).push({ element, event, handler, options: optimizedOptions });
-            this.listenerCount++;
-        },
-        
-        removeAllListeners() {
-            this.listeners.forEach((listeners, key) => {
-                listeners.forEach(({ element, event, handler, options }) => {
-                    element.removeEventListener(event, handler, options);
-                });
-            });
-            this.listeners.clear();
-            this.listenerCount = 0;
-        },
-        
-        addObserver(observer) {
-            this.observers.add(observer);
-            this.observerCount++;
-        },
-        
-        disconnectAllObservers() {
-            this.observers.forEach(observer => {
-                if (observer && typeof observer.disconnect === 'function') {
-                    observer.disconnect();
-                }
-            });
-            this.observers.clear();
-            this.observerCount = 0;
-        },
-        
-        addTimer(timerId) {
-            this.timers.add(timerId);
-            this.timerCount++;
-        },
-        
-        removeTimer(timerId) {
-            if (this.timers.delete(timerId)) {
-                this.timerCount--;
-            }
-        },
-        
-        clearAllTimers() {
-            this.timers.forEach(timerId => {
-                clearTimeout(timerId);
-                clearInterval(timerId);
-            });
-            this.timers.clear();
-            this.timerCount = 0;
-        },
-        
-        cleanup() {
-            this.removeAllListeners();
-            this.disconnectAllObservers();
-            this.clearAllTimers();
-        },
-        
-        getStats() {
-            return {
-                listeners: this.listenerCount,
-                observers: this.observerCount,
-                timers: this.timerCount,
-                totalResources: this.listenerCount + this.observerCount + this.timerCount
-            };
-        }
-    };
     
     // Inject the widget when autoplay UI appears
     let autosellerWidgetObserver = null;
@@ -2450,16 +1848,7 @@
         observerSetupAttempts++;
         isObserverActive = true;
         
-        createAutosellerSessionWidget();
-        updateAutosellerSessionWidget();
-        
-        setTimeout(() => {
-            createAutosellerSessionWidget();
-            updateAutosellerSessionWidget();
-        }, 1000);
-        
         if (typeof MutationObserver !== 'undefined') {
-            let lastWidgetState = { shouldShow: false, containerExists: false };
             let debounceTimer = null;
             
             autosellerWidgetObserver = new MutationObserver((mutations) => {
@@ -2472,7 +1861,6 @@
                 
                 if (debounceTimer) {
                     clearTimeout(debounceTimer);
-                    eventManager.removeTimer(debounceTimer);
                 }
                 
                 debounceTimer = setTimeout(() => {
@@ -2487,19 +1875,12 @@
                         }
                     }
                     
-                    const widget = domCache.get(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
+                    const widget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
                     const widgetExists = !!widget;
                     
-                    const settings = getCachedSettings();
+                    const settings = getSettings();
                     const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
                     const containerExists = !!autoplayContainer;
-                    
-                    const currentState = { shouldShow: shouldShowWidget, containerExists };
-                    if (JSON.stringify(currentState) === JSON.stringify(lastWidgetState)) {
-                        return;
-                    }
-                    
-                    lastWidgetState = currentState;
                     
                     if (containerExists && shouldShowWidget && !widgetExists) {
                         createAutosellerSessionWidget();
@@ -2507,18 +1888,10 @@
                     } else if ((!containerExists || !shouldShowWidget) && widgetExists) {
                         if (widget && widget.parentNode) {
                             widget.parentNode.removeChild(widget);
-                            lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
-                            cachedWidget = null;
-                            cachedStatEls = null;
-                            forceWidgetUpdate = true;
                         }
                     }
                 }, OBSERVER_DEBOUNCE_MS);
-                
-                eventManager.addTimer(debounceTimer);
             });
-            
-            eventManager.addObserver(autosellerWidgetObserver);
             
             autosellerWidgetObserver.observe(document.body, {
                 childList: true,
@@ -2534,14 +1907,13 @@
     }
 
     // =======================
-    // 9. Initialization & Exports
+    // 12. Initialization & Exports
     // =======================
+    
     function initAutoseller() {
-        logger.init('Loaded.');
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         
-        // Set initial button color after a short delay to ensure DOM is ready
         setTimeout(() => {
             updateAutosellerNavButtonColor();
         }, 1000);
@@ -2563,18 +1935,19 @@
                         return;
                     }
                     
-                    const settings = getCachedSettings();
+                    const settings = getSettings();
                     
                     if (!settings.autosellChecked && !settings.autosqueezeChecked) {
                         return;
                     }
                     
-                    await squeezeEligibleMonsters(inventorySnapshot);
-                    await sellEligibleMonsters(inventorySnapshot);
+                    await processEligibleMonsters(inventorySnapshot, 'squeeze');
+                    await processEligibleMonsters(inventorySnapshot, 'sell');
                 }, (waitSeconds + 5) * 1000);
             });
         }
     }
+    
     if (typeof window !== 'undefined' && window.registerMod) {
         window.registerMod({
             name: modName,
@@ -2585,9 +1958,6 @@
         initAutoseller();
     }
     
-
-
-    // Expose public API and cleanup for mod loader
     if (typeof exports !== 'undefined') {
         exports = {
             openSettings: openAutosellerModal,
@@ -2599,27 +1969,16 @@
                 daycareCache.clear();
                 stateManager.clearProcessedIds();
                 clearSettingsCache();
-                console.log('All caches cleared');
             },
             cleanup: function() {
-                // Cache DOM queries for cleanup
                 const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
                 const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
                 const style = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
                 
-                // Remove Autoseller session widget
                 if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
-                
-                // Remove nav button
                 if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
-                
-                // Remove injected style
                 if (style && style.parentNode) style.parentNode.removeChild(style);
                 
-                // Clean up all tracked resources using event manager
-                eventManager.cleanup();
-                
-                // Clean up widget observer
                 if (autosellerWidgetObserver) {
                     autosellerWidgetObserver.disconnect();
                     autosellerWidgetObserver = null;
@@ -2627,14 +1986,8 @@
                 isObserverActive = false;
                 observerSetupAttempts = 0;
                 
-                // Clear caches
                 serverMonsterCache.clear();
                 daycareCache.clear();
-                cachedWidget = null;
-                cachedStatEls = null;
-                lastUpdateValues = { soldCount: -1, soldGold: -1, squeezedCount: -1, squeezedDust: -1 };
-                
-                // Reset state
                 stateManager.resetSession();
             }
         };

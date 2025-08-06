@@ -720,8 +720,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (browserAPI.tabs && typeof browserAPI.tabs.create === 'function') {
       browserAPI.tabs.create({ url: dashboardUrl });
     }
-    // Do not return true here
-    return;
+    // Send response to prevent "message port closed" error
+    sendResponse({ success: true });
+    return true; // Indicate async response
   }
 });
 
