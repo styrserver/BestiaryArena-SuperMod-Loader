@@ -771,7 +771,17 @@
       button.innerHTML = `<img alt="${currencyAlt}" src="${currencyIcon}" class="pixelated" width="11" height="12">${priceUtils.formatNumberWithCommas(totalPrice)}`;
     } else if (actionType === 'sell') {
       // For sell buttons (exchange section), show dust icon and quantity
-      const dustAmount = itemPrice * quantity;
+      let dustAmount;
+      
+      // Special handling for Liberty Bay Legendary Dice Manipulators
+      if (itemKey && itemKey.startsWith('diceManipulator')) {
+        // For dice manipulators in sell section, use 10 dust per item
+        dustAmount = 10 * quantity;
+      } else {
+        // For other items, use the provided itemPrice
+        dustAmount = itemPrice * quantity;
+      }
+      
       button.innerHTML = `<img alt="dust" src="/assets/icons/dust.png" class="pixelated" width="11" height="12">${priceUtils.formatNumberWithCommas(dustAmount)}`;
     } else {
       // For other trade buttons, show dust icon and quantity
@@ -1356,9 +1366,9 @@
           return;
         }
         
-        // For dice manipulators, convert visual quantity to actual quantity
+        // For dice manipulators, convert visual quantity to actual quantity (only for buy actions)
         let actualQuantity = quantity;
-        if (itemKey && itemKey.startsWith('diceManipulator')) {
+        if (actionType === 'buy' && itemKey && itemKey.startsWith('diceManipulator')) {
           const minQuantity = getMinimumQuantityFromDOM(document.querySelector(`[data-item-key="${itemKey}"]`)) || 10;
           actualQuantity = quantity * minQuantity; // Convert visual quantity to actual dice quantity
         }
@@ -2246,12 +2256,15 @@
       
       // Update button text immediately - get the correct price for this item
       let correctItemPrice = itemPrice;
-      if (itemKey && itemKey.startsWith('diceManipulator')) {
-        // For dice manipulators, get the price from API data
+      if (actionType === 'buy' && itemKey && itemKey.startsWith('diceManipulator')) {
+        // For dice manipulators in buy section, get the price from API data
         const yasirData = getYasirShopData();
         const diceCost = yasirData?.diceCost || 0;
         const minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
         correctItemPrice = diceCost * minQuantity; // Price per quantity unit
+      } else if (actionType === 'sell' && itemKey && itemKey.startsWith('diceManipulator')) {
+        // For dice manipulators in sell section, use 10 dust per item
+        correctItemPrice = 10;
       }
       updateActionButtonText(actionButton, quantity, actionType, correctItemPrice, itemKey);
       
@@ -2275,11 +2288,14 @@
               this.value = newMax.toString();
               // Get the correct price for this item
               let correctItemPrice = itemPrice;
-              if (itemKey && itemKey.startsWith('diceManipulator')) {
+              if (actionType === 'buy' && itemKey && itemKey.startsWith('diceManipulator')) {
                 const yasirData = getYasirShopData();
                 const diceCost = yasirData?.diceCost || 0;
                 const minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
                 correctItemPrice = diceCost * minQuantity;
+              } else if (actionType === 'sell' && itemKey && itemKey.startsWith('diceManipulator')) {
+                // For dice manipulators in sell section, use 10 dust per item
+                correctItemPrice = 10;
               }
               updateActionButtonText(actionButton, newMax, actionType, correctItemPrice, itemKey);
             }

@@ -204,7 +204,7 @@ function subscribeToGameTimer() {
     // Get current timer state to know if game is running
     let isGameRunning = false;
     try {
-      const timerState = state.gameTimer.getState();
+      const timerState = state.gameTimer.getSnapshot();
       isGameRunning = timerState && timerState.context && timerState.context.isRunning;
       if (window.DEBUG) console.log('Game running state:', isGameRunning);
     } catch (e) {
