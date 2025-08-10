@@ -1327,6 +1327,7 @@
                         } else if (!result.success && result.status === 404) {
                             if (result.isNotFound) {
                                 stateManager.markProcessed([id]);
+                                removeMonstersFromLocalInventory([id]);
                             }
                         } else if (!result.success) {
                             logger.warn('processEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
@@ -1370,6 +1371,7 @@
                     } else if (!result.success && result.status === 404) {
                         if (result.isNotFound) {
                             stateManager.markProcessed(ids);
+                            removeMonstersFromLocalInventory(ids);
                         }
                     } else if (!result.success) {
                         logger.warn('processEligibleMonsters', `Squeeze API failed: HTTP ${result.status}`);

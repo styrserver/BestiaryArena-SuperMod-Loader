@@ -1203,8 +1203,8 @@
     // Run initial tooltip transform
     transformHygenieTooltip();
 
-    // Use retry mechanism instead of multiple timeouts
-    retryEnhanceHygenieModal();
+    // Don't try to enhance modal on startup - wait for it to be opened
+    // The MutationObserver will handle detecting when the modal is actually opened
   }
   
   function cleanup() {

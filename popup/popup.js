@@ -162,6 +162,7 @@ function renderLocalMods(mods) {
   const superModNames = [
     'Autoseller.js',
     'Autoscroller.js',
+    'Better Analytics.js',
     'Better Cauldron.js',
     'Better Highscores.js',
     'Better Hy\'genie.js',

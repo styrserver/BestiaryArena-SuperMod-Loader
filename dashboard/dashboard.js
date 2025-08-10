@@ -118,6 +118,7 @@ async function scanAndRegisterLocalMods() {
     // Super Mods
     { name: 'Autoseller.js', enabled: true },
     { name: 'Autoscroller.js', enabled: true },
+    { name: 'Better Analytics.js', enabled: true },
     { name: 'Better Cauldron.js', enabled: true },
     { name: 'Better Highscores.js', enabled: true },
     { name: 'Better Hy\'genie.js', enabled: true },
@@ -245,6 +246,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   const superModNames = [
     'Autoseller.js',
     'Autoscroller.js',
+    'Better Analytics.js',
     'Better Cauldron.js',
     'Better Highscores.js',
     'Better Hy\'genie.js',

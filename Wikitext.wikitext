@@ -162,6 +162,17 @@ Automates summon scroll usage to collect specific creatures:
 * Automatic stopping when targets are reached
 * Rate-limit handling with visual feedback
 
+=== Better Analytics ===
+Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
+* Real-time damage per second (DPS) calculations displayed next to damage values
+* Automatic tracking of damage changes throughout the game session
+* Support for all game modes (manual, autoplay, sandbox)
+* Auto-opening of the impact analyzer panel for seamless tracking
+* Accurate DPS calculations using server game ticks for precise timing
+* Tab switching support for ally/villain damage analysis
+* Session statistics and damage history tracking
+* Clean, integrated UI that matches the game's aesthetic
+
 === Better Cauldron ===
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 * Real-time search through all monsters in your cauldron

@@ -214,6 +214,7 @@ async function listAllModFiles() {
     const superMods = [
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
+      'Super Mods/Better Analytics.js',
       'Super Mods/Better Cauldron.js',
       'Super Mods/Better Highscores.js',
       'Super Mods/Better Hy\'genie.js',
@@ -241,6 +242,7 @@ async function listAllModFiles() {
       'Official Mods/Turbo Mode.js',
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
+      'Super Mods/Better Analytics.js',
       'Super Mods/Better Cauldron.js',
       'Super Mods/Better Highscores.js',
       'Super Mods/Better Hy\'genie.js',

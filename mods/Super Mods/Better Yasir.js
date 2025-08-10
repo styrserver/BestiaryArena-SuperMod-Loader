@@ -2784,8 +2784,8 @@
     // Check for flex containers on startup
     addQuantityInputsToFlexContainers();
 
-    // Use retry mechanism instead of multiple timeouts
-    retryEnhanceYasirModal();
+    // Don't try to enhance modal on startup - wait for it to be opened
+    // The MutationObserver will handle detecting when the modal is actually opened
   }
   
   function cleanup() {
