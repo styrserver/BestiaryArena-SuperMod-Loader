@@ -13,22 +13,65 @@
     const modDescription = "Adds damage per tick (DPT) tracking to the damage analyzer.";
     
     const BETTER_ANALYTICS_VERSION = "1.0.0";
+    
+    // DOM Selectors
     const ANALYZER_PANEL_SELECTOR = 'div[data-state="open"]';
     const DAMAGE_ENTRIES_SELECTOR = 'div[data-state="open"] ul li';
     const DAMAGE_VALUE_SELECTOR = 'span.font-outlined-fill';
     
+    // Game Mechanics Constants
     const TICK_TO_SECONDS_RATIO = 1 / 16;
     const TICKS_PER_SECOND = 16;
     
+    // Timing Configuration
     const TIMING = {
+        // Panel Detection Delays
         AUTO_OPEN_DELAY: 100,
         TRACKING_DELAY: 100,
         RESTORE_DELAY: 100,
         FINAL_UPDATE_DELAY: 100,
         IMMEDIATE_CHECK_DELAY: 25,
+        TAB_SWITCH_DELAY: 25,
+        
+        // Retry and Update Intervals
         RETRY_DELAY: 100,
         DPS_UPDATE_INTERVAL: 1000,
-        TAB_SWITCH_DELAY: 25
+        
+        // Sleep Duration (prevents conflicts with Board Analyzer)
+        SLEEP_DURATION: 2500 // 2.5 seconds
+    };
+    
+    // Panel Detection Attempts (varies by game mode)
+    const PANEL_DETECTION_ATTEMPTS = {
+        AUTOPLAY: 20,
+        MANUAL: 20,
+        SANDBOX: 50,
+        DEFAULT: 50
+    };
+    
+    const PANEL_DETECTION_INTERVALS = {
+        AUTOPLAY: 50,
+        MANUAL: 50,
+        SANDBOX: 100,
+        DEFAULT: 100
+    };
+    
+    // Alternative Selectors for Damage Detection
+    const ALTERNATIVE_DAMAGE_SELECTORS = [
+        'ul.frame-2 li',
+        'ul[class*="frame-2"] li',
+        'ul li',
+        'button'
+    ];
+    
+    // CSS Classes and Attributes
+    const CSS_CLASSES = {
+        DPS_DISPLAY: 'better-analytics-dps',
+        PORTRAIT_CONTAINER: 'container-slot'
+    };
+    
+    const ATTRIBUTES = {
+        DPS_LISTENER: 'data-dps-listener'
     };
     
     // =======================
@@ -76,8 +119,57 @@
     let serverResultsSubscription = null;
     let currentGameMode = null;
     
+    // Sleep mechanism variables
+    let sleepTimeout = null;
+    let isSleeping = false;
+    let sleepStartTime = null;
+    // Removed complex tracking call times array and spam detection variables
+    
+    // Prevent multiple simultaneous calls
+    let isWaitingForPanel = false;
+    
     // =======================
-    // 4. Core Functions
+    // 4. Sleep Management Functions
+    // =======================
+    
+    function startSleep() {
+        if (isSleeping) {
+            logger.debug('startSleep', 'Already sleeping, extending sleep timer');
+            clearTimeout(sleepTimeout);
+        } else {
+            logger.info('startSleep', 'Starting 2.5-second sleep to prevent conflicts with Board Analyzer');
+            isSleeping = true;
+            sleepStartTime = Date.now();
+        }
+        
+        sleepTimeout = setTimeout(() => {
+            logger.info('startSleep', 'Sleep completed, resuming normal operation');
+            isSleeping = false;
+            sleepStartTime = null;
+        }, TIMING.SLEEP_DURATION);
+    }
+    
+    function checkAndRefreshSleep() {
+        if (!isSleeping) {
+            return false;
+        }
+        
+        const boardState = globalThis.state.board.getSnapshot();
+        if (boardState.context.gameStarted) {
+            logger.info('checkAndRefreshSleep', 'Battle started during sleep, refreshing sleep timer');
+            startSleep();
+            return true;
+        }
+        
+        return false;
+    }
+    
+    function isCurrentlySleeping() {
+        return isSleeping;
+    }
+    
+    // =======================
+    // 5. Core Functions
     // =======================
     
     function initializeBetterAnalytics() {
@@ -149,7 +241,7 @@
                 const damageText = damageValueElement.textContent.trim();
                 const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
                 
-                const portraitContainer = damageValueElement.closest('.container-slot');
+                const portraitContainer = damageValueElement.closest(CSS_CLASSES.PORTRAIT_CONTAINER);
                 if (portraitContainer) {
                     return;
                 }
@@ -160,7 +252,7 @@
                 
                 const finalDPS = calculateDPS(creatureId, damageValue, gameTicks);
                 
-                let dpsDisplay = damageValueElement.parentNode.querySelector('.better-analytics-dps');
+                let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
                 
                 if (!dpsDisplay) {
                     dpsDisplay = createDPSDisplayElement();
@@ -171,7 +263,7 @@
                 logger.debug('updateFinalDPSWithGameTicks', `Final DPS for ${creatureId}: ${finalDPS}/s (game ticks: ${gameTicks}, damage: ${damageValue})`);
             });
             
-            const dpsDisplays = document.querySelectorAll('.better-analytics-dps');
+            const dpsDisplays = document.querySelectorAll(`.${CSS_CLASSES.DPS_DISPLAY}`);
             dpsDisplays.forEach(display => {
                 display.style.opacity = '0.7';
                 display.style.fontStyle = 'italic';
@@ -227,6 +319,12 @@
             currentGameMode = context.mode;
             logger.debug('setupBoardStateMonitoring', `Board state changed: gameStarted=${context.gameStarted}, isTracking=${isTracking}, mode=${context.mode}`);
             
+            // Check if we're currently sleeping - if so, skip processing to prevent spam
+            if (isSleeping) {
+                logger.debug('setupBoardStateMonitoring', 'Currently sleeping, skipping board state processing to prevent spam');
+                return;
+            }
+            
             if (context.gameStarted && !isTracking) {
                 logger.info('setupBoardStateMonitoring', `Game started in ${context.mode} mode, resetting tracking session`);
                 resetTrackingSession();
@@ -249,18 +347,36 @@
         });
         
         globalThis.state.board.on('newGame', (event) => {
+            // Check if we're currently sleeping - if so, skip processing to prevent spam
+            if (isSleeping) {
+                logger.debug('setupBoardStateMonitoring', 'Currently sleeping, skipping newGame event to prevent spam');
+                return;
+            }
+            
             logger.info('setupBoardStateMonitoring', 'New game event detected, resetting tracking session');
             gameStartTick = 0;
             resetTrackingSession();
         });
         
         globalThis.state.board.on('emitNewGame', (event) => {
+            // Check if we're currently sleeping - if so, skip processing to prevent spam
+            if (isSleeping) {
+                logger.debug('setupBoardStateMonitoring', 'Currently sleeping, skipping emitNewGame event to prevent spam');
+                return;
+            }
+            
             logger.info('setupBoardStateMonitoring', 'New game emitted, resetting tracking session');
             gameStartTick = 0;
             resetTrackingSession();
         });
         
         globalThis.state.board.on('emitEndGame', (event) => {
+            // Check if we're currently sleeping - if so, skip processing to prevent spam
+            if (isSleeping) {
+                logger.debug('setupBoardStateMonitoring', 'Currently sleeping, skipping emitEndGame event to prevent spam');
+                return;
+            }
+            
             logger.info('setupBoardStateMonitoring', 'Game end event detected, stopping tracking');
             stopDamageTracking();
         });
@@ -289,87 +405,105 @@
         }
         
         analyzerObserver = new MutationObserver((mutations) => {
-            const boardState = globalThis.state.board.getSnapshot();
-            const isAutoplay = boardState.context.mode === 'autoplay';
-            
-            mutations.forEach((mutation, index) => {
+            try {
+                const boardState = globalThis.state.board.getSnapshot();
+                const isAutoplay = boardState.context.mode === 'autoplay';
                 
-                if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
-                    const target = mutation.target;
-                    const newState = target.getAttribute('data-state');
-                    logger.debug(`setupAnalyzerObserver`, `Data-state attribute changed to: "${newState}" on:`, target);
+                mutations.forEach((mutation, index) => {
                     
-                    const hasAnalyzerStructure = target.querySelector && (
-                        target.querySelector('button[aria-controls*="ally"]') && 
-                        target.querySelector('button[aria-controls*="villain"]') &&
-                        target.querySelector('img[alt="damage"]')
-                    );
-                    
-                    if (newState === 'open' && hasAnalyzerStructure) {
-                        logger.info('setupAnalyzerObserver', 'Impact analyzer panel opened, starting tracking');
-                        startDamageTracking();
-                    } else if (newState === 'closed' && hasAnalyzerStructure) {
-                        logger.info('setupAnalyzerObserver', 'Impact analyzer panel closed, stopping tracking');
-                        stopDamageTracking();
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
+                        const target = mutation.target;
+                        const newState = target.getAttribute('data-state');
+                        logger.debug(`setupAnalyzerObserver`, `Data-state attribute changed to: "${newState}" on:`, target);
+                        
+                        try {
+                            const hasAnalyzerStructure = target.querySelector && (
+                                target.querySelector('button[aria-controls*="ally"]') && 
+                                target.querySelector('button[aria-controls*="villain"]') &&
+                                target.querySelector('img[alt="damage"]')
+                            );
+                            
+                            if (newState === 'open' && hasAnalyzerStructure) {
+                                logger.info('setupAnalyzerObserver', 'Impact analyzer panel opened, starting tracking');
+                                startDamageTracking();
+                            } else if (newState === 'closed' && hasAnalyzerStructure) {
+                                logger.info('setupAnalyzerObserver', 'Impact analyzer panel closed, stopping tracking');
+                                stopDamageTracking();
+                            }
+                        } catch (error) {
+                            logger.error('setupAnalyzerObserver', 'Error checking analyzer structure', error);
+                        }
+                    } else if (mutation.type === 'childList') {
+                        mutation.addedNodes.forEach((node, nodeIndex) => {
+                            try {
+                                if (node.nodeType === Node.ELEMENT_NODE) {
+                                    if (node.matches && node.matches(ANALYZER_PANEL_SELECTOR)) {
+                                        const hasAnalyzerStructure = node.querySelector && (
+                                            node.querySelector('button[aria-controls*="ally"]') && 
+                                            node.querySelector('button[aria-controls*="villain"]') &&
+                                            node.querySelector('img[alt="damage"]')
+                                        );
+                                        if (hasAnalyzerStructure) {
+                                            logger.info('setupAnalyzerObserver', 'Impact analyzer panel detected in added node, starting tracking');
+                                            startDamageTracking();
+                                        }
+                                    }
+                                    const analyzerPanel = node.querySelector && node.querySelector(ANALYZER_PANEL_SELECTOR);
+                                    if (analyzerPanel) {
+                                        const hasAnalyzerStructure = analyzerPanel.querySelector && (
+                                            analyzerPanel.querySelector('button[aria-controls*="ally"]') && 
+                                            analyzerPanel.querySelector('button[aria-controls*="villain"]') &&
+                                            analyzerPanel.querySelector('img[alt="damage"]')
+                                        );
+                                        if (hasAnalyzerStructure) {
+                                            logger.info('setupAnalyzerObserver', 'Impact analyzer panel detected in child of added node, starting tracking');
+                                            startDamageTracking();
+                                        }
+                                    }
+                                }
+                            } catch (error) {
+                                logger.error('setupAnalyzerObserver', 'Error processing added node', error);
+                            }
+                        });
+                        
+                        mutation.removedNodes.forEach((node, nodeIndex) => {
+                            try {
+                                if (node.nodeType === Node.ELEMENT_NODE) {
+                                    if (node.matches && node.matches(ANALYZER_PANEL_SELECTOR)) {
+                                        const hasAnalyzerStructure = node.querySelector && (
+                                            node.querySelector('button[aria-controls*="ally"]') && 
+                                            node.querySelector('button[aria-controls*="villain"]') &&
+                                            node.querySelector('img[alt="damage"]')
+                                        );
+                                        if (hasAnalyzerStructure) {
+                                            logger.info('setupAnalyzerObserver', 'Impact analyzer panel removed, stopping tracking');
+                                            cleanupTabButtonListeners();
+                                            stopDamageTracking();
+                                        }
+                                    }
+                                    const analyzerPanel = node.querySelector && node.querySelector(ANALYZER_PANEL_SELECTOR);
+                                    if (analyzerPanel) {
+                                        const hasAnalyzerStructure = analyzerPanel.querySelector && (
+                                            analyzerPanel.querySelector('button[aria-controls*="ally"]') && 
+                                            analyzerPanel.querySelector('button[aria-controls*="villain"]') &&
+                                            analyzerPanel.querySelector('img[alt="damage"]')
+                                        );
+                                        if (hasAnalyzerStructure) {
+                                            logger.info('setupAnalyzerObserver', 'Impact analyzer panel removed from child, stopping tracking');
+                                            cleanupTabButtonListeners();
+                                            stopDamageTracking();
+                                        }
+                                    }
+                                }
+                            } catch (error) {
+                                logger.error('setupAnalyzerObserver', 'Error processing removed node', error);
+                            }
+                        });
                     }
-                } else if (mutation.type === 'childList') {
-                    mutation.addedNodes.forEach((node, nodeIndex) => {
-                        if (node.nodeType === Node.ELEMENT_NODE) {
-                            if (node.matches && node.matches(ANALYZER_PANEL_SELECTOR)) {
-                                const hasAnalyzerStructure = node.querySelector && (
-                                    node.querySelector('button[aria-controls*="ally"]') && 
-                                    node.querySelector('button[aria-controls*="villain"]') &&
-                                    node.querySelector('img[alt="damage"]')
-                                );
-                                if (hasAnalyzerStructure) {
-                                    logger.info('setupAnalyzerObserver', 'Impact analyzer panel detected in added node, starting tracking');
-                                    startDamageTracking();
-                                }
-                            }
-                            const analyzerPanel = node.querySelector && node.querySelector(ANALYZER_PANEL_SELECTOR);
-                            if (analyzerPanel) {
-                                const hasAnalyzerStructure = analyzerPanel.querySelector && (
-                                    analyzerPanel.querySelector('button[aria-controls*="ally"]') && 
-                                    analyzerPanel.querySelector('button[aria-controls*="villain"]') &&
-                                    analyzerPanel.querySelector('img[alt="damage"]')
-                                );
-                                if (hasAnalyzerStructure) {
-                                    logger.info('setupAnalyzerObserver', 'Impact analyzer panel detected in child of added node, starting tracking');
-                                    startDamageTracking();
-                                }
-                            }
-                        }
-                    });
-                    
-                    mutation.removedNodes.forEach((node, nodeIndex) => {
-                        if (node.nodeType === Node.ELEMENT_NODE) {
-                            if (node.matches && node.matches(ANALYZER_PANEL_SELECTOR)) {
-                                const hasAnalyzerStructure = node.querySelector && (
-                                    node.querySelector('button[aria-controls*="ally"]') && 
-                                    node.querySelector('button[aria-controls*="villain"]') &&
-                                    node.querySelector('img[alt="damage"]')
-                                );
-                                if (hasAnalyzerStructure) {
-                                    logger.info('setupAnalyzerObserver', 'Impact analyzer panel removed, stopping tracking');
-                                    stopDamageTracking();
-                                }
-                            }
-                            const analyzerPanel = node.querySelector && node.querySelector(ANALYZER_PANEL_SELECTOR);
-                            if (analyzerPanel) {
-                                const hasAnalyzerStructure = analyzerPanel.querySelector && (
-                                    analyzerPanel.querySelector('button[aria-controls*="ally"]') && 
-                                    analyzerPanel.querySelector('button[aria-controls*="villain"]') &&
-                                    analyzerPanel.querySelector('img[alt="damage"]')
-                                );
-                                if (hasAnalyzerStructure) {
-                                    logger.info('setupAnalyzerObserver', 'Impact analyzer panel removed from child, stopping tracking');
-                                    stopDamageTracking();
-                                }
-                            }
-                        }
-                    });
-                }
-            });
+                });
+            } catch (error) {
+                logger.error('setupAnalyzerObserver', 'Error in mutation observer callback', error);
+            }
         });
         
         logger.info('setupAnalyzerObserver', 'Starting to observe document.body for changes');
@@ -380,17 +514,21 @@
             attributeFilter: ['data-state']
         });
         
-        const existingAnalyzer = document.querySelector(ANALYZER_PANEL_SELECTOR);
-        if (existingAnalyzer) {
-            const hasAnalyzerStructure = existingAnalyzer.querySelector && (
-                existingAnalyzer.querySelector('button[aria-controls*="ally"]') && 
-                existingAnalyzer.querySelector('button[aria-controls*="villain"]') &&
-                existingAnalyzer.querySelector('img[alt="damage"]')
-            );
-            if (hasAnalyzerStructure) {
-                logger.info('setupAnalyzerObserver', 'Impact analyzer panel already open, starting tracking');
-                startDamageTracking();
+        try {
+            const existingAnalyzer = document.querySelector(ANALYZER_PANEL_SELECTOR);
+            if (existingAnalyzer) {
+                const hasAnalyzerStructure = existingAnalyzer.querySelector && (
+                    existingAnalyzer.querySelector('button[aria-controls*="ally"]') && 
+                    existingAnalyzer.querySelector('button[aria-controls*="villain"]') &&
+                    existingAnalyzer.querySelector('img[alt="damage"]')
+                );
+                if (hasAnalyzerStructure) {
+                    logger.info('setupAnalyzerObserver', 'Impact analyzer panel already open, starting tracking');
+                    startDamageTracking();
+                }
             }
+        } catch (error) {
+            logger.error('setupAnalyzerObserver', 'Error checking existing analyzer panel', error);
         }
     }
     
@@ -403,6 +541,12 @@
         }
         
         autoOpenObserver = new MutationObserver((mutations) => {
+            // Check if we're currently sleeping - if so, skip processing to prevent spam
+            if (isSleeping) {
+                logger.debug('setupAutoOpenImpactAnalyzer', 'Currently sleeping, skipping auto-open observer processing to prevent spam');
+                return;
+            }
+            
             mutations.forEach((mutation) => {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
@@ -415,6 +559,12 @@
                                 if (button) {
                                     const boardState = globalThis.state.board.getSnapshot();
                                     if (boardState.context.gameStarted) {
+                                        // Check if we're sleeping - if so, skip auto-open to prevent spam
+                                        if (isSleeping) {
+                                            logger.debug('setupAutoOpenImpactAnalyzer', 'Currently sleeping, skipping auto-open to prevent spam');
+                                            return;
+                                        }
+                                        
                                         logger.info('setupAutoOpenImpactAnalyzer', `Game started in ${boardState.context.mode} mode, auto-opening impact analyzer in 100ms...`);
                                         
                                         const delay = TIMING.AUTO_OPEN_DELAY;
@@ -468,6 +618,12 @@
             if (button) {
                 const boardState = globalThis.state.board.getSnapshot();
                 if (boardState.context.gameStarted) {
+                    // Check if we're sleeping - if so, skip auto-open to prevent spam
+                    if (isSleeping) {
+                        logger.debug('setupAutoOpenImpactAnalyzer', 'Currently sleeping, skipping auto-open for existing button to prevent spam');
+                        return;
+                    }
+                    
                     logger.info('setupAutoOpenImpactAnalyzer', `Game already started in ${boardState.context.mode} mode, auto-opening impact analyzer in 100ms...`);
                     const delay = TIMING.AUTO_OPEN_DELAY;
                     logger.debug('setupAutoOpenImpactAnalyzer', `Using delay of ${delay}ms for existing button in ${boardState.context.mode} mode`);
@@ -506,28 +662,53 @@
     }
     
     function waitForAnalyzerPanelAndStartTracking() {
+        // Prevent multiple simultaneous calls
+        if (isWaitingForPanel) {
+            logger.debug('waitForAnalyzerPanelAndStartTracking', 'Already waiting for panel, skipping duplicate call');
+            return;
+        }
+        
         logger.info('waitForAnalyzerPanelAndStartTracking', 'Waiting for analyzer panel to be fully loaded...');
+        
+        // Check if we're currently sleeping - if so, skip this entire function to prevent spam
+        if (isSleeping) {
+            logger.debug('waitForAnalyzerPanelAndStartTracking', 'Currently sleeping, skipping to prevent spam');
+            return;
+        }
+        
+        // Simple spam prevention: if called while already processing, start sleep
+        if (window.__updatingDPS) {
+            logger.info('waitForAnalyzerPanelAndStartTracking', 'Already processing DPS update, starting sleep to prevent conflicts');
+            startSleep();
+            return;
+        }
+        
+        // Set flag to prevent multiple simultaneous calls
+        isWaitingForPanel = true;
         
         const boardState = globalThis.state.board.getSnapshot();
         const isAutoplay = boardState.context.mode === 'autoplay';
         const isManual = boardState.context.mode === 'manual';
         
-        let attempts = 0;
-        const maxAttempts = isAutoplay || isManual ? 20 : 50;
-        const checkInterval = isAutoplay || isManual ? 50 : 100;
+        let retryAttempts = 0;
+        const maxRetryAttempts = isAutoplay || isManual ? PANEL_DETECTION_ATTEMPTS.AUTOPLAY : PANEL_DETECTION_ATTEMPTS.SANDBOX;
+        const retryInterval = isAutoplay || isManual ? PANEL_DETECTION_INTERVALS.AUTOPLAY : PANEL_DETECTION_INTERVALS.SANDBOX;
         
-        logger.debug('waitForAnalyzerPanelAndStartTracking', `Using ${maxAttempts} attempts with ${checkInterval}ms intervals for ${boardState.context.mode} mode`);
+        logger.debug('waitForAnalyzerPanelAndStartTracking', `Using ${maxRetryAttempts} attempts with ${retryInterval}ms intervals for ${boardState.context.mode} mode`);
         
         const checkAndStart = () => {
-            attempts++;
+            retryAttempts++;
             
             const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
             if (analyzerPanel) {
                 const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-                logger.debug('waitForAnalyzerPanelAndStartTracking', `Attempt ${attempts}: Found ${damageValueElements.length} damage value elements`);
+                logger.debug('waitForAnalyzerPanelAndStartTracking', `Attempt ${retryAttempts}: Found ${damageValueElements.length} damage value elements`);
                 
-                if (damageValueElements.length > 0 || attempts >= maxAttempts) {
-                    logger.info('waitForAnalyzerPanelAndStartTracking', `Starting damage tracking after ${attempts} attempts`);
+                if (damageValueElements.length > 0 || retryAttempts >= maxRetryAttempts) {
+                    logger.info('waitForAnalyzerPanelAndStartTracking', `Starting damage tracking after ${retryAttempts} attempts`);
+                    
+                    // Reset flag when starting tracking
+                    isWaitingForPanel = false;
                     
                     const boardState = globalThis.state.board.getSnapshot();
                     const timerState = globalThis.state.gameTimer.getSnapshot();
@@ -535,79 +716,89 @@
                     if (boardState.context.gameStarted && timerState.context.state !== 'victory' && timerState.context.state !== 'defeat') {
                         startDamageTracking();
                     } else {
-                        logger.warn('waitForAnalyzerPanelAndStartTracking', 'Game ended while waiting for panel, not starting tracking');
-                        
-                        if (boardState.context.mode === 'manual' && damageValueElements.length > 0) {
-                            logger.info('waitForAnalyzerPanelAndStartTracking', 'Manual mode game ended, checking for server results to show final DPS');
-                            
-                            const { serverResults } = boardState.context;
-                            if (serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
-                                const gameTicks = serverResults.rewardScreen.gameTicks;
-                                logger.info('waitForAnalyzerPanelAndStartTracking', `Manual mode: Server results available with ${gameTicks} ticks, calculating final DPS`);
-                                updateFinalDPSWithGameTicks(gameTicks);
-                            } else {
-                                logger.warn('waitForAnalyzerPanelAndStartTracking', 'Manual mode: No server results available for final DPS calculation');
-                            }
-                        } else if (boardState.context.mode === 'sandbox' && damageValueElements.length > 0) {
-                            logger.info('waitForAnalyzerPanelAndStartTracking', 'Sandbox mode game ended, restoring frozen DPS displays');
-                            setTimeout(() => {
-                                restoreFrozenDPSDisplays();
-                                setupTabButtonListeners();
-                            }, 100);
-                        } else if (boardState.context.mode === 'autoplay' && damageValueElements.length > 0) {
-                            logger.info('waitForAnalyzerPanelAndStartTracking', 'Autoplay mode game ended, restoring frozen DPS displays');
-                            setTimeout(() => {
-                                restoreFrozenDPSDisplays();
-                                setupTabButtonListeners();
-                            }, 200);
-                        }
+                        handleGameEndedWhileWaiting(damageValueElements, boardState.context.mode);
                     }
                     return;
                 }
             }
             
-            if (attempts < maxAttempts) {
-                setTimeout(checkAndStart, checkInterval);
+            if (retryAttempts < maxRetryAttempts) {
+                setTimeout(checkAndStart, retryInterval);
             } else {
-                logger.warn('waitForAnalyzerPanelAndStartTracking', 'Max attempts reached, checking game state before starting tracking');
-                
-                const boardState = globalThis.state.board.getSnapshot();
-                const timerState = globalThis.state.gameTimer.getSnapshot();
-                
-                if (boardState.context.gameStarted && timerState.context.state !== 'victory' && timerState.context.state !== 'defeat') {
-                    startDamageTracking();
-                } else {
-                    logger.warn('waitForAnalyzerPanelAndStartTracking', 'Game ended, not starting tracking');
-                    
-                    if (boardState.context.mode === 'manual') {
-                        logger.info('waitForAnalyzerPanelAndStartTracking', 'Manual mode game ended (fallback), checking for server results to show final DPS');
-                        
-                        const { serverResults } = boardState.context;
-                        if (serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
-                            const gameTicks = serverResults.rewardScreen.gameTicks;
-                            logger.info('waitForAnalyzerPanelAndStartTracking', `Manual mode fallback: Server results available with ${gameTicks} ticks, calculating final DPS`);
-                            updateFinalDPSWithGameTicks(gameTicks);
-                        } else {
-                            logger.warn('waitForAnalyzerPanelAndStartTracking', 'Manual mode fallback: No server results available for final DPS calculation');
-                        }
-                    } else if (boardState.context.mode === 'sandbox') {
-                        logger.info('waitForAnalyzerPanelAndStartTracking', 'Sandbox mode game ended (fallback), restoring frozen DPS displays');
-                        setTimeout(() => {
-                            restoreFrozenDPSDisplays();
-                            setupTabButtonListeners();
-                        }, 100);
-                    } else if (boardState.context.mode === 'autoplay') {
-                        logger.info('waitForAnalyzerPanelAndStartTracking', 'Autoplay mode game ended (fallback), restoring frozen DPS displays');
-                        setTimeout(() => {
-                            restoreFrozenDPSDisplays();
-                            setupTabButtonListeners();
-                        }, 200);
-                    }
-                }
+                // Reset flag when max attempts reached
+                isWaitingForPanel = false;
+                handleMaxAttemptsReached();
             }
         };
         
         checkAndStart();
+    }
+    
+    function handleGameEndedWhileWaiting(damageValueElements, gameMode) {
+        logger.warn('handleGameEndedWhileWaiting', 'Game ended while waiting for panel, not starting tracking');
+        
+        if (gameMode === 'manual' && damageValueElements.length > 0) {
+            logger.info('handleGameEndedWhileWaiting', 'Manual mode game ended, checking for server results to show final DPS');
+            
+            const { serverResults } = globalThis.state.board.getSnapshot().context;
+            if (serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
+                const gameTicks = serverResults.rewardScreen.gameTicks;
+                logger.info('handleGameEndedWhileWaiting', `Manual mode: Server results available with ${gameTicks} ticks, calculating final DPS`);
+                updateFinalDPSWithGameTicks(gameTicks);
+            } else {
+                logger.warn('handleGameEndedWhileWaiting', 'Manual mode: No server results available for final DPS calculation');
+            }
+        } else if (gameMode === 'sandbox' && damageValueElements.length > 0) {
+            logger.info('handleGameEndedWhileWaiting', 'Sandbox mode game ended, restoring frozen DPS displays');
+            setTimeout(() => {
+                restoreFrozenDPSDisplays();
+                setupTabButtonListeners();
+            }, 100);
+        } else if (gameMode === 'autoplay' && damageValueElements.length > 0) {
+            logger.info('handleGameEndedWhileWaiting', 'Autoplay mode game ended, restoring frozen DPS displays');
+            setTimeout(() => {
+                restoreFrozenDPSDisplays();
+                setupTabButtonListeners();
+            }, 200);
+        }
+    }
+    
+    function handleMaxAttemptsReached() {
+        logger.warn('handleMaxAttemptsReached', 'Max attempts reached, checking game state before starting tracking');
+        
+        const boardState = globalThis.state.board.getSnapshot();
+        const timerState = globalThis.state.gameTimer.getSnapshot();
+        
+        if (boardState.context.gameStarted && timerState.context.state !== 'victory' && timerState.context.state !== 'defeat') {
+            startDamageTracking();
+        } else {
+            logger.warn('handleMaxAttemptsReached', 'Game ended, not starting tracking');
+            
+            if (boardState.context.mode === 'manual') {
+                logger.info('handleMaxAttemptsReached', 'Manual mode game ended (fallback), checking for server results to show final DPS');
+                
+                const { serverResults } = boardState.context;
+                if (serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
+                    const gameTicks = serverResults.rewardScreen.gameTicks;
+                    logger.info('handleMaxAttemptsReached', `Manual mode fallback: Server results available with ${gameTicks} ticks, calculating final DPS`);
+                    updateFinalDPSWithGameTicks(gameTicks);
+                } else {
+                    logger.warn('handleMaxAttemptsReached', 'Manual mode fallback: No server results available for final DPS calculation');
+                }
+            } else if (boardState.context.mode === 'sandbox') {
+                logger.info('handleMaxAttemptsReached', 'Sandbox mode game ended (fallback), restoring frozen DPS displays');
+                setTimeout(() => {
+                    restoreFrozenDPSDisplays();
+                    setupTabButtonListeners();
+                }, 100);
+            } else if (boardState.context.mode === 'autoplay') {
+                logger.info('handleMaxAttemptsReached', 'Autoplay mode game ended (fallback), restoring frozen DPS displays');
+                setTimeout(() => {
+                    restoreFrozenDPSDisplays();
+                    setupTabButtonListeners();
+                }, 200);
+            }
+        }
     }
     
     function handleTabSwitch() {
@@ -633,20 +824,36 @@
     }
     
     function setupTabButtonListeners() {
-        const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
-        if (analyzerPanel) {
-            const allyButton = analyzerPanel.querySelector('button[aria-controls*="ally"]');
-            const villainButton = analyzerPanel.querySelector('button[aria-controls*="villain"]');
-            
-            if (allyButton && !allyButton.hasAttribute('data-dps-listener')) {
-                allyButton.setAttribute('data-dps-listener', 'true');
-                allyButton.addEventListener('click', handleTabSwitch);
+        try {
+            const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
+            if (analyzerPanel) {
+                try {
+                    const allyButton = analyzerPanel.querySelector('button[aria-controls*="ally"]');
+                    const villainButton = analyzerPanel.querySelector('button[aria-controls*="villain"]');
+                    
+                    if (allyButton && !allyButton.hasAttribute(ATTRIBUTES.DPS_LISTENER)) {
+                        try {
+                            allyButton.setAttribute(ATTRIBUTES.DPS_LISTENER, 'true');
+                            allyButton.addEventListener('click', handleTabSwitch);
+                        } catch (error) {
+                            logger.error('setupTabButtonListeners', 'Error setting up ally button listener', error);
+                        }
+                    }
+                    
+                    if (villainButton && !villainButton.hasAttribute(ATTRIBUTES.DPS_LISTENER)) {
+                        try {
+                            villainButton.setAttribute(ATTRIBUTES.DPS_LISTENER, 'true');
+                            villainButton.addEventListener('click', handleTabSwitch);
+                        } catch (error) {
+                            logger.error('setupTabButtonListeners', 'Error setting up villain button listener', error);
+                        }
+                    }
+                } catch (error) {
+                    logger.error('setupTabButtonListeners', 'Error querying tab buttons', error);
+                }
             }
-            
-            if (villainButton && !villainButton.hasAttribute('data-dps-listener')) {
-                villainButton.setAttribute('data-dps-listener', 'true');
-                villainButton.addEventListener('click', handleTabSwitch);
-            }
+        } catch (error) {
+            logger.error('setupTabButtonListeners', 'Error setting up tab button listeners', error);
         }
     }
     
@@ -672,7 +879,7 @@
             const damageText = damageValueElement.textContent.trim();
             const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
             
-            const portraitContainer = damageValueElement.closest('.container-slot');
+            const portraitContainer = damageValueElement.closest(CSS_CLASSES.PORTRAIT_CONTAINER);
             if (portraitContainer) {
                 return;
             }
@@ -688,7 +895,7 @@
                 finalDPS = calculateDPS(creatureId, damageValue);
             }
             
-            let dpsDisplay = damageValueElement.parentNode.querySelector('.better-analytics-dps');
+            let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
             
             if (!dpsDisplay) {
                 dpsDisplay = createDPSDisplayElement();
@@ -715,7 +922,7 @@
                         const damageText = damageValueElement.textContent.trim();
                         const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
                         
-                        const portraitContainer = damageValueElement.closest('.container-slot');
+                        const portraitContainer = damageValueElement.closest(CSS_CLASSES.PORTRAIT_CONTAINER);
                         if (portraitContainer) {
                             return;
                         }
@@ -726,7 +933,7 @@
                         
                         const finalDPS = calculateDPS(creatureId, damageValue, retryGameTicks);
                         
-                        const dpsDisplay = damageValueElement.parentNode.querySelector('.better-analytics-dps');
+                        const dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
                         if (dpsDisplay) {
                             dpsDisplay.textContent = `(${finalDPS}/s)`;
                         }
@@ -739,7 +946,7 @@
     }
     
     function startDamageTracking() {
-        logger.debug('startDamageTracking', `Function called - isTracking: ${isTracking}`);
+        logger.debug('startDamageTracking', `Function called - isTracking: ${isTracking}, isSleeping: ${isSleeping}`);
         
         if (isTracking) {
             logger.debug('startDamageTracking', 'Already tracking, returning early');
@@ -777,7 +984,7 @@
         logger.debug('startDamageTracking', 'Setting isTracking to true');
         isTracking = true;
         
-        const dpsDisplays = document.querySelectorAll('.better-analytics-dps');
+        const dpsDisplays = document.querySelectorAll(`.${CSS_CLASSES.DPS_DISPLAY}`);
         dpsDisplays.forEach(display => display.remove());
         
         logger.debug('startDamageTracking', 'About to set up periodic updates');
@@ -849,67 +1056,73 @@
             let damageEntries = analyzerPanel.querySelectorAll('li');
             
             if (damageEntries.length === 0) {
-                const alternativeSelectors = [
-                    'ul.frame-2 li',
-                    'ul[class*="frame-2"] li',
-                    'ul li',
-                    'button'
-                ];
-                
-                for (const selector of alternativeSelectors) {
-                    damageEntries = analyzerPanel.querySelectorAll(selector);
-                    if (damageEntries.length > 0) {
-                        break;
+                for (const selector of ALTERNATIVE_DAMAGE_SELECTORS) {
+                    try {
+                        damageEntries = analyzerPanel.querySelectorAll(selector);
+                        if (damageEntries.length > 0) {
+                            break;
+                        }
+                    } catch (error) {
+                        logger.error('updateDamageData', `Error with selector ${selector}`, error);
+                        continue;
                     }
                 }
             }
             
-            const currentTick = globalThis.state.gameTimer.getSnapshot().context.currentTick;
-            
-            damageEntries.forEach((entry, index) => {
-                const damageValueElement = entry.querySelector(DAMAGE_VALUE_SELECTOR);
-                if (!damageValueElement) {
-                    return;
-                }
+            try {
+                const currentTick = globalThis.state.gameTimer.getSnapshot().context.currentTick;
                 
-                const damageText = damageValueElement.textContent.trim();
-                const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
-                
-                if (damageValue === 0) {
-                    return;
-                }
-                
-                const portraitImg = entry.querySelector('img[alt="creature"]');
-                const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-                
-                if (!damageTrackingData.has(creatureId)) {
-                    damageTrackingData.set(creatureId, {
-                        totalDamage: 0,
-                        damageHistory: [],
-                        firstSeen: currentTick,
-                        lastUpdate: currentTick
-                    });
-                }
-                
-                const creatureData = damageTrackingData.get(creatureId);
-                
-                if (damageValue !== creatureData.totalDamage) {
-                    const damageDiff = damageValue - creatureData.totalDamage;
-                    
-                    if (damageDiff > 0) {
-                        creatureData.damageHistory.push({
-                            damage: damageDiff,
-                            tick: currentTick,
-                            timestamp: Date.now()
-                        });
+                damageEntries.forEach((entry, index) => {
+                    try {
+                        const damageValueElement = entry.querySelector(DAMAGE_VALUE_SELECTOR);
+                        if (!damageValueElement) {
+                            return;
+                        }
+                        
+                        const damageText = damageValueElement.textContent.trim();
+                        const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
+                        
+                        if (damageValue === 0) {
+                            return;
+                        }
+                        
+                        const portraitImg = entry.querySelector('img[alt="creature"]');
+                        const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
+                        
+                        if (!damageTrackingData.has(creatureId)) {
+                            damageTrackingData.set(creatureId, {
+                                totalDamage: 0,
+                                damageHistory: [],
+                                firstSeen: currentTick,
+                                lastUpdate: currentTick
+                            });
+                        }
+                        
+                        const creatureData = damageTrackingData.get(creatureId);
+                        
+                        if (damageValue !== creatureData.totalDamage) {
+                            const damageDiff = damageValue - creatureData.totalDamage;
+                            
+                            if (damageDiff > 0) {
+                                creatureData.damageHistory.push({
+                                    damage: damageDiff,
+                                    tick: currentTick,
+                                    timestamp: Date.now()
+                                });
+                            }
+                            
+                            creatureData.totalDamage = damageValue;
+                            creatureData.lastUpdate = currentTick;
+                        } else {
+                            creatureData.totalDamage = damageValue;
+                        }
+                    } catch (error) {
+                        logger.error('updateDamageData', `Error processing damage entry ${index}`, error);
                     }
-                    
-                    creatureData.totalDamage = damageValue;
-                    creatureData.lastUpdate = currentTick;
-                } else {
-                    creatureData.totalDamage = damageValue;
-                }
-            });
+                });
+            } catch (error) {
+                logger.error('updateDamageData', 'Error getting game timer state', error);
+            }
         } catch (error) {
             logger.error('updateDamageData', 'Error updating damage data', error);
         }
@@ -962,42 +1175,50 @@
                 return;
             }
         
-        updateDamageData();
-        
-        const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
-        if (!analyzerPanel) {
-            return;
-        }
-        
-        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-        
-        damageValueElements.forEach((damageValueElement, index) => {
-            const damageText = damageValueElement.textContent.trim();
-            const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
+            updateDamageData();
             
-            const portraitContainer = damageValueElement.closest('.container-slot');
-            if (portraitContainer) {
+            const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
+            if (!analyzerPanel) {
                 return;
             }
             
-            const parentContainer = damageValueElement.closest('li');
-            const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
-            const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
-            
-            const totalDPS = calculateDPS(creatureId, damageValue);
-            
-            let dpsDisplay = damageValueElement.parentNode.querySelector('.better-analytics-dps');
-            
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
+            try {
+                const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
+                
+                damageValueElements.forEach((damageValueElement, index) => {
+                    try {
+                        const damageText = damageValueElement.textContent.trim();
+                        const damageValue = parseInt(damageText.replace(/[^\d]/g, '')) || 0;
+                        
+                        const portraitContainer = damageValueElement.closest(CSS_CLASSES.PORTRAIT_CONTAINER);
+                        if (portraitContainer) {
+                            return;
+                        }
+                        
+                        const parentContainer = damageValueElement.closest('li');
+                        const portraitImg = parentContainer ? parentContainer.querySelector('img[alt="creature"]') : null;
+                        const creatureId = portraitImg ? portraitImg.src.split('/').pop().replace('.png', '') : `creature_${index}`;
+                        
+                        const totalDPS = calculateDPS(creatureId, damageValue);
+                        
+                        let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
+                        
+                        if (!dpsDisplay) {
+                            dpsDisplay = createDPSDisplayElement();
+                            damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
+                        }
+                        
+                        dpsDisplay.textContent = `(${totalDPS}/s)`;
+                        
+                        dpsDisplay.style.opacity = '1';
+                        dpsDisplay.style.fontStyle = 'normal';
+                    } catch (error) {
+                        logger.error('updateDPSDisplay', `Error processing DPS display for element ${index}`, error);
+                    }
+                });
+            } catch (error) {
+                logger.error('updateDPSDisplay', 'Error querying damage value elements', error);
             }
-            
-            dpsDisplay.textContent = `(${totalDPS}/s)`;
-            
-            dpsDisplay.style.opacity = '1';
-            dpsDisplay.style.fontStyle = 'normal';
-        });
         } catch (error) {
             logger.error('updateDPSDisplay', 'Error updating DPS display', error);
         }
@@ -1005,7 +1226,7 @@
     
     function createDPSDisplayElement() {
         const dpsDisplay = document.createElement('span');
-        dpsDisplay.className = 'better-analytics-dps';
+        dpsDisplay.className = CSS_CLASSES.DPS_DISPLAY;
         dpsDisplay.style.cssText = `
             font-size: 11px;
             color: #ffffff;
@@ -1023,29 +1244,41 @@
     }
     
     function createPlaceholderDPSDisplays() {
-        const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
-        if (!analyzerPanel) {
-            return;
-        }
-
-        const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
-        damageValueElements.forEach((damageValueElement, index) => {
-            const portraitContainer = damageValueElement.closest('.container-slot');
-            if (portraitContainer) {
+        try {
+            const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
+            if (!analyzerPanel) {
                 return;
             }
 
-            let dpsDisplay = damageValueElement.parentNode.querySelector('.better-analytics-dps');
-            if (!dpsDisplay) {
-                dpsDisplay = createDPSDisplayElement();
-                dpsDisplay.textContent = '(0/s)';
-                dpsDisplay.style.opacity = '0.7';
-                dpsDisplay.style.fontStyle = 'italic';
-                damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
-            } else {
-                dpsDisplay.textContent = '(0/s)';
+            try {
+                const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
+                damageValueElements.forEach((damageValueElement, index) => {
+                    try {
+                        const portraitContainer = damageValueElement.closest(CSS_CLASSES.PORTRAIT_CONTAINER);
+                        if (portraitContainer) {
+                            return;
+                        }
+
+                        let dpsDisplay = damageValueElement.parentNode.querySelector(`.${CSS_CLASSES.DPS_DISPLAY}`);
+                        if (!dpsDisplay) {
+                            dpsDisplay = createDPSDisplayElement();
+                            dpsDisplay.textContent = '(0/s)';
+                            dpsDisplay.style.opacity = '0.7';
+                            dpsDisplay.style.fontStyle = 'italic';
+                            damageValueElement.parentNode.insertBefore(dpsDisplay, damageValueElement.nextSibling);
+                        } else {
+                            dpsDisplay.textContent = '(0/s)';
+                        }
+                    } catch (error) {
+                        logger.error('createPlaceholderDPSDisplays', `Error creating placeholder for element ${index}`, error);
+                    }
+                });
+            } catch (error) {
+                logger.error('createPlaceholderDPSDisplays', 'Error querying damage value elements', error);
             }
-        });
+        } catch (error) {
+            logger.error('createPlaceholderDPSDisplays', 'Error creating placeholder DPS displays', error);
+        }
     }
     
     // =======================
@@ -1080,6 +1313,21 @@
     function cleanup() {
         stopDamageTracking();
         
+        // Clear sleep timeout
+        if (sleepTimeout) {
+            clearTimeout(sleepTimeout);
+            sleepTimeout = null;
+        }
+        isSleeping = false;
+        sleepStartTime = null;
+        // Removed complex tracking call times array and spam detection variables
+        
+        // Reset panel waiting flag
+        isWaitingForPanel = false;
+        
+        // Clean up tab button event listeners
+        cleanupTabButtonListeners();
+        
         if (analyzerObserver) {
             analyzerObserver.disconnect();
             analyzerObserver = null;
@@ -1113,6 +1361,28 @@
         logger.info('cleanup', 'Cleanup completed');
     }
     
+    function cleanupTabButtonListeners() {
+        try {
+            const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
+            if (analyzerPanel) {
+                const allyButton = analyzerPanel.querySelector('button[aria-controls*="ally"]');
+                const villainButton = analyzerPanel.querySelector('button[aria-controls*="villain"]');
+                
+                if (allyButton && allyButton.hasAttribute(ATTRIBUTES.DPS_LISTENER)) {
+                    allyButton.removeEventListener('click', handleTabSwitch);
+                    allyButton.removeAttribute(ATTRIBUTES.DPS_LISTENER);
+                }
+                
+                if (villainButton && villainButton.hasAttribute(ATTRIBUTES.DPS_LISTENER)) {
+                    villainButton.removeEventListener('click', handleTabSwitch);
+                    villainButton.removeAttribute(ATTRIBUTES.DPS_LISTENER);
+                }
+            }
+        } catch (error) {
+            logger.error('cleanupTabButtonListeners', 'Error cleaning up tab button listeners', error);
+        }
+    }
+    
     // =======================
     // 6. Initialization & Exports
     // =======================
@@ -1140,7 +1410,10 @@
             calculateRecentDPS: calculateRecentDPS,
             resetTracking: resetTracking,
             getSessionStats: getSessionStats,
-            cleanup: cleanup
+            cleanup: cleanup,
+            startSleep: startSleep,
+            checkAndRefreshSleep: checkAndRefreshSleep,
+            isCurrentlySleeping: isCurrentlySleeping
         };
     }
 

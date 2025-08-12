@@ -1,180 +1,348 @@
 // =======================
-// 0. Version & Metadata
+// 1. Configuration
 // =======================
-/**
- * Cyclopedia Mod for Bestiary Arena
- * @version 1.0.2
- * @description Comprehensive game data viewer and player profile manager
- */
 'use strict';
-
-// =======================
-// 1. Constants & Globals
-// =======================
-const START_PAGE_CONFIG = {
-  API_TIMEOUT: 10000,
-  COLUMN_WIDTHS: {
-    LEFT: 300,
-    MIDDLE: 300,
-    RIGHT: 300
-  },
-  API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData',
-  FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png'
+const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
+var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
+if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}
+const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
+const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '252px', LEFT_COLUMN_WIDTH: '180px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
+const INVENTORY_CATEGORIES = {
+  'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
+  'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
+  'Upgrades': ['Daily Boosted Map', 'Daycare', 'Hy\'genie', 'Monster Cauldron', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
-let globalTimer = null;
-let cachedProfileData = null;
-const timerCleanup = new WeakMap();
-
-var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips)
-  || {};
-
-if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {
-  console.warn('[Cyclopedia] inventory-tooltips.js NOT loaded or is not an object!');
-}
-
-const CYCLOPEDIA_MODAL_WIDTH = 900;
-const CYCLOPEDIA_MODAL_HEIGHT = 600;
-
-const LAYOUT_CONSTANTS = {
-  COLUMN_WIDTH: '252px',
-  LEFT_COLUMN_WIDTH: '180px',
-  MODAL_WIDTH: 900,
-  MODAL_HEIGHT: 600,
-  CHROME_HEIGHT: 70,
-  COLORS: {
-    PRIMARY: '#ffe066',
-    SECONDARY: '#e6d7b0',
-    BACKGROUND: '#232323',
-    TEXT: '#fff',
-    ERROR: '#ff6b6b',
-    WARNING: '#888'
-  },
-  FONTS: {
-    PRIMARY: 'pixel-font',
-    SMALL: 'pixel-font-14',
-    MEDIUM: 'pixel-font-16',
-    LARGE: 'pixel-font-16',
-    SIZES: {
-      TITLE: 'pixel-font-16',
-      BODY: 'pixel-font-16',
-      SMALL: 'pixel-font-14',
-      TINY: 'pixel-font-14',
-    }
-  }
+const INVENTORY_VARIANTS = {
+  'Change Nickname': ['nicknameChange'],
+  'Dice Manipulators': ['diceManipulator1', 'diceManipulator2', 'diceManipulator3', 'diceManipulator4', 'diceManipulator5'],
+  'Exaltation Chests': ['equipChest'], 'Nickname Creature': ['nicknameMonster'], 'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
+  'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
+  'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
+  'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
+  'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
+  'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
+  'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Hy\'genie': ['hygenie'],
+  'Monster Cauldron': ['monsterCauldron'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
+  'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
 
-// =======================
-// 2. Centralized Data Configuration
-// =======================
+const INVENTORY_STATIC_ITEMS = {
+  'beastCoins': { name: 'Beast Coins', rarity: '1' }, 'dust': { name: 'Dust', rarity: '2' },
+  'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
+  'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
+  'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
+  'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
+  'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
+  'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
+  'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
+  'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
+  'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
+};
 
-const GAME_DATA = {
-  MONSTER_STATS_CONFIG: [
+const RARITY_CONFIG = {
+  text: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Epic', '5': 'Legendary' },
+  colors: { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' }
+};
+
+const INVENTORY_CONFIG = {
+  categories: INVENTORY_CATEGORIES,
+  variants: INVENTORY_VARIANTS,
+  staticItems: INVENTORY_STATIC_ITEMS,
+  rarityText: RARITY_CONFIG.text,
+  rarityColors: RARITY_CONFIG.colors
+};
+const CURRENCY_CONFIG = {};
+
+// Hunting Marks path configurations - optimized based on actual game structure
+const HUNTING_MARKS_PATHS = [
+  'questLog?.task?.points',  // Primary path - confirmed working
+  'questLog?.task?.marks',   // Alternative task path
+  'questLog?.hunting?.marks', // Hunting-specific path
+  'huntingMarks',            // Direct path
+  'player?.huntingMarks'     // Player-specific path
+];
+
+const HUNTING_MARKS_UI_SELECTORS = [
+  '.sprite.item.relative.id-35572', '.sprite.item.relative[class*="id-35572"]',
+  'img[src*="huntingmarks.png"]', '[data-item*="hunting"]', '[data-item*="mark"]'
+];
+const MONSTER_STATS_CONFIG = [
     { key: 'hp', label: 'Hitpoints', icon: '/assets/icons/heal.png', max: 700, barColor: 'rgb(96, 192, 96)' },
     { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 80, barColor: 'rgb(255, 128, 96)' },
     { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 60, barColor: 'rgb(128, 128, 255)' },
     { key: 'armor', label: 'Armor', icon: '/assets/icons/armor.png', max: 60, barColor: 'rgb(224, 224, 128)' },
     { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' }
-  ],
+];
 
-  UNOBTAINABLE_CREATURES: [
-    'Black Knight',
-    'Dead Tree',
-    'Earth Crystal',
-    'Energy Crystal',
-    'Lavahole',
-    'Magma Crystal',
-    'Old Giant Spider',
-    'Orc',
-    'Sweaty Cyclops'
-  ],
+const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops'];
 
-  ALL_CREATURES: [
-    'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
-    'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
-    'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
-    'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
-    'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
-    'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
-    'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
-    'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
-  ],
+const ALL_CREATURES = ['Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord', 'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout', 'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin', 'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk', 'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman', 'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton', 'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental', 'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'];
 
-  ALL_EQUIPMENT: [
-    'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher',
-    'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod',
-    'Glass of Goo', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap',
-    'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay',
-    'White Skull'
-  ],
+const ALL_EQUIPMENT = ['Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
 
-  NO_RARITY_KEYS: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+const GAME_KEYS = {
+  NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
+  CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
+  UPGRADE: ['dailyBoostedMap', 'daycare', 'hygenie', 'monsterCauldron', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+};
 
-  CURRENCY_KEYS: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
+const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
 
-  UPGRADE_KEYS: ['dailyBoostedMap', 'daycare', 'hygenie', 'monsterCauldron', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract'],
+const HARDCODED_MONSTER_STATS = {
+  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 } },
+  'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
+  'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
+  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 100 },
+  'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
+  'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 }
+};
 
-  RARITY_COLORS: {
-    '1': '#9d9d9d',
-    '2': '#1eff00',
-    '3': '#0070dd',
-    '4': '#a335ee',
-    '5': '#ff8000'
-  },
+const REGION_NAME_MAP = {
+  'rook': 'Rookgaard', 'abdendriel': 'Ab\'Dendriel', 'carlin': 'Carlin',
+  'venore': 'Venore', 'thais': 'Thais', 'kazordoon': 'Kazordoon'
+};
 
-  EXP_TABLE: [
-    [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-    [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-    [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-    [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-    [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-    [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-    [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-    [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-  ]
+const GAME_DATA = {
+  MONSTER_STATS_CONFIG,
+  UNOBTAINABLE_CREATURES,
+  ALL_CREATURES,
+  ALL_EQUIPMENT,
+  NO_RARITY_KEYS: GAME_KEYS.NO_RARITY,
+  CURRENCY_KEYS: GAME_KEYS.CURRENCY,
+  UPGRADE_KEYS: GAME_KEYS.UPGRADE,
+  RARITY_COLORS: RARITY_CONFIG.colors,
+  EXP_TABLE,
+  HARDCODED_MONSTER_STATS,
+  REGION_NAME_MAP
 };
 
 // =======================
-// 3. Global State & Configuration
+// 2. Global State & Configuration
 // =======================
-
 if (typeof window.cyclopediaGlobalObserver === 'undefined') {
   window.cyclopediaGlobalObserver = null;
 }
 
 const cyclopediaState = {
-  observer: null,
-  modalOpen: false,
-  currentModal: null,
-  profileData: null,
-  lastFetch: 0,
-  fetchInProgress: false,
-  monsterNameMap: null,
-  monsterNameMapBuilt: false,
-  monsterLocationCache: new Map(),
-  searchDebounceTimer: null,
-  lazyLoadQueue: [],
-  isProcessingQueue: false
+  observer: null, modalOpen: false, currentModal: null,
+  profileData: null, lastFetch: 0, fetchInProgress: false,
+  monsterNameMap: null, monsterNameMapBuilt: false, monsterLocationCache: new Map(),
+  searchDebounceTimer: null, searchedUsername: null,
+  lazyLoadQueue: [], isProcessingQueue: false,
+  cache: {
+    profileData: new Map(), leaderboardData: new Map(), lastFetch: new Map(), roomThumbnails: new Map(),
+    maxSize: { profileData: 50, leaderboardData: 20, roomThumbnails: 100 },
+    defaultTTL: { profileData: 900000, leaderboardData: 600000, roomThumbnails: 3600000 }
+  },
+  pendingRequests: new Map(), timers: new Map(),
+  
+  setProfileData: function(playerName, data) {
+    this.cache.profileData.set(playerName, { data, timestamp: Date.now() });
+    if (this.cache.profileData.size > this.cache.maxSize.profileData) {
+      const firstKey = this.cache.profileData.keys().next().value;
+      this.cache.profileData.delete(firstKey);
+    }
+  },
+  
+  getProfileData: function(playerName, ttl = null) {
+    const cached = this.cache.profileData.get(playerName);
+    if (!cached) return null;
+    const effectiveTTL = ttl || this.cache.defaultTTL.profileData;
+    if (Date.now() - cached.timestamp < effectiveTTL) return cached.data;
+    this.cache.profileData.delete(playerName);
+    return null;
+  },
+  
+  setLeaderboardData: function(category, data) {
+    this.cache.leaderboardData.set(category, { data, timestamp: Date.now() });
+    if (this.cache.leaderboardData.size > this.cache.maxSize.leaderboardData) {
+      const firstKey = this.cache.leaderboardData.keys().next().value;
+      this.cache.leaderboardData.delete(firstKey);
+    }
+  },
+  
+  getLeaderboardData: function(category, ttl = null) {
+    const cached = this.cache.leaderboardData.get(category);
+    if (!cached) return null;
+    const effectiveTTL = ttl || this.cache.defaultTTL.leaderboardData;
+    if (Date.now() - cached.timestamp < effectiveTTL) return cached.data;
+    this.cache.leaderboardData.delete(category);
+    return null;
+  },
+  
+  clearCache: function(type = 'all') {
+    if (type === 'all') {
+      this.cache.profileData.clear(); this.cache.leaderboardData.clear();
+      this.cache.lastFetch.clear(); this.cache.roomThumbnails.clear(); this.pendingRequests.clear();
+    } else if (this.cache[type]) this.cache[type].clear();
+  },
+  
+  cleanupExpiredCache: function() {
+    const now = Date.now(); let cleanedCount = 0;
+    for (const [key, value] of this.cache.profileData.entries()) {
+      if (now - value.timestamp > this.cache.defaultTTL.profileData) {
+        this.cache.profileData.delete(key); cleanedCount++;
+      }
+    }
+    for (const [key, value] of this.cache.leaderboardData.entries()) {
+      if (now - value.timestamp > this.cache.defaultTTL.leaderboardData) {
+        this.cache.leaderboardData.delete(key); cleanedCount++;
+      }
+    }
+    for (const [key, value] of this.cache.roomThumbnails.entries()) {
+      if (now - value.timestamp > this.cache.defaultTTL.roomThumbnails) {
+        this.cache.roomThumbnails.delete(key); cleanedCount++;
+      }
+    }
+    return cleanedCount;
+  },
+  
+  getCacheStats: function() {
+    return {
+      profileData: this.cache.profileData.size,
+      leaderboardData: this.cache.leaderboardData.size,
+      roomThumbnails: this.cache.roomThumbnails.size,
+      pendingRequests: this.pendingRequests.size,
+      queueStatus: RequestQueue.getStatus(),
+      memoryInfo: MemoryUtils.getMemoryInfo()
+    };
+  },
+  
+  cleanup: function() {
+    this.clearCache();
+    this.timers.forEach(timer => { if (timer) clearInterval(timer); });
+    this.timers.clear();
+    this.observer = null; this.modalOpen = false; this.currentModal = null;
+    this.profileData = null; this.lastFetch = 0; this.fetchInProgress = false;
+    this.searchDebounceTimer = null; this.lazyLoadQueue = []; this.isProcessingQueue = false;
+    this.searchedUsername = null;
+    const cacheStats = this.getCacheStats();
+  }
 };
 
 // =======================
-// 4. Utility Functions
+// 3. Utility Functions
 // =======================
+const MemoryUtils = {
+  clearLargeObjects: function() {
+    // Don't disconnect context menu observers - they are core functionality, not "large objects"
+    // Only disconnect menu observer (which is different from context menu observer)
+    if (window.cyclopediaMenuObserver) {
+      try { 
+        window.cyclopediaMenuObserver.disconnect(); 
+        window.cyclopediaMenuObserver = null; 
+      } catch (e) {}
+    }
+    
+    // Context menu observer (cyclopediaGlobalObserver) should NEVER be disconnected
+    // It's needed for right-click functionality and should always be active
+  },
+  
+  getMemoryInfo: function() {
+    return {
+      eventHandlers: EventHandlerManager.getHandlerCount(),
+      cacheSize: cyclopediaState.cache.profileData.size + cyclopediaState.cache.leaderboardData.size + cyclopediaState.cache.roomThumbnails.size,
+      pendingRequests: cyclopediaState.pendingRequests.size
+    };
+  }
+};
+
+const DOMUtils = {
+  createElement: function(tag, className = '', textContent = '') {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (textContent) element.textContent = textContent;
+    return element;
+  },
+  
+  applyCommonStyles: function(element, styles = {}) {
+    const defaultStyles = { display: 'flex', flexDirection: 'column', margin: '0', padding: '0', minHeight: '0', height: '100%', ...styles };
+    Object.assign(element.style, defaultStyles);
+    return element;
+  },
+  
+  createColumn: function(width, content, extraStyles = {}) {
+    const wrapper = document.createElement('div');
+    Object.assign(wrapper.style, { width: width + 'px', flex: `0 0 ${width}px`, display: 'flex', flexDirection: 'column', height: '100%', ...extraStyles });
+    if (content) wrapper.appendChild(content);
+    return wrapper;
+  },
+  
+  createTitle: function(text, className = LAYOUT_CONSTANTS.FONTS.SIZES.TITLE) {
+    const titleEl = document.createElement('h2');
+    titleEl.className = 'widget-top widget-top-text ' + className;
+    Object.assign(titleEl.style, { margin: '0', padding: '2px 8px', textAlign: 'center', color: LAYOUT_CONSTANTS.COLORS.TEXT });
+    const p = document.createElement('p');
+    p.textContent = text; p.className = className;
+    Object.assign(p.style, { margin: '0', padding: '0', textAlign: 'center', color: LAYOUT_CONSTANTS.COLORS.TEXT });
+    titleEl.appendChild(p);
+    return titleEl;
+  },
+  
+  createScrollContainer: function(height = '100%', padding = false) {
+    if (!api || !api.ui || !api.ui.components || typeof api.ui.components.createScrollContainer !== 'function') {
+      console.error('[Cyclopedia] createScrollContainer: api.ui.components.createScrollContainer is not available.');
+      const fallback = document.createElement('div');
+      fallback.textContent = 'Cyclopedia UI error: scroll container unavailable.';
+      fallback.style.color = 'red';
+      return fallback;
+    }
+    const scrollContainer = api.ui.components.createScrollContainer({ height, padding, content: null });
+    if (scrollContainer && scrollContainer.element) {
+      Object.assign(scrollContainer.element.style, { flex: '1 1 0', minHeight: '0', overflowY: 'scroll' });
+    }
+    return scrollContainer;
+  },
+  
+  createListItem: function(text, className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY) {
+    const item = document.createElement('div');
+    item.textContent = text; item.className = className;
+    Object.assign(item.style, { color: LAYOUT_CONSTANTS.COLORS.TEXT, cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' });
+    return item;
+  }
+};
+
+// =======================
+// 4. Event Handler Management
+// =======================
+const EventHandlerManager = {
+  handlers: new Map(),
+  
+  addHandler: function(element, eventType, handler, options = {}) {
+    const key = `${eventType}_${Date.now()}_${Math.random()}`;
+    const handlerInfo = { element, eventType, handler, options, key };
+    element.addEventListener(eventType, handler, options);
+    this.handlers.set(key, handlerInfo);
+    return key;
+  },
+  
+  removeHandler: function(key) {
+    const handlerInfo = this.handlers.get(key);
+    if (handlerInfo) {
+      handlerInfo.element.removeEventListener(handlerInfo.eventType, handlerInfo.handler, handlerInfo.options);
+      this.handlers.delete(key);
+    }
+  },
+  
+  removeElementHandlers: function(element) {
+    for (const [key, handlerInfo] of this.handlers.entries()) {
+      if (handlerInfo.element === element) this.removeHandler(key);
+    }
+  },
+  
+  cleanup: function() {
+    for (const [key, handlerInfo] of this.handlers.entries()) this.removeHandler(key);
+  },
+  
+  getHandlerCount: function() { return this.handlers.size; }
+};
 
 function safeRemoveChild(parent, child) {
   try {
-    if (!parent || !child) {
-      return false;
-    }
-    
-    if (!parent.contains(child)) {
-      return false;
-    }
-    
-    if (child.parentNode !== parent) {
-      return false;
-    }
-    
+    if (!parent || !child) return false;
+    if (!parent.contains(child)) return false;
+    if (child.parentNode !== parent) return false;
     parent.removeChild(child);
     return true;
   } catch (error) {
@@ -201,11 +369,7 @@ const DOMCache = {
   get: function(selector, context = document) {
     const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
     const cached = this.cache.get(key);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached.element;
-    }
-    
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) return cached.element;
     const element = context.querySelector(selector);
     this.cache.set(key, { element, timestamp: Date.now() });
     return element;
@@ -214,25 +378,17 @@ const DOMCache = {
   getAll: function(selector, context = document) {
     const key = `all_${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
     const cached = this.cache.get(key);
-    
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached.elements;
-    }
-    
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) return cached.elements;
     const elements = context.querySelectorAll(selector);
     this.cache.set(key, { elements, timestamp: Date.now() });
     return elements;
   },
 
-  clear: function() {
-    this.cache.clear();
-  },
+  clear: function() { this.cache.clear(); },
 
   clearSelector: function(selector) {
     for (const key of this.cache.keys()) {
-      if (key.includes(selector)) {
-        this.cache.delete(key);
-      }
+      if (key.includes(selector)) this.cache.delete(key);
     }
   }
 };
@@ -242,9 +398,7 @@ const MemoizationUtils = {
     const cache = new Map();
     return function(...args) {
       const key = keyFn(...args);
-      if (cache.has(key)) {
-        return cache.get(key);
-      }
+      if (cache.has(key)) return cache.get(key);
       const result = fn.apply(this, args);
       cache.set(key, result);
       return result;
@@ -256,15 +410,11 @@ const MemoizationUtils = {
     return function(...args) {
       const key = keyFn(...args);
       const now = Date.now();
-      
       if (cache.has(key)) {
         const { result, timestamp } = cache.get(key);
-        if (now - timestamp < ttl) {
-          return result;
-        }
+        if (now - timestamp < ttl) return result;
         cache.delete(key);
       }
-      
       const result = fn.apply(this, args);
       cache.set(key, { result, timestamp: now });
       return result;
@@ -289,18 +439,14 @@ const FormatUtils = {
     return n.toLocaleString();
   },
 
-  number: function(n) {
-    return n !== undefined ? n.toLocaleString() : '-';
-  },
+  number: function(n) { return n !== undefined ? n.toLocaleString() : '-'; },
 
   date: function(ts) {
     if (!ts) return '-';
     try {
       const date = new Date(Number(ts));
       return date.toISOString().split('T')[0];
-    } catch (e) {
-      return '-';
-    }
+    } catch (e) { return '-'; }
   },
 
   tilePosition: function(tileIndex) {
@@ -322,155 +468,52 @@ const FormatUtils = {
   }
 };
 
-function getGoldFromUI() {
-  try {
-    const goldBtn = Array.from(DOMCache.getAll('button'))
-      .find(btn => {
-        const div = btn.querySelector('.frame-pressed-1[title="Gold"]');
-        const img = btn.querySelector('img[alt="Player gold"]');
-        return div || img;
-      });
-    if (!goldBtn) return null;
-    const span = goldBtn.querySelector('span');
-    if (!span) return null;
-    const value = span.textContent.replace(/,/g, '');
-    const parsedValue = parseInt(value, 10);
-    return isNaN(parsedValue) ? null : parsedValue;
-  } catch (error) {
-    console.warn('[Cyclopedia] Error getting gold from UI:', error);
-    return null;
-  }
-}
+const CURRENCY_UI_SELECTORS = { gold: { button: true, title: 'Gold', alt: 'Player gold' }, beastCoins: { button: true, title: 'Beast Coins', alt: 'Player Beast Coins' }, dust: { div: true, title: 'Dust', alt: 'Dust' } };
+const CURRENCY_GAME_STATE_PATHS = { dust: ['inventory?.dust', 'inventory?.dust?.count', 'resources?.dust', 'player?.dust', 'dust'], huntingMarks: ['inventory?.huntingMarks', 'inventory?.huntingMarks?.count', 'resources?.huntingMarks', 'player?.huntingMarks', 'huntingMarks', 'hunting?.marks', 'marks', 'huntingMarks?.count', 'huntingMarks?.amount', 'huntingMarks?.quantity', 'hunting?.huntingMarks', 'hunting?.huntingMarks?.count', 'player?.hunting?.marks', 'player?.hunting?.huntingMarks', 'player?.huntingMarks', 'player?.marks', 'inventory?.marks', 'inventory?.marks?.count', 'player?.inventory?.huntingMarks', 'player?.inventory?.huntingMarks?.count', 'player?.resources?.huntingMarks', 'player?.resources?.huntingMarks?.count', 'context?.inventory?.huntingMarks', 'context?.inventory?.huntingMarks?.count', 'context?.player?.huntingMarks', 'context?.player?.huntingMarks?.count', 'context?.huntingMarks', 'context?.huntingMarks?.count', 'context?.hunting?.marks', 'context?.hunting?.marks?.count', 'questLog?.hunting?.marks', 'questLog?.hunting?.huntingMarks', 'questLog?.task?.huntingMarks', 'questLog?.task?.marks', 'questLog?.task?.points', 'questLog?.seashell?.huntingMarks', 'questLog?.seashell?.marks', 'huntingMarks', 'huntingMarksCount', 'huntingMarksAmount', 'huntingMarksQuantity', 'huntingMarksTotal', 'totalHuntingMarks', 'huntingMarksEarned', 'huntingMarksCollected'] };
+function getCurrencyFromUI(currencyType) { try { const config = CURRENCY_UI_SELECTORS[currencyType]; if (!config) return null; const selector = config.button ? 'button' : 'div'; const element = Array.from(DOMCache.getAll(selector)).find(el => { const div = el.querySelector(`.frame-pressed-1[title="${config.title}"]`); const img = el.querySelector(`img[alt="${config.alt}"]`); return div || img; }); if (!element) return null; const span = element.querySelector('span'); if (!span) return null; const value = span.textContent.replace(/,/g, ''); const parsedValue = parseInt(value, 10); return isNaN(parsedValue) ? null : parsedValue; } catch (error) { console.warn(`[Cyclopedia] Error getting ${currencyType} from UI:`, error); return null; } }
+function getCurrencyFromGameState(currencyType) { try { const gameState = globalThis.state?.player?.getSnapshot()?.context; if (!gameState) return null; const paths = CURRENCY_GAME_STATE_PATHS[currencyType]; if (!paths) return null; for (const path of paths) { const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState); if (typeof value === 'number' && !isNaN(value) && value >= 0) return value; } return null; } catch (error) { return null; } }
+function getGoldFromUI() { return getCurrencyFromUI('gold'); }
 
-function getBeastCoinsFromUI() {
-  try {
-    const beastCoinsBtn = Array.from(DOMCache.getAll('button'))
-      .find(btn => {
-        const div = btn.querySelector('.frame-pressed-1[title="Beast Coins"]');
-        const img = btn.querySelector('img[alt="Player Beast Coins"]');
-        return div || img;
-      });
-    if (!beastCoinsBtn) return null;
-    const span = beastCoinsBtn.querySelector('span');
-    if (!span) return null;
-    const value = span.textContent.replace(/,/g, '');
-    const parsedValue = parseInt(value, 10);
-    return isNaN(parsedValue) ? null : parsedValue;
-  } catch (error) {
-    console.warn('[Cyclopedia] Error getting beast coins from UI:', error);
-    return null;
-  }
-}
-
-function getDustFromUI() {
-  try {
-    const dustDiv = Array.from(DOMCache.getAll('div'))
-      .find(div => {
-        const hasTitle = div.getAttribute('title') === 'Dust';
-        const img = div.querySelector('img[alt="Dust"]');
-        return hasTitle || img;
-      });
-    
-    if (!dustDiv) return null;
-    
-    const span = dustDiv.querySelector('span');
-    if (!span) return null;
-    
-    const value = span.textContent.replace(/,/g, '');
-    const parsedValue = parseInt(value, 10);
-    if (isNaN(parsedValue)) {
-      console.warn('[Cyclopedia] Invalid dust value:', value);
-      return null;
-    }
-    return parsedValue;
-  } catch (error) {
-    console.warn('[Cyclopedia] Error getting dust from UI:', error);
-    return null;
-  }
-}
-
-function getDustFromGameState() {
-  try {
-    const gameState = globalThis.state?.player?.getSnapshot()?.context;
-    if (!gameState) return null;
-    
-    const possiblePaths = [
-      gameState.inventory?.dust,
-      gameState.inventory?.dust?.count,
-      gameState.resources?.dust,
-      gameState.player?.dust,
-      gameState.dust
-    ];
-    
-    for (const dustValue of possiblePaths) {
-      if (typeof dustValue === 'number' && !isNaN(dustValue) && dustValue > 0) {
-        return dustValue;
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    return null;
-  }
-}
+function getBeastCoinsFromUI() { return getCurrencyFromUI('beastCoins'); }
+function getDustFromUI() { return getCurrencyFromUI('dust'); }
+function getDustFromGameState() { return getCurrencyFromGameState('dust'); }
 
 function getHuntingMarksFromUI() {
   try {
-    let huntingMarksSprite = DOMCache.get('.sprite.item.relative.id-35572') ||
-                            DOMCache.get('.sprite.item.relative[class*="id-35572"]') ||
-                            DOMCache.get('img[src*="huntingmarks.png"]')?.closest('.sprite.item.relative') ||
-                            DOMCache.get('[data-item*="hunting"]') ||
-                            DOMCache.get('[data-item*="mark"]');
+    // Try predefined selectors first
+    let huntingMarksSprite = HUNTING_MARKS_UI_SELECTORS.reduce((found, selector) => {
+      if (found) return found;
+      const element = DOMCache.get(selector);
+      return element?.tagName === 'IMG' ? element.closest('.sprite.item.relative') : element;
+    }, null);
     
-  if (!huntingMarksSprite) {
+    // Fallback: search for text content
+    if (!huntingMarksSprite) {
       const huntingMarksText = Array.from(DOMCache.getAll('*')).find(el => 
-      el.textContent && el.textContent.includes('Hunting Marks')
-    );
-    if (huntingMarksText) {
-      huntingMarksSprite = huntingMarksText.closest('.sprite.item.relative') || huntingMarksText;
+        el.textContent?.includes('Hunting Marks')
+      );
+      huntingMarksSprite = huntingMarksText?.closest('.sprite.item.relative') || huntingMarksText;
     }
-  }
-  
-  if (!huntingMarksSprite) {
-    return null;
-  }
-  
-  let span = huntingMarksSprite.querySelector('.font-outlined-fill');
-  
-  if (!span) {
-    const spans = huntingMarksSprite.querySelectorAll('span');
-    span = Array.from(spans).find(s => {
-      const text = s.textContent.trim();
-      return /^\d+$/.test(text.replace(/,/g, ''));
-    });
-  }
-  
-  if (!span) {
-    const textContent = huntingMarksSprite.textContent;
-    const numberMatch = textContent.match(/(\d{1,3}(?:,\d{3})*)/);
-    if (numberMatch) {
-      const value = numberMatch[1].replace(/,/g, '');
-      const parsedValue = parseInt(value, 10);
-      if (!isNaN(parsedValue)) {
-        return parsedValue;
-      }
+    
+    if (!huntingMarksSprite) return null;
+    
+    // Extract number from span or text content
+    let span = huntingMarksSprite.querySelector('.font-outlined-fill') || 
+               Array.from(huntingMarksSprite.querySelectorAll('span')).find(s => 
+                 /^\d+$/.test(s.textContent.trim().replace(/,/g, ''))
+               );
+    
+    const textContent = span?.textContent || huntingMarksSprite.textContent;
+      const numberMatch = textContent.match(/(\d{1,3}(?:,\d{3})*)/);
+      if (numberMatch) {
+      const parsedValue = parseInt(numberMatch[1].replace(/,/g, ''), 10);
+        if (!isNaN(parsedValue)) return parsedValue;
     }
-  }
-  
-  if (!span) {
+    
     return null;
-  }
-  
-  const value = span.textContent.replace(/,/g, '');
-  const parsedValue = parseInt(value, 10);
-  if (isNaN(parsedValue)) {
-    console.warn('[Cyclopedia] Invalid Hunting Marks value:', value);
-    return null;
-  }
-  return parsedValue;
-  } catch (error) {
-    return null;
-  }
+  } catch (error) { 
+      return null;
+    }
 }
 
 function getHuntingMarksFromGameState() {
@@ -478,156 +521,28 @@ function getHuntingMarksFromGameState() {
     const gameState = globalThis.state?.player?.getSnapshot()?.context;
     if (!gameState) return null;
     
-    const possiblePaths = [
-      gameState.inventory?.huntingMarks,
-      gameState.inventory?.huntingMarks?.count,
-      gameState.resources?.huntingMarks,
-      gameState.player?.huntingMarks,
-      gameState.huntingMarks,
-      gameState.hunting?.marks,
-      gameState.marks,
-      gameState.huntingMarks?.count,
-      gameState.huntingMarks?.amount,
-      gameState.huntingMarks?.quantity,
-      gameState.hunting?.huntingMarks,
-      gameState.hunting?.huntingMarks?.count,
-      gameState.player?.hunting?.marks,
-      gameState.player?.hunting?.huntingMarks,
-      gameState.player?.huntingMarks,
-      gameState.player?.marks,
-      gameState.inventory?.marks,
-      gameState.inventory?.marks?.count,
-      gameState.player?.inventory?.huntingMarks,
-      gameState.player?.inventory?.huntingMarks?.count,
-      gameState.player?.resources?.huntingMarks,
-      gameState.player?.resources?.huntingMarks?.count,
-      gameState.context?.inventory?.huntingMarks,
-      gameState.context?.inventory?.huntingMarks?.count,
-      gameState.context?.player?.huntingMarks,
-      gameState.context?.player?.huntingMarks?.count,
-      gameState.context?.huntingMarks,
-      gameState.context?.huntingMarks?.count,
-      gameState.context?.hunting?.marks,
-      gameState.context?.hunting?.marks?.count,
-      gameState.questLog?.hunting?.marks,
-      gameState.questLog?.hunting?.huntingMarks,
-      gameState.questLog?.task?.huntingMarks,
-      gameState.questLog?.task?.marks,
-      gameState.questLog?.task?.points,
-      gameState.questLog?.seashell?.huntingMarks,
-      gameState.questLog?.seashell?.marks,
-      gameState.huntingMarks,
-      gameState.huntingMarksCount,
-      gameState.huntingMarksAmount,
-      gameState.huntingMarksQuantity,
-      gameState.huntingMarksTotal,
-      gameState.totalHuntingMarks,
-      gameState.huntingMarksEarned,
-      gameState.huntingMarksCollected
-    ];
-    
-    for (const huntingMarksValue of possiblePaths) {
-      if (typeof huntingMarksValue === 'number' && !isNaN(huntingMarksValue) && huntingMarksValue >= 0) {
-        return huntingMarksValue;
-      }
-    }
-    
-    const searchRecursively = (obj, depth = 0, path = '') => {
-      if (depth > 4) return null;
-      if (!obj || typeof obj !== 'object') return null;
-      
-      for (const [key, value] of Object.entries(obj)) {
-        const currentPath = path ? `${path}.${key}` : key;
-        
-        if (key.toLowerCase().includes('hunting') && key.toLowerCase().includes('mark')) {
-          if (typeof value === 'number' && !isNaN(value) && value >= 0) {
-            return value;
-          }
+    // Check optimized paths (primary path is questLog?.task?.points)
+    for (const path of HUNTING_MARKS_PATHS) {
+      const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState);
+          if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
         }
         
-        if (key.toLowerCase() === 'marks' && typeof value === 'number' && !isNaN(value) && value >= 0) {
-          const parentKey = path.split('.').pop() || '';
-          if (parentKey.toLowerCase().includes('hunting') || 
-              parentKey.toLowerCase().includes('player') || 
-              parentKey.toLowerCase().includes('inventory') ||
-              parentKey.toLowerCase().includes('quest') ||
-              parentKey.toLowerCase().includes('task')) {
-            return value;
-          }
-        }
-        
-        if (key.toLowerCase() === 'points' && typeof value === 'number' && !isNaN(value) && value >= 0) {
-          const parentKey = path.split('.').pop() || '';
-          if (parentKey.toLowerCase().includes('task') || 
-              parentKey.toLowerCase().includes('quest')) {
-            return value;
-          }
-        }
-        
-        if (typeof value === 'number' && !isNaN(value) && value >= 0) {
-          const keyLower = key.toLowerCase();
-          if (keyLower.includes('hunt') || 
-              keyLower.includes('mark') || 
-              keyLower.includes('task') ||
-              keyLower.includes('quest')) {
-            if (keyLower.includes('hunting') || (keyLower.includes('hunt') && keyLower.includes('mark'))) {
-              return value;
-            }
-          }
-        }
-        
-        if (typeof value === 'object' && value !== null) {
-          const result = searchRecursively(value, depth + 1, currentPath);
-          if (result !== null) return result;
-        }
-      }
       return null;
-    };
-    
-    const recursiveResult = searchRecursively(gameState);
-    if (recursiveResult !== null) {
-      return recursiveResult;
-    }
-    
-    if (globalThis.state?.huntingMarks) {
-      const value = globalThis.state.huntingMarks;
-      if (typeof value === 'number' && !isNaN(value) && value >= 0) {
-        return value;
-      }
-    }
-    
-    if (globalThis.state?.player?.huntingMarks) {
-      const value = globalThis.state.player.huntingMarks;
-      if (typeof value === 'number' && !isNaN(value) && value >= 0) {
-        return value;
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    return null;
+  } catch (error) { 
+    return null; 
   }
 }
 
 async function getHuntingMarksFromProfileAPI() {
   try {
-    console.log('[Cyclopedia] Fetching hunting marks from API...');
-    
     let playerName = globalThis.state?.player?.getSnapshot()?.context?.player?.name;
-    if (!playerName) {
-      playerName = globalThis.state?.player?.getSnapshot()?.context?.name;
-    }
-    if (!playerName) {
-      console.warn('[Cyclopedia] No player name found for API request');
-      return null;
-    }
+    if (!playerName) playerName = globalThis.state?.player?.getSnapshot()?.context?.name;
+    if (!playerName) return null;
     
     const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
     
     const response = await fetch(apiUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     
     const data = await response.json();
     
@@ -636,9 +551,7 @@ async function getHuntingMarksFromProfileAPI() {
       
       for (const [key, value] of Object.entries(obj)) {
         if (key.toLowerCase().includes('hunting') && key.toLowerCase().includes('mark')) {
-          if (typeof value === 'number' && !isNaN(value) && value >= 0) {
-            return value;
-          }
+          if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
         }
         if (typeof value === 'object' && value !== null) {
           const result = searchForHuntingMarks(value);
@@ -649,12 +562,7 @@ async function getHuntingMarksFromProfileAPI() {
     };
     
     const huntingMarks = searchForHuntingMarks(data);
-    if (huntingMarks !== null) {
-      console.log('[Cyclopedia] Hunting marks fetched successfully:', huntingMarks);
-      return huntingMarks;
-    }
-    
-    console.log('[Cyclopedia] No hunting marks found in API response');
+    if (huntingMarks !== null) return huntingMarks;
     return null;
   } catch (error) {
     console.error('[Cyclopedia] Error fetching hunting marks from API:', error);
@@ -675,10 +583,15 @@ async function getHuntingMarksFromProfileAPI() {
   }
 }
 
+Object.assign(CURRENCY_CONFIG, {
+  gold: { uiGetter: getGoldFromUI, gameStatePath: 'gold', name: 'Gold', icon: '/assets/icons/goldpile.png', rarity: '1' },
+  beastCoins: { uiGetter: getBeastCoinsFromUI, gameStatePath: 'coin', name: 'Beast Coins', icon: '/assets/icons/beastcoin.png', rarity: '2' },
+  dust: { gameStateGetter: getDustFromGameState, gameStatePath: 'dust', name: 'Dust', icon: '/assets/icons/dust.png', rarity: '3' },
+  huntingMarks: { uiGetter: getHuntingMarksFromUI, gameStateGetter: getHuntingMarksFromGameState, apiGetter: getHuntingMarksFromProfileAPI, gameStatePath: 'questLog.task.points', name: 'Hunting Marks', icon: 'sprite://35572', rarity: '3' }
+});
+
 async function processLazyLoadQueue() {
-  if (cyclopediaState.isProcessingQueue || cyclopediaState.lazyLoadQueue.length === 0) {
-    return;
-  }
+  if (cyclopediaState.isProcessingQueue || cyclopediaState.lazyLoadQueue.length === 0) return;
   
   cyclopediaState.isProcessingQueue = true;
   
@@ -688,14 +601,10 @@ async function processLazyLoadQueue() {
       
       try {
         const monsterData = safeGetMonsterData(monsterId);
-        if (callback && typeof callback === 'function') {
-          callback(monsterData);
-        }
+        if (callback && typeof callback === 'function') callback(monsterData);
       } catch (error) {
         console.error(`[Cyclopedia] Error loading monster ${monsterId}:`, error);
-        if (callback && typeof callback === 'function') {
-          callback(null);
-        }
+        if (callback && typeof callback === 'function') callback(null);
       }
       
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -707,21 +616,14 @@ async function processLazyLoadQueue() {
 
 function queueMonsterDataLoad(monsterId, callback) {
   cyclopediaState.lazyLoadQueue.push({ monsterId, callback });
-  
-  if (!cyclopediaState.isProcessingQueue) {
-    processLazyLoadQueue();
-  }
+  if (!cyclopediaState.isProcessingQueue) processLazyLoadQueue();
 }
 
 function safeGetMonsterData(monsterId) {
   try {
-    if (!globalThis.state?.utils?.getMonster) {
-      throw new Error('Monster API not available');
-    }
+    if (!globalThis.state?.utils?.getMonster) throw new Error('Monster API not available');
     const monsterData = globalThis.state.utils.getMonster(monsterId);
-    if (!monsterData?.metadata) {
-      throw new Error('Invalid monster data');
-    }
+    if (!monsterData?.metadata) throw new Error('Invalid monster data');
     return monsterData;
   } catch (error) {
     console.error(`[Cyclopedia] Error getting monster data for ID ${monsterId}:`, error);
@@ -729,226 +631,164 @@ function safeGetMonsterData(monsterId) {
   }
 }
 
-const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
-  if (cyclopediaState.monsterNameMapBuilt && cyclopediaState.monsterNameMap) {
-    return cyclopediaState.monsterNameMap;
+// =======================
+// Characters Tab Caching Utilities
+// =======================
+function getCachedProfileData(playerName, ttl = 300000) { return cyclopediaState.getProfileData(playerName, ttl); }
+function setCachedProfileData(playerName, data) { cyclopediaState.setProfileData(playerName, data); }
+function getCachedLeaderboardData(category, ttl = 300000) { return cyclopediaState.getLeaderboardData(category, ttl); }
+function setCachedLeaderboardData(category, data) { cyclopediaState.setLeaderboardData(category, data); }
+function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
+function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
+function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
+
+// Image caching functions for room thumbnails
+function getCachedRoomThumbnail(roomCode) {
+  return cyclopediaState.cache.roomThumbnails.get(roomCode);
+}
+
+function setCachedRoomThumbnail(roomCode, imgElement) {
+  cyclopediaState.cache.roomThumbnails.set(roomCode, imgElement);
+  // Enforce cache size limit
+  if (cyclopediaState.cache.roomThumbnails.size > cyclopediaState.cache.maxSize.roomThumbnails) {
+    const firstKey = cyclopediaState.cache.roomThumbnails.keys().next().value;
+    cyclopediaState.cache.roomThumbnails.delete(firstKey);
   }
+}
+
+function createRoomThumbnail(roomCode, roomName, size = 32) {
+  // Check if we already have a cached thumbnail for this room
+  let cachedThumbnail = getCachedRoomThumbnail(roomCode);
+  
+  if (cachedThumbnail) {
+    // Clone the cached image to avoid DOM conflicts
+    const clonedThumbnail = cachedThumbnail.cloneNode(true);
+    clonedThumbnail.style.width = `${size}px`;
+    clonedThumbnail.style.height = `${size}px`;
+    return clonedThumbnail;
+  }
+  
+  // Create new thumbnail if not cached
+  const thumbnail = document.createElement('img');
+  thumbnail.src = `/assets/room-thumbnails/${roomCode}.png`;
+  thumbnail.alt = roomName;
+  thumbnail.style.cssText = `
+    width: ${size}px;
+    height: ${size}px;
+    border-radius: 4px;
+    object-fit: cover;
+  `;
+  
+  // Cache the thumbnail for future use
+  setCachedRoomThumbnail(roomCode, thumbnail);
+  
+  return thumbnail;
+}
+
+const MONSTER_MAP_CONFIG = { maxSearchId: 1000, maxConsecutiveFailures: 10, fallbackMaxId: 200 };
+const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
+  if (cyclopediaState.monsterNameMapBuilt && cyclopediaState.monsterNameMap) return cyclopediaState.monsterNameMap;
   cyclopediaState.monsterNameMap = new Map();
   const utils = globalThis.state.utils;
+  if (!utils?.getMonster) return;
   
-  if (!utils || !utils.getMonster) {
-    console.warn('[Cyclopedia] Monster API not available, skipping name map build');
-    return;
-  }
-  
-  let maxId = 200;
-  let consecutiveFailures = 0;
-  const maxConsecutiveFailures = 10;
-  
+  let maxId = MONSTER_MAP_CONFIG.fallbackMaxId, consecutiveFailures = 0;
   try {
-    for (let i = 1; i < 1000; i++) {
+    for (let i = 1; i < MONSTER_MAP_CONFIG.maxSearchId; i++) {
       try {
         const monster = utils.getMonster(i);
-        if (!monster || !monster.metadata || !monster.metadata.name) {
-          consecutiveFailures++;
-          if (consecutiveFailures >= maxConsecutiveFailures) {
-            maxId = Math.max(1, i - maxConsecutiveFailures);
-            break;
+        if (!monster?.metadata?.name) {
+          if (++consecutiveFailures >= MONSTER_MAP_CONFIG.maxConsecutiveFailures) {
+            maxId = Math.max(1, i - MONSTER_MAP_CONFIG.maxConsecutiveFailures); break;
           }
-        } else {
-          consecutiveFailures = 0;
-          maxId = i;
-        }
+        } else { consecutiveFailures = 0; maxId = i; }
       } catch (error) {
-        consecutiveFailures++;
-        if (consecutiveFailures >= maxConsecutiveFailures) {
-          maxId = Math.max(1, i - maxConsecutiveFailures);
-          break;
+        if (++consecutiveFailures >= MONSTER_MAP_CONFIG.maxConsecutiveFailures) {
+          maxId = Math.max(1, i - MONSTER_MAP_CONFIG.maxConsecutiveFailures); break;
         }
       }
     }
-  } catch (error) {
-    console.warn('[Cyclopedia] Error determining monster ID range:', error);
-  }
+  } catch (error) {}
   
   for (let i = 1; i <= maxId; i++) {
     try {
       const monster = utils.getMonster(i);
-      if (monster && monster.metadata && monster.metadata.name) {
+      if (monster?.metadata?.name) {
         cyclopediaState.monsterNameMap.set(monster.metadata.name.toLowerCase(), { monster, index: i });
       }
-    } catch (error) {
-      continue;
-    }
+    } catch (error) { continue; }
   }
   cyclopediaState.monsterNameMapBuilt = true;
   
-  // Hardcode stats for Old Giant Spider
-  const entry = cyclopediaState.monsterNameMap.get('old giant spider');
-  if (entry && entry.monster && entry.monster.metadata && entry.monster.metadata.baseStats) {
-    entry.monster.metadata.baseStats = {
-      hp: 1140,
-      ad: 108,
-      ap: 30,
-      armor: 30,
-      magicResist: 30
-    };
-  }
-  
-  // Hardcode stats for Black Knight
-  const blackKnightEntry = cyclopediaState.monsterNameMap.get('black knight');
-  if (blackKnightEntry && blackKnightEntry.monster && blackKnightEntry.monster.metadata) {
-    blackKnightEntry.monster.metadata.baseStats = {
-      hp: 4800,
-      ad: 66,
-      ap: 0,
-      armor: 975,
-      magicResist: 975
-    };
-    // Set level to 300
-    if (blackKnightEntry.monster.metadata) {
-      blackKnightEntry.monster.metadata.level = 300;
+  Object.entries(GAME_DATA.HARDCODED_MONSTER_STATS).forEach(([monsterName, stats]) => {
+    const entry = cyclopediaState.monsterNameMap.get(monsterName);
+    if (entry?.monster?.metadata) {
+      if (stats.baseStats) entry.monster.metadata.baseStats = stats.baseStats;
+      if (stats.level) entry.monster.metadata.level = stats.level;
     }
-  }
-  
-  // Hardcode stats for Dead Tree
-  const deadTreeEntry = cyclopediaState.monsterNameMap.get('dead tree');
-  if (deadTreeEntry && deadTreeEntry.monster && deadTreeEntry.monster.metadata) {
-    deadTreeEntry.monster.metadata.baseStats = {
-      hp: 7000,
-      ad: 0,
-      ap: 0,
-      armor: 700,
-      magicResist: 700
-    };
-    // Set level to 100
-    if (deadTreeEntry.monster.metadata) {
-      deadTreeEntry.monster.metadata.level = 100;
-    }
-  }
-  
-  // Hardcode stats for Earth Crystal
-  const earthCrystalEntry = cyclopediaState.monsterNameMap.get('earth crystal');
-  if (earthCrystalEntry && earthCrystalEntry.monster && earthCrystalEntry.monster.metadata) {
-    earthCrystalEntry.monster.metadata.baseStats = {
-      hp: 350,
-      ad: 0,
-      ap: 0,
-      armor: 350,
-      magicResist: 350
-    };
-    // Set level to 50
-    if (earthCrystalEntry.monster.metadata) {
-      earthCrystalEntry.monster.metadata.level = 50;
-    }
-  }
-  
-  // Hardcode stats for Energy Crystal
-  const energyCrystalEntry = cyclopediaState.monsterNameMap.get('energy crystal');
-  if (energyCrystalEntry && energyCrystalEntry.monster && energyCrystalEntry.monster.metadata) {
-    energyCrystalEntry.monster.metadata.baseStats = {
-      hp: 350,
-      ad: 0,
-      ap: 0,
-      armor: 150,
-      magicResist: 30
-    };
-    // Set level to 50
-    if (energyCrystalEntry.monster.metadata) {
-      energyCrystalEntry.monster.metadata.level = 50;
-    }
-  }
-  
-  // Hardcode stats for Magma Crystal
-  const magmaCrystalEntry = cyclopediaState.monsterNameMap.get('magma crystal');
-  if (magmaCrystalEntry && magmaCrystalEntry.monster && magmaCrystalEntry.monster.metadata) {
-    magmaCrystalEntry.monster.metadata.baseStats = {
-      hp: 350,
-      ad: 0,
-      ap: 0,
-      armor: 350,
-      magicResist: 350
-    };
-    // Set level to 50
-    if (magmaCrystalEntry.monster.metadata) {
-      magmaCrystalEntry.monster.metadata.level = 50;
-    }
-  }
+  });
   
   return cyclopediaState.monsterNameMap;
 });
 
+const MENU_UTILS = {
+  getGroup: (menuElem) => menuElem.querySelector('div[role="group"]'),
+  getFirstItem: (group) => group?.querySelector('.dropdown-menu-item'),
+  getTierItem: (group) => Array.from(group?.querySelectorAll('.dropdown-menu-item') || []).find(item => /\(Tier[: ]?\d+\)/.test(item.textContent)) || group?.querySelector('.dropdown-menu-item'),
+  extractName: (text, pattern) => {
+    const match = text.trim().match(pattern);
+    return match ? match[1] : text.trim();
+  }
+};
+
 function getMonsterNameFromMenu(menuElem) {
-  const group = menuElem.querySelector('div[role="group"]');
-  if (!group) return null;
-  const firstItem = group.querySelector('.dropdown-menu-item');
-  if (!firstItem) return null;
-  const match = firstItem.textContent.trim().match(/^(.*?)\s*\(/);
-  return match ? match[1] : firstItem.textContent.trim();
+  const group = MENU_UTILS.getGroup(menuElem);
+  const firstItem = MENU_UTILS.getFirstItem(group);
+  return firstItem ? MENU_UTILS.extractName(firstItem.textContent, /^(.*?)\s*\(/) : null;
 }
 
-
+const LOCATION_UTILS = {
+  getMonsterGameId: (monsterName) => {
+    const entry = cyclopediaState.monsterNameMap?.get(monsterName.toLowerCase());
+    if (entry) return entry.index;
+    const maps = window.BestiaryModAPI?.utility?.maps;
+    return maps?.monsterNamesToGameIds?.get(monsterName.toLowerCase());
+  },
+  createLocationData: (actor, index) => ({
+    tileIndex: null, direction: actor.direction || 'unknown', level: actor.level || 1,
+    tier: 0, villain: true, equipment: null, actorIndex: index
+  })
+};
 
 function findMonsterLocations(monsterName) {
   const cacheKey = monsterName.toLowerCase();
-  if (cyclopediaState.monsterLocationCache.has(cacheKey)) {
-    return cyclopediaState.monsterLocationCache.get(cacheKey);
-  }
+  if (cyclopediaState.monsterLocationCache.has(cacheKey)) return cyclopediaState.monsterLocationCache.get(cacheKey);
+  
   const locations = [];
   try {
-    let monsterGameId = null;
-    if (cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(monsterName.toLowerCase());
-      if (entry) {
-        monsterGameId = entry.index;
-      }
-    }
-    if (!monsterGameId) {
-      if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.maps) {
-        const maps = window.BestiaryModAPI.utility.maps;
-        monsterGameId = maps.monsterNamesToGameIds.get(monsterName.toLowerCase());
-      }
-    }
+    const monsterGameId = LOCATION_UTILS.getMonsterGameId(monsterName);
     if (!monsterGameId) {
       cyclopediaState.monsterLocationCache.set(cacheKey, locations);
       return locations;
     }
+    
     const rooms = globalThis.state.utils.ROOMS;
     const roomNames = globalThis.state.utils.ROOM_NAME;
     Object.entries(rooms).forEach(([roomId, room]) => {
       try {
-        if (!room.file || !room.file.data || !room.file.data.actors) {
-          return;
-        }
-        const actors = room.file.data.actors;
-        const monsterInRoom = actors.filter((actor) => {
-          if (!actor) {
-            return false;
-          }
-          return actor.id === monsterGameId;
-        });
+        const actors = room.file?.data?.actors;
+        if (!actors) return;
+        
+        const monsterInRoom = actors.filter(actor => actor?.id === monsterGameId);
         if (monsterInRoom.length > 0) {
           const roomName = roomNames[roomId] || roomId;
-          const roomLocations = monsterInRoom.map((actor, index) => ({
-            tileIndex: null,
-            direction: actor.direction || 'unknown',
-            level: actor.level || 1,
-            tier: 0,
-            villain: true,
-            equipment: null,
-            actorIndex: index
-          }));
-          locations.push({
-            roomId: roomId,
-            roomName: roomName,
-            positions: roomLocations
-          });
+          const roomLocations = monsterInRoom.map((actor, index) => LOCATION_UTILS.createLocationData(actor, index));
+          locations.push({ roomId, roomName, positions: roomLocations });
         }
-      } catch (error) {
-      }
+      } catch (error) {}
     });
-  } catch (error) {
-  }
+  } catch (error) {}
+  
   cyclopediaState.monsterLocationCache.set(cacheKey, locations);
   return locations;
 }
@@ -963,176 +803,58 @@ function getLevelFromExp(exp) {
 }
 
 // =======================
-// 3. DOM/CSS Injection Helpers
+// 5. DOM/CSS Injection Helpers
 // =======================
+const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
+function injectCyclopediaButtonStyles() { if (!document.getElementById('cyclopedia-btn-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-btn-css'; style.textContent = CYCLOPEDIA_BUTTON_CSS; document.head.appendChild(style); } }
 
-function injectCyclopediaButtonStyles() {
-  if (!document.getElementById('cyclopedia-btn-css')) {
-    const style = document.createElement('style');
-    style.id = 'cyclopedia-btn-css';
-    style.textContent = `
-      .cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; }
-      nav.cyclopedia-subnav > button.cyclopedia-btn,
-      nav.cyclopedia-subnav > button.cyclopedia-btn:hover,
-      nav.cyclopedia-subnav > button.cyclopedia-btn:focus {
-        background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
-        border: 6px solid transparent !important;
-        border-color: #ffe066 !important;
-        border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important;
-        color: var(--theme-text, #e6d7b0) !important;
-        font-weight: 700 !important;
-        border-radius: 0 !important;
-        box-sizing: border-box !important;
-        transition: color 0.2s, border-image 0.1s !important;
-        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important;
-        outline: none !important;
-        position: relative !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        font-size: 16px !important;
-        padding: 7px 24px !important;
-        cursor: pointer;
-        flex: 1 1 0;
-        min-width: 0;
-      }
-      nav.cyclopedia-subnav > button.cyclopedia-btn.pressed,
-      nav.cyclopedia-subnav > button.cyclopedia-btn:active {
-        border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important;
-      }
-      nav.cyclopedia-subnav > button.cyclopedia-btn.active {
-        border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important;
-      }
-      /* Home button specific styling - 42x42 pixels */
-      nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"],
-      nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] {
-        width: 42px !important;
-        height: 42px !important;
-        min-width: 42px !important;
-        min-height: 42px !important;
-        max-width: 42px !important;
-        max-height: 42px !important;
-        flex: 0 0 42px !important;
-        padding: 0 !important;
-        font-size: 12px !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-}
+const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
+function injectCyclopediaBoxStyles() { if (!document.getElementById('cyclopedia-box-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-box-css'; style.textContent = CYCLOPEDIA_BOX_CSS; document.head.appendChild(style); } }
 
-function injectCyclopediaBoxStyles() {
-  if (!document.getElementById('cyclopedia-box-css')) {
-    const style = document.createElement('style');
-    style.id = 'cyclopedia-box-css';
-    style.textContent = `
-      .cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; }
-      .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; }
-      .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; }
-      .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; }
-      .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; }
-      .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }
-    `;
-    document.head.appendChild(style);
-  }
-}
-
-function injectCyclopediaSelectedCss() {
-  if (!document.getElementById('cyclopedia-selected-css')) {
-    const style = document.createElement('style');
-    style.id = 'cyclopedia-selected-css';
-    style.textContent = `
-      .cyclopedia-selected {
-        background: rgba(255,255,255,0.18) !important;
-        color: #ffe066 !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait .absolute {
-        background: none !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute {
-        background: none !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] {
-        background: none !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] {
-        background: none !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] {
-        background: none !important;
-      }
-      
-      .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 {
-        background: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-}
+const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: #ffe066 !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
+function injectCyclopediaSelectedCss() { if (!document.getElementById('cyclopedia-selected-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-selected-css'; style.textContent = CYCLOPEDIA_SELECTED_CSS; document.head.appendChild(style); } }
 
 function removeCyclopediaFromMenus() {
-  function isInMenu(el, menuLabel) {
+  // Generic DOM traversal helper
+  const traverseParents = (el, condition) => {
     let parent = el.parentElement;
     while (parent) {
-      if (parent.textContent && parent.textContent.includes(menuLabel)) {
-        if (parent.getAttribute('role') === 'menu' || parent.classList.contains('dropdown-menu')) {
-          return true;
-        }
-      }
+      if (condition(parent)) return true;
       parent = parent.parentElement;
     }
     return false;
-  }
+  };
   
-  function isHeaderButton(el) {
-    if (el.classList && el.classList.contains('cyclopedia-header-btn')) {
-      return true;
-    }
-    
-    if (el.tagName === 'LI' && el.querySelector('.cyclopedia-header-btn')) {
-      return true;
-    }
-    
-    let parent = el.parentElement;
-    while (parent) {
-      if (parent.classList && parent.classList.contains('cyclopedia-header-btn')) {
-        return true;
-      }
-      if (parent.tagName === 'LI' && parent.querySelector('.cyclopedia-header-btn')) {
-        return true;
-      }
-      parent = parent.parentElement;
-    }
-    return false;
-  }
+  // Check if element is in a specific menu
+  const isInMenu = (el, menuLabel) => traverseParents(el, parent => 
+    parent.textContent?.includes(menuLabel) && 
+    (parent.getAttribute('role') === 'menu' || parent.classList.contains('dropdown-menu'))
+  );
   
-  function isInHeader(el) {
-    let parent = el.parentElement;
-    while (parent) {
-      if (parent.tagName === 'NAV' || (parent.classList && parent.classList.contains('w-full'))) {
-        return true;
-      }
-      parent = parent.parentElement;
-    }
-    return false;
-  }
+  // Check if element is a header button
+  const isHeaderButton = (el) => {
+    if (el.classList?.contains('cyclopedia-header-btn') || 
+        (el.tagName === 'LI' && el.querySelector('.cyclopedia-header-btn'))) return true;
+    return traverseParents(el, parent => 
+      parent.classList?.contains('cyclopedia-header-btn') || 
+      (parent.tagName === 'LI' && parent.querySelector('.cyclopedia-header-btn'))
+    );
+  };
   
+  // Check if element is in header
+  const isInHeader = (el) => traverseParents(el, parent => 
+    parent.tagName === 'NAV' || parent.classList?.contains('w-full')
+  );
+  
+  // Process all cyclopedia elements
   document.querySelectorAll('div, li').forEach(el => {
-    const textContent = el.textContent.trim().toLowerCase();
-    if (textContent === 'cyclopedia') {
+    if (el.textContent.trim().toLowerCase() === 'cyclopedia') {
       const inMyAccount = isInMenu(el, 'My account');
       const inGameMode = isInMenu(el, 'Game mode');
       const isHeader = isHeaderButton(el);
       const inHeader = isInHeader(el);
       
-      if ((inMyAccount || inGameMode) && !isHeader && !inHeader) {
-        el.style.display = 'none';
-      }
+      if ((inMyAccount || inGameMode) && !isHeader && !inHeader) el.style.display = 'none';
     }
   });
 }
@@ -1140,63 +862,24 @@ function removeCyclopediaFromMenus() {
 setTimeout(removeCyclopediaFromMenus, 500);
 const cyclopediaMenuObserver = new MutationObserver(removeCyclopediaFromMenus);
 cyclopediaMenuObserver.observe(document.body, { childList: true, subtree: true });
+window.cyclopediaMenuObserver = cyclopediaMenuObserver;
 
 // =======================
-// 4. UI Creation Functions
+// 6. UI Creation Functions
 // =======================
 function createBox({
-  title,
-  items,
-  extraBoxStyles = {},
-  type = 'creature',
-  selectedCreature,
-  selectedEquipment,
-  selectedInventory,
-  setSelectedCreature,
-  setSelectedEquipment,
-  setSelectedInventory,
-  updateRightCol
+  title, items, extraBoxStyles = {}, type = 'creature', selectedCreature, selectedEquipment, selectedInventory,
+  setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, clearAllSelections = null
 }) {
-  if (!api || !api.ui || !api.ui.components || typeof api.ui.components.createScrollContainer !== 'function') {
-    console.error('[Cyclopedia] createBox: api.ui.components.createScrollContainer is not available.');
-    const fallback = document.createElement('div');
-    fallback.textContent = 'Cyclopedia UI error: scroll container unavailable.';
-    fallback.style.color = 'red';
-    return fallback;
-  }
-  if (!Array.isArray(items)) {
-    console.warn('[Cyclopedia] createBox: items is not an array. Defaulting to empty list.');
-    items = [];
-  }
-  const box = document.createElement('div');
-  box.style.flex = '1 1 0';
-  box.style.display = 'flex';
-  box.style.flexDirection = 'column';
-  box.style.margin = '0';
-  box.style.padding = '0';
-  box.style.minHeight = '0';
-  box.style.height = '100%';
-  Object.assign(box.style, extraBoxStyles);
-  const titleEl = document.createElement('h2');
-  titleEl.className = 'widget-top widget-top-text ' + LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
-  titleEl.style.margin = '0';
-  titleEl.style.padding = '2px 8px';
-  titleEl.style.textAlign = 'center';
-  titleEl.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-  const p = document.createElement('p');
-  p.textContent = title;
-  p.className = LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
-  p.style.margin = '0';
-  p.style.padding = '0';
-  p.style.textAlign = 'center';
-  p.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-  titleEl.appendChild(p);
+  if (!Array.isArray(items)) items = [];
+  
+  const box = DOMUtils.createElement('div');
+  DOMUtils.applyCommonStyles(box, extraBoxStyles);
+  
+  const titleEl = DOMUtils.createTitle(title);
   box.appendChild(titleEl);
-  const scrollContainer = api.ui.components.createScrollContainer({
-    height: '100%',
-    padding: false,
-    content: null
-  });
+  
+  const scrollContainer = DOMUtils.createScrollContainer();
   
   if (!scrollContainer || !scrollContainer.element) {
     console.error('[Cyclopedia] createBox: scrollContainer creation failed');
@@ -1206,68 +889,78 @@ function createBox({
     return fallback;
   }
   
-  scrollContainer.element.style.flex = '1 1 0';
-  scrollContainer.element.style.minHeight = '0';
-  scrollContainer.element.style.overflowY = 'scroll';
-  items.forEach(name => {
-    const item = document.createElement('div');
-    item.textContent = name;
-    item.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
-    item.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-    item.style.cursor = 'pointer';
-    item.style.padding = '2px 4px';
-    item.style.borderRadius = '2px';
-    item.style.textAlign = 'left';
-    item.addEventListener('mouseenter', () => {
-      item.style.background = 'rgba(255,255,255,0.08)';
-    });
-    item.addEventListener('mouseleave', () => {
-      if (!item.classList.contains('cyclopedia-selected')) {
-        item.style.background = 'none';
-      }
-    });
-    item.addEventListener('mousedown', () => {
-      item.style.background = 'rgba(255,255,255,0.18)';
-    });
-    item.addEventListener('mouseup', () => {
-      if (!item.classList.contains('cyclopedia-selected')) {
-        item.style.background = 'rgba(255,255,255,0.08)';
-      }
-    });
-    item.addEventListener('click', () => {
-      document.querySelectorAll('.cyclopedia-selected').forEach(el => {
-        el.classList.remove('cyclopedia-selected');
-        el.style.background = 'none';
-        el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-      });
-      item.classList.add('cyclopedia-selected');
-      item.style.background = 'rgba(255,255,255,0.18)';
-      item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
-      if (type === 'creature') {
-        if (title === 'Unobtainable') {
+    items.forEach(name => {
+      const item = DOMUtils.createListItem(name);
+      
+      const clickHandler = () => {
+        if (clearAllSelections) {
+          clearAllSelections();
+        } else if (box.clearAllSelections) {
+          box.clearAllSelections();
+        } else {
+          box.querySelectorAll('.cyclopedia-selected').forEach(el => {
+            el.classList.remove('cyclopedia-selected');
+            el.style.background = 'none';
+            el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+          });
         }
-        setSelectedCreature(name);
-        setSelectedEquipment(null);
-        setSelectedInventory(null);
-        updateRightCol();
-      } else if (type === 'equipment') {
-        setSelectedCreature(null);
-        setSelectedEquipment(name);
-        setSelectedInventory(null);
-        updateRightCol();
-      } else if (type === 'inventory') {
-        setSelectedCreature(null);
-        setSelectedEquipment(null);
-        setSelectedInventory(name);
-        updateRightCol();
+        
+        item.classList.add('cyclopedia-selected');
+        item.style.background = 'rgba(255,255,255,0.18)';
+        item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+        
+          if (type === 'creature') {
+            setSelectedCreature(name);
+            setSelectedEquipment(null);
+            setSelectedInventory(null);
+            updateRightCol();
+          } else if (type === 'equipment') {
+            setSelectedCreature(null);
+            setSelectedEquipment(name);
+            setSelectedInventory(null);
+            updateRightCol();
+          } else if (type === 'inventory') {
+            setSelectedCreature(null);
+            setSelectedEquipment(null);
+            setSelectedInventory(name);
+            updateRightCol();
+        }
+      };
+      
+      const mouseEnterHandler = () => { item.style.background = 'rgba(255,255,255,0.08)'; };
+      const mouseLeaveHandler = () => {
+        if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'none';
+      };
+      const mouseDownHandler = () => { item.style.background = 'rgba(255,255,255,0.18)'; };
+      const mouseUpHandler = () => {
+        if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'rgba(255,255,255,0.08)';
+      };
+      
+      EventHandlerManager.addHandler(item, 'click', clickHandler);
+      EventHandlerManager.addHandler(item, 'mouseenter', mouseEnterHandler);
+      EventHandlerManager.addHandler(item, 'mouseleave', mouseLeaveHandler);
+      EventHandlerManager.addHandler(item, 'mousedown', mouseDownHandler);
+      EventHandlerManager.addHandler(item, 'mouseup', mouseUpHandler);
+      
+      if (type === 'equipment' && selectedEquipment && name === selectedEquipment) {
+        item.classList.add('cyclopedia-selected');
+        item.style.background = 'rgba(255,255,255,0.18)';
+        item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+      }
+      
+      if (type === 'inventory' && selectedInventory && name === selectedInventory) {
+        item.classList.add('cyclopedia-selected');
+        item.style.background = 'rgba(255,255,255,0.18)';
+        item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+      }
+      
+      if (scrollContainer.contentContainer) {
+        scrollContainer.contentContainer.appendChild(item);
+      } else {
+        console.error('[Cyclopedia] createBox: contentContainer not found');
       }
     });
-    if (scrollContainer.contentContainer) {
-      scrollContainer.contentContainer.appendChild(item);
-    } else {
-      console.error('[Cyclopedia] createBox: contentContainer not found');
-    }
-  });
+  
   box.appendChild(scrollContainer.element);
   return box;
 }
@@ -1279,8 +972,6 @@ function createBox({
 
 function addCyclopediaHeaderButton() {
   try {
-    console.log('[Cyclopedia] Adding header button...');
-    
     let retryCount = 0;
     const maxRetries = 20;
     const tryInsert = () => {
@@ -1288,17 +979,11 @@ function addCyclopediaHeaderButton() {
         const headerUl = DOMCache.get('header ul.pixel-font-16.flex.items-center');
         if (!headerUl) {
           retryCount++;
-          if (retryCount > maxRetries) {
-            console.warn('[Cyclopedia] addCyclopediaHeaderButton: header not found after max retries.');
-            return;
-          }
+          if (retryCount > maxRetries) return;
           setTimeout(tryInsert, 500);
           return;
         }
-        if (headerUl.querySelector('.cyclopedia-header-btn')) {
-          console.log('[Cyclopedia] Header button already exists');
-          return;
-        }
+        if (headerUl.querySelector('.cyclopedia-header-btn')) return;
         
         const li = document.createElement('li');
         li.className = 'hover:text-whiteExp';
@@ -1321,7 +1006,6 @@ function addCyclopediaHeaderButton() {
         } else {
           headerUl.appendChild(li);
         }
-        console.log('[Cyclopedia] Header button added successfully');
       } catch (insertError) {
         console.error('[Cyclopedia] Error inserting header button:', insertError);
       }
@@ -1333,38 +1017,24 @@ function addCyclopediaHeaderButton() {
 }
 
 function getEquipmentNameFromMenu(menuElem) {
-  const group = menuElem.querySelector('div[role="group"]');
-  if (!group) return null;
-  const firstItem = Array.from(group.querySelectorAll('.dropdown-menu-item')).find(item => {
-    return /\(Tier[: ]?\d+\)/.test(item.textContent);
-  }) || group.querySelector('.dropdown-menu-item');
-  if (!firstItem) return null;
-  const match = firstItem.textContent.trim().match(/^(.*?)\s*\(Tier[: ]?\d+\)/);
-  return match ? match[1] : firstItem.textContent.trim();
+  const group = MENU_UTILS.getGroup(menuElem);
+  const tierItem = MENU_UTILS.getTierItem(group);
+  return tierItem ? MENU_UTILS.extractName(tierItem.textContent, /^(.*?)\s*\(Tier[: ]?\d+\)/) : null;
 }
 
 function injectCyclopediaButton(menuElem) {
-  // Only show Cyclopedia button if data-scroll-locked is less than '2'
   const body = document.body;
   const scrollLocked = body.getAttribute('data-scroll-locked');
   if (scrollLocked >= '2') return;
   
-  // Remove ALL existing Cyclopedia buttons in this menu (robust duplicate prevention)
   const existingButtons = menuElem.querySelectorAll('.cyclopedia-menu-item');
   existingButtons.forEach(btn => {
     try {
-      if (btn.parentNode) {
-        btn.parentNode.removeChild(btn);
-      }
-    } catch (error) {
-      console.warn('[Cyclopedia] Error removing existing button:', error);
-    }
+      if (btn.parentNode) btn.parentNode.removeChild(btn);
+    } catch (error) {}
   });
   
-  // If we just removed buttons, don't inject new ones (menu is being cleaned up)
-  if (existingButtons.length > 0) {
-    return;
-  }
+  if (existingButtons.length > 0) return;
   
   const monsterName = getMonsterNameFromMenu(menuElem);
   const equipmentName = getEquipmentNameFromMenu(menuElem);
@@ -1384,7 +1054,6 @@ function injectCyclopediaButton(menuElem) {
     e.stopPropagation();
     const equipmentToOpen = matchedEquipment;
     const creatureToOpen = monsterName;
-    // Open Cyclopedia immediately
     if (equipmentToOpen) {
       openCyclopediaModal({ equipment: equipmentToOpen });
     } else if (creatureToOpen && typeof creatureToOpen === 'string') {
@@ -1414,20 +1083,27 @@ function addCyclopediaPressedStateListeners(btn) {
 }
 
 // =======================
-// 5. Data/Model Functions
+// 7. Data/Model Functions
 // =======================
 function startContextMenuObserver() {
+  // Don't restart if already running
+  if (cyclopediaState.observer && window.cyclopediaGlobalObserver) {
+    return;
+  }
+  
+  // Clean up any existing observers before creating new one
   if (window.cyclopediaGlobalObserver) {
     try {
       window.cyclopediaGlobalObserver.disconnect();
-    } catch (error) {
-      console.warn('[Cyclopedia] Error disconnecting global observer:', error);
-    }
+    } catch (error) {}
     window.cyclopediaGlobalObserver = null;
   }
   
   if (cyclopediaState.observer) {
-    stopContextMenuObserver();
+    try {
+      cyclopediaState.observer.disconnect();
+    } catch (error) {}
+    cyclopediaState.observer = null;
   }
   
   cyclopediaState.observer = new MutationObserver((mutations) => {
@@ -1436,16 +1112,12 @@ function startContextMenuObserver() {
         if (node.nodeType === 1) {
           if (node.matches && node.matches('div[data-radix-popper-content-wrapper]')) {
             const menu = node.querySelector('[role="menu"]');
-            if (menu) {
-              setTimeout(() => injectCyclopediaButton(menu), 10);
-            }
+            if (menu) setTimeout(() => injectCyclopediaButton(menu), 10);
           } else if (node.querySelector) {
             const wrapper = node.querySelector('div[data-radix-popper-content-wrapper]');
             if (wrapper) {
               const menu = wrapper.querySelector('[role="menu"]');
-              if (menu) {
-                setTimeout(() => injectCyclopediaButton(menu), 10);
-              }
+              if (menu) setTimeout(() => injectCyclopediaButton(menu), 10);
             }
           }
         }
@@ -1459,22 +1131,22 @@ function startContextMenuObserver() {
 
 function stopContextMenuObserver() {
   if (cyclopediaState.observer) {
+    try {
     cyclopediaState.observer.disconnect();
+    } catch (error) {}
     cyclopediaState.observer = null;
   }
   
   if (window.cyclopediaGlobalObserver) {
     try {
       window.cyclopediaGlobalObserver.disconnect();
-    } catch (error) {
-      console.warn('[Cyclopedia] Error disconnecting global observer during cleanup:', error);
-    }
+    } catch (error) {}
     window.cyclopediaGlobalObserver = null;
   }
 }
 
 // =======================
-// 6. Modal & Template Rendering
+// 8. Modal & Template Rendering
 // =======================
 
 let activeCyclopediaModal = null;
@@ -1482,6 +1154,32 @@ let cyclopediaModalInProgress = false;
 let lastModalCall = 0;
 
 function createStartPageManager() {
+  // HTML templates for different states
+  const HTML_TEMPLATES = {
+    loading: () => `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT};">
+        <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Cyclopedia...</div>
+        <div style="font-size: 14px; color: #888;">Fetching your profile data</div>
+      </div>
+    `,
+    error: (message) => `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Profile Data</div>
+        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
+        <button id="retry-profile-load" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer; font-family: ${LAYOUT_CONSTANTS.FONTS.PRIMARY};">Retry</button>
+      </div>
+    `
+  };
+
+  // Error message mapping
+  const ERROR_MESSAGES = {
+    'AbortError': 'Request timed out. Please check your internet connection and try again.',
+    'Player name not available': 'Player name not available. Please ensure you are logged into the game.',
+    'HTTP': 'Failed to fetch profile data. Please try again.'
+  };
+
   class StartPageManager {
     constructor() {
       this.container = this.createContainer();
@@ -1492,124 +1190,61 @@ function createStartPageManager() {
     createContainer() {
       const container = document.createElement('div');
       Object.assign(container.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        height: '100%',
-        padding: '20px',
-        boxSizing: 'border-box',
-        overflowY: 'scroll'
+        display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
+        padding: '20px', boxSizing: 'border-box', overflowY: 'scroll'
       });
       return container;
     }
 
     showLoading() {
-      this.container.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT};">
-          <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
-          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Cyclopedia...</div>
-          <div style="font-size: 14px; color: #888;">Fetching your profile data</div>
-        </div>
-      `;
+      this.container.innerHTML = HTML_TEMPLATES.loading();
     }
 
     async fetchProfileData(playerName) {
-      try {
-        if (!playerName || typeof playerName !== 'string') {
-          throw new Error('Invalid player name provided');
-        }
+        if (!playerName || typeof playerName !== 'string') throw new Error('Invalid player name provided');
 
-        if (cachedProfileData) {
-          return cachedProfileData;
-        }
+        const cachedData = cyclopediaState.getProfileData(playerName);
+        if (cachedData) return cachedData;
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          controller.abort();
-          console.warn('[Cyclopedia] Profile data fetch timed out');
-        }, START_PAGE_CONFIG.API_TIMEOUT);
+        const timeoutId = setTimeout(() => controller.abort(), START_PAGE_CONFIG.API_TIMEOUT);
 
         try {
           const apiUrl = `${START_PAGE_CONFIG.API_BASE_URL}?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
-          
           const response = await fetch(apiUrl, { 
-            signal: controller.signal,
-            headers: { 'Accept': 'application/json' }
+            signal: controller.signal, headers: { 'Accept': 'application/json' }
           });
           
           clearTimeout(timeoutId);
           
-          if (!response.ok) {
-            throw new Error(`Failed to fetch profile data (HTTP ${response.status})`);
-          }
+          if (!response.ok) throw new Error(`Failed to fetch profile data (HTTP ${response.status})`);
           
           const data = await response.json();
+          if (!data || typeof data !== 'object') throw new Error('Invalid response format from API');
           
-          if (!data || typeof data !== 'object') {
-            throw new Error('Invalid response format from API');
-          }
-          
-          cachedProfileData = data;
+          cyclopediaState.setProfileData(playerName, data);
           return data;
           
         } catch (fetchError) {
           clearTimeout(timeoutId);
-          
           if (fetchError.name === 'AbortError') {
             throw new Error('Request timed out. Please check your internet connection and try again.');
           }
-          
           throw fetchError;
         }
-        
-      } catch (error) {
-        console.error('[Cyclopedia] Error fetching profile data:', error);
-        throw error;
-      }
-    }
-
-    createColumn(width, content) {
-      const wrapper = document.createElement('div');
-      Object.assign(wrapper.style, {
-        width: width + 'px',
-        flex: `0 0 ${width}px`,
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%'
-      });
-      wrapper.appendChild(content);
-      return wrapper;
     }
 
     getErrorMessage(error) {
-      const errorMessages = {
-        'AbortError': 'Request timed out. Please check your internet connection and try again.',
-        'Player name not available': 'Player name not available. Please ensure you are logged into the game.',
-        'HTTP': 'Failed to fetch profile data. Please try again.'
-      };
-      
-      for (const [key, message] of Object.entries(errorMessages)) {
-        if (error.name === key || error.message.includes(key)) {
-          return message;
-        }
+      for (const [key, message] of Object.entries(ERROR_MESSAGES)) {
+        if (error.name === key || error.message.includes(key)) return message;
       }
       return 'An unexpected error occurred while loading the profile data.';
     }
 
     showError(message, retryFunction) {
-      this.container.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
-          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Profile Data</div>
-          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div>
-          <button id="retry-profile-load" style="padding: 8px 16px; background: #444; border: 1px solid #666; border-radius: 4px; color: white; cursor: pointer; font-family: ${LAYOUT_CONSTANTS.FONTS.PRIMARY};">Retry</button>
-        </div>
-      `;
-      
+      this.container.innerHTML = HTML_TEMPLATES.error(message);
       const retryButton = this.container.querySelector('#retry-profile-load');
-      if (retryButton && retryFunction) {
-        retryButton.addEventListener('click', retryFunction);
-      }
+      if (retryButton && retryFunction) retryButton.addEventListener('click', retryFunction);
     }
 
     async initialize() {
@@ -1617,14 +1252,11 @@ function createStartPageManager() {
         this.showLoading();
         
         const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-        if (!playerState?.name) {
-          throw new Error('Player name not available. Please ensure you are logged into the game.');
-        }
+        if (!playerState?.name) throw new Error('Player name not available. Please ensure you are logged into the game.');
         
         const data = await this.fetchProfileData(playerState.name);
         const profileData = Array.isArray(data) && data[0]?.result?.data?.json 
-          ? data[0].result.data.json 
-          : data;
+          ? data[0].result.data.json : data;
         
         this.renderLayout(playerState.name, profileData);
         this.setupTimers();
@@ -1635,58 +1267,37 @@ function createStartPageManager() {
     }
 
     renderLayout(playerName, profileData) {
-      try {
         this.container.innerHTML = '';
         
         const mainFlexRow = document.createElement('div');
         Object.assign(mainFlexRow.style, {
-          display: 'flex',
-          flexDirection: 'row',
-          width: '900px',
-          height: '100%',
-          margin: '0 auto',
-          gap: '0',
-          alignItems: 'center'
+          display: 'flex', flexDirection: 'row', width: '900px', height: '100%',
+          margin: '0 auto', gap: '0', alignItems: 'center'
         });
         
-        const leftCol = this.createColumn(START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT, renderCyclopediaWelcomeColumn(playerName));
+      const leftCol = DOMUtils.createColumn(START_PAGE_CONFIG.COLUMN_WIDTHS.LEFT, renderCyclopediaWelcomeColumn(playerName));
         mainFlexRow.appendChild(leftCol);
         
-        const middleCol = this.createColumn(START_PAGE_CONFIG.COLUMN_WIDTHS.MIDDLE, renderCyclopediaPlayerInfo(profileData));
-        Object.assign(middleCol.style, {
-          justifyContent: 'center',
-          padding: '0 12px'
-        });
+      const middleCol = DOMUtils.createColumn(START_PAGE_CONFIG.COLUMN_WIDTHS.MIDDLE, renderCyclopediaPlayerInfo(profileData));
+        Object.assign(middleCol.style, { justifyContent: 'center', padding: '0 12px' });
         mainFlexRow.appendChild(middleCol);
         
         const rightCol = renderDailyContextColumn();
         mainFlexRow.appendChild(rightCol);
         
         this.container.appendChild(mainFlexRow);
-      } catch (error) {
-        console.error('[Cyclopedia] Error rendering layout:', error);
-        this.showError('Failed to render the layout. Please try again.', () => this.initialize());
-      }
     }
 
     setupTimers() {
-      try {
         this.timerElements.yasir = this.container.querySelector('.yasir-timer');
         this.timerElements.boosted = this.container.querySelector('.boosted-timer');
         
-        if (this.timerElements.yasir || this.timerElements.boosted) {
-          this.startTimer();
-        }
-      } catch (error) {
-        console.error('[Cyclopedia] Error setting up timers:', error);
-      }
+        if (this.timerElements.yasir || this.timerElements.boosted) this.startTimer();
     }
 
     startTimer() {
-      try {
-        if (globalTimer) {
-          clearInterval(globalTimer);
-          globalTimer = null;
+        if (cyclopediaState.timers.has(this.container)) {
+          clearInterval(cyclopediaState.timers.get(this.container));
         }
         
         const dailyContext = globalThis.state?.daily?.getSnapshot?.()?.context || {};
@@ -1700,64 +1311,33 @@ function createStartPageManager() {
             const now = Date.now();
             ms -= (now - lastUpdate);
             lastUpdate = now;
-            
             errorCount = 0;
             
             const timeString = FormatUtils.time(ms) + 'h';
-            
             if (this.timerElements.yasir) this.timerElements.yasir.textContent = timeString;
             if (this.timerElements.boosted) this.timerElements.boosted.textContent = timeString;
             
           } catch (error) {
             errorCount++;
-            console.error('[Cyclopedia] Error updating timers:', error);
-            
-            if (errorCount >= MAX_ERRORS) {
-              console.warn('[Cyclopedia] Too many timer errors, stopping timer');
-              this.stopTimer();
-            }
+            if (errorCount >= MAX_ERRORS) this.stopTimer();
           }
         };
         
-        globalTimer = setInterval(updateTimers, 1000);
-        
-        timerCleanup.set(this.container, () => {
-          this.stopTimer();
-        });
-        
-      } catch (error) {
-        console.error('[Cyclopedia] Error starting timer:', error);
-      }
+        const timerId = setInterval(updateTimers, 1000);
+        cyclopediaState.timers.set(this.container, timerId);
     }
 
     stopTimer() {
-      try {
-        if (globalTimer) {
-          clearInterval(globalTimer);
-          globalTimer = null;
-        }
-      } catch (error) {
-        console.error('[Cyclopedia] Error stopping timer:', error);
+        if (cyclopediaState.timers.has(this.container)) {
+          clearInterval(cyclopediaState.timers.get(this.container));
+          cyclopediaState.timers.delete(this.container);
       }
     }
 
     cleanup() {
-      try {
         this.stopTimer();
-
-        const cleanup = timerCleanup.get(this.container);
-        if (cleanup) {
-          cleanup();
-          timerCleanup.delete(this.container);
-        }
-        
         this.timerElements = {};
-
         this.isInitialized = false;
-        
-      } catch (error) {
-        console.error('[Cyclopedia] Error during StartPageManager cleanup:', error);
-      }
     }
   }
 
@@ -1773,30 +1353,20 @@ function createStartPage() {
 
 function openCyclopediaModal(options) {
   try {
-    console.log('[Cyclopedia] Opening modal with options:', options);
-    
     const now = Date.now();
-    if (cyclopediaModalInProgress) {
-      console.log('[Cyclopedia] Modal already in progress, ignoring request');
-      return;
-    }
-    if (now - lastModalCall < 1000) {
-      console.log('[Cyclopedia] Modal call too frequent, ignoring request');
-      return;
-    }
+    if (cyclopediaModalInProgress) return;
+    if (now - lastModalCall < 1000) return;
+    
     lastModalCall = now;
     cyclopediaModalInProgress = true;
     options = options || {};
     const creatureToSelect = options.creature;
     const equipmentToSelect = options.equipment;
-    
     const isFromHeader = options.fromHeader === true;
   
   (() => {
     try {
-      if (!cyclopediaModalInProgress) {
-        return;
-      }
+      if (!cyclopediaModalInProgress) return;
       
       if (!document.querySelector('.cyclopedia-styles-injected')) {
         injectCyclopediaButtonStyles();
@@ -1805,13 +1375,14 @@ function openCyclopediaModal(options) {
         document.body.classList.add('cyclopedia-styles-injected');
       }
       
-      if (!document.querySelector('.cyclopedia-header-btn')) {
-        addCyclopediaHeaderButton();
-      }
+      if (!document.querySelector('.cyclopedia-header-btn')) addCyclopediaHeaderButton();
       
-      if (!cyclopediaState.observer) {
-        startContextMenuObserver();
-      }
+          if (!cyclopediaState.observer || !window.cyclopediaGlobalObserver) {
+      startContextMenuObserver();
+    }
+    
+    // Ensure monster name map is built
+    buildCyclopediaMonsterNameMap();
 
     const content = document.createElement('div');
     content.style.display = 'flex';
@@ -1845,6 +1416,10 @@ function openCyclopediaModal(options) {
     }
     if (foundEquipment) {
       selectedEquipment = foundEquipment;
+      // Also set the global variable for the equipment tab
+      if (typeof window !== 'undefined') {
+        window.cyclopediaSelectedEquipment = foundEquipment;
+      }
       activeTab = 2;
     }
 
@@ -1855,9 +1430,7 @@ function openCyclopediaModal(options) {
           page.style.display = i === 0 ? 'flex' : 'none';
           try {
             mainContent.appendChild(page);
-          } catch (error) {
-            console.warn('[Cyclopedia] Error appending tab page:', error);
-          }
+          } catch (error) {}
         }
       });
       
@@ -1871,89 +1444,98 @@ function openCyclopediaModal(options) {
           if (page) {
             try {
               page.style.display = i === idx ? 'flex' : 'none';
-            } catch (error) {
-              console.warn('[Cyclopedia] Error changing tab display:', error);
-            }
+              
+              // If this is the equipment tab (index 2) and it's becoming active, update the display
+              if (i === 2 && i === idx && page.updateRightCol) {
+                // Update the global variable to ensure the updateRightCol function sees the current value
+                if (typeof window !== 'undefined' && window.cyclopediaSelectedEquipment) {
+                  // Force a small delay to ensure the tab is fully visible
+                  setTimeout(() => {
+                    page.updateRightCol();
+                  }, 10);
+                }
+              }
+            } catch (error) {}
           }
         });
       };
     }
 
     function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
-      const d = document.createElement('div');
-      d.style.display = 'flex';
-      d.style.flexDirection = 'row';
-      d.style.width = '100%';
-      d.style.height = '100%';
-      d.style.alignItems = 'flex-start';
-      d.style.justifyContent = 'center';
-      d.style.gap = '0';
-      const rightCol = document.createElement('div');
-      rightCol.style.flex = '1';
-      rightCol.style.padding = '0';
-      rightCol.style.margin = '0';
-      rightCol.style.height = '100%';
-      rightCol.style.borderImage = 'none';
+      // Common layout styles
+      const LAYOUT_STYLES = {
+        container: {
+        display: 'flex', flexDirection: 'row', width: '100%', height: '100%',
+        alignItems: 'flex-start', justifyContent: 'center', gap: '0'
+        },
+        rightCol: {
+          flex: '1', padding: '0', margin: '0', height: '100%', borderImage: 'none'
+        },
+        leftCol: {
+          width: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, minWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH,
+          maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, padding: '0', margin: '0', height: '100%',
+          display: 'flex', flexDirection: 'column', borderRight: '6px solid transparent',
+          borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
+          overflowY: 'scroll', minHeight: '0'
+        },
+        box: {
+          flex: '1 1 0', minHeight: '0'
+        }
+      };
+
+      const d = DOMUtils.createElement('div');
+      Object.assign(d.style, LAYOUT_STYLES.container);
+      
+      const rightCol = DOMUtils.createElement('div');
+      Object.assign(rightCol.style, LAYOUT_STYLES.rightCol);
+      
       function updateRightColInternal() {
         rightCol.innerHTML = '';
         if (selectedCreature) {
           rightCol.appendChild(renderCreatureTemplate(selectedCreature));
         } else {
-          const msg = document.createElement('div');
-          msg.textContent = 'Select a creature from the left column to view.';
-          msg.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
-          msg.style.display = 'flex';
-          msg.style.justifyContent = 'center';
-          msg.style.alignItems = 'center';
-          msg.style.height = '100%';
-          msg.style.width = '100%';
-          msg.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-          msg.style.fontWeight = 'bold';
-          msg.style.textAlign = 'center';
+          const msg = DOMUtils.createElement('div', LAYOUT_CONSTANTS.FONTS.SIZES.BODY, 'Select a creature from the left column to view.');
+          Object.assign(msg.style, {
+            display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%',
+            color: LAYOUT_CONSTANTS.COLORS.TEXT, fontWeight: 'bold', textAlign: 'center'
+          });
           rightCol.appendChild(msg);
         }
       }
-      const leftCol = document.createElement('div');
-      leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.minWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.maxWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.padding = '0';
-      leftCol.style.margin = '0';
-      leftCol.style.height = '100%';
-      leftCol.style.display = 'flex';
-      leftCol.style.flexDirection = 'column';
-      leftCol.style.borderRight = '6px solid transparent';
-      leftCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-      leftCol.style.overflowY = 'scroll';
-      leftCol.style.minHeight = '0';
-      const creaturesBox = createBox({
-        title: 'Creatures',
-        items: GAME_DATA.ALL_CREATURES,
-        type: 'creature',
-        selectedCreature,
-        selectedEquipment,
-        selectedInventory,
+      
+      const leftCol = DOMUtils.createElement('div');
+      Object.assign(leftCol.style, LAYOUT_STYLES.leftCol);
+      
+      // Create boxes with common configuration
+      const createCreatureBox = (title, items) => {
+        const box = createBox({
+          title, items, type: 'creature',
+          selectedCreature, selectedEquipment, selectedInventory,
         setSelectedCreature: v => { selectedCreature = v; updateRightColInternal(); },
-        setSelectedEquipment,
-        setSelectedInventory,
+          setSelectedEquipment, setSelectedInventory,
         updateRightCol: updateRightColInternal
       });
-      creaturesBox.style.flex = '1 1 0';
-      creaturesBox.style.minHeight = '0';
-      const unobtainableBox = createBox({
-        title: 'Unobtainable',
-        items: GAME_DATA.UNOBTAINABLE_CREATURES,
-        type: 'creature',
-        selectedCreature,
-        selectedEquipment,
-        selectedInventory,
-        setSelectedCreature: v => { selectedCreature = v; updateRightColInternal(); },
-        setSelectedEquipment,
-        setSelectedInventory,
-        updateRightCol: updateRightColInternal
-      });
-      unobtainableBox.style.flex = '1 1 0';
-      unobtainableBox.style.minHeight = '0';
+        Object.assign(box.style, LAYOUT_STYLES.box);
+        return box;
+      };
+      
+      const creaturesBox = createCreatureBox('Creatures', GAME_DATA.ALL_CREATURES);
+      const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
+      
+      // Shared selection clearing
+      const clearAllBestiarySelections = () => {
+        [creaturesBox, unobtainableBox].forEach(box => {
+          box.querySelectorAll('.cyclopedia-selected').forEach(el => {
+          el.classList.remove('cyclopedia-selected');
+          el.style.background = 'none';
+          el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+        });
+        });
+      };
+      
+      creaturesBox.clearAllSelections = clearAllBestiarySelections;
+      unobtainableBox.clearAllSelections = clearAllBestiarySelections;
+      
       leftCol.appendChild(creaturesBox);
       leftCol.appendChild(unobtainableBox);
       d.appendChild(leftCol);
@@ -1963,114 +1545,99 @@ function openCyclopediaModal(options) {
     }
 
     function createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+      // Common styles for equipment tab
+      const EQUIPMENT_STYLES = {
+        container: {
+          display: 'flex', flexDirection: 'row', width: '100%', height: '100%',
+          alignItems: 'flex-start', justifyContent: 'center', gap: '0'
+        },
+        column: {
+          flex: '1 1 0', height: '100%', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
+          fontWeight: 'bold', color: LAYOUT_CONSTANTS.COLORS.TEXT,
+          borderRight: '6px solid transparent',
+          borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
+        },
+        title: {
+        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
+        },
+        titleText: {
+        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box'
+        }
+      };
+
+      // Helper function to create title elements
+      const createTitleElement = (titleText, updateFunction) => {
+        const title = document.createElement('h2');
+        title.className = 'widget-top widget-top-text pixel-font-16';
+        Object.assign(title.style, EQUIPMENT_STYLES.title);
+
+        const titleP = document.createElement('p');
+        titleP.className = 'pixel-font-16';
+        Object.assign(titleP.style, EQUIPMENT_STYLES.titleText);
+
+        if (updateFunction) updateFunction(titleP);
+        title.appendChild(titleP);
+        return { title, titleP };
+      };
+
       const d = document.createElement('div');
-      d.style.display = 'flex';
-      d.style.flexDirection = 'row';
-      d.style.width = '100%';
-      d.style.height = '100%';
-      d.style.alignItems = 'flex-start';
-      d.style.justifyContent = 'center';
-      d.style.gap = '0';
+      Object.assign(d.style, EQUIPMENT_STYLES.container);
 
-      let selectedEquipmentLocal = selectedEquipment;
-
+      // Create equipment details column
       const equipDetailsCol = document.createElement('div');
-      equipDetailsCol.style.flex = '1 1 0';
-      equipDetailsCol.style.height = '100%';
-      equipDetailsCol.style.display = 'flex';
-      equipDetailsCol.style.flexDirection = 'column';
-      equipDetailsCol.style.alignItems = 'center';
-      equipDetailsCol.style.justifyContent = 'flex-start';
-      equipDetailsCol.style.fontSize = '16px';
-      equipDetailsCol.style.fontWeight = 'bold';
-      equipDetailsCol.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-      equipDetailsCol.style.borderRight = '6px solid transparent';
-      equipDetailsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      Object.assign(equipDetailsCol.style, EQUIPMENT_STYLES.column);
       equipDetailsCol.classList.add('text-whiteHighlight');
 
-      const equipDetailsTitle = document.createElement('h2');
-      equipDetailsTitle.className = 'widget-top widget-top-text pixel-font-16';
-      equipDetailsTitle.style.margin = '0';
-      equipDetailsTitle.style.padding = '2px 8px';
-      equipDetailsTitle.style.textAlign = 'center';
-      equipDetailsTitle.style.color = 'rgb(255, 255, 255)';
-      equipDetailsTitle.style.width = '100%';
-      equipDetailsTitle.style.boxSizing = 'border-box';
-      equipDetailsTitle.style.marginBottom = '10px';
-
-      const equipDetailsTitleP = document.createElement('p');
-      equipDetailsTitleP.className = 'pixel-font-16';
-      equipDetailsTitleP.style.margin = '0';
-      equipDetailsTitleP.style.padding = '0';
-      equipDetailsTitleP.style.textAlign = 'center';
-      equipDetailsTitleP.style.color = 'rgb(255, 255, 255)';
-      equipDetailsTitleP.style.width = '100%';
-      equipDetailsTitleP.style.boxSizing = 'border-box';
-
-      function updateEquipDetailsTitle(name) {
-        equipDetailsTitleP.textContent = name || 'Equipment Details';
-      }
-
-      updateEquipDetailsTitle();
-      equipDetailsTitle.appendChild(equipDetailsTitleP);
+      const updateEquipDetailsTitle = (titleP) => {
+        titleP.textContent = 'Equipment Details';
+      };
+      const { title: equipDetailsTitle, titleP: equipDetailsTitleP } = createTitleElement('Equipment Details', updateEquipDetailsTitle);
       equipDetailsCol.appendChild(equipDetailsTitle);
 
+      // Create owned equipment column
       const ownedEquipCol = document.createElement('div');
-      ownedEquipCol.style.flex = '1 1 0';
-      ownedEquipCol.style.height = '100%';
-      ownedEquipCol.style.display = 'flex';
-      ownedEquipCol.style.flexDirection = 'column';
-      ownedEquipCol.style.alignItems = 'center';
-      ownedEquipCol.style.justifyContent = 'flex-start';
-      ownedEquipCol.style.fontSize = '16px';
-      ownedEquipCol.style.fontWeight = 'bold';
-      ownedEquipCol.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column);
       ownedEquipCol.classList.add('text-whiteHighlight');
 
-      const ownedEquipTitle = document.createElement('h2');
-      ownedEquipTitle.className = 'widget-top widget-top-text pixel-font-16';
-      ownedEquipTitle.style.margin = '0';
-      ownedEquipTitle.style.padding = '2px 8px';
-      ownedEquipTitle.style.textAlign = 'center';
-      ownedEquipTitle.style.color = 'rgb(255, 255, 255)';
-      ownedEquipTitle.style.width = '100%';
-      ownedEquipTitle.style.boxSizing = 'border-box';
-      ownedEquipTitle.style.marginBottom = '10px';
-
-      const ownedEquipTitleP = document.createElement('p');
-      ownedEquipTitleP.className = 'pixel-font-16';
-      ownedEquipTitleP.style.margin = '0';
-      ownedEquipTitleP.style.padding = '0';
-      ownedEquipTitleP.style.textAlign = 'center';
-      ownedEquipTitleP.style.color = 'rgb(255, 255, 255)';
-      ownedEquipTitleP.style.width = '100%';
-      ownedEquipTitleP.style.boxSizing = 'border-box';
-
-      function updateOwnedEquipTitle(name, count) {
-        if (name && count !== undefined) {
-          ownedEquipTitleP.textContent = `Owned ${name} (${count})`;
-        } else {
-          ownedEquipTitleP.textContent = 'Owned Equipment';
-        }
-      }
-
-      updateOwnedEquipTitle();
-      ownedEquipTitle.appendChild(ownedEquipTitleP);
+      const updateOwnedEquipTitle = (titleP) => {
+        titleP.textContent = 'Owned Equipment';
+      };
+      const { title: ownedEquipTitle, titleP: ownedEquipTitleP } = createTitleElement('Owned Equipment', updateOwnedEquipTitle);
       ownedEquipCol.appendChild(ownedEquipTitle);
 
       function updateRightCol() {
         equipDetailsCol.innerHTML = '';
         equipDetailsCol.appendChild(equipDetailsTitle);
 
-        if (!selectedEquipmentLocal) {
-          updateEquipDetailsTitle();
+        // Get the current selectedEquipment value from the outer scope
+        // We need to access the updated value, not the captured one
+        let currentSelectedEquipment = null;
+        
+        // Try to get the current value from the outer scope
+        try {
+          // Access the global selectedEquipment variable
+          if (typeof window !== 'undefined' && window.cyclopediaSelectedEquipment !== undefined) {
+            currentSelectedEquipment = window.cyclopediaSelectedEquipment;
+          } else {
+            // Fallback to the captured value
+            currentSelectedEquipment = selectedEquipment;
+          }
+        } catch (e) {
+          currentSelectedEquipment = selectedEquipment;
+        }
+        
+        if (!currentSelectedEquipment) {
+          equipDetailsTitleP.textContent = 'Equipment Details';
           equipDetailsCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view details</div>';
         } else {
-          updateEquipDetailsTitle(selectedEquipmentLocal);
+          equipDetailsTitleP.textContent = currentSelectedEquipment;
           let equipId = null;
 
           if (window.BestiaryModAPI?.utility?.maps) {
-            equipId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(selectedEquipmentLocal.toLowerCase());
+            equipId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(currentSelectedEquipment.toLowerCase());
           }
 
           if (equipId == null && globalThis.state?.utils?.getEquipment) {
@@ -2078,7 +1645,7 @@ function openCyclopediaModal(options) {
             for (let i = 1; i < 1000; i++) {
               try {
                 const eq = utils.getEquipment(i);
-                if (eq?.metadata?.name?.toLowerCase() === selectedEquipmentLocal.toLowerCase()) {
+                if (eq?.metadata?.name?.toLowerCase() === currentSelectedEquipment.toLowerCase()) {
                   equipId = i;
                   break;
                 }
@@ -2141,14 +1708,14 @@ function openCyclopediaModal(options) {
         ownedEquipCol.innerHTML = '';
         ownedEquipCol.appendChild(ownedEquipTitle);
 
-        if (!selectedEquipmentLocal) {
-          updateOwnedEquipTitle();
+        if (!currentSelectedEquipment) {
+          ownedEquipTitleP.textContent = 'Owned Equipment';
           ownedEquipCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view owned</div>';
         } else {
           let equipId = null;
 
           if (window.BestiaryModAPI?.utility?.maps) {
-            equipId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(selectedEquipmentLocal.toLowerCase());
+            equipId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(currentSelectedEquipment.toLowerCase());
           }
 
           if (equipId == null && globalThis.state?.utils?.getEquipment) {
@@ -2156,7 +1723,7 @@ function openCyclopediaModal(options) {
             for (let i = 1; i < 1000; i++) {
               try {
                 const eq = utils.getEquipment(i);
-                if (eq?.metadata?.name?.toLowerCase() === selectedEquipmentLocal.toLowerCase()) {
+                if (eq?.metadata?.name?.toLowerCase() === currentSelectedEquipment.toLowerCase()) {
                   equipId = i;
                   break;
                 }
@@ -2173,7 +1740,7 @@ function openCyclopediaModal(options) {
             return 0;
           });
 
-          updateOwnedEquipTitle(selectedEquipmentLocal, owned.length);
+          ownedEquipTitleP.textContent = `Owned ${currentSelectedEquipment} (${owned.length})`;
 
           if (owned.length === 0) {
             ownedEquipCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">You do not own this equipment.</div>';
@@ -2197,10 +1764,9 @@ function openCyclopediaModal(options) {
             });
 
             const headerRow = document.createElement('div');
-            headerRow.style.display = 'flex';
-            headerRow.style.flexDirection = 'row';
-            headerRow.style.width = '100%';
-            headerRow.style.gap = '0';
+            Object.assign(headerRow.style, {
+              display: 'flex', flexDirection: 'row', width: '100%', gap: '0'
+            });
 
             statTypes.forEach(stat => {
               const col = document.createElement('div');
@@ -2211,19 +1777,17 @@ function openCyclopediaModal(options) {
               col.style.justifyContent = 'flex-start';
 
               const labelWrap = document.createElement('div');
-              labelWrap.style.display = 'flex';
-              labelWrap.style.alignItems = 'center';
-              labelWrap.style.justifyContent = 'center';
-              labelWrap.style.marginTop = '2px';
-              labelWrap.style.marginBottom = '2px';
+              Object.assign(labelWrap.style, {
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                marginTop: '2px', marginBottom: '2px'
+              });
 
               const icon = document.createElement('img');
               icon.src = statIcons[stat];
               icon.alt = stat.toUpperCase();
-              icon.style.width = '22px';
-              icon.style.height = '22px';
-              icon.style.display = 'inline-block';
-              icon.style.marginRight = '4px';
+              Object.assign(icon.style, {
+                width: '22px', height: '22px', display: 'inline-block', marginRight: '4px'
+              });
               labelWrap.appendChild(icon);
 
               const countSpan = document.createElement('span');
@@ -2245,14 +1809,10 @@ function openCyclopediaModal(options) {
             ownedEquipCol.appendChild(headerRow);
 
             const grid = document.createElement('div');
-            grid.style.display = 'flex';
-            grid.style.flexDirection = 'row';
-            grid.style.width = '100%';
-            grid.style.gap = '0';
-            grid.style.overflowY = 'auto';
-            grid.style.flex = '1 1 0';
-            grid.style.minHeight = '0';
-            grid.style.height = 'auto';
+            Object.assign(grid.style, {
+              display: 'flex', flexDirection: 'row', width: '100%', gap: '0',
+              overflowY: 'auto', flex: '1 1 0', minHeight: '0', height: 'auto'
+            });
 
             statTypes.forEach(stat => {
               const col = document.createElement('div');
@@ -2268,11 +1828,10 @@ function openCyclopediaModal(options) {
                 const count = tierGroup.length;
 
                 const tierRow = document.createElement('div');
-                tierRow.style.display = 'flex';
-                tierRow.style.alignItems = 'center';
-                tierRow.style.justifyContent = 'center';
-                tierRow.style.gap = '8px';
-                tierRow.style.margin = '2px 0';
+                Object.assign(tierRow.style, {
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '8px', margin: '2px 0'
+                });
 
                 let eqData = null;
                 try {
@@ -2291,8 +1850,7 @@ function openCyclopediaModal(options) {
                   portrait = portrait.firstChild;
                 }
 
-                portrait.style.margin = '0';
-                portrait.style.display = 'block';
+                Object.assign(portrait.style, { margin: '0', display: 'block' });
                 tierRow.appendChild(portrait);
 
                 const countLabel = document.createElement('span');
@@ -2300,8 +1858,7 @@ function openCyclopediaModal(options) {
                 countLabel.textContent = `x${count}`;
 
                 if (count === 0) {
-                  countLabel.style.color = '#888';
-                  countLabel.style.opacity = '0.7';
+                  Object.assign(countLabel.style, { color: '#888', opacity: '0.7' });
                 } else {
                   countLabel.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
                 }
@@ -2320,112 +1877,27 @@ function openCyclopediaModal(options) {
 
       const allEquipment = GAME_DATA.ALL_EQUIPMENT;
 
-      function createEquipmentBox({ title, items }) {
-        const box = document.createElement('div');
-        box.style.flex = '1 1 0';
-        box.style.display = 'flex';
-        box.style.flexDirection = 'column';
-        box.style.margin = '0';
-        box.style.padding = '0';
-        box.style.minHeight = '0';
-        box.style.height = '100%';
-
-        const titleEl = document.createElement('h2');
-        titleEl.className = 'widget-top widget-top-text pixel-font-16';
-        titleEl.style.margin = '0';
-        titleEl.style.padding = '2px 8px';
-        titleEl.style.textAlign = 'center';
-        titleEl.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-
-        const p = document.createElement('p');
-        p.textContent = title;
-        p.className = 'pixel-font-16';
-        p.style.margin = '0';
-        p.style.padding = '0';
-        p.style.textAlign = 'center';
-        p.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-        titleEl.appendChild(p);
-        box.appendChild(titleEl);
-
-        const scrollContainer = api.ui.components.createScrollContainer({
-          height: '100%',
-          padding: false,
-          content: null
-        });
-
-        scrollContainer.element.style.flex = '1 1 0';
-        scrollContainer.element.style.minHeight = '0';
-        scrollContainer.element.style.overflowY = 'scroll';
-
-        items.forEach(name => {
-          const item = document.createElement('div');
-          item.textContent = name;
-          item.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
-          item.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-          item.style.cursor = 'pointer';
-          item.style.padding = '2px 4px';
-          item.style.borderRadius = '2px';
-          item.style.textAlign = 'left';
-
-          if (selectedEquipmentLocal && name === selectedEquipmentLocal) {
-            item.classList.add('cyclopedia-selected');
-            item.style.background = 'rgba(255,255,255,0.18)';
-            item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
-            setTimeout(() => updateRightCol(), 0);
+            // Use the enhanced createBox function instead of duplicate createEquipmentBox
+      const createEquipmentBox = ({ title, items }) => {
+        return createBox({
+          title, items, type: 'equipment', selectedCreature, selectedEquipment, selectedInventory,
+          setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol: () => {
+            // Call the stored updateRightCol function from the tab page
+            if (d.updateRightCol) {
+              d.updateRightCol();
+            }
           }
-
-          item.addEventListener('mouseenter', () => {
-            item.style.background = 'rgba(255,255,255,0.08)';
-          });
-
-          item.addEventListener('mouseleave', () => {
-            if (!item.classList.contains('cyclopedia-selected')) {
-              item.style.background = 'none';
-            }
-          });
-
-          item.addEventListener('mousedown', () => {
-            item.style.background = 'rgba(255,255,255,0.18)';
-          });
-
-          item.addEventListener('mouseup', () => {
-            if (!item.classList.contains('cyclopedia-selected')) {
-              item.style.background = 'rgba(255,255,255,0.08)';
-            }
-          });
-
-          item.addEventListener('click', () => {
-            box.querySelectorAll('.cyclopedia-selected').forEach(el => {
-              el.classList.remove('cyclopedia-selected');
-              el.style.background = 'none';
-              el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-            });
-
-            item.classList.add('cyclopedia-selected');
-            item.style.background = 'rgba(255,255,255,0.18)';
-            item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
-            selectedEquipmentLocal = name;
-            updateRightCol();
-          });
-
-          scrollContainer.contentContainer.appendChild(item);
         });
-
-        box.appendChild(scrollContainer.element);
-        return box;
-      }
+      };
 
       const leftCol = document.createElement('div');
-      leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.minWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.maxWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
-      leftCol.style.height = '100%';
-      leftCol.style.display = 'flex';
-      leftCol.style.flexDirection = 'column';
-      leftCol.style.borderRight = '6px solid transparent';
-      leftCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-      leftCol.style.overflowY = 'scroll';
-      leftCol.style.minHeight = '0';
+      Object.assign(leftCol.style, {
+        width: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, minWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH,
+        maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, height: '100%', display: 'flex',
+        flexDirection: 'column', borderRight: '6px solid transparent',
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
+        overflowY: 'scroll', minHeight: '0'
+      });
 
       leftCol.appendChild(createEquipmentBox({
         title: 'Equipment',
@@ -2435,7 +1907,2452 @@ function openCyclopediaModal(options) {
       d.appendChild(leftCol);
       d.appendChild(equipDetailsCol);
       d.appendChild(ownedEquipCol);
+      
+      // Store the updateRightCol function on the returned element so it can be called externally
+      d.updateRightCol = updateRightCol;
+      
       updateRightCol();
+      return d;
+    }
+
+    // Helper functions for creating Characters tab components
+    function createCharactersTabColumns() {
+      const col1 = DOMUtils.createElement('div');
+      Object.assign(col1.style, {
+        width: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, minWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH,
+        maxWidth: LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH, height: '100%', display: 'flex',
+        flexDirection: 'column', borderRight: '6px solid transparent',
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`,
+        overflowY: 'scroll', minHeight: '0'
+      });
+
+      const sharedScrollContainer = DOMUtils.createElement('div');
+      sharedScrollContainer.style.cssText = `
+        flex: 1 1 0; display: flex; flex-direction: row; height: 100%; overflow-y: auto;
+        border-right: 6px solid transparent;
+        border-image: url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch;
+      `;
+
+      const col2 = DOMUtils.createElement('div');
+      Object.assign(col2.style, {
+        flex: '1 1 0', minWidth: '0', maxWidth: '50%', height: '100%', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        borderRight: '6px solid transparent',
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
+      });
+      col2.className = 'pixel-font-16 text-whiteHighlight';
+
+      const col3 = DOMUtils.createElement('div');
+      Object.assign(col3.style, {
+        flex: '1 1 0', minWidth: '0', maxWidth: '50%', height: '100%', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
+      });
+      col3.className = 'pixel-font-16 text-whiteHighlight';
+
+      sharedScrollContainer.appendChild(col2);
+      sharedScrollContainer.appendChild(col3);
+
+      return { col1, col2, col3, sharedScrollContainer };
+    }
+
+    function createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory) {
+      const playerSearchBox = createBox({
+        title: 'Player search', items: [], type: 'inventory', selectedCreature, selectedEquipment, selectedInventory,
+        setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol: () => {}
+      });
+      Object.assign(playerSearchBox.style, { flex: '0.2 1 0', minHeight: '0' });
+      return playerSearchBox;
+    }
+
+    function createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+      const d = DOMUtils.createElement('div');
+      Object.assign(d.style, {
+        display: 'flex', flexDirection: 'row', width: '100%', height: '100%',
+        alignItems: 'flex-start', justifyContent: 'center', gap: '0'
+      });
+
+      const { col1, col2, col3, sharedScrollContainer } = createCharactersTabColumns();
+      const playerSearchBox = createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory);
+
+      // Helper functions for displaying user stats
+      function showLoadingState(col2) {
+        col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">📚</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div><div style="font-size: 14px; color: #888;">Fetching profile data</div></div>`;
+      }
+
+      function showErrorState(col2, message) {
+        col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Profile Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">${message}</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+      }
+
+      function createUserStatsContainer(profileData) {
+        const container = DOMUtils.createElement('div');
+        Object.assign(container.style, {
+          display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
+          padding: '20px', boxSizing: 'border-box', overflowY: 'scroll'
+        });
+
+        const userInfoContent = renderCyclopediaPlayerInfo(profileData);
+        const centeredContent = DOMUtils.createElement('div');
+        Object.assign(centeredContent.style, {
+          display: 'flex', justifyContent: 'center', alignItems: 'flex-start', width: '100%', height: '100%'
+        });
+        
+        centeredContent.appendChild(userInfoContent);
+        container.appendChild(centeredContent);
+        return container;
+      }
+
+      let currentUserStatsRequest = null;
+
+      async function displayUserStats(selectedCategory) {
+        // Request management helper
+        const createRequest = () => {
+          if (currentUserStatsRequest?.category === selectedCategory) {
+            currentUserStatsRequest.cancel = true;
+          }
+          const requestId = Date.now();
+          currentUserStatsRequest = { category: selectedCategory, cancel: false, id: requestId };
+          return requestId;
+        };
+
+        const isCancelled = (requestId) => currentUserStatsRequest?.cancel || currentUserStatsRequest?.id !== requestId;
+
+        try {
+          const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+          if (!playerState?.name) {
+            col2.innerHTML = '<div style="color: #888; text-align: center; padding: 20px;">User data not available</div>';
+            return;
+          }
+
+          const requestId = createRequest();
+          showLoadingState(col2);
+
+          // Handle special categories
+          if (selectedCategory === 'Speedrun' || selectedCategory === 'Rank Points') {
+            await displaySpeedrunOrRankData(selectedCategory, playerState);
+            return;
+          }
+          
+          if (selectedCategory === 'Leaderboards') {
+            await displayCombinedLeaderboardsData(playerState);
+            return;
+          }
+
+          if (isCancelled(requestId)) return;
+
+          // Validate player name
+          if (!playerState.name.trim()) {
+            col2.innerHTML = `<div style="color: #ff6b6b; text-align: center; padding: 20px;">Invalid player name</div>`;
+            return;
+          }
+
+          // Get or fetch profile data
+          let profileData = getCachedProfileData(playerState.name);
+          
+          if (!profileData?.name) {
+            const apiUrl = `${START_PAGE_CONFIG.API_BASE_URL}?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerState.name)}%22%7D%7D`;
+            const data = await fetchWithDeduplication(apiUrl, `profile-${playerState.name}`, 1);
+            
+            if (isCancelled(requestId)) return;
+            
+            profileData = Array.isArray(data) && data[0]?.result?.data?.json 
+              ? data[0].result.data.json : data;
+            
+            if (profileData?.name) {
+            setCachedProfileData(playerState.name, profileData);
+            }
+          }
+
+          if (isCancelled(requestId)) return;
+
+          // Update UI
+          const container = createUserStatsContainer(profileData);
+          col2.innerHTML = '';
+          col2.appendChild(container);
+          
+          if (currentUserStatsRequest?.id === requestId) {
+            currentUserStatsRequest = null;
+          }
+        } catch (error) {
+          console.error('[Cyclopedia] Error displaying user stats:', error);
+          
+          col2.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+              <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+              <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Stats</div>
+              <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Click to retry</div>
+              <button onclick="displayUserStats('${selectedCategory}')" style="background: #ffe066; color: #232323; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;">Retry</button>
+            </div>
+          `;
+        }
+      }
+
+      async function fetchTRPC(method) {
+        try {
+          if (cyclopediaState.pendingRequests.has(method)) return await cyclopediaState.pendingRequests.get(method);
+
+          const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
+          const url = `/api/trpc/${method}?batch=1&input=${inp}`;
+          
+          const requestPromise = fetch(url, {
+            headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
+          }).then(async (res) => {
+            if (!res.ok) throw new Error(`${method} → ${res.status}`);
+            const json = await res.json();
+            return json[0].result.data.json;
+          }).finally(() => cyclopediaState.pendingRequests.delete(method));
+
+          cyclopediaState.pendingRequests.set(method, requestPromise);
+          return await requestPromise;
+        } catch (error) {
+          console.error('Error fetching from TRPC:', error);
+          throw error;
+        }
+      }
+
+// =======================
+// 9. API Call Optimization
+// =======================
+
+const RATE_LIMIT_CONFIG = {
+  maxRequests: 30, timeWindow: 10000, requests: [], backoffMultiplier: 1.5,
+  maxBackoff: 60000, currentBackoff: 0
+};
+
+function checkRateLimit() {
+  const now = Date.now();
+  
+  // Check backoff period
+  if (RATE_LIMIT_CONFIG.currentBackoff > 0) {
+    if (now < RATE_LIMIT_CONFIG.currentBackoff) {
+      const waitTime = Math.ceil((RATE_LIMIT_CONFIG.currentBackoff - now) / 1000);
+      throw new Error(`Rate limit backoff active. Please wait ${waitTime} seconds.`);
+    }
+    RATE_LIMIT_CONFIG.currentBackoff = 0;
+  }
+  
+  // Clean old requests and check limit
+  RATE_LIMIT_CONFIG.requests = RATE_LIMIT_CONFIG.requests.filter(
+    timestamp => now - timestamp < RATE_LIMIT_CONFIG.timeWindow
+  );
+  
+  if (RATE_LIMIT_CONFIG.requests.length >= RATE_LIMIT_CONFIG.maxRequests) {
+    const oldestRequest = RATE_LIMIT_CONFIG.requests[0];
+    const waitTime = Math.ceil((RATE_LIMIT_CONFIG.timeWindow - (now - oldestRequest)) / 1000);
+    
+    RATE_LIMIT_CONFIG.currentBackoff = now + Math.min(
+      RATE_LIMIT_CONFIG.currentBackoff * RATE_LIMIT_CONFIG.backoffMultiplier,
+      RATE_LIMIT_CONFIG.maxBackoff
+    );
+    
+    throw new Error(`Rate limit exceeded. Please wait ${waitTime} seconds.`);
+  }
+  
+  RATE_LIMIT_CONFIG.requests.push(now);
+}
+
+const RequestQueue = {
+  pending: new Map(), queue: [], processing: false,
+  
+  add: function(key, requestPromise, priority = 0) {
+    if (this.pending.has(key)) return this.pending.get(key);
+    
+    this.queue.push({ key, requestPromise, priority, timestamp: Date.now() });
+    this.queue.sort((a, b) => b.priority - a.priority);
+    this.pending.set(key, requestPromise);
+    
+    if (!this.processing) this.process();
+    return requestPromise;
+  },
+  
+  process: async function() {
+    if (this.processing || this.queue.length === 0) return;
+    
+    this.processing = true;
+    
+    while (this.queue.length > 0) {
+      const item = this.queue.shift();
+      
+      try {
+        await item.requestPromise;
+      } catch (error) {
+        console.error(`[Cyclopedia] Request failed for ${item.key}:`, error);
+      } finally {
+        this.pending.delete(item.key);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    this.processing = false;
+  },
+  
+  getStatus: function() {
+    return { pending: this.pending.size, queued: this.queue.length, processing: this.processing };
+  }
+};
+
+async function fetchWithDeduplication(url, key, priority = 0) {
+  try {
+    checkRateLimit();
+    
+    if (cyclopediaState.pendingRequests.has(key)) return await cyclopediaState.pendingRequests.get(key);
+    
+    const requestPromise = fetch(url, {
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      timeout: 10000
+    }).then(async (res) => {
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      return await res.json();
+    }).catch(error => {
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('Network error: Unable to connect to server');
+      }
+      throw error;
+    }).finally(() => cyclopediaState.pendingRequests.delete(key));
+
+    cyclopediaState.pendingRequests.set(key, requestPromise);
+    return await RequestQueue.add(key, requestPromise, priority);
+  } catch (error) {
+    console.error(`[Cyclopedia] Error in fetchWithDeduplication for ${key}:`, error);
+    throw error;
+  }
+}
+
+      async function displaySpeedrunOrRankData(category, playerState) {
+        try {
+          const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
+          const rooms = playerState.rooms;
+          const you = playerState.userId;
+
+          let best, lbs, roomsHighscores;
+          
+          const cachedData = getCachedLeaderboardData('speedrun-rank');
+          if (cachedData) {
+            ({ best, lbs, roomsHighscores } = cachedData);
+          } else {
+            [best, lbs, roomsHighscores] = await Promise.all([
+              fetchTRPC('game.getTickHighscores'),
+              fetchTRPC('game.getTickLeaderboards'),
+              fetchTRPC('game.getRoomsHighscores')
+            ]);
+            
+            setCachedLeaderboardData('speedrun-rank', { best, lbs, roomsHighscores });
+          }
+
+          displayUserSpeedrunOrRankData(category, playerState.name, rooms, ROOM_NAMES, best, roomsHighscores, col2);
+          updateSearchForSpeedrunOrRank(category, rooms, ROOM_NAMES, best, roomsHighscores);
+
+        } catch (error) {
+          console.error('[Cyclopedia] Error displaying speedrun/rank data:', error);
+          col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load ${category} Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch game data</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+        }
+      }
+
+      async function displayCombinedLeaderboardsData(playerState) {
+        try {
+          const ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
+          const rooms = playerState.rooms;
+          const you = playerState.userId;
+
+          let best, lbs, roomsHighscores;
+          
+          const cachedData = getCachedLeaderboardData('combined-leaderboards');
+          if (cachedData) {
+            ({ best, lbs, roomsHighscores } = cachedData);
+          } else {
+            [best, lbs, roomsHighscores] = await Promise.all([
+              fetchTRPC('game.getTickHighscores'),
+              fetchTRPC('game.getTickLeaderboards'),
+              fetchTRPC('game.getRoomsHighscores')
+            ]);
+            
+            setCachedLeaderboardData('combined-leaderboards', { best, lbs, roomsHighscores });
+          }
+
+          displayUserCombinedLeaderboardsData(playerState.name, rooms, ROOM_NAMES, best, roomsHighscores, col2);
+          updateSearchForCombinedLeaderboards(rooms, ROOM_NAMES, best, roomsHighscores);
+
+        } catch (error) {
+          console.error('[Cyclopedia] Error displaying combined leaderboards data:', error);
+          col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Leaderboards Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch game data</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+        }
+      }
+
+      function displayUserSpeedrunOrRankData(category, playerName, rooms, ROOM_NAMES, best, roomsHighscores, container, isTemplate = false) {
+        function formatTime(ms) {
+          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          const milliseconds = Math.floor((ms % 1000) / 10);
+          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
+        }
+        
+        const containerDiv = document.createElement('div');
+        Object.assign(containerDiv.style, {
+          display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
+          padding: '20px', boxSizing: 'border-box'
+        });
+
+        const header = document.createElement('div');
+        header.style.cssText = `font-size: 18px; font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; margin-bottom: 20px; text-align: center; padding: 10px; background: rgba(255, 224, 102, 0.1); border-radius: 8px;`;
+        header.textContent = isTemplate ? 'Search Results' : `Your ${category} Data`;
+        containerDiv.appendChild(header);
+
+        const contentContainer = document.createElement('div');
+        contentContainer.style.cssText = `flex: 1; padding: 10px;`;
+
+        if (isTemplate) {
+          const organizedRooms = {
+            'Rookgaard': [
+              { roomCode: 'rookgaard', roomName: 'Rookgaard' },
+              { roomCode: 'sewers', roomName: 'Sewers' },
+              { roomCode: 'wheatfield', roomName: 'Wheat Field' },
+              { roomCode: 'evergreen', roomName: 'Evergreen Fields' },
+              { roomCode: 'wolfsden', roomName: 'Wolf\'s Den' },
+              { roomCode: 'honeyflower', roomName: 'Honeyflower Tower' }
+            ]
+          };
+
+          Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
+            const regionHeader = document.createElement('div');
+            regionHeader.style.cssText = `font-size: 14px; font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; margin: 8px 0 4px 0; padding: 4px 6px; background: rgba(255, 224, 102, 0.15); border-radius: 4px; border-left: 3px solid ${LAYOUT_CONSTANTS.COLORS.PRIMARY};`;
+            regionHeader.textContent = regionName;
+            contentContainer.appendChild(regionHeader);
+
+            regionRooms.forEach(({ roomCode, roomName }) => {
+              const roomEntry = document.createElement('div');
+              roomEntry.style.cssText = `margin-bottom: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
+
+              const roomHeader = document.createElement('div');
+              roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
+
+              const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+
+              const roomTitle = document.createElement('div');
+              roomTitle.style.cssText = `font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; font-size: 14px;`;
+              roomTitle.textContent = roomName;
+
+              roomHeader.appendChild(thumbnail);
+              roomHeader.appendChild(roomTitle);
+              roomEntry.appendChild(roomHeader);
+
+              const dataRow = document.createElement('div');
+              dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
+
+              const yourData = document.createElement('div');
+              yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div style="color: #888;">[ticks] ticks</div>`;
+
+              const bestData = document.createElement('div');
+              bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div style="color: #888;">[ticks] ticks</div><div style="font-size: 10px; color: #888;">by [Player]</div>`;
+
+              dataRow.appendChild(yourData);
+              dataRow.appendChild(bestData);
+              roomEntry.appendChild(dataRow);
+
+              contentContainer.appendChild(roomEntry);
+            });
+          });
+
+          const searchInstruction = document.createElement('div');
+          searchInstruction.style.cssText = `text-align: center; padding: 20px; color: ${LAYOUT_CONSTANTS.COLORS.WARNING}; font-size: 14px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); margin-top: 16px;`;
+          searchInstruction.innerHTML = `<div style="font-size: 24px; margin-bottom: 8px;">🔍</div><div style="font-weight: bold; margin-bottom: 4px;">Search for a Player</div><div style="color: #888;">Use the search box to compare leaderboard data</div>`;
+          contentContainer.appendChild(searchInstruction);
+        } else {
+          const allRoomCodes = Object.keys(ROOM_NAMES).sort();
+
+          allRoomCodes.forEach(roomCode => {
+            const roomName = ROOM_NAMES[roomCode];
+            const yourRoom = rooms[roomCode];
+
+            if (!yourRoom) return;
+
+            const roomEntry = document.createElement('div');
+            roomEntry.style.cssText = `margin-bottom: 12px; padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
+
+            const roomHeader = document.createElement('div');
+            roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
+
+            const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+
+            const roomTitle = document.createElement('div');
+            roomTitle.style.cssText = `font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; font-size: 14px;`;
+            roomTitle.textContent = roomName;
+
+            roomHeader.appendChild(thumbnail);
+            roomHeader.appendChild(roomTitle);
+            roomEntry.appendChild(roomHeader);
+
+            if (category === 'Speedrun') {
+              const yourTicks = yourRoom.ticks || 0;
+              const bestTicks = best[roomCode]?.ticks || 0;
+              const bestPlayer = best[roomCode]?.userName || 'Unknown';
+              
+              const dataRow = document.createElement('div');
+              dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
+
+              const yourData = document.createElement('div');
+              yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>${yourTicks} ticks</div>`;
+
+              const bestData = document.createElement('div');
+              bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div>${bestTicks} ticks</div><div style="font-size: 10px; color: #888;">by ${bestPlayer}</div>`;
+
+              dataRow.appendChild(yourData);
+              dataRow.appendChild(bestData);
+              roomEntry.appendChild(dataRow);
+
+            } else if (category === 'Rank Points') {
+              const yourRank = yourRoom.rank || 0;
+              const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
+              const topPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
+
+              const dataRow = document.createElement('div');
+              dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
+
+              const yourData = document.createElement('div');
+              yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>${yourRank} points</div>`;
+
+              const topData = document.createElement('div');
+              topData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Top:</div><div>${topRank} points</div><div style="font-size: 10px; color: #888;">by ${topPlayer}</div>`;
+
+              dataRow.appendChild(yourData);
+              dataRow.appendChild(topData);
+              roomEntry.appendChild(dataRow);
+            }
+
+            contentContainer.appendChild(roomEntry);
+          });
+        }
+
+        containerDiv.appendChild(contentContainer);
+
+        // Clear container and append content
+        container.innerHTML = '';
+        container.appendChild(containerDiv);
+      }
+
+      function updateSearchForSpeedrunOrRank(category, yourRooms, ROOM_NAMES, best, roomsHighscores) {
+        window.currentSpeedrunRankCategory = category;
+        window.currentSpeedrunRankData = { yourRooms, ROOM_NAMES, best, roomsHighscores };
+      }
+
+      function updateSearchForCombinedLeaderboards(yourRooms, ROOM_NAMES, best, roomsHighscores) {
+        window.currentSpeedrunRankCategory = 'Combined';
+        window.currentSpeedrunRankData = { yourRooms, ROOM_NAMES, best, roomsHighscores };
+        
+        col3.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">🔍</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Results</div><div style="font-size: 14px; color: #888; margin-bottom: 16px;">Use the search box above to compare leaderboard data</div><div style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 16px; margin-top: 16px; border: 1px solid rgba(255, 255, 255, 0.1);"><div style="font-size: 14px; font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; margin-bottom: 8px;">How to use:</div><div style="font-size: 12px; color: #ccc; text-align: left; line-height: 1.4;">• Enter a player name in the search box<br>• View their leaderboard data compared to yours</div></div></div>`;
+      }
+      
+
+      
+      function showPlayerProfileTemplate(container) {
+        const containerDiv = document.createElement('div');
+        Object.assign(containerDiv.style, {
+          display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
+          padding: '20px', boxSizing: 'border-box'
+        });
+
+        const centeredContent = document.createElement('div');
+        Object.assign(centeredContent.style, {
+          display: 'flex', justifyContent: 'center', alignItems: 'flex-start', width: '100%', height: '100%'
+        });
+
+        const profileContainer = document.createElement('div');
+        Object.assign(profileContainer.style, {
+          display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '400px'
+        });
+
+        const playerInfoSection = document.createElement('div');
+        playerInfoSection.style.cssText = `margin-bottom: 20px; padding: 16px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
+
+        const playerInfoHeader = document.createElement('div');
+        playerInfoHeader.style.cssText = `display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 16px; font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};`;
+        playerInfoHeader.innerHTML = `<span>📄</span><span>Player information</span>`;
+        playerInfoSection.appendChild(playerInfoHeader);
+
+        const playerName = document.createElement('div');
+        playerName.style.cssText = `display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; color: #ccc;`;
+        playerName.innerHTML = `<span style="color: #4CAF50;">🛡️</span><span style="color: #888;">[Player Name]</span>`;
+        playerInfoSection.appendChild(playerName);
+
+        const level = document.createElement('div');
+        level.style.cssText = `margin-bottom: 8px; font-size: 14px; color: #ccc;`;
+        level.innerHTML = `<span>Level</span><div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;"><div style="flex: 1; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;"><div style="width: 50%; height: 100%; background: #FFD700; border-radius: 4px;"></div></div><span style="color: #888;">[Level]</span></div>`;
+        playerInfoSection.appendChild(level);
+
+        // Created at (placeholder)
+        const createdAt = document.createElement('div');
+        createdAt.style.cssText = `
+          margin-bottom: 8px;
+          font-size: 14px;
+          color: #ccc;
+        `;
+        createdAt.innerHTML = `
+          <span>Created at</span>
+          <div style="color: #888; margin-top: 2px;">[Date]</div>
+        `;
+        playerInfoSection.appendChild(createdAt);
+
+        // Status (placeholder)
+        const status = document.createElement('div');
+        status.style.cssText = `
+          margin-bottom: 8px;
+          font-size: 14px;
+          color: #ccc;
+        `;
+        status.innerHTML = `
+          <span>Status</span>
+          <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+            <span style="color: #888;">[Status]</span>
+            <span style="color: #FFD700;">🔥</span>
+          </div>
+        `;
+        playerInfoSection.appendChild(status);
+
+        // Loyalty Points (placeholder)
+        const loyaltyPoints = document.createElement('div');
+        loyaltyPoints.style.cssText = `
+          font-size: 14px;
+          color: #ccc;
+        `;
+        loyaltyPoints.innerHTML = `
+          <span>Loyalty Points</span>
+          <div style="color: #888; margin-top: 2px;">[Points]</div>
+        `;
+        playerInfoSection.appendChild(loyaltyPoints);
+
+        profileContainer.appendChild(playerInfoSection);
+
+        // Player Stats Section
+        const playerStatsSection = document.createElement('div');
+        playerStatsSection.style.cssText = `
+          margin-bottom: 20px;
+          padding: 16px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        `;
+
+        // Player Stats Header
+        const playerStatsHeader = document.createElement('div');
+        playerStatsHeader.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 12px;
+          font-size: 16px;
+          font-weight: bold;
+          color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+        `;
+        playerStatsHeader.innerHTML = `
+          <span>📊</span>
+          <span>Player stats</span>
+        `;
+        playerStatsSection.appendChild(playerStatsHeader);
+
+        // Current Total (placeholder)
+        const currentTotal = document.createElement('div');
+        currentTotal.style.cssText = `
+          margin-bottom: 12px;
+        `;
+        currentTotal.innerHTML = `
+          <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Current total</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #FF9800;">🐚</span>
+              <span>Daily Seashell</span>
+              <span style="color: #888;">[Count]x</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #8BC34A;">🎯</span>
+              <span>Hunting tasks</span>
+              <span style="color: #888;">[Count]x</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #2196F3;">🔄</span>
+              <span>Total runs</span>
+              <span style="color: #888;">[Count]x</span>
+            </div>
+          </div>
+        `;
+        playerStatsSection.appendChild(currentTotal);
+
+        // Progress (placeholder)
+        const progress = document.createElement('div');
+        progress.style.cssText = `
+          margin-bottom: 12px;
+        `;
+        progress.innerHTML = `
+          <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Progress</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #4CAF50;">✅</span>
+              <span>Perfect Creatures</span>
+              <span style="color: #888;">[Progress]</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #4CAF50;">✅</span>
+              <span>BIS Equipments</span>
+              <span style="color: #888;">[Progress]</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #4CAF50;">✅</span>
+              <span>Explored maps</span>
+              <span style="color: #888;">[Progress]</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #4CAF50;">✅</span>
+              <span>Bag Outfits</span>
+              <span style="color: #888;">[Progress]</span>
+            </div>
+          </div>
+        `;
+        playerStatsSection.appendChild(progress);
+
+        // Rankings (placeholder)
+        const rankings = document.createElement('div');
+        rankings.innerHTML = `
+          <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Rankings</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #FFD700;">⭐</span>
+              <span>Rank points</span>
+              <span style="color: #888;">[Points]</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc;">
+              <span style="color: #FFD700;">⏱️</span>
+              <span>Time sum</span>
+              <span style="color: #888;">[Time]</span>
+            </div>
+          </div>
+        `;
+        playerStatsSection.appendChild(rankings);
+
+        profileContainer.appendChild(playerStatsSection);
+
+        // Add search instruction
+        const searchInstruction = document.createElement('div');
+        searchInstruction.style.cssText = `
+          text-align: center;
+          padding: 20px;
+          color: ${LAYOUT_CONSTANTS.COLORS.WARNING};
+          font-size: 14px;
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 8px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        `;
+        searchInstruction.innerHTML = `
+          <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
+          <div style="font-weight: bold; margin-bottom: 4px;">Search for a Player</div>
+          <div style="color: #888;">Use the search box to compare profiles</div>
+        `;
+        profileContainer.appendChild(searchInstruction);
+
+        centeredContent.appendChild(profileContainer);
+        containerDiv.appendChild(centeredContent);
+
+        // Clear container and append template
+        container.innerHTML = '';
+        container.appendChild(containerDiv);
+      }
+
+      // Function to organize rooms by region and correct order
+      function organizeRoomsByRegion(rooms, ROOM_NAMES) {
+        const regions = globalThis.state.utils.REGIONS;
+        const roomsData = globalThis.state.utils.ROOMS;
+        
+        if (!regions || !roomsData) {
+          // Fallback to alphabetical sorting if region data is not available
+          return {
+            'All Maps': Object.keys(ROOM_NAMES)
+              .filter(roomCode => rooms[roomCode])
+              .sort()
+              .map(roomCode => ({ roomCode, roomName: ROOM_NAMES[roomCode] }))
+          };
+        }
+
+        const organizedRooms = {};
+        
+        // Process each region
+        regions.forEach(region => {
+          if (!region.rooms || !Array.isArray(region.rooms)) return;
+          
+          const regionRooms = [];
+          
+          // Add rooms that belong to this region and have player data
+          region.rooms.forEach(room => {
+            const roomCode = room.id;
+            if (rooms[roomCode] && ROOM_NAMES[roomCode]) {
+              regionRooms.push({
+                roomCode,
+                roomName: ROOM_NAMES[roomCode]
+              });
+            }
+          });
+          
+          // Only add region if it has rooms with player data
+          if (regionRooms.length > 0) {
+            // Use real region name from the API instead of ID
+            const regionName = getRealRegionName(region);
+            organizedRooms[regionName] = regionRooms;
+          }
+        });
+        
+        // Add any remaining rooms that might not be in regions
+        const allRoomCodes = Object.keys(ROOM_NAMES);
+        const processedRoomCodes = new Set();
+        
+        Object.values(organizedRooms).forEach(regionRooms => {
+          regionRooms.forEach(room => processedRoomCodes.add(room.roomCode));
+        });
+        
+        const remainingRooms = allRoomCodes
+          .filter(roomCode => rooms[roomCode] && !processedRoomCodes.has(roomCode))
+          .sort()
+          .map(roomCode => ({ roomCode, roomName: ROOM_NAMES[roomCode] }));
+        
+        if (remainingRooms.length > 0) {
+          organizedRooms['Other Maps'] = remainingRooms;
+        }
+        
+        return organizedRooms;
+      }
+
+      // Helper function to get real region names from the API
+      function getRealRegionName(region) {
+        if (!region) return 'Unknown Region';
+        
+        // If the region has a name property, use it
+        if (region.name) {
+          return region.name;
+        }
+        
+        // Map region IDs to real names based on the game's region data
+        const regionNameMap = {
+          'rook': 'Rookgaard',
+          'abdendriel': 'Ab\'Dendriel',
+          'carlin': 'Carlin',
+          'venore': 'Venore',
+          'thais': 'Thais',
+          'kazordoon': 'Kazordoon',
+          'edron': 'Edron',
+          'darashia': 'Darashia',
+          'ankrahmun': 'Ankrahmun',
+          'libertybay': 'Liberty Bay',
+          'port hope': 'Port Hope',
+          'svargrond': 'Svargrond',
+          'yalahar': 'Yalahar',
+          'roshamuul': 'Roshamuul',
+          'rathleton': 'Rathleton',
+          'gray beach': 'Gray Beach',
+          'oramond': 'Oramond',
+          'krailos': 'Krailos',
+          'issavi': 'Issavi',
+          'venore swamp': 'Venore Swamp',
+          'thais swamp': 'Thais Swamp',
+          'carlin swamp': 'Carlin Swamp',
+          'edron swamp': 'Edron Swamp',
+          'darashia swamp': 'Darashia Swamp',
+          'ankrahmun swamp': 'Ankrahmun Swamp',
+          'liberty bay swamp': 'Liberty Bay Swamp',
+          'port hope swamp': 'Port Hope Swamp',
+          'svargrond swamp': 'Svargrond Swamp',
+          'yalahar swamp': 'Yalahar Swamp',
+          'roshamuul swamp': 'Roshamuul Swamp',
+          'rathleton swamp': 'Rathleton Swamp',
+          'gray beach swamp': 'Gray Beach Swamp',
+          'oramond swamp': 'Oramond Swamp',
+          'krailos swamp': 'Krailos Swamp',
+          'issavi swamp': 'Issavi Swamp'
+        };
+        
+        // Try to find the region name by ID
+        const regionId = region.id ? region.id.toLowerCase() : '';
+        if (regionNameMap[regionId]) {
+          return regionNameMap[regionId];
+        }
+        
+        // If no mapping found, capitalize the ID as fallback
+        return region.id ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()) : 'Unknown Region';
+      }
+
+      // Function to display user's combined leaderboards data (Speedrun + Rank Points)
+      function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
+        // Local formatTime function for time formatting
+        function formatTime(ms) {
+          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          const milliseconds = Math.floor((ms % 1000) / 10); // Get centiseconds (10ms precision)
+          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
+        }
+
+        // Create container
+        const containerDiv = document.createElement('div');
+        Object.assign(containerDiv.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100%',
+          padding: '8px',
+          boxSizing: 'border-box',
+          minWidth: '0', // Prevent content from expanding the container
+          maxWidth: '100%' // Ensure content doesn't exceed container width
+        });
+
+
+
+        // Create content container (no scrollbar needed)
+        const contentContainer = document.createElement('div');
+        contentContainer.style.cssText = `
+          flex: 1;
+          padding: 2px;
+          min-width: 0; /* Prevent content from expanding */
+          max-width: 100%; /* Ensure content doesn't exceed container width */
+        `;
+
+        // Organize rooms by region
+        const organizedRooms = organizeRoomsByRegion(rooms, ROOM_NAMES);
+
+        // Create room entries organized by region
+        Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
+          // Create region header using the title system with sticky positioning
+          const regionHeader = DOMUtils.createTitle(regionName, LAYOUT_CONSTANTS.FONTS.SIZES.SMALL);
+          Object.assign(regionHeader.style, {
+            margin: '8px 0 4px 0',
+            width: '100%',
+            position: 'sticky',
+            top: '0',
+            zIndex: '10',
+            backgroundColor: '#232323'
+          });
+          contentContainer.appendChild(regionHeader);
+
+          // Create room entries for this region
+          regionRooms.forEach(({ roomCode, roomName }) => {
+            const yourRoom = rooms[roomCode];
+
+          // Single room entry with grid layout
+          const roomEntry = document.createElement('div');
+          roomEntry.style.cssText = `
+            display: grid;
+            grid-template-columns: 80px 1fr;
+            gap: 8px;
+            margin-bottom: 4px;
+            padding: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-width: 0; /* Prevent grid from expanding container */
+            max-width: 100%; /* Ensure grid doesn't exceed container width */
+          `;
+
+          // Column 1: Map Icon + Map Name (stacked vertically)
+          const mapColumn = document.createElement('div');
+          mapColumn.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            width: 80px;
+            min-width: 80px; /* Prevent shrinking */
+            max-width: 80px; /* Prevent expanding */
+          `;
+
+          // Map icon
+          const mapIcon = document.createElement('div');
+          mapIcon.style.cssText = `
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            overflow: hidden;
+          `;
+          // Use cached thumbnail for map icon
+          const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+          thumbnail.style.width = '100%';
+          thumbnail.style.height = '100%';
+          mapIcon.appendChild(thumbnail);
+
+          // Map name
+          const mapName = document.createElement('div');
+          mapName.style.cssText = `
+            font-size: 12px;
+            font-weight: bold;
+            color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+            text-align: center;
+            width: 100%;
+            word-wrap: break-word;
+          `;
+          mapName.textContent = roomName;
+
+          mapColumn.appendChild(mapIcon);
+          mapColumn.appendChild(mapName);
+
+          // Column 2: Speedrun and Rank Points data (stacked vertically)
+          const dataColumn = document.createElement('div');
+          dataColumn.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure it doesn't exceed container width */
+          `;
+
+          // Speedrun row
+          const speedrunRow = document.createElement('div');
+          const isSpeedrunTop = yourRoom.ticks && best?.[roomCode]?.ticks && yourRoom.ticks === best[roomCode].ticks;
+          speedrunRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            gap: 6px;
+            padding: 4px;
+            background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #4CAF50;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure it doesn't exceed container width */
+          `;
+
+          // Speedrun data
+          const yourTicks = yourRoom.ticks || 0;
+          const topTicks = best?.[roomCode]?.ticks || 0;
+          const topPlayer = best?.[roomCode]?.userName || 'Unknown';
+
+          const yourSpeedrun = document.createElement('div');
+          yourSpeedrun.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
+          `;
+          yourSpeedrun.innerHTML = `
+            <span style="color: #8f8; font-weight: bold;">You:</span>
+            <span>${yourTicks} ticks</span>
+          `;
+
+          const topSpeedrun = document.createElement('div');
+          topSpeedrun.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
+          `;
+          topSpeedrun.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span>${topTicks} ticks</span>
+          `;
+
+          speedrunRow.appendChild(yourSpeedrun);
+          speedrunRow.appendChild(topSpeedrun);
+
+          // Rank Points row
+          const rankRow = document.createElement('div');
+          const isRankTop = yourRoom.rank && roomsHighscores?.rank?.[roomCode]?.rank && yourRoom.rank === roomsHighscores.rank[roomCode].rank;
+          rankRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure it doesn't exceed container width */
+            gap: 6px;
+            padding: 4px;
+            background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #FF9800;
+          `;
+
+          // Rank Points data
+          const yourRank = yourRoom.rank || 0;
+          const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
+          const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
+
+          const yourRankData = document.createElement('div');
+          yourRankData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isRankTop ? 'bold' : 'normal'};
+          `;
+          yourRankData.innerHTML = `
+            <span style="color: #8f8; font-weight: bold;">You:</span>
+            <span>${yourRank} points</span>
+          `;
+
+          const topRankData = document.createElement('div');
+          topRankData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isRankTop ? 'bold' : 'normal'};
+          `;
+          topRankData.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span>${topRank} points</span>
+          `;
+
+          rankRow.appendChild(yourRankData);
+          rankRow.appendChild(topRankData);
+
+          dataColumn.appendChild(speedrunRow);
+          dataColumn.appendChild(rankRow);
+
+          roomEntry.appendChild(mapColumn);
+          roomEntry.appendChild(dataColumn);
+          contentContainer.appendChild(roomEntry);
+          }); // Close the regionRooms.forEach loop
+        }); // Close the Object.entries(organizedRooms).forEach loop
+
+        containerDiv.appendChild(contentContainer);
+
+        // Clear container and append content
+        container.innerHTML = '';
+        container.appendChild(containerDiv);
+      }
+
+      // Function to display search results for Speedrun/Rank Points in col3
+      function displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
+        // Create container
+        const containerDiv = document.createElement('div');
+        Object.assign(containerDiv.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100%',
+          padding: '20px',
+          boxSizing: 'border-box'
+        });
+
+        // Create header
+        const header = document.createElement('div');
+        header.style.cssText = `
+          font-size: 18px;
+          font-weight: bold;
+          color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+          margin-bottom: 20px;
+          text-align: center;
+          padding: 10px;
+          background: rgba(255, 224, 102, 0.1);
+          border-radius: 8px;
+        `;
+        header.textContent = `${playerName}'s ${category} Data`;
+        containerDiv.appendChild(header);
+
+        // Create content container (no scrollbar needed)
+        const contentContainer = document.createElement('div');
+        contentContainer.style.cssText = `
+          flex: 1;
+          padding: 10px;
+        `;
+
+        // Get all room codes and sort them alphabetically
+        const allRoomCodes = Object.keys(ROOM_NAMES).sort();
+
+        // Create room entries
+        allRoomCodes.forEach(roomCode => {
+          const roomName = ROOM_NAMES[roomCode];
+          const searchedRoom = searchedRooms[roomCode];
+          const yourRoom = yourRooms[roomCode];
+
+          if (!searchedRoom) return; // Skip if searched player doesn't have this room
+
+          const roomEntry = document.createElement('div');
+          roomEntry.style.cssText = `
+            margin-bottom: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+          `;
+
+          // Room header
+          const roomHeader = document.createElement('div');
+          roomHeader.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+          `;
+
+          // Room thumbnail - use cached version
+          const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+
+          const roomTitle = document.createElement('div');
+          roomTitle.style.cssText = `
+            font-weight: bold;
+            color: ${LAYOUT_CONSTANTS.COLORS.TEXT};
+            font-size: 14px;
+          `;
+          roomTitle.textContent = roomName;
+
+          roomHeader.appendChild(thumbnail);
+          roomHeader.appendChild(roomTitle);
+          roomEntry.appendChild(roomHeader);
+
+          // Data rows
+          if (category === 'Speedrun') {
+            // Speedrun data
+            const searchedTicks = searchedRoom.ticks || 0;
+            const yourTicks = yourRoom?.ticks || 0;
+            const bestTicks = best[roomCode]?.ticks || 0;
+            const bestPlayer = best[roomCode]?.userName || 'Unknown';
+
+            const dataRow = document.createElement('div');
+            dataRow.style.cssText = `
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 12px;
+              color: #ccc;
+            `;
+
+            const searchedData = document.createElement('div');
+            searchedData.innerHTML = `
+              <div style="color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; font-weight: bold;">${playerName}:</div>
+              <div>${searchedTicks} ticks</div>
+            `;
+
+            const yourData = document.createElement('div');
+            yourData.innerHTML = `
+              <div style="color: #8f8; font-weight: bold;">You:</div>
+              <div>${yourTicks} ticks</div>
+            `;
+
+            const bestData = document.createElement('div');
+            bestData.innerHTML = `
+              <div style="color: #ff8; font-weight: bold;">Best:</div>
+              <div>${bestTicks} ticks</div>
+              <div style="font-size: 10px; color: #888;">by ${bestPlayer}</div>
+            `;
+
+            dataRow.appendChild(searchedData);
+            dataRow.appendChild(yourData);
+            dataRow.appendChild(bestData);
+            roomEntry.appendChild(dataRow);
+
+          } else if (category === 'Rank Points') {
+            // Rank Points data
+            const searchedRank = searchedRoom.rank || 0;
+            const yourRank = yourRoom?.rank || 0;
+            const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
+            const topPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
+
+            const dataRow = document.createElement('div');
+            dataRow.style.cssText = `
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 12px;
+              color: #ccc;
+            `;
+
+            const searchedData = document.createElement('div');
+            searchedData.innerHTML = `
+              <div style="color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; font-weight: bold;">${playerName}:</div>
+              <div>${searchedRank} points</div>
+            `;
+
+            const yourData = document.createElement('div');
+            yourData.innerHTML = `
+              <div style="color: #8f8; font-weight: bold;">You:</div>
+              <div>${yourRank} points</div>
+            `;
+
+            const topData = document.createElement('div');
+            topData.innerHTML = `
+              <div style="color: #ff8; font-weight: bold;">Top:</div>
+              <div>${topRank} points</div>
+              <div style="font-size: 10px; color: #888;">by ${topPlayer}</div>
+            `;
+
+            dataRow.appendChild(searchedData);
+            dataRow.appendChild(yourData);
+            dataRow.appendChild(topData);
+            roomEntry.appendChild(dataRow);
+          }
+
+          contentContainer.appendChild(roomEntry);
+        });
+
+        // Add content container to container div
+        containerDiv.appendChild(contentContainer);
+
+        // Clear container and append results
+        container.innerHTML = '';
+        container.appendChild(containerDiv);
+      }
+
+      // Function to display search results (legacy function, kept for compatibility)
+      function displaySearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
+        displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container);
+      }
+
+      // Function to display combined leaderboards search results
+      function displayCombinedLeaderboardsSearchResults(playerName, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
+        // Add null checks for all parameters
+        if (!playerName || !searchedProfileData || !yourRooms || !ROOM_NAMES || !best || !roomsHighscores || !container) {
+          console.error('[Cyclopedia] displayCombinedLeaderboardsSearchResults: Missing required parameters:', {
+            playerName: !!playerName,
+            searchedProfileData: !!searchedProfileData,
+            yourRooms: !!yourRooms,
+            ROOM_NAMES: !!ROOM_NAMES,
+            best: !!best,
+            roomsHighscores: !!roomsHighscores,
+            container: !!container
+          });
+          
+          // Show error message in container
+          if (container) {
+            container.innerHTML = `
+              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Data Error</div>
+                <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
+                <div style="font-size: 12px; color: #666;">Please try searching again.</div>
+              </div>
+            `;
+          }
+          return;
+        }
+        
+        // Extract highscores from profile data
+        const searchedHighscores = searchedProfileData.highscores || [];
+        
+        // Convert highscores array to a map for easy lookup
+        // Separate speedrun records (rank: -1) from rank points records (rank > 0)
+        const searchedHighscoresMap = {};
+        const searchedRankPointsMap = {};
+        
+        searchedHighscores.forEach(score => {
+          if (score.roomId) {
+            if (score.rank === -1) {
+              // Speedrun record: use ticks for speedrun data
+              if (score.ticks && (!searchedHighscoresMap[score.roomId] || score.ticks < searchedHighscoresMap[score.roomId].ticks)) {
+                searchedHighscoresMap[score.roomId] = score;
+              }
+            } else if (score.rank > 0) {
+              // Rank points record: use rank for rank points data
+              if (!searchedRankPointsMap[score.roomId] || score.rank < searchedRankPointsMap[score.roomId].rank) {
+                searchedRankPointsMap[score.roomId] = score;
+              }
+            }
+          }
+        });
+        // Local formatTime function for time formatting
+        function formatTime(ms) {
+          if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
+          const totalSeconds = Math.floor(ms / 1000);
+          const minutes = Math.floor(totalSeconds / 60);
+          const seconds = totalSeconds % 60;
+          const milliseconds = Math.floor((ms % 1000) / 10); // Get centiseconds (10ms precision)
+          return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
+        }
+
+        // Create container
+        const containerDiv = document.createElement('div');
+        Object.assign(containerDiv.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100%',
+          padding: '8px',
+          boxSizing: 'border-box',
+          minWidth: '0', // Prevent content from expanding the container
+          maxWidth: '100%' // Ensure content doesn't exceed container width
+        });
+
+        // Create content container (no scrollbar needed)
+        const contentContainer = document.createElement('div');
+        contentContainer.style.cssText = `
+          flex: 1;
+          padding: 2px;
+          min-width: 0; /* Prevent content from expanding */
+          max-width: 100%; /* Ensure content doesn't exceed container width */
+        `;
+
+        // Organize rooms by region
+        const organizedRooms = organizeRoomsByRegion(ROOM_NAMES, ROOM_NAMES);
+
+        // Create room entries organized by region
+        Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
+          // Create region header using the title system with sticky positioning
+          const regionHeader = DOMUtils.createTitle(regionName, LAYOUT_CONSTANTS.FONTS.SIZES.SMALL);
+          Object.assign(regionHeader.style, {
+            margin: '8px 0 4px 0',
+            width: '100%',
+            position: 'sticky',
+            top: '0',
+            zIndex: '10',
+            backgroundColor: '#232323'
+          });
+          contentContainer.appendChild(regionHeader);
+
+          // Create room entries for this region
+          regionRooms.forEach(({ roomCode, roomName }) => {
+            const searchedScore = searchedHighscoresMap[roomCode];
+            const yourRoom = yourRooms[roomCode];
+
+            // Show all rooms, but mark those without highscores
+            const hasSearchedScore = searchedScore && searchedScore.ticks;
+            const hasSearchedRankScore = searchedRankPointsMap[roomCode];
+
+            // Single room entry with grid layout - matching left column style
+            const roomEntry = document.createElement('div');
+            roomEntry.style.cssText = `
+              display: grid;
+              grid-template-columns: 80px 1fr;
+              gap: 8px;
+              margin-bottom: 4px;
+              padding: 6px;
+              background: rgba(255, 255, 255, 0.05);
+              border-radius: 4px;
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              min-width: 0; /* Prevent grid from expanding container */
+              max-width: 100%; /* Ensure grid doesn't exceed container width */
+            `;
+
+          // Column 1: Map Icon + Map Name (stacked vertically) - same as left column
+          const mapColumn = document.createElement('div');
+          mapColumn.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            width: 80px;
+            min-width: 80px; /* Prevent shrinking */
+            max-width: 80px; /* Prevent expanding */
+          `;
+
+          // Map icon
+          const mapIcon = document.createElement('div');
+          mapIcon.style.cssText = `
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            overflow: hidden;
+          `;
+          // Use cached thumbnail for map icon
+          const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+          thumbnail.style.width = '100%';
+          thumbnail.style.height = '100%';
+          mapIcon.appendChild(thumbnail);
+
+          // Map name
+          const mapName = document.createElement('div');
+          mapName.style.cssText = `
+            font-size: 12px;
+            font-weight: bold;
+            color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+            text-align: center;
+            width: 100%;
+            word-wrap: break-word;
+          `;
+          mapName.textContent = roomName;
+
+          mapColumn.appendChild(mapIcon);
+          mapColumn.appendChild(mapName);
+
+          // Column 2: Speedrun and Rank Points data (stacked vertically) - same as left column
+          const dataColumn = document.createElement('div');
+          dataColumn.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure it doesn't exceed container width */
+          `;
+
+          // Speedrun data - show searched player's data, not user's data
+          const searchedTicks = hasSearchedScore ? searchedScore.ticks : null;
+          const topTicks = best?.[roomCode]?.ticks || null;
+
+          // Speedrun row
+          const speedrunRow = document.createElement('div');
+          const isSpeedrunTop = searchedTicks !== null && topTicks !== null && searchedTicks === topTicks;
+          speedrunRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            gap: 6px;
+            padding: 4px;
+            background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #4CAF50;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure grid doesn't exceed container width */
+          `;
+
+          const searchedSpeedrun = document.createElement('div');
+          searchedSpeedrun.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
+          `;
+          searchedSpeedrun.innerHTML = `
+            <span style="color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; font-weight: bold;">${playerName}:</span>
+            <span>${searchedTicks !== null && searchedTicks >= 0 ? searchedTicks + ' ticks' : '-'}</span>
+          `;
+
+          const topSpeedrun = document.createElement('div');
+          topSpeedrun.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
+          `;
+          topSpeedrun.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span>${topTicks !== null ? topTicks + ' ticks' : '-'}</span>
+          `;
+
+          speedrunRow.appendChild(searchedSpeedrun);
+          speedrunRow.appendChild(topSpeedrun);
+
+          // Rank Points data - show searched player's data, not user's data
+          const searchedRankScore = searchedRankPointsMap[roomCode];
+          const searchedRank = searchedRankScore ? searchedRankScore.rank : null;
+          const topRank = roomsHighscores?.rank?.[roomCode]?.rank || null;
+
+          // Rank Points row
+          const rankRow = document.createElement('div');
+          const isRankTop = searchedRank !== null && topRank !== null && searchedRank === topRank;
+          rankRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            min-width: 0; /* Prevent expanding */
+            max-width: 100%; /* Ensure grid doesn't exceed container width */
+            gap: 6px;
+            padding: 4px;
+            background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #FF9800;
+          `;
+
+          const searchedRankData = document.createElement('div');
+          searchedRankData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isRankTop ? 'bold' : 'normal'};
+          `;
+          searchedRankData.innerHTML = `
+            <span style="color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; font-weight: bold;">${playerName}:</span>
+            <span>${searchedRank !== null && searchedRank >= 0 ? searchedRank + ' points' : '-'}</span>
+          `;
+
+          const topRankData = document.createElement('div');
+          topRankData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isRankTop ? 'bold' : 'normal'};
+          `;
+          topRankData.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span>${topRank !== null ? topRank + ' points' : '-'}</span>
+          `;
+
+          rankRow.appendChild(searchedRankData);
+          rankRow.appendChild(topRankData);
+
+          dataColumn.appendChild(speedrunRow);
+          dataColumn.appendChild(rankRow);
+
+          roomEntry.appendChild(mapColumn);
+          roomEntry.appendChild(dataColumn);
+          contentContainer.appendChild(roomEntry);
+          }); // Close the regionRooms.forEach loop
+        }); // Close the Object.entries(organizedRooms).forEach loop
+
+        containerDiv.appendChild(contentContainer);
+
+        // Clear container and append results
+        container.innerHTML = '';
+        container.appendChild(containerDiv);
+      }
+
+      // Function to display searched player's stats in col3
+      const displaySearchedPlayerStats = (playerName, profileData, targetColumn = col3) => {
+        // Check if we're in Speedrun, Rank Points, or Combined Leaderboards mode
+        if (window.currentSpeedrunRankCategory && window.currentSpeedrunRankData) {
+          if (window.currentSpeedrunRankCategory === 'Combined') {
+            // Handle Combined Leaderboards search
+            displayCombinedLeaderboardsSearchResults(
+              playerName,
+              profileData,
+              window.currentSpeedrunRankData.yourRooms,
+              window.currentSpeedrunRankData.ROOM_NAMES,
+              window.currentSpeedrunRankData.best,
+              window.currentSpeedrunRankData.roomsHighscores,
+              targetColumn
+            );
+          } else {
+            // Handle Speedrun/Rank Points search
+            displaySpeedrunRankSearchResults(
+              window.currentSpeedrunRankCategory,
+              playerName,
+              profileData.rooms,
+              window.currentSpeedrunRankData.yourRooms,
+              window.currentSpeedrunRankData.ROOM_NAMES,
+              window.currentSpeedrunRankData.best,
+              window.currentSpeedrunRankData.roomsHighscores,
+              targetColumn
+            );
+          }
+          return;
+        }
+
+        // Default behavior for Player Information
+        // Create a container for searched player info
+        const container = document.createElement('div');
+        Object.assign(container.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100%',
+          padding: '20px',
+          boxSizing: 'border-box'
+        });
+
+        // Check if profileData is null (player not found)
+        if (profileData === null) {
+          // Create template content with "Player not found" in the name slot with red text
+          const templateContent = renderCyclopediaPlayerInfo({
+            name: 'Player not found',
+            level: '-',
+            createdAt: '-',
+            status: '-',
+            loyaltyPoints: '-',
+            dailySeashell: '-',
+            huntingTasks: '-',
+            totalRuns: '-',
+            perfectCreatures: '-',
+            bisEquipments: '-',
+            exploredMaps: '-',
+            bagOutfits: '-',
+            rankPoints: '-',
+            timeSum: '-'
+          });
+          
+          // Find the name element and make it red
+          const nameElement = templateContent.querySelector('p.line-clamp-1.text-whiteExp.animate-in.fade-in');
+          
+          if (nameElement) {
+            nameElement.textContent = 'Player not found';
+            nameElement.style.color = LAYOUT_CONSTANTS.COLORS.ERROR;
+            nameElement.style.fontWeight = 'bold';
+          }
+          
+          // Center the content
+          const centeredContent = document.createElement('div');
+          Object.assign(centeredContent.style, {
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            width: '100%',
+            height: '100%'
+          });
+          
+          centeredContent.appendChild(templateContent);
+          container.appendChild(centeredContent);
+        } else {
+          // Create the player info content for valid player data
+          const playerInfoContent = renderCyclopediaPlayerInfo(profileData);
+          
+          // Add profile button after the player name
+          const nameElement = playerInfoContent.querySelector('p.line-clamp-1.text-whiteExp.animate-in.fade-in');
+          if (nameElement && playerName) {
+            // Create a container for name and button
+            const nameContainer = document.createElement('div');
+            Object.assign(nameContainer.style, {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              flexWrap: 'wrap'
+            });
+            
+            // Move the name to the container
+            nameElement.parentNode.insertBefore(nameContainer, nameElement);
+            nameContainer.appendChild(nameElement);
+            
+            // Create profile button
+            const profileButton = document.createElement('button');
+            Object.assign(profileButton.style, {
+              background: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat',
+              border: '1px solid transparent',
+              borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch',
+              color: '#e6d7b0',
+              cursor: 'pointer',
+              borderRadius: '0',
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '16px',
+              height: '16px',
+              padding: '1px',
+              marginLeft: '4px',
+              transition: 'border-image 0.1s'
+            });
+            
+            // Add button content - just the icon
+            profileButton.innerHTML = `
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 7h10v10"/>
+                <path d="M7 17 17 7"/>
+              </svg>
+            `;
+            
+            // Add title for accessibility
+            profileButton.title = 'View Profile';
+            profileButton.setAttribute('aria-label', 'View Profile');
+            
+            // Add hover effects
+            profileButton.addEventListener('mouseenter', () => {
+              profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 1 fill stretch';
+            });
+            
+            profileButton.addEventListener('mouseleave', () => {
+              profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch';
+            });
+            
+            // Add click handler
+            profileButton.addEventListener('click', () => {
+              const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent(playerName)}`;
+              window.open(profileUrl, '_blank');
+            });
+            
+            // Add pressed state
+            profileButton.addEventListener('mousedown', () => {
+              profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 1 fill stretch';
+            });
+            
+            profileButton.addEventListener('mouseup', () => {
+              profileButton.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 1 fill stretch';
+            });
+            
+            // Add to container
+            nameContainer.appendChild(profileButton);
+          }
+          
+          // Center the content
+          const centeredContent = document.createElement('div');
+          Object.assign(centeredContent.style, {
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            width: '100%',
+            height: '100%'
+          });
+          
+          centeredContent.appendChild(playerInfoContent);
+          container.appendChild(centeredContent);
+        }
+
+        // Clear col3 and append searched player info
+        col3.innerHTML = '';
+        col3.appendChild(container);
+      };
+
+      // Add the search input and button to the content area
+      function setupSearchInterface() {
+        setTimeout(() => {
+          // Find the correct container - the one with the grid layout
+          const contentContainer = playerSearchBox.querySelector('[data-nopadding="true"]') ||
+                                  playerSearchBox.querySelector('[style*="grid-template-rows"]') ||
+                                  playerSearchBox.querySelector('[style*="overflow-y"]');
+          
+          if (contentContainer) {
+            // Clear any existing content
+            contentContainer.innerHTML = '';
+            
+            // Set container styles to ensure content is at the top
+            Object.assign(contentContainer.style, {
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-start',
+              alignItems: 'stretch',
+              padding: '8px',
+              height: 'auto',
+              minHeight: '0',
+              overflow: 'visible'
+            });
+            
+            // Get current user's username
+            let currentUsername = '';
+            try {
+              const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+              if (playerState?.name) {
+                currentUsername = playerState.name;
+              }
+            } catch (error) {
+          
+            }
+
+            const playerSearchInput = DOMUtils.createElement('input');
+            playerSearchInput.type = 'text';
+            playerSearchInput.placeholder = 'Compare with...';
+            playerSearchInput.value = ''; // Leave empty for comparison
+            Object.assign(playerSearchInput.style, {
+              width: '100%',
+              padding: '4px 8px',
+              border: '1px solid #444',
+              borderRadius: '2px',
+              backgroundColor: '#232323',
+              color: LAYOUT_CONSTANTS.COLORS.TEXT,
+              fontFamily: LAYOUT_CONSTANTS.FONTS.PRIMARY,
+              fontSize: '12px',
+              boxSizing: 'border-box',
+              marginBottom: '4px'
+            });
+
+            const searchButton = DOMUtils.createElement('button', '', 'Search');
+            Object.assign(searchButton.style, {
+              width: '100%',
+              padding: '4px 8px',
+              border: '1px solid #444',
+              borderRadius: '2px',
+              backgroundColor: '#232323',
+              color: LAYOUT_CONSTANTS.COLORS.TEXT,
+              fontFamily: LAYOUT_CONSTANTS.FONTS.PRIMARY,
+              fontSize: '12px',
+              cursor: 'pointer',
+              boxSizing: 'border-box'
+            });
+
+            // Add hover effect using EventHandlerManager
+            EventHandlerManager.addHandler(searchButton, 'mouseenter', () => {
+              searchButton.style.backgroundColor = '#444';
+            });
+            EventHandlerManager.addHandler(searchButton, 'mouseleave', () => {
+              searchButton.style.backgroundColor = '#232323';
+            });
+
+            // Add search functionality with caching and debouncing
+            const performSearch = async () => {
+              const searchTerm = playerSearchInput.value.trim();
+              if (!searchTerm) {
+                return;
+              }
+              
+              // Store the searched username globally
+              cyclopediaState.searchedUsername = searchTerm;
+              
+              // Show loading state only in col3 (col2 keeps user's stats)
+              col3.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                  <div style="font-size: 24px; margin-bottom: 16px;">🔍</div>
+                  <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Searching...</div>
+                  <div style="font-size: 14px; color: #888;">Looking for player: ${searchTerm}</div>
+                </div>
+              `;
+              
+              try {
+                // Check cache first for the searched player's profile data
+                let searchedProfileData = getCachedProfileData(searchTerm);
+                
+                if (!searchedProfileData) {
+                  // Fetch player data from API with deduplication
+                  const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(searchTerm)}%22%7D%7D`;
+                  
+                  const data = await fetchWithDeduplication(apiUrl, `search-${searchTerm}`);
+                  
+                  // Extract profile data from the response
+                  if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
+                    searchedProfileData = data[0].result.data.json;
+                  } else {
+                    searchedProfileData = data;
+                  }
+                  
+                  // Cache the result if valid
+                  if (searchedProfileData && searchedProfileData !== null) {
+                    setCachedProfileData(searchTerm, searchedProfileData);
+                  }
+                } else {
+                  // Using cached profile data for search
+                }
+                
+                // Check if player doesn't exist (API returns json: null)
+                if (searchedProfileData === null) {
+                  // Show "Player doesn't exist" message only in col3
+                  col3.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                      <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
+                      <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${searchTerm}</div>
+                      <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
+                    </div>
+                  `;
+                  return;
+                }
+                
+                // Always populate col3 with searched player's data for current tab mode
+                
+                if (window.selectedCharacterItem === 'Leaderboards' && window.currentSpeedrunRankData) {
+                  // Handle leaderboard search - populate col3 with Leaderboards data
+                  try {
+                    const { yourRooms, ROOM_NAMES, best, roomsHighscores } = window.currentSpeedrunRankData;
+                    const searchedRooms = searchedProfileData.rooms || {};
+                    
+                    displayCombinedLeaderboardsSearchResults(searchTerm, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
+                    
+                  } catch (error) {
+                    console.error('[Cyclopedia] Error displaying leaderboard search results:', error);
+                    col3.innerHTML = `
+                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
+                        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${searchTerm}</div>
+                        <div style="font-size: 12px; color: #666;">Please try again later.</div>
+                      </div>
+                    `;
+                  }
+                } else {
+                  // Default: Player Information mode - populate col3 with searched player's Player Information
+                  displaySearchedPlayerStats(searchTerm, searchedProfileData, col3);
+                }
+                
+              } catch (error) {
+                console.error('[Cyclopedia] Error searching for player:', error);
+                
+                let errorMessage = 'Could not find player';
+                let errorDetails = 'Please check the spelling and try again.';
+                
+                // Handle rate limiting specifically
+                if (error.message.includes('Rate limit exceeded')) {
+                  errorMessage = 'Rate limit exceeded';
+                  errorDetails = error.message;
+                } else if (error.message.includes('HTTP error')) {
+                  errorMessage = 'Network error';
+                  errorDetails = 'Please check your internet connection and try again.';
+                }
+                
+                // Show error state only in col3
+                col3.innerHTML = `
+                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                    <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">${errorMessage}</div>
+                    <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${errorDetails}</div>
+                    <div style="font-size: 12px; color: #666;">Search term: ${searchTerm}</div>
+                  </div>
+                `;
+              }
+            };
+
+            // Add click handler to search button using EventHandlerManager
+            EventHandlerManager.addHandler(searchButton, 'click', performSearch);
+            
+            // Add Enter key functionality to input using EventHandlerManager
+            EventHandlerManager.addHandler(playerSearchInput, 'keydown', (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                performSearch();
+              }
+            });
+
+            contentContainer.appendChild(playerSearchInput);
+            contentContainer.appendChild(searchButton);
+          }
+        }, 10);
+      }
+      
+      setupSearchInterface();
+
+      col1.appendChild(playerSearchBox);
+
+      // Create the Characters box (80% of col1) - now second
+      const charactersBox = createBox({
+        title: 'Statistics',
+        items: ['Player Information', 'Leaderboards'],
+        type: 'inventory',
+        selectedCreature,
+        selectedEquipment,
+        selectedInventory,
+        setSelectedCreature,
+        setSelectedEquipment,
+        setSelectedInventory,
+        updateRightCol: () => {}
+      });
+      charactersBox.style.flex = '0.8 1 0';
+      charactersBox.style.minHeight = '0';
+      col1.appendChild(charactersBox);
+
+      // Set default selection and add click handlers, plus show player's own profile
+      setTimeout(() => {
+        // Only select divs that are actual character items (not titles or other elements)
+        const items = charactersBox.querySelectorAll('div');
+        const characterItems = Array.from(items).filter(item => {
+          const text = item.textContent.trim();
+          return text === 'Player Information' || text === 'Leaderboards';
+        });
+        
+        characterItems.forEach(item => {
+          
+          if (item.textContent === 'Player Information') {
+            item.classList.add('cyclopedia-selected');
+            item.style.background = 'rgba(255,255,255,0.18)';
+            item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+          }
+          
+          // Add click handler for character items only
+          item.addEventListener('click', async (event) => {
+            event.stopPropagation(); // Prevent event bubbling
+            
+            // Remove selection from all character items
+            characterItems.forEach(otherItem => {
+              otherItem.classList.remove('cyclopedia-selected');
+              otherItem.style.background = 'none';
+              otherItem.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            });
+            
+            // Add selection to clicked item
+            item.classList.add('cyclopedia-selected');
+            item.style.background = 'rgba(255,255,255,0.18)';
+            item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+            
+            // Update the selected character item and refresh both col2 and col3
+            selectedCharacterItem = item.textContent;
+            window.selectedCharacterItem = selectedCharacterItem; // Update global variable
+            
+            // Handle tab switching with remembered searched username
+            if (selectedCharacterItem === 'Player Information') {
+              window.currentSpeedrunRankCategory = null;
+              window.currentSpeedrunRankData = null;
+              
+              // Simple, robust display of user stats
+              displayUserStats('Player Information');
+              
+              // Always show searched player's data in col3 for current tab mode
+              if (cyclopediaState.searchedUsername) {
+                // Get cached profile data for the searched user
+                let searchedProfileData = getCachedProfileData(cyclopediaState.searchedUsername);
+                
+                if (searchedProfileData) {
+                  // Populate col3 with the searched user's Player Information
+                  displaySearchedPlayerStats(cyclopediaState.searchedUsername, searchedProfileData, col3);
+                } else {
+                  // Show player profile template in col3 (same layout as col2)
+                  const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+                  if (playerState?.name) {
+                    // Get cached profile data or fetch it
+                    let profileData = getCachedProfileData(playerState.name);
+                    if (!profileData) {
+                      // Show loading state
+                      col3.innerHTML = `
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                          <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
+                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div>
+                          <div style="font-size: 14px; color: #888;">Fetching profile data</div>
+                        </div>
+                      `;
+                      
+                      // Fetch profile data
+                      const apiUrl = `${START_PAGE_CONFIG.API_BASE_URL}?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerState.name)}%22%7D%7D`;
+                      try {
+                        const data = await fetchWithDeduplication(apiUrl, `profile-${playerState.name}`);
+                        profileData = Array.isArray(data) && data[0]?.result?.data?.json 
+                          ? data[0].result.data.json 
+                          : data;
+                        setCachedProfileData(playerState.name, profileData);
+                      } catch (error) {
+                        console.error('[Cyclopedia] Error fetching profile data for template:', error);
+                        profileData = null;
+                      }
+                    }
+                    
+                    // Show template with same layout as col2
+                    if (profileData) {
+                      const container = document.createElement('div');
+                      Object.assign(container.style, {
+                        display: 'flex',
+                        flexDirection: 'column',
+                        width: '100%',
+                        height: '100%',
+                        padding: '20px',
+                        boxSizing: 'border-box',
+                        overflowY: 'scroll'
+                      });
+                      
+                      // Center the content
+                      const centeredContent = document.createElement('div');
+                      Object.assign(centeredContent.style, {
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'flex-start',
+                        width: '100%',
+                        height: '100%'
+                      });
+                      
+                      // Create template content with same structure as col2 but with placeholder data
+                      const templateContent = renderCyclopediaPlayerInfo({
+                        name: '[Player Name]',
+                      exp: 0,
+                      premium: false,
+                      shell: 0,
+                      tasks: 0,
+                      playCount: 0,
+                      perfectMonsters: 0,
+                      bisEquips: 0,
+                      maps: 0,
+                      ownedOutfits: 0,
+                      rankPoints: 0,
+                      ticks: 0
+                      });
+                      
+                      centeredContent.appendChild(templateContent);
+                      container.appendChild(centeredContent);
+                      
+                      // Clear col3 and append template
+                      col3.innerHTML = '';
+                      col3.appendChild(container);
+                    } else {
+                      showPlayerProfileTemplate(col3);
+                    }
+                  } else {
+                    showPlayerProfileTemplate(col3);
+                  }
+                }
+              } else {
+                // No searched username, show default behavior
+                // Show player profile template in col3 (same layout as col2)
+                const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+                if (playerState?.name) {
+                  // Get cached profile data or fetch it
+                  let profileData = getCachedProfileData(playerState.name);
+                  if (!profileData) {
+                    // Show loading state
+                    col3.innerHTML = `
+                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                        <div style="font-size: 24px; margin-bottom: 16px;">📚</div>
+                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div>
+                        <div style="font-size: 14px; color: #888;">Fetching profile data</div>
+                      </div>
+                    `;
+                    
+                    // Fetch profile data
+                    const apiUrl = `${START_PAGE_CONFIG.API_BASE_URL}?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerState.name)}%22%7D%7D`;
+                    try {
+                      const data = await fetchWithDeduplication(apiUrl, `profile-${playerState.name}`);
+                      profileData = Array.isArray(data) && data[0]?.result?.data?.json 
+                        ? data[0].result.data.json 
+                        : data;
+                      setCachedProfileData(playerState.name, profileData);
+                    } catch (error) {
+                      console.error('[Cyclopedia] Error fetching profile data for template:', error);
+                      profileData = null;
+                    }
+                  }
+                  
+                  // Show template with same layout as col2
+                  if (profileData) {
+                    const container = document.createElement('div');
+                    Object.assign(container.style, {
+                      display: 'flex',
+                      flexDirection: 'column',
+                      width: '100%',
+                      height: '100%',
+                      padding: '20px',
+                      boxSizing: 'border-box',
+                      overflowY: 'scroll'
+                    });
+                    
+                    // Center the content
+                    const centeredContent = document.createElement('div');
+                    Object.assign(centeredContent.style, {
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'flex-start',
+                      width: '100%',
+                      height: '100%'
+                    });
+                    
+                    // Create template content with same structure as col2 but with placeholder data
+                    const templateContent = renderCyclopediaPlayerInfo({
+                      name: '[Player Name]',
+                      exp: 0,
+                      premium: false,
+                      shell: 0,
+                      tasks: 0,
+                      playCount: 0,
+                      perfectMonsters: 0,
+                      bisEquips: 0,
+                      maps: 0,
+                      ownedOutfits: 0,
+                      rankPoints: 0,
+                      ticks: 0
+                    });
+                    
+                    centeredContent.appendChild(templateContent);
+                    container.appendChild(centeredContent);
+                    
+                    // Clear col3 and append template
+                    col3.innerHTML = '';
+                    col3.appendChild(container);
+                  } else {
+                    showPlayerProfileTemplate(col3);
+                  }
+                } else {
+                  showPlayerProfileTemplate(col3);
+                }
+              }
+            } else if (selectedCharacterItem === 'Leaderboards') {
+              // Always show user's stats in col2
+              displayUserStats('Player Information').catch(error => {
+                console.error('[Cyclopedia] Error updating user stats:', error);
+              });
+              
+              // Get player state for leaderboard data
+              const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+              
+              // Always show searched player's data in col3 for current tab mode
+              if (cyclopediaState.searchedUsername) {
+                // Get cached profile data for the searched user
+                let searchedProfileData = getCachedProfileData(cyclopediaState.searchedUsername);
+                
+                if (searchedProfileData) {
+                  // Check if we have leaderboard data available
+                  if (window.currentSpeedrunRankData) {
+                    // Populate col3 with Leaderboards data for the searched user
+                    const { yourRooms, ROOM_NAMES, best, roomsHighscores } = window.currentSpeedrunRankData;
+                    const searchedRooms = searchedProfileData.rooms || {};
+                    
+                    // Check if we have valid data before calling the function
+                    const searchedHighscores = searchedProfileData.highscores || [];
+                    if (searchedHighscores.length > 0) {
+                      displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
+                    } else {
+                      // Show message if searched player has no highscores data
+                      col3.innerHTML = `
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.WARNING}; text-align: center; padding: 20px;">
+                          <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
+                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">No Highscores Data</div>
+                          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${cyclopediaState.searchedUsername} has no highscores data</div>
+                          <div style="font-size: 12px; color: #666;">This player may not have completed any rooms yet.</div>
+                        </div>
+                      `;
+                    }
+                  } else {
+                    // Load leaderboard data first, then populate col3
+                    if (playerState?.name) {
+                      // Show loading state in col3
+                      col3.innerHTML = `
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                          <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
+                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
+                          <div style="font-size: 14px; color: #888;">Preparing ${cyclopediaState.searchedUsername}'s data</div>
+                        </div>
+                      `;
+                      
+                      // Load leaderboard data
+                      displayCombinedLeaderboardsData(playerState).then(() => {
+                        // After leaderboard data is loaded, populate col3 with searched player's data
+                        const cachedData = getCachedLeaderboardData('combined-leaderboards');
+                        if (cachedData && searchedProfileData) {
+                          // Ensure we have the correct data structure
+                          const yourRooms = cachedData.yourRooms || playerState.rooms || {};
+                          const ROOM_NAMES = cachedData.ROOM_NAMES || globalThis.state.utils.ROOM_NAME || {};
+                          const best = cachedData.best || {};
+                          const roomsHighscores = cachedData.roomsHighscores || {};
+                          const searchedRooms = searchedProfileData.rooms || {};
+                          
+                                                                         // Check if we have valid data before calling the function
+                     const searchedHighscores = searchedProfileData.highscores || [];
+                     if (searchedHighscores.length > 0) {
+                       displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
+                     } else {
+                       // Show message if searched player has no highscores data
+                       col3.innerHTML = `
+                         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.WARNING}; text-align: center; padding: 20px;">
+                           <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
+                           <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">No Highscores Data</div>
+                           <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${cyclopediaState.searchedUsername} has no highscores data</div>
+                           <div style="font-size: 12px; color: #666;">This player may not have completed any rooms yet.</div>
+                         </div>
+                       `;
+                     }
+                        }
+                      }).catch(error => {
+                        console.error('[Cyclopedia] Error loading leaderboard data for searched player:', error);
+                        col3.innerHTML = `
+                          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                            <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                            <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Load Error</div>
+                            <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
+                            <div style="font-size: 12px; color: #666;">Please try again later.</div>
+                          </div>
+                        `;
+                      });
+                    }
+                  }
+                } else {
+                  // Show loading state in col3
+                  col3.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                      <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
+                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
+                      <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
+                    </div>
+                  `;
+                }
+              } else {
+                // No searched username, show default behavior
+                if (playerState?.name) {
+                  // Show loading state in col3
+                  col3.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                      <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
+                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
+                      <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
+                    </div>
+                  `;
+                
+                // Update search functionality for Leaderboards
+                displayCombinedLeaderboardsData(playerState).then(() => {
+                  // After col2 is updated, update col3 with search functionality
+                  // Get the actual data that was fetched
+                  const cachedData = getCachedLeaderboardData('combined-leaderboards');
+                  if (cachedData) {
+                    updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, cachedData.best, cachedData.roomsHighscores);
+                  } else {
+                    updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, null, null);
+                  }
+                }).catch(error => {
+                  console.error('[Cyclopedia] Error updating leaderboards data:', error);
+                });
+              }
+            }
+            }
+            
+            displayUserStats(selectedCharacterItem).catch(error => {
+              console.error('[Cyclopedia] Error updating user stats:', error);
+            });
+          });
+        });
+
+        // Show player's own stats by default in col2 and col3
+        (async () => {
+          try {
+            await displayUserStats('Player Information');
+            
+            // Show template/placeholder data in col3 (not actual user data)
+            const container = document.createElement('div');
+            Object.assign(container.style, {
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%',
+              height: '100%',
+              padding: '20px',
+              boxSizing: 'border-box',
+              overflowY: 'scroll'
+            });
+            
+            // Center the content
+            const centeredContent = document.createElement('div');
+            Object.assign(centeredContent.style, {
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-start',
+              width: '100%',
+              height: '100%'
+            });
+            
+            // Create template content with placeholder data (simulating null/empty JSON)
+            const templateContent = renderCyclopediaPlayerInfo({
+              name: '[Player Name]',
+              exp: 0,
+              premium: false,
+              shell: 0,
+              tasks: 0,
+              playCount: 0,
+              perfectMonsters: 0,
+              bisEquips: 0,
+              maps: 0,
+              ownedOutfits: 0,
+              rankPoints: 0,
+              ticks: 0
+            });
+            
+            centeredContent.appendChild(templateContent);
+            container.appendChild(centeredContent);
+            
+            // Clear col3 and append template
+            col3.innerHTML = '';
+            col3.appendChild(container);
+                  } catch (error) {
+          // Could not get player state for default profile
+        }
+        })();
+      }, 10);
+
+      // Content for col2 and col3
+      let selectedCharacterItem = 'Player Information';
+      
+      // Make selectedCharacterItem accessible to the search function
+      window.selectedCharacterItem = selectedCharacterItem;
+
+      // Show player's own stats by default in col2
+      displayUserStats('Player Information');
+
+      d.appendChild(col1);
+      d.appendChild(sharedScrollContainer);
+      
+      // Add cleanup function to the returned element
+      d.cleanupCharactersTab = () => {
+        try {
+          // Clear only leaderboard cache and DOM references, preserve profile data cache
+          clearLeaderboardCache();
+          
+          // Clear DOM references
+          col1.innerHTML = '';
+          col2.innerHTML = '';
+          col3.innerHTML = '';
+          
+          // Remove event listeners (if any were stored)
+          if (d.characterEventListeners) {
+            d.characterEventListeners.forEach(({ element, event, handler }) => {
+              element?.removeEventListener(event, handler);
+            });
+            d.characterEventListeners = [];
+          }
+          
+  
+        } catch (error) {
+          console.error('[Cyclopedia] Error during Characters tab cleanup:', error);
+        }
+      };
+      
       return d;
     }
 
@@ -2452,133 +4369,10 @@ function openCyclopediaModal(options) {
       let selectedCategory = 'Consumables';
       let selectedInventoryItem = null;
 
-      const INVENTORY_CONFIG = {
-        items: {
-          stamina: {
-            prefix: 'stamina',
-            baseName: 'Stamina Potion',
-            tiers: {
-              '1': '(Mini)', '2': '(Strong)', '3': '(Great)', '4': '(Ultimate)', '5': '(Supreme)'
-            },
-            rarity: { '1': '1', '2': '2', '3': '3', '4': '4', '5': '5' }
-          },
-          insightStone: {
-            prefix: 'insightStone',
-            baseName: 'Stone of Insight',
-            tiers: {
-              '1': '(Glimpse)', '2': '(Awakening)', '3': '(Arcane)', '4': '(Enlightenment)', '5': '(Epiphany)'
-            },
-            rarity: { '1': '1', '2': '2', '3': '3', '4': '4', '5': '5' }
-          },
-          summonScroll: {
-            prefix: 'summonScroll',
-            baseName: 'Summon Scroll',
-            tiers: {
-              '1': '(Crude)', '2': '(Ordinary)', '3': '(Refined)', '4': '(Special)', '5': '(Exceptional)'
-            },
-            rarity: { '1': '1', '2': '2', '3': '3', '4': '4', '5': '5' }
-          },
-          diceManipulator: {
-            prefix: 'diceManipulator',
-            baseName: 'Dice Manipulator',
-            tiers: {
-              '1': '(Common)', '2': '(Uncommon)', '3': '(Rare)', '4': '(Mythic)', '5': '(Legendary)'
-            },
-            rarity: { '1': '1', '2': '2', '3': '3', '4': '4', '5': '5' }
-          },
-          surpriseCube: {
-            prefix: 'surpriseCube',
-            baseName: 'Surprise Cube',
-            tiers: {
-              '2': '(Irregular)', '3': '(Uniform)', '4': '(Precise)', '5': '(Perfect)'
-            },
-            rarity: { '2': '2', '3': '3', '4': '4', '5': '5' }
-          }
-        },
-        categories: {
-          'Consumables': [
-            'Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature',
-            'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'
-          ],
-          'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-          'Upgrades': [
-            'Daily Boosted Map', 'Daycare', 'Hy\'genie', 'Monster Cauldron', 'Monster Squeezer',
-            'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract'
-          ]
-        },
-        variants: {
-          'Change Nickname': ['nicknameChange'],
-          'Dice Manipulators': ['diceManipulator1', 'diceManipulator2', 'diceManipulator3', 'diceManipulator4', 'diceManipulator5'],
-          'Exaltation Chests': ['equipChest'],
-          'Nickname Creature': ['nicknameMonster'],
-          'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
-          'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
-          'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
-          'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
-          'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
-          'Beast Coins': ['beastCoins'],
-          'Dust': ['dust'],
-          'Gold': ['gold'],
-          'Hunting Marks': ['huntingMarks'],
-          'Daily Boosted Map': ['dailyBoostedMap'],
-          'Daycare': ['daycare'],
-          'Hy\'genie': ['hygenie'],
-          'Monster Cauldron': ['monsterCauldron'],
-          'Monster Squeezer': ['monsterSqueezer'],
-          'Mountain Fortress': ['mountainFortress'],
-          'Premium': ['premium'],
-          'The Sweaty Cyclop\'s Forge': ['forge'],
-          'Yasir\'s Trading Contract': ['yasirTradingContract']
-        },
-        staticItems: {
-          'beastCoins': { name: 'Beast Coins', rarity: '1' },
-          'dust': { name: 'Dust', rarity: '2' },
-          'gold': { name: 'Gold', rarity: '3' },
-          'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
-          'nicknameMonster': { name: 'Nickname Creature', rarity: '3' },
-          'nicknameChange': { name: 'Change Nickname', rarity: '2' },
-          'nicknamePlayer': { name: 'Player Nickname', rarity: '2' },
-          'equipChest': { name: 'Exaltation Chest', rarity: '5' },
-          'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' },
-          'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
-          'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' },
-          'daycare': { name: 'Daycare', rarity: '3' },
-          'hygenie': { name: 'Hy\'genie', rarity: '5' },
-          'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
-          'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' },
-          'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
-          'premium': { name: 'Premium', rarity: '5' },
-          'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
-          'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
-        },
-        rarityColors: {
-          '1': '#9d9d9d',
-          '2': '#1eff00',
-          '3': '#0070dd',
-          '4': '#a335ee',
-          '5': '#ff8000'
-        },
-        rarityText: {
-          '1': 'Common',
-          '2': 'Uncommon',
-          '3': 'Rare',
-          '4': 'Epic',
-          '5': 'Legendary'
-        }
-      };
+
 
       const getItemInfo = (itemKey) => {
         if (!itemKey) return { displayName: 'Unknown Item', rarity: '1' };
-
-        for (const [type, config] of Object.entries(INVENTORY_CONFIG.items)) {
-          if (itemKey.startsWith(config.prefix)) {
-            const tier = itemKey.replace(config.prefix, '');
-            return {
-              displayName: `${config.baseName} ${config.tiers[tier] || `(Tier ${tier})`}`,
-              rarity: config.rarity[tier] || '1'
-            };
-          }
-        }
 
         const staticItem = INVENTORY_CONFIG.staticItems[itemKey];
         if (staticItem) {
@@ -2622,7 +4416,7 @@ function openCyclopediaModal(options) {
           const { key, name, icon, rarity } = parseItemMetadata(slot);
           return key ? { count, name, icon, rarity, key } : null;
         } catch (error) {
-          console.warn('[Cyclopedia] Error parsing inventory item:', error);
+  
           return null;
         }
       };
@@ -2807,7 +4601,7 @@ function openCyclopediaModal(options) {
             inventoryCache = new WeakMap();
           }
         } catch (error) {
-          console.warn('[Cyclopedia] Error clearing inventory cache:', error);
+  
           inventoryCache = new WeakMap();
         }
       };
@@ -2845,30 +4639,7 @@ function openCyclopediaModal(options) {
         ]
       };
 
-      const itemVariants = {
-        'Change Nickname': ['nicknameChange'],
-        'Dice Manipulators': ['diceManipulator1', 'diceManipulator2', 'diceManipulator3', 'diceManipulator4', 'diceManipulator5'],
-        'Exaltation Chests': ['equipChest'],
-        'Nickname Creature': ['nicknameMonster'],
-        'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
-        'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
-        'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
-        'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
-        'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
-        'Beast Coins': ['beastCoins'],
-        'Dust': ['dust'],
-        'Gold': ['gold'],
-        'Hunting Marks': ['huntingMarks'],
-        'Daily Boosted Map': ['dailyBoostedMap'],
-        'Daycare': ['daycare'],
-        'Hy\'genie': ['hygenie'],
-        'Monster Cauldron': ['monsterCauldron'],
-        'Monster Squeezer': ['monsterSqueezer'],
-        'Mountain Fortress': ['mountainFortress'],
-        'Premium': ['premium'],
-        'The Sweaty Cyclop\'s Forge': ['forge'],
-        'Yasir\'s Trading Contract': ['yasirTradingContract']
-      };
+
 
       const getItemDisplayName = memoize((itemKey) => {
         if (!itemKey) return 'Unknown Item';
@@ -2880,7 +4651,7 @@ function openCyclopediaModal(options) {
         const displayName = getItemDisplayName(itemKey);
         if (inventoryTooltips[itemKey]?.text) return inventoryTooltips[itemKey].text;
         if (inventoryTooltips[displayName]?.text) return inventoryTooltips[displayName].text;
-        console.warn(`[Cyclopedia] Missing description in inventoryTooltips for:`, { itemKey, displayName, keys: Object.keys(inventoryTooltips) });
+
         return 'A mysterious item with unknown properties.';
       });
 
@@ -2899,48 +4670,17 @@ function openCyclopediaModal(options) {
         let icon = inventoryTooltips[itemKey]?.icon || inventoryTooltips[displayName]?.icon;
 
         if (!icon) {
-          console.warn(`[Cyclopedia] Missing icon in inventoryTooltips for:`, { itemKey, displayName, keys: Object.keys(inventoryTooltips) });
+  
         }
 
         if (icon && !icon.startsWith('/assets/icons/') && !icon.startsWith('/assets/misc/') && !icon.startsWith('sprite://')) {
-          console.warn(`[Cyclopedia] Icon path may be incorrect for:`, { itemKey, displayName, icon });
+  
         }
 
         return icon;
       });
 
-      const currencyConfig = {
-        gold: {
-          uiGetter: getGoldFromUI,
-          gameStatePath: 'gold',
-          name: 'Gold',
-          icon: '/assets/icons/goldpile.png',
-          rarity: '1'
-        },
-        beastCoins: {
-          uiGetter: getBeastCoinsFromUI,
-          gameStatePath: 'coin',
-          name: 'Beast Coins',
-          icon: '/assets/icons/beastcoin.png',
-          rarity: '2'
-        },
-        dust: {
-          gameStateGetter: getDustFromGameState,
-          gameStatePath: 'dust',
-          name: 'Dust',
-          icon: '/assets/icons/dust.png',
-          rarity: '3'
-        },
-        huntingMarks: {
-          uiGetter: getHuntingMarksFromUI,
-          gameStateGetter: getHuntingMarksFromGameState,
-          apiGetter: getHuntingMarksFromProfileAPI,
-          gameStatePath: 'questLog.task.points',
-          name: 'Hunting Marks',
-          icon: 'sprite://35572',
-          rarity: '3'
-        }
-      };
+
 
       const fetchCurrency = async (currencyKey, config) => {
         if (inventory[currencyKey] && inventory[currencyKey].count > 0) {
@@ -2949,14 +4689,14 @@ function openCyclopediaModal(options) {
 
         let value = null;
 
-        if (config.uiGetter) {
+        if (config.uiGetter && typeof config.uiGetter === 'function') {
           value = config.uiGetter();
           if (typeof value === 'number' && !isNaN(value) && value >= 0) {
             // Value found from UI getter
           }
         }
 
-        if ((!value || value === 0) && config.gameStateGetter) {
+        if ((!value || value === 0) && config.gameStateGetter && typeof config.gameStateGetter === 'function') {
           value = config.gameStateGetter();
           if (typeof value === 'number' && !isNaN(value) && value >= 0) {
             // Value found from game state getter
@@ -2984,7 +4724,7 @@ function openCyclopediaModal(options) {
           }
         }
 
-        if ((!value || value === 0) && config.apiGetter) {
+        if ((!value || value === 0) && config.apiGetter && typeof config.apiGetter === 'function') {
           try {
             const apiValue = await config.apiGetter();
             if (typeof apiValue === 'number' && !isNaN(apiValue) && apiValue >= 0) {
@@ -3006,7 +4746,7 @@ function openCyclopediaModal(options) {
         }
       };
 
-      const currencyPromises = Object.entries(currencyConfig).map(([key, config]) => 
+      const currencyPromises = Object.entries(CURRENCY_CONFIG).map(([key, config]) => 
         fetchCurrency(key, config)
       );
 
@@ -3142,7 +4882,7 @@ function openCyclopediaModal(options) {
               </div>
             `;
           } catch (error) {
-            console.warn('[Cyclopedia] Error rendering variant:', itemKey, error);
+    
             return `
               <div style="background: rgba(255,0,0,0.1); border: 1px solid #f00; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
                 <div style="color: #f00; font-size: 12px;">Error loading ${itemKey}</div>
@@ -3195,8 +4935,8 @@ function openCyclopediaModal(options) {
           const rarityColors = GAME_DATA.RARITY_COLORS;
 
           let category = 'Unknown';
-          if (Object.keys(itemVariants).some(cat => itemVariants[cat].includes(itemKey))) {
-            category = Object.keys(itemVariants).find(cat => itemVariants[cat].includes(itemKey));
+                  if (Object.keys(INVENTORY_CONFIG.variants).some(cat => INVENTORY_CONFIG.variants[cat].includes(itemKey))) {
+          category = Object.keys(INVENTORY_CONFIG.variants).find(cat => INVENTORY_CONFIG.variants[cat].includes(itemKey));
           }
 
           const obtainMethod = getItemObtainMethod(itemKey);
@@ -3265,7 +5005,7 @@ function openCyclopediaModal(options) {
         const displayName = getItemDisplayName(itemKey);
         if (inventoryTooltips[displayName]?.obtain) return inventoryTooltips[displayName].obtain;
         if (inventoryTooltips[itemKey]?.obtain) return inventoryTooltips[itemKey].obtain;
-        console.warn(`[Cyclopedia] Missing obtain info in inventoryTooltips for:`, displayName, itemKey);
+
         return '';
       };
 
@@ -3319,7 +5059,8 @@ function openCyclopediaModal(options) {
           }
           
           const mainItemCategories = INVENTORY_CONFIG.categories || {};
-          const items = mainItemCategories[selectedCategory] || [];
+          const rawItems = mainItemCategories[selectedCategory] || [];
+          const items = rawItems.map(itemKey => getItemDisplayName(itemKey));
           
           const box = createBox({
             title: selectedCategory,
@@ -3327,11 +5068,13 @@ function openCyclopediaModal(options) {
             type: 'inventory',
             selectedCreature: null,
             selectedEquipment: null,
-            selectedInventory: selectedInventoryItem,
+            selectedInventory: selectedInventoryItem ? getItemDisplayName(selectedInventoryItem) : null,
             setSelectedCreature: () => {},
             setSelectedEquipment: () => {},
-            setSelectedInventory: (itemName) => {
-              selectedInventoryItem = itemName;
+            setSelectedInventory: (itemDisplayName) => {
+              // Find the key that corresponds to this display name
+              const itemKey = rawItems.find(key => getItemDisplayName(key) === itemDisplayName);
+              selectedInventoryItem = itemKey || itemDisplayName;
               updateRightCol();
             },
             updateRightCol: () => {}
@@ -3401,7 +5144,7 @@ function openCyclopediaModal(options) {
         try {
           if (selectedInventoryItem) {
             const itemVariants = INVENTORY_CONFIG.variants || {};
-            if (itemVariants[selectedInventoryItem]) {
+            if (INVENTORY_CONFIG.variants[selectedInventoryItem]) {
               rightCol.innerHTML = renderItemVariants(selectedInventoryItem);
             } else {
               rightCol.innerHTML = renderItemDetails(selectedInventoryItem);
@@ -3434,7 +5177,7 @@ function openCyclopediaModal(options) {
           });
         }
       } catch (error) {
-        console.warn('[Cyclopedia] Could not subscribe to game state:', error);
+
       }
 
       clearInventoryCache();
@@ -3445,7 +5188,7 @@ function openCyclopediaModal(options) {
           try {
             gameStateSubscription();
           } catch (error) {
-            console.warn('[Cyclopedia] Error cleaning up subscription:', error);
+    
           }
         }
       };
@@ -3457,14 +5200,31 @@ function openCyclopediaModal(options) {
       return d;
     }
 
+    // Create equipment tab page
+    const equipmentTabPage = createEquipmentTabPage(
+      selectedCreature, selectedEquipment, selectedInventory, 
+      v => { selectedCreature = v; }, 
+      v => { 
+        selectedEquipment = v; 
+        // Also update the global variable for the updateRightCol function
+        if (typeof window !== 'undefined') {
+          window.cyclopediaSelectedEquipment = v;
+        }
+      }, 
+      v => { selectedInventory = v; }, 
+      () => {} // Placeholder - will be replaced
+    );
+    
+    // Create the tab pages
     const tabPages = [
       (() => createStartPage())(),
       (() => createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
-      (() => createEquipmentTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
-      (() => createInventoryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))()
+      equipmentTabPage,
+      (() => createInventoryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
+      (() => createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))()
     ];
 
-    const tabNames = ['Home', 'Bestiary', 'Equipment', 'Inventory'];
+    const tabNames = ['Home', 'Bestiary', 'Equipment', 'Inventory', 'Characters'];
     const tabButtons = [];
     const tabNav = document.createElement('nav');
     tabNav.className = 'cyclopedia-subnav';
@@ -3539,13 +5299,73 @@ function openCyclopediaModal(options) {
     content.appendChild(flexRow);
 
     try {
+  
+      
       activeCyclopediaModal = api.ui.components.createModal({
         title: 'Cyclopedia',
         width: CYCLOPEDIA_MODAL_WIDTH,
         height: CYCLOPEDIA_MODAL_HEIGHT,
         content: content,
-        buttons: []
+        buttons: [],
+        onClose: () => {
+  
+
+          cleanupCyclopediaModal();
+        }
       });
+      
+      // Fallback cleanup for when onClose doesn't work
+      
+      setTimeout(() => {
+        const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+        if (modalElement) {
+  
+          
+          // Watch for modal removal
+          const cleanupObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+              if (mutation.type === 'childList') {
+                mutation.removedNodes.forEach((node) => {
+                  if (node === modalElement || node.contains?.(modalElement)) {
+            
+                    // Immediately disable ALL cleanup triggers
+                    cleanupObserver.disconnect();
+                    document.removeEventListener('keydown', handleKeyDown);
+                    // Remove the cleanup reference
+                    delete modalElement._cyclopediaCleanup;
+                    // Now run cleanup
+                    cleanupCyclopediaModal();
+                  }
+                });
+              }
+            });
+          });
+          
+          cleanupObserver.observe(document.body, { childList: true, subtree: true });
+          
+          // Also watch for ESC key and clicks outside
+          const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+      
+              // Immediately disable ALL cleanup triggers
+              cleanupObserver.disconnect();
+              document.removeEventListener('keydown', handleKeyDown);
+              // Remove the cleanup reference
+              delete modalElement._cyclopediaCleanup;
+              // Now run cleanup
+              cleanupCyclopediaModal();
+            }
+          };
+          
+          document.addEventListener('keydown', handleKeyDown);
+          
+          // Store cleanup functions for later removal
+          modalElement._cyclopediaCleanup = {
+            observer: cleanupObserver,
+            keyHandler: handleKeyDown
+          };
+        }
+      }, 100);
       
       setActiveTab(activeTab);
       
@@ -3622,7 +5442,7 @@ function renderMonsterStats(monsterData) {
     GAME_DATA.MONSTER_STATS_CONFIG.forEach(stat => {
       try {
         if (!stat || typeof stat !== 'object' || !stat.key || !stat.label || !stat.icon) {
-          console.warn('[Cyclopedia] Invalid stat configuration:', stat);
+  
           return;
         }
 
@@ -3654,7 +5474,7 @@ function renderMonsterStats(monsterData) {
           
           icon.onerror = () => {
             icon.style.display = 'none';
-            console.warn('[Cyclopedia] Failed to load stat icon:', stat.icon);
+    
           };
 
           left.appendChild(icon);
@@ -3855,6 +5675,9 @@ function renderCreatureTemplate(name) {
   col1Picture.style.height = '110px';
   let monsterId = null;
   let monster = null;
+  
+
+  
   if (cyclopediaState.monsterNameMap && typeof name === 'string') {
     const entry = cyclopediaState.monsterNameMap.get(name.toLowerCase());
     if (entry) {
@@ -4214,9 +6037,8 @@ function renderCreatureTemplate(name) {
   if (monsterLocations.length > 0) {
     function capitalizeRegionName(name) {
       if (!name) return '';
-      if (name.toLowerCase() === 'rook') return 'Rookgaard';
-      if (name.toLowerCase() === 'abdendriel') return 'Ab\'Dendriel';
-      return name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+      const regionId = name.toLowerCase();
+      return GAME_DATA.REGION_NAME_MAP[regionId] || name.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
     }
     const regionMap = new Map();
     monsterLocations.forEach((location) => {
@@ -4733,6 +6555,8 @@ function renderCyclopediaPlayerInfo(profileData) {
       div.innerHTML = `<span style="color: #ff6b6b;">No profile data found.</span>`;
       return div;
     }
+    
+
 
 
   function getProfileValue(key) {
@@ -4915,7 +6739,9 @@ function renderCyclopediaPlayerInfo(profileData) {
   const loyaltyValue = document.createElement('div');
   loyaltyValue.className = 'text-whiteHighlight';
   let loyaltyPoints = getProfileValue('loyaltyPoints');
-  if (loyaltyPoints === '-' || loyaltyPoints === undefined) {
+  // Only fallback to current user's game state if we're displaying the current user's own profile
+  // For searched players, we should only show what's available from the API
+  if ((loyaltyPoints === '-' || loyaltyPoints === undefined) && profileData.name === globalThis.state?.player?.getSnapshot?.()?.context?.name) {
     loyaltyPoints = globalThis.state?.player?.getSnapshot?.()?.context?.loyaltyPoints ?? '-';
   }
   loyaltyValue.textContent = loyaltyPoints;
@@ -5322,17 +7148,30 @@ const cyclopediaEventHandlers = [];
 
 function initCyclopedia() {
   try {
-    console.log('[Cyclopedia] Setting up UI components...');
+
     addCyclopediaHeaderButton();
     injectCyclopediaSelectedCss();
     
-    console.log('[Cyclopedia] Starting observers...');
     startContextMenuObserver();
     
-    console.log('[Cyclopedia] Setting up event handlers...');
     setupEventHandlers();
     
-    console.log('[Cyclopedia] Initialization complete');
+    // Set up periodic cache cleanup (every 5 minutes)
+    const cacheCleanupInterval = setInterval(() => {
+      try {
+        const cleanedCount = cyclopediaState.cleanupExpiredCache();
+        if (cleanedCount > 0) {
+          // Periodic cache cleanup completed
+        }
+      } catch (error) {
+        console.error('[Cyclopedia] Error during periodic cache cleanup:', error);
+      }
+    }, 300000); // 5 minutes
+    
+    // Store interval ID for cleanup
+    cyclopediaState.timers.set('cacheCleanup', cacheCleanupInterval);
+    
+
     return true;
   } catch (error) {
     console.error('[Cyclopedia] Initialization failed:', error);
@@ -5392,14 +7231,105 @@ function cleanupAbilityTooltips() {
   });
 }
 
+function cleanupCyclopediaModal() {
+  // Note: This function is safe to call multiple times (idempotent)
+  // Only clean up modal-specific resources, preserve global context menu observer
+  
+  // Don't stop the global context menu observer - it's needed for future right-click menus
+  // cyclopediaState.observer and window.cyclopediaGlobalObserver handle context menu injection
+  
+  if (window.cyclopediaMenuObserver) {
+    try {
+      window.cyclopediaMenuObserver.disconnect();
+      window.cyclopediaMenuObserver = null;
+
+    } catch (error) {}
+  }
+  
+  // Clear all caches
+  clearCharactersTabCache();
+  clearLeaderboardCache();
+  clearSearchedUsername();
+  
+  // Clear additional caches
+  // Preserve monster data cache - it's expensive to rebuild and doesn't change
+  // cyclopediaState.monsterLocationCache.clear();
+  // if (cyclopediaState.monsterNameMap) {
+  //   cyclopediaState.monsterNameMap.clear();
+  //   console.warn('[Cyclopedia] ✅ Cleared monsterNameMap');
+  // }
+  // cyclopediaState.monsterNameMapBuilt = false;
+  cyclopediaState.lazyLoadQueue.length = 0;
+  cyclopediaState.isProcessingQueue = false;
+  
+  // Clear utility caches
+  DOMCache.clear();
+  
+  // Reset state
+  cyclopediaState.modalOpen = false;
+  cyclopediaState.currentModal = null;
+  cyclopediaState.lastFetch = 0;
+  cyclopediaState.fetchInProgress = false;
+  
+  // Clear global variables
+  if (activeCyclopediaModal) {
+    activeCyclopediaModal = null;
+  }
+  
+  // Clear equipment selection global variable
+  if (typeof window !== 'undefined') {
+    window.cyclopediaSelectedEquipment = null;
+  }
+  
+  // Simple memory cleanup
+  MemoryUtils.clearLargeObjects();
+  
+  // Ensure context menu observer is still running for future right-click menus
+  if (!cyclopediaState.observer || !window.cyclopediaGlobalObserver) {
+    startContextMenuObserver();
+  }
+}
+
 function cleanupCyclopedia() {
-  stopContextMenuObserver();
-  cleanupAbilityTooltips();
-  removeCyclopediaEventListeners();
-  const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
-  if (headerUl) {
-    const btnLi = headerUl.querySelector('li:has(.cyclopedia-header-btn)');
-    if (btnLi) btnLi.remove();
+  try {
+
+    
+    // Don't stop the context menu observer - it should always be active
+    // stopContextMenuObserver(); // REMOVED - context menu observer should persist
+    
+    // Remove event listeners
+    removeCyclopediaEventListeners();
+    
+    // Clean up ability tooltips
+    cleanupAbilityTooltips();
+    
+    // Clean up modal
+    if (activeCyclopediaModal) {
+      cleanupCyclopediaModal();
+      activeCyclopediaModal = null;
+    }
+    
+    // Remove header button
+    const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
+    if (headerUl) {
+      const btnLi = headerUl.querySelector('li:has(.cyclopedia-header-btn)');
+      if (btnLi) btnLi.remove();
+    }
+    
+    // Clean up all event handlers
+    EventHandlerManager.cleanup();
+    // Simple memory cleanup
+    MemoryUtils.clearLargeObjects();
+    
+    // Use centralized cleanup
+    cyclopediaState.cleanup();
+    
+      // Ensure context menu observer is always running
+  if (!cyclopediaState.observer || !window.cyclopediaGlobalObserver) {
+    startContextMenuObserver();
+  }
+  } catch (error) {
+    console.error('[Cyclopedia] Error during cleanup:', error);
   }
 }
 
@@ -5410,7 +7340,6 @@ function cleanupCyclopedia() {
 // Proper exports following mod development guide
 exports = {
   init: function() {
-    console.log('[Cyclopedia] Initializing mod...');
     try {
       initCyclopedia();
       return true;
@@ -5421,7 +7350,6 @@ exports = {
   },
   
   cleanup: function() {
-    console.log('[Cyclopedia] Cleaning up mod...');
     try {
       cleanupCyclopedia();
       return true;
@@ -5432,7 +7360,6 @@ exports = {
   },
   
   show: function(options) {
-    console.log('[Cyclopedia] Opening modal...');
     try {
       return openCyclopediaModal(options);
     } catch (error) {
@@ -5442,7 +7369,6 @@ exports = {
   },
   
   updateConfig: function(newConfig) {
-    console.log('[Cyclopedia] Updating config...');
     try {
       // Update any configurable settings here
       Object.assign(START_PAGE_CONFIG, newConfig);
@@ -5466,6 +7392,5 @@ if (typeof window !== 'undefined') {
 
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {
-  console.log('[Cyclopedia] Auto-initializing in mod context...');
   exports.init();
 }
