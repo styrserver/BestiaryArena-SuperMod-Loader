@@ -6,7 +6,7 @@ const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDD
 var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}
 const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
-const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '252px', LEFT_COLUMN_WIDTH: '180px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
+const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '252px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
@@ -136,6 +136,7 @@ const cyclopediaState = {
     defaultTTL: { profileData: 900000, leaderboardData: 600000, roomThumbnails: 3600000 }
   },
   pendingRequests: new Map(), timers: new Map(),
+  requestQueue: { pending: new Map(), queue: [], processing: false },
   
   setProfileData: function(playerName, data) {
     this.cache.profileData.set(playerName, { data, timestamp: Date.now() });
@@ -638,6 +639,8 @@ function getCachedProfileData(playerName, ttl = 300000) { return cyclopediaState
 function setCachedProfileData(playerName, data) { cyclopediaState.setProfileData(playerName, data); }
 function getCachedLeaderboardData(category, ttl = 300000) { return cyclopediaState.getLeaderboardData(category, ttl); }
 function setCachedLeaderboardData(category, data) { cyclopediaState.setLeaderboardData(category, data); }
+function getCachedRankingsData(ttl = 600000) { return cyclopediaState.getLeaderboardData('rankings', ttl); }
+function setCachedRankingsData(data) { cyclopediaState.setLeaderboardData('rankings', data); }
 function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
@@ -2037,6 +2040,11 @@ function openCyclopediaModal(options) {
             return;
           }
 
+          if (selectedCategory === 'Rankings') {
+            await displayRankingsData(playerState);
+            return;
+          }
+
           if (isCancelled(requestId)) return;
 
           // Validate player name
@@ -2105,6 +2113,115 @@ function openCyclopediaModal(options) {
           return await requestPromise;
         } catch (error) {
           console.error('Error fetching from TRPC:', error);
+          throw error;
+        }
+      }
+
+      async function fetchRankingsFromWiki() {
+        try {
+          const apiUrl = 'https://bestiaryarena.wiki.gg/api.php?action=query&prop=revisions&titles=Rankings&rvslots=*&rvprop=content&formatversion=2&format=json&origin=*';
+          const response = await fetch(apiUrl);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          if (!data.query?.pages?.[0]?.revisions?.[0]?.slots?.main?.content) {
+            throw new Error('Invalid response format from wiki API');
+          }
+          
+          const wikitext = data.query.pages[0].revisions[0].slots.main.content;
+
+          // Extract timestamp from wikitext
+          const timestampMatch = wikitext.match(/Updated \(([^)]+)\)/);
+          const timestamp = timestampMatch ? timestampMatch[1] : null;
+
+          // Extract the first wikitable - use a more robust regex to capture the entire table
+          let tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/s);
+          if (!tableMatch) {
+            // Try alternative regex patterns
+            tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/);
+            if (!tableMatch) {
+              tableMatch = wikitext.match(/\{\|[\s\S]*\|\}/s);
+            }
+          }
+          
+          if (!tableMatch) {
+            console.warn('[Cyclopedia] No wiki table found in rankings page');
+            console.warn('[Cyclopedia] Wiki content preview:', wikitext.substring(0, 500));
+            return { rankings: [], timestamp: timestamp };
+          }
+          
+          const table = tableMatch[0];
+          const rows = table.split('|-').slice(1); // skip header row
+          
+          console.warn('[Cyclopedia] Parsed table rows:', rows.length);
+
+          const rankings = [];
+          let rank = 1;
+
+          rows.forEach((row, rowIndex) => {
+            const cols = row.split('|').map(s => s.trim()).filter(Boolean);
+            if (cols.length < 9) {
+              console.warn(`[Cyclopedia] Skipping row ${rowIndex + 1}: insufficient columns (${cols.length})`);
+              return; // Need at least 9 columns
+            }
+            
+            // Extract username from the first column (remove wiki link formatting)
+            let username = cols[0];
+            // Remove wiki link formatting: [https://bestiaryarena.com/profile/username username]
+            const usernameMatch = username.match(/\[https:\/\/bestiaryarena\.com\/profile\/[^\s\]]+\s+([^\]]+)\]/);
+            if (usernameMatch) {
+              username = usernameMatch[1];
+            } else {
+              // If no link format, just use the text as is
+              username = username.replace(/[\[\]]/g, '');
+            }
+            
+            // Parse all columns
+            const level = parseInt(cols[1], 10);
+            const successfulRuns = parseInt(cols[2], 10);
+            const rankPoints = parseInt(cols[3], 10);
+            const timeSum = parseInt(cols[4], 10);
+            const dailySeashell = parseInt(cols[5], 10);
+            const huntingTasks = parseInt(cols[6], 10);
+            const perfectCreatures = parseInt(cols[7], 10);
+            const bisEquipment = parseInt(cols[8], 10);
+            const bagOutfits = parseInt(cols[9], 10);
+            
+            if (isNaN(level) || !username) {
+              console.warn(`[Cyclopedia] Skipping row ${rowIndex + 1}: invalid data (level: ${level}, username: ${username})`);
+              return;
+            }
+            
+            rankings.push({
+              rank: rank,
+              name: username,
+              level: level,
+              successfulRuns: successfulRuns,
+              rankPoints: rankPoints,
+              timeSum: timeSum,
+              dailySeashell: dailySeashell,
+              huntingTasks: huntingTasks,
+              perfectCreatures: perfectCreatures,
+              bisEquipment: bisEquipment,
+              bagOutfits: bagOutfits
+            });
+            
+            rank++;
+          });
+          
+          if (rankings.length === 0) {
+            console.warn('[Cyclopedia] No valid rankings data found in wiki table');
+          }
+          
+          console.warn('[Cyclopedia] Processed rankings:', rankings.length);
+          
+          return { rankings: rankings, timestamp: timestamp };
+        } catch (error) {
+          console.error('[Cyclopedia] Error fetching rankings from wiki:', error);
           throw error;
         }
       }
@@ -2278,6 +2395,476 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         } catch (error) {
           console.error('[Cyclopedia] Error displaying combined leaderboards data:', error);
           col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Leaderboards Data</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch game data</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
+        }
+      }
+
+      async function displayRankingsData(playerState) {
+        try {
+          // Check cache first
+          let rankingsData = getCachedRankingsData();
+          if (!rankingsData) {
+            rankingsData = await fetchRankingsFromWiki();
+            setCachedRankingsData(rankingsData);
+          }
+          
+          const rankings = rankingsData.rankings || rankingsData;
+          const timestamp = rankingsData.timestamp;
+          
+          // Sorting variables - declare at the top
+          let allRankings = [...rankings]; // Create a copy for sorting
+          let currentSortColumn = 'level'; // Default sort by level
+          let currentSortDirection = 'desc'; // Default descending for level
+          
+          const containerDiv = document.createElement('div');
+          Object.assign(containerDiv.style, {
+            display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
+            padding: '20px', boxSizing: 'border-box'
+          });
+
+
+
+          const contentContainer = document.createElement('div');
+          contentContainer.style.cssText = `flex: 1; padding: 10px; overflow-y: auto; position: relative; height: 100%;`;
+
+          // Find current player's rank
+          const currentPlayerRank = rankings.find(r => r.name.toLowerCase() === playerState.name.toLowerCase());
+
+          // Create table container with proper grid system
+          const tableContainer = document.createElement('div');
+          tableContainer.className = 'pixel-font-14';
+          tableContainer.style.cssText = `
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+            font-size: 10px;
+            position: relative;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+          `;
+
+          // Create header row container
+          const headerRow = document.createElement('div');
+          headerRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 43px 120px 53px 53px 53px 53px 53px 53px 53px 53px 53px;
+            gap: 1px;
+            background: rgba(255, 224, 102, 0.2);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            width: 100%;
+          `;
+
+          // Create table header row with icons
+          const headerData = [
+            { type: 'text', content: 'Rank', key: 'rank', sortable: false },
+            { type: 'text', content: 'Player', key: 'name', sortable: true },
+            { type: 'text', content: 'Level', key: 'level', sortable: true },
+            { type: 'icon', src: '/assets/icons/match-count.png', alt: 'Total runs', key: 'successfulRuns', sortable: true },
+            { type: 'icon', src: '/assets/icons/grade.png', alt: 'Rank points', key: 'rankPoints', sortable: true },
+            { type: 'icon', src: '/assets/icons/speed.png', alt: 'Time sum', key: 'timeSum', sortable: true },
+            { type: 'icon', src: '/assets/icons/shell-count.png', alt: 'Daily seashell', key: 'dailySeashell', sortable: true },
+            { type: 'icon', src: '/assets/icons/task-count.png', alt: 'Hunting tasks', key: 'huntingTasks', sortable: true },
+            { type: 'icon', src: '/assets/icons/enemy.png', alt: 'Perfect creatures', key: 'perfectCreatures', sortable: true },
+            { type: 'icon', src: '/assets/icons/equips.png', alt: 'BIS equipments', key: 'bisEquipment', sortable: true },
+            { type: 'icon', src: '/assets/icons/mini-outfitbag.png', alt: 'Bag outfits', key: 'bagOutfits', sortable: true }
+          ];
+          
+          headerData.forEach((item, index) => {
+            const headerCell = document.createElement('div');
+            headerCell.className = 'pixel-font-14';
+            headerCell.style.cssText = `
+              padding: 8px 4px;
+              color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+              font-weight: bold;
+              text-align: center;
+              border-right: 1px solid rgba(255, 255, 255, 0.1);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+              font-size: 10px;
+              ${item.sortable ? 'cursor: pointer;' : 'cursor: default;'}
+              transition: all 0.2s ease;
+            `;
+            
+            // Add sort indicator for current sort column
+            if (item.key === currentSortColumn) {
+              headerCell.style.background = 'rgba(255, 224, 102, 0.2)';
+            }
+            
+            if (item.type === 'icon') {
+              const icon = document.createElement('img');
+              icon.src = item.src;
+              icon.alt = item.alt;
+              icon.title = item.alt;
+              icon.style.cssText = `
+                width: 16px;
+                height: 16px;
+                object-fit: contain;
+              `;
+              headerCell.appendChild(icon);
+            } else {
+              headerCell.textContent = item.content;
+            }
+            
+            // Add sort indicator
+            if (item.key === currentSortColumn) {
+              const sortIndicator = document.createElement('span');
+              sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
+              sortIndicator.style.cssText = `
+                margin-left: 4px;
+                font-size: 8px;
+                color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+              `;
+              headerCell.appendChild(sortIndicator);
+            }
+            
+                      // Add click handler for sorting (only for sortable columns)
+          if (item.sortable) {
+            headerCell.addEventListener('click', () => {
+              const sortKey = item.key;
+              
+              // Toggle direction if same column, otherwise default to desc
+              if (sortKey === currentSortColumn) {
+                currentSortDirection = currentSortDirection === 'desc' ? 'asc' : 'desc';
+              } else {
+                currentSortColumn = sortKey;
+                currentSortDirection = 'desc';
+              }
+              
+              // Sort the data
+              allRankings.sort((a, b) => {
+                let aVal = a[sortKey];
+                let bVal = b[sortKey];
+                
+                // Handle string comparison for names
+                if (typeof aVal === 'string') {
+                  aVal = aVal.toLowerCase();
+                  bVal = bVal.toLowerCase();
+                }
+                
+                let primarySort = 0;
+                
+                // Special handling for time sum - lower is better
+                if (sortKey === 'timeSum') {
+                  if (currentSortDirection === 'desc') {
+                    primarySort = aVal - bVal; // Lower times first (e.g., 10 comes before 20)
+                  } else {
+                    primarySort = bVal - aVal; // Higher times first (e.g., 20 comes before 10)
+                  }
+                } else {
+                  // Standard numerical/string comparison for other columns
+                  if (typeof aVal === 'string') {
+                    if (currentSortDirection === 'desc') {
+                      primarySort = bVal.localeCompare(aVal);
+                    } else {
+                      primarySort = aVal.localeCompare(bVal);
+                    }
+                  } else {
+                    if (currentSortDirection === 'desc') {
+                      primarySort = bVal - aVal; // Higher values first
+                    } else {
+                      primarySort = aVal - bVal; // Lower values first
+                    }
+                  }
+                }
+                
+                // If primary sort is equal, use level as secondary sort (descending)
+                if (primarySort === 0) {
+                  return b.level - a.level;
+                }
+                
+                return primarySort;
+              });
+              
+              // Re-render the table and update header highlighting
+              renderRankingsTable();
+              updateHeaderHighlighting();
+            });
+          }
+            
+            // Add hover effects (only for sortable columns)
+            if (item.sortable) {
+              headerCell.addEventListener('mouseenter', () => {
+                if (item.key !== currentSortColumn) {
+                  headerCell.style.background = 'rgba(255, 224, 102, 0.1)';
+                }
+              });
+              
+              headerCell.addEventListener('mouseleave', () => {
+                if (item.key !== currentSortColumn) {
+                  headerCell.style.background = 'transparent';
+                }
+              });
+            }
+            
+            headerRow.appendChild(headerCell);
+          });
+          
+                    tableContainer.appendChild(headerRow);
+          
+          // Create scrollable container for data
+          const scrollableContainer = document.createElement('div');
+          scrollableContainer.style.cssText = `
+            overflow-y: auto;
+            max-height: calc(100vh - 300px);
+            min-height: 400px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+          `;
+          
+          // Create data rows container
+          const dataRowsContainer = document.createElement('div');
+          dataRowsContainer.style.cssText = `
+            display: grid;
+            grid-template-columns: 43px 120px 53px 53px 53px 53px 53px 53px 53px 53px 53px;
+            gap: 1px;
+            min-height: fit-content;
+            flex: 1;
+          `;
+
+          // Display all rankings in table format
+          // Initial sort by level
+          allRankings.sort((a, b) => b.level - a.level);
+          
+          function renderRankingsTable() {
+            // Clear existing data rows
+            dataRowsContainer.innerHTML = '';
+            
+            allRankings.forEach((ranking, index) => {
+            const isCurrentPlayer = ranking.name.toLowerCase() === playerState.name.toLowerCase();
+            const isSearchedPlayer = cyclopediaState.searchedUsername && ranking.name.toLowerCase() === cyclopediaState.searchedUsername.toLowerCase();
+            
+            let rowBackground;
+            if (isSearchedPlayer) {
+              rowBackground = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
+            } else if (isCurrentPlayer) {
+              rowBackground = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")';
+            } else {
+              rowBackground = index % 2 === 0 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.02)';
+            }
+            const rowBorder = 'none';
+
+            let rankIcon = '🥉';
+            if (ranking.rank === 1) rankIcon = '🥇';
+            else if (ranking.rank === 2) rankIcon = '🥈';
+            else if (ranking.rank <= 10) rankIcon = '🏅';
+
+            // Create cells for each column
+            const cellData = [
+              `${rankIcon} #${currentSortDirection === 'desc' ? index + 1 : allRankings.length - index}`, // Reverse rank numbers for ascending
+              ranking.name,
+              ranking.level.toLocaleString(),
+              ranking.successfulRuns.toLocaleString(),
+              ranking.rankPoints.toLocaleString(),
+              ranking.timeSum.toLocaleString(),
+              ranking.dailySeashell.toLocaleString(),
+              ranking.huntingTasks.toLocaleString(),
+              ranking.perfectCreatures.toLocaleString(),
+              ranking.bisEquipment.toLocaleString(),
+              ranking.bagOutfits.toLocaleString()
+            ];
+
+            cellData.forEach((text, cellIndex) => {
+              const cell = document.createElement('div');
+              cell.className = 'pixel-font-14';
+              cell.style.cssText = `
+                padding: 6px 4px;
+                background: ${rowBackground};
+                color: #fff;
+                font-weight: ${isCurrentPlayer || isSearchedPlayer ? 'bold' : 'normal'};
+                text-align: ${cellIndex === 0 ? 'left' : cellIndex === 1 ? 'left' : 'center'};
+                border-right: 1px solid rgba(255, 255, 255, 0.1);
+                display: flex;
+                align-items: center;
+                justify-content: ${cellIndex === 0 ? 'flex-start' : cellIndex === 1 ? 'flex-start' : 'center'};
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                border: ${rowBorder};
+                font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+                font-size: 10px;
+              `;
+              
+              // Make player names clickable (cellIndex === 1 is the player name column)
+              if (cellIndex === 1) {
+                cell.style.cursor = 'pointer';
+                cell.style.textDecoration = 'underline';
+                cell.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+                cell.addEventListener('click', () => {
+                  window.open(`https://bestiaryarena.com/profile/${ranking.name}`, '_blank');
+                });
+                cell.addEventListener('mouseenter', () => {
+                  cell.style.color = '#fff';
+                });
+                cell.addEventListener('mouseleave', () => {
+                  cell.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+                });
+              }
+              
+              cell.textContent = text;
+              dataRowsContainer.appendChild(cell);
+            });
+          });
+          
+          console.warn('[Cyclopedia] Rendered DOM cells:', dataRowsContainer.children.length);
+          }
+          
+          // Function to update header highlighting
+          function updateHeaderHighlighting() {
+            const headerCells = headerRow.querySelectorAll('div');
+            headerCells.forEach((cell, index) => {
+              const item = headerData[index];
+              if (!item) return;
+              
+              // Reset all cells
+              cell.style.background = 'transparent';
+              cell.style.border = 'none';
+              
+              // Remove existing sort indicators
+              const existingIndicator = cell.querySelector('span');
+              if (existingIndicator) {
+                existingIndicator.remove();
+              }
+              
+              // Highlight current sort column
+              if (item.key === currentSortColumn) {
+                cell.style.background = 'rgba(255, 224, 102, 0.2)';
+                
+                // Add sort indicator
+                const sortIndicator = document.createElement('span');
+                sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
+                sortIndicator.style.cssText = `
+                  margin-left: 4px;
+                  font-size: 8px;
+                  color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+                `;
+                cell.appendChild(sortIndicator);
+              }
+            });
+          }
+          
+          // Initial render
+          renderRankingsTable();
+          updateHeaderHighlighting();
+          
+          scrollableContainer.appendChild(dataRowsContainer);
+          tableContainer.appendChild(scrollableContainer);
+
+          contentContainer.appendChild(tableContainer);
+
+          // Add info icon with tooltip in the header area
+          const infoContainer = document.createElement('div');
+          infoContainer.style.cssText = `
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 20;
+          `;
+
+          const infoIcon = document.createElement('div');
+          infoIcon.innerHTML = 'ℹ️';
+          infoIcon.style.cssText = `
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+          `;
+
+          const tooltip = document.createElement('div');
+          tooltip.style.cssText = `
+            position: absolute;
+            top: 100%;
+            right: 0;
+            width: 280px;
+            background: rgba(35, 35, 35, 0.95);
+            border: 2px solid ${LAYOUT_CONSTANTS.COLORS.PRIMARY};
+            border-radius: 8px;
+            padding: 12px;
+            color: #fff;
+            font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s ease;
+            z-index: 30;
+            backdrop-filter: blur(4px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          `;
+          tooltip.innerHTML = `
+            <div style="font-size: 16px; margin-bottom: 8px; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; font-weight: bold;">📊 Data Source</div>
+            <div style="margin-bottom: 6px;">Rankings fetched from <a href="https://bestiaryarena.wiki.gg/wiki/Rankings" target="_blank" style="color: #ffe066; text-decoration: underline;">Bestiary Arena Wiki</a></div>
+            <div style="margin-bottom: 6px; font-size: 11px; color: #ccc;">Shows all players who completed all 64 maps, sorted by level</div>
+            <div style="font-size: 10px; color: #888;">${timestamp ? `Updated: ${timestamp}` : 'No timestamp available'}</div>
+          `;
+
+          let isTooltipPersistent = false;
+
+          // Show/hide tooltip on hover
+          infoIcon.addEventListener('mouseenter', () => {
+            if (!isTooltipPersistent) {
+              tooltip.style.opacity = '1';
+              tooltip.style.visibility = 'visible';
+              infoIcon.style.color = '#fff';
+            }
+          });
+
+          infoIcon.addEventListener('mouseleave', () => {
+            if (!isTooltipPersistent) {
+              tooltip.style.opacity = '0';
+              tooltip.style.visibility = 'hidden';
+              infoIcon.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+            }
+          });
+
+          // Toggle persistent tooltip on click
+          infoIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            isTooltipPersistent = !isTooltipPersistent;
+            if (isTooltipPersistent) {
+              tooltip.style.opacity = '1';
+              tooltip.style.visibility = 'visible';
+              infoIcon.style.color = '#fff';
+            } else {
+              tooltip.style.opacity = '0';
+              tooltip.style.visibility = 'hidden';
+              infoIcon.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+            }
+          });
+
+          // Close tooltip when clicking outside
+          document.addEventListener('click', (e) => {
+            if (isTooltipPersistent && !infoContainer.contains(e.target)) {
+              isTooltipPersistent = false;
+              tooltip.style.opacity = '0';
+              tooltip.style.visibility = 'hidden';
+              infoIcon.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+            }
+          });
+
+          infoContainer.appendChild(infoIcon);
+          infoContainer.appendChild(tooltip);
+          contentContainer.appendChild(infoContainer);
+
+          containerDiv.appendChild(contentContainer);
+
+          // Clear container and append content
+          col2.innerHTML = '';
+          col2.appendChild(containerDiv);
+
+        } catch (error) {
+          console.error('[Cyclopedia] Error displaying rankings data:', error);
+          col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;"><div style="font-size: 48px; margin-bottom: 16px;">⚠️</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Failed to Load Rankings</div><div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not fetch rankings from wiki</div><div style="font-size: 12px; color: #666;">Please check your internet connection and try again.</div></div>`;
         }
       }
 
@@ -3721,22 +4308,62 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
             }
 
+            // Create a container for the search input and status indicator
+            const searchInputContainer = DOMUtils.createElement('div');
+            Object.assign(searchInputContainer.style, {
+              position: 'relative',
+              width: '100%',
+              marginBottom: '4px'
+            });
+
             const playerSearchInput = DOMUtils.createElement('input');
             playerSearchInput.type = 'text';
             playerSearchInput.placeholder = 'Compare with...';
-            playerSearchInput.value = ''; // Leave empty for comparison
+            playerSearchInput.value = cyclopediaState.searchedUsername || ''; // Persist searched username
             Object.assign(playerSearchInput.style, {
               width: '100%',
               padding: '4px 8px',
+              paddingRight: '24px', // Make room for the status indicator
               border: '1px solid #444',
               borderRadius: '2px',
               backgroundColor: '#232323',
               color: LAYOUT_CONSTANTS.COLORS.TEXT,
               fontFamily: LAYOUT_CONSTANTS.FONTS.PRIMARY,
               fontSize: '12px',
-              boxSizing: 'border-box',
-              marginBottom: '4px'
+              boxSizing: 'border-box'
             });
+
+            // Create status indicator element
+            const statusIndicator = DOMUtils.createElement('div');
+            Object.assign(statusIndicator.style, {
+              position: 'absolute',
+              right: '6px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '14px',
+              pointerEvents: 'none',
+              display: 'none'
+            });
+
+            searchInputContainer.appendChild(playerSearchInput);
+            searchInputContainer.appendChild(statusIndicator);
+            
+            // Show status indicator if there's already a searched username
+            if (cyclopediaState.searchedUsername) {
+              // Check if we have cached data for the searched user
+              const cachedData = getCachedProfileData(cyclopediaState.searchedUsername);
+              if (cachedData === null) {
+                // Show red cross for null result
+                statusIndicator.innerHTML = '❌';
+                statusIndicator.style.color = '#ff6b6b';
+                statusIndicator.style.display = 'block';
+              } else if (cachedData && cachedData.name) {
+                // Show green checkmark for successful cached result
+                statusIndicator.innerHTML = '✓';
+                statusIndicator.style.color = '#51cf66';
+                statusIndicator.style.display = 'block';
+              }
+            }
 
             const searchButton = DOMUtils.createElement('button', '', 'Search');
             Object.assign(searchButton.style, {
@@ -3764,11 +4391,72 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const performSearch = async () => {
               const searchTerm = playerSearchInput.value.trim();
               if (!searchTerm) {
+                // Hide status indicator when search is cleared
+                statusIndicator.style.display = 'none';
+                
+                // Reset searched player state
+                cyclopediaState.searchedUsername = null;
+                cyclopediaState.previousTabState = null;
+                
+                // Refresh the current tab to show default content
+                if (window.selectedCharacterItem === 'Rankings') {
+                  displayUserStats('Rankings').catch(error => {
+                    console.error('[Cyclopedia] Error refreshing rankings after reset:', error);
+                  });
+                } else if (window.selectedCharacterItem === 'Leaderboards') {
+                  // Refresh leaderboards to show default search functionality
+                  const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+                  if (playerState?.name) {
+                    displayCombinedLeaderboardsData(playerState).then(() => {
+                      const cachedData = getCachedLeaderboardData('combined-leaderboards');
+                      if (cachedData) {
+                        updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, cachedData.best, cachedData.roomsHighscores);
+                      } else {
+                        updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, null, null);
+                      }
+                    }).catch(error => {
+                      console.error('[Cyclopedia] Error refreshing leaderboards after reset:', error);
+                    });
+                  }
+                } else {
+                  // For other tabs, clear col3 to show default content
+                  col3.innerHTML = '';
+                }
+                
                 return;
+              }
+              
+              // Clear previous search and refresh rankings if we're in Rankings tab
+              if (cyclopediaState.searchedUsername && cyclopediaState.searchedUsername !== searchTerm && window.selectedCharacterItem === 'Rankings') {
+                // Store the new search term before clearing the old one
+                const newSearchTerm = searchTerm;
+                cyclopediaState.searchedUsername = null;
+                // Refresh rankings to clear the previous blue background
+                displayUserStats('Rankings').catch(error => {
+                  console.error('[Cyclopedia] Error clearing previous search from rankings:', error);
+                });
+                // Restore the new search term after clearing
+                cyclopediaState.searchedUsername = newSearchTerm;
               }
               
               // Store the searched username globally
               cyclopediaState.searchedUsername = searchTerm;
+              
+              // If we're in Rankings tab, update the previousTabState to preserve the search for other tabs
+              if (window.selectedCharacterItem === 'Rankings') {
+                cyclopediaState.previousTabState = {
+                  searchedUsername: searchTerm,
+                  hasSearchedData: true
+                };
+              }
+              
+              // If we're currently in the Rankings tab, refresh the rankings display immediately
+              if (window.selectedCharacterItem === 'Rankings') {
+                // Refresh the rankings display to show the searched player with blue background
+                displayUserStats('Rankings').catch(error => {
+                  console.error('[Cyclopedia] Error refreshing rankings after search:', error);
+                });
+              }
               
               // Show loading state only in col3 (col2 keeps user's stats)
               col3.innerHTML = `
@@ -3806,6 +4494,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Check if player doesn't exist (API returns json: null)
                 if (searchedProfileData === null) {
+                  // Show red cross status indicator
+                  statusIndicator.innerHTML = '❌';
+                  statusIndicator.style.color = '#ff6b6b';
+                  statusIndicator.style.display = 'block';
+                  
                   // Show "Player doesn't exist" message only in col3
                   col3.innerHTML = `
                     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
@@ -3828,6 +4521,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     
                     displayCombinedLeaderboardsSearchResults(searchTerm, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
                     
+                    // Show green checkmark for successful leaderboard search
+                    statusIndicator.innerHTML = '✓';
+                    statusIndicator.style.color = '#51cf66';
+                    statusIndicator.style.display = 'block';
+                    
                   } catch (error) {
                     console.error('[Cyclopedia] Error displaying leaderboard search results:', error);
                     col3.innerHTML = `
@@ -3838,14 +4536,29 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                         <div style="font-size: 12px; color: #666;">Please try again later.</div>
                       </div>
                     `;
+                    
+                    // Show red cross for search error
+                    statusIndicator.innerHTML = '❌';
+                    statusIndicator.style.color = '#ff6b6b';
+                    statusIndicator.style.display = 'block';
                   }
                 } else {
                   // Default: Player Information mode - populate col3 with searched player's Player Information
                   displaySearchedPlayerStats(searchTerm, searchedProfileData, col3);
                 }
                 
+                // Show green checkmark for successful search
+                statusIndicator.innerHTML = '✓';
+                statusIndicator.style.color = '#51cf66';
+                statusIndicator.style.display = 'block';
+                
               } catch (error) {
                 console.error('[Cyclopedia] Error searching for player:', error);
+                
+                // Show red cross for search error
+                statusIndicator.innerHTML = '❌';
+                statusIndicator.style.color = '#ff6b6b';
+                statusIndicator.style.display = 'block';
                 
                 let errorMessage = 'Could not find player';
                 let errorDetails = 'Please check the spelling and try again.';
@@ -3882,7 +4595,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               }
             });
 
-            contentContainer.appendChild(playerSearchInput);
+            contentContainer.appendChild(searchInputContainer);
             contentContainer.appendChild(searchButton);
           }
         }, 10);
@@ -3895,7 +4608,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Create the Characters box (80% of col1) - now second
       const charactersBox = createBox({
         title: 'Statistics',
-        items: ['Player Information', 'Leaderboards'],
+        items: ['Player Information', 'Leaderboards', 'Rankings'],
         type: 'inventory',
         selectedCreature,
         selectedEquipment,
@@ -3915,7 +4628,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         const items = charactersBox.querySelectorAll('div');
         const characterItems = Array.from(items).filter(item => {
           const text = item.textContent.trim();
-          return text === 'Player Information' || text === 'Leaderboards';
+          return text === 'Player Information' || text === 'Leaderboards' || text === 'Rankings';
         });
         
         characterItems.forEach(item => {
@@ -3951,8 +4664,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               window.currentSpeedrunRankCategory = null;
               window.currentSpeedrunRankData = null;
               
+              // Show col3 again and reset col2 styling
+              col3.style.display = 'flex';
+              col2.style.flex = '1 1 0';
+              col2.style.maxWidth = '50%';
+              
               // Simple, robust display of user stats
               displayUserStats('Player Information');
+              
+              // Check if we're returning from Rankings and need to restore search state
+              if (cyclopediaState.previousTabState && cyclopediaState.previousTabState.hasSearchedData) {
+                cyclopediaState.searchedUsername = cyclopediaState.previousTabState.searchedUsername;
+                // Clear the previous state since we've restored it
+                cyclopediaState.previousTabState = null;
+              }
               
               // Always show searched player's data in col3 for current tab mode
               if (cyclopediaState.searchedUsername) {
@@ -4128,13 +4853,25 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 }
               }
             } else if (selectedCharacterItem === 'Leaderboards') {
-              // Always show user's stats in col2
-              displayUserStats('Player Information').catch(error => {
-                console.error('[Cyclopedia] Error updating user stats:', error);
-              });
-              
-              // Get player state for leaderboard data
+              // Always show user's leaderboard data in col2
               const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+              if (playerState?.name) {
+                displayCombinedLeaderboardsData(playerState).catch(error => {
+                  console.error('[Cyclopedia] Error updating leaderboard data:', error);
+                });
+              }
+              
+              // Show col3 again and reset col2 styling
+              col3.style.display = 'flex';
+              col2.style.flex = '1 1 0';
+              col2.style.maxWidth = '50%';
+              
+              // Check if we're returning from Rankings and need to restore search state
+              if (cyclopediaState.previousTabState && cyclopediaState.previousTabState.hasSearchedData) {
+                cyclopediaState.searchedUsername = cyclopediaState.previousTabState.searchedUsername;
+                // Clear the previous state since we've restored it
+                cyclopediaState.previousTabState = null;
+              }
               
               // Always show searched player's data in col3 for current tab mode
               if (cyclopediaState.searchedUsername) {
@@ -4148,21 +4885,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     const { yourRooms, ROOM_NAMES, best, roomsHighscores } = window.currentSpeedrunRankData;
                     const searchedRooms = searchedProfileData.rooms || {};
                     
-                    // Check if we have valid data before calling the function
-                    const searchedHighscores = searchedProfileData.highscores || [];
-                    if (searchedHighscores.length > 0) {
-                      displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
-                    } else {
-                      // Show message if searched player has no highscores data
-                      col3.innerHTML = `
-                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.WARNING}; text-align: center; padding: 20px;">
-                          <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
-                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">No Highscores Data</div>
-                          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${cyclopediaState.searchedUsername} has no highscores data</div>
-                          <div style="font-size: 12px; color: #666;">This player may not have completed any rooms yet.</div>
-                        </div>
-                      `;
-                    }
+                    // Always show all rooms, even if player has no highscores
+                    displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
                   } else {
                     // Load leaderboard data first, then populate col3
                     if (playerState?.name) {
@@ -4187,21 +4911,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                           const roomsHighscores = cachedData.roomsHighscores || {};
                           const searchedRooms = searchedProfileData.rooms || {};
                           
-                                                                         // Check if we have valid data before calling the function
-                     const searchedHighscores = searchedProfileData.highscores || [];
-                     if (searchedHighscores.length > 0) {
-                       displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
-                     } else {
-                       // Show message if searched player has no highscores data
-                       col3.innerHTML = `
-                         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.WARNING}; text-align: center; padding: 20px;">
-                           <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
-                           <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">No Highscores Data</div>
-                           <div style="font-size: 14px; margin-bottom: 16px; color: #888;">${cyclopediaState.searchedUsername} has no highscores data</div>
-                           <div style="font-size: 12px; color: #666;">This player may not have completed any rooms yet.</div>
-                         </div>
-                       `;
-                     }
+                          // Always show all rooms, even if player has no highscores
+                          displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
                         }
                       }).catch(error => {
                         console.error('[Cyclopedia] Error loading leaderboard data for searched player:', error);
@@ -4217,14 +4928,84 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     }
                   }
                 } else {
-                  // Show loading state in col3
-                  col3.innerHTML = `
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
-                      <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
-                      <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                      <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
-                    </div>
-                  `;
+                  // No searched profile data, but we have a username - try to fetch it
+                  if (playerState?.name) {
+                    // Show loading state in col3
+                    col3.innerHTML = `
+                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                        <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
+                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
+                        <div style="font-size: 14px; color: #888;">Preparing ${cyclopediaState.searchedUsername}'s data</div>
+                      </div>
+                    `;
+                    
+                    // Load leaderboard data first, then fetch and display searched player's data
+                    displayCombinedLeaderboardsData(playerState).then(() => {
+                      // After leaderboard data is loaded, fetch the searched player's profile data
+                      const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(cyclopediaState.searchedUsername)}%22%7D%7D`;
+                      
+                      fetchWithDeduplication(apiUrl, `search-${cyclopediaState.searchedUsername}`).then(data => {
+                        let searchedProfileData = Array.isArray(data) && data[0]?.result?.data?.json !== undefined
+                          ? data[0].result.data.json
+                          : data;
+                        
+                        if (searchedProfileData && searchedProfileData !== null) {
+                          setCachedProfileData(cyclopediaState.searchedUsername, searchedProfileData);
+                          
+                          // Now display the searched player's leaderboard data
+                          const cachedData = getCachedLeaderboardData('combined-leaderboards');
+                          if (cachedData) {
+                            const yourRooms = cachedData.yourRooms || playerState.rooms || {};
+                            const ROOM_NAMES = cachedData.ROOM_NAMES || globalThis.state.utils.ROOM_NAME || {};
+                            const best = cachedData.best || {};
+                            const roomsHighscores = cachedData.roomsHighscores || {};
+                            
+                            // Always show all rooms, even if player has no highscores
+                            displayCombinedLeaderboardsSearchResults(cyclopediaState.searchedUsername, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, col3);
+                          }
+                        } else {
+                          // Player doesn't exist
+                          col3.innerHTML = `
+                            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                              <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                              <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
+                              <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${cyclopediaState.searchedUsername}</div>
+                              <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
+                            </div>
+                          `;
+                        }
+                      }).catch(error => {
+                        console.error('[Cyclopedia] Error fetching searched player data:', error);
+                        col3.innerHTML = `
+                          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                            <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                            <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
+                            <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${cyclopediaState.searchedUsername}</div>
+                            <div style="font-size: 12px; color: #666;">Please try again later.</div>
+                          </div>
+                        `;
+                      });
+                    }).catch(error => {
+                      console.error('[Cyclopedia] Error loading leaderboard data:', error);
+                      col3.innerHTML = `
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
+                          <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                          <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Load Error</div>
+                          <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not load leaderboard data</div>
+                          <div style="font-size: 12px; color: #666;">Please try again later.</div>
+                        </div>
+                      `;
+                    });
+                  } else {
+                    // Show loading state in col3
+                    col3.innerHTML = `
+                      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;">
+                        <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
+                        <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
+                        <div style="font-size: 14px; color: #888;">Preparing search functionality</div>
+                      </div>
+                    `;
+                  }
                 }
               } else {
                 // No searched username, show default behavior
@@ -4238,26 +5019,52 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     </div>
                   `;
                 
-                // Update search functionality for Leaderboards
-                displayCombinedLeaderboardsData(playerState).then(() => {
-                  // After col2 is updated, update col3 with search functionality
-                  // Get the actual data that was fetched
-                  const cachedData = getCachedLeaderboardData('combined-leaderboards');
-                  if (cachedData) {
-                    updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, cachedData.best, cachedData.roomsHighscores);
-                  } else {
-                    updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, null, null);
-                  }
-                }).catch(error => {
-                  console.error('[Cyclopedia] Error updating leaderboards data:', error);
-                });
+                  // Update search functionality for Leaderboards
+                  displayCombinedLeaderboardsData(playerState).then(() => {
+                    // After col2 is updated, update col3 with search functionality
+                    // Get the actual data that was fetched
+                    const cachedData = getCachedLeaderboardData('combined-leaderboards');
+                    if (cachedData) {
+                      updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, cachedData.best, cachedData.roomsHighscores);
+                    } else {
+                      updateSearchForCombinedLeaderboards(playerState.rooms, globalThis.state.utils.ROOM_NAME, null, null);
+                    }
+                  }).catch(error => {
+                    console.error('[Cyclopedia] Error updating leaderboards data:', error);
+                  });
+                }
+              }
+            } else if (selectedCharacterItem === 'Rankings') {
+              // Show rankings in col2 and hide col3
+              displayUserStats('Rankings').catch(error => {
+                console.error('[Cyclopedia] Error updating rankings:', error);
+              });
+              
+              // Hide col3 for rankings
+              col3.style.display = 'none';
+              col2.style.flex = '1 1 0';
+              col2.style.maxWidth = '100%';
+              
+              // Store the current state for when we return from Rankings
+              // This ensures search persistence when switching back to other tabs
+              if (cyclopediaState.searchedUsername) {
+                // Store the current tab state to restore later
+                cyclopediaState.previousTabState = {
+                  searchedUsername: cyclopediaState.searchedUsername,
+                  hasSearchedData: true
+                };
+              } else if (cyclopediaState.previousTabState && cyclopediaState.previousTabState.hasSearchedData) {
+                // If we don't have a current search but have a previous one, restore it
+                cyclopediaState.searchedUsername = cyclopediaState.previousTabState.searchedUsername;
               }
             }
-            }
             
-            displayUserStats(selectedCharacterItem).catch(error => {
-              console.error('[Cyclopedia] Error updating user stats:', error);
-            });
+            // Only call displayUserStats for Rankings since we handle Player Information and Leaderboards manually
+            if (selectedCharacterItem === 'Rankings') {
+              displayUserStats(selectedCharacterItem).catch(error => {
+                console.error('[Cyclopedia] Error updating user stats:', error);
+              });
+            }
           });
         });
 
@@ -4310,9 +5117,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Clear col3 and append template
             col3.innerHTML = '';
             col3.appendChild(container);
-                  } catch (error) {
-          // Could not get player state for default profile
-        }
+          } catch (error) {
+            // Could not get player state for default profile
+          }
         })();
       }, 10);
 
