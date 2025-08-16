@@ -7164,8 +7164,8 @@ function renderCyclopediaWelcomeColumn(playerName) {
 
 const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 68,
-  bisEquipments: 90,
-  exploredMaps: 64,
+  bisEquipments: 102,
+  exploredMaps: 76,
   bagOutfits: 192,
   raids: 12
 };

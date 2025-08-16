@@ -156,6 +156,10 @@
     
     // Autosell state
     autosellNonSelected: false,
+    autosellGenesMin: 5,
+    autosellGenesMax: 79,
+    autosqueezeGenesMin: 80,
+    autosqueezeGenesMax: 100,
     
     // Rate limiting state
     rateLimitedSales: new Set(),
@@ -207,7 +211,12 @@
           selectedScrollTier: this.selectedScrollTier,
           selectedCreatures: [...this.selectedCreatures],
           stopConditions: { ...this.stopConditions },
-          userDefinedSpeed: this.userDefinedSpeed
+          userDefinedSpeed: this.userDefinedSpeed,
+          autosellNonSelected: this.autosellNonSelected,
+          autosellGenesMin: this.autosellGenesMin,
+          autosellGenesMax: this.autosellGenesMax,
+          autosqueezeGenesMin: this.autosqueezeGenesMin,
+          autosqueezeGenesMax: this.autosqueezeGenesMax
         };
         localStorage.setItem('autoscroller_state', JSON.stringify(stateToSave));
       } catch (error) {
@@ -221,10 +230,15 @@
         if (saved) {
           const state = JSON.parse(saved);
           
-          if (state.selectedScrollTier) this.selectedScrollTier = state.selectedScrollTier;
-          if (state.selectedCreatures) this.selectedCreatures = [...state.selectedCreatures];
-          if (state.stopConditions) this.stopConditions = { ...this.stopConditions, ...state.stopConditions };
-          if (state.userDefinedSpeed) this.userDefinedSpeed = state.userDefinedSpeed;
+                  if (state.selectedScrollTier) this.selectedScrollTier = state.selectedScrollTier;
+        if (state.selectedCreatures) this.selectedCreatures = [...state.selectedCreatures];
+        if (state.stopConditions) this.stopConditions = { ...this.stopConditions, ...state.stopConditions };
+        if (state.userDefinedSpeed) this.userDefinedSpeed = state.userDefinedSpeed;
+        if (state.autosellNonSelected !== undefined) this.autosellNonSelected = state.autosellNonSelected;
+        if (state.autosellGenesMin !== undefined) this.autosellGenesMin = state.autosellGenesMin;
+        if (state.autosellGenesMax !== undefined) this.autosellGenesMax = state.autosellGenesMax;
+        if (state.autosqueezeGenesMin !== undefined) this.autosqueezeGenesMin = state.autosqueezeGenesMin;
+        if (state.autosqueezeGenesMax !== undefined) this.autosqueezeGenesMax = state.autosqueezeGenesMax;
           
                   // State loaded from storage
       }
@@ -241,7 +255,9 @@
         targetCreatures: new Set(),
         foundCreatures: new Map(),
         soldMonsters: 0,
-        soldGold: 0
+        soldGold: 0,
+        squeezedMonsters: 0,
+        squeezedDust: 0
       };
       
       this.selectedScrollTier = 1;
@@ -256,6 +272,10 @@
       };
       
       this.autosellNonSelected = false;
+      this.autosellGenesMin = 5;
+      this.autosellGenesMax = 79;
+      this.autosqueezeGenesMin = 80;
+      this.autosqueezeGenesMax = 100;
       this.rateLimitedSales.clear();
       this.rateLimitedSalesRetryCount.clear();
       this.lastRateLimitTime = 0;
@@ -292,6 +312,10 @@
   let autoscrolling = AutoscrollerState.autoscrolling;
   let stopConditions = AutoscrollerState.stopConditions;
   let autosellNonSelected = AutoscrollerState.autosellNonSelected;
+  let autosellGenesMin = AutoscrollerState.autosellGenesMin;
+  let autosellGenesMax = AutoscrollerState.autosellGenesMax;
+  let autosqueezeGenesMin = AutoscrollerState.autosqueezeGenesMin;
+  let autosqueezeGenesMax = AutoscrollerState.autosqueezeGenesMax;
   let rateLimitedSales = AutoscrollerState.rateLimitedSales;
   let rateLimitedSalesRetryCount = AutoscrollerState.rateLimitedSalesRetryCount;
   let lastRateLimitTime = AutoscrollerState.lastRateLimitTime;
@@ -738,13 +762,21 @@
     apiRequestQueue.addRequest(request);
   }
   
+  // Flag to prevent operations during queue clearing
+  let isQueueClearing = false;
+  
   function clearApiQueue() {
+    isQueueClearing = true;
     apiRequestQueue.pending.forEach(request => {
       request.reject(new Error('Queue cleared'));
     });
     apiRequestQueue.pending = [];
     apiRequestQueue.processing = false;
     apiRequestQueue.lastBatchTime = 0;
+    // Reset flag after a short delay to allow cleanup
+    setTimeout(() => {
+      isQueueClearing = false;
+    }, 100);
   }
 
 // =======================
@@ -1018,6 +1050,43 @@
       console.warn('[Autoscroller] Failed to remove monster from local inventory:', e);
     }
   }
+
+  function updateLocalInventoryGoldDust(goldChange = 0, dustChange = 0) {
+    try {
+      const player = globalThis.state?.player;
+      if (!player) return;
+      
+      player.send({
+        type: "setState",
+        fn: (prev) => {
+          const newState = { ...prev };
+          // Ensure nested inventory exists
+          newState.inventory = { ...prev.inventory };
+          
+          // Get current values from both possible locations
+          const currentGold = prev.inventory?.gold ?? prev.gold ?? 0;
+          const currentDust = prev.inventory?.dust ?? prev.dust ?? 0;
+          
+          // Update inventory values by ADDING to current values
+          if (goldChange !== 0) {
+            newState.inventory.gold = currentGold + goldChange;
+            // Mirror on root for compatibility (like updateLocalInventoryAfterRoll does)
+            newState.gold = newState.inventory.gold;
+          }
+          
+          if (dustChange !== 0) {
+            newState.inventory.dust = currentDust + dustChange;
+            // Mirror on root for compatibility
+            newState.dust = newState.inventory.dust;
+          }
+          
+          return newState;
+        },
+      });
+    } catch (e) {
+      console.warn('[Autoscroller] Failed to update local inventory gold/dust:', e);
+    }
+  }
   
   function getMonsterNameFromGameId(gameId) {
     // Check cache first
@@ -1238,6 +1307,62 @@
   }
   
   /**
+   * Squeeze monsters by their IDs using the same API as Autoseller
+   * @param {Array<number>} monsterIds - Array of monster IDs to squeeze
+   * @returns {Promise<Object>} API response
+   */
+  async function squeezeMonsters(monsterIds, retryCount = 0) {
+    return new Promise((resolve, reject) => {
+      const request = {
+        execute: async () => {
+          try {
+            const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
+            const body = { "0": { json: monsterIds } };
+            
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Game-Version': '1'
+              },
+              body: JSON.stringify(body)
+            });
+            
+            if (!response.ok) {
+              if (response.status === 404) {
+                console.log(`[Autoscroller] Monsters not found (already squeezed or removed)`);
+                return { success: false, status: 404, message: 'Monsters not found' };
+              }
+              if (response.status === 429) {
+                console.log(`[Autoscroller] Rate limited while squeezing monsters - will retry later`);
+                return { success: false, status: 429, message: 'Rate limited' };
+              }
+              throw new Error(`Squeeze API failed: HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const apiResponse = data[0]?.result?.data?.json;
+            
+            if (apiResponse && apiResponse.dustDiff != null) {
+              return { success: true, dustDiff: apiResponse.dustDiff };
+            } else {
+              console.warn(`[Autoscroller] Unexpected squeeze API response format:`, apiResponse);
+              return { success: false, message: 'Unexpected response format' };
+            }
+          } catch (error) {
+            console.error(`[Autoscroller] Error squeezing monsters:`, error);
+            return { success: false, error: error.message };
+          }
+        },
+        resolve,
+        reject
+      };
+      
+      addToApiQueue(request);
+    });
+  }
+
+  /**
    * Sell a monster by its ID using the same API as Autoseller
    * @param {number} monsterId - The monster ID to sell
    * @returns {Promise<Object>} API response
@@ -1323,35 +1448,64 @@
   }
   
   /**
+   * Calculate total genes for a monster
+   * @param {Object} monster - Monster object
+   * @returns {number} Total gene percentage
+   */
+  function getMonsterGenes(monster) {
+    if (!monster) return 0;
+    return (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
+  }
+
+  /**
    * Check if a monster should be sold (not in selected creatures list)
    * @param {Object} monster - Monster object from summon result
-   * @returns {boolean} Whether the monster should be sold
+   * @returns {Object} Object with action: 'sell', 'squeeze', or 'keep'
    */
-  function shouldSellMonster(monster) {
+  function shouldProcessMonster(monster) {
     if (!autosellNonSelected || !monster || !monster.gameId) {
-      return false;
+      return { action: 'keep' };
     }
     
     const monsterName = getMonsterNameFromGameId(monster.gameId);
     if (!monsterName) {
       console.warn('[Autoscroller] Could not determine monster name for gameId:', monster.gameId);
-      return false;
+      return { action: 'keep' };
     }
     
     // Check if the monster is in the selected creatures list
     const isSelected = selectedCreatures.includes(monsterName);
     
-    // Log the decision for debugging
-    if (autosellNonSelected) {
-              // Monster sell decision logged for debugging
-      }
+    // Keep if selected
+    if (isSelected) {
+      return { action: 'keep' };
+    }
     
-    // Sell if NOT selected
-    return !isSelected;
+    // Calculate genes for non-selected monsters
+    const genes = getMonsterGenes(monster);
+    
+    // Squeeze if genes are 80-100%
+    if (genes >= autosqueezeGenesMin && genes <= autosqueezeGenesMax) {
+      return { action: 'squeeze', genes };
+    }
+    
+    // Sell if genes are 5-79%
+    if (genes >= autosellGenesMin && genes <= autosellGenesMax) {
+      return { action: 'sell', genes };
+    }
+    
+    // Keep if genes are outside both ranges
+    return { action: 'keep', genes };
   }
   
   async function autoscrollLoop() {
     try {
+      // Check if queue is being cleared - if so, stop operations
+      if (isQueueClearing) {
+        console.log('[Autoscroller] Queue is being cleared, stopping operations');
+        return;
+      }
+      
       // Check if modal is still open - if not, stop autoscrolling
       if (!DOM_ELEMENTS.isModalOpen()) {
         autoscrolling = false;
@@ -1454,8 +1608,9 @@
         
         addMonsterToLocalInventory(result.summonedMonster);
         
-        // Check if we should sell this monster (if it's not in selected creatures)
-        if (shouldSellMonster(result.summonedMonster)) {
+        // Check if we should process this monster (if it's not in selected creatures)
+        const processResult = shouldProcessMonster(result.summonedMonster);
+        if (processResult.action !== 'keep') {
           // Get the monster ID from the summoned monster
           const monsterId = result.summonedMonster.id;
           if (monsterId) {
@@ -1463,28 +1618,54 @@
             await new Promise(resolve => setTimeout(resolve, 200));
             
             try {
-              const sellResult = await sellMonster(monsterId);
-              
-              if (sellResult.success) {
-                // Update statistics
-                autoscrollStats.soldMonsters++;
-                autoscrollStats.soldGold += sellResult.goldValue;
-                // Remove from local inventory since it was sold
-                removeMonsterFromLocalInventory(monsterId);
-              } else if (sellResult.status === 404) {
-                // Remove from local inventory since it doesn't exist on server
-                removeMonsterFromLocalInventory(monsterId);
-              } else if (sellResult.status === 429) {
-                // Track this monster for potential retry later
-                rateLimitedSales.add(monsterId);
-                // Don't remove from local inventory, let it stay and try again later
-                // This prevents the monster from disappearing if we can't sell it due to rate limits
-              } else {
-                console.warn(`[Autoscroller] Failed to sell monster:`, sellResult.message || sellResult.error);
-                // For other errors, don't remove from inventory to be safe
+              if (processResult.action === 'sell') {
+                const sellResult = await sellMonster(monsterId);
+                
+                if (sellResult.success) {
+                  // Update statistics
+                  autoscrollStats.soldMonsters++;
+                  autoscrollStats.soldGold += sellResult.goldValue;
+                  // Update local inventory with gold received
+                  updateLocalInventoryGoldDust(sellResult.goldValue, 0);
+                  // Remove from local inventory since it was sold
+                  removeMonsterFromLocalInventory(monsterId);
+                } else if (sellResult.status === 404) {
+                  // Remove from local inventory since it doesn't exist on server
+                  removeMonsterFromLocalInventory(monsterId);
+                } else if (sellResult.status === 429) {
+                  // Track this monster for potential retry later
+                  rateLimitedSales.add(monsterId);
+                  // Don't remove from local inventory, let it stay and try again later
+                  // This prevents the monster from disappearing if we can't sell it due to rate limits
+                } else {
+                  console.warn(`[Autoscroller] Failed to sell monster:`, sellResult.message || sellResult.error);
+                  // For other errors, don't remove from inventory to be safe
+                }
+              } else if (processResult.action === 'squeeze') {
+                const squeezeResult = await squeezeMonsters([monsterId]);
+                
+                if (squeezeResult.success) {
+                  // Update statistics
+                  autoscrollStats.squeezedMonsters = (autoscrollStats.squeezedMonsters || 0) + 1;
+                  autoscrollStats.squeezedDust = (autoscrollStats.squeezedDust || 0) + squeezeResult.dustDiff;
+                  // Update local inventory with dust received
+                  updateLocalInventoryGoldDust(0, squeezeResult.dustDiff);
+                  // Remove from local inventory since it was squeezed
+                  removeMonsterFromLocalInventory(monsterId);
+                } else if (squeezeResult.status === 404) {
+                  // Remove from local inventory since it doesn't exist on server
+                  removeMonsterFromLocalInventory(monsterId);
+                } else if (squeezeResult.status === 429) {
+                  // Track this monster for potential retry later
+                  rateLimitedSales.add(monsterId);
+                  // Don't remove from local inventory, let it stay and try again later
+                } else {
+                  console.warn(`[Autoscroller] Failed to squeeze monster:`, squeezeResult.message || squeezeResult.error);
+                  // For other errors, don't remove from inventory to be safe
+                }
               }
-            } catch (sellError) {
-              console.error(`[Autoscroller] Error during autosell:`, sellError);
+            } catch (error) {
+              console.error(`[Autoscroller] Error during autosell/autosqueeze:`, error);
               // Don't let autosell errors stop the autoscroll
             }
           }
@@ -2338,7 +2519,7 @@
         
         const autosellLabel = document.createElement('label');
         autosellLabel.htmlFor = 'autosell-checkbox';
-        autosellLabel.textContent = 'Autosell non-selected creatures';
+        autosellLabel.textContent = 'Autosell and autosqueeze non-selected creatures';
         autosellLabel.style.color = 'rgb(230, 215, 176)';
         autosellLabel.style.cursor = 'pointer';
         
@@ -2349,8 +2530,10 @@
         // Add event listener for autosell checkbox
         autosellCheckbox.addEventListener('change', () => {
           autosellNonSelected = autosellCheckbox.checked;
-                  // Autosell setting updated
-      });
+          // Autosell setting updated
+        });
+        
+
         
         return div;
       }
@@ -3210,6 +3393,12 @@
    * Retry selling monsters that failed due to rate limiting
    */
   async function retryFailedSales() {
+    // Check if queue is being cleared - if so, stop operations
+    if (isQueueClearing) {
+      console.log('[Autoscroller] Queue is being cleared, stopping retry operations');
+      return;
+    }
+    
     if (rateLimitedSales.size === 0) return;
     
             const monstersToRetry = Array.from(rateLimitedSales);
@@ -3226,12 +3415,14 @@
       try {
         const result = await sellMonster(monsterId, retryCount);
         if (result.success) {
-                  rateLimitedSales.delete(monsterId);
-        rateLimitedSalesRetryCount.delete(monsterId);
-        // Update statistics
-        autoscrollStats.soldMonsters++;
-        autoscrollStats.soldGold += result.goldValue;
-        removeMonsterFromLocalInventory(monsterId);
+          rateLimitedSales.delete(monsterId);
+          rateLimitedSalesRetryCount.delete(monsterId);
+          // Update statistics
+          autoscrollStats.soldMonsters++;
+          autoscrollStats.soldGold += result.goldValue;
+          // Update local inventory with gold received
+          updateLocalInventoryGoldDust(result.goldValue, 0);
+          removeMonsterFromLocalInventory(monsterId);
       } else if (result.status === 429) {
         // Keep in retry queue
       } else {
@@ -3294,9 +3485,14 @@
         messageParts.push(` Sold ${autoscrollStats.soldMonsters} non-selected creatures for ${autoscrollStats.soldGold} gold.`);
       }
       
+      // Add autosqueeze statistics if any monsters were squeezed
+      if (autosellNonSelected && autoscrollStats.squeezedMonsters > 0) {
+        messageParts.push(` Squeezed ${autoscrollStats.squeezedMonsters} non-selected creatures for ${autoscrollStats.squeezedDust} dust.`);
+      }
+      
       // Add rate limit information if there are pending sales
       if (autosellNonSelected && rateLimitedSales.size > 0) {
-        messageParts.push(` (${rateLimitedSales.size} sales pending due to rate limits)`);
+        messageParts.push(` (${rateLimitedSales.size} operations pending due to rate limits)`);
       }
       
       // Add rate limiting status
