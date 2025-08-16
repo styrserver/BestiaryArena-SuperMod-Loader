@@ -285,6 +285,13 @@ const inventoryTooltips = {
     rarity: '4',
     obtain: 'Store'
   },
+  monsterRaids: {
+    displayName: "Monster Raids",
+    text: 'Stay alert! At any moment, a new random monster raid may begin! Raids can drop exclusive equipments and monsters.',
+    icon: 'https://bestiaryarena.com/assets/icons/raid-store.png',
+    rarity: '5',
+    obtain: 'Store'
+  },
   monsterSqueezer: {
     displayName: "Monster Squeezer",
     text: 'Ingredients should have at most Lv. 10 and have at least 80% genes.\n\nThis is required if you want to produce 99.1% pure dust.\n\nSqueezing is easy peasy. Unsqueezing is not feasibly',

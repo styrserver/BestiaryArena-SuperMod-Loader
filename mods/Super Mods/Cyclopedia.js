@@ -10,7 +10,7 @@ const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '252px', LEFT_COLUMN_WIDTH: '200px', MO
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-  'Upgrades': ['Daily Boosted Map', 'Daycare', 'Hy\'genie', 'Monster Cauldron', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
+  'Upgrades': ['Daily Boosted Map', 'Daycare', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
 const INVENTORY_VARIANTS = {
@@ -23,7 +23,7 @@ const INVENTORY_VARIANTS = {
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
   'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Hy\'genie': ['hygenie'],
-  'Monster Cauldron': ['monsterCauldron'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
+  'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
 
@@ -35,7 +35,7 @@ const INVENTORY_STATIC_ITEMS = {
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
   'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
   'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
-  'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
+  'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
   'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
   'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
 };
@@ -54,13 +54,12 @@ const INVENTORY_CONFIG = {
 };
 const CURRENCY_CONFIG = {};
 
-// Hunting Marks path configurations - optimized based on actual game structure
 const HUNTING_MARKS_PATHS = [
-  'questLog?.task?.points',  // Primary path - confirmed working
-  'questLog?.task?.marks',   // Alternative task path
-  'questLog?.hunting?.marks', // Hunting-specific path
-  'huntingMarks',            // Direct path
-  'player?.huntingMarks'     // Player-specific path
+  'questLog?.task?.points',
+  'questLog?.task?.marks',
+  'questLog?.hunting?.marks',
+  'huntingMarks',
+  'player?.huntingMarks'
 ];
 
 const HUNTING_MARKS_UI_SELECTORS = [
@@ -79,12 +78,12 @@ const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dead Tree', 'Earth Crystal', 'E
 
 const ALL_CREATURES = ['Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord', 'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout', 'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin', 'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk', 'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman', 'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton', 'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental', 'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'];
 
-const ALL_EQUIPMENT = ['Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
+const ALL_EQUIPMENT = ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
 
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
   CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: ['dailyBoostedMap', 'daycare', 'hygenie', 'monsterCauldron', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  UPGRADE: ['dailyBoostedMap', 'daycare', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
 const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
@@ -227,17 +226,12 @@ const cyclopediaState = {
 // =======================
 const MemoryUtils = {
   clearLargeObjects: function() {
-    // Don't disconnect context menu observers - they are core functionality, not "large objects"
-    // Only disconnect menu observer (which is different from context menu observer)
     if (window.cyclopediaMenuObserver) {
       try { 
         window.cyclopediaMenuObserver.disconnect(); 
         window.cyclopediaMenuObserver = null; 
       } catch (e) {}
     }
-    
-    // Context menu observer (cyclopediaGlobalObserver) should NEVER be disconnected
-    // It's needed for right-click functionality and should always be active
   },
   
   getMemoryInfo: function() {
@@ -481,14 +475,12 @@ function getDustFromGameState() { return getCurrencyFromGameState('dust'); }
 
 function getHuntingMarksFromUI() {
   try {
-    // Try predefined selectors first
     let huntingMarksSprite = HUNTING_MARKS_UI_SELECTORS.reduce((found, selector) => {
       if (found) return found;
       const element = DOMCache.get(selector);
       return element?.tagName === 'IMG' ? element.closest('.sprite.item.relative') : element;
     }, null);
     
-    // Fallback: search for text content
     if (!huntingMarksSprite) {
       const huntingMarksText = Array.from(DOMCache.getAll('*')).find(el => 
         el.textContent?.includes('Hunting Marks')
@@ -498,7 +490,6 @@ function getHuntingMarksFromUI() {
     
     if (!huntingMarksSprite) return null;
     
-    // Extract number from span or text content
     let span = huntingMarksSprite.querySelector('.font-outlined-fill') || 
                Array.from(huntingMarksSprite.querySelectorAll('span')).find(s => 
                  /^\d+$/.test(s.textContent.trim().replace(/,/g, ''))
@@ -522,7 +513,6 @@ function getHuntingMarksFromGameState() {
     const gameState = globalThis.state?.player?.getSnapshot()?.context;
     if (!gameState) return null;
     
-    // Check optimized paths (primary path is questLog?.task?.points)
     for (const path of HUNTING_MARKS_PATHS) {
       const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState);
           if (typeof value === 'number' && !isNaN(value) && value >= 0) return value;
@@ -660,18 +650,15 @@ function setCachedRoomThumbnail(roomCode, imgElement) {
 }
 
 function createRoomThumbnail(roomCode, roomName, size = 32) {
-  // Check if we already have a cached thumbnail for this room
   let cachedThumbnail = getCachedRoomThumbnail(roomCode);
   
   if (cachedThumbnail) {
-    // Clone the cached image to avoid DOM conflicts
     const clonedThumbnail = cachedThumbnail.cloneNode(true);
     clonedThumbnail.style.width = `${size}px`;
     clonedThumbnail.style.height = `${size}px`;
     return clonedThumbnail;
   }
   
-  // Create new thumbnail if not cached
   const thumbnail = document.createElement('img');
   thumbnail.src = `/assets/room-thumbnails/${roomCode}.png`;
   thumbnail.alt = roomName;
@@ -682,7 +669,6 @@ function createRoomThumbnail(roomCode, roomName, size = 32) {
     object-fit: cover;
   `;
   
-  // Cache the thumbnail for future use
   setCachedRoomThumbnail(roomCode, thumbnail);
   
   return thumbnail;
@@ -1089,12 +1075,10 @@ function addCyclopediaPressedStateListeners(btn) {
 // 7. Data/Model Functions
 // =======================
 function startContextMenuObserver() {
-  // Don't restart if already running
   if (cyclopediaState.observer && window.cyclopediaGlobalObserver) {
     return;
   }
   
-  // Clean up any existing observers before creating new one
   if (window.cyclopediaGlobalObserver) {
     try {
       window.cyclopediaGlobalObserver.disconnect();
@@ -1157,7 +1141,6 @@ let cyclopediaModalInProgress = false;
 let lastModalCall = 0;
 
 function createStartPageManager() {
-  // HTML templates for different states
   const HTML_TEMPLATES = {
     loading: () => `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT};">
@@ -1176,7 +1159,6 @@ function createStartPageManager() {
     `
   };
 
-  // Error message mapping
   const ERROR_MESSAGES = {
     'AbortError': 'Request timed out. Please check your internet connection and try again.',
     'Player name not available': 'Player name not available. Please ensure you are logged into the game.',
@@ -1384,7 +1366,6 @@ function openCyclopediaModal(options) {
       startContextMenuObserver();
     }
     
-    // Ensure monster name map is built
     buildCyclopediaMonsterNameMap();
 
     const content = document.createElement('div');
@@ -1419,7 +1400,6 @@ function openCyclopediaModal(options) {
     }
     if (foundEquipment) {
       selectedEquipment = foundEquipment;
-      // Also set the global variable for the equipment tab
       if (typeof window !== 'undefined') {
         window.cyclopediaSelectedEquipment = foundEquipment;
       }
@@ -1571,7 +1551,6 @@ function openCyclopediaModal(options) {
         }
       };
 
-      // Helper function to create title elements
       const createTitleElement = (titleText, updateFunction) => {
         const title = document.createElement('h2');
         title.className = 'widget-top widget-top-text pixel-font-16';
@@ -1589,7 +1568,6 @@ function openCyclopediaModal(options) {
       const d = document.createElement('div');
       Object.assign(d.style, EQUIPMENT_STYLES.container);
 
-      // Create equipment details column
       const equipDetailsCol = document.createElement('div');
       Object.assign(equipDetailsCol.style, EQUIPMENT_STYLES.column);
       equipDetailsCol.classList.add('text-whiteHighlight');
@@ -1600,7 +1578,6 @@ function openCyclopediaModal(options) {
       const { title: equipDetailsTitle, titleP: equipDetailsTitleP } = createTitleElement('Equipment Details', updateEquipDetailsTitle);
       equipDetailsCol.appendChild(equipDetailsTitle);
 
-      // Create owned equipment column
       const ownedEquipCol = document.createElement('div');
       Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column);
       ownedEquipCol.classList.add('text-whiteHighlight');
@@ -1880,12 +1857,10 @@ function openCyclopediaModal(options) {
 
       const allEquipment = GAME_DATA.ALL_EQUIPMENT;
 
-            // Use the enhanced createBox function instead of duplicate createEquipmentBox
       const createEquipmentBox = ({ title, items }) => {
         return createBox({
           title, items, type: 'equipment', selectedCreature, selectedEquipment, selectedInventory,
           setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol: () => {
-            // Call the stored updateRightCol function from the tab page
             if (d.updateRightCol) {
               d.updateRightCol();
             }
@@ -1977,7 +1952,6 @@ function openCyclopediaModal(options) {
       const { col1, col2, col3, sharedScrollContainer } = createCharactersTabColumns();
       const playerSearchBox = createPlayerSearchBox(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory);
 
-      // Helper functions for displaying user stats
       function showLoadingState(col2) {
         col2.innerHTML = `<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; text-align: center; padding: 20px;"><div style="font-size: 24px; margin-bottom: 16px;">📚</div><div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading...</div><div style="font-size: 14px; color: #888;">Fetching profile data</div></div>`;
       }
@@ -2134,14 +2108,11 @@ function openCyclopediaModal(options) {
           
           const wikitext = data.query.pages[0].revisions[0].slots.main.content;
 
-          // Extract timestamp from wikitext
           const timestampMatch = wikitext.match(/Updated \(([^)]+)\)/);
           const timestamp = timestampMatch ? timestampMatch[1] : null;
 
-          // Extract the first wikitable - use a more robust regex to capture the entire table
           let tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/s);
           if (!tableMatch) {
-            // Try alternative regex patterns
             tableMatch = wikitext.match(/\{\|[\s\S]*?\|\}/);
             if (!tableMatch) {
               tableMatch = wikitext.match(/\{\|[\s\S]*\|\}/s);
@@ -2149,15 +2120,11 @@ function openCyclopediaModal(options) {
           }
           
           if (!tableMatch) {
-            console.warn('[Cyclopedia] No wiki table found in rankings page');
-            console.warn('[Cyclopedia] Wiki content preview:', wikitext.substring(0, 500));
             return { rankings: [], timestamp: timestamp };
           }
           
           const table = tableMatch[0];
-          const rows = table.split('|-').slice(1); // skip header row
-          
-          console.warn('[Cyclopedia] Parsed table rows:', rows.length);
+          const rows = table.split('|-').slice(1);
 
           const rankings = [];
           let rank = 1;
@@ -2166,21 +2133,16 @@ function openCyclopediaModal(options) {
             const cols = row.split('|').map(s => s.trim()).filter(Boolean);
             if (cols.length < 9) {
               console.warn(`[Cyclopedia] Skipping row ${rowIndex + 1}: insufficient columns (${cols.length})`);
-              return; // Need at least 9 columns
+              return;
             }
             
-            // Extract username from the first column (remove wiki link formatting)
             let username = cols[0];
-            // Remove wiki link formatting: [https://bestiaryarena.com/profile/username username]
             const usernameMatch = username.match(/\[https:\/\/bestiaryarena\.com\/profile\/[^\s\]]+\s+([^\]]+)\]/);
             if (usernameMatch) {
               username = usernameMatch[1];
             } else {
-              // If no link format, just use the text as is
               username = username.replace(/[\[\]]/g, '');
             }
-            
-            // Parse all columns
             const level = parseInt(cols[1], 10);
             const successfulRuns = parseInt(cols[2], 10);
             const rankPoints = parseInt(cols[3], 10);
@@ -2217,8 +2179,6 @@ function openCyclopediaModal(options) {
             console.warn('[Cyclopedia] No valid rankings data found in wiki table');
           }
           
-          console.warn('[Cyclopedia] Processed rankings:', rankings.length);
-          
           return { rankings: rankings, timestamp: timestamp };
         } catch (error) {
           console.error('[Cyclopedia] Error fetching rankings from wiki:', error);
@@ -2238,7 +2198,6 @@ const RATE_LIMIT_CONFIG = {
 function checkRateLimit() {
   const now = Date.now();
   
-  // Check backoff period
   if (RATE_LIMIT_CONFIG.currentBackoff > 0) {
     if (now < RATE_LIMIT_CONFIG.currentBackoff) {
       const waitTime = Math.ceil((RATE_LIMIT_CONFIG.currentBackoff - now) / 1000);
@@ -2247,7 +2206,6 @@ function checkRateLimit() {
     RATE_LIMIT_CONFIG.currentBackoff = 0;
   }
   
-  // Clean old requests and check limit
   RATE_LIMIT_CONFIG.requests = RATE_LIMIT_CONFIG.requests.filter(
     timestamp => now - timestamp < RATE_LIMIT_CONFIG.timeWindow
   );
@@ -2400,7 +2358,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
       async function displayRankingsData(playerState) {
         try {
-          // Check cache first
           let rankingsData = getCachedRankingsData();
           if (!rankingsData) {
             rankingsData = await fetchRankingsFromWiki();
@@ -2410,10 +2367,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const rankings = rankingsData.rankings || rankingsData;
           const timestamp = rankingsData.timestamp;
           
-          // Sorting variables - declare at the top
-          let allRankings = [...rankings]; // Create a copy for sorting
-          let currentSortColumn = 'level'; // Default sort by level
-          let currentSortDirection = 'desc'; // Default descending for level
+          let allRankings = [...rankings];
+          let currentSortColumn = 'level';
+          let currentSortDirection = 'desc';
           
           const containerDiv = document.createElement('div');
           Object.assign(containerDiv.style, {
@@ -2426,10 +2382,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const contentContainer = document.createElement('div');
           contentContainer.style.cssText = `flex: 1; padding: 10px; overflow-y: auto; position: relative; height: 100%;`;
 
-          // Find current player's rank
           const currentPlayerRank = rankings.find(r => r.name.toLowerCase() === playerState.name.toLowerCase());
 
-          // Create table container with proper grid system
           const tableContainer = document.createElement('div');
           tableContainer.className = 'pixel-font-14';
           tableContainer.style.cssText = `
@@ -2444,7 +2398,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             flex-direction: column;
           `;
 
-          // Create header row container
           const headerRow = document.createElement('div');
           headerRow.style.cssText = `
             display: grid;
@@ -2457,7 +2410,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             width: 100%;
           `;
 
-          // Create table header row with icons
           const headerData = [
             { type: 'text', content: 'Rank', key: 'rank', sortable: false },
             { type: 'text', content: 'Player', key: 'name', sortable: true },
@@ -2510,7 +2462,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               headerCell.textContent = item.content;
             }
             
-            // Add sort indicator
             if (item.key === currentSortColumn) {
               const sortIndicator = document.createElement('span');
               sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
@@ -2522,12 +2473,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               headerCell.appendChild(sortIndicator);
             }
             
-                      // Add click handler for sorting (only for sortable columns)
           if (item.sortable) {
             headerCell.addEventListener('click', () => {
               const sortKey = item.key;
               
-              // Toggle direction if same column, otherwise default to desc
               if (sortKey === currentSortColumn) {
                 currentSortDirection = currentSortDirection === 'desc' ? 'asc' : 'desc';
               } else {
@@ -2535,12 +2484,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 currentSortDirection = 'desc';
               }
               
-              // Sort the data
               allRankings.sort((a, b) => {
                 let aVal = a[sortKey];
                 let bVal = b[sortKey];
                 
-                // Handle string comparison for names
                 if (typeof aVal === 'string') {
                   aVal = aVal.toLowerCase();
                   bVal = bVal.toLowerCase();
@@ -2548,15 +2495,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 let primarySort = 0;
                 
-                // Special handling for time sum - lower is better
                 if (sortKey === 'timeSum') {
                   if (currentSortDirection === 'desc') {
-                    primarySort = aVal - bVal; // Lower times first (e.g., 10 comes before 20)
+                    primarySort = aVal - bVal;
                   } else {
-                    primarySort = bVal - aVal; // Higher times first (e.g., 20 comes before 10)
+                    primarySort = bVal - aVal;
                   }
                 } else {
-                  // Standard numerical/string comparison for other columns
                   if (typeof aVal === 'string') {
                     if (currentSortDirection === 'desc') {
                       primarySort = bVal.localeCompare(aVal);
@@ -2565,14 +2510,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     }
                   } else {
                     if (currentSortDirection === 'desc') {
-                      primarySort = bVal - aVal; // Higher values first
+                      primarySort = bVal - aVal;
                     } else {
-                      primarySort = aVal - bVal; // Lower values first
+                      primarySort = aVal - bVal;
                     }
                   }
                 }
                 
-                // If primary sort is equal, use level as secondary sort (descending)
                 if (primarySort === 0) {
                   return b.level - a.level;
                 }
@@ -2580,13 +2524,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 return primarySort;
               });
               
-              // Re-render the table and update header highlighting
               renderRankingsTable();
               updateHeaderHighlighting();
             });
           }
             
-            // Add hover effects (only for sortable columns)
             if (item.sortable) {
               headerCell.addEventListener('mouseenter', () => {
                 if (item.key !== currentSortColumn) {
@@ -2606,7 +2548,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
                     tableContainer.appendChild(headerRow);
           
-          // Create scrollable container for data
           const scrollableContainer = document.createElement('div');
           scrollableContainer.style.cssText = `
             overflow-y: auto;
@@ -2617,7 +2558,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             flex-direction: column;
           `;
           
-          // Create data rows container
           const dataRowsContainer = document.createElement('div');
           dataRowsContainer.style.cssText = `
             display: grid;
@@ -2627,12 +2567,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             flex: 1;
           `;
 
-          // Display all rankings in table format
-          // Initial sort by level
           allRankings.sort((a, b) => b.level - a.level);
           
           function renderRankingsTable() {
-            // Clear existing data rows
             dataRowsContainer.innerHTML = '';
             
             allRankings.forEach((ranking, index) => {
@@ -2654,9 +2591,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             else if (ranking.rank === 2) rankIcon = '🥈';
             else if (ranking.rank <= 10) rankIcon = '🏅';
 
-            // Create cells for each column
             const cellData = [
-              `${rankIcon} #${currentSortDirection === 'desc' ? index + 1 : allRankings.length - index}`, // Reverse rank numbers for ascending
+              `${rankIcon} #${currentSortDirection === 'desc' ? index + 1 : allRankings.length - index}`,
               ranking.name,
               ranking.level.toLocaleString(),
               ranking.successfulRuns.toLocaleString(),
@@ -2690,7 +2626,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 font-size: 10px;
               `;
               
-              // Make player names clickable (cellIndex === 1 is the player name column)
               if (cellIndex === 1) {
                 cell.style.cursor = 'pointer';
                 cell.style.textDecoration = 'underline';
@@ -2710,32 +2645,25 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               dataRowsContainer.appendChild(cell);
             });
           });
-          
-          console.warn('[Cyclopedia] Rendered DOM cells:', dataRowsContainer.children.length);
           }
           
-          // Function to update header highlighting
           function updateHeaderHighlighting() {
             const headerCells = headerRow.querySelectorAll('div');
             headerCells.forEach((cell, index) => {
               const item = headerData[index];
               if (!item) return;
               
-              // Reset all cells
               cell.style.background = 'transparent';
               cell.style.border = 'none';
               
-              // Remove existing sort indicators
               const existingIndicator = cell.querySelector('span');
               if (existingIndicator) {
                 existingIndicator.remove();
               }
               
-              // Highlight current sort column
               if (item.key === currentSortColumn) {
                 cell.style.background = 'rgba(255, 224, 102, 0.2)';
                 
-                // Add sort indicator
                 const sortIndicator = document.createElement('span');
                 sortIndicator.textContent = currentSortDirection === 'desc' ? ' ▼' : ' ▲';
                 sortIndicator.style.cssText = `
@@ -2748,7 +2676,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             });
           }
           
-          // Initial render
           renderRankingsTable();
           updateHeaderHighlighting();
           
@@ -2757,7 +2684,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           contentContainer.appendChild(tableContainer);
 
-          // Add info icon with tooltip in the header area
           const infoContainer = document.createElement('div');
           infoContainer.style.cssText = `
             position: absolute;
@@ -2810,7 +2736,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           let isTooltipPersistent = false;
 
-          // Show/hide tooltip on hover
           infoIcon.addEventListener('mouseenter', () => {
             if (!isTooltipPersistent) {
               tooltip.style.opacity = '1';
@@ -2827,7 +2752,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           });
 
-          // Toggle persistent tooltip on click
           infoIcon.addEventListener('click', (e) => {
             e.stopPropagation();
             isTooltipPersistent = !isTooltipPersistent;
@@ -2842,7 +2766,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           });
 
-          // Close tooltip when clicking outside
           document.addEventListener('click', (e) => {
             if (isTooltipPersistent && !infoContainer.contains(e.target)) {
               isTooltipPersistent = false;
@@ -2858,7 +2781,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           containerDiv.appendChild(contentContainer);
 
-          // Clear container and append content
           col2.innerHTML = '';
           col2.appendChild(containerDiv);
 
@@ -3016,7 +2938,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
         containerDiv.appendChild(contentContainer);
 
-        // Clear container and append content
         container.innerHTML = '';
         container.appendChild(containerDiv);
       }
@@ -3070,7 +2991,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         level.innerHTML = `<span>Level</span><div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;"><div style="flex: 1; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;"><div style="width: 50%; height: 100%; background: #FFD700; border-radius: 4px;"></div></div><span style="color: #888;">[Level]</span></div>`;
         playerInfoSection.appendChild(level);
 
-        // Created at (placeholder)
         const createdAt = document.createElement('div');
         createdAt.style.cssText = `
           margin-bottom: 8px;
@@ -3083,7 +3003,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerInfoSection.appendChild(createdAt);
 
-        // Status (placeholder)
         const status = document.createElement('div');
         status.style.cssText = `
           margin-bottom: 8px;
@@ -3099,7 +3018,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerInfoSection.appendChild(status);
 
-        // Loyalty Points (placeholder)
         const loyaltyPoints = document.createElement('div');
         loyaltyPoints.style.cssText = `
           font-size: 14px;
@@ -3113,7 +3031,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
         profileContainer.appendChild(playerInfoSection);
 
-        // Player Stats Section
         const playerStatsSection = document.createElement('div');
         playerStatsSection.style.cssText = `
           margin-bottom: 20px;
@@ -3123,7 +3040,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           border: 1px solid rgba(255, 255, 255, 0.1);
         `;
 
-        // Player Stats Header
         const playerStatsHeader = document.createElement('div');
         playerStatsHeader.style.cssText = `
           display: flex;
@@ -3140,7 +3056,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerStatsSection.appendChild(playerStatsHeader);
 
-        // Current Total (placeholder)
         const currentTotal = document.createElement('div');
         currentTotal.style.cssText = `
           margin-bottom: 12px;
@@ -3167,7 +3082,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerStatsSection.appendChild(currentTotal);
 
-        // Progress (placeholder)
         const progress = document.createElement('div');
         progress.style.cssText = `
           margin-bottom: 12px;
@@ -3199,7 +3113,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerStatsSection.appendChild(progress);
 
-        // Rankings (placeholder)
         const rankings = document.createElement('div');
         rankings.innerHTML = `
           <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Rankings</div>
@@ -3220,7 +3133,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
         profileContainer.appendChild(playerStatsSection);
 
-        // Add search instruction
         const searchInstruction = document.createElement('div');
         searchInstruction.style.cssText = `
           text-align: center;
@@ -3241,18 +3153,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         centeredContent.appendChild(profileContainer);
         containerDiv.appendChild(centeredContent);
 
-        // Clear container and append template
         container.innerHTML = '';
         container.appendChild(containerDiv);
       }
 
-      // Function to organize rooms by region and correct order
       function organizeRoomsByRegion(rooms, ROOM_NAMES) {
         const regions = globalThis.state.utils.REGIONS;
         const roomsData = globalThis.state.utils.ROOMS;
         
         if (!regions || !roomsData) {
-          // Fallback to alphabetical sorting if region data is not available
           return {
             'All Maps': Object.keys(ROOM_NAMES)
               .filter(roomCode => rooms[roomCode])
@@ -3263,13 +3172,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
         const organizedRooms = {};
         
-        // Process each region
         regions.forEach(region => {
           if (!region.rooms || !Array.isArray(region.rooms)) return;
           
           const regionRooms = [];
           
-          // Add rooms that belong to this region and have player data
           region.rooms.forEach(room => {
             const roomCode = room.id;
             if (rooms[roomCode] && ROOM_NAMES[roomCode]) {
@@ -3280,15 +3187,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           });
           
-          // Only add region if it has rooms with player data
           if (regionRooms.length > 0) {
-            // Use real region name from the API instead of ID
             const regionName = getRealRegionName(region);
             organizedRooms[regionName] = regionRooms;
           }
         });
         
-        // Add any remaining rooms that might not be in regions
         const allRoomCodes = Object.keys(ROOM_NAMES);
         const processedRoomCodes = new Set();
         
@@ -3308,16 +3212,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         return organizedRooms;
       }
 
-      // Helper function to get real region names from the API
       function getRealRegionName(region) {
         if (!region) return 'Unknown Region';
         
-        // If the region has a name property, use it
         if (region.name) {
           return region.name;
         }
         
-        // Map region IDs to real names based on the game's region data
         const regionNameMap = {
           'rook': 'Rookgaard',
           'abdendriel': 'Ab\'Dendriel',
@@ -3356,29 +3257,24 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           'issavi swamp': 'Issavi Swamp'
         };
         
-        // Try to find the region name by ID
         const regionId = region.id ? region.id.toLowerCase() : '';
         if (regionNameMap[regionId]) {
           return regionNameMap[regionId];
         }
         
-        // If no mapping found, capitalize the ID as fallback
         return region.id ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()) : 'Unknown Region';
       }
 
-      // Function to display user's combined leaderboards data (Speedrun + Rank Points)
       function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
-        // Local formatTime function for time formatting
         function formatTime(ms) {
           if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
           const totalSeconds = Math.floor(ms / 1000);
           const minutes = Math.floor(totalSeconds / 60);
           const seconds = totalSeconds % 60;
-          const milliseconds = Math.floor((ms % 1000) / 10); // Get centiseconds (10ms precision)
+          const milliseconds = Math.floor((ms % 1000) / 10);
           return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
         }
 
-        // Create container
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
           display: 'flex',
@@ -3387,27 +3283,23 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           height: '100%',
           padding: '8px',
           boxSizing: 'border-box',
-          minWidth: '0', // Prevent content from expanding the container
-          maxWidth: '100%' // Ensure content doesn't exceed container width
+          minWidth: '0',
+          maxWidth: '100%'
         });
 
 
 
-        // Create content container (no scrollbar needed)
         const contentContainer = document.createElement('div');
         contentContainer.style.cssText = `
           flex: 1;
           padding: 2px;
-          min-width: 0; /* Prevent content from expanding */
-          max-width: 100%; /* Ensure content doesn't exceed container width */
+          min-width: 0;
+          max-width: 100%;
         `;
 
-        // Organize rooms by region
         const organizedRooms = organizeRoomsByRegion(rooms, ROOM_NAMES);
 
-        // Create room entries organized by region
         Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
-          // Create region header using the title system with sticky positioning
           const regionHeader = DOMUtils.createTitle(regionName, LAYOUT_CONSTANTS.FONTS.SIZES.SMALL);
           Object.assign(regionHeader.style, {
             margin: '8px 0 4px 0',
@@ -3419,11 +3311,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           });
           contentContainer.appendChild(regionHeader);
 
-          // Create room entries for this region
           regionRooms.forEach(({ roomCode, roomName }) => {
             const yourRoom = rooms[roomCode];
 
-          // Single room entry with grid layout
           const roomEntry = document.createElement('div');
           roomEntry.style.cssText = `
             display: grid;
@@ -3434,8 +3324,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 4px;
             border: 1px solid rgba(255, 255, 255, 0.1);
-            min-width: 0; /* Prevent grid from expanding container */
-            max-width: 100%; /* Ensure grid doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
           `;
 
           // Column 1: Map Icon + Map Name (stacked vertically)
@@ -3458,13 +3348,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-radius: 4px;
             overflow: hidden;
           `;
-          // Use cached thumbnail for map icon
           const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
           thumbnail.style.width = '100%';
           thumbnail.style.height = '100%';
           mapIcon.appendChild(thumbnail);
 
-          // Map name
           const mapName = document.createElement('div');
           mapName.style.cssText = `
             font-size: 12px;
@@ -3479,18 +3367,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           mapColumn.appendChild(mapIcon);
           mapColumn.appendChild(mapName);
 
-          // Column 2: Speedrun and Rank Points data (stacked vertically)
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `
             display: flex;
             flex-direction: column;
             gap: 4px;
             width: 100%;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure it doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
           `;
 
-          // Speedrun row
           const speedrunRow = document.createElement('div');
           const isSpeedrunTop = yourRoom.ticks && best?.[roomCode]?.ticks && yourRoom.ticks === best[roomCode].ticks;
           speedrunRow.style.cssText = `
@@ -3502,11 +3388,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
             border-radius: 3px;
             border-left: 3px solid #4CAF50;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure it doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
           `;
 
-          // Speedrun data
           const yourTicks = yourRoom.ticks || 0;
           const topTicks = best?.[roomCode]?.ticks || 0;
           const topPlayer = best?.[roomCode]?.userName || 'Unknown';
@@ -3544,15 +3429,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           speedrunRow.appendChild(yourSpeedrun);
           speedrunRow.appendChild(topSpeedrun);
 
-          // Rank Points row
           const rankRow = document.createElement('div');
           const isRankTop = yourRoom.rank && roomsHighscores?.rank?.[roomCode]?.rank && yourRoom.rank === roomsHighscores.rank[roomCode].rank;
           rankRow.style.cssText = `
             display: grid;
             grid-template-columns: 120px 120px;
             align-items: center;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure it doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
             gap: 6px;
             padding: 4px;
             background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
@@ -3560,7 +3444,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-left: 3px solid #FF9800;
           `;
 
-          // Rank Points data
           const yourRank = yourRoom.rank || 0;
           const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
           const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
@@ -3604,19 +3487,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           roomEntry.appendChild(mapColumn);
           roomEntry.appendChild(dataColumn);
           contentContainer.appendChild(roomEntry);
-          }); // Close the regionRooms.forEach loop
-        }); // Close the Object.entries(organizedRooms).forEach loop
+          });
+        });
 
         containerDiv.appendChild(contentContainer);
 
-        // Clear container and append content
         container.innerHTML = '';
         container.appendChild(containerDiv);
       }
 
-      // Function to display search results for Speedrun/Rank Points in col3
       function displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
-        // Create container
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
           display: 'flex',
@@ -3627,7 +3507,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           boxSizing: 'border-box'
         });
 
-        // Create header
         const header = document.createElement('div');
         header.style.cssText = `
           font-size: 18px;
@@ -3642,17 +3521,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         header.textContent = `${playerName}'s ${category} Data`;
         containerDiv.appendChild(header);
 
-        // Create content container (no scrollbar needed)
         const contentContainer = document.createElement('div');
         contentContainer.style.cssText = `
           flex: 1;
           padding: 10px;
         `;
 
-        // Get all room codes and sort them alphabetically
         const allRoomCodes = Object.keys(ROOM_NAMES).sort();
 
-        // Create room entries
         allRoomCodes.forEach(roomCode => {
           const roomName = ROOM_NAMES[roomCode];
           const searchedRoom = searchedRooms[roomCode];
@@ -3678,7 +3554,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             margin-bottom: 8px;
           `;
 
-          // Room thumbnail - use cached version
           const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
 
           const roomTitle = document.createElement('div');
@@ -3693,9 +3568,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           roomHeader.appendChild(roomTitle);
           roomEntry.appendChild(roomHeader);
 
-          // Data rows
           if (category === 'Speedrun') {
-            // Speedrun data
             const searchedTicks = searchedRoom.ticks || 0;
             const yourTicks = yourRoom?.ticks || 0;
             const bestTicks = best[roomCode]?.ticks || 0;
@@ -3735,7 +3608,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             roomEntry.appendChild(dataRow);
 
           } else if (category === 'Rank Points') {
-            // Rank Points data
             const searchedRank = searchedRoom.rank || 0;
             const yourRank = yourRoom?.rank || 0;
             const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
@@ -3778,22 +3650,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           contentContainer.appendChild(roomEntry);
         });
 
-        // Add content container to container div
         containerDiv.appendChild(contentContainer);
 
-        // Clear container and append results
         container.innerHTML = '';
         container.appendChild(containerDiv);
       }
 
-      // Function to display search results (legacy function, kept for compatibility)
       function displaySearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
         displaySpeedrunRankSearchResults(category, playerName, searchedRooms, yourRooms, ROOM_NAMES, best, roomsHighscores, container);
       }
 
-      // Function to display combined leaderboards search results
       function displayCombinedLeaderboardsSearchResults(playerName, searchedProfileData, yourRooms, ROOM_NAMES, best, roomsHighscores, container) {
-        // Add null checks for all parameters
         if (!playerName || !searchedProfileData || !yourRooms || !ROOM_NAMES || !best || !roomsHighscores || !container) {
           console.error('[Cyclopedia] displayCombinedLeaderboardsSearchResults: Missing required parameters:', {
             playerName: !!playerName,
@@ -3805,7 +3672,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             container: !!container
           });
           
-          // Show error message in container
           if (container) {
             container.innerHTML = `
               <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${LAYOUT_CONSTANTS.COLORS.ERROR}; text-align: center; padding: 20px;">
@@ -3819,40 +3685,33 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           return;
         }
         
-        // Extract highscores from profile data
         const searchedHighscores = searchedProfileData.highscores || [];
         
-        // Convert highscores array to a map for easy lookup
-        // Separate speedrun records (rank: -1) from rank points records (rank > 0)
         const searchedHighscoresMap = {};
         const searchedRankPointsMap = {};
         
         searchedHighscores.forEach(score => {
           if (score.roomId) {
             if (score.rank === -1) {
-              // Speedrun record: use ticks for speedrun data
               if (score.ticks && (!searchedHighscoresMap[score.roomId] || score.ticks < searchedHighscoresMap[score.roomId].ticks)) {
                 searchedHighscoresMap[score.roomId] = score;
               }
             } else if (score.rank > 0) {
-              // Rank points record: use rank for rank points data
               if (!searchedRankPointsMap[score.roomId] || score.rank < searchedRankPointsMap[score.roomId].rank) {
                 searchedRankPointsMap[score.roomId] = score;
               }
             }
           }
         });
-        // Local formatTime function for time formatting
         function formatTime(ms) {
           if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
           const totalSeconds = Math.floor(ms / 1000);
           const minutes = Math.floor(totalSeconds / 60);
           const seconds = totalSeconds % 60;
-          const milliseconds = Math.floor((ms % 1000) / 10); // Get centiseconds (10ms precision)
+          const milliseconds = Math.floor((ms % 1000) / 10);
           return `${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}.${milliseconds.toString().padStart(3,'0')}`;
         }
 
-        // Create container
         const containerDiv = document.createElement('div');
         Object.assign(containerDiv.style, {
           display: 'flex',
@@ -3861,17 +3720,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           height: '100%',
           padding: '8px',
           boxSizing: 'border-box',
-          minWidth: '0', // Prevent content from expanding the container
-          maxWidth: '100%' // Ensure content doesn't exceed container width
+          minWidth: '0',
+          maxWidth: '100%'
         });
 
-        // Create content container (no scrollbar needed)
         const contentContainer = document.createElement('div');
         contentContainer.style.cssText = `
           flex: 1;
           padding: 2px;
-          min-width: 0; /* Prevent content from expanding */
-          max-width: 100%; /* Ensure content doesn't exceed container width */
+          min-width: 0;
+          max-width: 100%;
         `;
 
         // Organize rooms by region
@@ -3891,16 +3749,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           });
           contentContainer.appendChild(regionHeader);
 
-          // Create room entries for this region
           regionRooms.forEach(({ roomCode, roomName }) => {
             const searchedScore = searchedHighscoresMap[roomCode];
             const yourRoom = yourRooms[roomCode];
 
-            // Show all rooms, but mark those without highscores
             const hasSearchedScore = searchedScore && searchedScore.ticks;
             const hasSearchedRankScore = searchedRankPointsMap[roomCode];
 
-            // Single room entry with grid layout - matching left column style
             const roomEntry = document.createElement('div');
             roomEntry.style.cssText = `
               display: grid;
@@ -3911,11 +3766,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               background: rgba(255, 255, 255, 0.05);
               border-radius: 4px;
               border: 1px solid rgba(255, 255, 255, 0.1);
-              min-width: 0; /* Prevent grid from expanding container */
-              max-width: 100%; /* Ensure grid doesn't exceed container width */
+              min-width: 0;
+              max-width: 100%;
             `;
 
-          // Column 1: Map Icon + Map Name (stacked vertically) - same as left column
           const mapColumn = document.createElement('div');
           mapColumn.style.cssText = `
             display: flex;
@@ -3923,11 +3777,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             align-items: center;
             gap: 4px;
             width: 80px;
-            min-width: 80px; /* Prevent shrinking */
-            max-width: 80px; /* Prevent expanding */
+            min-width: 80px;
+            max-width: 80px;
           `;
 
-          // Map icon
           const mapIcon = document.createElement('div');
           mapIcon.style.cssText = `
             width: 32px;
@@ -3935,13 +3788,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-radius: 4px;
             overflow: hidden;
           `;
-          // Use cached thumbnail for map icon
           const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
           thumbnail.style.width = '100%';
           thumbnail.style.height = '100%';
           mapIcon.appendChild(thumbnail);
 
-          // Map name
           const mapName = document.createElement('div');
           mapName.style.cssText = `
             font-size: 12px;
@@ -3956,22 +3807,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           mapColumn.appendChild(mapIcon);
           mapColumn.appendChild(mapName);
 
-          // Column 2: Speedrun and Rank Points data (stacked vertically) - same as left column
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `
             display: flex;
             flex-direction: column;
             gap: 4px;
             width: 100%;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure it doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
           `;
 
-          // Speedrun data - show searched player's data, not user's data
           const searchedTicks = hasSearchedScore ? searchedScore.ticks : null;
           const topTicks = best?.[roomCode]?.ticks || null;
 
-          // Speedrun row
           const speedrunRow = document.createElement('div');
           const isSpeedrunTop = searchedTicks !== null && topTicks !== null && searchedTicks === topTicks;
           speedrunRow.style.cssText = `
@@ -3983,8 +3831,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             background: ${isSpeedrunTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
             border-radius: 3px;
             border-left: 3px solid #4CAF50;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure grid doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
           `;
 
           const searchedSpeedrun = document.createElement('div');
@@ -4020,20 +3868,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           speedrunRow.appendChild(searchedSpeedrun);
           speedrunRow.appendChild(topSpeedrun);
 
-          // Rank Points data - show searched player's data, not user's data
           const searchedRankScore = searchedRankPointsMap[roomCode];
           const searchedRank = searchedRankScore ? searchedRankScore.rank : null;
           const topRank = roomsHighscores?.rank?.[roomCode]?.rank || null;
 
-          // Rank Points row
           const rankRow = document.createElement('div');
           const isRankTop = searchedRank !== null && topRank !== null && searchedRank === topRank;
           rankRow.style.cssText = `
             display: grid;
             grid-template-columns: 120px 120px;
             align-items: center;
-            min-width: 0; /* Prevent expanding */
-            max-width: 100%; /* Ensure grid doesn't exceed container width */
+            min-width: 0;
+            max-width: 100%;
             gap: 6px;
             padding: 4px;
             background: ${isRankTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
@@ -4080,12 +3926,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           roomEntry.appendChild(mapColumn);
           roomEntry.appendChild(dataColumn);
           contentContainer.appendChild(roomEntry);
-          }); // Close the regionRooms.forEach loop
-        }); // Close the Object.entries(organizedRooms).forEach loop
+          });
+        });
 
         containerDiv.appendChild(contentContainer);
 
-        // Clear container and append results
         container.innerHTML = '';
         container.appendChild(containerDiv);
       }
@@ -6793,7 +6638,7 @@ function renderCreatureTemplate(name) {
   col2.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
 
   const dropsSection = document.createElement('div');
-  dropsSection.style.height = '50%';
+  dropsSection.style.height = '100%';
   dropsSection.style.display = 'flex';
   dropsSection.style.flexDirection = 'column';
   dropsSection.className = LAYOUT_CONSTANTS.FONTS.SIZES.SMALL;
@@ -6835,6 +6680,8 @@ function renderCreatureTemplate(name) {
   dropsList.style.letterSpacing = '.0625rem';
   dropsList.style.wordSpacing = '-.1875rem';
   dropsList.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+  dropsList.style.overflowY = 'auto';
+  dropsList.style.maxHeight = 'calc(100% - 40px)';
 
   let monsterLocations = [];
   try {
@@ -7319,12 +7166,14 @@ const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 68,
   bisEquipments: 90,
   exploredMaps: 64,
-  bagOutfits: 192
+  bagOutfits: 192,
+  raids: 12
 };
 
 const CYCLOPEDIA_PROGRESS_STATS = [
   { key: 'perfectCreatures', icon: '/assets/icons/enemy.png', max: CYCLOPEDIA_MAX_VALUES.perfectCreatures },
   { key: 'bisEquipments', icon: '/assets/icons/equips.png', max: CYCLOPEDIA_MAX_VALUES.bisEquipments },
+  { key: 'raids', icon: '/assets/icons/raid.png', max: CYCLOPEDIA_MAX_VALUES.raids },
   { key: 'exploredMaps', icon: '/assets/icons/map.png', max: CYCLOPEDIA_MAX_VALUES.exploredMaps },
   { key: 'bagOutfits', icon: '/assets/icons/mini-outfitbag.png', max: CYCLOPEDIA_MAX_VALUES.bagOutfits }
 ];
@@ -7335,6 +7184,7 @@ const CYCLOPEDIA_TRANSLATION = {
   playCount: { label: 'Total runs', value: d => d.playCount },
   perfectCreatures: { label: 'Perfect Creatures', value: d => d.perfectMonsters },
   bisEquipments: { label: 'BIS Equipments', value: d => d.bisEquips },
+  raids: { label: 'Completed raids', value: d => d.raids },
   exploredMaps: { label: 'Explored maps', value: d => d.maps },
   bagOutfits: { label: 'Bag Outfits', value: d => d.ownedOutfits },
   rankPoints: { label: 'Rank points', value: d => d.rankPoints },
