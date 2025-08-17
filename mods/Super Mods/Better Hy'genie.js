@@ -2,7 +2,7 @@
 // 0. Version & Metadata
 // =======================
 (function() {
-  console.log('[Better Hy\'genie] initializing...');
+  console.warn('[Better Hy\'genie] initializing...');
   
 // =======================
 // 1. Configuration & Constants
@@ -10,7 +10,6 @@
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
-  // Performance constants
   const CONSTANTS = {
     DEBOUNCE_DELAY: 100,
     RETRY_MAX_ATTEMPTS: 5,
@@ -21,7 +20,6 @@
     MAX_INPUT_WIDTH: 50
   };
   
-  // DOM selectors cache
   const SELECTORS = {
     HYGENIE_MODAL: '.widget-bottom',
     GRID_CONTAINERS: '.grid.w-\\[53px\\]',
@@ -35,10 +33,8 @@
     RARITY_ELEMENT: '[data-rarity]'
   };
   
-  // Outside click handler reference for confirmation reset
   let confirmationOutsideHandler = null;
   
-  // CSS styles for the quantity input and fuse buttons
   const QUANTITY_INPUT_STYLES = `
     .better-hygenie-quantity-input {
       width: 100%;
@@ -86,29 +82,24 @@
       margin: 0;
     }
     .better-hygenie-fuse-button {
-      /* Base layout and styling */
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
       
-      /* Typography */
-      font-family: inherit !important; /* Use game's pixel font */
-      font-size: 14px !important; /* pixel-font-14 */
+      font-family: inherit !important;
+      font-size: 14px !important;
       line-height: 1 !important;
-      letter-spacing: 0.025em !important; /* tracking-wide */
+      letter-spacing: 0.025em !important;
       
-      /* Colors */
-      color: #ffffff !important; /* text-whiteRegular */
+      color: #ffffff !important;
       
-      /* Spacing */
-      gap: 0.25rem !important; /* gap-1 */
-      padding: 0.05rem 0 !important; /* reduced vertical padding */
-      padding-bottom: 1px !important; /* reduced bottom padding */
-      padding-left: 0 !important; /* px-0 */
-      padding-right: 0 !important; /* px-0 */
-      margin: 0 !important; /* no margins */
+      gap: 0.25rem !important;
+      padding: 0.05rem 0 !important;
+      padding-bottom: 1px !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      margin: 0 !important;
       
-      /* Frame styling - background + border frame */
       background-image: 
         url('https://bestiaryarena.com/_next/static/media/1-frame-blue.cf300a6a.png'),
         url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') !important;
@@ -118,27 +109,24 @@
       border: none !important;
       border-radius: 0 !important;
       
-      /* Interaction */
       cursor: pointer !important;
       transition: all 0.1s ease !important;
       
-      /* Focus styles */
       outline: 2px solid transparent !important;
       outline-offset: 2px !important;
     }
     
     .better-hygenie-fuse-button:focus-visible {
-      outline: 2px solid rgba(59, 130, 246, 0.5) !important; /* focus-style-visible */
+      outline: 2px solid rgba(59, 130, 246, 0.5) !important;
     }
     
     .better-hygenie-fuse-button:disabled {
-      cursor: not-allowed !important; /* disabled:cursor-not-allowed */
-      color: rgba(255, 255, 255, 0.6) !important; /* disabled:text-whiteDark/60 */
-      filter: grayscale(50%) !important; /* disabled:grayscale-50 */
+      cursor: not-allowed !important;
+      color: rgba(255, 255, 255, 0.6) !important;
+      filter: grayscale(50%) !important;
     }
     
     .better-hygenie-fuse-button:active {
-      /* Pressed state - using pressed frame + background */
       background-image: 
         url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png'),
         url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') !important;
@@ -148,8 +136,6 @@
       transform: translateY(1px) !important;
     }
     
-    /* SVG icon styling within button */
-    /* Confirmation highlight */
     .better-hygenie-fuse-button.confirm {
       background-image:
         url('https://bestiaryarena.com/_next/static/media/1-frame-green.fe32d59c.png'),
@@ -157,10 +143,10 @@
     }
 
     .better-hygenie-fuse-button svg {
-      width: 11px !important; /* [&_svg]:size-[11px] */
-      height: 11px !important; /* [&_svg]:size-[11px] */
-      margin-bottom: 1px !important; /* [&_svg]:mb-[1px] */
-      margin-top: 2px !important; /* [&_svg]:mt-[2px] */
+      width: 11px !important;
+      height: 11px !important;
+      margin-bottom: 1px !important;
+      margin-top: 2px !important;
     }
 
   `;
@@ -169,14 +155,12 @@
 // 2. Utility Functions
 // =======================
 
-  // Centralized error handling
   function handleError(error, context = '') {
     const prefix = '[Better Hy\'genie]';
     const message = context ? `${prefix} ${context}:` : prefix;
     console.error(message, error);
   }
 
-  // Safe game state access (matches Autoscroller pattern)
   function getGameState() {
     try {
       return globalThis.state?.player?.getSnapshot()?.context;
@@ -186,19 +170,28 @@
     }
   }
   
-  // Get inventory specifically (using Autoscroller pattern)
   function getInventoryState() {
     try {
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
       const inventory = playerContext?.inventory || {};
+      
+      if (Object.keys(inventory).length === 0) {
+        return null;
+      }
+      
+      const hasSummonScrolls = Object.keys(inventory).some(key => key.startsWith('summonScroll'));
+      const hasDiceManipulators = Object.keys(inventory).some(key => key.startsWith('diceManipulator'));
+      
+      if (!hasSummonScrolls && !hasDiceManipulators) {
+        return null;
+      }
       return inventory;
     } catch (error) {
       handleError(error, 'Error accessing inventory state');
-      return {};
+      return null;
     }
   }
   
-  // Inject CSS styles
   function injectStyles() {
     if (!document.getElementById('better-hygenie-styles')) {
       const style = document.createElement('style');
@@ -208,9 +201,12 @@
     }
   }
   
-  // Get the quantity from an item slot using game state only
   function getItemQuantity(itemSlot) {
     const inventory = getInventoryState();
+    
+    if (!inventory) {
+      return 0;
+    }
     
     const itemKey = getItemKeyFromSlot(itemSlot);
     if (!itemKey) {
@@ -220,7 +216,6 @@
     return inventory[itemKey] || 0;
   }
   
-  // Retry getting item quantity with a delay to allow game state to load
   function getItemQuantityWithRetry(itemSlot, maxRetries = CONSTANTS.RETRY_MAX_ATTEMPTS) {
     return new Promise((resolve) => {
       let attempts = 0;
@@ -247,41 +242,38 @@
     });
   }
   
-  // Get the fusion ratio for an item
   function getFusionRatio(itemKey) {
     try {
       if (!itemKey) {
-        console.log('[Better Hy\'genie] No itemKey provided to getFusionRatio');
+        console.warn('[Better Hy\'genie] No itemKey provided to getFusionRatio');
         return 1;
       }
       
-      // Dice Manipulator fusion ratios
       if (itemKey.startsWith('diceManipulator')) {
         const tier = parseInt(itemKey.replace('diceManipulator', ''));
         switch (tier) {
-          case 1: return 20; // Common -> Uncommon (20:1)
-          case 2: return 10; // Uncommon -> Rare (10:1)
-          case 3: return 5;  // Rare -> Mythic (5:1)
-          case 4: return 3;  // Mythic -> Legendary (3:1)
-          case 5: return 0;  // Legendary (no fusion)
+          case 1: return 20;
+          case 2: return 10;
+          case 3: return 5;
+          case 4: return 3;
+          case 5: return 0;
           default: return 1;
         }
       }
       
-      // Summon Scroll fusion ratios
       if (itemKey.startsWith('summonScroll')) {
         const tier = parseInt(itemKey.replace('summonScroll', ''));
         switch (tier) {
-          case 1: return 4;  // Crude -> Ordinary (4:1)
-          case 2: return 3;  // Ordinary -> Refined (3:1)
-          case 3: return 2;  // Refined -> Special (2:1)
-          case 4: return 2;  // Special -> Exceptional (2:1)
-          case 5: return 0;  // Exceptional (no fusion)
+          case 1: return 4;
+          case 2: return 3;
+          case 3: return 2;
+          case 4: return 2;
+          case 5: return 0;
           default: return 1;
         }
       }
       
-      console.log(`[Better Hy\'genie] Unknown itemKey: ${itemKey}, using default ratio 1`);
+      console.warn(`[Better Hy\'genie] Unknown itemKey: ${itemKey}, using default ratio 1`);
       return 1;
     } catch (error) {
       handleError(error, 'Error getting fusion ratio');
@@ -289,14 +281,12 @@
     }
   }
   
-  // Calculate how many items can be fused (output amount)
   function calculateFusableAmount(itemKey, availableQuantity) {
     const ratio = getFusionRatio(itemKey);
-    if (ratio === 0) return 0; // No fusion possible
+    if (ratio === 0) return 0;
     return Math.floor(availableQuantity / ratio);
   }
   
-  // Perform the actual fusion via API call
   async function performFusion(itemKey, inputQuantity) {
     try {
       if (!itemKey || inputQuantity <= 0) {
@@ -304,7 +294,6 @@
         return;
       }
       
-      // Re-validate current inventory before proceeding
       const gameState = getGameState();
       if (gameState && gameState.inventory) {
         const currentQuantity = gameState.inventory[itemKey] || 0;
@@ -314,7 +303,6 @@
         }
       }
       
-      // Calculate how many output items will be created from the input quantity
       const fusionRatio = getFusionRatio(itemKey);
       const outputQuantity = Math.floor(inputQuantity / fusionRatio);
       
@@ -323,7 +311,6 @@
         return;
       }
       
-      // Determine the rarity/tier for the API call and endpoint
       let endpoint = '/api/trpc/inventory.useGenie?batch=1';
       let payload = {};
       
@@ -354,10 +341,7 @@
         return;
       }
       
-      // Both summon scrolls and dice manipulators use the same single API call approach
       const itemType = itemKey.startsWith('summonScroll') ? 'summon scroll' : 'dice manipulator';
-      console.log(`[Better Hy\'genie] Performing ${itemType} fusion: consuming ${inputQuantity} items to create ${outputQuantity} items`);
-      console.log(`[Better Hy\'genie] Payload:`, JSON.stringify(payload, null, 2));
       
       let result = null;
       
@@ -386,7 +370,6 @@
           const errorText = await response.text();
           console.error(`[Better Hy\'genie] Server response:`, errorText);
           
-          // Handle specific error cases
           if (response.status === 403) {
             try {
               const errorData = JSON.parse(errorText);
@@ -402,18 +385,15 @@
         }
         
         result = await response.json();
-        console.log(`[Better Hy\'genie] ${itemType} fusion successful:`, result);
         
       } catch (error) {
         handleError(error, `${itemType} fusion failed`);
-        return; // Exit early on error
+        return;
       }
       
-      // Update local inventory based on the API response
       if (result && Array.isArray(result) && result[0]?.result?.data?.json?.inventoryDiff) {
         updateLocalInventory(result[0].result.data.json.inventoryDiff);
         
-        // Refresh UI to show updated counts (with longer delay to ensure state updates)
         setTimeout(() => {
           refreshUIAfterFusion();
         }, 300);
@@ -421,11 +401,9 @@
       
     } catch (error) {
       handleError(error, 'Fusion failed');
-      // You could add user notification here if needed
     }
   }
   
-  // Update local inventory based on API response (write into playerContext.inventory)
   function updateLocalInventory(inventoryDiff) {
     try {
       const player = globalThis.state?.player;
@@ -434,47 +412,38 @@
         return;
       }
       
-      console.log('[Better Hy\'genie] Updating local inventory with diff:', inventoryDiff);
-      
       player.send({
         type: 'setState',
         fn: (prev) => {
           const newState = { ...prev };
-          // Ensure nested inventory exists
           newState.inventory = { ...prev.inventory };
           
           Object.entries(inventoryDiff).forEach(([itemKey, change]) => {
             if (change === 0) return;
             if (!newState.inventory[itemKey]) newState.inventory[itemKey] = 0;
             newState.inventory[itemKey] = Math.max(0, newState.inventory[itemKey] + change);
-            // Mirror on root for compatibility
             newState[itemKey] = newState.inventory[itemKey];
           });
           return newState;
         }
       });
-      console.log('[Better Hy\'genie] Local inventory updated successfully');
     } catch (error) {
       handleError(error, 'Failed to update local inventory');
     }
   }
   
-  // Determine item key from the slot (optimized with cached selectors + per-slot caching)
   function getItemKeyFromSlot(itemSlot) {
     try {
-      // Fast path – return cached value if we already resolved this slot
       if (itemSlot.dataset.itemKey) {
         return itemSlot.dataset.itemKey;
       }
 
-      // Cache commonly used elements
       const summonScrollImg = itemSlot.querySelector(SELECTORS.SUMMON_SCROLL_IMG);
       const diceManipulatorSprite = itemSlot.querySelector(SELECTORS.DICE_MANIPULATOR_SPRITE);
       const rarityElement = itemSlot.querySelector(SELECTORS.RARITY_ELEMENT);
 
       let detectedKey = null;
 
-      // Check for summon scroll first (faster path)
       if (summonScrollImg) {
         const match = summonScrollImg.src.match(/summonscroll(\d+)\.png/);
         if (match) {
@@ -482,7 +451,6 @@
         }
       }
 
-      // Check for dice manipulator
       if (!detectedKey && diceManipulatorSprite) {
         const spriteId = diceManipulatorSprite.getAttribute('data-sprite-id') ||
                          diceManipulatorSprite.querySelector('img')?.alt;
@@ -492,7 +460,6 @@
         }
       }
 
-      // Fallback for dice manipulators in dice manipulator sections
       if (!detectedKey) {
         const parentSection = itemSlot.closest(SELECTORS.SECTIONS);
         if (parentSection?.textContent.includes('Dice Manipulators')) {
@@ -500,7 +467,6 @@
             const rarity = rarityElement.getAttribute('data-rarity');
             detectedKey = `diceManipulator${rarity}`;
           } else {
-            // Position-based fallback
             const gridContainer = itemSlot.closest('.grid');
             if (gridContainer?.parentNode) {
               const gridIndex = Array.from(gridContainer.parentNode.children).indexOf(gridContainer);
@@ -513,7 +479,7 @@
       }
 
       if (detectedKey) {
-        itemSlot.dataset.itemKey = detectedKey; // cache for future calls
+        itemSlot.dataset.itemKey = detectedKey;
         return detectedKey;
       }
 
@@ -524,30 +490,25 @@
     }
   }
   
-  // Create custom fuse button
   function createCustomFuseButton() {
     const button = document.createElement('button');
     button.className = 'better-hygenie-fuse-button';
     return button;
   }
 
-  // Create quantity input element
   function createQuantityInput(maxQuantity) {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'better-hygenie-quantity-input';
     input.placeholder = '1';
     
-    // Handle input validation
     input.addEventListener('input', function() {
       const value = this.value.trim();
       
-      // Allow empty input (user can delete all numbers)
       if (value === '') {
         return;
       }
       
-      // Check if it's a valid number
       const numValue = parseInt(value);
       if (isNaN(numValue) || numValue < 1) {
         this.value = '1';
@@ -556,11 +517,9 @@
       }
     });
     
-    // Handle blur event to set default value when input loses focus
     input.addEventListener('blur', function() {
       const value = this.value.trim();
       
-      // If empty, set to 1
       if (value === '') {
         this.value = '1';
       }
@@ -569,7 +528,6 @@
     return input;
   }
   
-  // Update fuse button text based on quantity
   function updateFuseButtonText(button, quantity) {
     if (quantity > 1) {
       button.innerHTML = `Fuse<br>${quantity}`;
@@ -578,8 +536,6 @@
     }
   }
   
-  // Show confirmation prompt inside Hy'genie tooltip
-  // Friendly name for items
   function getItemDisplayName(itemKey) {
     if (itemKey.startsWith('summonScroll')) {
       const tier = parseInt(itemKey.replace('summonScroll',''));
@@ -616,7 +572,7 @@
       if (!tooltip.dataset.originalText) {
         tooltip.dataset.originalText = msgElem.textContent;
       }
-      // remove any previous confirmation
+      
       document.querySelectorAll('.better-hygenie-fuse-button.confirm').forEach(btn=>{
         btn.classList.remove('confirm');
         delete btn.dataset.confirm;
@@ -627,7 +583,7 @@
       msgElem.style.color = '#ff4d4d';
       fuseButton.dataset.confirm = 'pending';
       fuseButton.classList.add('confirm');
-      // Attach outside click handler to reset confirmation when clicking elsewhere
+      
       if (!confirmationOutsideHandler) {
         confirmationOutsideHandler = (ev) => {
           if (!ev.target.closest('.better-hygenie-fuse-button.confirm')) {
@@ -638,6 +594,7 @@
       }
     } catch (e) {}
   }
+  
   function removeConfirmationPrompt() {
     try {
       const tooltip = document.querySelector('.tooltip-prose');
@@ -648,8 +605,7 @@
       msgElem.textContent = tooltip.dataset.originalText;
       msgElem.style.color = '';
       delete tooltip.dataset.originalText;
-      // remove confirm class from any button
-      // Remove pending confirmation from all fuse buttons
+      
       document.querySelectorAll('.better-hygenie-fuse-button').forEach(b=>{
         b.classList.remove('confirm');
         delete b.dataset.confirm;
@@ -659,9 +615,8 @@
         confirmationOutsideHandler = null;
       }
     } catch (e) {}
-    }
+  }
   
-  // Show a temporary tooltip message (error/info)
   function showTooltipMessage(message, color = '#ff4d4d', duration = CONSTANTS.ERROR_DISPLAY_DURATION) {
     try {
       const tooltip = document.querySelector('.tooltip-prose');
@@ -683,24 +638,19 @@
     } catch (e) {}
   }
   
-  // Refresh UI after fusion to show updated inventory counts
   function refreshUIAfterFusion() {
     try {
       const modal = document.querySelector(`${SELECTORS.HYGENIE_MODAL}[data-better-hygenie-enhanced]`);
       if (!modal) return;
       
-      // Force a fresh read of the game state (no caching)
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
       const inventory = playerContext?.inventory || {};
-      
-      console.log('[Better Hy\'genie] Refreshing UI with fresh inventory:', inventory);
       
       if (!inventory) {
         console.warn('[Better Hy\'genie] No inventory state available for UI refresh');
         return;
       }
       
-      // Find all quantity inputs and update their max values
       const quantityInputs = modal.querySelectorAll('.better-hygenie-quantity-input');
       quantityInputs.forEach(input => {
         const gridContainer = input.closest(SELECTORS.GRID_CONTAINERS);
@@ -712,14 +662,10 @@
         const itemKey = getItemKeyFromSlot(itemSlot);
         const currentQuantity = inventory[itemKey] || 0;
         
-        console.log(`[Better Hy\'genie] Refreshing UI for ${itemKey}: ${currentQuantity} items`);
-        
-        // Always keep controls visible, just update their values
         input.style.display = 'block';
         const fuseButton = gridContainer.querySelector('.better-hygenie-fuse-button');
         if (fuseButton) fuseButton.style.display = 'flex';
         
-        // Update max value and current value
         const fusableAmount = calculateFusableAmount(itemKey, currentQuantity);
         const maxInputQuantity = fusableAmount > 0 ? fusableAmount * getFusionRatio(itemKey) : 1;
         const maxInputForDisplay = Math.min(maxInputQuantity, currentQuantity);
@@ -727,15 +673,11 @@
         input.max = currentQuantity;
         input.value = Math.min(parseInt(input.value) || 1, Math.max(1, maxInputForDisplay));
         
-        // Update button text
         if (fuseButton) {
           updateFuseButtonText(fuseButton, parseInt(input.value) || 1);
         }
       });
       
-      // The game should automatically re-render based on the state update
-      
-      console.log('[Better Hy\'genie] UI refreshed after fusion');
     } catch (error) {
       handleError(error, 'Error refreshing UI after fusion');
     }
@@ -745,17 +687,13 @@
 // 3. UI Component Creation
 // =======================
   
-  // Add quantity inputs to a section (Summon Scrolls or Dice Manipulators)
   function addQuantityInputsToSection(section) {
-    // Check if this section has already been processed
     if (section.dataset.betterHygenieSectionProcessed) {
       return;
     }
     
-    // Mark section as being processed to prevent duplicates
     section.dataset.betterHygenieSectionProcessed = 'processing';
     
-    // Find all grid containers that contain item slots and fuse buttons
     const gridContainers = section.querySelectorAll(SELECTORS.GRID_CONTAINERS);
     
     let processedCount = 0;
@@ -769,56 +707,41 @@
         return;
       }
       
-      // Check if we've already added our custom UI to this container
       if (gridContainer.querySelector('.better-hygenie-quantity-input')) {
         return;
       }
       
       const itemKey = getItemKeyFromSlot(itemSlot);
       
-      // Use retry mechanism for dice manipulators to ensure we get correct game state data
       const isDiceManipulator = itemKey && itemKey.startsWith('diceManipulator');
       
       if (isDiceManipulator) {
-        // Use async retry for dice manipulators
         pendingAsyncCount++;
         getItemQuantityWithRetry(itemSlot).then(totalQuantity => {
           const fusableAmount = calculateFusableAmount(itemKey, totalQuantity);
           
-          // Double-check that we haven't already added an input (race condition protection)
           if (gridContainer.querySelector('.better-hygenie-quantity-input')) {
             pendingAsyncCount--;
             checkCompletion();
             return;
           }
           
-          // Create quantity input with available amount as max
           const quantityInput = createQuantityInput(totalQuantity || 1);
-          
-          // Create our custom fuse button
           const customFuseButton = createCustomFuseButton();
           
-          // Insert our custom UI before the original button
           originalFuseButton.parentNode.insertBefore(quantityInput, originalFuseButton);
           originalFuseButton.parentNode.insertBefore(customFuseButton, originalFuseButton);
           
-          // Hide the original button now that we have our custom UI
           originalFuseButton.style.display = 'none';
           
-          // Calculate maximum input quantity for maximum output (use real totalQuantity)
           const fusionRatio = getFusionRatio(itemKey);
           const maxInputQuantity = fusableAmount > 0 ? fusableAmount * fusionRatio : totalQuantity;
           const maxInputForDisplay = totalQuantity > 0 ? Math.min(maxInputQuantity, totalQuantity) : 1;
           
-          console.log(`[Better Hy\'genie] ${itemKey}: totalQuantity=${totalQuantity}, fusableAmount=${fusableAmount}, fusionRatio=${fusionRatio}, maxInputQuantity=${maxInputQuantity}, maxInputForDisplay=${maxInputForDisplay}`);
-          
-          // Set the initial value to maximum allowed conversion
           quantityInput.value = maxInputForDisplay.toString();
           
-          // Force update the button text immediately
           updateFuseButtonText(customFuseButton, maxInputForDisplay);
           
-          // Add event listeners to our custom button
           addEventListenersToInput(quantityInput, customFuseButton, itemKey, totalQuantity, index, itemSlot);
           
           processedCount++;
@@ -828,64 +751,46 @@
         return;
       }
       
-            // For summon scrolls, use immediate method
       const totalQuantity = getItemQuantity(itemSlot);
       const fusableAmount = calculateFusableAmount(itemKey, totalQuantity);
       
-      // Create quantity input with available amount as max
       const quantityInput = createQuantityInput(totalQuantity || 1);
-      
-      // Create our custom fuse button
       const customFuseButton = createCustomFuseButton();
       
-      // Insert our custom UI before the original button
       originalFuseButton.parentNode.insertBefore(quantityInput, originalFuseButton);
       originalFuseButton.parentNode.insertBefore(customFuseButton, originalFuseButton);
       
-      // Hide the original button now that we have our custom UI
       originalFuseButton.style.display = 'none';
       
-      // Calculate maximum input quantity for maximum output (use real totalQuantity)
       const fusionRatio = getFusionRatio(itemKey);
       const maxInputQuantity = fusableAmount > 0 ? fusableAmount * fusionRatio : totalQuantity;
       const maxInputForDisplay = totalQuantity > 0 ? Math.min(maxInputQuantity, totalQuantity) : 1;
       
-      console.log(`[Better Hy\'genie] ${itemKey}: totalQuantity=${totalQuantity}, fusableAmount=${fusableAmount}, fusionRatio=${fusionRatio}, maxInputQuantity=${maxInputQuantity}, maxInputForDisplay=${maxInputForDisplay}`);
-      
-      // Set the initial value to maximum allowed conversion
       quantityInput.value = maxInputForDisplay.toString();
       
-      // Force update the button text immediately
-          updateFuseButtonText(customFuseButton, maxInputForDisplay);
+      updateFuseButtonText(customFuseButton, maxInputForDisplay);
       
-      // Add event listeners to our custom button
       addEventListenersToInput(quantityInput, customFuseButton, itemKey, totalQuantity, index, itemSlot);
       
       processedCount++;
     });
     
-    // Function to check if all async operations are complete
     function checkCompletion() {
       if (pendingAsyncCount === 0) {
-        // Mark section as processed if we successfully processed any grids
         if (processedCount > 0) {
           section.dataset.betterHygenieSectionProcessed = 'true';
         } else {
-          // If no grids were processed, remove the processing marker
           delete section.dataset.betterHygenieSectionProcessed;
         }
       }
     }
     
-    // If no async operations, check completion immediately
     if (pendingAsyncCount === 0) {
       checkCompletion();
     }
   }
   
-  // Add event listeners to input and button
   function addEventListenersToInput(quantityInput, fuseButton, itemKey, validFusionAmount, index, itemSlot) {
-    // Add event listener to update button text
     quantityInput.addEventListener('input', function() {
       const value = this.value.trim();
       let quantity;
@@ -894,7 +799,6 @@
         quantity = 1;
       } else {
         quantity = parseInt(value) || 1;
-        // Ensure quantity doesn't exceed the available amount
         const availableQuantity = getItemQuantity(itemSlot);
         if (quantity > availableQuantity) {
           quantity = availableQuantity;
@@ -904,10 +808,8 @@
       updateFuseButtonText(fuseButton, quantity);
     });
     
-    // Add event listener to the fuse button
     fuseButton.addEventListener('click', async function(e) {
       e.stopPropagation();
-      // Prevent multiple simultaneous clicks
       if (fuseButton.disabled) {
         return;
       }
@@ -919,18 +821,12 @@
         quantity = 1;
       } else {
         quantity = parseInt(value) || 1;
-        // Ensure quantity doesn't exceed the available amount
         const availableQuantity = getItemQuantity(itemSlot);
         if (quantity > availableQuantity) {
           quantity = availableQuantity;
         }
       }
       
-
-      
-      console.log(`[Better Hy\'genie] Fusing ${quantity} items from slot ${index + 1}`);
-      
-      // Final validation: Check current inventory before proceeding
       const currentQuantity = getItemQuantity(itemSlot);
       
       if (currentQuantity < quantity) {
@@ -940,7 +836,6 @@
         return;
       }
       
-      // Validate that quantity meets minimum fusion ratio
       const fusionRatio = getFusionRatio(itemKey);
       if (quantity < fusionRatio) {
         removeConfirmationPrompt();
@@ -948,31 +843,26 @@
         return;
       }
       
-      // Confirmation after validations pass
       if (fuseButton.dataset.confirm !== 'pending') {
         showConfirmationPrompt(quantity, itemKey, fuseButton);
-        return; // wait for second click
+        return;
       } else {
         removeConfirmationPrompt();
         delete fuseButton.dataset.confirm;
       }
       
-      // Show loading state and disable button
       const originalText = fuseButton.innerHTML;
-              fuseButton.innerHTML = 'Fusing...';
-        removeConfirmationPrompt();
+      fuseButton.innerHTML = 'Fusing...';
+      removeConfirmationPrompt();
       fuseButton.disabled = true;
       
       try {
-        // Implement actual fusion logic
         await performFusion(itemKey, quantity);
-        // Show success message inside tooltip
         removeConfirmationPrompt();
         showTooltipMessage(`Successfully fused ${quantity} items!`, '#32cd32', 1500);
       } catch (error) {
         handleError(error, `${itemKey} fusion failed`);
         
-        // Show user-friendly error message
         let errorMessage = 'Fusion failed. Please try again.';
         if (error.message.includes('Not enough items')) {
           errorMessage = error.message;
@@ -980,17 +870,15 @@
           errorMessage = 'Not enough items in inventory for this fusion.';
         }
         
-        // Show error state briefly
         fuseButton.innerHTML = 'Error!';
-          removeConfirmationPrompt();
-          showTooltipMessage(errorMessage);
+        removeConfirmationPrompt();
+        showTooltipMessage(errorMessage);
         setTimeout(() => {
           fuseButton.innerHTML = originalText;
           fuseButton.disabled = false;
         }, CONSTANTS.ERROR_DISPLAY_DURATION);
         return;
       } finally {
-        // Restore button state
         fuseButton.innerHTML = originalText;
         fuseButton.disabled = false;
       }
@@ -1001,26 +889,25 @@
 // 4. Core UI Functions
 // =======================
   
-  // Main function to enhance the Hy'genie modal
   function enhanceHygenieModal() {
-    // Try multiple ways to find the Hy'genie modal
+    const inventory = getInventoryState();
+    if (!inventory) {
+      return false;
+    }
+    
     let hygenieTitle = null;
     let modal = null;
     
-    // Method 1: Look for h2 with p containing "Hy'genie" and find the correct widget-bottom
     hygenieTitle = document.querySelector('h2 p');
     if (hygenieTitle && hygenieTitle.textContent.includes('Hy\'genie')) {
-      // Replace title with activation message in green
       hygenieTitle.textContent = "Better Hy'genie activated!";
       hygenieTitle.style.color = '#32cd32';
-      // Look for the widget-bottom that contains both the title and the sections
       const widgetBottom = hygenieTitle.closest('.widget-bottom');
       if (widgetBottom && widgetBottom.textContent.includes('Summon Scrolls')) {
         modal = widgetBottom;
       }
     }
     
-    // Method 2: Look for any widget-bottom containing both "Hy'genie" and the sections
     if (!modal) {
       const widgetBottoms = document.querySelectorAll('.widget-bottom');
       for (const widget of widgetBottoms) {
@@ -1032,12 +919,10 @@
       }
     }
     
-    // Method 3: Look for the specific structure with the correct class hierarchy
     if (!modal) {
       const hygenieElements = document.querySelectorAll('*');
       for (const element of hygenieElements) {
         if (element.textContent && element.textContent.includes('Hy\'genie')) {
-          // Find the widget-bottom that contains this element and also has the sections
           const widgetBottom = element.closest('.widget-bottom');
           if (widgetBottom && widgetBottom.textContent.includes('Summon Scrolls') && widgetBottom.textContent.includes('Dice Manipulators')) {
             modal = widgetBottom;
@@ -1051,21 +936,16 @@
       return false;
     }
     
-    // Check if we've already enhanced this modal
     if (modal.dataset.betterHygenieEnhanced) {
       return true;
     }
     
-    // Check if modal is currently being processed
     if (modal.dataset.betterHygenieProcessing) {
       return false;
     }
     
-    // Mark modal as being processed
     modal.dataset.betterHygenieProcessing = 'true';
     
-    // Find the sections by looking for the specific structure
-    // Based on the HTML, sections are div elements with widget-top and widget-bottom children
     const sections = modal.querySelectorAll('.w-full');
     
     let sectionsProcessed = 0;
@@ -1077,7 +957,6 @@
       const sectionText = sectionHeader.textContent || '';
       
       if (sectionText.includes('Summon Scrolls') || sectionText.includes('Dice Manipulators')) {
-        // Find the corresponding widget-bottom that contains the actual content
         const sectionContent = sectionContainer.querySelector('.widget-bottom');
         
         if (sectionContent) {
@@ -1087,10 +966,8 @@
       }
     });
     
-    // Mark as enhanced
     modal.dataset.betterHygenieEnhanced = 'true';
     
-    // Remove processing marker
     delete modal.dataset.betterHygenieProcessing;
     
     return true;
@@ -1100,16 +977,14 @@
 // 5. Main Logic
 // =======================
   
-  // Observer to watch for modal changes
   let observer = null;
   let observerTimeout = null;
   
-  // Utility to transform Hy'genie tooltip title to activation text
   function transformHygenieTooltip() {
     try {
       const tooltip = document.querySelector('.tooltip-prose');
       if (!tooltip) return;
-      const titleElem = tooltip.querySelector('p'); // first <p> is title
+      const titleElem = tooltip.querySelector('p');
       if (titleElem && titleElem.textContent.includes("Hy'genie") && titleElem.textContent !== "Better Hy'genie activated!") {
         titleElem.textContent = "Better Hy'genie activated!";
         titleElem.style.color = '#32cd32';
@@ -1117,22 +992,18 @@
     } catch (e) { /* silent */ }
   }
 
-  // Debounced function for processing mutations
   function debouncedProcessMutations(mutations) {
     if (observerTimeout) {
       clearTimeout(observerTimeout);
     }
     
     observerTimeout = setTimeout(() => {
-      // Always attempt tooltip transform
       transformHygenieTooltip();
-      // Check if already processing to avoid duplicate work
       const existingModal = document.querySelector(`${SELECTORS.HYGENIE_MODAL}[data-better-hygenie-enhanced]`);
       if (existingModal) {
         return;
       }
       
-      // Early exit if no relevant mutations
       const hasRelevantMutation = mutations.some(mutation => 
         mutation.type === 'childList' && 
         Array.from(mutation.addedNodes).some(node => 
@@ -1149,7 +1020,6 @@
         return;
       }
       
-      // Find and process the modal
       const widgetBottoms = document.querySelectorAll(SELECTORS.HYGENIE_MODAL);
       for (const widget of widgetBottoms) {
         if (widget.querySelector(SELECTORS.RARITY_ELEMENT) && 
@@ -1160,27 +1030,34 @@
           if (widget.dataset.betterHygenieProcessing) {
             delete widget.dataset.betterHygenieProcessing;
           }
-          break; // Only process one modal at a time
+          break;
         }
       }
     }, CONSTANTS.DEBOUNCE_DELAY);
   }
   
-  // Retry mechanism for modal enhancement
   function retryEnhanceHygenieModal(maxAttempts = CONSTANTS.RETRY_MAX_ATTEMPTS, baseDelay = CONSTANTS.RETRY_BASE_DELAY) {
     let attempts = 0;
     
     const tryEnhance = () => {
       attempts++;
+      
+      const inventory = getInventoryState();
+      if (!inventory) {
+        if (attempts < maxAttempts) {
+          const delay = baseDelay * Math.pow(2, attempts - 1);
+          setTimeout(tryEnhance, delay);
+        }
+        return;
+      }
+      
       if (enhanceHygenieModal()) {
-        return; // Success, stop retrying
+        return;
       }
       
       if (attempts < maxAttempts) {
-        const delay = baseDelay * Math.pow(2, attempts - 1); // Exponential backoff
+        const delay = baseDelay * Math.pow(2, attempts - 1);
         setTimeout(tryEnhance, delay);
-      } else {
-        console.warn('[Better Hy\'genie] Failed to enhance modal after maximum retry attempts');
       }
     };
     
@@ -1188,62 +1065,47 @@
   }
   
   function initializeBetterHygenie() {
-    // Inject styles
     injectStyles();
     
-    // Set up observer to watch for DOM changes
     observer = new MutationObserver(debouncedProcessMutations);
     
-    // Start observing
     observer.observe(document.body, {
       childList: true,
       subtree: true
     });
     
-    // Run initial tooltip transform
     transformHygenieTooltip();
-
-    // Don't try to enhance modal on startup - wait for it to be opened
-    // The MutationObserver will handle detecting when the modal is actually opened
   }
   
   function cleanup() {
-    // Disconnect observer
     if (observer) {
       observer.disconnect();
       observer = null;
     }
     
-    // Remove styles
     const styleElement = document.getElementById('better-hygenie-styles');
     if (styleElement) {
       styleElement.remove();
     }
     
-    // Remove enhanced markers
     document.querySelectorAll('[data-better-hygenie-enhanced]').forEach(element => {
       delete element.dataset.betterHygenieEnhanced;
     });
     
-    // Remove section processing markers
     document.querySelectorAll('[data-better-hygenie-section-processed]').forEach(element => {
       delete element.dataset.betterHygenieSectionProcessed;
     });
     
-    // Remove modal processing markers
     document.querySelectorAll('[data-better-hygenie-processing]').forEach(element => {
       delete element.dataset.betterHygenieProcessing;
     });
     
-    // Remove quantity inputs and custom buttons
     document.querySelectorAll('.better-hygenie-quantity-input, .better-hygenie-fuse-button').forEach(element => {
-      // Remove event listeners by cloning and replacing
       const newElement = element.cloneNode(true);
       element.parentNode.replaceChild(newElement, element);
       newElement.remove();
     });
     
-    // Show original buttons that were hidden
     document.querySelectorAll('button[style*="display: none"]').forEach(button => {
       if (button.parentNode.querySelector('.better-hygenie-fuse-button')) {
         button.style.display = '';
@@ -1251,10 +1113,8 @@
     });
   }
   
-  // Initialize the mod
   initializeBetterHygenie();
   
-  // Export cleanup function for the mod loader
   if (typeof context !== 'undefined') {
     context.exports = {
       cleanup: cleanup

@@ -427,15 +427,26 @@ const refillStaminaIfNeeded = async () => {
   }
 };
 
-// Take rewards if available
+// Track if we've already collected rewards for this game session
+let rewardsCollectedThisSession = false;
+
+// Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
-  if (!config.autoCollectRewards) return;
+  if (!config.autoCollectRewards || rewardsCollectedThisSession) return;
   
   try {
+    // Check if player has reached the target level for rewards
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const currentExp = playerContext.exp;
+    
+    // Calculate current level from experience
+    const currentLevel = globalThis.state.utils.expToCurrentLevel(currentExp);
+    
+    // Check if there are rewards available by looking for the ping animation
     const available = document.querySelector('button[aria-haspopup="menu"]:has(.animate-ping)');
     if (!available) return;
     
-    if (window.DEBUG) console.log('[Bestiary Automator] Taking rewards');
+    if (window.DEBUG) console.log(`[Bestiary Automator] Taking rewards at level ${currentLevel}`);
     
     // Open rewards menu
     globalThis.state.menu.send({
@@ -452,6 +463,9 @@ const takeRewardsIfAvailable = async () => {
     await sleep(500);
     clickAllCloseButtons();
     await sleep(500);
+    
+    // Mark rewards as collected for this session
+    rewardsCollectedThisSession = true;
     
     // Check for scroll lock after collecting rewards
     handleScrollLock();
@@ -527,10 +541,18 @@ let focusEventListeners = null;
 
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
-  if (!config.autoPlayAfterDefeat) return;
-  
   try {
-    // Subscribe to game state changes
+    // Subscribe to board state changes for new game detection
+    if (globalThis.state && globalThis.state.board) {
+      globalThis.state.board.on('newGame', (event) => {
+        if (window.DEBUG) console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
+        rewardsCollectedThisSession = false;
+      });
+    }
+    
+    // Subscribe to game state changes for autoplay after defeat
+    if (!config.autoPlayAfterDefeat) return;
+    
     if (api.game && api.game.subscribeToState) {
       gameStateObserver = api.game.subscribeToState((state) => {
         checkForDefeatToast();
@@ -667,6 +689,9 @@ const startAutomation = () => {
   if (automationInterval) return;
   
   if (window.DEBUG) console.log('[Bestiary Automator] Starting automation loop');
+  
+  // Reset rewards collection flag when starting automation
+  rewardsCollectedThisSession = false;
   
   // Setup focus event listeners
   setupFocusEventListeners();
@@ -945,6 +970,9 @@ const createButtons = () => {
 // Initialize the mod
 function init() {
   if (window.DEBUG) console.log('[Bestiary Automator] Initializing UI...');
+  
+  // Reset rewards collection flag on initialization
+  rewardsCollectedThisSession = false;
   
   // Create the buttons
   createButtons();
