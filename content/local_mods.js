@@ -274,6 +274,8 @@ const defaultEnabledMods = [
 // Key for localStorage user-generated scripts
 const MANUAL_MODS_KEY = 'manualMods';
 
+
+
 // Helper function to get user-generated scripts from localStorage
 async function getManualMods() {
   return new Promise(resolve => {
@@ -352,6 +354,8 @@ async function initLocalMods() {
         return;
       }
       
+
+      
       const modFiles = await listAllModFiles();
       let validMods = [];
       
@@ -366,6 +370,7 @@ async function initLocalMods() {
           const isDatabaseMod = file.startsWith('database/');
           const enabled = defaultEnabledMods.includes(file) || isSuperMod || isDatabaseMod;
           console.log(`Mod ${file} enabled: ${enabled} (isSuperMod: ${isSuperMod}, isDatabaseMod: ${isDatabaseMod})`);
+          
           validMods.push({
             name: file,
             key: file.replace('.js','').replace(/_/g,' '),
@@ -426,15 +431,8 @@ async function initLocalMods() {
         }
       }, '*');
       
-      // Execute enabled mods after registration
-      const enabledMods = window.localMods.filter(mod => mod.enabled);
-      if (enabledMods.length > 0) {
-        console.log(`Executing ${enabledMods.length} enabled mods after initialization`);
-        console.log(`Mods to execute:`, enabledMods.map(m => m.name));
-        console.log(`Manual mods to execute:`, enabledMods.filter(m => m.type === 'manual').map(m => m.name));
-        console.log(`Manual mods before execution:`, enabledMods.filter(m => m.type === 'manual').map(m => ({ name: m.name, type: m.type, hasContent: !!m.content })));
-        executeModsInOrder(enabledMods);
-      }
+      // Don't execute mods here - wait for stored states from background script
+      console.log('Mods initialized, waiting for stored states from background script before execution');
       
       console.log('Initialization completed successfully');
       return window.localMods;
@@ -847,15 +845,21 @@ window.addEventListener('message', function(event) {
         // Store the previous mods for reference
         const previousMods = [...window.localMods];
         
-        // Update with new mods
+        // Update with new mods from background script (these have the correct stored states)
         window.localMods = event.data.message.mods;
-        console.log('Local mods updated from extension:', 
+        console.log('Local mods updated from extension with stored states:', 
           window.localMods.map(m => `${m.name}: ${m.enabled}`));
         console.log('Manual mods in received data:', 
           window.localMods.filter(m => m.type === 'manual').map(m => ({ name: m.name, type: m.type, hasContent: !!m.content })));
         
-        // Don't execute mods here - they should already be executed during initialization
-        console.log('Mods registered with background script, execution already handled during initialization');
+        // Execute all enabled mods from stored states
+        const enabledMods = window.localMods.filter(mod => mod.enabled);
+        if (enabledMods.length > 0) {
+          console.log(`Executing ${enabledMods.length} enabled mods from stored states:`, enabledMods.map(m => m.name));
+          executeModsInOrder(enabledMods);
+        } else {
+          console.log('No enabled mods found in stored states');
+        }
       }
     }
     
@@ -896,6 +900,8 @@ window.addEventListener('message', function(event) {
       console.log('Received response for mod message:', event.data);
       // Here we could process the response from getLocalModConfig
     }
+    
+
   }
 });
 

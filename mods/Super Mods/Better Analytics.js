@@ -152,6 +152,21 @@
                 setupServerResultsMonitoring();
                 setupAnalyzerObserver();
                 setupAutoOpenImpactAnalyzer();
+                
+                // Check if we already have server results available on initialization
+                const boardState = globalThis.state.board.getSnapshot();
+                const { serverResults, mode } = boardState.context;
+                
+                if ((mode === 'autoplay' || mode === 'manual') && 
+                    serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
+                    // If server results are already available, trigger an initial DPS update
+                    setTimeout(() => {
+                        const analyzerPanel = getAnalyzerPanel();
+                        if (analyzerPanel) {
+                            restoreFrozenDPSDisplays();
+                        }
+                    }, 200);
+                }
             } else {
                 setTimeout(checkGameState, 100);
             }
@@ -178,6 +193,15 @@
                     // For autoplay and manual modes, update DPS even if tracking has stopped
                     updateFinalDPSWithGameTicks(gameTicks);
                 }
+                
+                // Also trigger a restoration of frozen DPS displays when server results become available
+                // This helps with the initial load issue
+                setTimeout(() => {
+                    const analyzerPanel = getAnalyzerPanel();
+                    if (analyzerPanel) {
+                        restoreFrozenDPSDisplays();
+                    }
+                }, 50);
             }
         });
     }
@@ -587,6 +611,17 @@
                 updateDamageData();
                 updateDPSDisplay();
             }, TIMING.TAB_SWITCH_DELAY * 2);
+        } else {
+            // If not tracking, check if we have server results and update DPS accordingly
+            const boardState = globalThis.state.board.getSnapshot();
+            const { serverResults, mode } = boardState.context;
+            
+            if ((mode === 'autoplay' || mode === 'manual') && 
+                serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
+                setTimeout(() => {
+                    updateFinalDPSWithGameTicks(serverResults.rewardScreen.gameTicks);
+                }, TIMING.TAB_SWITCH_DELAY * 2);
+            }
         }
     }
     
@@ -617,11 +652,13 @@
         const damageValueElements = analyzerPanel.querySelectorAll('span.font-outlined-fill');
         
         const boardState = globalThis.state.board.getSnapshot();
-        const isAutoplay = boardState.context.mode === 'autoplay';
+        const gameMode = boardState.context.mode;
         const { serverResults } = boardState.context;
         
         let gameTicks = null;
-        if (isAutoplay && serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
+        // Check for server results in both autoplay and manual modes
+        if ((gameMode === 'autoplay' || gameMode === 'manual') && 
+            serverResults && serverResults.rewardScreen && typeof serverResults.rewardScreen.gameTicks === 'number') {
             gameTicks = serverResults.rewardScreen.gameTicks;
         }
         
@@ -655,7 +692,7 @@
             }
             
             let finalDPS;
-            if (isAutoplay && gameTicks !== null) {
+            if (gameTicks !== null) {
                 finalDPS = calculateDPS(creatureId, damageValue, gameTicks);
             } else {
                 finalDPS = calculateDPS(creatureId, damageValue);
@@ -668,10 +705,17 @@
             dpsDisplay.removeAttribute('title');
         });
         
-        if (isAutoplay && gameTicks === null) {
-            setTimeout(() => {
+        // Enhanced retry mechanism for both autoplay and manual modes when server results aren't available
+        if ((gameMode === 'autoplay' || gameMode === 'manual') && gameTicks === null) {
+            let retryAttempts = 0;
+            const maxRetries = 10;
+            const retryInterval = 100;
+            
+            const retryWithServerResults = () => {
+                retryAttempts++;
                 const retryBoardState = globalThis.state.board.getSnapshot();
                 const retryServerResults = retryBoardState.context.serverResults;
+                
                 if (retryServerResults && retryServerResults.rewardScreen && typeof retryServerResults.rewardScreen.gameTicks === 'number') {
                     const retryGameTicks = retryServerResults.rewardScreen.gameTicks;
                     
@@ -707,10 +751,14 @@
                         const finalDPS = calculateDPS(creatureId, damageValue, retryGameTicks);
                         dpsDisplay.textContent = `(${finalDPS}/s)`;
                     });
+                } else if (retryAttempts < maxRetries) {
+                    setTimeout(retryWithServerResults, retryInterval);
                 } else {
-                    logger.warn('restoreFrozenDPSDisplays', 'Autoplay mode: Server results still not available after retry');
+                    logger.warn('restoreFrozenDPSDisplays', `${gameMode} mode: Server results still not available after ${maxRetries} retries`);
                 }
-            }, 100);
+            };
+            
+            setTimeout(retryWithServerResults, retryInterval);
         }
     }
     
