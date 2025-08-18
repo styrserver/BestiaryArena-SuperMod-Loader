@@ -181,18 +181,39 @@ async function setActiveScripts(activeScripts) {
 
 async function getLocalMods() {
   try {
+    // Get file-based mods
+    let mods = [];
+    
     // First try to get from sync storage
     const syncData = await browserAPI.storage.sync.get('localMods');
     
     if (syncData.localMods && syncData.localMods.length > 0) {
       // If found in sync, also update local storage
       await browserAPI.storage.local.set({ localMods: syncData.localMods });
-      return syncData.localMods;
+      mods = syncData.localMods;
+    } else {
+      // Fall back to local storage
+      const localData = await browserAPI.storage.local.get('localMods');
+      mods = localData.localMods || [];
     }
     
-    // Fall back to local storage
-    const localData = await browserAPI.storage.local.get('localMods');
-    return localData.localMods || [];
+    // Get manual mods and add them to the list
+    const manualData = await browserAPI.storage.local.get('manualMods');
+    const manualMods = manualData.manualMods || [];
+    
+    // Convert manual mods to the same format as file-based mods
+    const convertedManualMods = manualMods.map(mod => ({
+      name: `User Mods/${mod.name}.js`,
+      displayName: mod.name,
+      isLocal: true,
+      enabled: mod.enabled !== false,
+      type: 'manual',
+      content: mod.content,
+      originalName: mod.name
+    }));
+    
+    // Combine file-based mods and manual mods
+    return [...mods, ...convertedManualMods];
   } catch (error) {
     console.error('Error getting local mods:', error);
     return [];
@@ -303,8 +324,21 @@ async function getUtilityScript(forceRefresh = false) {
 }
 
 console.log('Bestiary Arena Mod Loader - Background script initialized');
-console.log('Running in: Firefox');
+console.log('Running in:', typeof browser !== 'undefined' ? 'Firefox' : 'Chrome');
 console.log('Using browserAPI:', typeof browserAPI);
+
+// Service worker initialization for Chrome
+if (typeof self !== 'undefined' && self.addEventListener) {
+  self.addEventListener('install', (event) => {
+    console.log('Service worker installing...');
+    self.skipWaiting();
+  });
+  
+  self.addEventListener('activate', (event) => {
+    console.log('Service worker activating...');
+    event.waitUntil(self.clients.claim());
+  });
+}
 
 // Verificando permissões
 if (browserAPI && browserAPI.permissions) {
@@ -324,6 +358,13 @@ try {
 }
 
 browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Handle service worker wake-up for Chrome
+  if (message.action === 'ping') {
+    console.log('Background script pinged, responding...');
+    sendResponse({ success: true, timestamp: Date.now() });
+    return true;
+  }
+  
   if (message.action === 'getScript') {
     getScript(message.hash)
       .then(scriptContent => {
@@ -489,7 +530,11 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         displayName: mod.displayName || mod.name,
         isLocal: true,
         // If mod existed before, use its previous enabled state, otherwise default to enabled
-        enabled: existingModStates.hasOwnProperty(mod.name) ? existingModStates[mod.name] : true
+        enabled: existingModStates.hasOwnProperty(mod.name) ? existingModStates[mod.name] : true,
+        // Preserve type and content for manual mods
+        type: mod.type,
+        content: mod.content,
+        originalName: mod.originalName
       }));
       
       console.log('Background: Processed local mods with preserved states:', localMods);
@@ -503,6 +548,20 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     
     return true;
+  }
+
+  if (message.action === 'getManualMods') {
+    console.log('Background: Getting manual mods');
+    
+    // Get manual mods from storage
+    browserAPI.storage.local.get(['manualMods'], result => {
+      const manualMods = result.manualMods || [];
+      console.log('Background: Found manual mods:', manualMods.map(m => m.name));
+      console.log('Background: Sending response with', manualMods.length, 'mods');
+      sendResponse({ success: true, mods: manualMods });
+    });
+    
+    return true; // Keep message channel open for async response
   }
 
   if (message.action === 'executeLocalMod') {
@@ -631,23 +690,25 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'toggleLocalMod') {
-    browserAPI.storage.local.get('localMods', (data) => {
-      const localMods = data.localMods || [];
-      const modIndex = localMods.findIndex(mod => mod.name === message.name);
-      
-      if (modIndex !== -1) {
-        localMods[modIndex].enabled = message.enabled;
+    // Check if this is a manual mod (starts with "User Mods/")
+    if (message.name.startsWith('User Mods/')) {
+      // Handle manual mod toggle
+      browserAPI.storage.local.get('manualMods', (data) => {
+        const manualMods = data.manualMods || [];
+        const originalName = message.name.replace('User Mods/', '').replace('.js', '');
+        const modIndex = manualMods.findIndex(mod => mod.name === originalName);
         
-        console.log(`Toggling local mod ${message.name} to ${message.enabled}`);
-        
-        // First update browser sync storage
-        browserAPI.storage.sync.set({ localMods }, () => {
-          // Then update local storage
-          browserAPI.storage.local.set({ localMods }, () => {
-            // Then respond to confirm it's done
+        if (modIndex !== -1) {
+          manualMods[modIndex].enabled = message.enabled;
+          
+          console.log(`Toggling manual mod ${originalName} to ${message.enabled}`);
+          
+          // Update manual mods in storage
+          browserAPI.storage.local.set({ manualMods }, () => {
+            // Respond to confirm it's done
             sendResponse({ success: true });
             
-            // Finally notify active tabs about the change
+            // Notify active tabs about the change
             browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
               if (tabs[0]) {
                 browserAPI.tabs.sendMessage(tabs[0].id, {
@@ -658,11 +719,45 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
             });
           });
-        });
-      } else {
-        sendResponse({ success: false, error: 'Local mod not found' });
-      }
-    });
+        } else {
+          sendResponse({ success: false, error: 'Manual mod not found' });
+        }
+      });
+    } else {
+      // Handle regular local mod toggle
+      browserAPI.storage.local.get('localMods', (data) => {
+        const localMods = data.localMods || [];
+        const modIndex = localMods.findIndex(mod => mod.name === message.name);
+        
+        if (modIndex !== -1) {
+          localMods[modIndex].enabled = message.enabled;
+          
+          console.log(`Toggling local mod ${message.name} to ${message.enabled}`);
+          
+          // First update browser sync storage
+          browserAPI.storage.sync.set({ localMods }, () => {
+            // Then update local storage
+            browserAPI.storage.local.set({ localMods }, () => {
+              // Then respond to confirm it's done
+              sendResponse({ success: true });
+              
+              // Finally notify active tabs about the change
+              browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]) {
+                  browserAPI.tabs.sendMessage(tabs[0].id, {
+                    action: 'updateLocalModState',
+                    name: message.name,
+                    enabled: message.enabled
+                  });
+                }
+              });
+            });
+          });
+        } else {
+          sendResponse({ success: false, error: 'Local mod not found' });
+        }
+      });
+    }
     return true;
   }
 

@@ -6,7 +6,7 @@ const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDD
 var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}
 const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
-const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '252px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
+const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '247px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
@@ -74,7 +74,7 @@ const MONSTER_STATS_CONFIG = [
     { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' }
 ];
 
-const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops'];
+const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops', 'Willi Wasp'];
 
 const ALL_CREATURES = ['Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord', 'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout', 'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin', 'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk', 'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman', 'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton', 'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental', 'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'];
 
@@ -6279,6 +6279,8 @@ function renderCreatureTemplate(name) {
   container.style.width = '100%';
   container.style.height = '100%';
   container.style.gap = '0';
+  container.style.overflowX = 'hidden';
+  container.style.overflowY = 'auto';
 
   const col1 = document.createElement('div');
   col1.style.display = 'flex';
@@ -6292,6 +6294,8 @@ function renderCreatureTemplate(name) {
   col1.style.boxSizing = 'border-box';
   col1.style.marginRight = '0';
   col1.style.paddingRight = '0';
+  col1.style.overflowX = 'hidden';
+  col1.style.overflowY = 'auto';
   const col1Title = document.createElement('h2');
   col1Title.className = 'widget-top widget-top-text ' + LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
   col1Title.style.margin = '0';
@@ -6636,6 +6640,8 @@ function renderCreatureTemplate(name) {
   col2.style.paddingLeft = '0';
   col2.style.borderRight = '6px solid transparent';
   col2.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+  col2.style.overflowX = 'hidden';
+  col2.style.overflowY = 'auto';
 
   const dropsSection = document.createElement('div');
   dropsSection.style.height = '100%';
@@ -6901,6 +6907,8 @@ function renderCreatureTemplate(name) {
   col3.style.height = '100%';
   col3.style.minHeight = '0';
   col3.style.maxHeight = '100%';
+  col3.style.overflowX = 'hidden';
+  col3.style.overflowY = 'auto';
 
   let ownedMonsters = [];
   try {
@@ -7165,9 +7173,9 @@ function renderCyclopediaWelcomeColumn(playerName) {
 const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 68,
   bisEquipments: 102,
-  exploredMaps: 76,
+  exploredMaps: 64,
   bagOutfits: 192,
-  raids: 12
+  raids: 13
 };
 
 const CYCLOPEDIA_PROGRESS_STATS = [

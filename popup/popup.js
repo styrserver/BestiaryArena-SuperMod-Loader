@@ -115,23 +115,9 @@ let isLoadingMods = false;
 async function loadLocalMods() {
   isLoadingMods = true;
   try {
-    // Fetch official/super mods as before
+    // Fetch all mods (including manual mods) from background script
     const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
-    let mods = response && response.success ? response.mods : [];
-
-    // Fetch user-generated mods
-    const manualMods = await getManualMods();
-    const userMods = manualMods.map(mod => ({
-      name: `User Mods/${mod.name}.js`,
-      displayName: mod.name,
-      isLocal: true,
-      enabled: mod.enabled !== false,
-      type: 'manual',
-      content: mod.content
-    }));
-
-    // Combine all mods
-    mods = [...mods, ...userMods];
+    const mods = response && response.success ? response.mods : [];
 
     renderLocalMods(mods);
   } catch (error) {

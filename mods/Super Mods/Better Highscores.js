@@ -49,8 +49,7 @@
       position: 'absolute',
       top: '9px',
       left: '290px',
-      right: '110px',
-      width: '550px',
+      width: 'auto',
       height: '30px'
     },
              CONTAINER_STYLE: {
@@ -67,7 +66,8 @@
       zIndex: '999999',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between'
+      justifyContent: 'space-between',
+      gap: '20px'
     },
     COLORS: {
       GOLD: '#ffd700',
@@ -524,7 +524,7 @@
     return {
       color: isCurrentUser ? '#00ff00' : medalColor, // Green for current user
       fontWeight: 'bold',
-      text: `${isCurrentUser ? 'You' : entry.userName}`,
+      text: `${isCurrentUser ? 'You' : 'Top:'}`,
       value: value
     };
   }
@@ -551,7 +551,7 @@
        fontWeight: 'bold',
        fontSize: '11px',
        color: UI_CONFIG.COLORS.MAP_HEADER,
-       minWidth: '120px',
+       minWidth: 'auto',
        textAlign: 'left',
        wordSpacing: '-1px',
        lineHeight: '1.1'
@@ -572,7 +572,7 @@
        display: 'flex',
        alignItems: 'center',
        gap: '8px',
-       minWidth: '200px'
+       minWidth: 'auto'
      });
      
      if (tickData && tickData.length > 0) {
@@ -625,7 +625,7 @@
        display: 'flex',
        alignItems: 'center',
        gap: '8px',
-       minWidth: '200px'
+       minWidth: 'auto'
      });
      
      if (rankData && rankData.length > 0) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features, custom mods, and comprehensive tools for the Bestiary Arena game.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -86,5 +86,5 @@
       "strict_min_version": "78.0"
     }
   },
-  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'self'"
+  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'; connect-src 'self' https://*.gist.githubusercontent.com https://gist.githubusercontent.com"
 } 

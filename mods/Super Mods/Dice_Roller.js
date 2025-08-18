@@ -653,6 +653,78 @@
     });
   }
 
+  /**
+   * Update the local inventory state using inventoryDiff from API response
+   */
+  function updateLocalInventoryAfterRoll(inventoryDiff) {
+    try {
+      const player = globalThis.state?.player;
+      if (!player) return;
+      
+      if (!inventoryDiff || Object.keys(inventoryDiff).length === 0) return;
+      
+      player.send({
+        type: 'setState',
+        fn: (prev) => {
+          const newState = { ...prev };
+          // Ensure nested inventory exists
+          newState.inventory = { ...prev.inventory };
+          
+          Object.entries(inventoryDiff).forEach(([itemKey, change]) => {
+            if (change === 0) return;
+            if (!newState.inventory[itemKey]) newState.inventory[itemKey] = 0;
+            newState.inventory[itemKey] = Math.max(0, newState.inventory[itemKey] + change);
+            // Mirror on root for compatibility
+            newState[itemKey] = newState.inventory[itemKey];
+          });
+          
+          return newState;
+        }
+      });
+    } catch (error) {
+      console.warn('[Dice Roller] Error updating local inventory:', error);
+    }
+  }
+
+  /**
+   * Update the dice counts display in the UI
+   */
+  function updateDiceCountsDisplay() {
+    try {
+      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      if (!playerContext) return;
+      
+      const inventory = playerContext.inventory || {};
+      
+      // Find all dice count elements in the modal
+      const countElements = document.querySelectorAll('div[role="dialog"][data-state="open"] span[translate="no"]');
+      
+      countElements.forEach((countElement, index) => {
+        const tier = index + 1; // 1-5 for dice tiers
+        if (tier > 5) return; // Only process first 5 count elements (dice manipulators)
+        
+        const key = `diceManipulator${tier}`;
+        const count = inventory[key] || 0;
+        
+        if (count === 0) {
+          countElement.textContent = '0';
+          countElement.style.color = '#888';
+          countElement.style.fontStyle = 'italic';
+          countElement.style.fontWeight = 'normal';
+        } else {
+          // Optimized number formatting
+          const formattedCount = count >= 1000 ? `${(count / 1000).toFixed(1).replace('.', ',')}K` : count.toString();
+          countElement.textContent = formattedCount;
+          countElement.style.color = '#fff';
+          countElement.style.fontStyle = 'normal';
+          countElement.style.fontWeight = 'bold';
+        }
+      });
+    } catch (error) {
+      console.warn('[Dice Roller] Error updating dice counts display:', error);
+    }
+  }
+
 // =======================
 // 3. UI Component Creation
 // =======================
@@ -2650,6 +2722,17 @@
         Object.assign(monsters[idx], newStats);
         // Clear the monsters cache to ensure fresh data is retrieved
         clearMonstersCache();
+      }
+      
+      // Update local inventory using inventoryDiff from API response
+      const inventoryDiff = data[0]?.result?.data?.json?.inventoryDiff;
+      if (inventoryDiff && Object.keys(inventoryDiff).length > 0) {
+        updateLocalInventoryAfterRoll(inventoryDiff);
+        
+        // Update dice counts display after inventory update
+        setTimeout(() => {
+          updateDiceCountsDisplay();
+        }, 50);
       }
       
       // Check if we're in tier mode and if any target tier has been achieved

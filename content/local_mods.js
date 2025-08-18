@@ -277,21 +277,57 @@ const MANUAL_MODS_KEY = 'manualMods';
 // Helper function to get user-generated scripts from localStorage
 async function getManualMods() {
   return new Promise(resolve => {
-    if (!window.browserAPI || !window.browserAPI.storage || !window.browserAPI.storage.local) {
-      // Fallback to localStorage if browserAPI not available
-      try {
-        const stored = localStorage.getItem(MANUAL_MODS_KEY);
-        resolve(stored ? JSON.parse(stored) : []);
-      } catch (e) {
-        console.warn('Error reading manual mods from localStorage:', e);
+    console.log('getManualMods: Requesting manual mods from background script...');
+    
+    // Use message passing to get manual mods from background script
+    const messageId = 'manual_mods_' + Date.now() + '_' + Math.random();
+    
+    // Set up a listener for the response
+    let responseHandler = (event) => {
+      if (event.source !== window) return;
+      if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+        clearTimeout(timeoutId);
+        window.removeEventListener('message', responseHandler);
+        const mods = event.data.response?.mods || [];
+        console.log(`getManualMods: Received ${mods.length} manual mods from background script:`, mods.map(m => m.name));
+        resolve(mods);
+      }
+    };
+    
+    // Fallback timeout in case no response
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', responseHandler);
+      console.warn('getManualMods: No response from background script, trying direct storage access...');
+      
+      // Try direct storage access as fallback
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['manualMods'], result => {
+          const mods = result.manualMods || [];
+          console.log(`getManualMods: Fallback - Found ${mods.length} manual mods in direct storage access:`, mods.map(m => m.name));
+          resolve(mods);
+        });
+      } else if (typeof browser !== 'undefined' && browser.storage && browser.storage.local) {
+        browser.storage.local.get(['manualMods'], result => {
+          const mods = result.manualMods || [];
+          console.log(`getManualMods: Fallback - Found ${mods.length} manual mods in direct storage access:`, mods.map(m => m.name));
+          resolve(mods);
+        });
+      } else {
+        console.warn('getManualMods: No storage API available, using empty array');
         resolve([]);
       }
-      return;
-    }
+    }, 2000); // Further reduced timeout for faster fallback
     
-    window.browserAPI.storage.local.get([MANUAL_MODS_KEY], result => {
-      resolve(result[MANUAL_MODS_KEY] || []);
-    });
+    window.addEventListener('message', responseHandler);
+    
+    // Send request to background script via content_injector
+    window.postMessage({
+      from: 'BESTIARY_CLIENT',
+      id: messageId,
+      message: {
+        action: 'getManualMods'
+      }
+    }, '*');
   });
 }
 
@@ -340,10 +376,12 @@ async function initLocalMods() {
       }
       
       // Process user-generated scripts from localStorage
+      console.log('Starting to process manual mods...');
       const manualMods = await getManualMods();
       console.log(`Found ${manualMods.length} user-generated scripts in localStorage`);
       
       manualMods.forEach((manualMod, index) => {
+        console.log(`Processing manual mod: ${manualMod.name}, enabled: ${manualMod.enabled !== false}`);
         validMods.push({
           name: `User Mods/${manualMod.name}.js`,
           key: manualMod.name,
@@ -371,6 +409,13 @@ async function initLocalMods() {
       }));
       
       console.log('Local mods initialized:', window.localMods);
+      console.log('Manual mods in initialized data:', 
+        window.localMods.filter(m => m.type === 'manual').map(m => ({ 
+          name: m.name, 
+          type: m.type, 
+          hasContent: !!m.content,
+          contentLength: m.content ? m.content.length : 0
+        })));
       
       // Register mods with the extension
       window.postMessage({
@@ -381,6 +426,17 @@ async function initLocalMods() {
         }
       }, '*');
       
+      // Execute enabled mods after registration
+      const enabledMods = window.localMods.filter(mod => mod.enabled);
+      if (enabledMods.length > 0) {
+        console.log(`Executing ${enabledMods.length} enabled mods after initialization`);
+        console.log(`Mods to execute:`, enabledMods.map(m => m.name));
+        console.log(`Manual mods to execute:`, enabledMods.filter(m => m.type === 'manual').map(m => m.name));
+        console.log(`Manual mods before execution:`, enabledMods.filter(m => m.type === 'manual').map(m => ({ name: m.name, type: m.type, hasContent: !!m.content })));
+        executeModsInOrder(enabledMods);
+      }
+      
+      console.log('Initialization completed successfully');
       return window.localMods;
     } finally {
       isInitializing = false;
@@ -412,6 +468,13 @@ async function executeLocalMod(modName, forceExecution = false) {
   }
   
   console.log(`Found mod:`, mod);
+  console.log(`Mod properties:`, {
+    name: mod.name,
+    type: mod.type,
+    hasContent: !!mod.content,
+    contentLength: mod.content ? mod.content.length : 0,
+    enabled: mod.enabled
+  });
   
   if (!mod.enabled && !forceExecution) {
     console.log(`Skipping disabled mod: ${modName}`);
@@ -423,10 +486,12 @@ async function executeLocalMod(modName, forceExecution = false) {
   let content = null;
   
   // Check if this is a user-generated script (manual mod)
+  console.log(`Checking mod type for ${modName}:`, mod.type, 'has content:', !!mod.content);
   if (mod && mod.type === 'manual' && mod.content) {
     // Use the content directly from the mod object
     content = mod.content;
     console.log(`Using stored content for user-generated mod: ${modName}`);
+    console.log(`Manual mod content preview:`, content.substring(0, 200) + '...');
   } else {
     // Fetch content from file for file-based mods
     if (!modBaseUrl) {
@@ -564,7 +629,8 @@ async function executeModsInOrder(mods, forceExecution = false) {
   for (const mod of mods) {
     if (mod.enabled || forceExecution) {
       try {
-        const result = await executeLocalMod(mod.name, forceExecution);
+        // Pass the full mod object instead of just the name
+        const result = await executeLocalModWithObject(mod, forceExecution);
         results.push({ mod: mod.name, success: !!result, result });
       } catch (error) {
         console.error(`Failed to execute mod ${mod.name}:`, error);
@@ -575,6 +641,163 @@ async function executeModsInOrder(mods, forceExecution = false) {
   
   console.log(`Batch execution completed. Results:`, results);
   return results;
+}
+
+// New function that accepts a mod object directly
+async function executeLocalModWithObject(mod, forceExecution = false) {
+  console.log(`=== EXECUTE LOCAL MOD WITH OBJECT START: ${mod.name} ===`);
+  console.log(`Force execution: ${forceExecution}`);
+  console.log(`Mod object:`, mod);
+  
+  // If already executed, log and exit (but allow a forced re-execution if needed)
+  if (executedMods[mod.name] && !forceExecution) {
+    console.log(`Local mod ${mod.name} was already executed, skipping`);
+    return executedMods[mod.name];
+  }
+  
+  if (!mod.enabled && !forceExecution) {
+    console.log(`Skipping disabled mod: ${mod.name}`);
+    return null;
+  }
+
+  console.log(`Executing local mod: ${mod.name}`);
+  
+  let content = null;
+  
+  // Check if this is a user-generated script (manual mod)
+  console.log(`Checking mod type for ${mod.name}:`, mod.type, 'has content:', !!mod.content);
+  if (mod && mod.type === 'manual' && mod.content) {
+    // Use the content directly from the mod object
+    content = mod.content;
+    console.log(`Using stored content for user-generated mod: ${mod.name}`);
+    console.log(`Manual mod content preview:`, content.substring(0, 200) + '...');
+  } else {
+    // Fetch content from file for file-based mods
+    if (!modBaseUrl) {
+      console.error(`Cannot execute mod ${mod.name}: mod base URL not set yet`);
+      return null;
+    }
+    
+    content = await getLocalModContent(mod.name);
+    
+    if (!content) {
+      console.error(`Failed to load local mod: ${mod.name}`);
+      return null;
+    }
+  }
+  
+  try {
+    // Check API availability with better retry mechanism
+    if (!window.BestiaryModAPI) {
+      console.warn(`BestiaryModAPI not available yet, will retry executing mod: ${mod.name}`);
+      
+      // Setup a more robust retry mechanism
+      let retryCount = 0;
+      const maxRetries = 20; // Increase max retries
+      const checkAndExecute = () => {
+        retryCount++;
+        if (window.BestiaryModAPI) {
+          console.log(`BestiaryModAPI now available on retry ${retryCount}, executing mod: ${mod.name}`);
+          executeLocalModWithObject(mod, forceExecution);
+        } else if (retryCount < maxRetries) {
+          console.log(`BestiaryModAPI still not available, retry ${retryCount}/${maxRetries}`);
+          setTimeout(checkAndExecute, 300); // Slightly faster retries
+        } else {
+          console.error(`BestiaryModAPI not available after ${maxRetries} retries, giving up on mod: ${mod.name}`);
+        }
+      };
+      
+      setTimeout(checkAndExecute, 300);
+      return null;
+    }
+
+    // Get saved config for the mod via page communication
+    let modConfig = {};
+    try {
+      const configId = generateMessageId();
+      
+      // Request mod config via message to the injector
+      window.postMessage({
+        from: 'BESTIARY_CLIENT',
+        id: configId,
+        message: {
+          action: 'getLocalModConfig',
+          modName: mod.name
+        }
+      }, '*');
+
+      // Execute with a slight delay to allow config to be received
+      return new Promise((resolve) => {
+        setTimeout(async () => {
+          try {
+            console.log(`Creating context for local mod: ${mod.name}`);
+            const scriptContext = {
+              hash: `local_${mod.name}`,
+              config: modConfig,
+              api: window.BestiaryModAPI
+            };
+            
+            console.log(`Preparing to execute mod: ${mod.name}`);
+            const scriptFunction = new Function('context', `
+              with (context) {
+                ${content}
+              }
+              // Return any exports
+              return context.exports;
+            `);
+            
+            console.log(`Executing mod function for: ${mod.name}`);
+            const scriptResult = scriptFunction(scriptContext);
+            executedMods[mod.name] = {
+              name: mod.name,
+              exports: scriptResult,
+              context: scriptContext
+            };
+            
+            console.log(`Local mod ${mod.name} executed successfully`, scriptResult);
+            resolve(executedMods[mod.name]);
+          } catch (error) {
+            console.error(`Error executing mod ${mod.name}:`, error);
+            resolve(null);
+          }
+        }, 50);
+      });
+    } catch (error) {
+      console.warn(`Could not load config for mod ${mod.name}:`, error);
+      
+      console.log(`Creating context for local mod: ${mod.name}`);
+      const scriptContext = {
+        hash: `local_${mod.name}`,
+        config: {},
+        api: window.BestiaryModAPI
+      };
+      
+      console.log(`Preparing to execute mod: ${mod.name}`);
+      const scriptFunction = new Function('context', `
+        with (context) {
+          ${content}
+        }
+        // Return any exports
+        return context.exports;
+      `);
+      
+      console.log(`Executing mod function for: ${mod.name}`);
+      const scriptResult = scriptFunction(scriptContext);
+      executedMods[mod.name] = {
+        name: mod.name,
+        exports: scriptResult,
+        context: scriptContext
+      };
+      
+      console.log(`Local mod ${mod.name} executed successfully`, scriptResult);
+      console.log(`=== EXECUTE LOCAL MOD WITH OBJECT END: ${mod.name} ===`);
+      return executedMods[mod.name];
+    }
+  } catch (error) {
+    console.error(`Error executing local mod ${mod.name}:`, error);
+    console.log(`=== EXECUTE LOCAL MOD WITH OBJECT ERROR: ${mod.name} ===`);
+    throw error;
+  }
 }
 
 // Generate unique ID for messages
@@ -628,20 +851,11 @@ window.addEventListener('message', function(event) {
         window.localMods = event.data.message.mods;
         console.log('Local mods updated from extension:', 
           window.localMods.map(m => `${m.name}: ${m.enabled}`));
+        console.log('Manual mods in received data:', 
+          window.localMods.filter(m => m.type === 'manual').map(m => ({ name: m.name, type: m.type, hasContent: !!m.content })));
         
-        // OPTIMIZATION: Execute mods in proper order instead of forEach
-        const enabledMods = window.localMods.filter(mod => mod.enabled);
-        const newlyEnabledMods = enabledMods.filter(mod => {
-          const wasEnabledBefore = previousMods.find(m => m.name === mod.name && m.enabled);
-          const wasExecutedBefore = !!executedMods[mod.name];
-          return !wasExecutedBefore || !wasEnabledBefore;
-        });
-        
-        if (newlyEnabledMods.length > 0) {
-          console.log(`Auto-executing ${newlyEnabledMods.length} newly enabled mods in order`);
-          console.log(`Mods to execute:`, newlyEnabledMods.map(m => m.name));
-          executeModsInOrder(newlyEnabledMods);
-        }
+        // Don't execute mods here - they should already be executed during initialization
+        console.log('Mods registered with background script, execution already handled during initialization');
       }
     }
     

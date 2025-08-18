@@ -3356,28 +3356,6 @@
   // Start initialization
   initializeAutoscroller();
   
-  // Clean up console logs for production
-  if (typeof window !== 'undefined' && window.location.hostname === 'bestiaryarena.com') {
-    // Override console.log to suppress non-essential logs in production
-    const originalLog = console.log;
-    console.log = function(...args) {
-      // Only allow initialization and essential logs
-      const message = args[0];
-      if (typeof message === 'string' && (
-        message.includes('[Autoscroller] Initializing') ||
-        message.includes('[Autoscroller] Initialization complete') ||
-        message.includes('[Autoscroller] Disabled in configuration') ||
-        message.includes('[Autoscroller] State loaded from storage') ||
-        message.includes('[Autoscroller] Modal closed') ||
-        message.includes('[Autoscroller] Autoscroll stopped by user') ||
-        message.includes('[Autoscroller] Error') ||
-        message.includes('[Autoscroller] Failed to')
-      )) {
-        originalLog.apply(console, args);
-      }
-    };
-  }
-  
   if (typeof exports !== 'undefined') {
     exports.cleanup = cleanup;
   }

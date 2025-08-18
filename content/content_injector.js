@@ -107,6 +107,41 @@ window.addEventListener('message', function(event) {
         }, '*');
       });
     }
+    
+    if (event.data.message && event.data.message.action === 'getManualMods') {
+      console.log('Content injector: Processing getManualMods request');
+      
+      // Wake up service worker first (for Chrome)
+      browserAPI.runtime.sendMessage({ action: 'ping' }, (pingResponse) => {
+        console.log('Content injector: Ping response:', pingResponse);
+        
+        // Then get manual mods from background script
+        browserAPI.runtime.sendMessage(event.data.message, response => {
+          console.log('Content injector: Get manual mods response:', response);
+          
+          // Forward manual mods to page
+          window.postMessage({
+            from: 'BESTIARY_EXTENSION',
+            id: event.data.id,
+            response: {
+              success: !!response?.success,
+              mods: response?.mods || []
+            }
+          }, '*');
+        }).catch(error => {
+          console.error('Content injector: Error getting manual mods:', error);
+          // Send empty response on error
+          window.postMessage({
+            from: 'BESTIARY_EXTENSION',
+            id: event.data.id,
+            response: {
+              success: false,
+              mods: []
+            }
+          }, '*');
+        });
+      });
+    }
   }
   
   // Listen for utility functions loaded message
