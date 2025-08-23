@@ -120,6 +120,7 @@ async function scanAndRegisterLocalMods() {
     { name: 'Autoscroller.js', enabled: true },
     { name: 'Better Analytics.js', enabled: true },
     { name: 'Better Cauldron.js', enabled: true },
+    { name: 'Better Forge.js', enabled: true },
     { name: 'Better Highscores.js', enabled: true },
     { name: 'Better Hy\'genie.js', enabled: true },
     { name: 'Better Yasir.js', enabled: true },

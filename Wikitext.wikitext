@@ -182,6 +182,18 @@ Enhances the native Monster Cauldron interface with powerful search and filter f
 * Efficient filtering system for managing large monster collections
 * Clean, responsive design that matches the game's aesthetic
 
+=== Better Forge ===
+Comprehensive equipment management system with advanced disenchanting capabilities:
+* Arsenal management with search and tier filtering functionality
+* Batch disenchanting with confirmation system and progress tracking
+* Real-time dust display and inventory updates
+* Equipment search by name and filter by tier (T1-T5)
+* Visual progress bar and status updates during disenchanting
+* Rate limiting protection with automatic retry mechanisms
+* Auto-upgrade system (coming soon) for equipment enhancement
+* Seamless integration with the game's inventory system
+* Game-styled UI that matches the existing interface
+
 === Better Highscores ===
 Displays real-time leaderboard information for the current map:
 * Show current map's tick and rank leaderboards in bottom left corner

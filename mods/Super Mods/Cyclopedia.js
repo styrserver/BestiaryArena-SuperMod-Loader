@@ -2149,9 +2149,10 @@ function openCyclopediaModal(options) {
             const timeSum = parseInt(cols[4], 10);
             const dailySeashell = parseInt(cols[5], 10);
             const huntingTasks = parseInt(cols[6], 10);
-            const perfectCreatures = parseInt(cols[7], 10);
-            const bisEquipment = parseInt(cols[8], 10);
-            const bagOutfits = parseInt(cols[9], 10);
+            const raids = parseInt(cols[7], 10);
+            const perfectCreatures = parseInt(cols[8], 10);
+            const bisEquipment = parseInt(cols[9], 10);
+            const bagOutfits = parseInt(cols[10], 10);
             
             if (isNaN(level) || !username) {
               console.warn(`[Cyclopedia] Skipping row ${rowIndex + 1}: invalid data (level: ${level}, username: ${username})`);
@@ -2167,6 +2168,7 @@ function openCyclopediaModal(options) {
               timeSum: timeSum,
               dailySeashell: dailySeashell,
               huntingTasks: huntingTasks,
+              raids: raids,
               perfectCreatures: perfectCreatures,
               bisEquipment: bisEquipment,
               bagOutfits: bagOutfits
@@ -2401,7 +2403,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const headerRow = document.createElement('div');
           headerRow.style.cssText = `
             display: grid;
-            grid-template-columns: 43px 120px 53px 53px 53px 53px 53px 53px 53px 53px 53px;
+            grid-template-columns: 43px 120px 53px 48px 48px 48px 48px 48px 48px 48px 48px 48px;
             gap: 1px;
             background: rgba(255, 224, 102, 0.2);
             position: sticky;
@@ -2419,6 +2421,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             { type: 'icon', src: '/assets/icons/speed.png', alt: 'Time sum', key: 'timeSum', sortable: true },
             { type: 'icon', src: '/assets/icons/shell-count.png', alt: 'Daily seashell', key: 'dailySeashell', sortable: true },
             { type: 'icon', src: '/assets/icons/task-count.png', alt: 'Hunting tasks', key: 'huntingTasks', sortable: true },
+            { type: 'icon', src: 'https://bestiaryarena.com/assets/icons/raid.png', alt: 'Raids', key: 'raids', sortable: true },
             { type: 'icon', src: '/assets/icons/enemy.png', alt: 'Perfect creatures', key: 'perfectCreatures', sortable: true },
             { type: 'icon', src: '/assets/icons/equips.png', alt: 'BIS equipments', key: 'bisEquipment', sortable: true },
             { type: 'icon', src: '/assets/icons/mini-outfitbag.png', alt: 'Bag outfits', key: 'bagOutfits', sortable: true }
@@ -2561,7 +2564,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const dataRowsContainer = document.createElement('div');
           dataRowsContainer.style.cssText = `
             display: grid;
-            grid-template-columns: 43px 120px 53px 53px 53px 53px 53px 53px 53px 53px 53px;
+            grid-template-columns: 43px 120px 53px 48px 48px 48px 48px 48px 48px 48px 48px 48px;
             gap: 1px;
             min-height: fit-content;
             flex: 1;
@@ -2600,6 +2603,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               ranking.timeSum.toLocaleString(),
               ranking.dailySeashell.toLocaleString(),
               ranking.huntingTasks.toLocaleString(),
+              ranking.raids.toLocaleString(),
               ranking.perfectCreatures.toLocaleString(),
               ranking.bisEquipment.toLocaleString(),
               ranking.bagOutfits.toLocaleString()
