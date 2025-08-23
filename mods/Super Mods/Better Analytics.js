@@ -192,6 +192,13 @@
                 } else if (mode === 'autoplay' || mode === 'manual') {
                     // For autoplay and manual modes, update DPS even if tracking has stopped
                     updateFinalDPSWithGameTicks(gameTicks);
+                    
+                    // Set up continuous DPS updates for these modes
+                    if (!dpsUpdateInterval) {
+                        dpsUpdateInterval = setInterval(() => {
+                            updateDPSDisplay();
+                        }, TIMING.DPS_UPDATE_INTERVAL);
+                    }
                 }
                 
                 // Also trigger a restoration of frozen DPS displays when server results become available
@@ -841,8 +848,12 @@
             if (localGameTicks > 0) {
                 updateFinalDPSWithGameTicks(localGameTicks);
             }
-        } else {
-            // For manual and autoplay modes, wait for server results for accurate DPS calculation
+        } else if (currentGameMode === 'autoplay' || currentGameMode === 'manual') {
+            // For autoplay and manual modes, ensure DPS displays are maintained
+            // Server results will trigger the final DPS update
+            setTimeout(() => {
+                restoreFrozenDPSDisplays();
+            }, 100);
         }
     }
     
@@ -907,7 +918,11 @@
 
     
     function updateDPSDisplay() {
-        if (!isTracking) {
+        // Allow autoplay and manual modes to update DPS even when not actively tracking
+        const boardState = globalThis.state.board.getSnapshot();
+        const gameMode = boardState.context.mode;
+        
+        if (!isTracking && gameMode !== 'autoplay' && gameMode !== 'manual') {
             return;
         }
     
