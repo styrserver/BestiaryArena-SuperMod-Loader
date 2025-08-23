@@ -9,6 +9,7 @@ const defaultConfig = {
   enableTurboAutomatically: true,
   stopOnSPlus: false,
   stopAfterTicks: 0, // 0 means no limit
+  stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -443,6 +444,8 @@ const TRANSLATIONS = {
     autoTurboLabel: 'Enable turbo mode automatically',
     stopOnSPlusLabel: 'Stop when reaching S+ grade',
     stopAfterTicksLabel: 'Stop after ticks (0 for no limit):',
+    stopWhenTicksReachedLabel: 'Stop when reaching ticks or below (0 to disable):',
+    copyTargetTicksReplayButton: 'Replay Target',
     saveButton: 'Save',
     cancelButton: 'Cancel',
     startAnalysisButton: 'Start Analysis',
@@ -489,6 +492,8 @@ const TRANSLATIONS = {
     autoTurboLabel: 'Ativar modo turbo automaticamente',
     stopOnSPlusLabel: 'Parar ao atingir classificação S+',
     stopAfterTicksLabel: 'Parar após ticks (0 para sem limite):',
+    stopWhenTicksReachedLabel: 'Parar ao atingir ticks ou abaixo (0 para desabilitar):',
+    copyTargetTicksReplayButton: 'Replay Alvo',
     saveButton: 'Salvar',
     cancelButton: 'Cancelar',
     startAnalysisButton: 'Iniciar Análise',
@@ -704,6 +709,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   // Variables to store best runs
   let bestTimeRun = null;
   let bestScoreRun = null;
+  let targetTicksRun = null; // To store the run that reached the target ticks
   
   // Timing variables
   const startTime = performance.now();
@@ -871,6 +877,40 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
           }
         }
         
+        // Check if should stop for reaching the desired number of ticks or below
+        if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
+          console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
+          
+          // Capture the configuration for the target replay
+          let boardData;
+          
+          if (typeof window.$serializeBoard === 'function') {
+            boardData = JSON.parse(window.$serializeBoard());
+            console.log('Target ticks: Using window.$serializeBoard directly');
+          } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
+            boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+            console.log('Target ticks: Using BestiaryModAPI.utility.serializeBoard');
+          } else {
+            boardData = serializeBoard();
+            console.log('Target ticks: Using local serializeBoard implementation');
+          }
+          
+          // Create a deep copy to avoid reference issues
+          const boardDataCopy = structuredClone(boardData);
+          boardDataCopy.seed = runSeed;
+          
+          targetTicksRun = {
+            seed: runSeed,
+            board: boardDataCopy,
+            ticks: ticks,
+            grade: grade,
+            rankPoints: rankPoints
+          };
+          
+          console.log(`Target ticks run captured: ${ticks} ticks with seed ${runSeed}`);
+          break;
+        }
+        
         // Update max rank points
         if (rankPoints > maxRankPoints) {
           maxRankPoints = rankPoints;
@@ -1005,6 +1045,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       modeSwitched,
       bestTimeResult: bestTimeRun,
       maxPointsResult: bestScoreRun,
+      targetTicksResult: targetTicksRun,
       // Timing stats
       totalTimeMs: totalTime,
       totalTimeFormatted: formatMilliseconds(totalTime),
@@ -1253,6 +1294,25 @@ function createConfigPanel(startAnalysisCallback) {
   stopTicksContainer.appendChild(stopTicksInput);
   content.appendChild(stopTicksContainer);
 
+  // Stop when ticks reached input
+  const stopWhenTicksContainer = document.createElement('div');
+  stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+  const stopWhenTicksLabel = document.createElement('label');
+  stopWhenTicksLabel.textContent = t('stopWhenTicksReachedLabel');
+
+  const stopWhenTicksInput = document.createElement('input');
+  stopWhenTicksInput.type = 'number';
+  stopWhenTicksInput.id = 'stop-when-ticks-input';
+  stopWhenTicksInput.min = '0';
+  stopWhenTicksInput.max = '10000';
+  stopWhenTicksInput.value = config.stopWhenTicksReached;
+  stopWhenTicksInput.style.cssText = 'width: 80px; text-align: center;';
+
+  stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
+  stopWhenTicksContainer.appendChild(stopWhenTicksInput);
+  content.appendChild(stopWhenTicksContainer);
+
   // Create buttons array
   const buttons = [
     {
@@ -1300,6 +1360,7 @@ function createConfigPanel(startAnalysisCallback) {
     config.enableTurboAutomatically = document.getElementById('turbo-input').checked;
     config.stopOnSPlus = document.getElementById('stop-splus-input').checked;
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
+    config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     
     // Save configuration
     api.service.updateScriptConfig(context.hash, config);
@@ -1579,12 +1640,13 @@ function showResultsModal(results) {
     // Check if we have valid replay data for best time or max points
     const hasBestTimeReplay = results.summary.bestTimeResult && results.summary.bestTimeResult.board;
     const hasMaxPointsReplay = results.summary.maxPointsResult && results.summary.maxPointsResult.board;
+    const hasTargetTicksReplay = results.summary.targetTicksResult && results.summary.targetTicksResult.board;
     
     console.log('Best time replay data:', results.summary.bestTimeResult);
     console.log('Max points replay data:', results.summary.maxPointsResult);
     
     // Add copy replay buttons in their own container
-    if (hasBestTimeReplay || hasMaxPointsReplay) {
+    if (hasBestTimeReplay || hasMaxPointsReplay || hasTargetTicksReplay) {
       // Create a dedicated container for replay buttons
       const replayButtonsContainer = document.createElement('div');
       replayButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 20px; width: 100%;';
@@ -1673,6 +1735,48 @@ function showResultsModal(results) {
         });
         
         replayButtonsContainer.appendChild(copyMaxPointsButton);
+      }
+      
+      // Add target button if available
+      if (hasTargetTicksReplay) {
+        const copyTargetTicksButton = document.createElement('button');
+        copyTargetTicksButton.textContent = t('copyTargetTicksReplayButton');
+        copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+        copyTargetTicksButton.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+        
+        // Add click handler
+        copyTargetTicksButton.addEventListener('click', () => {
+          // Get the board data
+          const replayData = results.summary.targetTicksResult.board;
+          
+          // Verify and fix the replay data format
+          if (!verifyAndFixReplayData(replayData)) {
+            api.ui.components.createModal({
+              title: 'Error',
+              content: 'Failed to create replay data. The board configuration may be incomplete.',
+              buttons: [{ text: 'OK', primary: true }]
+            });
+            return;
+          }
+          
+          // Create the $replay formatted string
+          const replayText = `$replay(${JSON.stringify(replayData)})`;
+          
+          // Log for debugging
+          console.log('Target ticks replay text:', replayText);
+          
+          // Copy to clipboard
+          const success = copyToClipboard(replayText);
+          if (success) {
+            const originalText = copyTargetTicksButton.textContent;
+            copyTargetTicksButton.textContent = t('replayCopiedMessage');
+            setTimeout(() => {
+              copyTargetTicksButton.textContent = originalText;
+            }, 2000);
+          }
+        });
+        
+        replayButtonsContainer.appendChild(copyTargetTicksButton);
       }
       
       // Add the buttons container to the content
@@ -1867,6 +1971,12 @@ async function runAnalysis() {
     runningModal = showRunningAnalysisModal(0, config.runs);
     activeRunningModal = runningModal;
     
+    // Debug: Log the modal object structure
+    console.log('Running modal object:', runningModal);
+    console.log('Modal close method:', typeof runningModal?.close);
+    console.log('Modal element:', runningModal?.element);
+    console.log('Modal remove method:', typeof runningModal?.remove);
+    
     // Run the analysis with status updates
     const results = await analyzeBoard(config.runs, (status) => {
       const progressEl = document.getElementById('analysis-progress');
@@ -1902,7 +2012,16 @@ async function runAnalysis() {
     // Ensure the running modal is closed through the API too
     if (runningModal) {
       try {
-        runningModal.close();
+        // Check if the modal has a close method before calling it
+        if (typeof runningModal.close === 'function') {
+          runningModal.close();
+        } else if (runningModal.element && typeof runningModal.element.remove === 'function') {
+          // Try to remove the element directly if close method doesn't exist
+          runningModal.element.remove();
+        } else if (runningModal.remove && typeof runningModal.remove === 'function') {
+          // Try alternative remove method
+          runningModal.remove();
+        }
       } catch (e) {
         console.error('Error closing running modal:', e);
       }
@@ -1927,7 +2046,16 @@ async function runAnalysis() {
     
     if (runningModal) {
       try {
-        runningModal.close();
+        // Check if the modal has a close method before calling it
+        if (typeof runningModal.close === 'function') {
+          runningModal.close();
+        } else if (runningModal.element && typeof runningModal.element.remove === 'function') {
+          // Try to remove the element directly if close method doesn't exist
+          runningModal.element.remove();
+        } else if (runningModal.remove && typeof runningModal.remove === 'function') {
+          // Try alternative remove method
+          runningModal.remove();
+        }
       } catch (e) {
         console.error('Error closing running modal after error:', e);
       }

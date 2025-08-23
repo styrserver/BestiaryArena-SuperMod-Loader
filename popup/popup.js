@@ -150,6 +150,7 @@ function renderLocalMods(mods) {
     'Autoscroller.js',
     'Better Analytics.js',
     'Better Cauldron.js',
+    'Better Forge.js',
     'Better Highscores.js',
     'Better Hy\'genie.js',
     'Better Yasir.js',

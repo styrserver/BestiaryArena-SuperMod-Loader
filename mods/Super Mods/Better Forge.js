@@ -34,6 +34,7 @@
     isForging: false,
     isForgingInProgress: false,
     isForgeConfirmationMode: false,
+    isRefreshingInventory: false, // New state for inventory refresh
     forgeInterval: null,
     forgeQueue: [],
     currentForgeStep: null,
@@ -49,7 +50,9 @@
     intermediateResults: new Map(),
     // Track total steps for progress bar
     totalSteps: 0,
-    completedSteps: 0
+    completedSteps: 0,
+    // Track if we're on the final step
+    isFinalStep: false
   };
   
   // Auto-upgrade tab state management
@@ -387,6 +390,8 @@
 
   function checkIfCanForgeForButton(equipment, stat, targetTier) {
     try {
+      console.log(`[Better Forge] 🔍 checkIfCanForgeForButton called with:`, { equipment, stat, targetTier });
+      
       // Check if we have enough items
       const matchingItems = getMatchingInventoryItems(equipment, stat, targetTier);
       const itemsByTier = groupItemsByTier(matchingItems);
@@ -399,13 +404,16 @@
       
       // Check if we can forge the target tier
       const canForge = checkIfCanForge(itemsByTierCount, targetTier);
+      
       if (!canForge.canForge) {
+        console.log(`[Better Forge] ❌ Cannot forge:`, canForge.missing);
         return false;
       }
       
       // Check if we have enough dust
       const dustCost = calculateDustCost(equipment, stat, targetTier);
       const userDust = getUserCurrentDust();
+      console.log(`[Better Forge] 💰 Dust check: Need ${dustCost}, Have ${userDust}`);
       
       return userDust >= dustCost;
     } catch (error) {
@@ -421,13 +429,8 @@
         return;
       }
 
-      // Check if forging is actually possible before showing confirmation
-      const canForgeCheck = checkIfCanForgeForButton(equipment, stat, targetTier);
-      if (!canForgeCheck) {
-        console.warn('[Better Forge] ⚠️ Cannot forge - insufficient materials or dust');
-        updateAutoUpgradeStatus('Cannot forge - insufficient materials or dust');
-        return;
-      }
+      // Skip pre-validation - let the forge plan creation handle it
+      console.log(`[Better Forge] 🚀 Attempting to create forge plan for ${equipment} ${stat} T${targetTier}`);
 
       if (!forgeState.isForgeConfirmationMode) {
         forgeState.isForgeConfirmationMode = true;
@@ -475,9 +478,10 @@
       // Initialize progress tracking
       forgeState.totalSteps = steps.length;
       forgeState.completedSteps = 0;
+      forgeState.isFinalStep = false;
       
       // Initialize progress bar to 0% for first step
-      updateForgeProgressBar(0, 1);
+      resetForgeProgressBar();
 
       console.log(`[Better Forge] ✅ Forge state initialized`);
       console.log(`[Better Forge] 🔄 Queue created with ${forgeState.forgeQueue.length} steps`);
@@ -486,13 +490,13 @@
       updateForgeButtonState('forging');
       updateAutoUpgradeStatus('Starting forging process...');
 
-      // Start forging process with longer interval to allow for progress animation and sleep
-      forgeState.forgeInterval = setInterval(() => {
-        console.log(`[Better Forge] ⏰ Interval triggered, calling performForgeStep...`);
-        performForgeStep();
-      }, 1500); // 1.5 seconds between steps to allow for progress animation (1s) + sleep (200ms) + buffer
+      // Start forging process with faster interval
+              forgeState.forgeInterval = setInterval(() => {
+          console.log(`[Better Forge] ⏰ Interval triggered, calling performForgeStep...`);
+          performForgeStep();
+        }, 500); // 500ms between steps for faster operation
 
-      console.log(`[Better Forge] ⏱️ Forge interval started (1.5s intervals)`);
+              console.log(`[Better Forge] ⏱️ Forge interval started (500ms intervals)`);
 
     } catch (error) {
       console.error('[Better Forge] 💥 Error in startForging:', error);
@@ -509,11 +513,13 @@
       forgeState.isForging = false;
       forgeState.isForgingInProgress = false;
       forgeState.isForgeConfirmationMode = false;
+      forgeState.isRefreshingInventory = false; // Reset refreshing state
       forgeState.forgeQueue = [];
       forgeState.currentForgeStep = null;
       forgeState.intermediateResults.clear();
       forgeState.totalSteps = 0;
       forgeState.completedSteps = 0;
+      forgeState.isFinalStep = false;
 
       if (forgeState.forgeInterval) {
         clearInterval(forgeState.forgeInterval);
@@ -525,7 +531,7 @@
       updateAutoUpgradeStatus('Forging stopped');
       
       // Reset progress bar to 0%
-      updateForgeProgressBar(0, 1);
+      resetForgeProgressBar();
       
       console.log('[Better Forge] ✅ Forge state cleanup completed');
 
@@ -538,7 +544,13 @@
   function performForgeStep() {
     try {
       console.log(`[Better Forge] 🔍 performForgeStep called`);
-      console.log(`[Better Forge] 📊 Current state: isForging=${forgeState.isForging}, isForgingInProgress=${forgeState.isForgingInProgress}, queueLength=${forgeState.forgeQueue.length}`);
+      console.log(`[Better Forge] 📊 Current state: isForging=${forgeState.isForging}, isForgingInProgress=${forgeState.isForgingInProgress}, isRefreshingInventory=${forgeState.isRefreshingInventory}, queueLength=${forgeState.forgeQueue.length}`);
+      
+      // Check if we're refreshing inventory - if so, wait
+      if (forgeState.isRefreshingInventory) {
+        console.log(`[Better Forge] ⏳ Inventory refresh in progress, waiting...`);
+        return;
+      }
       
       if (forgeState.isForgingInProgress || forgeState.forgeQueue.length === 0) {
         console.log(`[Better Forge] ⚠️ Early return: isForgingInProgress=${forgeState.isForgingInProgress}, queueLength=${forgeState.forgeQueue.length}`);
@@ -553,6 +565,21 @@
             // Find which tier we can create steps for and create them
             const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
             if (selectedEquipment && selectedTier && selectedStat) {
+              // Check if we've already reached the target tier
+              const currentMaxTier = Math.max(...Array.from(forgeState.intermediateResults.keys()), 1);
+              if (currentMaxTier >= selectedTier) {
+                console.log(`[Better Forge] 🎯 Already reached target tier T${selectedTier}, completing forging`);
+                completeForging();
+                return;
+              }
+              
+              // Additional safety check: if we have a T5 item, we're definitely done
+              if (forgeState.intermediateResults.has(5)) {
+                console.log(`[Better Forge] 🎯 T5 item detected, completing forging immediately`);
+                completeForging();
+                return;
+              }
+              
               for (let tier = 1; tier < selectedTier; tier++) {
                 const availableItems = forgeState.intermediateResults.get(tier) || [];
                 const itemsNeeded = Math.pow(2, selectedTier - tier - 1);
@@ -571,8 +598,14 @@
             return;
           } else {
             console.log('[Better Forge] 🎉 All forge steps completed!');
-            // Forging completed
-            completeForging();
+            // Clear the interval immediately to stop spam
+            if (forgeState.forgeInterval) {
+              clearInterval(forgeState.forgeInterval);
+              forgeState.forgeInterval = null;
+              console.log('[Better Forge] ⏱️ Forge interval cleared to prevent spam');
+            }
+            // Mark as final step - completion will be handled after API call
+            forgeState.isFinalStep = true;
           }
         }
         return;
@@ -607,11 +640,12 @@
 
       // Start progress bar animation from 0-100 for this step
       updateForgeProgressBar(0, 1);
-      animateProgressBar(0, 100, 1000); // 1 second animation
+      animateProgressBar(0, 100, 500); // 500ms animation
 
-      // Execute the forge step
-      console.log(`[Better Forge] 🌐 Making API call to forge equipment...`);
-      forgeEquipment(step.equipA, step.equipB)
+      // Execute the forge step after animation completes
+      setTimeout(() => {
+        console.log(`[Better Forge] 🌐 Making API call to forge equipment...`);
+        forgeEquipment(step.equipA, step.equipB)
         .then(result => {
           if (!forgeState.isForging) {
             console.log('[Better Forge] ⏹️ Forging stopped, ignoring result');
@@ -666,6 +700,13 @@
               // Update progress tracking
               forgeState.completedSteps++;
               
+              // Check if we've reached the target tier and clear queue if needed
+              if (result.nextEquip && result.nextEquip.tier >= step.targetTier) {
+                console.log(`[Better Forge] 🎯 Target tier ${step.targetTier} reached! Clearing remaining queue (${forgeState.forgeQueue.length} steps)`);
+                forgeState.forgeQueue = [];
+                forgeState.isFinalStep = true;
+              }
+              
               // Update highlighting to reflect new state
               setTimeout(() => {
                 const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
@@ -677,55 +718,73 @@
               
               // Fresh inventory fetch and delay to ensure inventory is properly updated before checking next tier steps
               setTimeout(async () => {
-                // Force refresh of user inventory to get the latest state
+                // Set refreshing state to prevent premature step creation
+                forgeState.isRefreshingInventory = true;
+                console.log(`[Better Forge] 🔄 Starting inventory refresh after successful forge...`);
+                
                 try {
+                  // Force refresh of user inventory to get the latest state
                   console.log(`[Better Forge] 🔄 Refreshing inventory after successful forge...`);
-                  // Clear any cached inventory data to force fresh fetch
-                  if (typeof clearInventoryCache === 'function') {
-                    clearInventoryCache();
-                  }
+                  
+                  // Use the enhanced state refresh function
+                  await forceRefreshPlayerState();
+                  
+                  // Verify inventory was updated
+                  const freshInventory = getUserOwnedEquipment();
+                  console.log(`[Better Forge] 🔄 Fresh inventory check:`, freshInventory.length, 'items');
                   
                   // Check if we need to create additional forging steps for the next tier
                   const nextTier = step.toTier;
                   if (nextTier < step.targetTier && nextTier < 5) {
                     console.log(`[Better Forge] 🔄 Checking if we can create next tier steps for T${nextTier} → T${nextTier + 1}`);
                     
-                                      // Check if we have enough items at the current tier (including newly forged ones)
-                  const intermediateItems = forgeState.intermediateResults.get(nextTier) || [];
-                  const existingItems = getUserOwnedEquipment().filter(item => 
-                    item.name === step.equipment && 
-                    item.stat.toLowerCase() === step.stat.toLowerCase() &&
-                    item.tier === nextTier
-                  );
-                  const totalAvailable = intermediateItems.length + existingItems.length;
-                  const itemsNeeded = Math.pow(2, step.targetTier - nextTier - 1);
-                  const itemsRequired = itemsNeeded * 2; // Need 2 items per pair
-                  
-                  console.log(`[Better Forge] 📊 T${nextTier}: Have ${totalAvailable} (${intermediateItems.length} intermediate + ${existingItems.length} existing), Need ${itemsRequired} for ${itemsNeeded} pairs`);
-                  
-                  if (totalAvailable >= itemsRequired) {
-                    console.log(`[Better Forge] ✅ Sufficient items available, creating next tier steps`);
-                    createNextTierSteps(nextTier, step.equipment, step.stat, step.targetTier);
+                    // Check if we have enough items at the current tier (including newly forged ones)
+                    const intermediateItems = forgeState.intermediateResults.get(nextTier) || [];
+                    const existingItems = getUserOwnedEquipment().filter(item => 
+                      item.name === step.equipment && 
+                      item.stat.toLowerCase() === step.stat.toLowerCase() &&
+                      item.tier === nextTier
+                    );
+                    const totalAvailable = intermediateItems.length + existingItems.length;
+                    const itemsNeeded = Math.pow(2, step.targetTier - nextTier - 1);
+                    const itemsRequired = itemsNeeded * 2; // Need 2 items per pair
                     
-                    // If new steps were added, let the interval handle the next step
-                    if (forgeState.forgeQueue.length > 0) {
-                      console.log(`[Better Forge] 🔄 New steps added, waiting for next interval...`);
-                      console.log(`[Better Forge] 📊 Queue now contains:`, forgeState.forgeQueue.map(s => `T${s.fromTier}→T${s.toTier}`));
+                    console.log(`[Better Forge] 📊 T${nextTier}: Have ${totalAvailable} (${intermediateItems.length} intermediate + ${existingItems.length} existing), Need ${itemsRequired} for ${itemsNeeded} pairs`);
+                    
+                    if (totalAvailable >= itemsRequired) {
+                      console.log(`[Better Forge] ✅ Sufficient items available, creating next tier steps`);
+                      createNextTierSteps(nextTier, step.equipment, step.stat, step.targetTier);
                       
-                      // Reset the flag so the next interval can handle the next step
-                      forgeState.isForgingInProgress = false;
+                      // If new steps were added, let the interval handle the next step
+                      if (forgeState.forgeQueue.length > 0) {
+                        console.log(`[Better Forge] 🔄 New steps added, waiting for next interval...`);
+                        console.log(`[Better Forge] �� Queue now contains:`, forgeState.forgeQueue.map(s => `T${s.fromTier}→T${s.toTier}`));
+                        
+                        // Reset the flag so the next interval can handle the next step
+                        forgeState.isForgingInProgress = false;
+                      }
+                    } else {
+                      console.log(`[Better Forge] ⏳ Waiting for more T${nextTier} items (need ${itemsRequired}, have ${totalAvailable})`);
+                      console.log(`[Better Forge] 🔄 Will check again when more items are available`);
                     }
                   } else {
-                    console.log(`[Better Forge] ⏳ Waiting for more T${nextTier} items (need ${itemsRequired}, have ${totalAvailable})`);
-                    console.log(`[Better Forge] 🔄 Will check again when more items are available`);
-                  }
-                  } else {
                     console.log(`[Better Forge] 🎯 Reached target tier or max tier (${nextTier})`);
+                    
+                    // Clear the queue since we've reached the target tier
+                    if (forgeState.forgeQueue.length > 0) {
+                      console.log(`[Better Forge] 🧹 Clearing forge queue (${forgeState.forgeQueue.length} steps) - target tier reached`);
+                      forgeState.forgeQueue = [];
+                      forgeState.isFinalStep = true;
+                    }
                   }
                 } catch (error) {
                   console.error(`[Better Forge] 💥 Error refreshing inventory:`, error);
+                } finally {
+                  // Clear refreshing state
+                  forgeState.isRefreshingInventory = false;
+                  console.log(`[Better Forge] ✅ Inventory refresh completed`);
                 }
-              }, 500); // Increased delay to ensure inventory is fully updated
+              }, 200); // Reduced delay for faster operation
             }
             
             // Next tier step creation is now handled in the setTimeout above to ensure inventory is properly updated
@@ -756,28 +815,44 @@
       }
                   }
                 }
-              }, 500); // Check again after 500ms
+              }, 200); // Check again after 200ms
             }
 
             // Update dust
             if (result.dustDiff) {
-              console.log(`[Better Forge] 💰 Dust change: ${result.dustDiff}`);
-              updateLocalInventoryGoldDust(0, result.dustDiff);
-              updateDustDisplayWithAnimation(result.dustDiff);
+              console.log(`[Better Forge] 💰 Dust change: ${result.dustDiff}, type: ${typeof result.dustDiff}`);
+              const dustChange = Number(result.dustDiff) || 0;
+              console.log(`[Better Forge] 💰 Converted dust change: ${dustChange}`);
+              updateLocalInventoryGoldDust(0, dustChange);
+              updateDustDisplayWithAnimation(dustChange);
             }
 
             updateAutoUpgradeStatus(`Forged ${step.equipment} T${step.fromTier} → T${step.toTier}`);
+            
+            // Reset progress bar to 0% after animation completes
+            setTimeout(() => {
+              resetForgeProgressBar();
+              console.log(`[Better Forge] 🔄 Progress bar reset to 0% after animation completed`);
+            }, 500); // Wait for animation to complete
+            
+                  // Check if this was the final step and complete forging
+      if (forgeState.isFinalStep) {
+        console.log('[Better Forge] 🎯 Final step completed, calling completeForging...');
+        completeForging();
+        return; // Exit early to prevent further processing
+      }
+      
+      // Additional safety check: if queue is empty and we're not forging, stop
+      if (forgeState.forgeQueue.length === 0 && !forgeState.isForgingInProgress) {
+        console.log('[Better Forge] 🧹 Queue is empty, stopping forge process');
+        completeForging();
+        return;
+      }
             
             // Add configurable sleep after successful forge to prevent API rate limiting
             if (forgeState.forgeQueue.length > 0) {
               const sleepDuration = FORGE_CONFIG.FORGE_DELAY_MS;
               console.log(`[Better Forge] 😴 ${sleepDuration}ms sleep before next step to prevent rate limiting...`);
-              
-              // Reset progress bar to 0% during sleep
-              setTimeout(() => {
-                updateForgeProgressBar(0, 1);
-                console.log(`[Better Forge] 😴 ${sleepDuration}ms sleep completed, progress reset to 0%`);
-              }, sleepDuration);
             }
             
           } else if (result.status === 429) {
@@ -785,6 +860,8 @@
             // Rate limited - put step back in queue
             forgeState.forgeQueue.unshift(step);
             updateAutoUpgradeStatus('Rate limited - waiting...');
+            // Reset progress bar to 0% for rate limited operations
+            resetForgeProgressBar();
           } else if (result.status === 404) {
             // Handle 404 errors with retry logic and inventory refresh
             if (!step.retryCount) {
@@ -812,10 +889,12 @@
               console.error(`[Better Forge] ❌ 404 error after ${FORGE_CONFIG.MAX_RETRIES} retries: ${result.message}`);
               updateAutoUpgradeStatus(`Forge failed after ${FORGE_CONFIG.MAX_RETRIES} retries: ${result.message}`);
             }
-          } else {
-            console.error(`[Better Forge] ❌ Forge failed: ${result.message || 'Unknown error'}`);
-            updateAutoUpgradeStatus(`Forge failed: ${result.message || 'Unknown error'}`);
-          }
+                      } else {
+              console.error(`[Better Forge] ❌ Forge failed: ${result.message || 'Unknown error'}`);
+              updateAutoUpgradeStatus(`Forge failed: ${result.message || 'Unknown error'}`);
+              // Reset progress bar to 0% for failed operations
+              resetForgeProgressBar();
+            }
 
           forgeState.isForgingInProgress = false;
           console.log(`[Better Forge] 🔓 Forge step completed, ready for next step`);
@@ -828,7 +907,11 @@
           if (forgeState.isForging) {
             updateAutoUpgradeStatus('Forge error - retrying...');
           }
+          
+          // Reset progress bar to 0% on errors
+          resetForgeProgressBar();
         });
+      }, 500); // Wait for animation to complete before making API call
 
     } catch (error) {
       console.error('[Better Forge] 💥 Error in performForgeStep:', error);
@@ -845,11 +928,13 @@
       forgeState.isForging = false;
       forgeState.isForgingInProgress = false;
       forgeState.isForgeConfirmationMode = false;
+      forgeState.isRefreshingInventory = false; // Reset refreshing state
       forgeState.forgeQueue = [];
       forgeState.currentForgeStep = null;
       forgeState.intermediateResults.clear();
       forgeState.totalSteps = 0;
       forgeState.completedSteps = 0;
+      forgeState.isFinalStep = false;
 
       if (forgeState.forgeInterval) {
         clearInterval(forgeState.forgeInterval);
@@ -860,20 +945,16 @@
       updateForgeButtonState('normal');
       updateAutoUpgradeStatus('Forging completed successfully!');
       
-      // Set progress bar to 100% completion
-      updateForgeProgressBar(1, 1);
+      // Reset progress bar to 0% completion
+      resetForgeProgressBar();
 
       console.log('[Better Forge] 🔄 Refreshing UI...');
 
-      // Refresh the UI
-      setTimeout(() => {
-        const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
-        if (selectedEquipment && selectedTier && selectedStat) {
-          updateDetailsDisplay(selectedEquipment, selectedTier, selectedStat);
-          updateAutoUpgradeStatusBasedOnInventory(selectedEquipment, selectedTier, selectedStat);
-          console.log('[Better Forge] ✅ UI refresh completed');
-        }
-      }, 1000);
+              // Set completion status - UI will be refreshed after final API call completes
+        setTimeout(() => {
+          updateAutoUpgradeStatus('🎉 Forging completed successfully! Select new equipment to forge again.');
+          console.log('[Better Forge] ✅ Completion status set');
+        }, 1000);
 
     } catch (error) {
       console.error('[Better Forge] 💥 Error in completeForging:', error);
@@ -913,12 +994,21 @@
 
 
 
+  // Track the current animation frame ID to stop animations
+  let currentAnimationFrame = null;
+
   function animateProgressBar(fromProgress, toProgress, duration) {
     try {
       const progressFill = document.getElementById('auto-upgrade-progress-fill');
       const progressText = document.getElementById('auto-upgrade-progress-text');
       
       if (!progressFill || !progressText) return;
+      
+      // Cancel any existing animation
+      if (currentAnimationFrame) {
+        cancelAnimationFrame(currentAnimationFrame);
+        currentAnimationFrame = null;
+      }
       
       const startTime = Date.now();
       const progressDiff = toProgress - fromProgress;
@@ -941,7 +1031,9 @@
         }
         
         if (progress < 1) {
-          requestAnimationFrame(animate);
+          currentAnimationFrame = requestAnimationFrame(animate);
+        } else {
+          currentAnimationFrame = null;
         }
       };
       
@@ -949,6 +1041,28 @@
       
     } catch (error) {
       handleError(error, 'animateProgressBar', false);
+    }
+  }
+
+  function resetForgeProgressBar() {
+    try {
+      // Cancel any ongoing animation
+      if (currentAnimationFrame) {
+        cancelAnimationFrame(currentAnimationFrame);
+        currentAnimationFrame = null;
+      }
+      
+      const progressFill = document.getElementById('auto-upgrade-progress-fill');
+      const progressText = document.getElementById('auto-upgrade-progress-text');
+      
+      if (progressFill && progressText) {
+        // Immediately reset to 0% with blue color
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+        progressFill.style.background = 'linear-gradient(90deg, #2196F3, #1976D2)';
+      }
+    } catch (error) {
+      handleError(error, 'resetForgeProgressBar', false);
     }
   }
 
@@ -1086,6 +1200,12 @@
 
   function checkIfCanCreateMoreSteps() {
     try {
+      // Don't create steps if we're refreshing inventory
+      if (forgeState.isRefreshingInventory) {
+        console.log(`[Better Forge] ⏳ Skipping step creation - inventory refresh in progress`);
+        return false;
+      }
+      
       // Get the current selection to know what we're forging
       const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
       if (!selectedEquipment || !selectedTier || !selectedStat) {
@@ -1093,6 +1213,13 @@
       }
       
       console.log(`[Better Forge] 🔍 Checking if can create more steps for ${selectedEquipment} ${selectedStat} T${selectedTier}`);
+      
+      // Check if we've already reached the target tier
+      const currentMaxTier = Math.max(...Array.from(forgeState.intermediateResults.keys()), 1);
+      if (currentMaxTier >= selectedTier) {
+        console.log(`[Better Forge] 🎯 Already reached target tier T${selectedTier}, no more steps needed`);
+        return false;
+      }
       
       // Check each tier to see if we can create more steps
       for (let tier = 1; tier < selectedTier; tier++) {
@@ -1364,6 +1491,7 @@
            removeEquipmentFromArsenal(equipment.id);
            removeEquipmentFromLocalInventory(equipment.id);
             const dustGained = FORGE_CONFIG.DUST_PER_EQUIPMENT;
+            console.log(`[Better Forge] 💰 Disenchant successful, dust gained:`, dustGained);
             updateLocalInventoryGoldDust(0, dustGained);
             updateDustDisplayWithAnimation(dustGained);
           } else if (result.status === 404) {
@@ -1650,6 +1778,8 @@
       return { canForge: false, steps: [], error: 'Highlighted equipment not found in inventory' };
     }
     
+    console.log(`[Better Forge] 🔍 calculateForgeSteps - highlighted items:`, highlightedItems);
+    
     // Validate that highlighted items match the expected equipment, stat, and can reach target tier
     const validation = validateHighlightedEquipment(highlightedItems, equipment, stat, targetTier);
     if (!validation.valid) {
@@ -1665,26 +1795,49 @@
       itemsByTier[item.tier].push(item);
     });
     
-    // Calculate total T1 equivalents from highlighted items
-    const totalT1Equivalent = calculateT1Equivalents(itemsByTier);
-    const totalT1Needed = Math.pow(2, targetTier - 1);
+    console.log(`[Better Forge] 📊 User selected items by tier:`, itemsByTier);
     
-    if (totalT1Equivalent < totalT1Needed) {
-      return { 
-        canForge: false, 
-        steps: [], 
-        error: `Insufficient materials. Need ${totalT1Needed} T1 equivalents, have ${totalT1Equivalent}` 
-      };
+    // Check if we can directly forge to target tier
+    const directTier = targetTier - 1; // We need items from the tier below target
+    const directItems = itemsByTier[directTier] || [];
+    
+    console.log(`[Better Forge] 🔍 Direct forging check: Need T${directTier} items, have ${directItems.length}`);
+    
+    if (directItems.length >= 2) {
+      // We can directly forge from the tier below target
+      console.log(`[Better Forge] ✅ Direct forging possible: T${directTier} → T${targetTier}`);
+      
+      const forgePlan = [];
+      for (let i = 0; i < Math.floor(directItems.length / 2); i++) {
+        const item1 = directItems[i * 2];
+        const item2 = directItems[i * 2 + 1];
+        
+        forgePlan.push({
+          type: 'forge',
+          equipA: item1.id,
+          equipB: item2.id,
+          fromTier: directTier,
+          toTier: targetTier,
+          equipment: equipment,
+          stat: stat,
+          stepOrder: 1,
+          targetTier: targetTier
+        });
+      }
+      
+      console.log(`[Better Forge] 📋 Direct forge plan created: ${forgePlan.length} steps`);
+      return { canForge: true, steps: forgePlan };
     }
     
-    console.log(`[Better Forge] 📊 User selected items by tier:`, itemsByTier);
+    // Skip T1-equivalent validation - create plan based on what we have
+    console.log(`[Better Forge] 📊 Creating forge plan based on available items:`, itemsByTier);
     
     // Create a complete forging plan that accounts for intermediate results
     const forgePlan = [];
     const itemsNeededByTier = {};
     
     // Calculate what we need at each tier
-    for (let tier = 1; tier < targetTier; tier++) {
+    for (let tier = 1; tier <= targetTier; tier++) {
       itemsNeededByTier[tier] = Math.pow(2, targetTier - tier);
     }
     
@@ -1692,7 +1845,7 @@
     
     // Step 1: Create T2 items from T1 items
     const t1Items = (itemsByTier[1] || []).length;
-    const t2Needed = itemsNeededByTier[2]; // 8 for T5
+    const t2Needed = itemsNeededByTier[2] || 0; // 8 for T5
     const t2ToCreate = Math.min(Math.floor(t1Items / 2), t2Needed);
     
     console.log(`[Better Forge] 🔍 T1: Have ${t1Items}, Need ${t2Needed * 2} (${t2Needed} pairs)`);
@@ -1719,7 +1872,7 @@
     
     // Step 2: Create T3 items from T2 items (both existing and newly created)
     const t2Items = (itemsByTier[2] || []).length;
-    const t3Needed = itemsNeededByTier[3]; // 4 for T5
+    const t3Needed = itemsNeededByTier[3] || 0; // 4 for T5
     const totalT2Available = t2Items + t2ToCreate; // Include newly created T2s
     const t3ToCreate = Math.min(Math.floor(totalT2Available / 2), t3Needed);
     
@@ -1746,7 +1899,7 @@
     
     // Step 3: Create T4 items from T3 items (both existing and newly created)
     const t3Items = (itemsByTier[3] || []).length;
-    const t4Needed = itemsNeededByTier[4]; // 2 for T5
+    const t4Needed = itemsNeededByTier[4] || 0; // 2 for T5
     const totalT3Available = t3Items + t3ToCreate; // Include newly created T3s
     const t4ToCreate = Math.min(Math.floor(totalT3Available / 2), t4Needed);
     
@@ -2000,6 +2153,8 @@
   // Generic selection handler factory
   function createSelectionHandler(type, value, updateFunction) {
     return (event) => {
+      console.log(`[Better Forge] 🔍 Selection handler called:`, { type, value });
+      
       // Clear previous selection based on type
       const container = document.getElementById(`auto-upgrade-${type}-col`);
       if (container) {
@@ -2034,6 +2189,8 @@
       } else if (type === 'stats') {
         newState.selectedStat = value;
       }
+      
+      console.log(`[Better Forge] 🔄 Selection state updated:`, { from: currentState, to: newState });
       
       updateAutoUpgradeSelection(newState.selectedEquipment, newState.selectedTier, newState.selectedStat);
       
@@ -2102,7 +2259,10 @@
   // ============================================================================
   
   function calculateForgeRequirements(targetTier, currentTier = 1) {
+    console.log(`[Better Forge] 🔍 calculateForgeRequirements called with:`, { targetTier, currentTier });
+    
     if (targetTier <= currentTier) {
+      console.log(`[Better Forge] ⚠️ Invalid tier: target ${targetTier} <= current ${currentTier}`);
       return { items: 0, tiers: [] };
     }
     
@@ -2112,6 +2272,8 @@
       tiers: []
     };
     
+    console.log(`[Better Forge] 📊 Total T1 items needed: ${requirements.items} (2^${targetTier - 1})`);
+    
     // Calculate the forging steps needed
     for (let tier = 1; tier < targetTier; tier++) {
       const itemsNeeded = Math.pow(2, targetTier - tier - 1);
@@ -2119,17 +2281,28 @@
         tier: tier + 1,
         items: itemsNeeded
       });
+      console.log(`[Better Forge] 📋 T${tier + 1}: Need ${itemsNeeded} items (2^${targetTier - tier - 1})`);
     }
     
+    console.log(`[Better Forge] 📋 Complete requirements:`, requirements);
     return requirements;
   }
   
     function updateDetailsDisplay(equipment, tier, stat) {
     try {
+      console.log(`[Better Forge] 🔍 updateDetailsDisplay called with:`, { equipment, tier, stat });
+      
       const detailsContent = document.getElementById('auto-upgrade-details-col');
       if (!detailsContent) return;
       
+      // Only skip inventory analysis if we're actively forging
+      if (forgeState.isForging === true) {
+        console.log(`[Better Forge] ⏸️ Forging in progress, skipping inventory analysis`);
+        return;
+      }
+      
       if (!equipment || !tier || !stat) {
+        console.log(`[Better Forge] ⚠️ Missing selection: equipment=${equipment}, tier=${tier}, stat=${stat}`);
         detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select equipment, tier, and stat to see result</div>';
         updateForgeButtonColor(null); // Reset to default (grey)
         updateAutoUpgradeStatus('Select equipment, tier, and stat to upgrade');
@@ -2137,6 +2310,7 @@
       }
       
       const requirements = calculateForgeRequirements(tier, 1);
+      console.log(`[Better Forge] 📊 Forge requirements:`, requirements);
       
       if (requirements.items === 0) {
         detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Invalid tier selection</div>';
@@ -2179,6 +2353,8 @@
       
       // Check if forging is possible
       const userInventory = getUserOwnedEquipment();
+      console.log(`[Better Forge] 📦 User inventory for forging check:`, userInventory);
+      
       const matchingItems = userInventory.filter(item => 
         item.name === equipment && 
         item.stat && 
@@ -2186,6 +2362,8 @@
         item.tier < 5 && // Exclude T5 items completely
         item.tier < tier // Exclude target tier items
       );
+      
+      console.log(`[Better Forge] 🔍 Matching items for forging:`, matchingItems);
       
       const itemsByTier = {};
       matchingItems.forEach(item => {
@@ -2216,14 +2394,48 @@
           // Update forge button color - cannot forge
           updateForgeButtonColor(false);
         }
+        
+        // Calculate and display forge plan
+        const { steps, error } = calculateForgeSteps(equipment, stat, tier);
+        
+        if (steps && steps.length > 0) {
+          // Create forge plan display
+          const planDiv = document.createElement('div');
+          planDiv.style.cssText = 'margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; font-size: 10px;';
+          
+          const planTitle = document.createElement('div');
+          planTitle.style.cssText = 'font-weight: bold; margin-bottom: 4px; color: #4CAF50;';
+          planTitle.textContent = 'Forge Plan:';
+          planDiv.appendChild(planTitle);
+          
+          steps.forEach((step, index) => {
+            const stepDiv = document.createElement('div');
+            stepDiv.style.cssText = 'margin: 2px 0; color: #888;';
+            
+            // Handle dynamic steps that haven't been populated yet
+            if (step.equipA && step.equipB && step.result) {
+              stepDiv.textContent = `Step ${index + 1}: T${step.equipA.tier} → T${step.equipB.tier} = T${step.result.tier}`;
+            } else {
+              // Show the planned tier progression
+              const fromTier = step.fromTier || '?';
+              const toTier = step.toTier || '?';
+              const resultTier = step.resultTier || '?';
+              stepDiv.textContent = `Step ${index + 1}: T${fromTier} → T${toTier} = T${resultTier}`;
+            }
+            
+            planDiv.appendChild(stepDiv);
+          });
+          
+          detailsContent.appendChild(planDiv);
+        }
       } else {
         statusDiv.style.color = '#ff4444'; // Red
         statusDiv.textContent = 'Not enough items';
         // Update forge button color - cannot forge
         updateForgeButtonColor(false);
       }
-      
-      // Clear and populate content
+        
+        // Clear and populate content
       detailsContent.innerHTML = '';
       detailsContent.appendChild(iconContainer);
       detailsContent.appendChild(statusDiv);
@@ -2277,17 +2489,20 @@
         });
       });
     }
+
     
     // Combine user inventory with newly forged items
     const allItems = [...userInventory, ...intermediateItems];
     
-    return allItems.filter(item => 
+    const filteredItems = allItems.filter(item => 
       item.name === equipment && 
       item.stat && 
       item.stat.toLowerCase() === stat.toLowerCase() &&
       item.tier < 5 && // Exclude T5 items
       (targetTier === null || item.tier < targetTier) // Exclude target tier items
     );
+    
+    return filteredItems;
   }
   
   function groupItemsByTier(items) {
@@ -2298,6 +2513,7 @@
       }
       itemsByTier[item.tier].push(item);
     });
+    
     return itemsByTier;
   }
   
@@ -2305,9 +2521,13 @@
     let total = 0;
     Object.keys(itemsByTier).forEach(tier => {
       const tierNum = parseInt(tier);
-      const count = Array.isArray(itemsByTier[tierNum]) ? itemsByTier[tierNum].length : itemsByTier[tierNum];
-      total += (count || 0) * Math.pow(2, tierNum - 1);
+      const count = Array.isArray(itemsByTier[tierNum]) ? itemsByTier[tierNum].length : (itemsByTier[tierNum] || 0);
+      const t1Value = Math.pow(2, tierNum - 1);
+      const tierContribution = (count || 0) * t1Value;
+      
+      total += tierContribution;
     });
+    
     return total;
   }
   
@@ -2537,6 +2757,8 @@
   
   // Centralized state management functions
   function updateAutoUpgradeSelection(equipment, tier, stat) {
+    console.log(`[Better Forge] 🔍 updateAutoUpgradeSelection called with:`, { equipment, tier, stat });
+    
     // Reset forge confirmation mode if user changes selection
     if (forgeState.isForgeConfirmationMode) {
       console.log(`[Better Forge] 🔄 Forge confirmation mode reset due to equipment selection change: ${equipment} ${stat} T${tier}`);
@@ -2546,6 +2768,8 @@
     autoUpgradeState.selectedEquipment = equipment;
     autoUpgradeState.selectedTier = tier;
     autoUpgradeState.selectedStat = stat;
+    
+    console.log(`[Better Forge] 📝 Auto-upgrade state updated:`, autoUpgradeState);
     
     // Update details display with new selection
     updateDetailsDisplay(equipment, tier, stat);
@@ -2896,7 +3120,79 @@
     }
   }
   
+  function generateForgingSteps(itemsToConsume, targetTier) {
+    const steps = [];
+    const availableItems = { ...itemsToConsume };
+    
+    console.log(`[Better Forge] 🔨 Smart queue creation for T${targetTier}:`, availableItems);
+    
+    // Calculate what we actually need to reach the target tier
+    let currentTier = 1;
+    let remainingT1Needed = Math.pow(2, targetTier - 1);
+    
+    // Start from highest available tier and work down to find the most efficient path
+    for (let tier = Math.min(targetTier - 1, 4); tier >= 1; tier--) {
+      const available = availableItems[tier] || 0;
+      if (available > 0) {
+        const t1Value = Math.pow(2, tier - 1);
+        const maxCanUse = Math.min(available, Math.floor(remainingT1Needed / t1Value));
+        
+        if (maxCanUse > 0) {
+          console.log(`[Better Forge] 🔍 T${tier}: Available ${available}, T1 value ${t1Value}, Can use ${maxCanUse}`);
+          
+          // Consume these items
+          availableItems[tier] = available - maxCanUse;
+          remainingT1Needed -= maxCanUse * t1Value;
+          
+          // If we consumed items, we might need to create steps to bridge gaps
+          if (tier < targetTier - 1) {
+            // We need to create items at tier+1 to reach target
+            const itemsNeededAtNextTier = Math.pow(2, targetTier - tier - 2);
+            if (itemsNeededAtNextTier > 0) {
+              steps.push({
+                action: 'forge',
+                fromTier: tier,
+                toTier: tier + 1,
+                count: Math.min(maxCanUse, itemsNeededAtNextTier * 2),
+                itemsNeeded: Math.min(maxCanUse, itemsNeededAtNextTier * 2)
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    // If we still need items, create steps to bridge the remaining gap
+    if (remainingT1Needed > 0) {
+      console.log(`[Better Forge] ⚠️ Still need ${remainingT1Needed} T1 equivalents, creating bridging steps`);
+      
+      // Find the highest tier where we can create items
+      for (let tier = 1; tier < targetTier - 1; tier++) {
+        const available = availableItems[tier] || 0;
+        if (available >= 2) {
+          const canForge = Math.floor(available / 2);
+          steps.push({
+            action: 'forge',
+            fromTier: tier,
+            toTier: tier + 1,
+            count: canForge,
+            itemsNeeded: canForge * 2
+          });
+          
+          // Update available items
+          availableItems[tier] = available - (canForge * 2);
+          availableItems[tier + 1] = (availableItems[tier + 1] || 0) + canForge;
+        }
+      }
+    }
+    
+    console.log(`[Better Forge] 🔨 Smart forging steps created:`, steps);
+    return steps;
+  }
+  
   function checkIfCanForge(itemsByTier, targetTier) {
+    console.log(`[Better Forge] 🔍 checkIfCanForge called with:`, { itemsByTier, targetTier });
+    
     const result = {
       canForge: false,
       forgeSteps: [],
@@ -2907,9 +3203,16 @@
     const totalT1Needed = Math.pow(2, targetTier - 1);
     const existingT1Equivalent = calculateT1Equivalents(itemsByTier);
     
+    console.log(`[Better Forge] 📊 T1 equivalents calculation:`, {
+      totalT1Needed,
+      existingT1Equivalent,
+      itemsByTier
+    });
+    
     if (existingT1Equivalent >= totalT1Needed) {
       // We can forge!
       result.canForge = true;
+      console.log(`[Better Forge] ✅ Can forge! Have ${existingT1Equivalent} T1 equivalents, need ${totalT1Needed}`);
       
       // Prioritize using higher tier items first
       let remainingT1Needed = totalT1Needed;
@@ -2922,9 +3225,12 @@
           const t1Value = Math.pow(2, tier - 1);
           const maxCanUse = Math.min(available, Math.floor(remainingT1Needed / t1Value));
           
+          console.log(`[Better Forge] 🔍 T${tier}: Available ${available}, T1 value ${t1Value}, Max can use ${maxCanUse}, Remaining T1 equivalents needed: ${remainingT1Needed}`);
+          
           if (maxCanUse > 0) {
             itemsToConsume[tier] = maxCanUse;
             remainingT1Needed -= maxCanUse * t1Value;
+            console.log(`[Better Forge] 📝 T${tier}: Will consume ${maxCanUse} items, remaining T1 equivalents needed: ${remainingT1Needed}`);
           }
         }
       }
@@ -2939,6 +3245,46 @@
         });
       });
       
+      // Generate forging steps to reach target tier
+      const forgingSteps = generateForgingSteps(itemsToConsume, targetTier);
+      result.forgeSteps.push(...forgingSteps);
+      
+      console.log(`[Better Forge] 📋 Forge steps created:`, result.forgeSteps);
+      
+      // Validate the smart queue creation
+      const totalSteps = result.forgeSteps.length;
+      const consumptionStepsCount = result.forgeSteps.filter(step => step.action === 'consume').length;
+      const forgingStepsCount = result.forgeSteps.filter(step => step.action === 'forge').length;
+      
+      console.log(`[Better Forge] 📊 Queue Summary: Total=${totalSteps}, Consumption=${consumptionStepsCount}, Forging=${forgingStepsCount}`);
+      
+      if (totalSteps <= 3) {
+        console.log(`[Better Forge] ✅ Smart queue created efficiently - only ${totalSteps} steps needed`);
+      } else {
+        console.log(`[Better Forge] ⚠️ Queue might be larger than expected: ${totalSteps} steps`);
+      }
+      
+      // Log complete forge plan summary
+      const consumptionStepsSummary = result.forgeSteps.filter(step => step.action === 'consume');
+      const forgingStepsSummary = result.forgeSteps.filter(step => step.action === 'forge');
+      
+      console.log(`[Better Forge] 📋 Complete Forge Plan Summary:`);
+      console.log(`[Better Forge]   Consumption Steps: ${consumptionStepsSummary.length}`);
+      consumptionStepsSummary.forEach(step => {
+        console.log(`[Better Forge]     - Consume ${step.count} T${step.tier} items`);
+      });
+      console.log(`[Better Forge]   Forging Steps: ${forgingStepsSummary.length}`);
+      forgingStepsSummary.forEach(step => {
+        console.log(`[Better Forge]     - Forge ${step.count} T${step.fromTier} → T${step.toTier} items`);
+      });
+      
+      // Add clear summary of what was consumed and what's needed
+      if (remainingT1Needed === 0) {
+        console.log(`[Better Forge] ✅ All T1 equivalents covered by existing items! No additional items needed.`);
+      } else {
+        console.log(`[Better Forge] ⚠️ Still need ${remainingT1Needed} T1 equivalents after consuming higher tier items.`);
+      }
+      
     } else {
       // We can't forge, calculate what's missing
       const missingT1 = totalT1Needed - existingT1Equivalent;
@@ -2946,8 +3292,10 @@
         count: missingT1,
         tier: 1
       });
+      console.log(`[Better Forge] ❌ Cannot forge: Missing ${missingT1} T1 equivalents`);
     }
     
+    console.log(`[Better Forge] 🔍 checkIfCanForge result:`, result);
     return result;
   }
 
@@ -3057,20 +3405,30 @@
 
   function updateDustDisplayWithAnimation(dustChange = 0) {
     try {
+      console.log(`[Better Forge] 🔍 updateDustDisplayWithAnimation called with:`, dustChange, `type:`, typeof dustChange);
+      
+      // Ensure dustChange is a number
+      const numericDustChange = Number(dustChange) || 0;
+      console.log(`[Better Forge] 📊 Converted dustChange to number:`, numericDustChange);
+      
       const dustAmountElement = document.getElementById('better-forge-dust-amount');
       if (!dustAmountElement) {
+        console.log(`[Better Forge] ⚠️ Dust amount element not found, calling updateDustDisplay`);
         updateDustDisplay();
         return;
       }
       
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
       const currentDust = playerContext?.dust || 0;
+      console.log(`[Better Forge] 📊 Current dust:`, currentDust);
       
-      if (dustChange > 0) {
-        const startValue = currentDust - dustChange;
+      if (numericDustChange > 0) {
+        const startValue = currentDust - numericDustChange;
         const endValue = currentDust;
+        console.log(`[Better Forge] 🎬 Animating dust from ${startValue} to ${endValue}`);
         animateDustCount(startValue, endValue, 800);
       } else {
+        console.log(`[Better Forge] 📝 Setting dust display to:`, currentDust);
         dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       }
       
@@ -3355,14 +3713,24 @@
      
      function getUserOwnedEquipment() {
        try {
-         const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+         // Force a fresh snapshot to ensure we have the latest data
+         const playerSnapshot = globalThis.state?.player?.getSnapshot();
+         if (!playerSnapshot) {
+           console.warn('[Better Forge] ⚠️ Player snapshot not available');
+           return [];
+         }
+         
+         const playerContext = playerSnapshot.context;
          if (!playerContext) {
+           console.warn('[Better Forge] ⚠️ Player context not available');
            return [];
          }
          
          const userEquips = playerContext.equips || [];
+         console.log(`[Better Forge] 📦 Raw player equips from state:`, userEquips.length, 'items');
          
          if (!userEquips || userEquips.length === 0) {
+           console.log('[Better Forge] 📦 No equipment found in player state');
            return [];
          }
          
@@ -3382,6 +3750,7 @@
                  count: 1
                };
              } catch (e) {
+               console.warn(`[Better Forge] ⚠️ Error processing equipment ${equip.gameId}:`, e);
                return null;
              }
            })
@@ -3393,10 +3762,11 @@
            return a.stat.localeCompare(b.stat);
          });
          
+         console.log(`[Better Forge] 📦 Processed equipment:`, sortedEquipment.length, 'items');
          return sortedEquipment;
          
        } catch (error) {
-         console.error('[Better Forge] Error getting user owned equipment:', error);
+         console.error('[Better Forge] 💥 Error getting user owned equipment:', error);
          return [];
        }
      }
@@ -4940,5 +5310,34 @@
     window.BetterForge.cleanup = cleanup;
     window.BetterForge.showModal = showBetterForgeModal;
   }
+  
+  // Force refresh player state to ensure latest inventory data
+  const forceRefreshPlayerState = async () => {
+    try {
+      console.log(`[Better Forge] 🔄 Forcing player state refresh...`);
+      
+      // Clear any cached data
+      if (typeof clearInventoryCache === 'function') {
+        clearInventoryCache();
+      }
+      
+      // Force multiple state snapshots to ensure fresh data
+      if (globalThis.state?.player?.getSnapshot) {
+        for (let i = 0; i < 5; i++) {
+          globalThis.state.player.getSnapshot();
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+      
+      // Additional delay to ensure state is fully updated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      console.log(`[Better Forge] ✅ Player state refresh completed`);
+      return true;
+    } catch (error) {
+      console.error(`[Better Forge] 💥 Error forcing player state refresh:`, error);
+      return false;
+    }
+  };
   
 })();
