@@ -472,14 +472,14 @@ const TRANSLATIONS = {
     partialResultsNote: 'Partial results (analysis stopped early)',
     sandboxModeEnabled: 'Sandbox mode enabled for analysis',
     copyReplayButton: 'Copy Replay',
-    copyBestTimeReplayButton: 'Replay Ticks',
-    copyMaxPointsReplayButton: 'Replay Score',
     replayCopiedMessage: 'Copied!',
     totalTimeLabel: 'Total Time:',
     avgRunTimeLabel: 'Avg Run Time:',
     estimatedTimeRemainingLabel: 'Est. Remaining:',
     fastestRunTimeLabel: 'Fastest Run:',
-    slowestRunTimeLabel: 'Slowest Run:'
+    slowestRunTimeLabel: 'Slowest Run:',
+    maxPointsSuffix: 'max points',
+    sPlusMaxPointsRateLabel: 'S+{points} Rate:'
   },
   pt: {
     buttonText: 'Analisar Tabuleiro',
@@ -520,14 +520,14 @@ const TRANSLATIONS = {
     partialResultsNote: 'Resultados parciais (análise interrompida)',
     sandboxModeEnabled: 'Modo sandbox ativado para análise',
     copyReplayButton: 'Copiar Replay',
-    copyBestTimeReplayButton: 'Replay Ticks',
-    copyMaxPointsReplayButton: 'Replay Score',
     replayCopiedMessage: 'Copiado!',
     totalTimeLabel: 'Tempo Total:',
     avgRunTimeLabel: 'Tempo Médio/run:',
     estimatedTimeRemainingLabel: 'Tempo Restante Est.:',
     fastestRunTimeLabel: 'Execução Mais Rápida:',
-    slowestRunTimeLabel: 'Execução Mais Lenta:'
+    slowestRunTimeLabel: 'Execução Mais Lenta:',
+    maxPointsSuffix: 'pontos máximos',
+    sPlusMaxPointsRateLabel: 'Taxa S+{points}:'
   }
 };
 
@@ -731,6 +731,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   let maxRankPoints = 0;
   let maxRankPointsResult = null;
   let sPlusCount = 0;
+  let sPlusMaxPointsCount = 0; // Track S+ runs that achieved max rank points
   let totalRuns = 0;
   let completedRuns = 0;
 
@@ -808,7 +809,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
           type: "setState",
           fn: prevState => ({
             ...prevState,
-            sandboxSeed: runSeed,
+            customSandboxSeed: runSeed,
             gameStarted: true
           })
         });
@@ -870,6 +871,10 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         
         if (grade === 'S+') {
           sPlusCount++;
+          // Check if this S+ run achieved the maximum rank points
+          if (rankPoints === maxRankPoints) {
+            sPlusMaxPointsCount++;
+          }
           // If stopOnSPlus is enabled, we might want to exit early
           if (config.stopOnSPlus) {
             console.log('Achieved S+ grade, stopping analysis early');
@@ -1034,6 +1039,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       totalRuns,
       completedRuns,
       sPlusCount,
+      sPlusMaxPointsCount,
       sPlusRate,
       completionRate,
       minTicks: isFinite(minTicks) ? minTicks : 0,
@@ -1545,7 +1551,63 @@ function showResultsModal(results) {
     
     const sPlusRateValue = document.createElement('div');
     sPlusRateValue.textContent = `${results.summary.sPlusRate}% (${results.summary.sPlusCount}/${results.summary.totalRuns})`;
-    sPlusRateValue.style.cssText = 'text-align: right; color: gold;';
+    sPlusRateValue.style.cssText = 'text-align: right; color: #FFD700;';
+    
+    // Create S+ rate lines for each unique rank point
+    const sPlusRateElements = [];
+    
+    if (results.summary.sPlusCount > 0) {
+      // Get all S+ runs and group by rank points
+      const sPlusResults = results.results.filter(r => r.grade === 'S+');
+      const rankPointsCounts = {};
+      
+      sPlusResults.forEach(r => {
+        rankPointsCounts[r.rankPoints] = (rankPointsCounts[r.rankPoints] || 0) + 1;
+      });
+      
+      // Sort rank points from highest to lowest
+      const sortedRankPoints = Object.keys(rankPointsCounts)
+        .map(points => parseInt(points))
+        .sort((a, b) => b - a);
+      
+      // Create a line for each rank point
+      sortedRankPoints.forEach(rankPoints => {
+        const count = rankPointsCounts[rankPoints];
+        const rate = results.summary.totalRuns > 0 ? 
+          (count / results.summary.totalRuns * 100).toFixed(2) : '0.00';
+        
+        const label = document.createElement('div');
+        label.textContent = rankPoints === results.summary.maxRankPoints ? 
+          t('sPlusMaxPointsRateLabel').replace('{points}', rankPoints) : 
+          `S+${rankPoints} Rate:`;
+        label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
+        
+        const value = document.createElement('div');
+        value.textContent = `${rate}% (${count}/${results.summary.totalRuns})`;
+        
+        // Color the S+ rate text based on rank points to match chart colors
+        // The highest rank points gets the brightest yellow, descending ranks get lighter shades
+        let textColor;
+        const highestRankPoints = sortedRankPoints[0];
+        const rankDifference = highestRankPoints - rankPoints;
+        
+        switch (rankDifference) {
+          case 0: textColor = '#FFD700'; break; // Bright gold for highest rank points
+          case 1: textColor = '#FFA500'; break; // Orange for second highest
+          case 2: textColor = '#FF8C00'; break; // Dark orange for third highest
+          case 3: textColor = '#FF6347'; break; // Tomato for fourth highest
+          case 4: textColor = '#FF4500'; break; // Orange red for fifth highest
+          case 5: textColor = '#FF0000'; break; // Red for sixth highest
+          case 6: textColor = '#DC143C'; break; // Crimson for seventh highest
+          case 7: textColor = '#8B0000'; break; // Dark red for eighth highest
+          default: textColor = '#FFD700'; break; // Default gold for unknown rank differences
+        }
+        
+        value.style.cssText = `text-align: right; color: ${textColor}; font-style: italic;`;
+        
+        sPlusRateElements.push({ label, value });
+      });
+    }
     
     // Completion Rate
     const completionRateLabel = document.createElement('div');
@@ -1583,14 +1645,7 @@ function showResultsModal(results) {
     medianTimeValue.textContent = `${results.summary.medianTicks} ${t('ticksSuffix')}`;
     medianTimeValue.style.cssText = 'text-align: right;';
     
-    // Max Rank Points
-    const maxPointsLabel = document.createElement('div');
-    maxPointsLabel.textContent = t('maxPointsLabel');
-    maxPointsLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    
-    const maxPointsValue = document.createElement('div');
-    maxPointsValue.textContent = results.summary.maxRankPoints.toString();
-    maxPointsValue.style.cssText = 'text-align: right;';
+    // Max Rank Points - Removed as redundant since we show S+ breakdown above
     
     // Add timing information
     
@@ -1615,6 +1670,13 @@ function showResultsModal(results) {
     // Add all stats to the container
     statsContainer.appendChild(sPlusRateLabel);
     statsContainer.appendChild(sPlusRateValue);
+    
+    // Add all S+ rate lines
+    sPlusRateElements.forEach(({ label, value }) => {
+      statsContainer.appendChild(label);
+      statsContainer.appendChild(value);
+    });
+    
     statsContainer.appendChild(completionRateLabel);
     statsContainer.appendChild(completionRateValue);
     statsContainer.appendChild(minTimeLabel);
@@ -1623,8 +1685,6 @@ function showResultsModal(results) {
     statsContainer.appendChild(maxTimeValue);
     statsContainer.appendChild(medianTimeLabel);
     statsContainer.appendChild(medianTimeValue);
-    statsContainer.appendChild(maxPointsLabel);
-    statsContainer.appendChild(maxPointsValue);
     
     // Add timing stats
     statsContainer.appendChild(document.createElement('hr'));
@@ -1637,202 +1697,323 @@ function showResultsModal(results) {
     // Add the stats container to the content
     content.appendChild(statsContainer);
     
-    // Check if we have valid replay data for best time or max points
-    const hasBestTimeReplay = results.summary.bestTimeResult && results.summary.bestTimeResult.board;
-    const hasMaxPointsReplay = results.summary.maxPointsResult && results.summary.maxPointsResult.board;
+    // Check if we have valid replay data for target ticks
     const hasTargetTicksReplay = results.summary.targetTicksResult && results.summary.targetTicksResult.board;
     
-    console.log('Best time replay data:', results.summary.bestTimeResult);
-    console.log('Max points replay data:', results.summary.maxPointsResult);
-    
-    // Add copy replay buttons in their own container
-    if (hasBestTimeReplay || hasMaxPointsReplay || hasTargetTicksReplay) {
-      // Create a dedicated container for replay buttons
-      const replayButtonsContainer = document.createElement('div');
-      replayButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 20px; width: 100%;';
+    // Add target ticks replay button if available (only useful replay button)
+    if (hasTargetTicksReplay) {
+      const copyTargetTicksButton = document.createElement('button');
+      copyTargetTicksButton.textContent = t('copyTargetTicksReplayButton');
+      copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+      copyTargetTicksButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 20px;';
       
-      // Add best time button if available
-      if (hasBestTimeReplay) {
-        const copyBestTimeButton = document.createElement('button');
-        copyBestTimeButton.textContent = t('copyBestTimeReplayButton');
-        copyBestTimeButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-        copyBestTimeButton.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+      // Add click handler
+      copyTargetTicksButton.addEventListener('click', () => {
+        // Get the board data
+        const replayData = results.summary.targetTicksResult.board;
         
-        // Add click handler - use exact $replay format
-        copyBestTimeButton.addEventListener('click', () => {
-          // Get the board data, ensuring it's a complete copy
-          const replayData = results.summary.bestTimeResult.board;
-          
-          // Always verify and fix the replay data format
-          if (!verifyAndFixReplayData(replayData)) {
-            // If the data is invalid, show an error to the user
-            api.ui.components.createModal({
-              title: 'Error',
-              content: 'Failed to create replay data. The board configuration may be incomplete.',
-              buttons: [{ text: 'OK', primary: true }]
-            });
-            return;
-          }
-          
-          // Create the $replay formatted string with proper data
-          const replayText = `$replay(${JSON.stringify(replayData)})`;
-          
-          // Log the replay text for debugging
-          console.log('Best time replay text:', replayText);
-          
-          // Copy to clipboard
-          const success = copyToClipboard(replayText);
-          if (success) {
-            const originalText = copyBestTimeButton.textContent;
-            copyBestTimeButton.textContent = t('replayCopiedMessage');
-            setTimeout(() => {
-              copyBestTimeButton.textContent = originalText;
-            }, 2000);
-          }
-        });
+        // Verify and fix the replay data format
+        if (!verifyAndFixReplayData(replayData)) {
+          api.ui.components.createModal({
+            title: 'Error',
+            content: 'Failed to create replay data. The board configuration may be incomplete.',
+            buttons: [{ text: 'OK', primary: true }]
+          });
+          return;
+        }
         
-        replayButtonsContainer.appendChild(copyBestTimeButton);
-      }
+        // Create the $replay formatted string
+        const replayText = `$replay(${JSON.stringify(replayData)})`;
+        
+        // Log for debugging
+        console.log('Target ticks replay text:', replayText);
+        
+        // Copy to clipboard
+        const success = copyToClipboard(replayText);
+        if (success) {
+          const originalText = copyTargetTicksButton.textContent;
+          copyTargetTicksButton.textContent = t('replayCopiedMessage');
+          setTimeout(() => {
+            copyTargetTicksButton.textContent = originalText;
+          }, 2000);
+        }
+      });
       
-      // Add max points button if available
-      if (hasMaxPointsReplay) {
-        const copyMaxPointsButton = document.createElement('button');
-        copyMaxPointsButton.textContent = t('copyMaxPointsReplayButton');
-        copyMaxPointsButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-        copyMaxPointsButton.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        
-        // Add click handler - use exact $replay format
-        copyMaxPointsButton.addEventListener('click', () => {
-          // Get the board data, ensuring it's a complete copy
-          const replayData = results.summary.maxPointsResult.board;
-          
-          // Always verify and fix the replay data format
-          if (!verifyAndFixReplayData(replayData)) {
-            // If the data is invalid, show an error to the user
-            api.ui.components.createModal({
-              title: 'Error',
-              content: 'Failed to create replay data. The board configuration may be incomplete.',
-              buttons: [{ text: 'OK', primary: true }]
-            });
-            return;
-          }
-          
-          // Create the $replay formatted string with proper data
-          const replayText = `$replay(${JSON.stringify(replayData)})`;
-          
-          // Log the replay text for debugging
-          console.log('Max points replay text:', replayText);
-          
-          // Copy to clipboard
-          const success = copyToClipboard(replayText);
-          if (success) {
-            const originalText = copyMaxPointsButton.textContent;
-            copyMaxPointsButton.textContent = t('replayCopiedMessage');
-            setTimeout(() => {
-              copyMaxPointsButton.textContent = originalText;
-            }, 2000);
-          }
-        });
-        
-        replayButtonsContainer.appendChild(copyMaxPointsButton);
-      }
-      
-      // Add target button if available
-      if (hasTargetTicksReplay) {
-        const copyTargetTicksButton = document.createElement('button');
-        copyTargetTicksButton.textContent = t('copyTargetTicksReplayButton');
-        copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-        copyTargetTicksButton.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        
-        // Add click handler
-        copyTargetTicksButton.addEventListener('click', () => {
-          // Get the board data
-          const replayData = results.summary.targetTicksResult.board;
-          
-          // Verify and fix the replay data format
-          if (!verifyAndFixReplayData(replayData)) {
-            api.ui.components.createModal({
-              title: 'Error',
-              content: 'Failed to create replay data. The board configuration may be incomplete.',
-              buttons: [{ text: 'OK', primary: true }]
-            });
-            return;
-          }
-          
-          // Create the $replay formatted string
-          const replayText = `$replay(${JSON.stringify(replayData)})`;
-          
-          // Log for debugging
-          console.log('Target ticks replay text:', replayText);
-          
-          // Copy to clipboard
-          const success = copyToClipboard(replayText);
-          if (success) {
-            const originalText = copyTargetTicksButton.textContent;
-            copyTargetTicksButton.textContent = t('replayCopiedMessage');
-            setTimeout(() => {
-              copyTargetTicksButton.textContent = originalText;
-            }, 2000);
-          }
-        });
-        
-        replayButtonsContainer.appendChild(copyTargetTicksButton);
-      }
-      
-      // Add the buttons container to the content
-      content.appendChild(replayButtonsContainer);
+      // Add the button directly to content
+      content.appendChild(copyTargetTicksButton);
     }
     
     // Only show chart if there are results
     if (results.results.length > 0) {
       // Create a chart visualization
       const chartContainer = document.createElement('div');
-      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 150px; position: relative;';
+      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
       
-      // Calculate the appropriate bar width to fit within container
-      const containerWidth = 270; // Fixed container width (minus padding)
-      const maxBars = 20; // Maximum number of bars to display - reduced to 14 to ensure they fit
+      // Add note about clickable bars above the chart
+      const chartClickableNote = document.createElement('div');
+      chartClickableNote.textContent = '💡 Tip: Click on any bar in the chart below to copy replay data for that specific run';
+      chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
+      content.appendChild(chartClickableNote);
       
-      // Determine if we need to limit the number of displayed results
-      const displayResults = results.results.length > maxBars ? 
-        results.results.slice(0, maxBars) : 
-        results.results;
+      // Create sorting buttons container
+      const sortButtonsContainer = document.createElement('div');
+      sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
       
-      // Calculate bar width based on available space
-      const spacing = 4; // Increased spacing for better visibility
-      const barWidth = Math.max(4, Math.floor((containerWidth - (displayResults.length * spacing)) / displayResults.length));
-      
-      // Find the maximum tick value for proper scaling
-      const maxTicks = Math.max(...results.results.map(r => r.ticks));
-      
-      // Create bars
-      displayResults.forEach((result, index) => {
-        const bar = document.createElement('div');
-        const height = Math.max(10, Math.floor((result.ticks / maxTicks) * 120));
+      // Create sorting buttons
+      const createSortButton = (text, sortType) => {
+        const button = document.createElement('button');
+        button.textContent = text;
+        button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+        button.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
         
-        bar.style.cssText = `
-          position: absolute;
-          bottom: 0;
-          left: ${index * (barWidth + spacing)}px;
-          width: ${barWidth}px;
-          height: ${height}px;
-          background-color: ${result.completed ? (result.grade === 'S+' ? 'gold' : '#4CAF50') : '#e74c3c'};
-          transition: height 0.3s ease;
-        `;
+        // Set first button as active by default
+        if (sortType === 'runs') {
+          button.style.backgroundColor = '#4a5';
+        }
         
-        // Add tooltip on hover
-        bar.title = `Run ${index + 1}: ${result.ticks} ticks, Grade: ${result.grade}, ${result.completed ? 'Completed' : 'Failed'}`;
+        button.addEventListener('click', () => {
+          // Update button styles
+          sortButtonsContainer.querySelectorAll('button').forEach(btn => {
+            btn.style.backgroundColor = '';
+          });
+          button.style.backgroundColor = '#4a5';
+          
+          // Sort and redraw chart
+          sortAndRedrawChart(sortType);
+        });
         
-        chartContainer.appendChild(bar);
-      });
+        return button;
+      };
       
-      // Add a note if we limited the display
-      if (results.results.length > maxBars) {
-        const limitNote = document.createElement('div');
-        limitNote.textContent = `Showing ${maxBars} of ${results.results.length} runs`;
-        limitNote.style.cssText = 'text-align: center; font-size: 0.8em; color: #999; margin-top: 5px;';
-        chartContainer.appendChild(limitNote);
-      }
+      const allRunsButton = createSortButton('All Runs', 'runs');
+      const minTimeButton = createSortButton('Min Time', 'time');
+      const sPlusRanksButton = createSortButton('S+ Ranks', 'splus');
+      
+      sortButtonsContainer.appendChild(allRunsButton);
+      sortButtonsContainer.appendChild(minTimeButton);
+      sortButtonsContainer.appendChild(sPlusRanksButton);
+      
+      chartContainer.appendChild(sortButtonsContainer);
+      
+      // Create chart bars container
+      const barsContainer = document.createElement('div');
+      barsContainer.style.cssText = 'height: 150px; position: relative;';
+      chartContainer.appendChild(barsContainer);
+      
+      // Use all results for the chart
+      const displayResults = results.results;
+      
+      // Calculate bar width and total chart width
+      const spacing = 4; // Spacing between bars
+      const barWidth = 8; // Fixed bar width for consistent appearance
+      const totalChartWidth = displayResults.length * (barWidth + spacing) - spacing; // Total width needed for all bars
+      
+      // Set the bars container to accommodate all bars
+      barsContainer.style.cssText = `height: 150px; position: relative; width: ${totalChartWidth}px;`;
+      
+      // Create a scrollable wrapper
+      const scrollWrapper = document.createElement('div');
+      scrollWrapper.style.cssText = `
+        width: 246px; 
+        height: 150px; 
+        overflow-x: auto; 
+        overflow-y: hidden;
+        border: 1px solid #555;
+        border-radius: 4px;
+        position: relative;
+        padding-left: 2px;
+        padding-right: 2px;
+      `;
+      
+      // Replace the bars container in the scroll wrapper
+      chartContainer.removeChild(barsContainer);
+      scrollWrapper.appendChild(barsContainer);
+      chartContainer.appendChild(scrollWrapper);
+      
+      // Ensure the bars container is properly sized for scrolling
+      barsContainer.style.cssText = `height: 150px; position: relative; width: ${totalChartWidth}px;`;
+      
+      // Function to sort and redraw chart
+      const sortAndRedrawChart = (sortType) => {
+        // Clear existing bars
+        barsContainer.innerHTML = '';
+        
+        let sortedResults;
+        switch (sortType) {
+          case 'runs':
+            // Sort by run order (original order)
+            sortedResults = [...displayResults];
+            break;
+          case 'time':
+            // Sort by ticks (ascending - fastest first)
+            sortedResults = [...displayResults].sort((a, b) => a.ticks - b.ticks);
+            break;
+          case 'splus':
+            // Sort by grade hierarchy (S+ → S → A → B → C...), then by ticks, then by run order
+            sortedResults = [...displayResults].sort((a, b) => {
+              // First priority: S+ grades come before all other grades
+              if (a.grade === 'S+' && b.grade !== 'S+') return -1;
+              if (a.grade !== 'S+' && b.grade === 'S+') return 1;
+              
+              // Second priority: Among S+ grades, sort by rank points (descending - highest first)
+              if (a.grade === 'S+' && b.grade === 'S+') {
+                const rankDiff = (b.rankPoints || 0) - (a.rankPoints || 0);
+                if (rankDiff !== 0) return rankDiff;
+              }
+              
+              // Third priority: Among non-S+ grades, sort by grade hierarchy (S → A → B → C...)
+              if (a.grade !== 'S+' && b.grade !== 'S+') {
+                const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6, 'F': 7 };
+                const aGradeOrder = gradeOrder[a.grade] || 999;
+                const bGradeOrder = gradeOrder[b.grade] || 999;
+                
+                if (aGradeOrder !== bGradeOrder) {
+                  return aGradeOrder - bGradeOrder;
+                }
+              }
+              
+              // Fourth priority: ticks (fastest first)
+              const tickDiff = a.ticks - b.ticks;
+              if (tickDiff !== 0) return tickDiff;
+              
+              // Fifth priority: run order (earliest first)
+              return results.results.indexOf(a) - results.results.indexOf(b);
+            });
+            break;
+          default:
+            sortedResults = [...displayResults];
+          }
+        
+        // Find the maximum tick value for proper scaling
+        const maxTicks = Math.max(...sortedResults.map(r => r.ticks));
+        
+        // Create bars
+        sortedResults.forEach((result, index) => {
+          const bar = document.createElement('div');
+          const height = Math.max(10, Math.floor((result.ticks / maxTicks) * 120));
+          
+          // Determine bar color based on grade and rank points
+          let barColor;
+          if (result.completed) {
+            if (result.grade === 'S+' && result.rankPoints) {
+              // Calculate the highest rank points dynamically for this run
+              const sPlusResults = displayResults.filter(r => r.grade === 'S+' && r.rankPoints);
+              const highestRankPoints = sPlusResults.length > 0 ? 
+                Math.max(...sPlusResults.map(r => r.rankPoints)) : 0;
+              
+              // Different shades of yellow based on rank difference from highest
+              const rankDifference = highestRankPoints - result.rankPoints;
+              
+              switch (rankDifference) {
+                case 0: barColor = '#FFD700'; break; // Bright gold for highest rank points
+                case 1: barColor = '#FFA500'; break; // Orange for second highest
+                case 2: barColor = '#FF8C00'; break; // Dark orange for third highest
+                case 3: barColor = '#FF6347'; break; // Tomato for fourth highest
+                case 4: barColor = '#FF4500'; break; // Orange red for fifth highest
+                case 5: barColor = '#FF0000'; break; // Red for sixth highest
+                case 6: barColor = '#DC143C'; break; // Crimson for seventh highest
+                case 7: barColor = '#8B0000'; break; // Dark red for eighth highest
+                default: barColor = '#FFD700'; break; // Default gold for unknown rank differences
+              }
+            } else if (result.grade === 'S+') {
+              barColor = '#FFD700'; // Default gold for S+ without rank points
+            } else {
+              barColor = '#4CAF50'; // Green for other completed grades
+            }
+          } else {
+            barColor = '#e74c3c'; // Red for failed runs
+          }
+          
+          bar.style.cssText = `
+            position: absolute;
+            bottom: 0;
+            left: ${index * (barWidth + spacing)}px;
+            width: ${barWidth}px;
+            height: ${height}px;
+            background-color: ${barColor};
+            transition: height 0.3s ease;
+            cursor: pointer;
+            border: 1px solid transparent;
+          `;
+          
+          // Add hover effects
+          bar.addEventListener('mouseenter', () => {
+            bar.style.border = '1px solid white';
+            bar.style.transform = 'scale(1.1)';
+          });
+          
+          bar.addEventListener('mouseleave', () => {
+            bar.style.border = '1px solid transparent';
+            bar.style.transform = 'scale(1)';
+          });
+          
+          // Add tooltip on hover
+          let tooltipText = `Run ${results.results.indexOf(result) + 1}: ${result.ticks} ticks, Grade: `;
+          
+          // Show S+ with rank points directly in the grade
+          if (result.grade === 'S+' && result.rankPoints) {
+            tooltipText += `S+${result.rankPoints}`;
+          } else {
+            tooltipText += result.grade;
+          }
+          
+          tooltipText += `, ${result.completed ? 'Completed' : 'Failed'}`;
+          if (result.seed) {
+            tooltipText += `, Seed: ${result.seed}`;
+          }
+          tooltipText += '\nClick to copy replay data';
+          bar.title = tooltipText;
+          
+          // Add click handler to copy replay data for this specific run
+          bar.addEventListener('click', () => {
+            // Create replay data for this specific run
+            const replayData = createReplayDataForRun(result);
+            
+            if (replayData) {
+              // Create the $replay formatted string
+              const replayText = `$replay(${JSON.stringify(replayData)})`;
+              
+              // Copy to clipboard
+              const success = copyToClipboard(replayText);
+              
+              if (success) {
+                // Show visual feedback
+                const originalBorder = bar.style.border;
+                
+                bar.style.border = '2px solid white';
+                
+                // Reset after 2 seconds
+                setTimeout(() => {
+                  bar.style.border = originalBorder;
+                }, 2000);
+                
+                // Show a brief notification
+                showCopyNotification(`Copied run ${results.results.indexOf(result) + 1} replay data!`);
+              } else {
+                showCopyNotification('Failed to copy replay data', true);
+              }
+            } else {
+              showCopyNotification('Failed to create replay data for this run', true);
+            }
+          });
+          
+          barsContainer.appendChild(bar);
+        });
+        
+        // Reset scroll position to left when sorting
+        scrollWrapper.scrollLeft = 0;
+      };
+      
+      // Initial chart draw
+      sortAndRedrawChart('runs');
+      
+      // Add note about clickable bars
+      const clickableNote = document.createElement('div');
+      clickableNote.textContent = '💡 Click on any bar to copy replay data for that specific run';
+      clickableNote.style.cssText = 'text-align: center; color: #aaa; font-size: 0.9em; margin-top: 10px; font-style: italic;';
+      chartContainer.appendChild(clickableNote);
+      
+      // No need for limit note since we show all runs with scrollbar
       
       content.appendChild(chartContainer);
     } else {
@@ -1934,6 +2115,74 @@ function verifyAndFixReplayData(replayData) {
   }
   
   return true;
+}
+
+// Function to create replay data for a specific run
+function createReplayDataForRun(runResult) {
+  try {
+    // Get the current board configuration
+    let boardData;
+    
+    // Try various methods to get the most complete board data
+    if (typeof window.$serializeBoard === 'function') {
+      boardData = JSON.parse(window.$serializeBoard());
+      console.log('Using window.$serializeBoard for run replay data');
+    } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
+      boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+      console.log('Using BestiaryModAPI.utility.serializeBoard for run replay data');
+    } else {
+      boardData = serializeBoard();
+      console.log('Using local serializeBoard for run replay data');
+    }
+    
+    // Add the seed from the run result
+    if (runResult.seed) {
+      boardData.seed = runResult.seed;
+    }
+    
+    // Verify the replay data is valid
+    if (!verifyAndFixReplayData(boardData)) {
+      console.error('Failed to create valid replay data for run:', runResult);
+      return null;
+    }
+    
+    return boardData;
+  } catch (error) {
+    console.error('Error creating replay data for run:', error);
+    return null;
+  }
+}
+
+// Function to show copy notification
+function showCopyNotification(message, isError = false) {
+  // Create notification element
+  const notification = document.createElement('div');
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background-color: ${isError ? '#e74c3c' : '#2ecc71'};
+    color: white;
+    padding: 12px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 10000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 300px;
+    word-wrap: break-word;
+  `;
+  
+  // Add to document
+  document.body.appendChild(notification);
+  
+  // Remove after 3 seconds
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.parentNode.removeChild(notification);
+    }
+  }, 3000);
 }
 
 // Show the configuration modal and prepare for analysis

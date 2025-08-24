@@ -5056,6 +5056,13 @@
   
   function observeInventory() {
     try {
+      // Additional safety check for DOM readiness
+      if (!document.body) {
+        console.warn('[Better Forge] ⚠️ Document body not ready, retrying in 500ms...');
+        setTimeout(observeInventory, 500);
+        return;
+      }
+
       if (inventoryObserver) {
         try { 
           inventoryObserver.disconnect(); 
@@ -5131,6 +5138,12 @@
   
   function addBetterForgeButton() {
     try {
+      // Additional safety checks
+      if (!document || !document.body) {
+        console.warn('[Better Forge] ⚠️ Document not ready, skipping button creation');
+        return;
+      }
+
       if (document.querySelector('.better-forge-inventory-button')) {
         failedAttempts = 0;
         hasLoggedInventoryNotFound = false;
@@ -5209,92 +5222,166 @@
   
   function cleanup() {
     try {
-             clearAllIntervals();
-       
-       if (buttonCheckInterval) {
-         clearInterval(buttonCheckInterval);
-         buttonCheckInterval = null;
-       }
-       
-       forgeState.isDisenchanting = false;
-       forgeState.isDisenchantingInProgress = false;
-       forgeState.isConfirmationMode = false;
-       forgeState.rateLimitedEquipment.clear();
-       forgeState.rateLimitedEquipmentRetryCount.clear();
-       
-       // Clean up forging state
-       forgeState.isForging = false;
-       forgeState.isForgingInProgress = false;
-       forgeState.isForgeConfirmationMode = false;
-       forgeState.forgeQueue = [];
-       forgeState.currentForgeStep = null;
-       forgeState.forgeRateLimit = {
-         lastRequest: 0,
-         requestCount: 0,
-         maxRequests: 30,
-         timeWindow: 10000
-       };
-       forgeState.highlightedEquipment.clear();
-       forgeState.intermediateResults.clear();
-       
-       removeEscKeyHandler();
-       
-       failedAttempts = 0;
-       hasLoggedInventoryNotFound = false;
-       
-       clearDomCache();
-       
-       if (inventoryObserver) {
-        try { 
-          inventoryObserver.disconnect(); 
-        } catch (e) {
-          console.warn('[Better Forge] Error disconnecting observer:', e);
-        }
-        inventoryObserver = null;
+      console.log('[Better Forge] 🧹 Starting cleanup...');
+      
+      // Reset retry counters
+      initRetryCount = 0;
+      
+      clearAllIntervals();
+     
+      if (buttonCheckInterval) {
+        clearInterval(buttonCheckInterval);
+        buttonCheckInterval = null;
       }
       
-      // Remove UI elements
-             try {
-         const forgeButtons = document.querySelectorAll('.better-forge-inventory-button');
-         forgeButtons.forEach(btn => {
-           try {
-             btn.remove();
-           } catch (e) {
-             console.warn('[Better Forge] Error removing button:', e);
-           }
-         });
+      forgeState.isDisenchanting = false;
+      forgeState.isDisenchantingInProgress = false;
+      forgeState.isConfirmationMode = false;
+      forgeState.rateLimitedEquipment.clear();
+      forgeState.rateLimitedEquipmentRetryCount.clear();
+      
+      // Clean up forging state
+      forgeState.isForging = false;
+      forgeState.isForgingInProgress = false;
+      forgeState.isForgeConfirmationMode = false;
+      forgeState.forgeQueue = [];
+      forgeState.currentForgeStep = null;
+      forgeState.forgeRateLimit = {
+        lastRequest: 0,
+        requestCount: 0,
+        maxRequests: 30,
+        timeWindow: 10000
+      };
+      forgeState.highlightedEquipment.clear();
+      forgeState.intermediateResults.clear();
+      
+      removeEscKeyHandler();
+      
+      failedAttempts = 0;
+      hasLoggedInventoryNotFound = false;
+      
+      clearDomCache();
+      
+      if (inventoryObserver) {
+       try { 
+         inventoryObserver.disconnect(); 
        } catch (e) {
-         console.warn('[Better Forge] Error removing forge buttons:', e);
+         console.warn('[Better Forge] Error disconnecting observer:', e);
        }
-       
+       inventoryObserver = null;
+     }
+     
+     // Remove UI elements
+            try {
+        const forgeButtons = document.querySelectorAll('.better-forge-inventory-button');
+        forgeButtons.forEach(btn => {
+          try {
+            btn.remove();
+          } catch (e) {
+            console.warn('[Better Forge] Error removing button:', e);
+          }
+        });
+      } catch (e) {
+        console.warn('[Better Forge] Error removing forge buttons:', e);
+      }
+      
+      try {
+        const injectedStyle = document.getElementById('betterforge-btn-css');
+        if (injectedStyle) {
+          injectedStyle.remove();
+        }
+      } catch (e) {
+        console.warn('[Better Forge] Error removing injected styles:', e);
+      }
+      
+      if (typeof window !== 'undefined') {
        try {
-         const injectedStyle = document.getElementById('betterforge-btn-css');
-         if (injectedStyle) {
-           injectedStyle.remove();
+         if (window.BetterForge) {
+           delete window.BetterForge.cleanup;
+           delete window.BetterForge;
          }
        } catch (e) {
-         console.warn('[Better Forge] Error removing injected styles:', e);
+         console.warn('[Better Forge] Error cleaning global state:', e);
        }
-       
-       if (typeof window !== 'undefined') {
-        try {
-          if (window.BetterForge) {
-            delete window.BetterForge.cleanup;
-            delete window.BetterForge;
-          }
-        } catch (e) {
-          console.warn('[Better Forge] Error cleaning global state:', e);
-        }
+     }
+     
+     console.log('[Better Forge] ✅ Cleanup completed successfully');
+     
+   } catch (error) {
+     console.error('[Better Forge] 💥 Error during cleanup:', error);
+   }
+ }
+  
+  // Add proper initialization checks
+  function initializeBetterForge() {
+    try {
+      // Check if required APIs are available
+      if (!api) {
+        console.error('[Better Forge] ❌ BestiaryModAPI not available');
+        return false;
+      }
+
+      // Check if context is available
+      if (!context) {
+        console.error('[Better Forge] ❌ Mod context not available');
+        return false;
+      }
+
+      // Check if game state is available
+      if (!globalThis.state) {
+        console.error('[Better Forge] ❌ Game state not available');
+        return false;
+      }
+
+      // Check if player state is available
+      if (!globalThis.state.player) {
+        console.error('[Better Forge] ❌ Player state not available');
+        return false;
+      }
+
+      console.log('[Better Forge] ✅ All dependencies available, initializing...');
+      
+      // Wait for DOM to be ready before observing
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          observeInventory();
+        });
+      } else {
+        observeInventory();
       }
       
+      return true;
     } catch (error) {
-      console.error('[Better Forge] Error during cleanup:', error);
+      console.error('[Better Forge] 💥 Initialization failed:', error);
+      return false;
     }
   }
-  
+
+  // Retry logic for initialization
+  let initRetryCount = 0;
+  const MAX_INIT_RETRIES = 5;
+  const INIT_RETRY_DELAY = 2000;
+
+  function attemptInitialization() {
+    if (initRetryCount >= MAX_INIT_RETRIES) {
+      console.error(`[Better Forge] ❌ Failed to initialize after ${MAX_INIT_RETRIES} attempts`);
+      return;
+    }
+
+    if (!initializeBetterForge()) {
+      initRetryCount++;
+      console.warn(`[Better Forge] ⚠️ Initialization attempt ${initRetryCount}/${MAX_INIT_RETRIES} failed, retrying in ${INIT_RETRY_DELAY}ms...`);
+      
+      setTimeout(attemptInitialization, INIT_RETRY_DELAY);
+    } else {
+      console.log('[Better Forge] ✅ Initialization successful');
+    }
+  }
+
   if (config.enabled) {
     try {
-      observeInventory();
+      // Wait a bit for the game to fully load, then attempt initialization
+      setTimeout(attemptInitialization, 1000);
     } catch (error) {
       handleError(error, 'initialization', false);
     }

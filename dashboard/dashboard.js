@@ -127,7 +127,8 @@ async function scanAndRegisterLocalMods() {
     { name: 'Cyclopedia.js', enabled: true },
     { name: 'DashboardButton.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
-    { name: 'Hunt Analyzer.js', enabled: true }
+    { name: 'Hunt Analyzer.js', enabled: true },
+    
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({

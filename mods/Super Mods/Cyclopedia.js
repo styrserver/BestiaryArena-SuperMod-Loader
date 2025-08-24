@@ -89,17 +89,35 @@ const GAME_KEYS = {
 const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
 
 const HARDCODED_MONSTER_STATS = {
-  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 } },
+  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
+  'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
   'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
   'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
-  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 100 },
+  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
   'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
   'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 }
 };
 
+const MAP_INTERACTION_CONFIG = {
+  cursor: 'pointer',
+  textDecoration: 'underline',
+  tooltip: 'Click to go to this map',
+  hoverBackground: 'rgba(255,255,255,0.08)',
+  hoverTextColor: '#4a9eff',
+  defaultBackground: 'transparent',
+  defaultTextColor: LAYOUT_CONSTANTS.COLORS.TEXT,
+  padding: '2px 6px',
+  borderRadius: '4px',
+  boxSizing: 'border-box'
+};
+
 const REGION_NAME_MAP = {
-  'rook': 'Rookgaard', 'abdendriel': 'Ab\'Dendriel', 'carlin': 'Carlin',
-  'venore': 'Venore', 'thais': 'Thais', 'kazordoon': 'Kazordoon'
+  'rook': 'Rookgaard',
+  'carlin': 'Carlin',
+  'folda': 'Folda',
+  'abdendriel': 'Ab\'Dendriel',
+  'kazordoon': 'Kazordoon',
+  'venore': 'Venore'
 };
 
 const GAME_DATA = {
@@ -623,7 +641,7 @@ function safeGetMonsterData(monsterId) {
 }
 
 // =======================
-// Characters Tab Caching Utilities
+// 5. Characters Tab Caching Utilities
 // =======================
 function getCachedProfileData(playerName, ttl = 300000) { return cyclopediaState.getProfileData(playerName, ttl); }
 function setCachedProfileData(playerName, data) { cyclopediaState.setProfileData(playerName, data); }
@@ -792,7 +810,7 @@ function getLevelFromExp(exp) {
 }
 
 // =======================
-// 5. DOM/CSS Injection Helpers
+// 6. DOM/CSS Injection Helpers
 // =======================
 const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
 function injectCyclopediaButtonStyles() { if (!document.getElementById('cyclopedia-btn-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-btn-css'; style.textContent = CYCLOPEDIA_BUTTON_CSS; document.head.appendChild(style); } }
@@ -854,7 +872,7 @@ cyclopediaMenuObserver.observe(document.body, { childList: true, subtree: true }
 window.cyclopediaMenuObserver = cyclopediaMenuObserver;
 
 // =======================
-// 6. UI Creation Functions
+// 7. UI Creation Functions
 // =======================
 function createBox({
   title, items, extraBoxStyles = {}, type = 'creature', selectedCreature, selectedEquipment, selectedInventory,
@@ -1072,7 +1090,7 @@ function addCyclopediaPressedStateListeners(btn) {
 }
 
 // =======================
-// 7. Data/Model Functions
+// 8. Data/Model Functions
 // =======================
 function startContextMenuObserver() {
   if (cyclopediaState.observer && window.cyclopediaGlobalObserver) {
@@ -1133,7 +1151,7 @@ function stopContextMenuObserver() {
 }
 
 // =======================
-// 8. Modal & Template Rendering
+// 9. Modal & Template Rendering
 // =======================
 
 let activeCyclopediaModal = null;
@@ -3223,47 +3241,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           return region.name;
         }
         
-        const regionNameMap = {
-          'rook': 'Rookgaard',
-          'abdendriel': 'Ab\'Dendriel',
-          'carlin': 'Carlin',
-          'venore': 'Venore',
-          'thais': 'Thais',
-          'kazordoon': 'Kazordoon',
-          'edron': 'Edron',
-          'darashia': 'Darashia',
-          'ankrahmun': 'Ankrahmun',
-          'libertybay': 'Liberty Bay',
-          'port hope': 'Port Hope',
-          'svargrond': 'Svargrond',
-          'yalahar': 'Yalahar',
-          'roshamuul': 'Roshamuul',
-          'rathleton': 'Rathleton',
-          'gray beach': 'Gray Beach',
-          'oramond': 'Oramond',
-          'krailos': 'Krailos',
-          'issavi': 'Issavi',
-          'venore swamp': 'Venore Swamp',
-          'thais swamp': 'Thais Swamp',
-          'carlin swamp': 'Carlin Swamp',
-          'edron swamp': 'Edron Swamp',
-          'darashia swamp': 'Darashia Swamp',
-          'ankrahmun swamp': 'Ankrahmun Swamp',
-          'liberty bay swamp': 'Liberty Bay Swamp',
-          'port hope swamp': 'Port Hope Swamp',
-          'svargrond swamp': 'Svargrond Swamp',
-          'yalahar swamp': 'Yalahar Swamp',
-          'roshamuul swamp': 'Roshamuul Swamp',
-          'rathleton swamp': 'Rathleton Swamp',
-          'gray beach swamp': 'Gray Beach Swamp',
-          'oramond swamp': 'Oramond Swamp',
-          'krailos swamp': 'Krailos Swamp',
-          'issavi swamp': 'Issavi Swamp'
-        };
-        
         const regionId = region.id ? region.id.toLowerCase() : '';
-        if (regionNameMap[regionId]) {
-          return regionNameMap[regionId];
+        if (GAME_DATA.REGION_NAME_MAP[regionId]) {
+          return GAME_DATA.REGION_NAME_MAP[regionId];
         }
         
         return region.id ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()) : 'Unknown Region';
@@ -5856,6 +5836,579 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       return d;
     }
 
+    function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+      const d = document.createElement('div');
+      d.style.display = 'flex';
+      d.style.flexDirection = 'row';
+      d.style.width = '100%';
+      d.style.height = '100%';
+      d.style.alignItems = 'flex-start';
+      d.style.justifyContent = 'center';
+      d.style.gap = '0';
+
+      let selectedCategory = '';
+      let selectedMap = null;
+
+      const leftCol = document.createElement('div');
+      leftCol.style.width = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
+      leftCol.style.minWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
+      leftCol.style.maxWidth = LAYOUT_CONSTANTS.LEFT_COLUMN_WIDTH;
+      leftCol.style.height = '100%';
+      leftCol.style.display = 'flex';
+      leftCol.style.flexDirection = 'column';
+      leftCol.style.borderRight = '6px solid transparent';
+      leftCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      leftCol.style.overflowY = 'hidden';
+      leftCol.style.minHeight = '0';
+
+      function updateBottomBox() {
+        try {
+          if (leftCol._bottomBox && leftCol._bottomBox.parentNode) {
+            safeRemoveChild(leftCol._bottomBox.parentNode, leftCol._bottomBox);
+          }
+          
+          // Get maps for selected region from game state
+          let mapsInRegion = [];
+          
+          if (selectedCategory && globalThis.state?.utils?.REGIONS) {
+            // Show maps from specific region
+            const region = globalThis.state.utils.REGIONS.find(r => r.id === selectedCategory);
+            console.log('[Cyclopedia] Selected region:', region);
+            if (region && region.rooms) {
+              console.log('[Cyclopedia] Region rooms:', region.rooms);
+              mapsInRegion = region.rooms.map(room => ({
+                id: room.id,
+                name: globalThis.state.utils.ROOM_NAME[room.id] || room.id,
+                region: region.id
+              }));
+              console.log('[Cyclopedia] Maps in region:', mapsInRegion);
+            }
+          }
+          
+          const box = createBox({
+            title: 'Maps',
+            items: mapsInRegion.map(map => map.name),
+            type: 'inventory',
+            selectedCreature: null,
+            selectedEquipment: null,
+            selectedInventory: selectedMap,
+            setSelectedCreature: () => {},
+            setSelectedEquipment: () => {},
+            setSelectedInventory: (mapName) => {
+              const mapData = mapsInRegion.find(map => map.name === mapName);
+              selectedMap = mapData ? mapData.id : mapName;
+              console.log('[Cyclopedia] Map selected:', { mapName, mapData, selectedMap });
+              updateRightCol();
+            },
+            updateRightCol: () => {}
+          });
+
+          box.style.flex = '1 1 0';
+          box.style.minHeight = '0';
+          box.style.marginTop = '8px';
+          leftCol._bottomBox = box;
+          leftCol.appendChild(box);
+        } catch (error) {
+          console.error('[Cyclopedia] Error updating bottom box:', error);
+          
+          if (leftCol._bottomBox && leftCol._bottomBox.parentNode) {
+            safeRemoveChild(leftCol._bottomBox.parentNode, leftCol._bottomBox);
+          }
+
+          const errorBox = document.createElement('div');
+          errorBox.style.flex = '1 1 0';
+          errorBox.style.minHeight = '0';
+          errorBox.style.marginTop = '8px';
+          errorBox.style.display = 'flex';
+          errorBox.style.justifyContent = 'center';
+          errorBox.style.alignItems = 'center';
+          errorBox.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+          errorBox.style.fontWeight = 'bold';
+          errorBox.style.textAlign = 'center';
+          errorBox.innerHTML = 'Error loading maps.';
+          leftCol._bottomBox = errorBox;
+          leftCol.appendChild(errorBox);
+        }
+      }
+
+      // Get regions from game state with proper names
+      let regions = [];
+      if (globalThis.state?.utils?.REGIONS) {
+        regions = globalThis.state.utils.REGIONS.map(region => region.id);
+      }
+      
+      // Set default selected region to first available region
+      if (regions.length > 0 && !selectedCategory) {
+        selectedCategory = regions[0];
+      }
+
+      const topBox = createBox({
+        title: 'Regions',
+        items: regions.map(regionId => GAME_DATA.REGION_NAME_MAP[regionId] || regionId),
+        type: 'inventory',
+        selectedCreature: null,
+        selectedEquipment: null,
+        selectedInventory: selectedCategory ? (GAME_DATA.REGION_NAME_MAP[selectedCategory] || selectedCategory) : null,
+        setSelectedCreature: () => {},
+        setSelectedEquipment: () => {},
+        setSelectedInventory: (cat) => {
+          // Find the region ID from the display name
+          const regionId = regions.find(regionId => GAME_DATA.REGION_NAME_MAP[regionId] === cat) || cat;
+          selectedCategory = regionId;
+          selectedMap = null;
+          updateBottomBox();
+          updateRightCol();
+        },
+        updateRightCol: () => {}
+      });
+
+      topBox.style.flex = '0 0 35%';
+      topBox.style.maxHeight = '35%';
+      topBox.style.minHeight = '0';
+      leftCol.appendChild(topBox);
+      updateBottomBox();
+
+      // Create two columns for the right side like Equipment Tab
+      const col2 = document.createElement('div');
+      Object.assign(col2.style, {
+        width: '250px', minWidth: '250px', maxWidth: '250px', height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
+        fontWeight: 'bold', color: LAYOUT_CONSTANTS.COLORS.TEXT,
+        borderRight: '6px solid transparent',
+        borderImage: `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`
+      });
+      col2.classList.add('text-whiteHighlight');
+
+      const col3 = document.createElement('div');
+      Object.assign(col3.style, {
+        flex: '1 1 0', height: '100%', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'flex-start', fontSize: '16px',
+        fontWeight: 'bold', color: LAYOUT_CONSTANTS.COLORS.TEXT
+      });
+      col3.classList.add('text-whiteHighlight');
+
+      // Create titles for the columns
+      const col2Title = document.createElement('h2');
+      col2Title.className = 'widget-top widget-top-text pixel-font-16';
+      Object.assign(col2Title.style, {
+        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
+      });
+      const col2TitleP = document.createElement('p');
+      col2TitleP.className = 'pixel-font-16';
+      Object.assign(col2TitleP.style, {
+        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box'
+      });
+      col2TitleP.textContent = 'Map Information';
+      col2Title.appendChild(col2TitleP);
+      col2.appendChild(col2Title);
+
+      const col3Title = document.createElement('h2');
+      col3Title.className = 'widget-top widget-top-text pixel-font-16';
+      Object.assign(col3Title.style, {
+        margin: '0', padding: '2px 8px', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box', marginBottom: '10px'
+      });
+      const col3TitleP = document.createElement('p');
+      col3TitleP.className = 'pixel-font-16';
+      Object.assign(col3TitleP.style, {
+        margin: '0', padding: '0', textAlign: 'center', color: 'rgb(255, 255, 255)',
+        width: '100%', boxSizing: 'border-box'
+      });
+      col3TitleP.textContent = 'Statistics';
+      col3Title.appendChild(col3TitleP);
+      col3.appendChild(col3Title);
+      
+      function updateRightCol() {
+        try {
+          // Clear both columns
+          col2.innerHTML = '';
+          col3.innerHTML = '';
+          
+          // Re-add titles
+          col2.appendChild(col2Title);
+          col3.appendChild(col3Title);
+          
+          if (selectedMap) {
+            // Get map data from game state
+            const roomData = globalThis.state?.utils?.ROOMS?.[selectedMap];
+            const roomName = globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap;
+            
+            // Column 2: Two separate divs - Map Information and Creature Information
+            
+            // First div: Map Information
+            const mapInfoDiv = document.createElement('div');
+            mapInfoDiv.style.padding = '0 20px 20px 20px';
+            mapInfoDiv.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            mapInfoDiv.style.width = '100%';
+            mapInfoDiv.style.boxSizing = 'border-box';
+            mapInfoDiv.style.marginBottom = '0';
+            
+            // Row1: Map Icon and Map Name
+            // Add room thumbnail
+            
+            // Add room thumbnail
+            const thumbnail = document.createElement('img');
+            thumbnail.alt = roomName;
+            thumbnail.className = 'pixelated';
+            thumbnail.style.width = '192px';
+            thumbnail.style.height = '192px';
+            thumbnail.style.objectFit = 'cover';
+            thumbnail.style.border = '2px solid #666';
+            thumbnail.style.borderRadius = '4px';
+            thumbnail.style.margin = '0 auto';
+            thumbnail.style.display = 'block';
+            thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
+            
+            mapInfoDiv.appendChild(thumbnail);
+            
+            // Add map name with click interaction
+            const title = document.createElement('h3');
+            title.textContent = roomName;
+            title.style.margin = '10px 0 0 0';
+            title.style.fontSize = '18px';
+            title.style.fontWeight = 'bold';
+            title.style.textAlign = 'center';
+            title.style.cursor = MAP_INTERACTION_CONFIG.cursor;
+            title.title = MAP_INTERACTION_CONFIG.tooltip;
+            title.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
+            title.style.padding = MAP_INTERACTION_CONFIG.padding;
+            title.style.borderRadius = MAP_INTERACTION_CONFIG.borderRadius;
+            title.style.boxSizing = MAP_INTERACTION_CONFIG.boxSizing;
+            
+            // Add the exact same interaction handlers as Bestiary Tab
+            title.addEventListener('mouseenter', () => {
+              title.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
+              title.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
+            });
+            
+            title.addEventListener('mouseleave', () => {
+              title.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
+              title.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
+            });
+            
+            title.addEventListener('click', (e) => {
+              e.stopPropagation();
+              globalThis.state.board.send({
+                type: 'selectRoomById',
+                roomId: selectedMap
+              });
+              // Try to close the modal if present
+              const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
+                btn => btn.textContent.trim() === 'Close'
+              );
+              if (closeBtn) {
+                closeBtn.click();
+              }
+            });
+            mapInfoDiv.appendChild(title);
+            
+            // Second div: Creature Information
+            const creatureInfoDiv = document.createElement('div');
+            creatureInfoDiv.style.padding = '0';
+            creatureInfoDiv.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            creatureInfoDiv.style.width = '100%';
+            creatureInfoDiv.style.boxSizing = 'border-box';
+            
+            // Add "Creature Information" title using Bestiary Tab title system
+            const creatureInfoTitle = document.createElement('h2');
+            creatureInfoTitle.className = 'widget-top widget-top-text ' + LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
+            creatureInfoTitle.style.margin = '0';
+            creatureInfoTitle.style.padding = '2px 0';
+            creatureInfoTitle.style.textAlign = 'center';
+            creatureInfoTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            creatureInfoTitle.style.width = '100%';
+            creatureInfoTitle.style.boxSizing = 'border-box';
+            creatureInfoTitle.style.display = 'block';
+            creatureInfoTitle.style.position = 'relative';
+            creatureInfoTitle.style.top = '0';
+            creatureInfoTitle.style.left = '0';
+            creatureInfoTitle.style.right = '0';
+            creatureInfoTitle.style.marginLeft = '0';
+            creatureInfoTitle.style.width = '100%';
+            creatureInfoTitle.style.marginBottom = '5px';
+            
+            const creatureInfoTitleP = document.createElement('p');
+            creatureInfoTitleP.textContent = 'Creature Information';
+            creatureInfoTitleP.className = LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
+            creatureInfoTitleP.style.margin = '0';
+            creatureInfoTitleP.style.padding = '0';
+            creatureInfoTitleP.style.textAlign = 'center';
+            creatureInfoTitleP.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            creatureInfoTitle.appendChild(creatureInfoTitleP);
+            creatureInfoDiv.appendChild(creatureInfoTitle);
+            
+            // Simple content container below the title
+            const contentContainer = document.createElement('div');
+            contentContainer.style.overflowY = 'hidden'; // Start with no scrollbar
+            contentContainer.style.maxHeight = '175px';
+            contentContainer.style.paddingRight = '8px';
+            contentContainer.style.width = '100%';
+            contentContainer.style.boxSizing = 'border-box';
+            
+            if (roomData) {
+              // Map difficulty
+              if (roomData.difficulty) {
+                const difficultyDiv = document.createElement('div');
+                difficultyDiv.style.marginBottom = '10px';
+                difficultyDiv.innerHTML = `<strong>Difficulty:</strong> ${'★'.repeat(roomData.difficulty)}`;
+                difficultyDiv.style.color = '#ffd700';
+                contentContainer.appendChild(difficultyDiv);
+              }
+              
+              // Team size
+              if (roomData.maxTeamSize) {
+                const teamSizeDiv = document.createElement('div');
+                teamSizeDiv.style.marginBottom = '10px';
+                teamSizeDiv.style.textAlign = 'center';
+                teamSizeDiv.innerHTML = `<strong>Max Team Size:</strong> ${roomData.maxTeamSize}`;
+                contentContainer.appendChild(teamSizeDiv);
+              }
+              
+              // Stamina cost
+              if (roomData.staminaCost) {
+                const staminaDiv = document.createElement('div');
+                staminaDiv.style.marginBottom = '10px';
+                staminaDiv.style.textAlign = 'center';
+                staminaDiv.innerHTML = `<strong>Stamina Cost:</strong> ${roomData.staminaCost}`;
+                contentContainer.appendChild(staminaDiv);
+              }
+              
+              // Region info
+              if (globalThis.state?.utils?.REGIONS) {
+                const region = globalThis.state.utils.REGIONS.find(r => r.rooms.some(room => room.id === selectedMap));
+                if (region) {
+                  const regionDiv = document.createElement('div');
+                  regionDiv.style.marginBottom = '10px';
+                  regionDiv.style.textAlign = 'center';
+                  regionDiv.innerHTML = `<strong>Region:</strong> ${region.id}`;
+                  contentContainer.appendChild(regionDiv);
+                }
+              }
+              
+            } else {
+              // Show creatures that spawn on this map instead of "Map data not available"
+              const creaturesContainer = document.createElement('div');
+              creaturesContainer.style.marginTop = '15px';
+              creaturesContainer.style.textAlign = 'center';
+
+              
+
+              
+              // Get creatures from room actors - try multiple approaches
+              let roomActors = null;
+              let roomData = null;
+              
+              // Try to get room data directly
+              if (globalThis.state?.utils?.ROOMS?.[selectedMap]) {
+                roomData = globalThis.state.utils.ROOMS[selectedMap];
+                roomActors = roomData.file?.data?.actors;
+              }
+              
+              // If no actors found, try to get from the region data
+              if (!roomActors && globalThis.state?.utils?.REGIONS) {
+                for (const region of globalThis.state.utils.REGIONS) {
+                  if (region.rooms) {
+                    const roomInRegion = region.rooms.find(r => r.id === selectedMap);
+                    if (roomInRegion && roomInRegion.file?.data?.actors) {
+                      roomActors = roomInRegion.file.data.actors;
+                      roomData = roomInRegion;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              // Debug logging
+              console.log('[Cyclopedia] Maps Tab - Room ID:', selectedMap);
+              console.log('[Cyclopedia] Maps Tab - Room Data:', roomData);
+              console.log('[Cyclopedia] Maps Tab - Room Actors:', roomActors);
+              
+              if (roomActors && roomActors.length > 0) {
+                const creaturesGrid = document.createElement('div');
+                creaturesGrid.style.display = 'grid';
+                creaturesGrid.style.gridTemplateColumns = '1fr';
+                creaturesGrid.style.gap = '8px';
+                creaturesGrid.style.justifyItems = 'center';
+                creaturesGrid.style.maxWidth = '100%';
+                
+                roomActors.forEach((actor, index) => {
+                  if (actor && actor.id) {
+                    try {
+                      console.log('[Cyclopedia] Processing actor:', actor);
+                      
+                      // Create creature icon similar to Bestiary Tab
+                      let monsterSprite;
+                      if (actor.metadata && actor.metadata.lookType === 'item') {
+                        monsterSprite = api.ui.components.createItemPortrait({
+                          itemId: actor.metadata.spriteId,
+                          size: 'small'
+                        });
+                        [monsterSprite.style.width, monsterSprite.style.height] = ['50px', '50px'];
+                        const portrait = monsterSprite.querySelector('.equipment-portrait');
+                        if (portrait) {
+                          portrait.style.width = '50px';
+                          portrait.style.height = '50px';
+                        }
+                      } else {
+                        monsterSprite = api.ui.components.createFullMonster({
+                          monsterId: actor.id,
+                          tier: 1,
+                          starTier: 1,
+                          level: 1,
+                          size: 'small'
+                        });
+                        [monsterSprite.style.width, monsterSprite.style.height] = ['50px', '50px'];
+                        // Remove level badge and star tier
+                        const levelBadge = monsterSprite.querySelector('span.pixel-font-16');
+                        if (levelBadge) levelBadge.remove();
+                        const starTierIcon = monsterSprite.querySelector('img[alt="star tier"]');
+                        if (starTierIcon) starTierIcon.remove();
+                      }
+                      
+                      creaturesGrid.appendChild(monsterSprite);
+                    } catch (error) {
+                      console.error('[Cyclopedia] Error creating creature icon for actor:', actor, error);
+                    }
+                  } else {
+                    console.log('[Cyclopedia] Skipping invalid actor:', actor);
+                  }
+                });
+                
+                creaturesContainer.appendChild(creaturesGrid);
+              } else {
+                const noCreaturesMsg = document.createElement('p');
+                noCreaturesMsg.textContent = `No creatures found on this map. (Room ID: ${selectedMap})`;
+                noCreaturesMsg.style.color = '#888';
+                noCreaturesMsg.style.fontStyle = 'italic';
+                creaturesContainer.appendChild(noCreaturesMsg);
+                
+                // Add debug info
+                const debugInfo = document.createElement('div');
+                debugInfo.style.marginTop = '10px';
+                debugInfo.style.fontSize = '12px';
+                debugInfo.style.color = '#666';
+                debugInfo.innerHTML = `
+                  <strong>Debug Info:</strong><br>
+                  Available Rooms: ${Object.keys(globalThis.state?.utils?.ROOMS || {}).length}<br>
+                  Available Regions: ${globalThis.state?.utils?.REGIONS?.length || 0}<br>
+                  Room Data: ${roomData ? 'Found' : 'Not found'}<br>
+                  Actors: ${roomActors ? roomActors.length : 'None'}
+                `;
+                creaturesContainer.appendChild(debugInfo);
+              }
+              
+              contentContainer.appendChild(creaturesContainer);
+            }
+            
+            // Add both divs to col2
+            col2.appendChild(mapInfoDiv);
+            col2.appendChild(creatureInfoDiv);
+            
+            // Add the content container to the creature info div
+            creatureInfoDiv.appendChild(contentContainer);
+            
+            // Check if content overflows and conditionally show scrollbar
+            setTimeout(() => {
+                const hasOverflow = contentContainer.scrollHeight > 175;
+                if (hasOverflow) {
+                    contentContainer.style.overflowY = 'auto';
+                }
+                // If no overflow, keep overflowY: 'hidden' (no scrollbar)
+            }, 0);
+            
+            // Column 3: Statistics
+            const statsContainer = document.createElement('div');
+            statsContainer.style.padding = '20px';
+            statsContainer.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            statsContainer.style.width = '100%';
+            statsContainer.style.boxSizing = 'border-box';
+            
+            const statsTitle = document.createElement('h3');
+            statsTitle.textContent = 'Statistics';
+            statsTitle.style.margin = '0 0 15px 0';
+            statsTitle.style.fontSize = '18px';
+            statsTitle.style.fontWeight = 'bold';
+            statsTitle.style.textAlign = 'center';
+            statsContainer.appendChild(statsTitle);
+            
+            if (roomData) {
+              // Player progress (if available)
+              if (globalThis.state?.player?.getSnapshot?.()?.context?.rooms?.[selectedMap]) {
+                const playerRoom = globalThis.state.player.getSnapshot().context.rooms[selectedMap];
+                const progressDiv = document.createElement('div');
+                progressDiv.style.marginTop = '15px';
+                progressDiv.style.padding = '10px';
+                progressDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                progressDiv.style.borderRadius = '5px';
+                progressDiv.style.textAlign = 'center';
+                progressDiv.innerHTML = `
+                  <strong>Your Progress:</strong><br>
+                  Rank: ${playerRoom.rank}<br>
+                  Completions: ${playerRoom.count}<br>
+                  Best Time: ${playerRoom.ticks} ticks
+                `;
+                statsContainer.appendChild(progressDiv);
+              } else {
+                const noProgressDiv = document.createElement('div');
+                noProgressDiv.style.textAlign = 'center';
+                noProgressDiv.style.color = '#888';
+                noProgressDiv.style.padding = '20px';
+                noProgressDiv.textContent = 'No progress data available for this map.';
+                statsContainer.appendChild(noProgressDiv);
+              }
+            } else {
+              const noStatsDiv = document.createElement('div');
+              noStatsDiv.style.textAlign = 'center';
+              noStatsDiv.style.color = '#888';
+              noStatsDiv.style.padding = '20px';
+              noStatsDiv.textContent = 'Statistics not available for this map.';
+              statsContainer.appendChild(noStatsDiv);
+            }
+            
+            col3.appendChild(statsContainer);
+          } else {
+            // No map selected - show placeholder messages
+            const col2Msg = document.createElement('div');
+            col2Msg.style.display = 'flex';
+            col2Msg.style.justifyContent = 'center';
+            col2Msg.style.alignItems = 'center';
+            col2Msg.style.height = '100%';
+            col2Msg.style.width = '100%';
+            col2Msg.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            col2Msg.style.fontWeight = 'bold';
+            col2Msg.style.textAlign = 'center';
+            col2Msg.textContent = 'Select a map to view information.';
+            col2.appendChild(col2Msg);
+            
+            const col3Msg = document.createElement('div');
+            col3Msg.style.display = 'flex';
+            col3Msg.style.justifyContent = 'center';
+            col3Msg.style.alignItems = 'center';
+            col3Msg.style.height = '100%';
+            col3Msg.style.width = '100%';
+            col3Msg.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            col3Msg.style.fontWeight = 'bold';
+            col3Msg.style.textAlign = 'center';
+            col3Msg.textContent = 'Select a map to view statistics.';
+            col3.appendChild(col3Msg);
+          }
+        } catch (error) {
+          console.error('[Cyclopedia] Error updating right columns:', error);
+          col2.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading map information.</div>';
+          col3.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading statistics.</div>';
+        }
+      }
+
+      updateRightCol();
+
+      d.appendChild(leftCol);
+      d.appendChild(col2);
+      d.appendChild(col3);
+      return d;
+    }
+
     // Create equipment tab page
     const equipmentTabPage = createEquipmentTabPage(
       selectedCreature, selectedEquipment, selectedInventory, 
@@ -5877,10 +6430,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       (() => createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
       equipmentTabPage,
       (() => createInventoryTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
+      (() => createMapsTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))(),
       (() => createCharactersTabPage(selectedCreature, selectedEquipment, selectedInventory, v => { selectedCreature = v; }, v => { selectedEquipment = v; }, v => { selectedInventory = v; }, () => {}))()
     ];
 
-    const tabNames = ['Home', 'Bestiary', 'Equipment', 'Inventory', 'Characters'];
+    const tabNames = ['Home', 'Bestiary', 'Equipment', 'Inventory', 'Maps', 'Characters'];
     const tabButtons = [];
     const tabNav = document.createElement('nav');
     tabNav.className = 'cyclopedia-subnav';
@@ -6825,17 +7379,18 @@ function renderCreatureTemplate(name) {
           }
           roomDiv.appendChild(nameSpan);
           roomDiv.appendChild(rightSpan);
-          roomDiv.style.cursor = 'pointer';
-          roomDiv.style.textDecoration = 'underline';
+          roomDiv.style.cursor = MAP_INTERACTION_CONFIG.cursor;
+          roomDiv.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
+          roomDiv.title = MAP_INTERACTION_CONFIG.tooltip;
           let foundLoc = foundLocation;
           if (foundLoc) {
             roomDiv.addEventListener('mouseenter', () => {
-              roomDiv.style.background = 'rgba(255,255,255,0.08)';
-              roomDiv.style.color = '#4a9eff';
+              roomDiv.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
+              roomDiv.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
             });
             roomDiv.addEventListener('mouseleave', () => {
-              roomDiv.style.background = 'none';
-              roomDiv.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+              roomDiv.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
+              roomDiv.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
             });
             roomDiv.addEventListener('click', () => {
               const roomCode = globalThis.state.utils.ROOMS[foundLoc.roomId]?.id;

@@ -173,6 +173,7 @@ const DEBUG = false; // Set to true for development
       transform: translate(-50%, -50%);
       z-index: 9999;
       width: ${typeof width === 'number' ? width + 'px' : width};
+      height: ${typeof height === 'number' ? height + 'px' : height};
       max-width: 95vw;
       max-height: 95vh;
       background: transparent;
