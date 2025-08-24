@@ -184,6 +184,19 @@ async function getLocalMods() {
     // Get file-based mods
     let mods = [];
     
+    // Check if manual mods exist - if they do, force refresh file-based mods
+    const manualData = await browserAPI.storage.local.get('manualMods');
+    const manualMods = manualData.manualMods || [];
+    const hasManualMods = manualMods.length > 0;
+    
+    if (hasManualMods) {
+      // Force refresh when manual mods are present to avoid stale cache
+      console.log('Manual mods detected, forcing refresh of file-based mods');
+      // Clear cached localMods to force fresh read
+      await browserAPI.storage.local.remove('localMods');
+      await browserAPI.storage.sync.remove('localMods');
+    }
+    
     // First try to get from sync storage
     const syncData = await browserAPI.storage.sync.get('localMods');
     
@@ -196,10 +209,6 @@ async function getLocalMods() {
       const localData = await browserAPI.storage.local.get('localMods');
       mods = localData.localMods || [];
     }
-    
-    // Get manual mods and add them to the list
-    const manualData = await browserAPI.storage.local.get('manualMods');
-    const manualMods = manualData.manualMods || [];
     
     // Convert manual mods to the same format as file-based mods
     const convertedManualMods = manualMods.map(mod => ({
