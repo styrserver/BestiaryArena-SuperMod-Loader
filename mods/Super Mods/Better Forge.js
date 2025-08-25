@@ -159,6 +159,39 @@
     }
   };
 
+  // Simple function to update local equipment inventory state
+  const updateLocalEquipmentInventory = (consumedIds, newEquipment) => {
+    try {
+      if (!globalThis.state?.player) return;
+      
+      const player = globalThis.state.player;
+      
+      // Remove consumed equipment
+      if (consumedIds && consumedIds.length > 0) {
+        player.send({
+          type: "setState",
+          fn: (prev) => ({
+            ...prev,
+            equips: prev.equips.filter(e => !consumedIds.includes(e.id))
+          }),
+        });
+      }
+      
+      // Add new equipment
+      if (newEquipment) {
+        player.send({
+          type: "setState",
+          fn: (prev) => ({
+            ...prev,
+            equips: [...prev.equips, newEquipment]
+          }),
+        });
+      }
+    } catch (error) {
+      console.error('[Better Forge] Error updating local equipment inventory:', error);
+    }
+  };
+
   // ============================================================================
   // 3. DISENCHANTING CORE FUNCTIONS
   // ============================================================================
@@ -692,6 +725,9 @@
               
               // Add to local inventory
               addEquipmentToLocalInventory(newEquipment);
+              
+              // Update local equipment inventory state
+              updateLocalEquipmentInventory([step.equipA, step.equipB], newEquipment);
               
               // Add to visual Arsenal display
               addEquipmentToArsenal(newEquipment);
@@ -2413,8 +2449,11 @@
             stepDiv.style.cssText = 'margin: 2px 0; color: #888;';
             
             // Handle dynamic steps that haven't been populated yet
-            if (step.equipA && step.equipB && step.result) {
-              stepDiv.textContent = `Step ${index + 1}: T${step.equipA.tier} → T${step.equipB.tier} = T${step.result.tier}`;
+            if (step.equipA && step.equipB && step.result && typeof step.equipA === 'object' && typeof step.equipB === 'object') {
+              const equipATier = step.equipA.tier || '?';
+              const equipBTier = step.equipB.tier || '?';
+              const resultTier = step.result.tier || '?';
+              stepDiv.textContent = `Step ${index + 1}: T${equipATier} → T${equipBTier} = T${resultTier}`;
             } else {
               // Show the planned tier progression
               const fromTier = step.fromTier || '?';
@@ -2422,6 +2461,15 @@
               const resultTier = step.resultTier || '?';
               stepDiv.textContent = `Step ${index + 1}: T${fromTier} → T${toTier} = T${resultTier}`;
             }
+            
+            // Debug logging to help identify object display issues
+            console.log(`[Better Forge] Step ${index + 1} display:`, {
+              step: step,
+              textContent: stepDiv.textContent,
+              equipAType: typeof step.equipA,
+              equipBType: typeof step.equipB,
+              resultType: typeof step.result
+            });
             
             planDiv.appendChild(stepDiv);
           });

@@ -1387,7 +1387,7 @@ function createConfigPanel(startAnalysisCallback) {
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
-  console.log("Tentando forçar o fechamento de todos os modais...");
+  console.log("Attempting to force close all modals...");
   
   // Specific cleanup for the modal structure in the UI
   const allDialogs = document.querySelectorAll('div[role="dialog"][data-state="open"]');
@@ -1395,7 +1395,7 @@ function forceCloseAllModals() {
     // Check if it's our analysis modal by looking for content
     const title = dialog.querySelector('.widget-top p');
     if (title && (title.textContent.includes('Executando Análise') || title.textContent.includes('Running Analysis'))) {
-      console.log("Encontrado modal de análise para remover:", dialog);
+      console.log("Found analysis modal to remove:", dialog);
       
       // First try to change its state to closed
       dialog.setAttribute('data-state', 'closed');
@@ -1404,7 +1404,7 @@ function forceCloseAllModals() {
       setTimeout(() => {
         if (dialog.parentNode) {
           dialog.parentNode.removeChild(dialog);
-          console.log("Modal removido com sucesso!");
+          console.log("Modal removed successfully!");
         }
       }, 50);
     }
@@ -1417,7 +1417,7 @@ function forceCloseAllModals() {
         el.textContent.includes('Running Analysis')
       ) && el.closest('[role="dialog"]')) {
       const dialog = el.closest('[role="dialog"]');
-      console.log("Encontrado modal de análise por texto:", dialog);
+      console.log("Found analysis modal by text:", dialog);
       if (dialog && dialog.parentNode) {
         dialog.parentNode.removeChild(dialog);
       }
@@ -2199,6 +2199,34 @@ function showConfigAndPrepareAnalysis() {
 
 // Main entry point - Run the analysis
 async function runAnalysis() {
+  // Check if Turbo Mode mod is enabled and disable it before analysis
+  if (window.__turboState && window.__turboState.active) {
+    console.log('Turbo Mode mod is currently enabled, disabling it before analysis...');
+    
+    // Try to disable Turbo Mode using the exported function if available
+    if (window.__turboState.disable && typeof window.__turboState.disable === 'function') {
+      window.__turboState.disable();
+    } else {
+      // Fallback: manually set the state to inactive
+      window.__turboState.active = false;
+      
+      // Also try to reset the tick interval if possible
+      if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
+        const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
+        tickEngine.setTickInterval(62.5); // Reset to default tick interval
+      }
+    }
+    
+    // Update the Turbo Mode button to show as inactive
+    if (window.turboButton) {
+      window.turboButton.textContent = 'Enable Turbo';
+      window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      window.turboButton.style.color = "#ffe066";
+    }
+    
+    console.log('Turbo Mode mod has been disabled for analysis');
+  }
+  
   // Force close any existing modals first
   forceCloseAllModals();
   

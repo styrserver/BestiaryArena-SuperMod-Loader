@@ -844,14 +844,25 @@ window.addEventListener('message', function(event) {
     if (event.data.message && event.data.message.action === 'registerLocalMods') {
       console.log('Received registerLocalMods message:', event.data.message);
       if (event.data.message.mods && Array.isArray(event.data.message.mods)) {
-        // Store the previous mods for reference
-        const previousMods = [...window.localMods];
+        // Merge with existing mods instead of replacing to avoid dropping file-based mods
+        const incoming = event.data.message.mods;
+        const existingByName = new Map(window.localMods.map(m => [m.name, m]));
         
-        // Update with new mods from background script (these have the correct stored states)
-        window.localMods = event.data.message.mods;
-        console.log('Local mods updated from extension with stored states:', 
-          window.localMods.map(m => `${m.name}: ${m.enabled}`));
-        console.log('Manual mods in received data:', 
+        // Update or add from incoming
+        for (const inc of incoming) {
+          const prev = existingByName.get(inc.name);
+          if (prev) {
+            // Preserve type/content/displayName from existing; update enabled state from incoming
+            prev.enabled = inc.enabled;
+          } else {
+            existingByName.set(inc.name, inc);
+          }
+        }
+        
+        window.localMods = Array.from(existingByName.values());
+        
+        console.log('Local mods merged with stored states:', window.localMods.map(m => `${m.name}: ${m.enabled}`));
+        console.log('Manual mods in merged data:', 
           window.localMods.filter(m => m.type === 'manual').map(m => ({ name: m.name, type: m.type, hasContent: !!m.content })));
         
         // Execute all enabled mods from stored states

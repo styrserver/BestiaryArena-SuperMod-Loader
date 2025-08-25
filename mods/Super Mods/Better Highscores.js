@@ -8,6 +8,7 @@
 // - Automatic data fetching from TRPC API
 // - Styled leaderboard display with medal colors
 // - Manual refresh capability
+// - Skips updates during sandbox mode runs (only updates in manual/autoplay mode)
 //
 // MODULE INDEX:
 // 1. Configuration & Constants
@@ -26,6 +27,10 @@
 // =======================
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
+  
+  const DEBUG = false;
+  
+  const log = DEBUG ? console.log : () => {};
   
   const PERFORMANCE = {
     DOM_CACHE_TIMEOUT: 100, // Reduced for faster cache refresh
@@ -138,7 +143,7 @@
           if (state.currentMapCode) this.currentMapCode = state.currentMapCode;
           if (state.lastUpdateTime) this.lastUpdateTime = state.lastUpdateTime;
           
-          console.log('[Better Highscores] State loaded from storage');
+          log('[Better Highscores] State loaded from storage');
         }
       } catch (error) {
         console.warn('[Better Highscores] Failed to load state:', error);
@@ -298,77 +303,77 @@
   // Function to get current map code using proper game state API
   function getCurrentMapCode() {
     try {
-      console.log('[Better Highscores] Attempting to detect current map...');
+      log('[Better Highscores] Attempting to detect current map...');
       
       // Method 1: Try to get from board state (most reliable)
       const boardState = globalThis.state?.board?.getSnapshot();
-      console.log('[Better Highscores] Board state:', boardState);
+      log('[Better Highscores] Board state:', boardState);
       if (boardState && boardState.context && boardState.context.selectedMap) {
         // Check different possible locations for the map ID
         const selectedMap = boardState.context.selectedMap;
-        console.log('[Better Highscores] Selected map object:', selectedMap);
+        log('[Better Highscores] Selected map object:', selectedMap);
         
         // Try selectedRoom.id first
         if (selectedMap.selectedRoom && selectedMap.selectedRoom.id) {
-          console.log('[Better Highscores] Found map from board state selectedRoom.id:', selectedMap.selectedRoom.id);
+          log('[Better Highscores] Found map from board state selectedRoom.id:', selectedMap.selectedRoom.id);
           return selectedMap.selectedRoom.id;
         }
         
         // Try selectedRegion.id as fallback
         if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
-          console.log('[Better Highscores] Found map from board state selectedRegion.id:', selectedMap.selectedRegion.id);
+          log('[Better Highscores] Found map from board state selectedRegion.id:', selectedMap.selectedRegion.id);
           return selectedMap.selectedRegion.id;
         }
         
         // Try direct id property
         if (selectedMap.id) {
-          console.log('[Better Highscores] Found map from board state selectedMap.id:', selectedMap.id);
+          log('[Better Highscores] Found map from board state selectedMap.id:', selectedMap.id);
           return selectedMap.id;
         }
       }
       
       // Method 2: Try to get from game state
       const gameState = globalThis.state?.game?.getSnapshot();
-      console.log('[Better Highscores] Game state:', gameState);
+      log('[Better Highscores] Game state:', gameState);
       if (gameState && gameState.context && gameState.context.map) {
-        console.log('[Better Highscores] Found map from game state:', gameState.context.map);
+        log('[Better Highscores] Found map from game state:', gameState.context.map);
         return gameState.context.map;
       }
       
       // Method 3: Try to get from URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const mapFromUrl = urlParams.get('map');
-      console.log('[Better Highscores] URL params map:', mapFromUrl);
+      log('[Better Highscores] URL params map:', mapFromUrl);
       if (mapFromUrl) {
-        console.log('[Better Highscores] Found map from URL:', mapFromUrl);
+        log('[Better Highscores] Found map from URL:', mapFromUrl);
         return mapFromUrl;
       }
       
       // Method 4: Try to get from current page context
       const currentPage = window.location.pathname;
-      console.log('[Better Highscores] Current page path:', currentPage);
+      log('[Better Highscores] Current page path:', currentPage);
       if (currentPage.includes('/room/')) {
         const pathParts = currentPage.split('/');
         const roomId = pathParts[pathParts.length - 1];
-        console.log('[Better Highscores] Room ID from path:', roomId);
+        log('[Better Highscores] Room ID from path:', roomId);
         if (roomId && roomId !== 'room') {
-          console.log('[Better Highscores] Found map from path:', roomId);
+          log('[Better Highscores] Found map from path:', roomId);
           return roomId;
         }
       }
       
       // Method 5: Try to get from page title or other DOM elements
       const pageTitle = document.title;
-      console.log('[Better Highscores] Page title:', pageTitle);
+      log('[Better Highscores] Page title:', pageTitle);
       
       // Method 6: Look for map indicators in the DOM
       const mapElements = document.querySelectorAll('[data-room], [data-map], .room-name, .map-name');
-      console.log('[Better Highscores] Map elements found:', mapElements.length);
+      log('[Better Highscores] Map elements found:', mapElements.length);
       mapElements.forEach((el, i) => {
-        console.log(`[Better Highscores] Map element ${i}:`, el.textContent, el.getAttribute('data-room'), el.getAttribute('data-map'));
+        log(`[Better Highscores] Map element ${i}:`, el.textContent, el.getAttribute('data-room'), el.getAttribute('data-map'));
       });
       
-      console.log('[Better Highscores] No map code found from any method');
+      log('[Better Highscores] No map code found from any method');
       return null;
     } catch (error) {
       console.error('[Better Highscores] Error getting current map code:', error);
@@ -386,19 +391,19 @@
     }
     
          try {
-       console.log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
+       log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
        
                // Both endpoints return the same data structure with both rank and tick data
         const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
         
-        console.log('[Better Highscores] Leaderboard response:', leaderboardData);
+        log('[Better Highscores] Leaderboard response:', leaderboardData);
         
         // Extract data from the correct structure
         const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
         const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
         
-        console.log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
-        console.log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
+        log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
+        log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
         
         const data = {
           tickData,
@@ -440,6 +445,16 @@
       roomNames = globalThis.state?.utils?.ROOM_NAME || {};
     }
     return roomNames[mapCode] || mapCode;
+  }
+
+  function isSandboxMode() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      return boardContext?.mode === 'sandbox';
+    } catch (error) {
+      console.warn('[Better Highscores] Error checking sandbox mode:', error);
+      return false;
+    }
   }
 
   function getMedalColor(position) {
@@ -684,21 +699,26 @@
 
   // Function to update leaderboards
   async function updateLeaderboards() {
-    console.log('[Better Highscores] updateLeaderboards called');
+    log('[Better Highscores] updateLeaderboards called');
     
     if (BetterHighscoresState.isUpdating) {
-      console.log('[Better Highscores] Update already in progress, skipping');
+      log('[Better Highscores] Update already in progress, skipping');
       return;
     }
     
+    if (isSandboxMode()) {
+      log('[Better Highscores] Game is in sandbox mode, skipping leaderboard updates.');
+      return;
+    }
+
     try {
       BetterHighscoresState.isUpdating = true;
       
       const mapCode = getCurrentMapCode();
-      console.log('[Better Highscores] Detected map code:', mapCode);
+      log('[Better Highscores] Detected map code:', mapCode);
       
       if (!mapCode) {
-        console.log('[Better Highscores] No current map code found');
+        log('[Better Highscores] No current map code found');
         return;
       }
       
@@ -727,28 +747,28 @@
       const existingContainers = document.querySelectorAll('.better-highscores-container');
       existingContainers.forEach(container => {
         if (container !== leaderboardContainer) {
-          console.log('[Better Highscores] Removing duplicate container');
+          log('[Better Highscores] Removing duplicate container');
           container.remove();
         }
       });
       
       // Create new container
       leaderboardContainer = createLeaderboardDisplay(tickData, rankData, mapName);
-      console.log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
+      log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
       
       // Find the main game container and append
       const mainContainer = getMainContainer();
-      console.log('[Better Highscores] Main container found:', mainContainer);
+      log('[Better Highscores] Main container found:', mainContainer);
       
       if (mainContainer) {
-        console.log('[Better Highscores] Appending leaderboard container to main container');
+        log('[Better Highscores] Appending leaderboard container to main container');
         mainContainer.appendChild(leaderboardContainer);
-        console.log('[Better Highscores] Leaderboard container appended successfully');
+        log('[Better Highscores] Leaderboard container appended successfully');
       } else {
         console.error('[Better Highscores] Could not find main container for leaderboard injection');
       }
       
-      console.log(`[Better Highscores] Updated leaderboards for map: ${mapName} (${mapCode})`);
+      log(`[Better Highscores] Updated leaderboards for map: ${mapName} (${mapCode})`);
       
       // Success - reset error state
       handleSuccess();
@@ -802,14 +822,20 @@
            }
            
            if (newMapCode && newMapCode !== currentMapCode) {
-             console.log(`[Better Highscores] Map changed from ${currentMapCode} to ${newMapCode}`);
+             log(`[Better Highscores] Map changed from ${currentMapCode} to ${newMapCode}`);
              updateLeaderboards();
            }
            
            // Check if the main container has changed (board re-render)
            const mainContainer = getMainContainer();
            if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
-             console.log('[Better Highscores] Main container changed, re-applying leaderboard');
+             // Skip container re-application if in sandbox mode
+             if (isSandboxMode()) {
+               log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
+               return;
+             }
+             
+             log('[Better Highscores] Main container changed, re-applying leaderboard');
              // Immediate re-application for fastest response
              updateLeaderboards();
            }
@@ -820,14 +846,20 @@
           globalThis.state.game.subscribe((state) => {
             const newMapCode = state.context?.map;
             if (newMapCode && newMapCode !== currentMapCode) {
-              console.log(`[Better Highscores] Game map changed from ${currentMapCode} to ${newMapCode}`);
+              log(`[Better Highscores] Game map changed from ${currentMapCode} to ${newMapCode}`);
               updateLeaderboards();
             }
             
             // Check if the main container has changed (game re-render)
             const mainContainer = getMainContainer();
             if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
-              console.log('[Better Highscores] Main container changed (game state), re-applying leaderboard');
+              // Skip container re-application if in sandbox mode
+              if (isSandboxMode()) {
+                log('[Better Highscores] Main container changed (game state) in sandbox mode, skipping leaderboard re-application');
+                return;
+              }
+              
+              log('[Better Highscores] Main container changed (game state), re-applying leaderboard');
               // Immediate re-application for fastest response
               updateLeaderboards();
             }
@@ -841,7 +873,13 @@
              
              // Check if game just ended (state changed from 'playing' to 'victory'/'defeat')
              if (state.context.state !== 'initial' && state.context.state !== 'playing') {
-               console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
+               // Skip updates if in sandbox mode
+               if (isSandboxMode()) {
+                 log('[Better Highscores] Battle completed in sandbox mode, skipping leaderboard update');
+                 return;
+               }
+               
+               log('[Better Highscores] Battle completed, refreshing leaderboard data');
                
                // Force refresh with fresh data
                setTimeout(async () => {
@@ -859,7 +897,7 @@
                        leaderboardContainer.replaceWith(newContainer);
                        leaderboardContainer = newContainer;
                        
-                       console.log('[Better Highscores] Leaderboard updated with fresh battle data');
+                       log('[Better Highscores] Leaderboard updated with fresh battle data');
                      }
                    } catch (error) {
                      console.warn('[Better Highscores] Failed to refresh leaderboard after battle:', error);
@@ -870,7 +908,7 @@
            });
          }
         
-        console.log('[Better Highscores] Initialization complete');
+        log('[Better Highscores] Initialization complete');
       } else {
         // Retry after a short delay
         setTimeout(checkGameState, 1000);
@@ -888,7 +926,7 @@
   }
 
   function cleanup() {
-    console.log('[Better Highscores] Cleaning up...');
+    log('[Better Highscores] Cleaning up...');
     
     // Remove leaderboard container
     if (leaderboardContainer) {
@@ -906,19 +944,19 @@
     DOMCache.clear();
     BetterHighscoresState.leaderboardCache.clear();
     
-    console.log('[Better Highscores] Cleanup complete');
+    log('[Better Highscores] Cleanup complete');
   }
 
   // =======================
   // MODULE INITIALIZATION
   // =======================
   function initializeBetterHighscores() {
-    console.log('[Better Highscores] Starting initialization...');
+    log('[Better Highscores] Starting initialization...');
     
     if (config.enabled) {
       initBetterHighscores();
     } else {
-      console.log('[Better Highscores] Disabled in configuration');
+      log('[Better Highscores] Disabled in configuration');
     }
   }
   
@@ -941,8 +979,9 @@
       getCurrentMapCode: getCurrentMapCode,
       getMapName: getMapName,
       getMainContainer: getMainContainer,
+      isSandboxMode: isSandboxMode,
       forceUpdate: () => {
-        console.log('[Better Highscores] Force update triggered');
+        log('[Better Highscores] Force update triggered');
         updateLeaderboards();
       }
     };

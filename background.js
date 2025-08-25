@@ -29,6 +29,7 @@ const browserAPI = (function() {
 const scriptCache = {};
 
 let localMods = [];
+let registeredTabs = new Set(); // Track which tabs have received local mods
 
 const DEBUG = false; // Set to true for development
 
@@ -184,18 +185,9 @@ async function getLocalMods() {
     // Get file-based mods
     let mods = [];
     
-    // Check if manual mods exist - if they do, force refresh file-based mods
+    // Check if manual mods exist
     const manualData = await browserAPI.storage.local.get('manualMods');
     const manualMods = manualData.manualMods || [];
-    const hasManualMods = manualMods.length > 0;
-    
-    if (hasManualMods) {
-      // Force refresh when manual mods are present to avoid stale cache
-      console.log('Manual mods detected, forcing refresh of file-based mods');
-      // Clear cached localMods to force fresh read
-      await browserAPI.storage.local.remove('localMods');
-      await browserAPI.storage.sync.remove('localMods');
-    }
     
     // First try to get from sync storage
     const syncData = await browserAPI.storage.sync.get('localMods');
@@ -221,8 +213,13 @@ async function getLocalMods() {
       originalName: mod.name
     }));
     
-    // Combine file-based mods and manual mods
-    return [...mods, ...convertedManualMods];
+    // Combine file-based mods and manual mods without duplicates,
+    // but PREFER the manual mod entry (so its enabled state wins)
+    const byName = new Map(mods.map(m => [m.name, m]));
+    for (const man of convertedManualMods) {
+      byName.set(man.name, man);
+    }
+    return Array.from(byName.values());
   } catch (error) {
     console.error('Error getting local mods:', error);
     return [];
@@ -712,20 +709,36 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
           
           console.log(`Toggling manual mod ${originalName} to ${message.enabled}`);
           
-          // Update manual mods in storage
+          // Update manual mods in storage and mirror the state in localMods for consistency
           browserAPI.storage.local.set({ manualMods }, () => {
-            // Respond to confirm it's done
-            sendResponse({ success: true });
-            
-            // Notify active tabs about the change
-            browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-              if (tabs[0]) {
-                browserAPI.tabs.sendMessage(tabs[0].id, {
-                  action: 'updateLocalModState',
-                  name: message.name,
-                  enabled: message.enabled
-                });
-              }
+            // Also update any existing entry in localMods caches
+            Promise.all([
+              browserAPI.storage.local.get('localMods'),
+              browserAPI.storage.sync.get('localMods')
+            ]).then(([localData, syncData]) => {
+              const updateList = (list) => {
+                const modsArr = list.localMods || [];
+                const idx = modsArr.findIndex(m => m.name === message.name);
+                if (idx !== -1) modsArr[idx].enabled = message.enabled;
+                return modsArr;
+              };
+              const updatedLocal = updateList(localData || {});
+              const updatedSync = updateList(syncData || {});
+              browserAPI.storage.local.set({ localMods: updatedLocal });
+              browserAPI.storage.sync.set({ localMods: updatedSync });
+            }).finally(() => {
+              // Respond to confirm it's done
+              sendResponse({ success: true });
+              // Notify active tabs about the change
+              browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]) {
+                  browserAPI.tabs.sendMessage(tabs[0].id, {
+                    action: 'updateLocalModState',
+                    name: message.name,
+                    enabled: message.enabled
+                  });
+                }
+              });
             });
           });
         } else {
@@ -804,6 +817,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
             action: 'registerLocalMods',
             mods: localMods
           });
+          
+          // Mark this tab as registered
+          registeredTabs.add(sender.tab.id);
         });
       }, 500);
     });
@@ -828,6 +844,11 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true; // Indicate async response
   }
+});
+
+// Clean up registered tabs when they're closed
+browserAPI.tabs.onRemoved.addListener((tabId) => {
+  registeredTabs.delete(tabId);
 });
 
 browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -863,10 +884,18 @@ browserAPI.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
                   getLocalMods().then(localMods => {
                     console.log(`Found ${localMods.length} local mods`, localMods);
                     
-                    browserAPI.tabs.sendMessage(tabId, {
-                      action: 'registerLocalMods',
-                      mods: localMods
-                    });
+                    // Only register if this tab hasn't been registered yet
+                    if (!registeredTabs.has(tabId)) {
+                      browserAPI.tabs.sendMessage(tabId, {
+                        action: 'registerLocalMods',
+                        mods: localMods
+                      });
+                      
+                      // Mark this tab as registered
+                      registeredTabs.add(tabId);
+                    } else {
+                      console.log(`Tab ${tabId} already registered, skipping duplicate registration`);
+                    }
                     
                     // OPTIMIZATION: Content script will handle execution automatically
                   });
