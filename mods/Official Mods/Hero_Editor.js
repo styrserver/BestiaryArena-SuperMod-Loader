@@ -390,7 +390,50 @@ function showHeroEditorModal() {
       }
       
       // Calculate monster level from exp if available or use the provided level
-      const monsterLevel = hero.monster.level || 1;
+      let monsterLevel = hero.monster.level || 1;
+      
+      // If we have experience data but no level, calculate it
+      if (hero.monster.exp && (!hero.monster.level || hero.monster.level === 1)) {
+        try {
+          monsterLevel = globalThis.state.utils.expToCurrentLevel(hero.monster.exp);
+          // Update the hero data with the calculated level
+          hero.monster.level = monsterLevel;
+          if (window.DEBUG) console.log(`Calculated level ${monsterLevel} from exp ${hero.monster.exp} for ${monsterName}`);
+        } catch (e) {
+          console.warn('Error calculating level from exp:', e);
+        }
+      }
+      
+      // If no exp data in board, try to get it from player context for player pieces
+      if (!hero.monster.exp && boardContext.boardConfig) {
+        const boardPiece = boardContext.boardConfig.find(p => 
+          p.tileIndex === hero.tile && p.type === 'player' && p.databaseId);
+        
+        if (boardPiece) {
+          const playerContext = getPlayerSnapshot();
+          const monster = playerContext.monsters.find(m => m.id === boardPiece.databaseId);
+          
+          if (monster && monster.exp) {
+            try {
+              const calculatedLevel = globalThis.state.utils.expToCurrentLevel(monster.exp);
+              monsterLevel = calculatedLevel;
+              // Update the hero data with the calculated level and exp
+              hero.monster.level = monsterLevel;
+              hero.monster.exp = monster.exp;
+              if (window.DEBUG) console.log(`Got exp ${monster.exp} from player context, calculated level ${monsterLevel} for ${monsterName}`);
+            } catch (e) {
+              console.warn('Error calculating level from player context exp:', e);
+            }
+          }
+        }
+      }
+      
+      // If still no level data and the level is 1, assume it should be 50 (max level)
+      if (monsterLevel === 1 && !hero.monster.exp) {
+        monsterLevel = 50;
+        hero.monster.level = 50;
+        if (window.DEBUG) console.log(`No exp data found, defaulting to level 50 for ${monsterName}`);
+      }
       
       // Create hero card container
       const heroCard = document.createElement('div');

@@ -343,12 +343,13 @@ function decompressCompactFormat(compressedData) {
     const boardData = {
       region,
       map,
+      seed,
       board
     };
     
     // Only include seed if it's not 0
-    if (seed !== 0) {
-      boardData.seed = seed;
+    if (seed === 0) {
+      delete boardData.seed;
     }
     
     return boardData;

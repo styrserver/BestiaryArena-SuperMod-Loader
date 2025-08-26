@@ -1,4 +1,5 @@
 // DOM Turbo with Ticks mod for Bestiary Arena
+window.DEBUG = false;
 if (window.DEBUG) console.log('Turbo Mod initializing...');
 
 // Constants
@@ -59,11 +60,11 @@ function setTimeScale(factor) {
     turboState.speedupSubscription = null;
   }
 
-  // If factor is 1, the original tick interval is desired. Nothing to do here.
-  if (factor === 1) return;
+  // If factor is 1 or less, the original tick interval is desired. Nothing to do here.
+  if (factor <= 1) return;
 
   // Otherwise, set up a custom handler that adjusts the tick interval.
-  const interval = DEFAULT_TICK_INTERVAL_MS / factor;
+  const interval = Math.max(DEFAULT_TICK_INTERVAL_MS / factor, 16); // Minimum 16ms (60fps) for performance
   if (window.DEBUG) console.log(`Setting tick interval to ${interval}ms (${factor}x speed)`);
   
   turboState.speedupSubscription = globalThis.state.board.on('newGame', (event) => {
@@ -166,7 +167,7 @@ function setupTimerWatcher() {
       if (window.DEBUG) console.log('Display shows no ticks or lost connection, subscribing...');
       subscribeToGameTimer();
     }
-  }, 500); // Check every half second for more responsiveness
+  }, 1000); // Check every second for better performance at high speeds
 }
 
 // Function to subscribe to the game timer
@@ -194,6 +195,8 @@ function subscribeToGameTimer() {
       }
       
       turboState.lastKnownTick = context.currentTick;
+      
+      // Update DOM every tick but use more efficient textContent assignment
       turboState.tickDisplayElement.textContent = `Turbo: ON | Ticks: ${context.currentTick}`;
       turboState.tickDisplayElement.style.color = '#00ff00';
       
@@ -301,11 +304,15 @@ function watchForGameControls() {
   turboState.gameControlsObserver = new MutationObserver((mutations) => {
     if (!turboState.active) return;
     
+    // Cache button queries to avoid repeated DOM searches
+    let playButton = null;
+    let stopButton = null;
+    
     for (const mutation of mutations) {
       if (mutation.type === 'childList' || mutation.type === 'attributes') {
-        // Look for play/stop buttons
-        const playButton = document.querySelector('button[aria-label="Play"]');
-        const stopButton = document.querySelector('button[aria-label="Stop"]');
+        // Only query DOM once per observer cycle
+        if (!playButton) playButton = document.querySelector('button[aria-label="Play"]');
+        if (!stopButton) stopButton = document.querySelector('button[aria-label="Stop"]');
         
         // If play button appears (game stopped), mark timer as unsubscribed so we resubscribe on next play
         if (playButton && turboState.timerSubscribed) {
@@ -336,15 +343,15 @@ function watchForGameControls() {
   if (gameArea) {
     turboState.gameControlsObserver.observe(gameArea, { 
       childList: true, 
-      subtree: true,
-      attributes: true
+      subtree: false,
+      attributes: false
     });
     if (window.DEBUG) console.log('Watching game controls for play/stop events');
   } else {
     // If game area not found, watch the whole document and try again later
     turboState.gameControlsObserver.observe(document.body, { 
       childList: true, 
-      subtree: true
+      subtree: false
     });
     if (window.DEBUG) console.log('Game area not found, watching body for changes');
     
@@ -452,7 +459,7 @@ function createConfigPanel() {
     // Add the slider
     const slider = document.createElement('input');
     slider.type = 'range';
-    slider.min = '1';
+    slider.min = '2';
     slider.max = '10';
     slider.step = '1';
     slider.value = turboState.speedupFactor;
@@ -474,7 +481,7 @@ function createConfigPanel() {
     configContent.appendChild(description);
     
     const defaultNote = document.createElement('p');
-    defaultNote.textContent = `Default game speed is 1x (${DEFAULT_TICK_INTERVAL_MS}ms per tick).`;
+    defaultNote.textContent = `Default game speed is 1x (${DEFAULT_TICK_INTERVAL_MS}ms per tick). Turbo speeds range from 2x to 10x with performance optimizations.`;
     defaultNote.style.fontSize = '14px';
     defaultNote.style.marginTop = '10px';
     defaultNote.style.color = '#888';
@@ -519,7 +526,7 @@ if (api) {
       
       // Update speed from saved config
       if (turboConfig.speedupFactor) {
-        turboState.speedupFactor = turboConfig.speedupFactor;
+        turboState.speedupFactor = Math.max(turboConfig.speedupFactor || 5, 2);
       }
       
       // If it was active before, reactivate it

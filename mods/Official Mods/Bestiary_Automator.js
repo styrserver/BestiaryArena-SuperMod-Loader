@@ -766,8 +766,6 @@ const runAutomationTasks = async () => {
   try {
     // Only run automation if game is active
     if (!isGameActive()) {
-      // Update button appearance even when paused
-      updateAutomatorButton();
       return;
     }
     
@@ -775,9 +773,6 @@ const runAutomationTasks = async () => {
     await handleDayCare();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
-    
-    // Update button appearance after tasks
-    updateAutomatorButton();
   } catch (error) {
     if (window.DEBUG) console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
@@ -1023,6 +1018,15 @@ function init() {
 // Initialize the mod
 init();
 
+// Track button state to prevent unnecessary updates
+let lastButtonState = {
+  autoRefillStamina: false,
+  autoCollectRewards: false,
+  autoDayCare: false,
+  autoPlayAfterDefeat: false,
+  boardAnalyzerRunning: false
+};
+
 // Update the Automator button style based on enabled features
 function updateAutomatorButton() {
   if (api && api.ui) {
@@ -1033,36 +1037,51 @@ function updateAutomatorButton() {
       tooltip: t('configButtonTooltip')
     });
     
-    // Apply custom styling based on priority
-    const btn = document.getElementById(CONFIG_BUTTON_ID);
-    if (btn) {
-      // Check if Board Analyzer is running and we should show paused state
-      if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-        // Show paused state with gray background
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat";
-        btn.style.color = "#888";
-        btn.title = t('configButtonTooltip') + ' (Paused - Board Analyzer Running)';
-        return;
+    // Check current state
+    const currentState = {
+      autoRefillStamina: config.autoRefillStamina,
+      autoCollectRewards: config.autoCollectRewards,
+      autoDayCare: config.autoDayCare,
+      autoPlayAfterDefeat: config.autoPlayAfterDefeat,
+      boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
+    };
+    
+    // Only update button styling if state has changed
+    const stateChanged = JSON.stringify(currentState) !== JSON.stringify(lastButtonState);
+    
+    if (stateChanged) {
+      const btn = document.getElementById(CONFIG_BUTTON_ID);
+      if (btn) {
+        // Check if Board Analyzer is running and we should show paused state
+        if (currentState.boardAnalyzerRunning) {
+          // Show paused state with gray background
+          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat";
+          btn.style.color = "#888";
+          btn.title = t('configButtonTooltip') + ' (Paused - Board Analyzer Running)';
+        } else if (config.autoRefillStamina) {
+          // Priority 1: Green background for auto refill stamina
+          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+          btn.style.backgroundSize = "auto";
+          btn.style.color = "#ffffff";
+        } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
+          // Priority 2: Blue background for other auto features
+          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
+          btn.style.backgroundSize = "auto";
+          btn.style.color = "#ffffff";
+        } else {
+          // Default: No features enabled
+          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+          btn.style.color = "#ffe066";
+        }
+        
+        // Reset tooltip to normal if not paused
+        if (!currentState.boardAnalyzerRunning) {
+          btn.title = t('configButtonTooltip');
+        }
       }
       
-      if (config.autoRefillStamina) {
-        // Priority 1: Green background for auto refill stamina
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-        btn.style.backgroundSize = "auto";
-        btn.style.color = "#ffffff";
-      } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
-        // Priority 2: Blue background for other auto features
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
-        btn.style.backgroundSize = "auto";
-        btn.style.color = "#ffffff";
-      } else {
-        // Default: No features enabled
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-        btn.style.color = "#ffe066";
-      }
-      
-      // Reset tooltip to normal
-      btn.title = t('configButtonTooltip');
+      // Update last known state
+      lastButtonState = currentState;
     }
   }
 }

@@ -716,6 +716,19 @@ function restoreBoardState() {
       document.body.style.overflow = '';
     }
     
+    // NEW: Restore Better Highscores container if it exists
+    if (window.BetterHighscores && typeof window.BetterHighscores.restoreContainer === 'function') {
+      try {
+        console.log('[Board Analyzer] Restoring Better Highscores container...');
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+          window.BetterHighscores.restoreContainer();
+        }, 100);
+      } catch (error) {
+        console.warn('[Board Analyzer] Error restoring Better Highscores container:', error);
+      }
+    }
+    
     console.log('Board state restored successfully');
   } catch (error) {
     console.error('Error restoring board state:', error);
@@ -1134,6 +1147,16 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   // Ensure sandbox mode
   const modeSwitched = ensureSandboxMode();
   
+  // NEW: Preserve Better Highscores container before hiding game board
+  if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
+    try {
+      console.log('[Board Analyzer] Preserving Better Highscores container...');
+      window.BetterHighscores.preserveContainer();
+    } catch (error) {
+      console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
+    }
+  }
+  
   // Hide the game board if configured
   const gameFrame = document.querySelector('main .frame-4');
   if (config.hideGameBoard && gameFrame) {
@@ -1311,7 +1334,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
           
           targetTicksRun = {
             seed: runSeed,
-            board: boardDataCopy,
+            board: boardData,
             ticks: ticks,
             grade: grade,
             rankPoints: rankPoints
