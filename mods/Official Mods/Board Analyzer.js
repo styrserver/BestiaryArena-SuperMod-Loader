@@ -1,6 +1,15 @@
 // Board Analyzer Mod for Bestiary Arena
 console.log('Board Analyzer Mod initializing...');
 
+// Global state management for mod coordination
+if (!window.__modCoordination) {
+  window.__modCoordination = {
+    boardAnalyzerRunning: false,
+    boardAnalyzerStartTime: null,
+    boardAnalyzerEndTime: null
+  };
+}
+
 // Configuration with defaults
 const defaultConfig = {
   runs: 20,
@@ -21,13 +30,69 @@ const config = Object.assign({}, defaultConfig, context.config);
 // Constants
 const MOD_ID = 'board-analyzer';
 const BUTTON_ID = `${MOD_ID}-button`;
-const CONFIG_BUTTON_ID = `${MOD_ID}-config-button`;
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const DEFAULT_TICK_INTERVAL_MS = 62.5;
 
 // Track active modals to ensure they can be closed properly
 let activeRunningModal = null;
 let activeConfigPanel = null;
+
+// NEW: Lightweight modal registry to replace excessive DOM queries
+const modalRegistry = {
+  modals: new Set(),
+  register(modal) {
+    this.modals.add(modal);
+  },
+  unregister(modal) {
+    this.modals.delete(modal);
+  },
+  closeAll() {
+    this.modals.forEach(modal => {
+      try {
+        // Handle different modal structures
+        if (modal && typeof modal === 'function') {
+          // Modal is a function (like closeModal)
+          modal();
+        } else if (modal && typeof modal.close === 'function') {
+          // Modal has a close method
+          modal.close();
+        } else if (modal && modal.element && typeof modal.element.remove === 'function') {
+          // Modal has an element with remove method
+          modal.element.remove();
+        } else if (modal && typeof modal.remove === 'function') {
+          // Modal has a remove method
+          modal.remove();
+        } else {
+          console.warn('Unknown modal structure:', modal);
+        }
+      } catch (e) {
+        console.warn('Error closing modal:', e);
+      }
+    });
+    this.modals.clear();
+  },
+  closeByType(type) {
+    this.modals.forEach(modal => {
+      try {
+        if (modal && modal.type === type) {
+          // Handle different modal structures
+          if (typeof modal === 'function') {
+            modal();
+          } else if (typeof modal.close === 'function') {
+            modal.close();
+          } else if (modal.element && typeof modal.element.remove === 'function') {
+            modal.element.remove();
+          } else if (typeof modal.remove === 'function') {
+            modal.remove();
+          }
+          this.modals.delete(modal);
+        }
+      } catch (e) {
+        console.warn('Error closing modal by type:', e);
+      }
+    });
+  }
+};
 
 // Variable to signal forced stop
 let forceStop = false;
@@ -583,26 +648,7 @@ function clickButtonWithText(text) {
   return false;
 }
 
-// Calculate median of an array
-function calculateMedian(arr) {
-  if (arr.length === 0) return 0;
-  
-  const sorted = [...arr].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  
-  if (sorted.length % 2 === 0) {
-    return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
-  } else {
-    return sorted[middle];
-  }
-}
-
-// Calculate average of an array
-function calculateAverage(arr) {
-  if (arr.length === 0) return 0;
-  const sum = arr.reduce((a, b) => a + b, 0);
-  return Math.round(sum / arr.length);
-}
+// REMOVED: calculateMedian and calculateAverage functions - now handled by StatisticsCalculator
 
 // Ensure the game is in sandbox mode
 function ensureSandboxMode() {
@@ -626,22 +672,352 @@ function ensureSandboxMode() {
   }
 }
 
-// Function to get the final result of a game run
-const getLastTick = () => {
-  return new Promise((resolve) => {
-    let timerSubscription;
-    let hasResolved = false;
+// NEW: Function to properly restore the board state
+function restoreBoardState() {
+  try {
+    console.log('Restoring board state...');
     
-    // Subscribe to timer to track ticks and game state
-    timerSubscription = globalThis.state.gameTimer.subscribe((data) => {
-      const { currentTick, state, readableGrade, rankPoints } = data.context;
+    // NEW: Reset global coordination state to allow other mods to resume
+    if (window.__modCoordination) {
+      window.__modCoordination.boardAnalyzerRunning = false;
+      window.__modCoordination.boardAnalyzerEndTime = Date.now();
+      console.log('[Board Analyzer] Analysis finished - other mods can resume');
+      
+      // Small delay to ensure other mods detect the state change
+      setTimeout(() => {
+        // Force a small state change to trigger any watchers
+        window.__modCoordination.boardAnalyzerRunning = false;
+      }, 50);
+    }
+    
+    // Stop any running game
+    globalThis.state.board.send({
+      type: "setState",
+      fn: prevState => ({
+        ...prevState,
+        gameStarted: false
+      })
+    });
+    
+    // Remove any forced seed
+    if (typeof removeSeed === 'function') {
+      removeSeed();
+    }
+    
+    // Restore game board visibility
+    const gameFrame = document.querySelector('main .frame-4');
+    if (gameFrame && gameFrame.style.display === 'none') {
+      gameFrame.style.display = '';
+      console.log('Game board visibility restored');
+    }
+    
+    // Reset body overflow if it was modified
+    if (document.body.style.overflow === 'hidden') {
+      document.body.style.overflow = '';
+    }
+    
+    console.log('Board state restored successfully');
+  } catch (error) {
+    console.error('Error restoring board state:', error);
+  }
+}
+
+// NEW: Shared game state tracker to avoid multiple subscriptions
+let gameStateTracker = null;
+let currentGameState = null;
+
+// NEW: Board serialization cache to avoid redundant calls
+let boardSerializationCache = {
+  lastSerialized: null,
+  lastSerializedTime: 0,
+  cacheTimeout: 100, // Cache for 100ms to avoid redundant calls
+  
+  serialize(seed = null) {
+    const now = Date.now();
+    
+    // Return cached version if it's recent enough
+    if (this.lastSerialized && (now - this.lastSerializedTime) < this.cacheTimeout) {
+      const cached = JSON.parse(JSON.stringify(this.lastSerialized));
+      if (seed) cached.seed = seed;
+      return cached;
+    }
+    
+    // Serialize fresh board data
+    let boardData;
+    
+    try {
+      if (typeof window.$serializeBoard === 'function') {
+        boardData = JSON.parse(window.$serializeBoard());
+      } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
+        boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+      } else {
+        boardData = serializeBoard();
+      }
+      
+      // Cache the result
+      this.lastSerialized = JSON.parse(JSON.stringify(boardData));
+      this.lastSerializedTime = now;
+      
+      // Add seed if provided
+      if (seed) boardData.seed = seed;
+      
+      return boardData;
+    } catch (error) {
+      console.error('Error serializing board:', error);
+      return null;
+    }
+  },
+  
+  clear() {
+    this.lastSerialized = null;
+    this.lastSerializedTime = 0;
+  }
+};
+
+// NEW: Optimized statistics calculator to avoid repeated array operations
+class StatisticsCalculator {
+  constructor() {
+    this.reset();
+  }
+  
+  reset() {
+    this.totalRuns = 0;
+    this.completedRuns = 0;
+    this.sPlusCount = 0;
+    this.sPlusMaxPointsCount = 0;
+    this.maxRankPoints = 0;
+    this.minTicks = Infinity;
+    this.maxTicks = 0;
+    this.ticksSum = 0;
+    this.ticksArray = [];
+    this.runTimes = [];
+    this.runTimesSum = 0;
+  }
+  
+  addRun(result, runTime) {
+    this.totalRuns++;
+    this.runTimes.push(runTime);
+    this.runTimesSum += runTime;
+    
+    if (result.completed) {
+      this.completedRuns++;
+      this.ticksArray.push(result.ticks);
+      this.ticksSum += result.ticks;
+      
+      // Update min/max ticks
+      if (result.ticks < this.minTicks) {
+        this.minTicks = result.ticks;
+      }
+      if (result.ticks > this.maxTicks) {
+        this.maxTicks = result.ticks;
+      }
+    }
+    
+    // Update S+ stats
+    if (result.grade === 'S+') {
+      this.sPlusCount++;
+      if (result.rankPoints === this.maxRankPoints) {
+        this.sPlusMaxPointsCount++;
+      } else if (result.rankPoints > this.maxRankPoints) {
+        this.maxRankPoints = result.rankPoints;
+        this.sPlusMaxPointsCount = 1;
+      }
+    }
+  }
+  
+  calculateStatistics() {
+    const sPlusRate = this.totalRuns > 0 ? (this.sPlusCount / this.totalRuns * 100).toFixed(2) : '0.00';
+    const completionRate = this.totalRuns > 0 ? (this.completedRuns / this.totalRuns * 100).toFixed(2) : '0.00';
+    const averageRunTime = this.runTimes.length > 0 ? this.runTimesSum / this.runTimes.length : 0;
+    const averageTicks = this.ticksArray.length > 0 ? this.ticksSum / this.ticksArray.length : 0;
+    const medianTicks = this.calculateMedian(this.ticksArray);
+    
+    return {
+      totalRuns: this.totalRuns,
+      completedRuns: this.completedRuns,
+      sPlusCount: this.sPlusCount,
+      sPlusMaxPointsCount: this.sPlusMaxPointsCount,
+      sPlusRate,
+      completionRate,
+      minTicks: isFinite(this.minTicks) ? this.minTicks : 0,
+      maxTicks: this.maxTicks,
+      medianTicks,
+      averageTicks,
+      maxRankPoints: this.maxRankPoints,
+      averageRunTime,
+      fastestRunTime: this.runTimes.length > 0 ? Math.min(...this.runTimes) : 0,
+      slowestRunTime: this.runTimes.length > 0 ? Math.max(...this.runTimes) : 0
+    };
+  }
+  
+  calculateMedian(array) {
+    if (array.length === 0) return 0;
+    if (array.length === 1) return array[0];
+    
+    const sorted = [...array].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    
+    if (sorted.length % 2 === 0) {
+      return (sorted[mid - 1] + sorted[mid]) / 2;
+    } else {
+      return sorted[mid];
+    }
+  }
+}
+
+// Function to initialize or get the shared game state tracker
+function getGameStateTracker() {
+  if (!gameStateTracker) {
+    gameStateTracker = {
+      subscription: null,
+      listeners: new Set(),
+      currentState: null,
+      
+      subscribe(listener) {
+        this.listeners.add(listener);
+        
+        // If this is the first listener, start the subscription
+        if (!this.subscription) {
+          this.startSubscription();
+        }
+        
+        // Return unsubscribe function
+        return () => {
+          this.listeners.delete(listener);
+          if (this.listeners.size === 0) {
+            this.stopSubscription();
+          }
+        };
+      },
+      
+      startSubscription() {
+        if (this.subscription) return;
+        
+        this.subscription = globalThis.state.gameTimer.subscribe((data) => {
+          this.currentState = data.context;
+          this.notifyListeners(data.context);
+        });
+      },
+      
+      stopSubscription() {
+        if (this.subscription) {
+          this.subscription.unsubscribe();
+          this.subscription = null;
+        }
+        this.currentState = null;
+      },
+      
+      notifyListeners(context) {
+        this.listeners.forEach(listener => {
+          try {
+            listener(context);
+          } catch (error) {
+            console.warn('Error in game state listener:', error);
+          }
+        });
+      },
+      
+      getCurrentState() {
+        return this.currentState;
+      }
+    };
+  }
+  
+  return gameStateTracker;
+}
+
+// Function to get the final result of a game run
+const getLastTick = (analysisId = null) => {
+  return new Promise((resolve) => {
+    let hasResolved = false;
+    let unsubscribe = null;
+    
+    // NEW: Check if this analysis instance is still valid
+    if (analysisId && currentAnalysisId !== analysisId) {
+      console.log('[Board Analyzer] Analysis instance changed in getLastTick - stopping immediately');
+      resolve({
+        ticks: 0,
+        grade: 'F',
+        rankPoints: 0,
+        completed: false,
+        forceStopped: true,
+        analysisChanged: true
+      });
+      return;
+    }
+    
+    // NEW: Check for force stop immediately
+    if (forceStop) {
+      console.log('Force stop detected in getLastTick - stopping immediately');
+      resolve({
+        ticks: 0,
+        grade: 'F',
+        rankPoints: 0,
+        completed: false,
+        forceStopped: true
+      });
+      return;
+    }
+    
+    // NEW: Use shared game state tracker instead of creating new subscription
+    const tracker = getGameStateTracker();
+    
+    const listener = (context) => {
+      const { currentTick, state, readableGrade, rankPoints } = context;
+      
+      // NEW: Check if this analysis instance is still valid
+      if (analysisId && currentAnalysisId !== analysisId && !hasResolved) {
+        console.log('[Board Analyzer] Analysis instance changed during game - stopping immediately');
+        hasResolved = true;
+        if (unsubscribe) unsubscribe();
+        resolve({
+          ticks: currentTick,
+          grade: readableGrade,
+          rankPoints: rankPoints,
+          completed: false,
+          forceStopped: true,
+          analysisChanged: true
+        });
+        return;
+      }
+      
+      // NEW: Check if analysis state was reset (stop button was clicked)
+      if (!isAnalysisRunning && !hasResolved) {
+        console.log('[Board Analyzer] Analysis state reset during game - stopping immediately');
+        hasResolved = true;
+        if (unsubscribe) unsubscribe();
+        resolve({
+          ticks: currentTick,
+          grade: readableGrade,
+          rankPoints: rankPoints,
+          completed: false,
+          forceStopped: true,
+          analysisReset: true
+        });
+        return;
+      }
+      
+      // NEW: Check for force stop on every timer update
+      if (forceStop && !hasResolved) {
+        console.log('Force stop detected during game - stopping immediately');
+        hasResolved = true;
+        if (unsubscribe) unsubscribe();
+        resolve({
+          ticks: currentTick,
+          grade: readableGrade,
+          rankPoints: rankPoints,
+          completed: false,
+          forceStopped: true
+        });
+        return;
+      }
       
       // Check for stop conditions
       if (state !== 'initial') {
         // Game completed naturally through state change
         if (!hasResolved) {
           hasResolved = true;
-          timerSubscription.unsubscribe();
+          if (unsubscribe) unsubscribe();
           resolve({
             ticks: currentTick,
             grade: readableGrade,
@@ -661,7 +1037,7 @@ const getLastTick = () => {
               gameStarted: false
             })
           });
-          timerSubscription.unsubscribe();
+          if (unsubscribe) unsubscribe();
           resolve({
             ticks: currentTick,
             grade: readableGrade,
@@ -681,7 +1057,7 @@ const getLastTick = () => {
               gameStarted: false
             })
           });
-          timerSubscription.unsubscribe();
+          if (unsubscribe) unsubscribe();
           resolve({
             ticks: currentTick,
             grade: readableGrade,
@@ -690,14 +1066,51 @@ const getLastTick = () => {
           });
         }
       }
-    });
+    };
+    
+    // Subscribe to the shared tracker
+    unsubscribe = tracker.subscribe(listener);
   });
 };
 
+// Analysis state tracker
+let isAnalysisRunning = false;
+let currentAnalysisId = null;
+
 // Main analyze function
 async function analyzeBoard(runs = config.runs, statusCallback = null) {
+  // NEW: Prevent multiple analyses from running simultaneously
+  if (isAnalysisRunning) {
+    console.log('[Board Analyzer] Analysis already running, stopping previous analysis first');
+    forceStop = true;
+    // Wait a bit for the previous analysis to stop
+    await sleep(200);
+  }
+  
+  // NEW: Set analysis state
+  isAnalysisRunning = true;
+  currentAnalysisId = Date.now();
+  const thisAnalysisId = currentAnalysisId;
+  
+  // Set global state to indicate Board Analyzer is running
+  window.__modCoordination.boardAnalyzerRunning = true;
+  window.__modCoordination.boardAnalyzerStartTime = Date.now();
+  window.__modCoordination.boardAnalyzerEndTime = null;
+  
+  console.log('[Board Analyzer] Analysis started - other mods should pause');
+  
   // Reset force stop flag
   forceStop = false;
+  
+  // NEW: Clear board serialization cache for fresh analysis
+  boardSerializationCache.clear();
+  
+  // NEW: Disable Turbo Mode button during analysis
+  if (window.turboButton) {
+    window.turboButton.disabled = true;
+    window.turboButton.title = 'Turbo Mode disabled during Board Analysis';
+    console.log('[Board Analyzer] Turbo Mode button disabled');
+  }
   
   // Reset tracking variables
   currentSeed = null;
@@ -706,6 +1119,9 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   currentRoomName = null;
   boardSetup = [];
   
+  // NEW: Use optimized statistics calculator
+  const statsCalculator = new StatisticsCalculator();
+  
   // Variables to store best runs
   let bestTimeRun = null;
   let bestScoreRun = null;
@@ -713,7 +1129,6 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   
   // Timing variables
   const startTime = performance.now();
-  const runTimes = [];
   let lastRunStart = 0;
   
   // Ensure sandbox mode
@@ -726,14 +1141,6 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   }
 
   const results = [];
-  let minTicks = Infinity;
-  let minTicksResult = null;
-  let maxRankPoints = 0;
-  let maxRankPointsResult = null;
-  let sPlusCount = 0;
-  let sPlusMaxPointsCount = 0; // Track S+ runs that achieved max rank points
-  let totalRuns = 0;
-  let completedRuns = 0;
 
   try {
     // If we just switched to sandbox mode, ensure UI is updated
@@ -768,19 +1175,31 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
     }
     
     for (let i = 1; i <= runs; i++) {
+      // NEW: Check if this analysis instance is still valid
+      if (currentAnalysisId !== thisAnalysisId) {
+        console.log('[Board Analyzer] Analysis instance changed, stopping this run');
+        break;
+      }
+      
+      // NEW: Check if analysis state was reset (stop button was clicked)
+      if (!isAnalysisRunning) {
+        console.log('[Board Analyzer] Analysis state reset, stopping this run');
+        break;
+      }
+      
       // Start timing this run
       lastRunStart = performance.now();
       
       // Check if forced stop was requested
       if (forceStop) {
-        console.log('Analysis stopped by user');
+        console.log('Analysis stopped by user - breaking out of loop');
         break;
       }
       
-      // Update status callback if provided
-      if (statusCallback && runTimes.length > 0) {
+      // NEW: Update status callback if provided
+      if (statusCallback && statsCalculator.runTimes.length > 0) {
         // Calculate average run time and estimated time remaining
-        const avgRunTime = runTimes.reduce((sum, time) => sum + time, 0) / runTimes.length;
+        const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
         const remainingRuns = runs - i + 1;
         const estimatedTimeRemaining = avgRunTime * remainingRuns;
         
@@ -815,22 +1234,28 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         });
         
         // Wait for game to complete
-        const result = await getLastTick();
+        const result = await getLastTick(thisAnalysisId);
+        
+        // NEW: Check if this run was force stopped, analysis changed, or analysis reset
+        if (result.forceStopped || result.analysisChanged || result.analysisReset) {
+          console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
+          break;
+        }
         
         // Add seed to result
         result.seed = runSeed;
         results.push(result);
         
         const { ticks, grade, rankPoints, completed } = result;
-        totalRuns++;
+        
+        // NEW: Use statistics calculator to track stats efficiently
+        const runTime = performance.now() - lastRunStart;
+        statsCalculator.addRun(result, runTime);
         
         if (completed) {
-          completedRuns++;
-          
           // Update min ticks if this is a completed run with lower ticks
-          if (ticks < minTicks) {
-            minTicks = ticks;
-            minTicksResult = {
+          if (ticks < statsCalculator.minTicks) {
+            const minTicksResult = {
               ticks,
               grade,
               rankPoints,
@@ -838,26 +1263,15 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
               runIndex: i
             };
             
-            // Store the board configuration for best time replay
-            // Try various methods to get the most complete board data
-            let boardData;
+            // NEW: Use cached board serialization for best time replay
+            const boardData = boardSerializationCache.serialize(runSeed);
             
-            if (typeof window.$serializeBoard === 'function') {
-              // Use the raw function directly from window
-              boardData = JSON.parse(window.$serializeBoard());
-              console.log('Best time: Using window.$serializeBoard directly');
-            } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-              // Use the function from the API
-              boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-              console.log('Best time: Using BestiaryModAPI.utility.serializeBoard');
+            if (boardData) {
+              console.log('Best time: Using cached board serialization');
             } else {
-              // Fallback to our own implementation
-              boardData = serializeBoard();
-              console.log('Best time: Using local serializeBoard implementation');
+              console.warn('Failed to serialize board for best time replay');
+              continue;
             }
-            
-            // Ensure the seed is set
-            boardData.seed = runSeed;
             
             bestTimeRun = {
               seed: runSeed,
@@ -870,10 +1284,9 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         }
         
         if (grade === 'S+') {
-          sPlusCount++;
           // Check if this S+ run achieved the maximum rank points
-          if (rankPoints === maxRankPoints) {
-            sPlusMaxPointsCount++;
+          if (rankPoints === statsCalculator.maxRankPoints) {
+            // This is handled by the statistics calculator
           }
           // If stopOnSPlus is enabled, we might want to exit early
           if (config.stopOnSPlus) {
@@ -886,23 +1299,15 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
           console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
           
-          // Capture the configuration for the target replay
-          let boardData;
+          // NEW: Use cached board serialization for target ticks replay
+          const boardData = boardSerializationCache.serialize(runSeed);
           
-          if (typeof window.$serializeBoard === 'function') {
-            boardData = JSON.parse(window.$serializeBoard());
-            console.log('Target ticks: Using window.$serializeBoard directly');
-          } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-            boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-            console.log('Target ticks: Using BestiaryModAPI.utility.serializeBoard');
+          if (boardData) {
+            console.log('Target ticks: Using cached board serialization');
           } else {
-            boardData = serializeBoard();
-            console.log('Target ticks: Using local serializeBoard implementation');
+            console.warn('Failed to serialize board for target ticks replay');
+            break;
           }
-          
-          // Create a deep copy to avoid reference issues
-          const boardDataCopy = structuredClone(boardData);
-          boardDataCopy.seed = runSeed;
           
           targetTicksRun = {
             seed: runSeed,
@@ -916,10 +1321,9 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
           break;
         }
         
-        // Update max rank points
-        if (rankPoints > maxRankPoints) {
-          maxRankPoints = rankPoints;
-          maxRankPointsResult = {
+        // Update max rank points (handled by statistics calculator, but we need the result object)
+        if (rankPoints > statsCalculator.maxRankPoints) {
+          const maxRankPointsResult = {
             ticks,
             grade,
             rankPoints,
@@ -927,26 +1331,15 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
             runIndex: i
           };
           
-          // Store the board configuration for max points replay
-          // Try various methods to get the most complete board data
-          let boardData;
+          // NEW: Use cached board serialization for max points replay
+          const boardData = boardSerializationCache.serialize(runSeed);
           
-          if (typeof window.$serializeBoard === 'function') {
-            // Use the raw function directly from window
-            boardData = JSON.parse(window.$serializeBoard());
-            console.log('Max points: Using window.$serializeBoard directly');
-          } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-            // Use the function from the API
-            boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-            console.log('Max points: Using BestiaryModAPI.utility.serializeBoard');
+          if (boardData) {
+            console.log('Max points: Using cached board serialization');
           } else {
-            // Fallback to our own implementation
-            boardData = serializeBoard();
-            console.log('Max points: Using local serializeBoard implementation');
+            console.warn('Failed to serialize board for max points replay');
+            continue;
           }
-          
-          // Ensure the seed is set
-          boardData.seed = runSeed;
           
           bestScoreRun = {
             seed: runSeed,
@@ -959,7 +1352,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         
         // Check for force stop again
         if (forceStop) {
-          console.log('Analysis stopped by user after run completed');
+          console.log('Analysis stopped by user after run completed - breaking out of loop');
           break;
         }
         
@@ -985,9 +1378,8 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         } catch (e) {}
       }
       
-      // Record the time taken for this run
+      // Record the time taken for this run (handled by statistics calculator)
       const runTime = performance.now() - lastRunStart;
-      runTimes.push(runTime);
       console.log(`Run ${i} took ${runTime.toFixed(2)}ms`);
       
       // Brief pause between runs to ensure clean state
@@ -997,56 +1389,59 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
     console.error('Error during analysis:', error);
     throw error;
   } finally {
-    // Restore game board visibility
-    if (config.hideGameBoard && gameFrame) {
-      gameFrame.style.display = '';
-    }
+    // NEW: Use the proper board restoration function (includes global state reset)
+    restoreBoardState();
     
     // Disable turbo mode if it was enabled
     if (config.enableTurboAutomatically && turboActive) {
       disableTurbo();
     }
     
-    // Ensure the game is stopped using direct state manipulation
-    try {
-      globalThis.state.board.send({
-        type: "setState",
-        fn: prevState => ({
-          ...prevState,
-          gameStarted: false
-        })
-      });
-    } catch (e) {
-      console.error('Error stopping game in finally block:', e);
+    // NEW: Reset analysis state
+    if (currentAnalysisId === thisAnalysisId) {
+      isAnalysisRunning = false;
+      currentAnalysisId = null;
+      console.log('[Board Analyzer] Analysis state reset');
+    }
+    
+    // NEW: Clean up game state tracker if no more listeners
+    if (gameStateTracker && gameStateTracker.listeners.size === 0) {
+      gameStateTracker.stopSubscription();
+      gameStateTracker = null;
+      console.log('[Board Analyzer] Game state tracker cleaned up');
+    }
+    
+    // NEW: Clear board serialization cache
+    boardSerializationCache.clear();
+    console.log('[Board Analyzer] Board serialization cache cleared');
+    
+    // NEW: Re-enable Turbo Mode button after analysis
+    if (window.turboButton) {
+      window.turboButton.disabled = false;
+      window.turboButton.title = '';
+      console.log('[Board Analyzer] Turbo Mode button re-enabled');
     }
   }
 
-  // Calculate timing statistics
+  // NEW: Use optimized statistics calculator
   const totalTime = performance.now() - startTime;
-  const averageRunTime = runTimes.length > 0 ? runTimes.reduce((sum, time) => sum + time, 0) / runTimes.length : 0;
-  
-  // Calculate statistics
-  const sPlusRate = totalRuns > 0 ? (sPlusCount / totalRuns * 100).toFixed(2) : '0.00';
-  const completionRate = totalRuns > 0 ? (completedRuns / totalRuns * 100).toFixed(2) : '0.00';
-  const ticksArray = results.filter(r => r.completed).map(r => r.ticks);
-  const medianTicks = calculateMedian(ticksArray);
-  const averageTicks = calculateAverage(ticksArray);
+  const stats = statsCalculator.calculateStatistics();
   
   return {
     results,
     summary: {
       runs,
-      totalRuns,
-      completedRuns,
-      sPlusCount,
-      sPlusMaxPointsCount,
-      sPlusRate,
-      completionRate,
-      minTicks: isFinite(minTicks) ? minTicks : 0,
-      maxTicks: Math.max(...results.map(r => r.ticks)),
-      medianTicks: medianTicks,
-      averageTicks: averageTicks,
-      maxRankPoints,
+      totalRuns: stats.totalRuns,
+      completedRuns: stats.completedRuns,
+      sPlusCount: stats.sPlusCount,
+      sPlusMaxPointsCount: stats.sPlusMaxPointsCount,
+      sPlusRate: stats.sPlusRate,
+      completionRate: stats.completionRate,
+      minTicks: stats.minTicks,
+      maxTicks: stats.maxTicks,
+      medianTicks: stats.medianTicks,
+      averageTicks: stats.averageTicks,
+      maxRankPoints: stats.maxRankPoints,
       forceStopped: forceStop,
       modeSwitched,
       bestTimeResult: bestTimeRun,
@@ -1055,10 +1450,10 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       // Timing stats
       totalTimeMs: totalTime,
       totalTimeFormatted: formatMilliseconds(totalTime),
-      averageRunTimeMs: averageRunTime,
-      averageRunTimeFormatted: formatMilliseconds(averageRunTime),
-      fastestRunTimeMs: Math.min(...runTimes),
-      slowestRunTimeMs: Math.max(...runTimes)
+      averageRunTimeMs: stats.averageRunTime,
+      averageRunTimeFormatted: formatMilliseconds(stats.averageRunTime),
+      fastestRunTimeMs: stats.fastestRunTime,
+      slowestRunTimeMs: stats.slowestRunTime
     }
   };
 }
@@ -1079,23 +1474,15 @@ function formatMilliseconds(ms) {
 // Create replay data in the required format
 function createReplayData(seed = null) {
   try {
-    // Get the serialized board data
-    let boardData;
+    // NEW: Use cached board serialization
+    const boardData = boardSerializationCache.serialize(seed);
     
-    // Check if the utility functions are directly available in window scope
-    if (typeof window.$serializeBoard === 'function') {
-      // Use the raw function directly from window
-      boardData = JSON.parse(window.$serializeBoard());
-      console.log('Used window.$serializeBoard directly for board data');
-    } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-      // Use the function from the API
-      boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-      console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
-    } else {
-      // Fallback to our own implementation
-      boardData = serializeBoard();
-      console.log('Used local serializeBoard implementation for board data');
+    if (!boardData) {
+      console.error('Failed to serialize board data');
+      return null;
     }
+    
+    console.log('Used cached board serialization for replay data');
     
     // Log the serialized data to see what we got
     console.log('Serialized board data:', boardData);
@@ -1325,6 +1712,12 @@ function createConfigPanel(startAnalysisCallback) {
       text: t('startAnalysisButton'),
       primary: true,
       onClick: () => {
+        // NEW: Check if analysis is already running
+        if (isAnalysisRunning) {
+          console.log('[Board Analyzer] Analysis already running, cannot start new analysis');
+          return;
+        }
+        
         // Update configuration with form values
         updateConfig();
         
@@ -1381,58 +1774,18 @@ function createConfigPanel(startAnalysisCallback) {
     buttons: buttons
   });
   
+  // NEW: Register config panel with registry
+  panel.type = 'config';
+  modalRegistry.register(panel);
+  
   activeConfigPanel = panel;
   return panel;
 }
 
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
-  console.log("Attempting to force close all modals...");
-  
-  // Specific cleanup for the modal structure in the UI
-  const allDialogs = document.querySelectorAll('div[role="dialog"][data-state="open"]');
-  allDialogs.forEach(dialog => {
-    // Check if it's our analysis modal by looking for content
-    const title = dialog.querySelector('.widget-top p');
-    if (title && (title.textContent.includes('Executando Análise') || title.textContent.includes('Running Analysis'))) {
-      console.log("Found analysis modal to remove:", dialog);
-      
-      // First try to change its state to closed
-      dialog.setAttribute('data-state', 'closed');
-      
-      // Then force remove it after a small delay
-      setTimeout(() => {
-        if (dialog.parentNode) {
-          dialog.parentNode.removeChild(dialog);
-          console.log("Modal removed successfully!");
-        }
-      }, 50);
-    }
-  });
-  
-  // Also try to find by text content inside any element
-  document.querySelectorAll('*').forEach(el => {
-    if (el.textContent && (
-        el.textContent.includes('Executando Análise') || 
-        el.textContent.includes('Running Analysis')
-      ) && el.closest('[role="dialog"]')) {
-      const dialog = el.closest('[role="dialog"]');
-      console.log("Found analysis modal by text:", dialog);
-      if (dialog && dialog.parentNode) {
-        dialog.parentNode.removeChild(dialog);
-      }
-    }
-  });
-  
-  // Remove overlay backgrounds too
-  document.querySelectorAll('.modal-overlay, .fixed.inset-0').forEach(overlay => {
-    if (overlay && overlay.parentNode) {
-      overlay.parentNode.removeChild(overlay);
-    }
-  });
-  
-  // Reset body styles that might have been added by modal
-  document.body.style.overflow = '';
+  console.log("Closing all registered modals...");
+  modalRegistry.closeAll();
 }
 
 // Call this function when starting a new analysis
@@ -1477,28 +1830,40 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
         text: t('forceStopButton'),
         primary: false,
         onClick: () => {
-          // Set force stop flag
+          // Reset analysis state - this will stop everything immediately
+          isAnalysisRunning = false;
+          currentAnalysisId = null;
           forceStop = true;
           
-          // Try to stop current game run
-          globalThis.state.board.send({
-            type: "setState",
-            fn: prevState => ({
-              ...prevState,
-              gameStarted: false
-            })
-          });
+          // NEW: Re-enable Turbo Mode button when stopping
+          if (window.turboButton) {
+            window.turboButton.disabled = false;
+            window.turboButton.title = '';
+            console.log('[Board Analyzer] Turbo Mode button re-enabled (stop)');
+          }
           
-          // Update progress text to indicate stopping
+          // Update UI
           const progressEl = document.getElementById('analysis-progress');
           if (progressEl) {
             progressEl.textContent += ' - Stopping...';
             progressEl.style.color = '#e74c3c';
           }
+          
+          const stopButton = event.target;
+          if (stopButton) {
+            stopButton.disabled = true;
+            stopButton.textContent = 'Stopping...';
+          }
+          
+          console.log('Stop Analysis clicked - analysis will stop immediately');
         }
       }
     ]
   });
+  
+  // NEW: Register modal with registry for efficient management
+  modal.type = 'running';
+  modalRegistry.register(modal);
   
   // Add a special identifier to the running modal
   if (modal && modal.element) {
@@ -2025,7 +2390,7 @@ function showResultsModal(results) {
     }
     
     // Show the results modal with a callback to clean up when closed
-    return api.ui.components.createModal({
+    const resultsModal = api.ui.components.createModal({
       title: t('resultTitle'),
       width: 400,
       content: content,
@@ -2040,6 +2405,12 @@ function showResultsModal(results) {
         }
       ]
     });
+    
+    // NEW: Register results modal with registry
+    resultsModal.type = 'results';
+    modalRegistry.register(resultsModal);
+    
+    return resultsModal;
   }, 100);
 }
 
@@ -2120,25 +2491,15 @@ function verifyAndFixReplayData(replayData) {
 // Function to create replay data for a specific run
 function createReplayDataForRun(runResult) {
   try {
-    // Get the current board configuration
-    let boardData;
+    // NEW: Use cached board serialization
+    const boardData = boardSerializationCache.serialize(runResult.seed);
     
-    // Try various methods to get the most complete board data
-    if (typeof window.$serializeBoard === 'function') {
-      boardData = JSON.parse(window.$serializeBoard());
-      console.log('Using window.$serializeBoard for run replay data');
-    } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-      boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-      console.log('Using BestiaryModAPI.utility.serializeBoard for run replay data');
-    } else {
-      boardData = serializeBoard();
-      console.log('Using local serializeBoard for run replay data');
+    if (!boardData) {
+      console.error('Failed to serialize board for run replay data');
+      return null;
     }
     
-    // Add the seed from the run result
-    if (runResult.seed) {
-      boardData.seed = runResult.seed;
-    }
+    console.log('Using cached board serialization for run replay data');
     
     // Verify the replay data is valid
     if (!verifyAndFixReplayData(boardData)) {
@@ -2199,6 +2560,12 @@ function showConfigAndPrepareAnalysis() {
 
 // Main entry point - Run the analysis
 async function runAnalysis() {
+  // NEW: Check if analysis is already running
+  if (isAnalysisRunning) {
+    console.log('[Board Analyzer] Analysis already running, cannot start new analysis');
+    return;
+  }
+  
   // Check if Turbo Mode mod is enabled and disable it before analysis
   if (window.__turboState && window.__turboState.active) {
     console.log('Turbo Mode mod is currently enabled, disabling it before analysis...');
@@ -2230,15 +2597,9 @@ async function runAnalysis() {
   // Force close any existing modals first
   forceCloseAllModals();
   
-  // Rest of the cleanup code can stay
-  if (activeRunningModal) {
-    try {
-      activeRunningModal.close();
-      activeRunningModal = null;
-    } catch (e) {
-      console.error('Error closing active running modal:', e);
-    }
-  }
+  // NEW: Use modal registry to close any existing modals
+  modalRegistry.closeByType('running');
+  activeRunningModal = null;
   
   // Create a variable to store the running modal
   let runningModal = null;
@@ -2283,6 +2644,12 @@ async function runAnalysis() {
       }
     });
     
+    // NEW: Always show results, even if analysis was stopped early
+    console.log('Analysis completed, showing results:', results);
+    console.log('Results summary:', results.summary);
+    console.log('Force stopped:', results.summary.forceStopped);
+    console.log('Total runs completed:', results.summary.totalRuns);
+    
     // Force close all modals again
     forceCloseAllModals();
     
@@ -2312,33 +2679,17 @@ async function runAnalysis() {
     // Force close all modals one more time
     forceCloseAllModals();
     
-    // Show the results modal
+    // Show the results modal (works for both completed and partial results)
     showResultsModal(results);
     
   } catch (error) {
     console.error('Analysis error:', error);
     
-    // Close the running modal if it exists
-    forceCloseAllModals();
-    
-    if (runningModal) {
-      try {
-        // Check if the modal has a close method before calling it
-        if (typeof runningModal.close === 'function') {
-          runningModal.close();
-        } else if (runningModal.element && typeof runningModal.element.remove === 'function') {
-          // Try to remove the element directly if close method doesn't exist
-          runningModal.element.remove();
-        } else if (runningModal.remove && typeof runningModal.remove === 'function') {
-          // Try alternative remove method
-          runningModal.remove();
-        }
-      } catch (e) {
-        console.error('Error closing running modal after error:', e);
-      }
-      runningModal = null;
-      activeRunningModal = null;
-    }
+    // NEW: Use modal registry to close modals and restore board state
+    modalRegistry.closeAll();
+    restoreBoardState();
+    runningModal = null;
+    activeRunningModal = null;
     
     // Show error modal
     api.ui.components.createModal({
@@ -2358,50 +2709,20 @@ async function runAnalysis() {
   }
 }
 
-// Add an initialization function to set up a MutationObserver to catch modals
-function setupModalWatcher() {
-  // Check if we already have an observer
-  if (window.__boardAnalyzerModalObserver) return;
-  
-  // Create a mutation observer to monitor for stuck modals
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.addedNodes.length) {
-        // Look for any added dialog nodes
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === 1 && node.getAttribute && node.getAttribute('role') === 'dialog') {
-            // If this is a results dialog, check if there are other analysis modals still open
-            const title = node.querySelector('.widget-top p');
-            if (title && title.textContent.includes(t('resultTitle'))) {
-              // Results modal is showing, force close any analysis modals
-              setTimeout(forceCloseAllModals, 100);
-            }
-          }
-        });
-      }
-    }
-  });
-  
-  // Start observing the document
-  observer.observe(document.body, { childList: true, subtree: true });
-  
-  // Store the observer for later reference
-  window.__boardAnalyzerModalObserver = observer;
-}
+// REMOVED: setupModalWatcher function - replaced with lightweight modal registry
 
 // Initialize UI
 function init() {
   console.log('Board Analyzer initializing UI...');
   
-  // Setup modal watcher
-  setupModalWatcher();
+  // REMOVED: setupModalWatcher() - replaced with lightweight modal registry
   
   // Make sure turbo mode is disabled on startup
   if (turboActive) {
     disableTurbo();
   }
   
-  // Add the main analyzer button - now opens config first
+  // Add the main analyzer button - opens config panel with analysis callback
   api.ui.addButton({
     id: BUTTON_ID,
     text: t('buttonText'),
@@ -2411,14 +2732,7 @@ function init() {
     onClick: showConfigAndPrepareAnalysis
   });
   
-  // Add the configuration button
-  api.ui.addButton({
-    id: CONFIG_BUTTON_ID,
-    icon: '⚙️',
-    modId: MOD_ID,
-    tooltip: t('configButtonTooltip'),
-    onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
-  });
+  // REMOVED: Cogwheel button - redundant since main button opens the same config panel
   
   // Create the configuration panel (without analysis callback)
   createConfigPanel();
@@ -2434,11 +2748,14 @@ init();
 
 // Export functionality
 context.exports = {
-  analyze: showConfigAndPrepareAnalysis, // Changed to show config first
-  toggleConfig: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID),
+  analyze: showConfigAndPrepareAnalysis, // Opens config panel with analysis callback
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
     api.service.updateScriptConfig(context.hash, config);
+  },
+  // NEW: Cleanup function for modal registry
+  cleanup: () => {
+    modalRegistry.closeAll();
   }
 };
 

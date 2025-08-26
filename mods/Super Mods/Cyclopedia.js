@@ -6142,7 +6142,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Simple content container below the title
             const contentContainer = document.createElement('div');
             contentContainer.style.overflowY = 'hidden'; // Start with no scrollbar
-            contentContainer.style.maxHeight = '175px';
+            contentContainer.style.maxHeight = '190px';
             contentContainer.style.paddingRight = '8px';
             contentContainer.style.width = '100%';
             contentContainer.style.boxSizing = 'border-box';
@@ -6190,7 +6190,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             } else {
               // Show creatures that spawn on this map instead of "Map data not available"
               const creaturesContainer = document.createElement('div');
-              creaturesContainer.style.marginTop = '15px';
+              creaturesContainer.style.marginTop = '4px';
               creaturesContainer.style.textAlign = 'center';
 
               
@@ -6226,50 +6226,301 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               console.log('[Cyclopedia] Maps Tab - Room Actors:', roomActors);
               
               if (roomActors && roomActors.length > 0) {
+                // Filter out null/invalid actors first, then sort creatures by Level -> Name
+                const validActors = roomActors.filter(actor => actor && actor.id);
+                const sortedActors = validActors.sort((a, b) => {
+                  // First sort by level (descending)
+                  const levelA = a.level || 1;
+                  const levelB = b.level || 1;
+                  if (levelA !== levelB) {
+                    return levelB - levelA;
+                  }
+                  
+                  // If levels are equal, sort by name (ascending)
+                  let nameA = 'Unknown';
+                  let nameB = 'Unknown';
+                  
+                  try {
+                    if (globalThis.state?.utils?.getMonster) {
+                      const monsterDataA = globalThis.state.utils.getMonster(a.id);
+                      if (monsterDataA?.metadata?.name) {
+                        nameA = monsterDataA.metadata.name;
+                      }
+                    }
+                  } catch (error) {}
+                  
+                  try {
+                    if (globalThis.state?.utils?.getMonster) {
+                      const monsterDataB = globalThis.state.utils.getMonster(b.id);
+                      if (monsterDataB?.metadata?.name) {
+                        nameB = monsterDataB.metadata.name;
+                      }
+                    }
+                  } catch (error) {}
+                  
+                  return nameA.localeCompare(nameB);
+                });
+                
                 const creaturesGrid = document.createElement('div');
-                creaturesGrid.style.display = 'grid';
-                creaturesGrid.style.gridTemplateColumns = '1fr';
-                creaturesGrid.style.gap = '8px';
-                creaturesGrid.style.justifyItems = 'center';
+                creaturesGrid.style.display = 'flex';
+                creaturesGrid.style.flexDirection = 'column';
+                creaturesGrid.style.gap = '4px';
+                creaturesGrid.style.width = '100%';
                 creaturesGrid.style.maxWidth = '100%';
                 
-                roomActors.forEach((actor, index) => {
+                sortedActors.forEach((actor, index) => {
                   if (actor && actor.id) {
                     try {
                       console.log('[Cyclopedia] Processing actor:', actor);
                       
-                      // Create creature icon similar to Bestiary Tab
-                      let monsterSprite;
-                      if (actor.metadata && actor.metadata.lookType === 'item') {
-                        monsterSprite = api.ui.components.createItemPortrait({
-                          itemId: actor.metadata.spriteId,
-                          size: 'small'
-                        });
-                        [monsterSprite.style.width, monsterSprite.style.height] = ['50px', '50px'];
-                        const portrait = monsterSprite.querySelector('.equipment-portrait');
-                        if (portrait) {
-                          portrait.style.width = '50px';
-                          portrait.style.height = '50px';
+                      // Create creature row container
+                      const creatureRow = document.createElement('div');
+                      creatureRow.style.display = 'flex';
+                      creatureRow.style.alignItems = 'center';
+                      creatureRow.style.justifyContent = 'space-between';
+                      creatureRow.style.width = '100%';
+                      creatureRow.style.padding = '4px 8px';
+                      creatureRow.style.marginBottom = '4px';
+                      creatureRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                      creatureRow.style.borderRadius = '4px';
+                      
+                      // Left: Creature icon (using Dice_Roller.js style)
+                      const iconContainer = document.createElement('div');
+                      iconContainer.style.flex = '0 0 50px';
+                      iconContainer.style.display = 'flex';
+                      iconContainer.style.justifyContent = 'center';
+                      iconContainer.style.alignItems = 'center';
+                      
+                      // Create creature icon using Dice_Roller.js approach
+                      const createCreatureIcon = (actor) => {
+                        // Container slot
+                        const slot = document.createElement('div');
+                        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
+                        slot.setAttribute('data-highlighted', 'false');
+                        slot.setAttribute('data-recent', 'false');
+                        slot.setAttribute('data-multiselected', 'false');
+                        slot.style.width = '40px';
+                        slot.style.height = '40px';
+                        slot.style.minWidth = '40px';
+                        slot.style.minHeight = '40px';
+                        slot.style.maxWidth = '40px';
+                        slot.style.maxHeight = '40px';
+                        
+                        // Rarity border/background (calculate from stats if available)
+                        const getRarityFromStats = (stats) => {
+                          const statSum = (stats.hp || 0) + (stats.ad || 0) + (stats.ap || 0) + (stats.armor || 0) + (stats.magicResist || 0);
+                          let rarity = 1;
+                          if (statSum >= 80) rarity = 5;
+                          else if (statSum >= 70) rarity = 4;
+                          else if (statSum >= 60) rarity = 3;
+                          else if (statSum >= 50) rarity = 2;
+                          return rarity;
+                        };
+                        
+                        // Try to get creature stats for rarity calculation
+                        let rarity = 1;
+                        try {
+                          if (globalThis.state?.utils?.getMonster) {
+                            const monsterData = globalThis.state.utils.getMonster(actor.id);
+                            if (monsterData) {
+                              rarity = getRarityFromStats(monsterData);
+                            }
+                          }
+                        } catch (error) {
+                          console.warn('[Cyclopedia] Could not get monster data for rarity calculation:', error);
                         }
-                      } else {
-                        monsterSprite = api.ui.components.createFullMonster({
-                          monsterId: actor.id,
-                          tier: 1,
-                          starTier: 1,
-                          level: 1,
-                          size: 'small'
-                        });
-                        [monsterSprite.style.width, monsterSprite.style.height] = ['50px', '50px'];
-                        // Remove level badge and star tier
-                        const levelBadge = monsterSprite.querySelector('span.pixel-font-16');
-                        if (levelBadge) levelBadge.remove();
-                        const starTierIcon = monsterSprite.querySelector('img[alt="star tier"]');
-                        if (starTierIcon) starTierIcon.remove();
+                        
+                        const rarityDiv = document.createElement('div');
+                        rarityDiv.setAttribute('role', 'none');
+                        rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+                        rarityDiv.setAttribute('data-rarity', rarity);
+                        slot.appendChild(rarityDiv);
+                        
+                        // Star tier icon (if available)
+                        if (actor.tier) {
+                          const starImg = document.createElement('img');
+                          starImg.alt = 'star tier';
+                          starImg.src = `/assets/icons/star-tier-${actor.tier}.png`;
+                          starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+                          slot.appendChild(starImg);
+                        }
+                        
+                        // Level badge
+                        const levelDiv = document.createElement('div');
+                        levelDiv.className = 'creature-level-badge';
+                        levelDiv.style.position = 'absolute';
+                        levelDiv.style.bottom = '2px';
+                        levelDiv.style.left = '2px';
+                        levelDiv.style.zIndex = '3';
+                        levelDiv.style.fontSize = '16px';
+                        levelDiv.style.color = '#fff';
+                        levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
+                        levelDiv.style.letterSpacing = '0.5px';
+                        levelDiv.textContent = actor.level || 1;
+                        slot.appendChild(levelDiv);
+                        
+                        // Portrait image
+                        const img = document.createElement('img');
+                        img.className = 'pixelated ml-auto';
+                        img.alt = 'creature';
+                        img.width = 40;
+                        img.height = 40;
+                        img.style.width = '40px';
+                        img.style.height = '40px';
+                        img.style.minWidth = '40px';
+                        img.style.minHeight = '40px';
+                        img.style.maxWidth = '40px';
+                        img.style.maxHeight = '40px';
+                        img.style.objectFit = 'contain';
+                        img.src = `/assets/portraits/${actor.id}.png`;
+                        slot.appendChild(img);
+                        
+                        return slot;
+                      };
+                      
+                      const creatureIcon = createCreatureIcon(actor);
+                      iconContainer.appendChild(creatureIcon);
+                      
+                      // Middle: Name and level
+                      const infoContainer = document.createElement('div');
+                      infoContainer.style.flex = '1';
+                      infoContainer.style.display = 'flex';
+                      infoContainer.style.flexDirection = 'column';
+                      infoContainer.style.alignItems = 'center';
+                      infoContainer.style.justifyContent = 'center';
+                      infoContainer.style.padding = '0 8px';
+                      
+                      // Get creature name
+                      let creatureName = 'Unknown';
+                      try {
+                        if (globalThis.state?.utils?.getMonster) {
+                          const monsterData = globalThis.state.utils.getMonster(actor.id);
+                          if (monsterData?.metadata?.name) {
+                            creatureName = monsterData.metadata.name;
+                          }
+                        }
+                      } catch (error) {
+                        console.warn('[Cyclopedia] Could not get creature name for ID:', actor.id);
                       }
                       
-                      creaturesGrid.appendChild(monsterSprite);
+                      const nameElement = document.createElement('div');
+                      nameElement.textContent = creatureName;
+                      nameElement.style.fontWeight = 'bold';
+                      nameElement.style.fontSize = '14px';
+                      nameElement.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                      nameElement.style.textAlign = 'center';
+                      
+                      const levelElement = document.createElement('div');
+                      levelElement.textContent = `Level ${actor.level || 1}`;
+                      levelElement.style.fontSize = '12px';
+                      levelElement.style.color = '#888';
+                      levelElement.style.textAlign = 'center';
+                      
+                      infoContainer.appendChild(nameElement);
+                      infoContainer.appendChild(levelElement);
+                      
+                      // Right: Equipment (if any)
+                      const equipmentContainer = document.createElement('div');
+                      equipmentContainer.style.flex = '0 0 60px';
+                      equipmentContainer.style.display = 'flex';
+                      equipmentContainer.style.justifyContent = 'center';
+                      equipmentContainer.style.alignItems = 'center';
+                      
+                      if (actor.equip && actor.equip.gameId) {
+                        // Show equipment using the same approach as Better Forge.js
+                        try {
+                          let equipmentSprite;
+                          if (globalThis.state?.utils?.getEquipment) {
+                            const equipmentData = globalThis.state.utils.getEquipment(actor.equip.gameId);
+                            if (equipmentData?.metadata?.spriteId && api?.ui?.components?.createItemPortrait) {
+                              equipmentSprite = api.ui.components.createItemPortrait({
+                                itemId: equipmentData.metadata.spriteId,
+                                tier: actor.equip.tier || 1,
+                                stat: actor.equip.stat || 'hp',
+                                size: 'small'
+                              });
+                              
+                              // Remove button functionality while keeping visual appearance
+                              if (equipmentSprite.tagName === 'BUTTON') {
+                                // Extract the inner content and create a div instead
+                                const innerContent = equipmentSprite.innerHTML;
+                                const divSprite = document.createElement('div');
+                                divSprite.innerHTML = innerContent;
+                                divSprite.className = equipmentSprite.className;
+                                divSprite.style.cssText = equipmentSprite.style.cssText;
+                                
+                                // Remove all clickable behavior from the div and its children
+                                divSprite.style.pointerEvents = 'none';
+                                divSprite.style.cursor = 'default';
+                                
+                                // Remove any clickable elements inside
+                                const clickableElements = divSprite.querySelectorAll('button, [onclick], [role="button"]');
+                                clickableElements.forEach(el => {
+                                  el.style.pointerEvents = 'none';
+                                  el.style.cursor = 'default';
+                                  el.removeAttribute('onclick');
+                                  el.removeAttribute('role');
+                                  el.removeAttribute('tabindex');
+                                });
+                                
+                                // Set size to 30px
+                                [divSprite.style.width, divSprite.style.height] = ['30px', '30px'];
+                                
+                                // Also adjust the inner portrait if it exists
+                                const portrait = divSprite.querySelector('.equipment-portrait');
+                                if (portrait) {
+                                  portrait.style.width = '30px';
+                                  portrait.style.height = '30px';
+                                  portrait.style.pointerEvents = 'none';
+                                }
+                                
+                                equipmentSprite = divSprite;
+                              } else {
+                                // Set size to 30px
+                                [equipmentSprite.style.width, equipmentSprite.style.height] = ['30px', '30px'];
+                                
+                                // Also adjust the inner portrait if it exists
+                                const portrait = equipmentSprite.querySelector('.equipment-portrait');
+                                if (portrait) {
+                                  portrait.style.width = '30px';
+                                  portrait.style.height = '30px';
+                                }
+                              }
+                              
+                              console.log('[Cyclopedia] Created equipment sprite for:', actor.equip);
+                            }
+                          }
+                          
+                          if (equipmentSprite) {
+                            equipmentContainer.appendChild(equipmentSprite);
+                          } else {
+                            // Fallback to text representation
+                            equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                            equipmentContainer.style.fontSize = '12px';
+                            equipmentContainer.style.color = '#888';
+                            equipmentContainer.style.fontWeight = 'bold';
+                          }
+                        } catch (error) {
+                          console.warn('[Cyclopedia] Could not create equipment sprite:', error);
+                          equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                          equipmentContainer.style.fontSize = '12px';
+                          equipmentContainer.style.color = '#888';
+                          equipmentContainer.style.fontWeight = 'bold';
+                        }
+                      } else {
+                        equipmentContainer.textContent = '—';
+                        equipmentContainer.style.fontSize = '14px';
+                        equipmentContainer.style.color = '#666';
+                      }
+                      
+                      // Assemble the row
+                      creatureRow.appendChild(iconContainer);
+                      creatureRow.appendChild(infoContainer);
+                      creatureRow.appendChild(equipmentContainer);
+                      
+                      creaturesGrid.appendChild(creatureRow);
                     } catch (error) {
-                      console.error('[Cyclopedia] Error creating creature icon for actor:', actor, error);
+                      console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
                     }
                   } else {
                     console.log('[Cyclopedia] Skipping invalid actor:', actor);
@@ -6311,61 +6562,105 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             // Check if content overflows and conditionally show scrollbar
             setTimeout(() => {
-                const hasOverflow = contentContainer.scrollHeight > 175;
+                const hasOverflow = contentContainer.scrollHeight > 190;
                 if (hasOverflow) {
                     contentContainer.style.overflowY = 'auto';
                 }
                 // If no overflow, keep overflowY: 'hidden' (no scrollbar)
             }, 0);
             
-            // Column 3: Statistics
+            // Column 3: Statistics - Split into 2 rows
             const statsContainer = document.createElement('div');
-            statsContainer.style.padding = '20px';
-            statsContainer.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            statsContainer.style.display = 'flex';
+            statsContainer.style.flexDirection = 'column';
             statsContainer.style.width = '100%';
+            statsContainer.style.height = '100%';
             statsContainer.style.boxSizing = 'border-box';
             
-            const statsTitle = document.createElement('h3');
-            statsTitle.textContent = 'Statistics';
-            statsTitle.style.margin = '0 0 15px 0';
-            statsTitle.style.fontSize = '18px';
-            statsTitle.style.fontWeight = 'bold';
-            statsTitle.style.textAlign = 'center';
-            statsContainer.appendChild(statsTitle);
+            // Row 1: 30% height, split into 2 columns
+            const row1 = document.createElement('div');
+            row1.style.display = 'flex';
+            row1.style.flexDirection = 'row';
+            row1.style.height = '30%';
+            row1.style.minHeight = '30%';
+            row1.style.maxHeight = '30%';
+            row1.style.borderBottom = '6px solid transparent';
+            row1.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
             
-            if (roomData) {
-              // Player progress (if available)
-              if (globalThis.state?.player?.getSnapshot?.()?.context?.rooms?.[selectedMap]) {
-                const playerRoom = globalThis.state.player.getSnapshot().context.rooms[selectedMap];
-                const progressDiv = document.createElement('div');
-                progressDiv.style.marginTop = '15px';
-                progressDiv.style.padding = '10px';
-                progressDiv.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-                progressDiv.style.borderRadius = '5px';
-                progressDiv.style.textAlign = 'center';
-                progressDiv.innerHTML = `
-                  <strong>Your Progress:</strong><br>
-                  Rank: ${playerRoom.rank}<br>
-                  Completions: ${playerRoom.count}<br>
-                  Best Time: ${playerRoom.ticks} ticks
-                `;
-                statsContainer.appendChild(progressDiv);
-              } else {
-                const noProgressDiv = document.createElement('div');
-                noProgressDiv.style.textAlign = 'center';
-                noProgressDiv.style.color = '#888';
-                noProgressDiv.style.padding = '20px';
-                noProgressDiv.textContent = 'No progress data available for this map.';
-                statsContainer.appendChild(noProgressDiv);
-              }
-            } else {
-              const noStatsDiv = document.createElement('div');
-              noStatsDiv.style.textAlign = 'center';
-              noStatsDiv.style.color = '#888';
-              noStatsDiv.style.padding = '20px';
-              noStatsDiv.textContent = 'Statistics not available for this map.';
-              statsContainer.appendChild(noStatsDiv);
-            }
+            // Column 1: Speedrun
+            const speedrunCol = document.createElement('div');
+            speedrunCol.style.flex = '1 1 0';
+            speedrunCol.style.display = 'flex';
+            speedrunCol.style.flexDirection = 'column';
+            speedrunCol.style.padding = '10px';
+            speedrunCol.style.borderRight = '3px solid transparent';
+            speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+            
+            const speedrunTitle = document.createElement('h3');
+            speedrunTitle.textContent = 'Speedrun';
+            speedrunTitle.style.margin = '0 0 10px 0';
+            speedrunTitle.style.fontSize = '16px';
+            speedrunTitle.style.fontWeight = 'bold';
+            speedrunTitle.style.textAlign = 'center';
+            speedrunTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            speedrunCol.appendChild(speedrunTitle);
+            
+            const speedrunContent = document.createElement('div');
+            speedrunContent.style.flex = '1';
+            speedrunContent.style.display = 'flex';
+            speedrunContent.style.justifyContent = 'center';
+            speedrunContent.style.alignItems = 'center';
+            speedrunContent.style.color = '#888';
+            speedrunContent.style.fontSize = '14px';
+            speedrunContent.style.textAlign = 'center';
+            speedrunContent.textContent = 'Top speedrun records will appear here';
+            speedrunCol.appendChild(speedrunContent);
+            
+            // Column 2: Rank Points
+            const rankPointsCol = document.createElement('div');
+            rankPointsCol.style.flex = '1 1 0';
+            rankPointsCol.style.display = 'flex';
+            rankPointsCol.style.flexDirection = 'column';
+            rankPointsCol.style.padding = '10px';
+            
+            const rankPointsTitle = document.createElement('h3');
+            rankPointsTitle.textContent = 'Rank Points';
+            rankPointsTitle.style.margin = '0 0 10px 0';
+            rankPointsTitle.style.fontSize = '16px';
+            rankPointsTitle.style.fontWeight = 'bold';
+            rankPointsTitle.style.textAlign = 'center';
+            rankPointsTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            rankPointsCol.appendChild(rankPointsTitle);
+            
+            const rankPointsContent = document.createElement('div');
+            rankPointsContent.style.flex = '1';
+            rankPointsContent.style.display = 'flex';
+            rankPointsContent.style.justifyContent = 'center';
+            rankPointsContent.style.alignItems = 'center';
+            rankPointsContent.style.color = '#888';
+            rankPointsContent.style.fontSize = '14px';
+            rankPointsContent.style.textAlign = 'center';
+            rankPointsContent.textContent = 'Top rank points records will appear here';
+            rankPointsCol.appendChild(rankPointsContent);
+            
+            // Add columns to row1
+            row1.appendChild(speedrunCol);
+            row1.appendChild(rankPointsCol);
+            
+            // Row 2: 70% height, placeholder
+            const row2 = document.createElement('div');
+            row2.style.flex = '1 1 0';
+            row2.style.display = 'flex';
+            row2.style.justifyContent = 'center';
+            row2.style.alignItems = 'center';
+            row2.style.color = '#888';
+            row2.style.fontSize = '14px';
+            row2.style.textAlign = 'center';
+            row2.textContent = 'Additional statistics will appear here';
+            
+            // Add rows to statsContainer
+            statsContainer.appendChild(row1);
+            statsContainer.appendChild(row2);
             
             col3.appendChild(statsContainer);
           } else {

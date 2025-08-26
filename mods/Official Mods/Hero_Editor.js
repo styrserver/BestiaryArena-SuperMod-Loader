@@ -267,7 +267,12 @@ function showHeroEditorModal() {
     const originalBoardData = getSerializedBoard();
     
     if (!originalBoardData) {
-      throw new Error('Could not retrieve board data. Make sure you are in a game.');
+      api.ui.components.createModal({
+        title: 'No Game Data',
+        content: 'Could not retrieve board data. Please make sure you are in an active game.',
+        buttons: [{ text: 'OK', primary: true }]
+      });
+      return;
     }
     
     // Check if we have any board data - even if it's just monsters without equipment
@@ -317,7 +322,12 @@ function showHeroEditorModal() {
     
     // Still no board data
     if (originalBoardData.board.length === 0) {
-      throw new Error('No hero data found. Make sure you have heroes on the board.');
+      api.ui.components.createModal({
+        title: 'No Heroes Found',
+        content: 'No heroes were found on the board. Please place some heroes on the board before using the Hero Editor.',
+        buttons: [{ text: 'OK', primary: true }]
+      });
+      return;
     }
     
     if (window.DEBUG) console.log('Original board data:', originalBoardData);

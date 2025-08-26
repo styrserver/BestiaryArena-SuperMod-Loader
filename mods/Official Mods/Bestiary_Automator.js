@@ -174,6 +174,12 @@ const clickButtonWithText = (textKey) => {
 
 // Check and handle scroll lock
 const handleScrollLock = () => {
+  // Don't handle scroll lock if Board Analyzer is running
+  if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+    if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, skipping scroll lock handling');
+    return false;
+  }
+  
   try {
     const body = document.body;
     const scrollLockValue = body.getAttribute('data-scroll-locked');
@@ -204,6 +210,12 @@ const handleScrollLock = () => {
 
 // Click all Close buttons
 const clickAllCloseButtons = () => {
+  // Don't close modals if Board Analyzer is running
+  if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+    if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, skipping modal close operations');
+    return false;
+  }
+  
   const closeButtons = document.querySelectorAll('button');
   let clickedCount = 0;
   
@@ -278,6 +290,12 @@ let lastStaminaRefillAttempt = 0;
 // Check if game is in a state where automation should run
 const isGameActive = () => {
   try {
+    // Check if Board Analyzer is running - if so, pause automation
+    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+      if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
+      return false;
+    }
+    
     // Check if document is visible and focused
     if (document.hidden) return false;
     
@@ -311,6 +329,12 @@ const isGameActive = () => {
 // Check if game is ready for stamina refill
 const isGameReadyForStaminaRefill = () => {
   try {
+    // Check if Board Analyzer is running - if so, pause automation
+    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+      if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
+      return false;
+    }
+    
     // Check if document is visible and focused
     if (document.hidden) return false;
     
@@ -742,6 +766,8 @@ const runAutomationTasks = async () => {
   try {
     // Only run automation if game is active
     if (!isGameActive()) {
+      // Update button appearance even when paused
+      updateAutomatorButton();
       return;
     }
     
@@ -749,6 +775,9 @@ const runAutomationTasks = async () => {
     await handleDayCare();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
+    
+    // Update button appearance after tasks
+    updateAutomatorButton();
   } catch (error) {
     if (window.DEBUG) console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
@@ -1007,6 +1036,15 @@ function updateAutomatorButton() {
     // Apply custom styling based on priority
     const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
+      // Check if Board Analyzer is running and we should show paused state
+      if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+        // Show paused state with gray background
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat";
+        btn.style.color = "#888";
+        btn.title = t('configButtonTooltip') + ' (Paused - Board Analyzer Running)';
+        return;
+      }
+      
       if (config.autoRefillStamina) {
         // Priority 1: Green background for auto refill stamina
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
@@ -1022,6 +1060,9 @@ function updateAutomatorButton() {
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
         btn.style.color = "#ffe066";
       }
+      
+      // Reset tooltip to normal
+      btn.title = t('configButtonTooltip');
     }
   }
 }

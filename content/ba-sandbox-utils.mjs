@@ -336,7 +336,7 @@
 					}
 					
 					// Get the level from monster data if available, otherwise use default
-					const monsterLevel = monster.level || 1;
+					const monsterLevel = monster.level || 50;
 					console.log(`configureBoard - Processing monster ${index} with level: ${monsterLevel}`);
 					
 					const pieceConfig = {
@@ -469,7 +469,7 @@
 				const monsterName = monsterGameIdsToNames.get(monster.gameId);
 				
 				// Calculate monster level from experience
-				let monsterLevel = 1;
+				let monsterLevel = 50;
 				if (monster.exp && typeof globalThis.state.utils.expToCurrentLevel === 'function') {
 					monsterLevel = globalThis.state.utils.expToCurrentLevel(monster.exp);
 				}
@@ -481,16 +481,19 @@
 					tile: tile,
 					monster: {
 						name: monsterName,
+						level: monsterLevel,
 						// Match the in-game UI order.
 						hp: monster.hp,
 						ad: monster.ad,
 						ap: monster.ap,
 						armor: monster.armor,
 						magicResist: monster.magicResist,
-						level: monsterLevel,     // Add level information
-						exp: monster.exp         // Add experience for precise level values
 					}
 				};
+				// Only include `level` if it's different from the default of `50`.
+				if (monsterLevel === 50) {
+					delete serialized.monster.level;
+				}
 				
 				// Only try to add equipment if it exists
 				if (equipId && equips && equips.length > 0) {
@@ -553,28 +556,24 @@
 				const monsterName = monsterGameIdsToNames.get(piece.gameId);
 				
 				// Get monster level - use piece.level directly if available
-				const monsterLevel = piece.level || 1;
-				
-				// Calculate experience for this level if needed and if the utility function is available
-				let monsterExp = null;
-				if (typeof globalThis.state.utils.expAtLevel === 'function') {
-					monsterExp = globalThis.state.utils.expAtLevel(monsterLevel);
-				}
-				
+				const monsterLevel = piece.level || 50;
+
 				const serialized = {
 					tile: piece.tileIndex,
 					monster: {
 						name: monsterName,
+						level: monsterLevel,
 						// Match the in-game UI order.
-						hp: piece.genes?.hp || 1,
-						ad: piece.genes?.ad || 1,
-						ap: piece.genes?.ap || 1,
-						armor: piece.genes?.armor || 1,
-						magicResist: piece.genes?.magicResist || 1,
-						level: monsterLevel,       // Add level directly
-						exp: monsterExp            // Add calculated experience
+						hp: piece.genes?.hp || 20,
+						ad: piece.genes?.ad || 20,
+						ap: piece.genes?.ap || 20,
+						armor: piece.genes?.armor || 20,
+						magicResist: piece.genes?.magicResist || 20,
 					}
 				};
+				if (monsterLevel === 50) {
+					delete serialized.monster.level;
+				}
 				
 				// Add equipment if available
 				if (piece.equip && piece.equip.gameId) {
