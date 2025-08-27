@@ -124,6 +124,31 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'restoreGameLocalStorage') {
+    console.log('Restoring game localStorage data...');
+    try {
+      // Clear existing localStorage
+      localStorage.clear();
+      
+      // Set new localStorage data
+      const gameData = message.data;
+      Object.keys(gameData).forEach(key => {
+        try {
+          localStorage.setItem(key, gameData[key]);
+        } catch (e) {
+          console.warn('Could not set localStorage key:', key, e);
+        }
+      });
+      
+      console.log('Restored', Object.keys(gameData).length, 'game localStorage items');
+      sendResponse({ success: true, count: Object.keys(gameData).length });
+    } catch (error) {
+      console.error('Error restoring game localStorage:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true;
+  }
+
   if (message.action === 'loadScripts') {
     console.log('Loading scripts:', message.scripts);
     window.postMessage({

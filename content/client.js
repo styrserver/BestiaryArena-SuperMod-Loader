@@ -190,6 +190,83 @@ if (typeof browserAPI === 'undefined') {
           console.error(`Error executing script ${message.hash}:`, error);
         }
       }
+      
+      // Handle localStorage export/import for game data
+      if (message.action === 'getGameLocalStorage') {
+        try {
+          const gameData = {};
+          // Get all localStorage items
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) {
+              try {
+                const value = localStorage.getItem(key);
+                gameData[key] = value;
+              } catch (e) {
+                console.warn(`Could not read localStorage key: ${key}`, e);
+              }
+            }
+          }
+          
+          // Send response back to extension
+          window.postMessage({
+            from: 'BESTIARY_CLIENT',
+            message: {
+              action: 'gameLocalStorageResponse',
+              success: true,
+              data: gameData
+            }
+          }, '*');
+        } catch (error) {
+          console.error('Error getting game localStorage:', error);
+          window.postMessage({
+            from: 'BESTIARY_CLIENT',
+            message: {
+              action: 'gameLocalStorageResponse',
+              success: false,
+              error: error.message
+            }
+          }, '*');
+        }
+      }
+      
+      if (message.action === 'setGameLocalStorage' && message.data) {
+        try {
+          // Clear existing localStorage first
+          localStorage.clear();
+          
+          // Set all imported data
+          Object.keys(message.data).forEach(key => {
+            try {
+              localStorage.setItem(key, message.data[key]);
+            } catch (e) {
+              console.warn(`Could not set localStorage key: ${key}`, e);
+            }
+          });
+          
+          console.log(`Restored ${Object.keys(message.data).length} localStorage items`);
+          
+          // Send response back to extension
+          window.postMessage({
+            from: 'BESTIARY_CLIENT',
+            message: {
+              action: 'gameLocalStorageResponse',
+              success: true,
+              data: { restored: Object.keys(message.data).length }
+            }
+          }, '*');
+        } catch (error) {
+          console.error('Error setting game localStorage:', error);
+          window.postMessage({
+            from: 'BESTIARY_CLIENT',
+            message: {
+              action: 'gameLocalStorageResponse',
+              success: false,
+              error: error.message
+            }
+          }, '*');
+        }
+      }
     }
     
     // Listen for extension base URL from injector.js

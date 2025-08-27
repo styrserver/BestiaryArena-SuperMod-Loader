@@ -695,6 +695,18 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Handle localStorage responses from content script
+  if (message.action === 'gameLocalStorageResponse') {
+    // This is a response from the content script about localStorage operations
+    // We don't need to send a response back, just log the result
+    if (message.success) {
+      console.log('Game localStorage operation successful:', message.data);
+    } else {
+      console.error('Game localStorage operation failed:', message.error);
+    }
+    return true;
+  }
+
   if (message.action === 'toggleLocalMod') {
     // Check if this is a manual mod (starts with "User Mods/")
     if (message.name.startsWith('User Mods/')) {

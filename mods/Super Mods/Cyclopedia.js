@@ -653,6 +653,68 @@ function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
 
+// Global function to fetch leaderboard data for Maps Tab
+async function fetchMapsLeaderboardData() {
+  try {
+    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (!playerState?.name) return null;
+
+    const cachedData = getCachedLeaderboardData('combined-leaderboards');
+    if (cachedData) {
+      return cachedData;
+    }
+
+    // Create our own fetchTRPC function for Maps Tab
+    async function fetchTRPC(method) {
+      try {
+        if (cyclopediaState.pendingRequests.has(method)) return await cyclopediaState.pendingRequests.get(method);
+
+        const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
+        const url = `/api/trpc/${method}?batch=1&input=${inp}`;
+        
+        // Simple fetch for Maps Tab - match Characters Tab format
+        const promise = fetch(url, {
+          headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
+        }).then(async (res) => {
+          if (!res.ok) throw new Error(`${method} → ${res.status}`);
+          const json = await res.json();
+          return json[0].result.data.json;
+        });
+        
+        cyclopediaState.pendingRequests.set(method, promise);
+        
+        const result = await promise;
+        cyclopediaState.pendingRequests.delete(method);
+        return result;
+      } catch (error) {
+        cyclopediaState.pendingRequests.delete(method);
+        throw error;
+      }
+    }
+
+    // Fetch fresh data if not cached
+    const [best, lbs, roomsHighscores] = await Promise.all([
+      fetchTRPC('game.getTickHighscores'),
+      fetchTRPC('game.getTickLeaderboards'),
+      fetchTRPC('game.getRoomsHighscores')
+    ]);
+
+    const data = {
+      best,
+      lbs,
+      roomsHighscores,
+      yourRooms: playerState.rooms,
+      ROOM_NAMES: globalThis.state.utils.ROOM_NAME
+    };
+
+    setCachedLeaderboardData('combined-leaderboards', data);
+    return data;
+  } catch (error) {
+    console.error('[Cyclopedia] Error fetching maps leaderboard data:', error);
+    return null;
+  }
+}
+
 // Image caching functions for room thumbnails
 function getCachedRoomThumbnail(roomCode) {
   return cyclopediaState.cache.roomThumbnails.get(roomCode);
@@ -6020,6 +6082,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       col3Title.appendChild(col3TitleP);
       col3.appendChild(col3Title);
       
+
+      
       function updateRightCol() {
         try {
           // Clear both columns
@@ -6046,7 +6110,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             mapInfoDiv.style.marginBottom = '0';
             
             // Row1: Map Icon and Map Name
-            // Add room thumbnail
             
             // Add room thumbnail
             const thumbnail = document.createElement('img');
@@ -6067,13 +6130,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const title = document.createElement('h3');
             title.textContent = roomName;
             title.style.margin = '10px 0 0 0';
-            title.style.fontSize = '18px';
+            title.style.fontSize = '16px';
             title.style.fontWeight = 'bold';
             title.style.textAlign = 'center';
             title.style.cursor = MAP_INTERACTION_CONFIG.cursor;
             title.title = MAP_INTERACTION_CONFIG.tooltip;
             title.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
             title.style.padding = MAP_INTERACTION_CONFIG.padding;
+            // Prevent text wrapping to avoid creature box overflow
+            title.style.whiteSpace = 'nowrap';
+            title.style.overflow = 'hidden';
+            title.style.textOverflow = 'ellipsis';
+            title.style.maxWidth = '100%';
             title.style.borderRadius = MAP_INTERACTION_CONFIG.borderRadius;
             title.style.boxSizing = MAP_INTERACTION_CONFIG.boxSizing;
             
@@ -6597,23 +6665,42 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
             
             const speedrunTitle = document.createElement('h3');
-            speedrunTitle.textContent = 'Speedrun';
             speedrunTitle.style.margin = '0 0 10px 0';
             speedrunTitle.style.fontSize = '16px';
             speedrunTitle.style.fontWeight = 'bold';
+            speedrunTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             speedrunTitle.style.textAlign = 'center';
             speedrunTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            speedrunTitle.style.display = 'flex';
+            speedrunTitle.style.alignItems = 'center';
+            speedrunTitle.style.justifyContent = 'center';
+            speedrunTitle.style.gap = '6px';
+            
+            const speedIcon = document.createElement('img');
+            speedIcon.src = 'https://bestiaryarena.com/assets/icons/speed.png';
+            speedIcon.alt = 'Speed';
+            speedIcon.style.width = '16px';
+            speedIcon.style.height = '16px';
+            
+            const speedrunText = document.createElement('span');
+            speedrunText.textContent = 'Speedrun';
+            
+            speedrunTitle.appendChild(speedIcon);
+            speedrunTitle.appendChild(speedrunText);
             speedrunCol.appendChild(speedrunTitle);
             
             const speedrunContent = document.createElement('div');
             speedrunContent.style.flex = '1';
             speedrunContent.style.display = 'flex';
+            speedrunContent.style.flexDirection = 'column';
             speedrunContent.style.justifyContent = 'center';
             speedrunContent.style.alignItems = 'center';
             speedrunContent.style.color = '#888';
             speedrunContent.style.fontSize = '14px';
+            speedrunContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             speedrunContent.style.textAlign = 'center';
-            speedrunContent.textContent = 'Top speedrun records will appear here';
+            speedrunContent.style.padding = '6px';
+            speedrunContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
             speedrunCol.appendChild(speedrunContent);
             
             // Column 2: Rank Points
@@ -6622,25 +6709,46 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             rankPointsCol.style.display = 'flex';
             rankPointsCol.style.flexDirection = 'column';
             rankPointsCol.style.padding = '10px';
+            rankPointsCol.style.borderLeft = '3px solid transparent';
+            rankPointsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
             
             const rankPointsTitle = document.createElement('h3');
-            rankPointsTitle.textContent = 'Rank Points';
             rankPointsTitle.style.margin = '0 0 10px 0';
             rankPointsTitle.style.fontSize = '16px';
             rankPointsTitle.style.fontWeight = 'bold';
+            rankPointsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             rankPointsTitle.style.textAlign = 'center';
             rankPointsTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            rankPointsTitle.style.display = 'flex';
+            rankPointsTitle.style.alignItems = 'center';
+            rankPointsTitle.style.justifyContent = 'center';
+            rankPointsTitle.style.gap = '6px';
+            
+            const gradeIcon = document.createElement('img');
+            gradeIcon.src = 'https://bestiaryarena.com/assets/icons/grade.png';
+            gradeIcon.alt = 'Grade';
+            gradeIcon.style.width = '16px';
+            gradeIcon.style.height = '16px';
+            
+            const rankPointsText = document.createElement('span');
+            rankPointsText.textContent = 'Rank Points';
+            
+            rankPointsTitle.appendChild(gradeIcon);
+            rankPointsTitle.appendChild(rankPointsText);
             rankPointsCol.appendChild(rankPointsTitle);
             
             const rankPointsContent = document.createElement('div');
             rankPointsContent.style.flex = '1';
             rankPointsContent.style.display = 'flex';
+            rankPointsContent.style.flexDirection = 'column';
             rankPointsContent.style.justifyContent = 'center';
             rankPointsContent.style.alignItems = 'center';
             rankPointsContent.style.color = '#888';
             rankPointsContent.style.fontSize = '14px';
+            rankPointsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
             rankPointsContent.style.textAlign = 'center';
-            rankPointsContent.textContent = 'Top rank points records will appear here';
+            rankPointsContent.style.padding = '6px';
+            rankPointsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
             rankPointsCol.appendChild(rankPointsContent);
             
             // Add columns to row1
@@ -6663,6 +6771,67 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             statsContainer.appendChild(row2);
             
             col3.appendChild(statsContainer);
+            
+            // Fetch and populate leaderboard data
+            fetchMapsLeaderboardData().then(data => {
+              if (data && selectedMap) {
+                const { best, roomsHighscores, yourRooms } = data;
+                const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+                
+                // Update speedrun content
+                const yourTicks = yourRooms?.[selectedMap]?.ticks || 0;
+                const bestTicks = best?.[selectedMap]?.ticks || 0;
+                const bestPlayer = best?.[selectedMap]?.userName || 'Unknown';
+                
+                let speedrunHtml = '';
+                if (bestTicks > 0) {
+                  speedrunHtml = `
+                    <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+                    <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestTicks} ticks</div>
+                    <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestPlayer}</div>
+                  `;
+                  if (yourTicks > 0) {
+                    speedrunHtml += `
+                      <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+                      <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
+                    `;
+                  }
+                } else {
+                  speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+                }
+                speedrunContent.innerHTML = speedrunHtml;
+                
+                // Update rank points content
+                const yourRankPoints = yourRooms?.[selectedMap]?.rank || 0;
+                const bestRankPoints = roomsHighscores?.rank?.[selectedMap]?.rank || 0;
+                const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
+                
+                let rankPointsHtml = '';
+                if (bestRankPoints > 0) {
+                  rankPointsHtml = `
+                    <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+                    <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}</div>
+                    <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
+                  `;
+                  if (yourRankPoints > 0) {
+                    rankPointsHtml += `
+                      <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+                      <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}</div>
+                    `;
+                  }
+                } else {
+                  rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+                }
+                rankPointsContent.innerHTML = rankPointsHtml;
+              } else {
+                speedrunContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
+                rankPointsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
+              }
+            }).catch(error => {
+              console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
+              speedrunContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
+              rankPointsContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
+            });
           } else {
             // No map selected - show placeholder messages
             const col2Msg = document.createElement('div');

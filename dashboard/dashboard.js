@@ -502,6 +502,8 @@ if (reloadModsBtn) reloadModsBtn.addEventListener('click', debounce(async () => 
 if (checkApiBtn) checkApiBtn.addEventListener('click', () => alert('Check BestiaryModAPI (TODO: integrate)'));
 if (logStorageBtn) logStorageBtn.addEventListener('click', () => alert('Log Storage Contents (TODO: integrate)'));
 
+
+
 // Mods submenu switching logic
 const modsSubnavBtns = document.querySelectorAll('.mods-subnav-btn');
 const modsSubsections = document.querySelectorAll('.mods-subsection');
@@ -624,4 +626,4 @@ document.addEventListener('DOMContentLoaded', async function() {
   // ... existing code ...
   const debugCard = document.querySelector('#debug-section .ublock-card');
   if (debugCard) debugCard.appendChild(resetAllBtn);
-}); 
+});
