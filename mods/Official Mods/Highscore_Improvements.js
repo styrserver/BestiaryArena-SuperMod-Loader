@@ -86,10 +86,19 @@ function createTickContent(opportunities, total, minTheo, gain) {
       itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
       itemEl.innerHTML = `
         <div class="frame-pressed-1 shrink-0" style="width: 48px; height: 48px;">
-          <img alt="${o.name}" class="pixelated size-full object-cover cursor-pointer" src="/assets/room-thumbnails/${o.code}.png" />
+          <img 
+            alt="${o.name}" 
+            class="pixelated size-full object-cover cursor-pointer" 
+            src="/assets/room-thumbnails/${o.code}.png" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" />
         </div>
         <div class="grid w-full gap-1">
-          <div class="text-whiteExp cursor-pointer">${o.name}</div>
+          <div 
+            class="text-whiteExp 
+            cursor-pointer" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });">
+              ${o.name}
+            </div>
           <div class="pixel-font-14">Your ${o.yours} → Top ${o.best}</div>
           <div class="pixel-font-14" style="color: #8f8;">+${o.diff} ticks (${o.pct}%)</div>
           <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
@@ -134,11 +143,19 @@ function createRankContent(opportunities) {
       const itemEl = document.createElement('div');
       itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
       itemEl.innerHTML = `
-        <div class="frame-pressed-1 shrink-0 cursour-pointer" style="width: 48px; height: 48px;">
-          <img alt="${o.name}" class="pixelated size-full object-cover" src="/assets/room-thumbnails/${o.code}.png" />
+        <div class="frame-pressed-1 shrink-0 cursor-pointer" style="width: 48px; height: 48px;">
+          <img 
+            alt="${o.name}" 
+            class="pixelated size-full object-cover" 
+            src="/assets/room-thumbnails/${o.code}.png" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" />
         </div>
         <div class="grid w-full gap-1">
-          <div class="text-whiteExp">${o.name}</div>
+          <div 
+            class="text-whiteExp cursor-pointer"
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
+              ${o.name}
+            </div>
           <div class="pixel-font-14">Your score ${o.yourScore} → Top ${o.bestScore}</div>
           <div class="pixel-font-14" style="color: #8f8;">+${o.diff} rank points</div>
           <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
