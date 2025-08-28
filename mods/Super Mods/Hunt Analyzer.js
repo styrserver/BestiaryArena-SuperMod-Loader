@@ -1982,13 +1982,11 @@ function updatePanelLayout(panel) {
 
 // Listen for game start and end events using the game's global API.
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.on) {
-    globalThis.state.board.on('newGame', (_) => {
-        if (globalThis.state.board._snapshot.context.mode !== "sandbox") {
-            autoplayCount++;
-            isGameActive = true;
-            sessionStartTime = Date.now();
-            updatePanelDisplay();
-        }
+    globalThis.state.board.on('newGame', (event) => {
+        autoplayCount++;
+        isGameActive = true;
+        sessionStartTime = Date.now();
+        updatePanelDisplay();
     });
 
     if (globalThis.state.board.subscribe) {
