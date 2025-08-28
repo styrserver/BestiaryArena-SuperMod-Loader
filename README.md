@@ -242,6 +242,16 @@ Enhances the Yasir shop interface with advanced features and improved usability:
 - Smart quantity validation and error handling
 - Seamless integration with the existing shop interface
 
+### Configurator
+Handles import/export of configuration data for the mod loader:
+- Export complete configuration including active mods, settings, and game data
+- Import configuration files to restore mod settings and game state
+- Backup and restore localStorage data (setup labels, autoseller settings, etc.)
+- User-friendly summary of what will be imported/exported
+- Safe configuration management with confirmation dialogs
+- Support for mod-specific data and caches
+- Header button integration for quick access
+
 ### Cyclopedia
 A comprehensive game data viewer and player profile manager:
 - View detailed monster and equipment information

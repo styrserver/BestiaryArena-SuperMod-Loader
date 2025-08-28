@@ -1067,13 +1067,21 @@ function addCyclopediaHeaderButton() {
           }
         };
         li.appendChild(btn);
-        const wikiLi = Array.from(headerUl.children).find(
-          el => el.querySelector('a') && el.textContent.includes('Wiki')
+        const configuratorLi = Array.from(headerUl.children).find(
+          el => el.querySelector('button') && el.textContent.includes('Configurator')
         );
-        if (wikiLi && wikiLi.nextSibling) {
-          headerUl.insertBefore(li, wikiLi.nextSibling);
+        if (configuratorLi && configuratorLi.nextSibling) {
+          headerUl.insertBefore(li, configuratorLi.nextSibling);
         } else {
-          headerUl.appendChild(li);
+          // Fallback: Insert after Wiki if Configurator not found
+          const wikiLi = Array.from(headerUl.children).find(
+            el => el.querySelector('a') && el.textContent.includes('Wiki')
+          );
+          if (wikiLi && wikiLi.nextSibling) {
+            headerUl.insertBefore(li, wikiLi.nextSibling);
+          } else {
+            headerUl.appendChild(li);
+          }
         }
       } catch (insertError) {
         console.error('[Cyclopedia] Error inserting header button:', insertError);

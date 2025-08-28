@@ -95,7 +95,7 @@ function addConfiguratorHeaderButton() {
     btn.onclick = openConfigurator;
     li.appendChild(btn);
 
-    // Insert after DashboardButton if it exists, otherwise after Cyclopedia
+    // Insert after DashboardButton if it exists, otherwise before Cyclopedia
     const dashboardLi = Array.from(headerUl.children).find(
       el => el.querySelector('.dashboard-header-btn')
     );
@@ -116,14 +116,9 @@ function addConfiguratorHeaderButton() {
       }
       console.debug('[Configurator] Configurator header button inserted after DashboardButton.');
     } else if (cyclopediaLi) {
-      if (mlAutoLi) {
-        headerUl.insertBefore(li, mlAutoLi);
-      } else if (cyclopediaLi.nextSibling) {
-        headerUl.insertBefore(li, cyclopediaLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.debug('[Configurator] Configurator header button inserted after Cyclopedia.');
+      // Insert before Cyclopedia
+      headerUl.insertBefore(li, cyclopediaLi);
+      console.debug('[Configurator] Configurator header button inserted before Cyclopedia.');
     } else {
       // Fallback: Insert after Wiki
       const wikiLi = Array.from(headerUl.children).find(
