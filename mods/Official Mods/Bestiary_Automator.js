@@ -526,8 +526,16 @@ const handleDayCare = async () => {
 };
 
 // Update minimum stamina if game shows a stamina requirement
+// Only auto-update if user hasn't manually set a custom value
 const updateRequiredStamina = () => {
   try {
+    // Check if user has manually set a custom value (different from default)
+    const hasCustomValue = config.minimumStaminaWithoutRefill !== defaultConfig.minimumStaminaWithoutRefill;
+    if (hasCustomValue) {
+      if (window.DEBUG) console.log(`[Bestiary Automator] Skipping auto-update - user has custom value: ${config.minimumStaminaWithoutRefill}`);
+      return;
+    }
+    
     const elements = document.querySelectorAll('.action-link');
     for (const element of elements) {
       if (element.textContent !== 'stamina') continue;
@@ -539,15 +547,30 @@ const updateRequiredStamina = () => {
       const staminaRequired = Number(match[1]);
       if (
         (config.minimumStaminaWithoutRefill !== staminaRequired) &&
-        (3 <= staminaRequired && staminaRequired <= 18)
+        (1 <= staminaRequired && staminaRequired <= 360)
       ) {
         config.minimumStaminaWithoutRefill = staminaRequired;
-        if (window.DEBUG) console.log(`[Bestiary Automator] Setting minimum stamina without refill to ${staminaRequired}`);
+        if (window.DEBUG) console.log(`[Bestiary Automator] Auto-setting minimum stamina without refill to ${staminaRequired}`);
         
-        // Save the new value to config
-        api.service.updateScriptConfig(context.hash, { 
-          minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill 
-        });
+        // Save the new value to both localStorage and API
+        const configToSave = {
+          minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill
+        };
+        
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'),
+            ...configToSave
+          }));
+        } catch (error) {
+          if (window.DEBUG) console.error('[Bestiary Automator] Error saving to localStorage:', error);
+        }
+        
+        try {
+          api.service.updateScriptConfig(context.hash, configToSave);
+        } catch (error) {
+          if (window.DEBUG) console.error('[Bestiary Automator] Error saving via API:', error);
+        }
         
         return;
       }
@@ -803,7 +826,7 @@ const createConfigPanel = () => {
   const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('autoRefillStamina'), config.autoRefillStamina);
   
   // Minimum stamina input
-  const staminaContainer = createNumberInputContainer('min-stamina-input', t('minimumStaminaLabel'), config.minimumStaminaWithoutRefill, 3, 18);
+  const staminaContainer = createNumberInputContainer('min-stamina-input', t('minimumStaminaLabel'), config.minimumStaminaWithoutRefill, 1, 360);
   
   // Auto collect rewards checkbox
   const rewardsContainer = createCheckboxContainer('auto-rewards-checkbox', t('autoCollectRewards'), config.autoCollectRewards);
@@ -849,7 +872,17 @@ const createConfigPanel = () => {
         onClick: () => {
           // Update configuration from form values
           config.autoRefillStamina = document.getElementById('auto-refill-checkbox').checked;
-          config.minimumStaminaWithoutRefill = parseInt(document.getElementById('min-stamina-input').value, 10);
+          
+          // Validate stamina input
+          const staminaInput = document.getElementById('min-stamina-input');
+          const staminaValue = parseInt(staminaInput.value, 10);
+          if (isNaN(staminaValue) || staminaValue < 1 || staminaValue > 360) {
+            showNotification('Minimum stamina must be between 1 and 360', 'error');
+            staminaInput.focus();
+            return;
+          }
+          config.minimumStaminaWithoutRefill = staminaValue;
+          
           config.autoCollectRewards = document.getElementById('auto-rewards-checkbox').checked;
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
@@ -943,8 +976,20 @@ const createConfigPanel = () => {
     input.id = id;
     input.min = min;
     input.max = max;
-    input.value = value;
+    input.value = Math.max(min, Math.min(max, value)); // Clamp value to valid range
     input.style.cssText = 'width: 100%; padding: 5px; background-color: #222; color: #fff; border: 1px solid #444;';
+    
+    // Add input validation
+    input.addEventListener('input', () => {
+      const numValue = parseInt(input.value, 10);
+      if (isNaN(numValue) || numValue < min || numValue > max) {
+        input.style.borderColor = '#ff4444';
+        input.title = `Value must be between ${min} and ${max}`;
+      } else {
+        input.style.borderColor = '#444';
+        input.title = '';
+      }
+    });
     
     container.appendChild(labelElement);
     container.appendChild(input);
@@ -972,20 +1017,27 @@ const createButtons = () => {
   setTimeout(() => {
     const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
+      // Clear any existing background styling first
+      btn.style.background = '';
+      btn.style.backgroundColor = '';
+      
       if (config.autoRefillStamina) {
         // Priority 1: Green background for auto refill stamina
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
         btn.style.backgroundSize = "auto";
         btn.style.color = "#ffffff";
+        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
       } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
         // Priority 2: Blue background for other auto features
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
         btn.style.backgroundSize = "auto";
         btn.style.color = "#ffffff";
+        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
       } else {
         // Default: No features enabled
         btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
         btn.style.color = "#ffe066";
+        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
       }
     }
   }, 100);
@@ -1052,26 +1104,34 @@ function updateAutomatorButton() {
     if (stateChanged) {
       const btn = document.getElementById(CONFIG_BUTTON_ID);
       if (btn) {
+        // Clear any existing background styling first
+        btn.style.background = '';
+        btn.style.backgroundColor = '';
+        
         // Check if Board Analyzer is running and we should show paused state
         if (currentState.boardAnalyzerRunning) {
           // Show paused state with gray background
           btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat";
           btn.style.color = "#888";
+          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
           btn.title = t('configButtonTooltip') + ' (Paused - Board Analyzer Running)';
         } else if (config.autoRefillStamina) {
           // Priority 1: Green background for auto refill stamina
           btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
           btn.style.backgroundSize = "auto";
           btn.style.color = "#ffffff";
+          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
         } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
           // Priority 2: Blue background for other auto features
           btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
           btn.style.backgroundSize = "auto";
           btn.style.color = "#ffffff";
+          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
         } else {
           // Default: No features enabled
           btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
           btn.style.color = "#ffe066";
+          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
         }
         
         // Reset tooltip to normal if not paused

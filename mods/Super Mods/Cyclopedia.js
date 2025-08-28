@@ -5898,6 +5898,853 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       return d;
     }
 
+    // Helper function to create statistics section
+    function createStatisticsSection(selectedMap) {
+      const statsContainer = document.createElement('div');
+      statsContainer.style.display = 'flex';
+      statsContainer.style.flexDirection = 'column';
+      statsContainer.style.width = '100%';
+      statsContainer.style.height = '100%';
+      statsContainer.style.boxSizing = 'border-box';
+      
+      // Row 1: 30% height, split into 2 columns
+      const row1 = document.createElement('div');
+      row1.style.display = 'flex';
+      row1.style.flexDirection = 'row';
+      row1.style.height = '30%';
+      row1.style.minHeight = '30%';
+      row1.style.maxHeight = '30%';
+      row1.style.borderBottom = '6px solid transparent';
+      row1.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      // Column 1: Speedrun
+      const speedrunCol = document.createElement('div');
+      speedrunCol.style.flex = '1 1 0';
+      speedrunCol.style.maxWidth = '245px';
+      speedrunCol.style.display = 'flex';
+      speedrunCol.style.flexDirection = 'column';
+      speedrunCol.style.padding = '10px';
+      speedrunCol.style.borderRight = '3px solid transparent';
+      speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const speedrunTitle = document.createElement('h3');
+      speedrunTitle.style.margin = '0 0 10px 0';
+      speedrunTitle.style.fontSize = '16px';
+      speedrunTitle.style.fontWeight = 'bold';
+      speedrunTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      speedrunTitle.style.textAlign = 'center';
+      speedrunTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      speedrunTitle.style.display = 'flex';
+      speedrunTitle.style.alignItems = 'center';
+      speedrunTitle.style.justifyContent = 'center';
+      speedrunTitle.style.gap = '6px';
+      
+      const speedIcon = document.createElement('img');
+      speedIcon.src = 'https://bestiaryarena.com/assets/icons/speed.png';
+      speedIcon.alt = 'Speed';
+      speedIcon.style.width = '16px';
+      speedIcon.style.height = '16px';
+      
+      const speedrunText = document.createElement('span');
+      speedrunText.textContent = 'Speedrun';
+      
+      speedrunTitle.appendChild(speedIcon);
+      speedrunTitle.appendChild(speedrunText);
+      speedrunCol.appendChild(speedrunTitle);
+      
+      const speedrunContent = document.createElement('div');
+      speedrunContent.style.flex = '1';
+      speedrunContent.style.display = 'flex';
+      speedrunContent.style.flexDirection = 'column';
+      speedrunContent.style.justifyContent = 'center';
+      speedrunContent.style.alignItems = 'center';
+      speedrunContent.style.color = '#888';
+      speedrunContent.style.fontSize = '14px';
+      speedrunContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      speedrunContent.style.textAlign = 'center';
+      speedrunContent.style.padding = '6px';
+      speedrunContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
+      speedrunCol.appendChild(speedrunContent);
+      
+      // Column 2: Rank Points
+      const rankPointsCol = document.createElement('div');
+      rankPointsCol.style.flex = '1 1 0';
+      rankPointsCol.style.maxWidth = '245px';
+      rankPointsCol.style.display = 'flex';
+      rankPointsCol.style.flexDirection = 'column';
+      rankPointsCol.style.padding = '10px';
+      rankPointsCol.style.borderLeft = '3px solid transparent';
+      rankPointsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const rankPointsTitle = document.createElement('h3');
+      rankPointsTitle.style.margin = '0 0 10px 0';
+      rankPointsTitle.style.fontSize = '16px';
+      rankPointsTitle.style.fontWeight = 'bold';
+      rankPointsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      rankPointsTitle.style.textAlign = 'center';
+      rankPointsTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      rankPointsTitle.style.display = 'flex';
+      rankPointsTitle.style.alignItems = 'center';
+      rankPointsTitle.style.justifyContent = 'center';
+      rankPointsTitle.style.gap = '6px';
+      
+      const gradeIcon = document.createElement('img');
+      gradeIcon.src = 'https://bestiaryarena.com/assets/icons/grade.png';
+      gradeIcon.alt = 'Grade';
+      gradeIcon.style.width = '16px';
+      gradeIcon.style.height = '16px';
+      
+      const rankPointsText = document.createElement('span');
+      rankPointsText.textContent = 'Rank Points';
+      
+      rankPointsTitle.appendChild(gradeIcon);
+      rankPointsTitle.appendChild(rankPointsText);
+      rankPointsCol.appendChild(rankPointsTitle);
+      
+      const rankPointsContent = document.createElement('div');
+      rankPointsContent.style.flex = '1';
+      rankPointsContent.style.display = 'flex';
+      rankPointsContent.style.flexDirection = 'column';
+      rankPointsContent.style.justifyContent = 'center';
+      rankPointsContent.style.alignItems = 'center';
+      rankPointsContent.style.color = '#888';
+      rankPointsContent.style.fontSize = '14px';
+      rankPointsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      rankPointsContent.style.textAlign = 'center';
+      rankPointsContent.style.padding = '6px';
+      rankPointsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
+      rankPointsCol.appendChild(rankPointsContent);
+      
+      // Add columns to row1
+      row1.appendChild(speedrunCol);
+      row1.appendChild(rankPointsCol);
+      
+      // Row 2: 70% height, Top 5 tables
+      const row2 = document.createElement('div');
+      row2.style.flex = '1 1 0';
+      row2.style.display = 'flex';
+      row2.style.flexDirection = 'row';
+      
+      // Left column: Top 5 Speedruns
+      const speedrunTableCol = document.createElement('div');
+      speedrunTableCol.style.flex = '1 1 0';
+      speedrunTableCol.style.maxWidth = '245px';
+      speedrunTableCol.style.display = 'flex';
+      speedrunTableCol.style.flexDirection = 'column';
+      speedrunTableCol.style.padding = '10px';
+      speedrunTableCol.style.borderRight = '3px solid transparent';
+      speedrunTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const speedrunTableTitle = document.createElement('div');
+      speedrunTableTitle.style.fontSize = '16px';
+      speedrunTableTitle.style.fontWeight = 'bold';
+      speedrunTableTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      speedrunTableTitle.style.marginBottom = '10px';
+      speedrunTableTitle.style.textAlign = 'center';
+      speedrunTableTitle.textContent = 'Top 5 Speedruns';
+      speedrunTableCol.appendChild(speedrunTableTitle);
+      
+      const speedrunTable = document.createElement('div');
+      speedrunTable.style.border = '1px solid #444';
+      speedrunTable.style.borderRadius = '4px';
+      speedrunTable.style.overflow = 'hidden';
+      speedrunTable.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+      
+      // Table header
+      const speedrunHeader = document.createElement('div');
+      speedrunHeader.style.display = 'grid';
+      speedrunHeader.style.gridTemplateColumns = '1fr 50px 40px 40px';
+      speedrunHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+      speedrunHeader.style.borderBottom = '1px solid #444';
+      speedrunHeader.style.fontWeight = 'bold';
+      speedrunHeader.style.fontSize = '11px';
+      speedrunHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      speedrunHeader.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      
+      const timeHeader = document.createElement('div');
+      timeHeader.style.padding = '6px 4px';
+      timeHeader.style.borderRight = '1px solid #444';
+      timeHeader.textContent = 'Time';
+      speedrunHeader.appendChild(timeHeader);
+      
+      const rankHeader = document.createElement('div');
+      rankHeader.style.padding = '6px 4px';
+      rankHeader.style.borderRight = '1px solid #444';
+      rankHeader.style.textAlign = 'center';
+      rankHeader.textContent = 'Rank';
+      speedrunHeader.appendChild(rankHeader);
+      
+      const copyHeader = document.createElement('div');
+      copyHeader.style.padding = '4px 2px';
+      copyHeader.style.borderRight = '1px solid #444';
+      copyHeader.style.textAlign = 'center';
+      copyHeader.textContent = '';
+      speedrunHeader.appendChild(copyHeader);
+      
+      const deleteHeader = document.createElement('div');
+      deleteHeader.style.padding = '4px 2px';
+      deleteHeader.style.textAlign = 'center';
+      deleteHeader.textContent = '';
+      speedrunHeader.appendChild(deleteHeader);
+      
+      speedrunTable.appendChild(speedrunHeader);
+      
+      // Table rows (placeholder data)
+      for (let i = 1; i <= 5; i++) {
+        const row = document.createElement('div');
+        row.style.display = 'grid';
+        row.style.gridTemplateColumns = '1fr 50px 40px 40px';
+        row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
+        row.style.fontSize = '10px';
+        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+        row.style.color = '#ccc';
+        
+        const timeCell = document.createElement('div');
+        timeCell.style.padding = '4px 2px';
+        timeCell.style.borderRight = '1px solid #333';
+        timeCell.textContent = `${97 + i}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}.${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
+        row.appendChild(timeCell);
+        
+        const rankCell = document.createElement('div');
+        rankCell.style.padding = '4px 2px';
+        rankCell.style.borderRight = '1px solid #333';
+        rankCell.style.textAlign = 'center';
+        rankCell.textContent = `#${i}`;
+        row.appendChild(rankCell);
+        
+        const copyCell = document.createElement('div');
+        copyCell.style.padding = '2px 1px';
+        copyCell.style.borderRight = '1px solid #333';
+        copyCell.style.textAlign = 'center';
+        copyCell.style.cursor = 'pointer';
+        copyCell.style.color = '#4CAF50';
+        copyCell.style.fontSize = '14px';
+        copyCell.innerHTML = '🔗';
+        copyCell.title = 'Copy/share this run setup';
+        row.appendChild(copyCell);
+        
+        const deleteCell = document.createElement('div');
+        deleteCell.style.padding = '2px 1px';
+        deleteCell.style.textAlign = 'center';
+        deleteCell.style.cursor = 'pointer';
+        deleteCell.style.color = '#f44336';
+        deleteCell.style.fontSize = '14px';
+        deleteCell.innerHTML = '🗑️';
+        deleteCell.title = 'Delete this run';
+        deleteCell.addEventListener('click', (e) => {
+          e.preventDefault();
+          const confirmed = confirm(`Are you sure you want to delete this run?\n\nTime: ${timeCell.textContent}\nRank: #${i}`);
+          if (confirmed) {
+            console.log(`Deleting run #${i}`);
+            // Add actual delete logic here
+          }
+        });
+        row.appendChild(deleteCell);
+        
+        speedrunTable.appendChild(row);
+      }
+      
+      speedrunTableCol.appendChild(speedrunTable);
+      
+      // Right column: Top 5 Ranks
+      const ranksTableCol = document.createElement('div');
+      ranksTableCol.style.flex = '1 1 0';
+      ranksTableCol.style.maxWidth = '245px';
+      ranksTableCol.style.display = 'flex';
+      ranksTableCol.style.flexDirection = 'column';
+      ranksTableCol.style.padding = '10px';
+      ranksTableCol.style.borderLeft = '3px solid transparent';
+      ranksTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const ranksTableTitle = document.createElement('div');
+      ranksTableTitle.style.fontSize = '16px';
+      ranksTableTitle.style.fontWeight = 'bold';
+      ranksTableTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      ranksTableTitle.style.marginBottom = '10px';
+      ranksTableTitle.style.textAlign = 'center';
+      ranksTableTitle.textContent = 'Top 5 Ranks';
+      ranksTableCol.appendChild(ranksTableTitle);
+      
+      const ranksTable = document.createElement('div');
+      ranksTable.style.border = '1px solid #444';
+      ranksTable.style.borderRadius = '4px';
+      ranksTable.style.overflow = 'hidden';
+      ranksTable.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+      
+      // Table header
+      const ranksHeader = document.createElement('div');
+      ranksHeader.style.display = 'grid';
+      ranksHeader.style.gridTemplateColumns = '1fr 50px 40px 40px';
+      ranksHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+      ranksHeader.style.borderBottom = '1px solid #444';
+      ranksHeader.style.fontWeight = 'bold';
+      ranksHeader.style.fontSize = '11px';
+      ranksHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      ranksHeader.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      
+      const ranksTimeHeader = document.createElement('div');
+      ranksTimeHeader.style.padding = '6px 4px';
+      ranksTimeHeader.style.borderRight = '1px solid #444';
+      ranksTimeHeader.textContent = 'Time';
+      ranksHeader.appendChild(ranksTimeHeader);
+      
+      const ranksRankHeader = document.createElement('div');
+      ranksRankHeader.style.padding = '6px 4px';
+      ranksRankHeader.style.borderRight = '1px solid #444';
+      ranksRankHeader.style.textAlign = 'center';
+      ranksRankHeader.textContent = 'Rank';
+      ranksHeader.appendChild(ranksRankHeader);
+      
+      const ranksCopyHeader = document.createElement('div');
+      ranksCopyHeader.style.padding = '4px 2px';
+      ranksCopyHeader.style.borderRight = '1px solid #444';
+      ranksCopyHeader.style.textAlign = 'center';
+      ranksCopyHeader.textContent = '';
+      ranksHeader.appendChild(ranksCopyHeader);
+      
+      const ranksDeleteHeader = document.createElement('div');
+      ranksDeleteHeader.style.padding = '4px 2px';
+      ranksDeleteHeader.style.textAlign = 'center';
+      ranksDeleteHeader.textContent = '';
+      ranksHeader.appendChild(ranksDeleteHeader);
+      
+      ranksTable.appendChild(ranksHeader);
+      
+      // Table rows (placeholder data)
+      for (let i = 1; i <= 5; i++) {
+        const row = document.createElement('div');
+        row.style.display = 'grid';
+        row.style.gridTemplateColumns = '1fr 50px 40px 40px';
+        row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
+        row.style.fontSize = '10px';
+        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+        row.style.color = '#ccc';
+        
+        const timeCell = document.createElement('div');
+        timeCell.style.padding = '4px 2px';
+        timeCell.style.borderRight = '1px solid #333';
+        timeCell.textContent = `${12 - i}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}.${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
+        row.appendChild(timeCell);
+        
+        const rankCell = document.createElement('div');
+        rankCell.style.padding = '4px 2px';
+        rankCell.style.borderRight = '1px solid #333';
+        rankCell.style.textAlign = 'center';
+        rankCell.textContent = `#${i}`;
+        row.appendChild(rankCell);
+        
+        const copyCell = document.createElement('div');
+        copyCell.style.padding = '2px 1px';
+        copyCell.style.borderRight = '1px solid #333';
+        copyCell.style.textAlign = 'center';
+        copyCell.style.cursor = 'pointer';
+        copyCell.style.color = '#4CAF50';
+        copyCell.style.fontSize = '14px';
+        copyCell.innerHTML = '🔗';
+        copyCell.title = 'Copy/share this run setup';
+        row.appendChild(copyCell);
+        
+        const deleteCell = document.createElement('div');
+        deleteCell.style.padding = '2px 1px';
+        deleteCell.style.textAlign = 'center';
+        deleteCell.style.cursor = 'pointer';
+        deleteCell.style.color = '#f44336';
+        deleteCell.style.fontSize = '14px';
+        deleteCell.innerHTML = '🗑️';
+        deleteCell.title = 'Delete this run';
+        deleteCell.addEventListener('click', (e) => {
+          e.preventDefault();
+          const confirmed = confirm(`Are you sure you want to delete this run?\n\nTime: ${timeCell.textContent}\nRank: #${i}`);
+          if (confirmed) {
+            console.log(`Deleting run #${i}`);
+            // Add actual delete logic here
+          }
+        });
+        row.appendChild(deleteCell);
+        
+        ranksTable.appendChild(row);
+      }
+      
+      ranksTableCol.appendChild(ranksTable);
+      
+      // Add columns to row2
+      row2.appendChild(speedrunTableCol);
+      row2.appendChild(ranksTableCol);
+      
+      // Add rows to statsContainer
+      statsContainer.appendChild(row1);
+      statsContainer.appendChild(row2);
+      
+      // Fetch and populate leaderboard data
+      fetchMapsLeaderboardData().then(data => {
+        if (data && selectedMap) {
+          const { best, roomsHighscores, yourRooms } = data;
+          const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+          
+          // Update speedrun content
+          const yourTicks = yourRooms?.[selectedMap]?.ticks || 0;
+          const bestTicks = best?.[selectedMap]?.ticks || 0;
+          const bestPlayer = best?.[selectedMap]?.userName || 'Unknown';
+          
+          let speedrunHtml = '';
+          if (bestTicks > 0) {
+            speedrunHtml = `
+              <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestTicks} ticks</div>
+              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestPlayer}</div>
+            `;
+            if (yourTicks > 0) {
+              speedrunHtml += `
+                <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+                <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
+              `;
+            }
+          } else {
+            speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+          }
+          speedrunContent.innerHTML = speedrunHtml;
+          
+          // Update rank points content
+          const yourRankPoints = yourRooms?.[selectedMap]?.rank || 0;
+          const bestRankPoints = roomsHighscores?.rank?.[selectedMap]?.rank || 0;
+          const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
+          
+          let rankPointsHtml = '';
+          if (bestRankPoints > 0) {
+            rankPointsHtml = `
+              <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}</div>
+              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
+            `;
+            if (yourRankPoints > 0) {
+              rankPointsHtml += `
+                <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+                <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}</div>
+              `;
+            }
+          } else {
+            rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+          }
+          rankPointsContent.innerHTML = rankPointsHtml;
+        } else {
+          speedrunContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
+          rankPointsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
+        }
+      }).catch(error => {
+        console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
+        speedrunContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
+        rankPointsContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
+      });
+      
+      return statsContainer;
+    }
+
+    // Helper function to create creature list section
+    function createCreatureListSection(roomActors, selectedMap) {
+      const creaturesContainer = document.createElement('div');
+      creaturesContainer.style.marginTop = '4px';
+      creaturesContainer.style.textAlign = 'center';
+
+      if (roomActors && roomActors.length > 0) {
+        // Filter out null/invalid actors first, then sort creatures by Level -> Name
+        const validActors = roomActors.filter(actor => actor && actor.id);
+        const sortedActors = validActors.sort((a, b) => {
+          // First sort by level (descending)
+          const levelA = a.level || 1;
+          const levelB = b.level || 1;
+          if (levelA !== levelB) {
+            return levelB - levelA;
+          }
+          
+          // If levels are equal, sort by name (ascending)
+          let nameA = 'Unknown';
+          let nameB = 'Unknown';
+          
+          try {
+            if (globalThis.state?.utils?.getMonster) {
+              const monsterDataA = globalThis.state.utils.getMonster(a.id);
+              if (monsterDataA?.metadata?.name) {
+                nameA = monsterDataA.metadata.name;
+              }
+            }
+          } catch (error) {}
+          
+          try {
+            if (globalThis.state?.utils?.getMonster) {
+              const monsterDataB = globalThis.state.utils.getMonster(b.id);
+              if (monsterDataB?.metadata?.name) {
+                nameB = monsterDataB.metadata.name;
+              }
+            }
+          } catch (error) {}
+          
+          return nameA.localeCompare(nameB);
+        });
+        
+        const creaturesGrid = document.createElement('div');
+        creaturesGrid.style.display = 'flex';
+        creaturesGrid.style.flexDirection = 'column';
+        creaturesGrid.style.gap = '4px';
+        creaturesGrid.style.width = '100%';
+        creaturesGrid.style.maxWidth = '100%';
+        
+        sortedActors.forEach((actor, index) => {
+          if (actor && actor.id) {
+            try {
+              console.log('[Cyclopedia] Processing actor:', actor);
+              
+              // Create creature row container
+              const creatureRow = document.createElement('div');
+              creatureRow.style.display = 'flex';
+              creatureRow.style.alignItems = 'center';
+              creatureRow.style.justifyContent = 'space-between';
+              creatureRow.style.width = '100%';
+              creatureRow.style.padding = '4px 8px';
+              creatureRow.style.marginBottom = '4px';
+              creatureRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+              creatureRow.style.borderRadius = '4px';
+              
+              // Left: Creature icon (using Dice_Roller.js style)
+              const iconContainer = document.createElement('div');
+              iconContainer.style.flex = '0 0 50px';
+              iconContainer.style.display = 'flex';
+              iconContainer.style.justifyContent = 'center';
+              iconContainer.style.alignItems = 'center';
+              
+              // Create creature icon using Dice_Roller.js approach
+              const createCreatureIcon = (actor) => {
+                // Container slot
+                const slot = document.createElement('div');
+                slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
+                slot.setAttribute('data-highlighted', 'false');
+                slot.setAttribute('data-recent', 'false');
+                slot.setAttribute('data-multiselected', 'false');
+                slot.style.width = '40px';
+                slot.style.height = '40px';
+                slot.style.minWidth = '40px';
+                slot.style.minHeight = '40px';
+                slot.style.maxWidth = '40px';
+                slot.style.maxHeight = '40px';
+                
+                // Rarity border/background (calculate from stats if available)
+                const getRarityFromStats = (stats) => {
+                  const statSum = (stats.hp || 0) + (stats.ad || 0) + (stats.ap || 0) + (stats.armor || 0) + (stats.magicResist || 0);
+                  let rarity = 1;
+                  if (statSum >= 80) rarity = 5;
+                  else if (statSum >= 70) rarity = 4;
+                  else if (statSum >= 60) rarity = 3;
+                  else if (statSum >= 50) rarity = 2;
+                  return rarity;
+                };
+                
+                // Try to get creature stats for rarity calculation
+                let rarity = 1;
+                try {
+                  if (globalThis.state?.utils?.getMonster) {
+                    const monsterData = globalThis.state.utils.getMonster(actor.id);
+                    if (monsterData) {
+                      rarity = getRarityFromStats(monsterData);
+                    }
+                  }
+                } catch (error) {
+                  console.warn('[Cyclopedia] Could not get monster data for rarity calculation:', error);
+                }
+                
+                const rarityDiv = document.createElement('div');
+                rarityDiv.setAttribute('role', 'none');
+                rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+                rarityDiv.setAttribute('data-rarity', rarity);
+                slot.appendChild(rarityDiv);
+                
+                // Star tier icon (if available)
+                if (actor.tier) {
+                  const starImg = document.createElement('img');
+                  starImg.alt = 'star tier';
+                  starImg.src = `/assets/icons/star-tier-${actor.tier}.png`;
+                  starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
+                  slot.appendChild(starImg);
+                }
+                
+                // Level badge
+                const levelDiv = document.createElement('div');
+                levelDiv.className = 'creature-level-badge';
+                levelDiv.style.position = 'absolute';
+                levelDiv.style.bottom = '2px';
+                levelDiv.style.left = '2px';
+                levelDiv.style.zIndex = '3';
+                levelDiv.style.fontSize = '16px';
+                levelDiv.style.color = '#fff';
+                levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
+                levelDiv.style.letterSpacing = '0.5px';
+                levelDiv.textContent = actor.level || 1;
+                slot.appendChild(levelDiv);
+                
+                // Portrait image
+                const img = document.createElement('img');
+                img.className = 'pixelated ml-auto';
+                img.alt = 'creature';
+                img.width = 40;
+                img.height = 40;
+                img.style.width = '40px';
+                img.style.height = '40px';
+                img.style.minWidth = '40px';
+                img.style.minHeight = '40px';
+                img.style.maxWidth = '40px';
+                img.style.maxHeight = '40px';
+                img.style.objectFit = 'contain';
+                img.src = `/assets/portraits/${actor.id}.png`;
+                slot.appendChild(img);
+                
+                return slot;
+              };
+              
+              const creatureIcon = createCreatureIcon(actor);
+              iconContainer.appendChild(creatureIcon);
+              
+              // Middle: Name and level
+              const infoContainer = document.createElement('div');
+              infoContainer.style.flex = '1';
+              infoContainer.style.display = 'flex';
+              infoContainer.style.flexDirection = 'column';
+              infoContainer.style.alignItems = 'center';
+              infoContainer.style.justifyContent = 'center';
+              infoContainer.style.padding = '0 8px';
+              
+              // Get creature name
+              let creatureName = 'Unknown';
+              try {
+                if (globalThis.state?.utils?.getMonster) {
+                  const monsterData = globalThis.state.utils.getMonster(actor.id);
+                  if (monsterData?.metadata?.name) {
+                    creatureName = monsterData.metadata.name;
+                  }
+                }
+              } catch (error) {
+                console.warn('[Cyclopedia] Could not get creature name for ID:', actor.id);
+              }
+              
+              const nameElement = document.createElement('div');
+              nameElement.textContent = creatureName;
+              nameElement.style.fontWeight = 'bold';
+              nameElement.style.fontSize = '14px';
+              nameElement.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+              nameElement.style.textAlign = 'center';
+              
+              const levelElement = document.createElement('div');
+              levelElement.textContent = `Level ${actor.level || 1}`;
+              levelElement.style.fontSize = '12px';
+              levelElement.style.color = '#888';
+              levelElement.style.textAlign = 'center';
+              
+              infoContainer.appendChild(nameElement);
+              infoContainer.appendChild(levelElement);
+              
+              // Right: Equipment (if any)
+              const equipmentContainer = document.createElement('div');
+              equipmentContainer.style.flex = '0 0 60px';
+              equipmentContainer.style.display = 'flex';
+              equipmentContainer.style.justifyContent = 'center';
+              equipmentContainer.style.alignItems = 'center';
+              
+              if (actor.equip && actor.equip.gameId) {
+                // Show equipment using the same approach as Better Forge.js
+                try {
+                  let equipmentSprite;
+                  if (globalThis.state?.utils?.getEquipment) {
+                    const equipmentData = globalThis.state.utils.getEquipment(actor.equip.gameId);
+                    if (equipmentData?.metadata?.spriteId && api?.ui?.components?.createItemPortrait) {
+                      equipmentSprite = api.ui.components.createItemPortrait({
+                        itemId: equipmentData.metadata.spriteId,
+                        tier: actor.equip.tier || 1,
+                        stat: actor.equip.stat || 'hp',
+                        size: 'small'
+                      });
+                      
+                      // Remove button functionality while keeping visual appearance
+                      if (equipmentSprite.tagName === 'BUTTON') {
+                        // Extract the inner content and create a div instead
+                        const innerContent = equipmentSprite.innerHTML;
+                        const divSprite = document.createElement('div');
+                        divSprite.innerHTML = innerContent;
+                        divSprite.className = equipmentSprite.className;
+                        divSprite.style.cssText = equipmentSprite.style.cssText;
+                        
+                        // Remove all clickable behavior from the div and its children
+                        divSprite.style.pointerEvents = 'none';
+                        divSprite.style.cursor = 'default';
+                        
+                        // Remove any clickable elements inside
+                        const clickableElements = divSprite.querySelectorAll('button, [onclick], [role="button"]');
+                        clickableElements.forEach(el => {
+                          el.style.pointerEvents = 'none';
+                          el.style.cursor = 'default';
+                          el.removeAttribute('onclick');
+                          el.removeAttribute('role');
+                          el.removeAttribute('tabindex');
+                        });
+                        
+                        // Set size to 30px
+                        [divSprite.style.width, divSprite.style.height] = ['30px', '30px'];
+                        
+                        // Also adjust the inner portrait if it exists
+                        const portrait = divSprite.querySelector('.equipment-portrait');
+                        if (portrait) {
+                          portrait.style.width = '30px';
+                          portrait.style.height = '30px';
+                          portrait.style.pointerEvents = 'none';
+                        }
+                        
+                        equipmentSprite = divSprite;
+                      } else {
+                        // Set size to 30px
+                        [equipmentSprite.style.width, equipmentSprite.style.height] = ['30px', '30px'];
+                        
+                        // Also adjust the inner portrait if it exists
+                        const portrait = equipmentSprite.querySelector('.equipment-portrait');
+                        if (portrait) {
+                          portrait.style.width = '30px';
+                          portrait.style.height = '30px';
+                        }
+                      }
+                      
+                      console.log('[Cyclopedia] Created equipment sprite for:', actor.equip);
+                    }
+                  }
+                  
+                  if (equipmentSprite) {
+                    equipmentContainer.appendChild(equipmentSprite);
+                  } else {
+                    // Fallback to text representation
+                    equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                    equipmentContainer.style.fontSize = '12px';
+                    equipmentContainer.style.color = '#888';
+                    equipmentContainer.style.fontWeight = 'bold';
+                  }
+                } catch (error) {
+                  console.warn('[Cyclopedia] Could not create equipment sprite:', error);
+                  equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                  equipmentContainer.style.fontSize = '12px';
+                  equipmentContainer.style.color = '#888';
+                  equipmentContainer.style.fontWeight = 'bold';
+                }
+              } else {
+                equipmentContainer.textContent = '—';
+                equipmentContainer.style.fontSize = '14px';
+                equipmentContainer.style.color = '#666';
+              }
+              
+              // Assemble the row
+              creatureRow.appendChild(iconContainer);
+              creatureRow.appendChild(infoContainer);
+              creatureRow.appendChild(equipmentContainer);
+              
+              creaturesGrid.appendChild(creatureRow);
+            } catch (error) {
+              console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
+            }
+          } else {
+            console.log('[Cyclopedia] Skipping invalid actor:', actor);
+          }
+        });
+        
+        creaturesContainer.appendChild(creaturesGrid);
+      } else {
+        const noCreaturesMsg = document.createElement('p');
+        noCreaturesMsg.textContent = `No creatures found on this map. (Room ID: ${selectedMap})`;
+        noCreaturesMsg.style.color = '#888';
+        noCreaturesMsg.style.fontStyle = 'italic';
+        creaturesContainer.appendChild(noCreaturesMsg);
+        
+        // Add debug info
+        const debugInfo = document.createElement('div');
+        debugInfo.style.marginTop = '10px';
+        debugInfo.style.fontSize = '12px';
+        debugInfo.style.color = '#666';
+        debugInfo.innerHTML = `
+          <strong>Debug Info:</strong><br>
+          Available Rooms: ${Object.keys(globalThis.state?.utils?.ROOMS || {}).length}<br>
+          Available Regions: ${globalThis.state?.utils?.REGIONS?.length || 0}<br>
+          Room Data: ${roomData ? 'Found' : 'Not found'}<br>
+          Actors: ${roomActors ? roomActors.length : 'None'}
+        `;
+        creaturesContainer.appendChild(debugInfo);
+      }
+      
+      return creaturesContainer;
+    }
+
+    // Helper function to create map information section
+    function createMapInfoSection(selectedMap, roomName) {
+      const mapInfoDiv = document.createElement('div');
+      mapInfoDiv.style.padding = '0 20px 20px 20px';
+      mapInfoDiv.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+      mapInfoDiv.style.width = '100%';
+      mapInfoDiv.style.boxSizing = 'border-box';
+      mapInfoDiv.style.marginBottom = '0';
+      
+      // Add room thumbnail
+      const thumbnail = document.createElement('img');
+      thumbnail.alt = roomName;
+      thumbnail.className = 'pixelated';
+      thumbnail.style.width = '192px';
+      thumbnail.style.height = '192px';
+      thumbnail.style.objectFit = 'cover';
+      thumbnail.style.border = '2px solid #666';
+      thumbnail.style.borderRadius = '4px';
+      thumbnail.style.margin = '0 auto';
+      thumbnail.style.display = 'block';
+      thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
+      
+      mapInfoDiv.appendChild(thumbnail);
+      
+      // Add map name with click interaction
+      const title = document.createElement('h3');
+      title.textContent = roomName;
+      title.style.margin = '10px 0 0 0';
+      title.style.fontSize = '16px';
+      title.style.fontWeight = 'bold';
+      title.style.textAlign = 'center';
+      title.style.cursor = MAP_INTERACTION_CONFIG.cursor;
+      title.title = MAP_INTERACTION_CONFIG.tooltip;
+      title.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
+      title.style.padding = MAP_INTERACTION_CONFIG.padding;
+      title.style.whiteSpace = 'nowrap';
+      title.style.overflow = 'hidden';
+      title.style.textOverflow = 'ellipsis';
+      title.style.maxWidth = '100%';
+      title.style.borderRadius = MAP_INTERACTION_CONFIG.borderRadius;
+      title.style.boxSizing = MAP_INTERACTION_CONFIG.boxSizing;
+      
+      // Add interaction handlers
+      title.addEventListener('mouseenter', () => {
+        title.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
+        title.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
+      });
+      
+      title.addEventListener('mouseleave', () => {
+        title.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
+        title.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
+      });
+      
+      title.addEventListener('click', (e) => {
+        e.stopPropagation();
+        globalThis.state.board.send({
+          type: 'selectRoomById',
+          roomId: selectedMap
+        });
+        // Try to close the modal if present
+        const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
+          btn => btn.textContent.trim() === 'Close'
+        );
+        if (closeBtn) {
+          closeBtn.click();
+        }
+      });
+      mapInfoDiv.appendChild(title);
+      
+      return mapInfoDiv;
+    }
+
     function createMapsTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
       const d = document.createElement('div');
       d.style.display = 'flex';
@@ -6102,75 +6949,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Column 2: Two separate divs - Map Information and Creature Information
             
             // First div: Map Information
-            const mapInfoDiv = document.createElement('div');
-            mapInfoDiv.style.padding = '0 20px 20px 20px';
-            mapInfoDiv.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-            mapInfoDiv.style.width = '100%';
-            mapInfoDiv.style.boxSizing = 'border-box';
-            mapInfoDiv.style.marginBottom = '0';
-            
-            // Row1: Map Icon and Map Name
-            
-            // Add room thumbnail
-            const thumbnail = document.createElement('img');
-            thumbnail.alt = roomName;
-            thumbnail.className = 'pixelated';
-            thumbnail.style.width = '192px';
-            thumbnail.style.height = '192px';
-            thumbnail.style.objectFit = 'cover';
-            thumbnail.style.border = '2px solid #666';
-            thumbnail.style.borderRadius = '4px';
-            thumbnail.style.margin = '0 auto';
-            thumbnail.style.display = 'block';
-            thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
-            
-            mapInfoDiv.appendChild(thumbnail);
-            
-            // Add map name with click interaction
-            const title = document.createElement('h3');
-            title.textContent = roomName;
-            title.style.margin = '10px 0 0 0';
-            title.style.fontSize = '16px';
-            title.style.fontWeight = 'bold';
-            title.style.textAlign = 'center';
-            title.style.cursor = MAP_INTERACTION_CONFIG.cursor;
-            title.title = MAP_INTERACTION_CONFIG.tooltip;
-            title.style.textDecoration = MAP_INTERACTION_CONFIG.textDecoration;
-            title.style.padding = MAP_INTERACTION_CONFIG.padding;
-            // Prevent text wrapping to avoid creature box overflow
-            title.style.whiteSpace = 'nowrap';
-            title.style.overflow = 'hidden';
-            title.style.textOverflow = 'ellipsis';
-            title.style.maxWidth = '100%';
-            title.style.borderRadius = MAP_INTERACTION_CONFIG.borderRadius;
-            title.style.boxSizing = MAP_INTERACTION_CONFIG.boxSizing;
-            
-            // Add the exact same interaction handlers as Bestiary Tab
-            title.addEventListener('mouseenter', () => {
-              title.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
-              title.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
-            });
-            
-            title.addEventListener('mouseleave', () => {
-              title.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
-              title.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
-            });
-            
-            title.addEventListener('click', (e) => {
-              e.stopPropagation();
-              globalThis.state.board.send({
-                type: 'selectRoomById',
-                roomId: selectedMap
-              });
-              // Try to close the modal if present
-              const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
-                btn => btn.textContent.trim() === 'Close'
-              );
-              if (closeBtn) {
-                closeBtn.click();
-              }
-            });
-            mapInfoDiv.appendChild(title);
+            const mapInfoDiv = createMapInfoSection(selectedMap, roomName);
             
             // Second div: Creature Information
             const creatureInfoDiv = document.createElement('div');
@@ -6257,13 +7036,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               
             } else {
               // Show creatures that spawn on this map instead of "Map data not available"
-              const creaturesContainer = document.createElement('div');
-              creaturesContainer.style.marginTop = '4px';
-              creaturesContainer.style.textAlign = 'center';
-
-              
-
-              
               // Get creatures from room actors - try multiple approaches
               let roomActors = null;
               let roomData = null;
@@ -6293,331 +7065,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               console.log('[Cyclopedia] Maps Tab - Room Data:', roomData);
               console.log('[Cyclopedia] Maps Tab - Room Actors:', roomActors);
               
-              if (roomActors && roomActors.length > 0) {
-                // Filter out null/invalid actors first, then sort creatures by Level -> Name
-                const validActors = roomActors.filter(actor => actor && actor.id);
-                const sortedActors = validActors.sort((a, b) => {
-                  // First sort by level (descending)
-                  const levelA = a.level || 1;
-                  const levelB = b.level || 1;
-                  if (levelA !== levelB) {
-                    return levelB - levelA;
-                  }
-                  
-                  // If levels are equal, sort by name (ascending)
-                  let nameA = 'Unknown';
-                  let nameB = 'Unknown';
-                  
-                  try {
-                    if (globalThis.state?.utils?.getMonster) {
-                      const monsterDataA = globalThis.state.utils.getMonster(a.id);
-                      if (monsterDataA?.metadata?.name) {
-                        nameA = monsterDataA.metadata.name;
-                      }
-                    }
-                  } catch (error) {}
-                  
-                  try {
-                    if (globalThis.state?.utils?.getMonster) {
-                      const monsterDataB = globalThis.state.utils.getMonster(b.id);
-                      if (monsterDataB?.metadata?.name) {
-                        nameB = monsterDataB.metadata.name;
-                      }
-                    }
-                  } catch (error) {}
-                  
-                  return nameA.localeCompare(nameB);
-                });
-                
-                const creaturesGrid = document.createElement('div');
-                creaturesGrid.style.display = 'flex';
-                creaturesGrid.style.flexDirection = 'column';
-                creaturesGrid.style.gap = '4px';
-                creaturesGrid.style.width = '100%';
-                creaturesGrid.style.maxWidth = '100%';
-                
-                sortedActors.forEach((actor, index) => {
-                  if (actor && actor.id) {
-                    try {
-                      console.log('[Cyclopedia] Processing actor:', actor);
-                      
-                      // Create creature row container
-                      const creatureRow = document.createElement('div');
-                      creatureRow.style.display = 'flex';
-                      creatureRow.style.alignItems = 'center';
-                      creatureRow.style.justifyContent = 'space-between';
-                      creatureRow.style.width = '100%';
-                      creatureRow.style.padding = '4px 8px';
-                      creatureRow.style.marginBottom = '4px';
-                      creatureRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-                      creatureRow.style.borderRadius = '4px';
-                      
-                      // Left: Creature icon (using Dice_Roller.js style)
-                      const iconContainer = document.createElement('div');
-                      iconContainer.style.flex = '0 0 50px';
-                      iconContainer.style.display = 'flex';
-                      iconContainer.style.justifyContent = 'center';
-                      iconContainer.style.alignItems = 'center';
-                      
-                      // Create creature icon using Dice_Roller.js approach
-                      const createCreatureIcon = (actor) => {
-                        // Container slot
-                        const slot = document.createElement('div');
-                        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
-                        slot.setAttribute('data-highlighted', 'false');
-                        slot.setAttribute('data-recent', 'false');
-                        slot.setAttribute('data-multiselected', 'false');
-                        slot.style.width = '40px';
-                        slot.style.height = '40px';
-                        slot.style.minWidth = '40px';
-                        slot.style.minHeight = '40px';
-                        slot.style.maxWidth = '40px';
-                        slot.style.maxHeight = '40px';
-                        
-                        // Rarity border/background (calculate from stats if available)
-                        const getRarityFromStats = (stats) => {
-                          const statSum = (stats.hp || 0) + (stats.ad || 0) + (stats.ap || 0) + (stats.armor || 0) + (stats.magicResist || 0);
-                          let rarity = 1;
-                          if (statSum >= 80) rarity = 5;
-                          else if (statSum >= 70) rarity = 4;
-                          else if (statSum >= 60) rarity = 3;
-                          else if (statSum >= 50) rarity = 2;
-                          return rarity;
-                        };
-                        
-                        // Try to get creature stats for rarity calculation
-                        let rarity = 1;
-                        try {
-                          if (globalThis.state?.utils?.getMonster) {
-                            const monsterData = globalThis.state.utils.getMonster(actor.id);
-                            if (monsterData) {
-                              rarity = getRarityFromStats(monsterData);
-                            }
-                          }
-                        } catch (error) {
-                          console.warn('[Cyclopedia] Could not get monster data for rarity calculation:', error);
-                        }
-                        
-                        const rarityDiv = document.createElement('div');
-                        rarityDiv.setAttribute('role', 'none');
-                        rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-                        rarityDiv.setAttribute('data-rarity', rarity);
-                        slot.appendChild(rarityDiv);
-                        
-                        // Star tier icon (if available)
-                        if (actor.tier) {
-                          const starImg = document.createElement('img');
-                          starImg.alt = 'star tier';
-                          starImg.src = `/assets/icons/star-tier-${actor.tier}.png`;
-                          starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-                          slot.appendChild(starImg);
-                        }
-                        
-                        // Level badge
-                        const levelDiv = document.createElement('div');
-                        levelDiv.className = 'creature-level-badge';
-                        levelDiv.style.position = 'absolute';
-                        levelDiv.style.bottom = '2px';
-                        levelDiv.style.left = '2px';
-                        levelDiv.style.zIndex = '3';
-                        levelDiv.style.fontSize = '16px';
-                        levelDiv.style.color = '#fff';
-                        levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
-                        levelDiv.style.letterSpacing = '0.5px';
-                        levelDiv.textContent = actor.level || 1;
-                        slot.appendChild(levelDiv);
-                        
-                        // Portrait image
-                        const img = document.createElement('img');
-                        img.className = 'pixelated ml-auto';
-                        img.alt = 'creature';
-                        img.width = 40;
-                        img.height = 40;
-                        img.style.width = '40px';
-                        img.style.height = '40px';
-                        img.style.minWidth = '40px';
-                        img.style.minHeight = '40px';
-                        img.style.maxWidth = '40px';
-                        img.style.maxHeight = '40px';
-                        img.style.objectFit = 'contain';
-                        img.src = `/assets/portraits/${actor.id}.png`;
-                        slot.appendChild(img);
-                        
-                        return slot;
-                      };
-                      
-                      const creatureIcon = createCreatureIcon(actor);
-                      iconContainer.appendChild(creatureIcon);
-                      
-                      // Middle: Name and level
-                      const infoContainer = document.createElement('div');
-                      infoContainer.style.flex = '1';
-                      infoContainer.style.display = 'flex';
-                      infoContainer.style.flexDirection = 'column';
-                      infoContainer.style.alignItems = 'center';
-                      infoContainer.style.justifyContent = 'center';
-                      infoContainer.style.padding = '0 8px';
-                      
-                      // Get creature name
-                      let creatureName = 'Unknown';
-                      try {
-                        if (globalThis.state?.utils?.getMonster) {
-                          const monsterData = globalThis.state.utils.getMonster(actor.id);
-                          if (monsterData?.metadata?.name) {
-                            creatureName = monsterData.metadata.name;
-                          }
-                        }
-                      } catch (error) {
-                        console.warn('[Cyclopedia] Could not get creature name for ID:', actor.id);
-                      }
-                      
-                      const nameElement = document.createElement('div');
-                      nameElement.textContent = creatureName;
-                      nameElement.style.fontWeight = 'bold';
-                      nameElement.style.fontSize = '14px';
-                      nameElement.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-                      nameElement.style.textAlign = 'center';
-                      
-                      const levelElement = document.createElement('div');
-                      levelElement.textContent = `Level ${actor.level || 1}`;
-                      levelElement.style.fontSize = '12px';
-                      levelElement.style.color = '#888';
-                      levelElement.style.textAlign = 'center';
-                      
-                      infoContainer.appendChild(nameElement);
-                      infoContainer.appendChild(levelElement);
-                      
-                      // Right: Equipment (if any)
-                      const equipmentContainer = document.createElement('div');
-                      equipmentContainer.style.flex = '0 0 60px';
-                      equipmentContainer.style.display = 'flex';
-                      equipmentContainer.style.justifyContent = 'center';
-                      equipmentContainer.style.alignItems = 'center';
-                      
-                      if (actor.equip && actor.equip.gameId) {
-                        // Show equipment using the same approach as Better Forge.js
-                        try {
-                          let equipmentSprite;
-                          if (globalThis.state?.utils?.getEquipment) {
-                            const equipmentData = globalThis.state.utils.getEquipment(actor.equip.gameId);
-                            if (equipmentData?.metadata?.spriteId && api?.ui?.components?.createItemPortrait) {
-                              equipmentSprite = api.ui.components.createItemPortrait({
-                                itemId: equipmentData.metadata.spriteId,
-                                tier: actor.equip.tier || 1,
-                                stat: actor.equip.stat || 'hp',
-                                size: 'small'
-                              });
-                              
-                              // Remove button functionality while keeping visual appearance
-                              if (equipmentSprite.tagName === 'BUTTON') {
-                                // Extract the inner content and create a div instead
-                                const innerContent = equipmentSprite.innerHTML;
-                                const divSprite = document.createElement('div');
-                                divSprite.innerHTML = innerContent;
-                                divSprite.className = equipmentSprite.className;
-                                divSprite.style.cssText = equipmentSprite.style.cssText;
-                                
-                                // Remove all clickable behavior from the div and its children
-                                divSprite.style.pointerEvents = 'none';
-                                divSprite.style.cursor = 'default';
-                                
-                                // Remove any clickable elements inside
-                                const clickableElements = divSprite.querySelectorAll('button, [onclick], [role="button"]');
-                                clickableElements.forEach(el => {
-                                  el.style.pointerEvents = 'none';
-                                  el.style.cursor = 'default';
-                                  el.removeAttribute('onclick');
-                                  el.removeAttribute('role');
-                                  el.removeAttribute('tabindex');
-                                });
-                                
-                                // Set size to 30px
-                                [divSprite.style.width, divSprite.style.height] = ['30px', '30px'];
-                                
-                                // Also adjust the inner portrait if it exists
-                                const portrait = divSprite.querySelector('.equipment-portrait');
-                                if (portrait) {
-                                  portrait.style.width = '30px';
-                                  portrait.style.height = '30px';
-                                  portrait.style.pointerEvents = 'none';
-                                }
-                                
-                                equipmentSprite = divSprite;
-                              } else {
-                                // Set size to 30px
-                                [equipmentSprite.style.width, equipmentSprite.style.height] = ['30px', '30px'];
-                                
-                                // Also adjust the inner portrait if it exists
-                                const portrait = equipmentSprite.querySelector('.equipment-portrait');
-                                if (portrait) {
-                                  portrait.style.width = '30px';
-                                  portrait.style.height = '30px';
-                                }
-                              }
-                              
-                              console.log('[Cyclopedia] Created equipment sprite for:', actor.equip);
-                            }
-                          }
-                          
-                          if (equipmentSprite) {
-                            equipmentContainer.appendChild(equipmentSprite);
-                          } else {
-                            // Fallback to text representation
-                            equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
-                            equipmentContainer.style.fontSize = '12px';
-                            equipmentContainer.style.color = '#888';
-                            equipmentContainer.style.fontWeight = 'bold';
-                          }
-                        } catch (error) {
-                          console.warn('[Cyclopedia] Could not create equipment sprite:', error);
-                          equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
-                          equipmentContainer.style.fontSize = '12px';
-                          equipmentContainer.style.color = '#888';
-                          equipmentContainer.style.fontWeight = 'bold';
-                        }
-                      } else {
-                        equipmentContainer.textContent = '—';
-                        equipmentContainer.style.fontSize = '14px';
-                        equipmentContainer.style.color = '#666';
-                      }
-                      
-                      // Assemble the row
-                      creatureRow.appendChild(iconContainer);
-                      creatureRow.appendChild(infoContainer);
-                      creatureRow.appendChild(equipmentContainer);
-                      
-                      creaturesGrid.appendChild(creatureRow);
-                    } catch (error) {
-                      console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
-                    }
-                  } else {
-                    console.log('[Cyclopedia] Skipping invalid actor:', actor);
-                  }
-                });
-                
-                creaturesContainer.appendChild(creaturesGrid);
-              } else {
-                const noCreaturesMsg = document.createElement('p');
-                noCreaturesMsg.textContent = `No creatures found on this map. (Room ID: ${selectedMap})`;
-                noCreaturesMsg.style.color = '#888';
-                noCreaturesMsg.style.fontStyle = 'italic';
-                creaturesContainer.appendChild(noCreaturesMsg);
-                
-                // Add debug info
-                const debugInfo = document.createElement('div');
-                debugInfo.style.marginTop = '10px';
-                debugInfo.style.fontSize = '12px';
-                debugInfo.style.color = '#666';
-                debugInfo.innerHTML = `
-                  <strong>Debug Info:</strong><br>
-                  Available Rooms: ${Object.keys(globalThis.state?.utils?.ROOMS || {}).length}<br>
-                  Available Regions: ${globalThis.state?.utils?.REGIONS?.length || 0}<br>
-                  Room Data: ${roomData ? 'Found' : 'Not found'}<br>
-                  Actors: ${roomActors ? roomActors.length : 'None'}
-                `;
-                creaturesContainer.appendChild(debugInfo);
-              }
-              
+              const creaturesContainer = createCreatureListSection(roomActors, selectedMap);
               contentContainer.appendChild(creaturesContainer);
             }
             
@@ -6637,201 +7085,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // If no overflow, keep overflowY: 'hidden' (no scrollbar)
             }, 0);
             
-            // Column 3: Statistics - Split into 2 rows
-            const statsContainer = document.createElement('div');
-            statsContainer.style.display = 'flex';
-            statsContainer.style.flexDirection = 'column';
-            statsContainer.style.width = '100%';
-            statsContainer.style.height = '100%';
-            statsContainer.style.boxSizing = 'border-box';
-            
-            // Row 1: 30% height, split into 2 columns
-            const row1 = document.createElement('div');
-            row1.style.display = 'flex';
-            row1.style.flexDirection = 'row';
-            row1.style.height = '30%';
-            row1.style.minHeight = '30%';
-            row1.style.maxHeight = '30%';
-            row1.style.borderBottom = '6px solid transparent';
-            row1.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-            
-            // Column 1: Speedrun
-            const speedrunCol = document.createElement('div');
-            speedrunCol.style.flex = '1 1 0';
-            speedrunCol.style.display = 'flex';
-            speedrunCol.style.flexDirection = 'column';
-            speedrunCol.style.padding = '10px';
-            speedrunCol.style.borderRight = '3px solid transparent';
-            speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-            
-            const speedrunTitle = document.createElement('h3');
-            speedrunTitle.style.margin = '0 0 10px 0';
-            speedrunTitle.style.fontSize = '16px';
-            speedrunTitle.style.fontWeight = 'bold';
-            speedrunTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-            speedrunTitle.style.textAlign = 'center';
-            speedrunTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-            speedrunTitle.style.display = 'flex';
-            speedrunTitle.style.alignItems = 'center';
-            speedrunTitle.style.justifyContent = 'center';
-            speedrunTitle.style.gap = '6px';
-            
-            const speedIcon = document.createElement('img');
-            speedIcon.src = 'https://bestiaryarena.com/assets/icons/speed.png';
-            speedIcon.alt = 'Speed';
-            speedIcon.style.width = '16px';
-            speedIcon.style.height = '16px';
-            
-            const speedrunText = document.createElement('span');
-            speedrunText.textContent = 'Speedrun';
-            
-            speedrunTitle.appendChild(speedIcon);
-            speedrunTitle.appendChild(speedrunText);
-            speedrunCol.appendChild(speedrunTitle);
-            
-            const speedrunContent = document.createElement('div');
-            speedrunContent.style.flex = '1';
-            speedrunContent.style.display = 'flex';
-            speedrunContent.style.flexDirection = 'column';
-            speedrunContent.style.justifyContent = 'center';
-            speedrunContent.style.alignItems = 'center';
-            speedrunContent.style.color = '#888';
-            speedrunContent.style.fontSize = '14px';
-            speedrunContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-            speedrunContent.style.textAlign = 'center';
-            speedrunContent.style.padding = '6px';
-            speedrunContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
-            speedrunCol.appendChild(speedrunContent);
-            
-            // Column 2: Rank Points
-            const rankPointsCol = document.createElement('div');
-            rankPointsCol.style.flex = '1 1 0';
-            rankPointsCol.style.display = 'flex';
-            rankPointsCol.style.flexDirection = 'column';
-            rankPointsCol.style.padding = '10px';
-            rankPointsCol.style.borderLeft = '3px solid transparent';
-            rankPointsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
-            
-            const rankPointsTitle = document.createElement('h3');
-            rankPointsTitle.style.margin = '0 0 10px 0';
-            rankPointsTitle.style.fontSize = '16px';
-            rankPointsTitle.style.fontWeight = 'bold';
-            rankPointsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-            rankPointsTitle.style.textAlign = 'center';
-            rankPointsTitle.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-            rankPointsTitle.style.display = 'flex';
-            rankPointsTitle.style.alignItems = 'center';
-            rankPointsTitle.style.justifyContent = 'center';
-            rankPointsTitle.style.gap = '6px';
-            
-            const gradeIcon = document.createElement('img');
-            gradeIcon.src = 'https://bestiaryarena.com/assets/icons/grade.png';
-            gradeIcon.alt = 'Grade';
-            gradeIcon.style.width = '16px';
-            gradeIcon.style.height = '16px';
-            
-            const rankPointsText = document.createElement('span');
-            rankPointsText.textContent = 'Rank Points';
-            
-            rankPointsTitle.appendChild(gradeIcon);
-            rankPointsTitle.appendChild(rankPointsText);
-            rankPointsCol.appendChild(rankPointsTitle);
-            
-            const rankPointsContent = document.createElement('div');
-            rankPointsContent.style.flex = '1';
-            rankPointsContent.style.display = 'flex';
-            rankPointsContent.style.flexDirection = 'column';
-            rankPointsContent.style.justifyContent = 'center';
-            rankPointsContent.style.alignItems = 'center';
-            rankPointsContent.style.color = '#888';
-            rankPointsContent.style.fontSize = '14px';
-            rankPointsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-            rankPointsContent.style.textAlign = 'center';
-            rankPointsContent.style.padding = '6px';
-            rankPointsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
-            rankPointsCol.appendChild(rankPointsContent);
-            
-            // Add columns to row1
-            row1.appendChild(speedrunCol);
-            row1.appendChild(rankPointsCol);
-            
-            // Row 2: 70% height, placeholder
-            const row2 = document.createElement('div');
-            row2.style.flex = '1 1 0';
-            row2.style.display = 'flex';
-            row2.style.justifyContent = 'center';
-            row2.style.alignItems = 'center';
-            row2.style.color = '#888';
-            row2.style.fontSize = '14px';
-            row2.style.textAlign = 'center';
-            row2.textContent = 'Additional statistics will appear here';
-            
-            // Add rows to statsContainer
-            statsContainer.appendChild(row1);
-            statsContainer.appendChild(row2);
-            
+            // Column 3: Statistics
+            const statsContainer = createStatisticsSection(selectedMap);
             col3.appendChild(statsContainer);
-            
-            // Fetch and populate leaderboard data
-            fetchMapsLeaderboardData().then(data => {
-              if (data && selectedMap) {
-                const { best, roomsHighscores, yourRooms } = data;
-                const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-                
-                // Update speedrun content
-                const yourTicks = yourRooms?.[selectedMap]?.ticks || 0;
-                const bestTicks = best?.[selectedMap]?.ticks || 0;
-                const bestPlayer = best?.[selectedMap]?.userName || 'Unknown';
-                
-                let speedrunHtml = '';
-                if (bestTicks > 0) {
-                  speedrunHtml = `
-                    <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-                    <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestTicks} ticks</div>
-                    <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestPlayer}</div>
-                  `;
-                  if (yourTicks > 0) {
-                    speedrunHtml += `
-                      <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                      <div style="font-size: 12px; color: #ccc;">${yourTicks} ticks</div>
-                    `;
-                  }
-                } else {
-                  speedrunHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
-                }
-                speedrunContent.innerHTML = speedrunHtml;
-                
-                // Update rank points content
-                const yourRankPoints = yourRooms?.[selectedMap]?.rank || 0;
-                const bestRankPoints = roomsHighscores?.rank?.[selectedMap]?.rank || 0;
-                const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
-                
-                let rankPointsHtml = '';
-                if (bestRankPoints > 0) {
-                  rankPointsHtml = `
-                    <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-                    <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}</div>
-                    <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
-                  `;
-                  if (yourRankPoints > 0) {
-                    rankPointsHtml += `
-                      <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                      <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}</div>
-                    `;
-                  }
-                } else {
-                  rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
-                }
-                rankPointsContent.innerHTML = rankPointsHtml;
-              } else {
-                speedrunContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
-                rankPointsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
-              }
-            }).catch(error => {
-              console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
-              speedrunContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
-              rankPointsContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
-            });
           } else {
             // No map selected - show placeholder messages
             const col2Msg = document.createElement('div');
