@@ -6853,6 +6853,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           let localRuns = await getLocalRunsForMap(mapKey, 'speedrun');
           console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} speedrun records:`, localRuns);
           
+          // Filter out defeated runs with 0 rank points (for consistency)
+          if (localRuns && localRuns.length > 0) {
+            const originalCount = localRuns.length;
+            localRuns = localRuns.filter(run => !run.points || run.points > 0);
+            const filteredCount = localRuns.length;
+            if (originalCount !== filteredCount) {
+              console.log(`[Cyclopedia] Filtered out ${originalCount - filteredCount} defeated runs (0 rank points) from speedrun table`);
+            }
+          }
+          
           // Sort speedrun data: 1. Ticks (ascending), 2. Date (newest first)
           if (localRuns && localRuns.length > 0) {
             localRuns.sort((a, b) => {
@@ -7394,6 +7404,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
           let localRuns = await getLocalRunsForMap(mapKey, 'rank');
           console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} rank records:`, localRuns);
+          
+          // Filter out defeated runs with 0 rank points
+          if (localRuns && localRuns.length > 0) {
+            const originalCount = localRuns.length;
+            localRuns = localRuns.filter(run => run.points > 0);
+            const filteredCount = localRuns.length;
+            if (originalCount !== filteredCount) {
+              console.log(`[Cyclopedia] Filtered out ${originalCount - filteredCount} defeated runs (0 rank points)`);
+            }
+          }
           
           // Sort rank data: 1. Rank (ascending), 2. Ticks (ascending), 3. Date (newest first)
           if (localRuns && localRuns.length > 0) {

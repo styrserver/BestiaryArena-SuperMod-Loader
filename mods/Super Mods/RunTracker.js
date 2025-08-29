@@ -902,8 +902,11 @@ async function addRun(runData) {
     }
     
     // Check rank category independently - same run can be in both categories
-    if (runData.points !== undefined && runData.points !== null) {
+    // Skip runs with 0 rank points as they represent defeats
+    if (runData.points !== undefined && runData.points !== null && runData.points > 0) {
       rankUpdated = await checkAndUpdateRankRuns(runData);
+    } else if (runData.points === 0) {
+      console.log(`[RunTracker] Skipping defeated run with 0 rank points for ${runData.mapName}`);
     }
     
     // Update metadata only if there were changes
@@ -981,6 +984,12 @@ async function checkAndUpdateSpeedruns(runData) {
 
 // Check and update rank points category
 async function checkAndUpdateRankRuns(runData) {
+  // Additional safety check: skip defeated runs with 0 rank points
+  if (runData.points === 0) {
+    console.log(`[RunTracker] Skipping defeated run with 0 rank points for ${runData.mapName}`);
+    return false;
+  }
+  
   const rankRuns = runStorage.runs[runData.mapKey].rank;
   
   // Check if it has higher rank points OR same rank points with better time
@@ -1109,6 +1118,42 @@ async function cleanupRuns() {
     return;
   } catch (error) {
     console.error('[RunTracker] Error in cleanup function:', error);
+  }
+}
+
+// Clean up defeated runs with 0 rank points
+async function cleanupDefeatedRuns() {
+  try {
+    if (!runStorage || !runStorage.runs) {
+      console.log('[RunTracker] No runs to clean up');
+      return;
+    }
+    
+    let totalRemoved = 0;
+    
+    for (const [mapKey, mapData] of Object.entries(runStorage.runs)) {
+      if (mapData.rank && Array.isArray(mapData.rank)) {
+        const originalCount = mapData.rank.length;
+        mapData.rank = mapData.rank.filter(run => run.points > 0);
+        const removedCount = originalCount - mapData.rank.length;
+        if (removedCount > 0) {
+          console.log(`[RunTracker] Removed ${removedCount} defeated runs from ${mapKey}`);
+          totalRemoved += removedCount;
+        }
+      }
+    }
+    
+    if (totalRemoved > 0) {
+      console.log(`[RunTracker] Cleaned up ${totalRemoved} total defeated runs`);
+      // Update metadata
+      runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
+        return total + map.speedrun.length + map.rank.length;
+      }, 0);
+      // Queue save
+      StorageManager.queueSave();
+    }
+  } catch (error) {
+    console.error('[RunTracker] Error cleaning up defeated runs:', error);
   }
 }
 
@@ -1281,6 +1326,9 @@ async function initialize() {
     setupResultsListener();
     setupNetworkListener();
     
+    // Clean up any existing defeated runs with 0 rank points
+    await cleanupDefeatedRuns();
+    
     // Periodic cleanup disabled - keeping runs forever
     // setInterval(cleanupRuns, 60 * 60 * 1000); // Clean up every hour
     
@@ -1451,6 +1499,7 @@ if (!window.RunTrackerAPI) {
   // Utility functions
   parseServerResults,
   cleanupRuns,
+  cleanupDefeatedRuns,
   
 
   
