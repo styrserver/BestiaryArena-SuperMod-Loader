@@ -782,22 +782,30 @@ if (typeof browserAPI === 'undefined') {
         
         const container = createModButtonContainer();
         
+        // Check if button already exists
         const existingButton = document.getElementById(id);
         if (existingButton) {
-          console.warn(`Button with id ${id} already exists, updating it`);
-          existingButton.textContent = icon ? icon : text;
-          existingButton.title = tooltip || text;
-          
-          const newClickHandler = (e) => {
-            e.preventDefault();
-            onClick(e);
-          };
-          
-          existingButton.removeEventListener('click', existingButton._clickHandler);
-          existingButton._clickHandler = newClickHandler;
-          existingButton.addEventListener('click', newClickHandler);
-          
-          return existingButton;
+          // If the button exists and has the same modId, just update it
+          if (existingButton.getAttribute('data-mod-id') === (modId || '')) {
+            console.log(`Button with id ${id} already exists, updating it`);
+            existingButton.textContent = icon ? icon : text;
+            existingButton.title = tooltip || text;
+            
+            const newClickHandler = (e) => {
+              e.preventDefault();
+              onClick(e);
+            };
+            
+            existingButton.removeEventListener('click', existingButton._clickHandler);
+            existingButton._clickHandler = newClickHandler;
+            existingButton.addEventListener('click', newClickHandler);
+            
+            return existingButton;
+          } else {
+            // If button exists but with different modId, remove the old one
+            console.warn(`Button with id ${id} exists but with different modId, removing old button`);
+            existingButton.remove();
+          }
         }
         
         const button = document.createElement('button');
@@ -867,6 +875,42 @@ if (typeof browserAPI === 'undefined') {
           return true;
         }
         return false;
+      },
+      
+      removeButtonsByModId: function(modId) {
+        const buttons = document.querySelectorAll(`button[data-mod-id="${modId}"]`);
+        let removedCount = 0;
+        
+        buttons.forEach(button => {
+          if (button.parentNode) {
+            button.parentNode.removeChild(button);
+            removedCount++;
+          }
+        });
+        
+        if (removedCount > 0) {
+          console.log(`Removed ${removedCount} buttons for modId: ${modId}`);
+        }
+        
+        return removedCount;
+      },
+      
+      cleanupAllModButtons: function() {
+        const buttons = document.querySelectorAll('button[data-mod-id]');
+        let removedCount = 0;
+        
+        buttons.forEach(button => {
+          if (button.parentNode) {
+            button.parentNode.removeChild(button);
+            removedCount++;
+          }
+        });
+        
+        if (removedCount > 0) {
+          console.log(`Cleaned up ${removedCount} mod buttons`);
+        }
+        
+        return removedCount;
       },
       
       toggleModButtons: function(visible) {
@@ -1724,6 +1768,11 @@ if (typeof browserAPI === 'undefined') {
   // Initialize the API and load components
   async function initializeAPI() {
     try {
+      // Clean up any existing mod buttons to prevent conflicts
+      if (window.BestiaryModAPI && window.BestiaryModAPI.ui) {
+        window.BestiaryModAPI.ui.cleanupAllModButtons();
+      }
+      
       await loadTranslations();
       await loadUIComponents();
       

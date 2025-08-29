@@ -6,7 +6,198 @@ const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDD
 var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}
 const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
+
+// RunTracker integration
+let runTrackerAPI = null;
 const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '247px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
+
+// Custom confirmation modal function
+function showDeleteConfirmationModal(runType, runData, onConfirm) {
+  // Create modal overlay
+  const overlay = document.createElement('div');
+  overlay.style.position = 'fixed';
+  overlay.style.top = '0';
+  overlay.style.left = '0';
+  overlay.style.width = '100%';
+  overlay.style.height = '100%';
+  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+  overlay.style.zIndex = '10000';
+  overlay.style.display = 'flex';
+  overlay.style.justifyContent = 'center';
+  overlay.style.alignItems = 'center';
+  
+  // Create modal container
+  const modal = document.createElement('div');
+  modal.style.backgroundColor = '#232323';
+  modal.style.border = '3px solid #444';
+  modal.style.borderRadius = '8px';
+  modal.style.padding = '25px';
+  modal.style.maxWidth = '450px';
+  modal.style.width = '90%';
+  modal.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.6)';
+  modal.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  modal.style.position = 'relative';
+  
+  // Create title
+  const titleElement = document.createElement('div');
+  titleElement.textContent = `Delete ${runType} Run`;
+  titleElement.style.fontSize = '20px';
+  titleElement.style.fontWeight = 'bold';
+  titleElement.style.color = '#ffe066';
+  titleElement.style.marginBottom = '20px';
+  titleElement.style.textAlign = 'center';
+  titleElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+  
+  // Create message
+  const messageElement = document.createElement('div');
+  messageElement.style.fontSize = '16px';
+  messageElement.style.color = '#fff';
+  messageElement.style.marginBottom = '25px';
+  messageElement.style.textAlign = 'center';
+  messageElement.style.lineHeight = '1.5';
+  
+  // Create run details
+  const detailsElement = document.createElement('div');
+  detailsElement.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+  detailsElement.style.border = '1px solid #555';
+  detailsElement.style.borderRadius = '6px';
+  detailsElement.style.padding = '15px';
+  detailsElement.style.marginBottom = '25px';
+  detailsElement.style.fontSize = '14px';
+  detailsElement.style.color = '#ccc';
+  
+  let detailsHtml = '';
+  if (runData.time) {
+    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Time:</strong> ${runData.time} ticks</div>`;
+  }
+  if (runData.points) {
+    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Rank Points:</strong> ${runData.points}</div>`;
+  }
+  if (runData.mapName) {
+    detailsHtml += `<div style="margin-bottom: 8px;"><strong>Map:</strong> ${runData.mapName}</div>`;
+  }
+  if (runData.seed) {
+    detailsHtml += `<div><strong>Seed:</strong> ${runData.seed}</div>`;
+  }
+  
+  detailsElement.innerHTML = detailsHtml;
+  
+  // Create warning message
+  const warningElement = document.createElement('div');
+  warningElement.textContent = 'This action cannot be undone.';
+  warningElement.style.fontSize = '14px';
+  warningElement.style.color = '#ff6b6b';
+  warningElement.style.textAlign = 'center';
+  warningElement.style.marginBottom = '25px';
+  warningElement.style.fontStyle = 'italic';
+  
+  // Create button container
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.display = 'flex';
+  buttonContainer.style.justifyContent = 'center';
+  buttonContainer.style.gap = '20px';
+  
+  // Create cancel button
+  const cancelButton = document.createElement('button');
+  cancelButton.textContent = 'Cancel';
+  cancelButton.style.backgroundColor = '#555';
+  cancelButton.style.color = '#fff';
+  cancelButton.style.border = '2px solid #666';
+  cancelButton.style.borderRadius = '6px';
+  cancelButton.style.padding = '12px 24px';
+  cancelButton.style.cursor = 'pointer';
+  cancelButton.style.fontSize = '16px';
+  cancelButton.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  cancelButton.style.fontWeight = 'bold';
+  cancelButton.style.transition = 'all 0.2s ease';
+  cancelButton.style.minWidth = '100px';
+  
+  cancelButton.addEventListener('mouseenter', () => {
+    cancelButton.style.backgroundColor = '#666';
+    cancelButton.style.borderColor = '#777';
+    cancelButton.style.transform = 'translateY(-2px)';
+  });
+  
+  cancelButton.addEventListener('mouseleave', () => {
+    cancelButton.style.backgroundColor = '#555';
+    cancelButton.style.borderColor = '#666';
+    cancelButton.style.transform = 'translateY(0)';
+  });
+  
+  // Create delete button
+  const deleteButton = document.createElement('button');
+  deleteButton.textContent = 'Delete';
+  deleteButton.style.backgroundColor = '#d32f2f';
+  deleteButton.style.color = '#fff';
+  deleteButton.style.border = '2px solid #f44336';
+  deleteButton.style.borderRadius = '6px';
+  deleteButton.style.padding = '12px 24px';
+  deleteButton.style.cursor = 'pointer';
+  deleteButton.style.fontSize = '16px';
+  deleteButton.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+  deleteButton.style.fontWeight = 'bold';
+  deleteButton.style.transition = 'all 0.2s ease';
+  deleteButton.style.minWidth = '100px';
+  
+  deleteButton.addEventListener('mouseenter', () => {
+    deleteButton.style.backgroundColor = '#f44336';
+    deleteButton.style.borderColor = '#ff5252';
+    deleteButton.style.transform = 'translateY(-2px)';
+  });
+  
+  deleteButton.addEventListener('mouseleave', () => {
+    deleteButton.style.backgroundColor = '#d32f2f';
+    deleteButton.style.borderColor = '#f44336';
+    deleteButton.style.transform = 'translateY(0)';
+  });
+  
+  // Add event listeners
+  const closeModal = () => {
+    document.body.removeChild(overlay);
+  };
+  
+  cancelButton.addEventListener('click', () => {
+    closeModal();
+  });
+  
+  deleteButton.addEventListener('click', () => {
+    closeModal();
+    if (onConfirm) onConfirm();
+  });
+  
+  // Close on overlay click
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      closeModal();
+    }
+  });
+  
+  // Close on Escape key
+  const handleEscape = (e) => {
+    if (e.key === 'Escape') {
+      closeModal();
+      document.removeEventListener('keydown', handleEscape);
+    }
+  };
+  document.addEventListener('keydown', handleEscape);
+  
+  // Assemble modal
+  messageElement.textContent = `Are you sure you want to delete this ${runType.toLowerCase()} run?`;
+  buttonContainer.appendChild(cancelButton);
+  buttonContainer.appendChild(deleteButton);
+  modal.appendChild(titleElement);
+  modal.appendChild(messageElement);
+  modal.appendChild(detailsElement);
+  modal.appendChild(warningElement);
+  modal.appendChild(buttonContainer);
+  overlay.appendChild(modal);
+  
+  // Show modal
+  document.body.appendChild(overlay);
+  
+  // Focus cancel button for safety
+  cancelButton.focus();
+}
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
@@ -653,6 +844,97 @@ function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
 
+// RunTracker integration functions
+// Helper function to resolve map ID to map name (same as RunTracker)
+function resolveMapName(mapId) {
+  try {
+    if (!mapId) return null;
+    
+    // Try to get the name from the API utility maps
+    if (window.mapIdsToNames && window.mapIdsToNames.has(mapId)) {
+      return window.mapIdsToNames.get(mapId);
+    }
+    
+    // Fallback to the game state utils
+    if (globalThis.state?.utils?.ROOM_NAME && globalThis.state.utils.ROOM_NAME[mapId]) {
+      return globalThis.state.utils.ROOM_NAME[mapId];
+    }
+    
+    // If all else fails, return the ID
+    return mapId;
+  } catch (error) {
+    console.warn('[Cyclopedia] Error resolving map name:', error);
+    return mapId;
+  }
+}
+
+function getLocalRunData() {
+  try {
+    console.log('[Cyclopedia] Getting local run data...');
+    if (window.RunTrackerAPI) {
+      console.log('[Cyclopedia] Using RunTrackerAPI.getAllRuns()');
+      const data = window.RunTrackerAPI.getAllRuns();
+      console.log('[Cyclopedia] RunTrackerAPI.getAllRuns() returned:', data);
+      return Promise.resolve(data);
+    }
+    // Fallback to direct storage access
+    if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+      console.log('[Cyclopedia] Using browserAPI.storage.local fallback');
+      return new Promise(resolve => {
+        window.browserAPI.storage.local.get('ba_local_runs', result => {
+          console.log('[Cyclopedia] browserAPI.storage.local.get result:', result);
+          resolve(result.ba_local_runs || null);
+        });
+      });
+    }
+    console.log('[Cyclopedia] No RunTrackerAPI or browserAPI available, returning null');
+    return Promise.resolve(null);
+  } catch (error) {
+    console.warn('[Cyclopedia] Error getting local run data:', error);
+    return Promise.resolve(null);
+  }
+}
+
+function getLocalRunsForMap(mapKey, category = null) {
+  try {
+    console.log(`[Cyclopedia] Getting local runs for map: ${mapKey}, category: ${category}`);
+    if (window.RunTrackerAPI) {
+      console.log(`[Cyclopedia] Using RunTrackerAPI.getRuns(${mapKey}, ${category})`);
+      const data = window.RunTrackerAPI.getRuns(mapKey, category);
+      console.log(`[Cyclopedia] RunTrackerAPI.getRuns(${mapKey}, ${category}) returned:`, data);
+      return Promise.resolve(data);
+    }
+    // Fallback to direct storage access
+    console.log('[Cyclopedia] Using getLocalRunData() fallback');
+    return getLocalRunData().then(runData => {
+      console.log('[Cyclopedia] getLocalRunData() returned:', runData);
+      if (!runData || !runData.runs || !runData.runs[mapKey]) {
+        console.log(`[Cyclopedia] No data found for mapKey: ${mapKey}`);
+        return category ? [] : { speedrun: [], rank: [] };
+      }
+      
+      if (category) {
+        const categoryData = runData.runs[mapKey][category] || [];
+        console.log(`[Cyclopedia] Found ${categoryData.length} runs for ${mapKey}/${category}:`, categoryData);
+        return categoryData;
+      }
+      
+      const mapData = runData.runs[mapKey];
+      console.log(`[Cyclopedia] Found data for ${mapKey}:`, mapData);
+      return mapData;
+    });
+  } catch (error) {
+    console.warn('[Cyclopedia] Error getting local runs for map:', error);
+    return Promise.resolve(category ? [] : { speedrun: [], rank: [] });
+  }
+}
+
+function formatLocalRunTime(ticks) {
+  if (!ticks || isNaN(ticks)) return 'N/A';
+  // Display ticks with "ticks" suffix
+  return `${ticks.toString()} ticks`;
+}
+
 // Global function to fetch leaderboard data for Maps Tab
 async function fetchMapsLeaderboardData() {
   try {
@@ -1113,8 +1395,15 @@ function injectCyclopediaButton(menuElem) {
   
   if (existingButtons.length > 0) return;
   
+  // Check if this menu contains creature or equipment items
   const monsterName = getMonsterNameFromMenu(menuElem);
   const equipmentName = getEquipmentNameFromMenu(menuElem);
+  
+  // Only inject Cyclopedia button if we found a valid creature or equipment
+  if (!monsterName && !equipmentName) {
+    return; // Don't add Cyclopedia button to menus that don't contain creatures or equipment
+  }
+  
   const allEquipment = GAME_DATA.ALL_EQUIPMENT;
   let matchedEquipment = null;
   let normalizedEquipmentName = null;
@@ -2902,6 +3191,96 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         header.style.cssText = `font-size: 18px; font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.PRIMARY}; margin-bottom: 20px; text-align: center; padding: 10px; background: rgba(255, 224, 102, 0.1); border-radius: 8px;`;
         header.textContent = isTemplate ? 'Search Results' : `Your ${category} Data`;
         containerDiv.appendChild(header);
+
+        // Add local runs section for non-template displays
+        if (!isTemplate) {
+          const localRunsSection = document.createElement('div');
+          localRunsSection.style.cssText = 'margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 6px; border-left: 3px solid #ffe066;';
+          
+          const localTitle = document.createElement('h4');
+          localTitle.textContent = 'Your Local Runs';
+          localTitle.style.cssText = 'margin: 0 0 10px 0; color: #ffe066; font-size: 14px;';
+          localRunsSection.appendChild(localTitle);
+          
+          // Get local runs for current map (if available)
+          const mapName = selectedMap ? (globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap) : null;
+          const currentMapKey = mapName ? `map_${mapName.toLowerCase().replace(/\s+/g, '_')}` : null;
+          if (currentMapKey) {
+            getLocalRunsForMap(currentMapKey, category).then(localRuns => {
+              if (localRuns && localRuns.length > 0) {
+                const localTable = document.createElement('table');
+                localTable.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 12px;';
+                
+                // Header
+                const headerRow = document.createElement('tr');
+                headerRow.innerHTML = `
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">Rank</th>
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">${category === 'speedrun' ? 'Time' : 'Points'}</th>
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">Date</th>
+                `;
+                localTable.appendChild(headerRow);
+                
+                // Local runs
+                localRuns.slice(0, 5).forEach((run, index) => {
+                  const row = document.createElement('tr');
+                  const value = category === 'speedrun' ? formatLocalRunTime(run.time) : run.points;
+                  row.innerHTML = `
+                    <td style="padding: 4px; color: #fff;">${index + 1}</td>
+                    <td style="padding: 4px; color: #fff; font-weight: bold;">${value}</td>
+                    <td style="padding: 4px; color: #ccc;">${run.date}</td>
+                  `;
+                  localTable.appendChild(row);
+                });
+                
+                // Fill remaining slots with dashes if less than 5 runs
+                for (let i = localRuns.length; i < 5; i++) {
+                  const row = document.createElement('tr');
+                  row.innerHTML = `
+                    <td style="padding: 4px; color: #888;">${i + 1}</td>
+                    <td style="padding: 4px; color: #888;">-</td>
+                    <td style="padding: 4px; color: #888;">-</td>
+                  `;
+                  localTable.appendChild(row);
+                }
+                
+                localRunsSection.appendChild(localTable);
+              } else {
+                // Create table with dashes for all 5 slots
+                const localTable = document.createElement('table');
+                localTable.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 12px;';
+                
+                // Header
+                const headerRow = document.createElement('tr');
+                headerRow.innerHTML = `
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">Rank</th>
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">${category === 'speedrun' ? 'Time' : 'Points'}</th>
+                  <th style="text-align: left; padding: 4px; color: #ffe066;">Date</th>
+                `;
+                localTable.appendChild(headerRow);
+                
+                // Empty slots with dashes
+                for (let i = 0; i < 5; i++) {
+                  const row = document.createElement('tr');
+                  row.innerHTML = `
+                    <td style="padding: 4px; color: #888;">${i + 1}</td>
+                    <td style="padding: 4px; color: #888;">-</td>
+                    <td style="padding: 4px; color: #888;">-</td>
+                  `;
+                  localTable.appendChild(row);
+                }
+                
+                localRunsSection.appendChild(localTable);
+              }
+            });
+          } else {
+            const noMapText = document.createElement('p');
+            noMapText.textContent = 'Select a map to view your local runs.';
+            noMapText.style.cssText = 'margin: 0; color: #888; font-size: 12px;';
+            localRunsSection.appendChild(noMapText);
+          }
+          
+          containerDiv.appendChild(localRunsSection);
+        }
 
         const contentContainer = document.createElement('div');
         contentContainer.style.cssText = `flex: 1; padding: 10px;`;
@@ -6027,14 +6406,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       row1.appendChild(speedrunCol);
       row1.appendChild(rankPointsCol);
       
-      // Row 2: 70% height, Top 5 tables
+      // Row 2: Top 5 tables (max 180px height)
       const row2 = document.createElement('div');
-      row2.style.flex = '1 1 0';
+      row2.style.maxHeight = '180px';
+      row2.style.height = '180px';
       row2.style.display = 'flex';
       row2.style.flexDirection = 'row';
       
       // Left column: Top 5 Speedruns
       const speedrunTableCol = document.createElement('div');
+      speedrunTableCol.setAttribute('data-table-type', 'speedrun');
       speedrunTableCol.style.flex = '1 1 0';
       speedrunTableCol.style.maxWidth = '245px';
       speedrunTableCol.style.display = 'flex';
@@ -6061,7 +6442,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Table header
       const speedrunHeader = document.createElement('div');
       speedrunHeader.style.display = 'grid';
-      speedrunHeader.style.gridTemplateColumns = '1fr 50px 40px 40px';
+      speedrunHeader.style.gridTemplateColumns = '30px 1fr 30px 30px';
       speedrunHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
       speedrunHeader.style.borderBottom = '1px solid #444';
       speedrunHeader.style.fontWeight = 'bold';
@@ -6069,18 +6450,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       speedrunHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       speedrunHeader.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
       
+      // Medal column header (empty)
+      const medalHeader = document.createElement('div');
+      medalHeader.style.padding = '6px 2px';
+      medalHeader.style.borderRight = '1px solid #444';
+      medalHeader.style.textAlign = 'center';
+      medalHeader.textContent = '';
+      speedrunHeader.appendChild(medalHeader);
+      
       const timeHeader = document.createElement('div');
       timeHeader.style.padding = '6px 4px';
       timeHeader.style.borderRight = '1px solid #444';
+      timeHeader.style.textAlign = 'center';
       timeHeader.textContent = 'Time';
       speedrunHeader.appendChild(timeHeader);
-      
-      const rankHeader = document.createElement('div');
-      rankHeader.style.padding = '6px 4px';
-      rankHeader.style.borderRight = '1px solid #444';
-      rankHeader.style.textAlign = 'center';
-      rankHeader.textContent = 'Rank';
-      speedrunHeader.appendChild(rankHeader);
       
       const copyHeader = document.createElement('div');
       copyHeader.style.padding = '4px 2px';
@@ -6097,65 +6480,442 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       speedrunTable.appendChild(speedrunHeader);
       
-      // Table rows (placeholder data)
-      for (let i = 1; i <= 5; i++) {
-        const row = document.createElement('div');
-        row.style.display = 'grid';
-        row.style.gridTemplateColumns = '1fr 50px 40px 40px';
-        row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
-        row.style.fontSize = '10px';
-        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-        row.style.color = '#ccc';
-        
-        const timeCell = document.createElement('div');
-        timeCell.style.padding = '4px 2px';
-        timeCell.style.borderRight = '1px solid #333';
-        timeCell.textContent = `${97 + i}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}.${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-        row.appendChild(timeCell);
-        
-        const rankCell = document.createElement('div');
-        rankCell.style.padding = '4px 2px';
-        rankCell.style.borderRight = '1px solid #333';
-        rankCell.style.textAlign = 'center';
-        rankCell.textContent = `#${i}`;
-        row.appendChild(rankCell);
-        
-        const copyCell = document.createElement('div');
-        copyCell.style.padding = '2px 1px';
-        copyCell.style.borderRight = '1px solid #333';
-        copyCell.style.textAlign = 'center';
-        copyCell.style.cursor = 'pointer';
-        copyCell.style.color = '#4CAF50';
-        copyCell.style.fontSize = '14px';
-        copyCell.innerHTML = '🔗';
-        copyCell.title = 'Copy/share this run setup';
-        row.appendChild(copyCell);
-        
-        const deleteCell = document.createElement('div');
-        deleteCell.style.padding = '2px 1px';
-        deleteCell.style.textAlign = 'center';
-        deleteCell.style.cursor = 'pointer';
-        deleteCell.style.color = '#f44336';
-        deleteCell.style.fontSize = '14px';
-        deleteCell.innerHTML = '🗑️';
-        deleteCell.title = 'Delete this run';
-        deleteCell.addEventListener('click', (e) => {
-          e.preventDefault();
-          const confirmed = confirm(`Are you sure you want to delete this run?\n\nTime: ${timeCell.textContent}\nRank: #${i}`);
-          if (confirmed) {
-            console.log(`Deleting run #${i}`);
-            // Add actual delete logic here
+      // Function to populate speedrun table with local data
+      async function populateSpeedrunTable() {
+        try {
+          console.log(`[Cyclopedia] Populating speedrun table for map: ${selectedMap}`);
+          // Resolve the map name to ensure consistency with RunTracker
+          const resolvedMapName = resolveMapName(selectedMap);
+          const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
+          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
+          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          let localRuns = await getLocalRunsForMap(mapKey, 'speedrun');
+          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} speedrun records:`, localRuns);
+          
+          // Sort speedrun data: 1. Ticks (ascending), 2. Date (newest first)
+          if (localRuns && localRuns.length > 0) {
+            localRuns.sort((a, b) => {
+              // First priority: Ticks (lower is better)
+              if (a.time !== b.time) {
+                return (a.time || Infinity) - (b.time || Infinity);
+              }
+              // Second priority: Date (newer is better)
+              const dateA = a.date || a.timestamp || 0;
+              const dateB = b.date || b.timestamp || 0;
+              return dateB - dateA;
+            });
+            console.log(`[Cyclopedia] Sorted speedrun records:`, localRuns);
           }
-        });
-        row.appendChild(deleteCell);
-        
-        speedrunTable.appendChild(row);
+          
+          if (!localRuns || localRuns.length === 0) {
+            // Show empty state
+            for (let i = 1; i <= 5; i++) {
+              const row = document.createElement('div');
+              row.style.display = 'grid';
+              row.style.gridTemplateColumns = '30px 1fr 30px 30px';
+              row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
+              row.style.fontSize = '10px';
+              row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+              row.style.color = '#666';
+              
+              // Medal cell
+              const medalCell = document.createElement('div');
+              medalCell.style.padding = '4px 2px';
+              medalCell.style.borderRight = '1px solid #333';
+              medalCell.style.textAlign = 'center';
+              medalCell.style.fontSize = '12px';
+              
+              // Set medal icon based on position (1-5)
+              const rankPosition = i;
+              if (rankPosition === 1) {
+                medalCell.innerHTML = '🥇';
+              } else if (rankPosition === 2) {
+                medalCell.innerHTML = '🥈';
+              } else if (rankPosition === 3) {
+                medalCell.innerHTML = '🥉';
+              } else {
+                medalCell.innerHTML = '🏅';
+              }
+              row.appendChild(medalCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = 'No runs';
+              row.appendChild(timeCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              speedrunTable.appendChild(row);
+            }
+            return;
+          }
+          
+          // Populate with actual data
+          for (let i = 0; i < 5; i++) {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '30px 1fr 30px 30px';
+            row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
+            row.style.fontSize = '10px';
+            row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+            
+            const run = localRuns[i];
+            console.log(`[Cyclopedia] Processing speedrun run ${i + 1}:`, run);
+            
+            if (!run) {
+              // No run for this slot - show "No runs" without buttons
+              row.style.color = '#666';
+              
+              // Medal cell
+              const medalCell = document.createElement('div');
+              medalCell.style.padding = '4px 2px';
+              medalCell.style.borderRight = '1px solid #333';
+              medalCell.style.textAlign = 'center';
+              medalCell.style.fontSize = '12px';
+              
+              // Set medal icon based on position (1-5)
+              const rankPosition = i + 1;
+              if (rankPosition === 1) {
+                medalCell.innerHTML = '🥇';
+              } else if (rankPosition === 2) {
+                medalCell.innerHTML = '🥈';
+              } else if (rankPosition === 3) {
+                medalCell.innerHTML = '🥉';
+              } else {
+                medalCell.innerHTML = '🏅';
+              }
+              row.appendChild(medalCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = 'No runs';
+              row.appendChild(timeCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              speedrunTable.appendChild(row);
+              continue;
+            }
+            
+            // Has run data - show with buttons
+            row.style.color = '#ccc';
+            
+            // Medal cell
+            const medalCell = document.createElement('div');
+            medalCell.style.padding = '4px 2px';
+            medalCell.style.borderRight = '1px solid #333';
+            medalCell.style.textAlign = 'center';
+            medalCell.style.fontSize = '12px';
+            
+            // Set medal icon based on position (1-5)
+            const rankPosition = i + 1;
+            if (rankPosition === 1) {
+              medalCell.innerHTML = '🥇'; // Gold medal
+            } else if (rankPosition === 2) {
+              medalCell.innerHTML = '🥈'; // Silver medal
+            } else if (rankPosition === 3) {
+              medalCell.innerHTML = '🥉'; // Bronze medal
+            } else {
+              medalCell.innerHTML = '🏅'; // Generic medal for 4th and 5th
+            }
+            row.appendChild(medalCell);
+            
+            const timeCell = document.createElement('div');
+            timeCell.style.padding = '4px 2px';
+            timeCell.style.borderRight = '1px solid #333';
+            timeCell.style.textAlign = 'center';
+            
+            if (run.time) {
+              timeCell.textContent = formatLocalRunTime(run.time);
+              console.log(`[Cyclopedia] Speedrun run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+            } else {
+              timeCell.textContent = 'N/A';
+              console.log(`[Cyclopedia] Speedrun run ${i + 1} has no time property`);
+            }
+            
+            row.appendChild(timeCell);
+            
+            const copyCell = document.createElement('div');
+            copyCell.style.padding = '2px 1px';
+            copyCell.style.borderRight = '1px solid #333';
+            copyCell.style.textAlign = 'center';
+            copyCell.style.cursor = 'pointer';
+            copyCell.style.color = '#4CAF50';
+            copyCell.style.fontSize = '14px';
+            copyCell.innerHTML = '🔗';
+            copyCell.title = 'Copy $replay command';
+            if (run.seed) {
+              // Add click animation styles
+              copyCell.style.transition = 'all 0.1s ease';
+              copyCell.style.userSelect = 'none';
+              
+              copyCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Click animation
+                copyCell.style.transform = 'scale(0.9)';
+                copyCell.style.opacity = '0.7';
+                setTimeout(() => {
+                  copyCell.style.transform = 'scale(1)';
+                  copyCell.style.opacity = '1';
+                }, 100);
+                
+                console.log(`[Cyclopedia] Copy button clicked for speedrun run:`, run);
+                
+                // Generate replay command with board configuration if available
+                let replayData = {};
+                
+                // Get proper region and map names
+                let regionName = 'Unknown Region';
+                let mapName = resolveMapName(selectedMap); // Use resolved map name
+                
+                // First, try to use the region name that RunTracker already resolved and saved
+                if (run.regionName) {
+                  regionName = run.regionName;
+                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                } else {
+                  // Try to determine region from the map name/ID using game state utils
+                  try {
+                    const mapId = selectedMap;
+                    let foundRegion = null;
+                    
+                    // Search through all regions to find which one contains this map
+                    if (globalThis.state?.utils?.REGIONS) {
+                      for (const region of globalThis.state.utils.REGIONS) {
+                        if (region.rooms && region.rooms.some(room => room.id === mapId)) {
+                          foundRegion = region;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (foundRegion) {
+                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                    } else {
+                      // Fallback: try to get region from current game state (this is the problematic part)
+                      const boardSnapshot = globalThis.state?.board?.getSnapshot();
+                      if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
+                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                      } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
+                        // Capitalize region name
+                        regionName = regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('[Cyclopedia] Error getting region from game state:', e);
+                  }
+                }
+                
+                replayData.region = regionName;
+                replayData.map = mapName;
+                
+                // Check if we have stored board setup data
+                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
+                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
+                  console.log('[Cyclopedia] Run setup data:', run.setup);
+                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  // Convert stored pieces to board format
+                  const board = run.setup.pieces.map(piece => {
+                    const boardPiece = {
+                      tile: piece.tile,
+                      monster: {
+                        name: piece.monsterName || piece.monsterId || 'unknown monster',
+                        hp: piece.monsterStats?.hp || 20,
+                        ad: piece.monsterStats?.ad || 20,
+                        ap: piece.monsterStats?.ap || 20,
+                        armor: piece.monsterStats?.armor || 20,
+                        magicResist: piece.monsterStats?.magicResist || 20
+                      }
+                    };
+                    
+                    // Add equipment if available
+                    if (piece.equipmentName || piece.equipId) {
+                      boardPiece.equipment = {
+                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
+                        stat: piece.equipmentStat || 'ap',
+                        tier: piece.equipmentTier || 5
+                      };
+                    }
+                    
+                    return boardPiece;
+                  });
+                  
+                  replayData.board = board;
+                  console.log('[Cyclopedia] Generated board configuration:', board);
+                  console.log('[Cyclopedia] Final replay data:', replayData);
+                } else {
+                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                }
+                
+                // Add seed at the end
+                replayData.seed = run.seed;
+                
+                const replayCommand = `$replay(${JSON.stringify(replayData)})`;
+                console.log(`[Cyclopedia] Generated speedrun replay command: ${replayCommand}`);
+                navigator.clipboard.writeText(replayCommand).then(() => {
+                  console.log('[Cyclopedia] Successfully copied speedrun replay command to clipboard:', replayCommand);
+                  // Update status bar with success message
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Successfully copied run!';
+                    row3.statusBar.style.color = '#4CAF50';
+                    // Reset status bar after 3 seconds
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                }).catch(err => {
+                  console.error('[Cyclopedia] Failed to copy speedrun replay command:', err);
+                  // Update status bar with error message
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Failed to copy run!';
+                    row3.statusBar.style.color = '#f44336';
+                    // Reset status bar after 3 seconds
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                });
+              });
+            }
+            row.appendChild(copyCell);
+            
+            const deleteCell = document.createElement('div');
+            deleteCell.style.padding = '2px 1px';
+            deleteCell.style.textAlign = 'center';
+            deleteCell.style.cursor = 'pointer';
+            deleteCell.style.color = '#f44336';
+            deleteCell.style.fontSize = '14px';
+            deleteCell.innerHTML = '🗑️';
+            deleteCell.title = 'Delete this run';
+            if (run) {
+              // Add click animation styles
+              deleteCell.style.transition = 'all 0.1s ease';
+              deleteCell.style.userSelect = 'none';
+              
+              deleteCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Click animation
+                deleteCell.style.transform = 'scale(0.9)';
+                deleteCell.style.opacity = '0.7';
+                setTimeout(() => {
+                  deleteCell.style.transform = 'scale(1)';
+                  deleteCell.style.opacity = '1';
+                }, 100);
+                
+                console.log(`[Cyclopedia] Delete button clicked for speedrun run:`, run);
+                
+                // Check if delete cell is already in "confirm" state
+                if (deleteCell.getAttribute('data-confirming') === 'true') {
+                  // User confirmed deletion
+                  console.log(`[Cyclopedia] Deleting speedrun #${i + 1} for ${selectedMap}`);
+                  // Remove from local storage
+                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+                    console.log(`[Cyclopedia] Calling RunTrackerAPI.deleteRun(${mapKey}, 'speedrun', ${i})`);
+                    window.RunTrackerAPI.deleteRun(mapKey, 'speedrun', i).then(success => {
+                      console.log(`[Cyclopedia] RunTrackerAPI.deleteRun result:`, success);
+                      if (success) {
+                        // Update status bar
+                        if (row3 && row3.statusBar) {
+                          row3.statusBar.textContent = 'Run deleted successfully!';
+                          row3.statusBar.style.color = '#4CAF50';
+                          setTimeout(() => {
+                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                            row3.statusBar.style.color = '#ccc';
+                          }, 3000);
+                        }
+                        // Refresh the table
+                        speedrunTable.innerHTML = '';
+                        speedrunTable.appendChild(speedrunHeader);
+                        if (populateSpeedrunTable) {
+                          populateSpeedrunTable();
+                        }
+                      }
+                    });
+                  }
+                  // Reset delete cell
+                  deleteCell.innerHTML = '🗑️';
+                  deleteCell.style.color = '#f44336';
+                  deleteCell.removeAttribute('data-confirming');
+                } else {
+                  // First click - reset any other confirming delete cells first
+                  const allConfirmingCells = document.querySelectorAll('[data-confirming="true"]');
+                  allConfirmingCells.forEach(cell => {
+                    cell.innerHTML = '🗑️';
+                    cell.style.color = '#f44336';
+                    cell.removeAttribute('data-confirming');
+                    cell.title = 'Delete this run';
+                  });
+                  
+                  // Show confirmation for this cell
+                  deleteCell.innerHTML = '✓';
+                  deleteCell.style.color = '#ff0000';
+                  deleteCell.setAttribute('data-confirming', 'true');
+                  deleteCell.title = 'Click again to confirm deletion';
+                  
+                  // Update status bar
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Are you sure you want to delete this run?';
+                    row3.statusBar.style.color = '#ff6b6b';
+                  }
+                  
+                  // Confirmation mode - no timer, user must click again to confirm or click elsewhere to cancel
+                }
+              });
+            }
+            row.appendChild(deleteCell);
+            
+            speedrunTable.appendChild(row);
+          }
+        } catch (error) {
+          console.error('[Cyclopedia] Error populating speedrun table:', error);
+        }
       }
+      
+      // Populate the speedrun table
+      populateSpeedrunTable();
+      
+      // Make the populate function accessible for refresh
+      speedrunTableCol.populateSpeedrunTable = populateSpeedrunTable;
       
       speedrunTableCol.appendChild(speedrunTable);
       
       // Right column: Top 5 Ranks
       const ranksTableCol = document.createElement('div');
+      ranksTableCol.setAttribute('data-table-type', 'ranks');
       ranksTableCol.style.flex = '1 1 0';
       ranksTableCol.style.maxWidth = '245px';
       ranksTableCol.style.display = 'flex';
@@ -6182,7 +6942,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Table header
       const ranksHeader = document.createElement('div');
       ranksHeader.style.display = 'grid';
-      ranksHeader.style.gridTemplateColumns = '1fr 50px 40px 40px';
+      ranksHeader.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
       ranksHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
       ranksHeader.style.borderBottom = '1px solid #444';
       ranksHeader.style.fontWeight = 'bold';
@@ -6190,9 +6950,18 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       ranksHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       ranksHeader.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
       
+      // Medal column header (empty)
+      const ranksMedalHeader = document.createElement('div');
+      ranksMedalHeader.style.padding = '6px 2px';
+      ranksMedalHeader.style.borderRight = '1px solid #444';
+      ranksMedalHeader.style.textAlign = 'center';
+      ranksMedalHeader.textContent = '';
+      ranksHeader.appendChild(ranksMedalHeader);
+      
       const ranksTimeHeader = document.createElement('div');
       ranksTimeHeader.style.padding = '6px 4px';
       ranksTimeHeader.style.borderRight = '1px solid #444';
+      ranksTimeHeader.style.textAlign = 'center';
       ranksTimeHeader.textContent = 'Time';
       ranksHeader.appendChild(ranksTimeHeader);
       
@@ -6218,60 +6987,472 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       ranksTable.appendChild(ranksHeader);
       
-      // Table rows (placeholder data)
-      for (let i = 1; i <= 5; i++) {
-        const row = document.createElement('div');
-        row.style.display = 'grid';
-        row.style.gridTemplateColumns = '1fr 50px 40px 40px';
-        row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
-        row.style.fontSize = '10px';
-        row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-        row.style.color = '#ccc';
-        
-        const timeCell = document.createElement('div');
-        timeCell.style.padding = '4px 2px';
-        timeCell.style.borderRight = '1px solid #333';
-        timeCell.textContent = `${12 - i}:${String(Math.floor(Math.random() * 60)).padStart(2, '0')}.${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
-        row.appendChild(timeCell);
-        
-        const rankCell = document.createElement('div');
-        rankCell.style.padding = '4px 2px';
-        rankCell.style.borderRight = '1px solid #333';
-        rankCell.style.textAlign = 'center';
-        rankCell.textContent = `#${i}`;
-        row.appendChild(rankCell);
-        
-        const copyCell = document.createElement('div');
-        copyCell.style.padding = '2px 1px';
-        copyCell.style.borderRight = '1px solid #333';
-        copyCell.style.textAlign = 'center';
-        copyCell.style.cursor = 'pointer';
-        copyCell.style.color = '#4CAF50';
-        copyCell.style.fontSize = '14px';
-        copyCell.innerHTML = '🔗';
-        copyCell.title = 'Copy/share this run setup';
-        row.appendChild(copyCell);
-        
-        const deleteCell = document.createElement('div');
-        deleteCell.style.padding = '2px 1px';
-        deleteCell.style.textAlign = 'center';
-        deleteCell.style.cursor = 'pointer';
-        deleteCell.style.color = '#f44336';
-        deleteCell.style.fontSize = '14px';
-        deleteCell.innerHTML = '🗑️';
-        deleteCell.title = 'Delete this run';
-        deleteCell.addEventListener('click', (e) => {
-          e.preventDefault();
-          const confirmed = confirm(`Are you sure you want to delete this run?\n\nTime: ${timeCell.textContent}\nRank: #${i}`);
-          if (confirmed) {
-            console.log(`Deleting run #${i}`);
-            // Add actual delete logic here
+      // Function to populate rank points table with local data
+      async function populateRankPointsTable() {
+        try {
+          console.log(`[Cyclopedia] Populating rank points table for map: ${selectedMap}`);
+          // Resolve the map name to ensure consistency with RunTracker
+          const resolvedMapName = resolveMapName(selectedMap);
+          const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
+          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
+          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          let localRuns = await getLocalRunsForMap(mapKey, 'rank');
+          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} rank records:`, localRuns);
+          
+          // Sort rank data: 1. Rank (ascending), 2. Ticks (ascending), 3. Date (newest first)
+          if (localRuns && localRuns.length > 0) {
+            localRuns.sort((a, b) => {
+              // First priority: Rank (lower is better)
+              if (a.points !== b.points) {
+                return (b.points || 0) - (a.points || 0); // Higher points = better rank
+              }
+              // Second priority: Ticks (lower is better)
+              if (a.time !== b.time) {
+                return (a.time || Infinity) - (b.time || Infinity);
+              }
+              // Third priority: Date (newer is better)
+              const dateA = a.date || a.timestamp || 0;
+              const dateB = b.date || b.timestamp || 0;
+              return dateB - dateA;
+            });
+            console.log(`[Cyclopedia] Sorted rank records:`, localRuns);
           }
-        });
-        row.appendChild(deleteCell);
-        
-        ranksTable.appendChild(row);
+          
+          if (localRuns && localRuns.length > 0) {
+            console.log(`[Cyclopedia] First rank record properties:`, Object.keys(localRuns[0]));
+            console.log(`[Cyclopedia] First rank record values:`, localRuns[0]);
+          }
+          
+          if (!localRuns || localRuns.length === 0) {
+            // Show empty state
+            for (let i = 1; i <= 5; i++) {
+              const row = document.createElement('div');
+              row.style.display = 'grid';
+              row.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
+              row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
+              row.style.fontSize = '10px';
+              row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+              row.style.color = '#666';
+              
+              // Medal cell
+              const medalCell = document.createElement('div');
+              medalCell.style.padding = '4px 2px';
+              medalCell.style.borderRight = '1px solid #333';
+              medalCell.style.textAlign = 'center';
+              medalCell.style.fontSize = '12px';
+              
+              // Set medal icon based on position (1-5)
+              const rankPosition = i;
+              if (rankPosition === 1) {
+                medalCell.innerHTML = '🥇';
+              } else if (rankPosition === 2) {
+                medalCell.innerHTML = '🥈';
+              } else if (rankPosition === 3) {
+                medalCell.innerHTML = '🥉';
+              } else {
+                medalCell.innerHTML = '🏅';
+              }
+              row.appendChild(medalCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = 'No runs';
+              row.appendChild(timeCell);
+              
+              const rankCell = document.createElement('div');
+              rankCell.style.padding = '4px 2px';
+              rankCell.style.borderRight = '1px solid #333';
+              rankCell.style.textAlign = 'center';
+              rankCell.textContent = '-';
+              row.appendChild(rankCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              ranksTable.appendChild(row);
+            }
+            return;
+          }
+          
+          // Populate with actual data
+          for (let i = 0; i < 5; i++) {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
+            row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
+            row.style.fontSize = '10px';
+            row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+            
+            const run = localRuns[i];
+            console.log(`[Cyclopedia] Processing rank run ${i + 1}:`, run);
+            
+            if (!run) {
+              // No run for this slot - show "No runs" without buttons
+              row.style.color = '#666';
+              
+              // Medal cell
+              const medalCell = document.createElement('div');
+              medalCell.style.padding = '4px 2px';
+              medalCell.style.borderRight = '1px solid #333';
+              medalCell.style.textAlign = 'center';
+              medalCell.style.fontSize = '12px';
+              
+              // Set medal icon based on position (1-5)
+              const rankPosition = i + 1;
+              if (rankPosition === 1) {
+                medalCell.innerHTML = '🥇';
+              } else if (rankPosition === 2) {
+                medalCell.innerHTML = '🥈';
+              } else if (rankPosition === 3) {
+                medalCell.innerHTML = '🥉';
+              } else {
+                medalCell.innerHTML = '🏅';
+              }
+              row.appendChild(medalCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = 'No runs';
+              row.appendChild(timeCell);
+              
+              const rankCell = document.createElement('div');
+              rankCell.style.padding = '4px 2px';
+              rankCell.style.borderRight = '1px solid #333';
+              rankCell.style.textAlign = 'center';
+              rankCell.textContent = '-';
+              row.appendChild(rankCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              ranksTable.appendChild(row);
+              continue;
+            }
+            
+            // Has run data - show with buttons
+            row.style.color = '#ccc';
+            
+            // Medal cell
+            const medalCell = document.createElement('div');
+            medalCell.style.padding = '4px 2px';
+            medalCell.style.borderRight = '1px solid #333';
+            medalCell.style.textAlign = 'center';
+            medalCell.style.fontSize = '12px';
+            
+            // Set medal icon based on position (1-5)
+            const rankPosition = i + 1;
+            if (rankPosition === 1) {
+              medalCell.innerHTML = '🥇'; // Gold medal
+            } else if (rankPosition === 2) {
+              medalCell.innerHTML = '🥈'; // Silver medal
+            } else if (rankPosition === 3) {
+              medalCell.innerHTML = '🥉'; // Bronze medal
+            } else {
+              medalCell.innerHTML = '🏅'; // Generic medal for 4th and 5th
+            }
+            row.appendChild(medalCell);
+            
+            const timeCell = document.createElement('div');
+            timeCell.style.padding = '4px 2px';
+            timeCell.style.borderRight = '1px solid #333';
+            timeCell.style.textAlign = 'center';
+            
+            if (run.time) {
+              timeCell.textContent = formatLocalRunTime(run.time);
+              console.log(`[Cyclopedia] Rank run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+            } else {
+              timeCell.textContent = 'N/A';
+              console.log(`[Cyclopedia] Rank run ${i + 1} has no time property`);
+            }
+            
+            row.appendChild(timeCell);
+            
+            const rankCell = document.createElement('div');
+            rankCell.style.padding = '4px 2px';
+            rankCell.style.borderRight = '1px solid #333';
+            rankCell.style.textAlign = 'center';
+            if (run.points) {
+              rankCell.textContent = run.points.toLocaleString();
+              console.log(`[Cyclopedia] Rank run ${i + 1} points: ${run.points} -> ${run.points.toLocaleString()}`);
+            } else {
+              rankCell.textContent = 'N/A';
+              console.log(`[Cyclopedia] Rank run ${i + 1} has no points property`);
+            }
+            row.appendChild(rankCell);
+            
+            const copyCell = document.createElement('div');
+            copyCell.style.padding = '2px 1px';
+            copyCell.style.borderRight = '1px solid #333';
+            copyCell.style.textAlign = 'center';
+            copyCell.style.cursor = 'pointer';
+            copyCell.style.color = '#4CAF50';
+            copyCell.style.fontSize = '14px';
+            copyCell.innerHTML = '🔗';
+            copyCell.title = 'Copy $replay command';
+            if (run.seed) {
+              // Add click animation styles
+              copyCell.style.transition = 'all 0.1s ease';
+              copyCell.style.userSelect = 'none';
+              
+              copyCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Click animation
+                copyCell.style.transform = 'scale(0.9)';
+                copyCell.style.opacity = '0.7';
+                setTimeout(() => {
+                  copyCell.style.transform = 'scale(1)';
+                  copyCell.style.opacity = '1';
+                }, 100);
+                
+                console.log(`[Cyclopedia] Copy button clicked for rank run:`, run);
+                
+                // Generate replay command with board configuration if available
+                let replayData = {};
+                
+                // Get proper region and map names
+                let regionName = 'Unknown Region';
+                let mapName = resolveMapName(selectedMap); // Use resolved map name
+                
+                // First, try to use the region name that RunTracker already resolved and saved
+                if (run.regionName) {
+                  regionName = run.regionName;
+                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                } else {
+                  // Try to determine region from the map name/ID using game state utils
+                  try {
+                    const mapId = selectedMap;
+                    let foundRegion = null;
+                    
+                    // Search through all regions to find which one contains this map
+                    if (globalThis.state?.utils?.REGIONS) {
+                      for (const region of globalThis.state.utils.REGIONS) {
+                        if (region.rooms && region.rooms.some(room => room.id === mapId)) {
+                          foundRegion = region;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (foundRegion) {
+                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                    } else {
+                      // Fallback: try to get region from current game state (this is the problematic part)
+                      const boardSnapshot = globalThis.state?.board?.getSnapshot();
+                      if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
+                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                      } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
+                        // Capitalize region name
+                        regionName = regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('[Cyclopedia] Error getting region from game state:', e);
+                  }
+                }
+                
+                replayData.region = regionName;
+                replayData.map = mapName;
+                
+                // Check if we have stored board setup data
+                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
+                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
+                  console.log('[Cyclopedia] Run setup data:', run.setup);
+                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  // Convert stored pieces to board format
+                  const board = run.setup.pieces.map(piece => {
+                    const boardPiece = {
+                      tile: piece.tile,
+                      monster: {
+                        name: piece.monsterName || piece.monsterId || 'unknown monster',
+                        hp: piece.monsterStats?.hp || 20,
+                        ad: piece.monsterStats?.ad || 20,
+                        ap: piece.monsterStats?.ap || 20,
+                        armor: piece.monsterStats?.armor || 20,
+                        magicResist: piece.monsterStats?.magicResist || 20
+                      }
+                    };
+                    
+                    // Add equipment if available
+                    if (piece.equipmentName || piece.equipId) {
+                      boardPiece.equipment = {
+                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
+                        stat: piece.equipmentStat || 'ap',
+                        tier: piece.equipmentTier || 5
+                      };
+                    }
+                    
+                    return boardPiece;
+                  });
+                  
+                  replayData.board = board;
+                  console.log('[Cyclopedia] Generated board configuration:', board);
+                  console.log('[Cyclopedia] Final replay data:', replayData);
+                } else {
+                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                }
+                
+                // Add seed at the end
+                replayData.seed = run.seed;
+                
+                const replayCommand = `$replay(${JSON.stringify(replayData)})`;
+                console.log(`[Cyclopedia] Generated rank replay command: ${replayCommand}`);
+                navigator.clipboard.writeText(replayCommand).then(() => {
+                  console.log('[Cyclopedia] Successfully copied rank replay command to clipboard:', replayCommand);
+                  // Update status bar with success message
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Successfully copied run!';
+                    row3.statusBar.style.color = '#4CAF50';
+                    // Reset status bar after 3 seconds
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                }).catch(err => {
+                  console.error('[Cyclopedia] Failed to copy rank replay command:', err);
+                  // Update status bar with error message
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Failed to copy run!';
+                    row3.statusBar.style.color = '#f44336';
+                    // Reset status bar after 3 seconds
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                });
+              });
+            }
+            row.appendChild(copyCell);
+            
+            const deleteCell = document.createElement('div');
+            deleteCell.style.padding = '2px 1px';
+            deleteCell.style.textAlign = 'center';
+            deleteCell.style.cursor = 'pointer';
+            deleteCell.style.color = '#f44336';
+            deleteCell.style.fontSize = '14px';
+            deleteCell.innerHTML = '🗑️';
+            deleteCell.title = 'Delete this run';
+            if (run) {
+              // Add click animation styles
+              deleteCell.style.transition = 'all 0.1s ease';
+              deleteCell.style.userSelect = 'none';
+              
+              deleteCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Click animation
+                deleteCell.style.transform = 'scale(0.9)';
+                deleteCell.style.opacity = '0.7';
+                setTimeout(() => {
+                  deleteCell.style.transform = 'scale(1)';
+                  deleteCell.style.opacity = '1';
+                }, 100);
+                
+                console.log(`[Cyclopedia] Delete button clicked for rank run:`, run);
+                
+                // Check if delete cell is already in "confirm" state
+                if (deleteCell.getAttribute('data-confirming') === 'true') {
+                  // User confirmed deletion
+                  console.log(`[Cyclopedia] Deleting rank run #${i + 1} for ${selectedMap}`);
+                  // Remove from local storage
+                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+                    console.log(`[Cyclopedia] Calling RunTrackerAPI.deleteRun(${mapKey}, 'rank', ${i})`);
+                    window.RunTrackerAPI.deleteRun(mapKey, 'rank', i).then(success => {
+                      console.log(`[Cyclopedia] RunTrackerAPI.deleteRun result:`, success);
+                      if (success) {
+                        // Update status bar
+                        if (row3 && row3.statusBar) {
+                          row3.statusBar.textContent = 'Run deleted successfully!';
+                          row3.statusBar.style.color = '#4CAF50';
+                          setTimeout(() => {
+                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                            row3.statusBar.style.color = '#ccc';
+                          }, 3000);
+                        }
+                        // Refresh the table
+                        ranksTable.innerHTML = '';
+                        ranksTable.appendChild(ranksHeader);
+                        if (populateRankPointsTable) {
+                          populateRankPointsTable();
+                        }
+                      }
+                    });
+                  }
+                  // Reset delete cell
+                  deleteCell.innerHTML = '🗑️';
+                  deleteCell.style.color = '#f44336';
+                  deleteCell.removeAttribute('data-confirming');
+                } else {
+                  // First click - reset any other confirming delete cells first
+                  const allConfirmingCells = document.querySelectorAll('[data-confirming="true"]');
+                  allConfirmingCells.forEach(cell => {
+                    cell.innerHTML = '🗑️';
+                    cell.style.color = '#f44336';
+                    cell.removeAttribute('data-confirming');
+                    cell.title = 'Delete this run';
+                  });
+                  
+                  // Show confirmation for this cell
+                  deleteCell.innerHTML = '✓';
+                  deleteCell.style.color = '#ff0000';
+                  deleteCell.setAttribute('data-confirming', 'true');
+                  deleteCell.title = 'Click again to confirm deletion';
+                  
+                  // Update status bar
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Are you sure you want to delete this run?';
+                    row3.statusBar.style.color = '#ff6b6b';
+                  }
+                  
+                  // Confirmation mode - no timer, user must click again to confirm or click elsewhere to cancel
+                }
+              });
+            }
+            row.appendChild(deleteCell);
+            
+            ranksTable.appendChild(row);
+          }
+        } catch (error) {
+          console.error('[Cyclopedia] Error populating rank points table:', error);
+        }
       }
+      
+      // Populate the rank points table
+      populateRankPointsTable();
+      
+      // Make the populate function accessible for refresh
+      ranksTableCol.populateRankPointsTable = populateRankPointsTable;
       
       ranksTableCol.appendChild(ranksTable);
       
@@ -6279,9 +7460,87 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       row2.appendChild(speedrunTableCol);
       row2.appendChild(ranksTableCol);
       
+      // Row 3: Additional content area
+      const row3 = document.createElement('div');
+      row3.style.flex = '1 1 0';
+      row3.style.display = 'flex';
+      row3.style.flexDirection = 'column';
+      row3.style.padding = '10px';
+      row3.style.borderTop = '3px solid transparent';
+      row3.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      row3.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+      row3.style.marginTop = '10px';
+      
+
+      
+      // Descriptive bullet points
+      const bulletPoints = document.createElement('div');
+      bulletPoints.style.marginBottom = '15px';
+      bulletPoints.style.fontSize = '12px';
+      bulletPoints.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      bulletPoints.style.color = '#ccc';
+      bulletPoints.style.lineHeight = '1.4';
+      
+      bulletPoints.innerHTML = `
+        <div style="margin-bottom: 8px;">• All runs made in Autoplay and manual mode will automatically be added here.</div>
+        <div>• If it's the same creatures, equipment and placement, the run will be overwritten with the better run, else it will be copied to a new row.</div>
+      `;
+      row3.appendChild(bulletPoints);
+      
+      // Status bar
+      const statusBar = document.createElement('div');
+      statusBar.style.padding = '8px 12px';
+      statusBar.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+      statusBar.style.border = '1px solid #444';
+      statusBar.style.borderRadius = '4px';
+      statusBar.style.fontSize = '12px';
+      statusBar.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      statusBar.style.color = '#ccc';
+      statusBar.style.textAlign = 'center';
+      statusBar.style.minHeight = '20px';
+      statusBar.style.display = 'flex';
+      statusBar.style.alignItems = 'center';
+      statusBar.style.justifyContent = 'center';
+      statusBar.textContent = 'Select to copy or delete run.';
+      row3.appendChild(statusBar);
+      
+      // Store status bar reference for later use
+      row3.statusBar = statusBar;
+      
+      // Global click listener to reset delete confirmation states
+      const resetDeleteStates = () => {
+        // Reset all delete cells in both tables
+        const allDeleteCells = document.querySelectorAll('[data-confirming="true"]');
+        allDeleteCells.forEach(cell => {
+          cell.innerHTML = '🗑️';
+          cell.style.color = '#f44336';
+          cell.removeAttribute('data-confirming');
+          cell.title = 'Delete this run';
+        });
+        
+        // Reset status bar
+        if (row3 && row3.statusBar) {
+          row3.statusBar.textContent = 'Select to copy or delete run.';
+          row3.statusBar.style.color = '#ccc';
+        }
+      };
+      
+      // Add global click listener
+      document.addEventListener('click', (e) => {
+        // Only reset if the click is not on a delete cell that's in confirming state
+        const clickedDeleteCell = e.target.closest('[data-confirming="true"]');
+        if (!clickedDeleteCell) {
+          resetDeleteStates();
+        }
+      });
+      
+      // Store the reset function for potential cleanup
+      row3.resetDeleteStates = resetDeleteStates;
+      
       // Add rows to statsContainer
       statsContainer.appendChild(row1);
       statsContainer.appendChild(row2);
+      statsContainer.appendChild(row3);
       
       // Fetch and populate leaderboard data
       fetchMapsLeaderboardData().then(data => {
@@ -7096,6 +8355,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Column 3: Statistics
             const statsContainer = createStatisticsSection(selectedMap);
             col3.appendChild(statsContainer);
+            
+            // Tables are populated automatically when createStatisticsSection is called
           } else {
             // No map selected - show placeholder messages
             const col2Msg = document.createElement('div');

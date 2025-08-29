@@ -164,7 +164,8 @@ function renderLocalMods(mods) {
 
   const hiddenMods = [
     'inventory-tooltips.js',
-    'DashboardButton.js'
+    'DashboardButton.js',
+    'RunTracker.js'
   ];
 
   function normalizeModName(name) {

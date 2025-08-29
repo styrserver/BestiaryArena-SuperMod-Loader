@@ -45,6 +45,9 @@ async function loadScripts() {
     await injectScript('content/local_mods.js');
     if (window.DEBUG) console.log('Local mods script loaded');
     
+    // RunTracker is now loaded as a Super Mod
+    if (window.DEBUG) console.log('RunTracker will be loaded as a Super Mod');
+    
     // Load utility functions via the sandbox utils
     // Make sure this is last since it needs the API to be initialized
     await injectScript('content/ba-sandbox-utils.mjs');

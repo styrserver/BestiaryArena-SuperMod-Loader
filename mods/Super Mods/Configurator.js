@@ -55,6 +55,14 @@ function generateSummary(data, isImport = false) {
     }
   }
   
+  // Add run data info
+  if (data.runData && data.runData.metadata) {
+    const runStats = data.runData.metadata;
+    if (runStats.totalRuns > 0) {
+      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps`);
+    }
+  }
+  
   // Add settings info
   const settings = [];
   if (data.dashboardTheme && data.dashboardTheme !== 'default') {
@@ -271,7 +279,8 @@ async function exportConfiguration(modal) {
           'dashboard-theme',
           'locale',
           'utility_script_cache',
-          'utility_script_timestamp'
+          'utility_script_timestamp',
+          'ba_local_runs' // Include run data
         ], result => {
           resolve(result || {});
         });
@@ -285,10 +294,18 @@ async function exportConfiguration(modal) {
     const localModsConfigData = storageData.localModsConfig || {};
     const dashboardThemeData = storageData['dashboard-theme'] || 'default';
     const localeData = storageData.locale || 'en-US';
-    const utilityScriptCacheData = {
-      cache: storageData.utility_script_cache || null,
-      timestamp: storageData.utility_script_timestamp || null
-    };
+         const utilityScriptCacheData = {
+       cache: storageData.utility_script_cache || null,
+       timestamp: storageData.utility_script_timestamp || null
+     };
+     
+     // Get run data (try RunTrackerAPI first, then fallback to storage)
+     let runData = null;
+     if (window.RunTrackerAPI) {
+       runData = window.RunTrackerAPI.getAllRuns();
+     } else {
+       runData = storageData.ba_local_runs || null;
+     }
     
          // Get all script caches from storage
      const allStorageData = await new Promise(resolve => {
@@ -352,7 +369,7 @@ async function exportConfiguration(modal) {
     
          // Create export data
      const exportData = {
-       version: '1.1',
+       version: '1.2',
        timestamp: new Date().toISOString(),
        activeScripts: activeScripts || [],
        localMods: localModsData || [],
@@ -363,6 +380,7 @@ async function exportConfiguration(modal) {
        locale: localeData || 'en-US',
        utilityScriptCache: utilityScriptCacheData.cache || null,
        utilityScriptTimestamp: utilityScriptCacheData.timestamp || null,
+       runData: runData,
        scriptCaches: scriptCaches,
        modLocalStorage: modLocalStorage,
        gameLocalStorage: gameLocalStorage,
@@ -372,6 +390,7 @@ async function exportConfiguration(modal) {
          totalManualMods: (manualModsData || []).length,
          totalModStatus: Object.keys(modStatus).length,
          hasUtilityCache: !!utilityScriptCacheData.cache,
+         hasRunData: !!runData,
          hasScriptCaches: Object.keys(scriptCaches).length > 0,
          hasModLocalStorage: Object.keys(modLocalStorage).length > 0,
          hasGameLocalStorage: Object.keys(gameLocalStorage).length > 0
@@ -496,6 +515,12 @@ async function importConfiguration(modal) {
                } catch (e) {
                  info.push(`• Setup labels: ${importData.gameLocalStorage['stored-setup-labels']}`);
                }
+             }
+           }
+           if (importData.exportInfo.hasRunData) {
+             const runStats = importData.runData?.metadata;
+             if (runStats && runStats.totalRuns > 0) {
+               info.push(`• Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps`);
              }
            }
            if (importData.locale) info.push(`• Language preference: ${importData.locale}`);
@@ -625,6 +650,17 @@ async function importConfiguration(modal) {
              await new Promise(resolve => {
                window.browserAPI.storage.local.set(importData.modLocalStorage, resolve);
              });
+           }
+           
+           // Import run data if available
+           if (importData.runData) {
+             if (window.RunTrackerAPI) {
+               await window.RunTrackerAPI.importRuns(importData);
+             } else if (window.browserAPI.storage.local) {
+               await new Promise(resolve => {
+                 window.browserAPI.storage.local.set({ ba_local_runs: importData.runData }, resolve);
+               });
+             }
            }
            
            // Import mod status data if available

@@ -64,37 +64,6 @@ You can enable, disable, and configure mods from the mod loader interface. Each 
 
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the [Mod Development Guide](docs/mod_development_guide.md) for detailed information on creating mods.
 
-### Basic Mod Template
-
-Here's a simple example of a mod:
-
-```javascript
-// My First Mod
-console.log('My First Mod initializing...');
-
-// Create a button in the UI
-api.ui.addButton({
-  id: 'my-first-mod-button',
-  text: 'My Mod',
-  tooltip: 'Click to show a message',
-  primary: false,
-  onClick: function() {
-    api.ui.components.createModal({
-      title: 'My First Mod',
-      content: '<p>Hello from my first mod!</p>',
-      buttons: [
-        {
-          text: 'OK',
-          primary: true
-        }
-      ]
-    });
-  }
-});
-
-console.log('My First Mod initialization complete');
-```
-
 ### Standardized UI Components
 
 The extension provides a set of UI components that match the game's style. These components ensure a consistent look and feel across all mods:
@@ -167,11 +136,12 @@ The extension comes with several powerful mods that demonstrate different featur
 These are advanced mods that provide comprehensive game enhancement features. All Super Mods listed below are included by default in this loader:
 
 ### Autoseller
-Automatically sells or squeezes creatures based on gene thresholds and user settings. Features include:
+Automatically sells or squeezes creatures based on gene thresholds and user settings:
 - Configurable gene thresholds for selling and squeezing
 - Minimum count triggers for batch actions
 - Session widget displaying sold/squeezed counts and rewards
 - Integrated with the mod loader's configuration system
+- Real-time tracking of gold and dust earnings
 
 ### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -180,8 +150,6 @@ Automates summon scroll usage to collect specific creatures:
 - Set stopping conditions (total creatures or tier-based targets)
 - Configurable autoscroll speed with rate-limit protection
 - Real-time tracking of found creatures and scroll usage
-- Automatic stopping when targets are reached
-- Rate-limit handling with visual feedback
 
 ### Better Analytics
 Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
@@ -190,9 +158,6 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Support for all game modes (manual, autoplay, sandbox)
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
-- Tab switching support for ally/villain damage analysis
-- Session statistics and damage history tracking
-- Clean, integrated UI that matches the game's aesthetic
 
 ### Better Cauldron
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
@@ -201,7 +166,6 @@ Enhances the native Monster Cauldron interface with powerful search and filter f
 - Game-styled UI controls that integrate seamlessly with the existing interface
 - Automatic detection and enhancement of the cauldron modal
 - Efficient filtering system for managing large monster collections
-- Clean, responsive design that matches the game's aesthetic
 
 ### Better Forge
 Comprehensive equipment management system with advanced disenchanting capabilities:
@@ -210,10 +174,6 @@ Comprehensive equipment management system with advanced disenchanting capabiliti
 - Real-time dust display and inventory updates
 - Equipment search by name and filter by tier (T1-T5)
 - Visual progress bar and status updates during disenchanting
-- Rate limiting protection with automatic retry mechanisms
-- Auto-upgrade system (coming soon) for equipment enhancement
-- Seamless integration with the game's inventory system
-- Game-styled UI that matches the existing interface
 
 ### Better Highscores
 Displays real-time leaderboard information for the current map:
@@ -222,8 +182,6 @@ Displays real-time leaderboard information for the current map:
 - Automatic data fetching from the game's TRPC API
 - Styled leaderboard display with medal colors (gold, silver, bronze)
 - Manual refresh capability for up-to-date information
-- Minimizable interface to save screen space
-- User-friendly display of top scores and rankings
 
 ### Better Hy'genie
 Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios, and improved UI:
@@ -231,6 +189,7 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 - Calculates maximum fusable amount based on inventory and fusion ratio
 - Provides confirmation prompts and error feedback inside the tooltip
 - Automatically refreshes inventory counts and UI after fusion
+- Smart fusion ratio calculations for optimal resource usage
 
 ### Better Yasir
 Enhances the Yasir shop interface with advanced features and improved usability:
@@ -239,8 +198,6 @@ Enhances the Yasir shop interface with advanced features and improved usability:
 - Enhanced UI with better visual feedback and confirmation prompts
 - Automatic inventory updates after transactions
 - Support for all item types including equipment, consumables, and special items
-- Smart quantity validation and error handling
-- Seamless integration with the existing shop interface
 
 ### Configurator
 Handles import/export of configuration data for the mod loader:
@@ -249,22 +206,22 @@ Handles import/export of configuration data for the mod loader:
 - Backup and restore localStorage data (setup labels, autoseller settings, etc.)
 - User-friendly summary of what will be imported/exported
 - Safe configuration management with confirmation dialogs
-- Support for mod-specific data and caches
-- Header button integration for quick access
 
 ### Cyclopedia
-A comprehensive game data viewer and player profile manager:
-- View detailed monster and equipment information
-- Access your player profile and statistics
-- Browse your inventory and collection
-- Track your progress and achievements
-- Search and filter game data efficiently
+A comprehensive game data viewer and player profile manager with advanced features:
+- **Monster Database**: Browse and search all monsters with detailed stats, abilities, and locations
+- **Equipment Database**: View all equipment with stats, tiers, and optimization recommendations
+- **Player Profiles**: Search and view detailed player profiles with statistics and achievements
+- **Leaderboards**: Access real-time leaderboards for maps, rankings, and competitions
+- **Run Tracking**: View and analyze personal run history with RunTracker integration
 
 ### Dashboard Button
 Quick access to the mod dashboard:
 - Provides easy access to all mod features
 - Integrates seamlessly with the game interface
 - Streamlines mod management
+- Centralized mod control and configuration
+- One-click access to all mod functionality
 
 ### Dice Roller
 Automates dice rolling for stat rerolling:
@@ -272,6 +229,7 @@ Automates dice rolling for stat rerolling:
 - Lets you set target values for each stat
 - Stops rolling when a desired stat value is reached
 - Displays roll count and status in a custom panel
+- Configurable target thresholds for optimal stat optimization
 
 ### Hunt Analyzer
 Advanced autoplay and loot tracking system:
@@ -286,20 +244,28 @@ Advanced autoplay and loot tracking system:
 These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
 
 ### Bestiary Automator
-Automates routine gameplay actions to streamline your Bestiary Arena experience. Features include:
+Automates routine gameplay actions to streamline your Bestiary Arena experience:
 - Automatic stamina refilling when low
 - Auto-collection of available rewards
 - Automatic handling of Day Care tasks
 - Customizable automation settings for safe and efficient play
+- Streamlined gameplay experience with minimal manual intervention
 
 ### Board Analyzer
-Analyzes and simulates board setups for optimal strategies and performance. Useful for advanced planning and testing.
+Analyzes and simulates board setups for optimal strategies and performance:
+- Advanced board setup analysis and simulation
+- Performance optimization recommendations
+- Strategic planning tools for complex scenarios
+- Testing environment for different configurations
+- Useful for advanced planning and testing
 
 ### Custom Display
 Enhances game visuals with two powerful features:
-- Performance Mode: Strips down graphics for better performance on low-end devices.
-- Map Grid: Adds a coordinate grid overlay to help with positioning and planning.
-Both features can be customized with extensive settings for colors, visibility, and display options.
+- Performance Mode: Strips down graphics for better performance on low-end devices
+- Map Grid: Adds a coordinate grid overlay to help with positioning and planning
+- Extensive customization settings for colors, visibility, and display options
+- Real-time visual adjustments without page refresh
+- Optimized performance for various device capabilities
 
 ### Hero Editor
 A powerful tool that allows players to:
@@ -307,31 +273,34 @@ A powerful tool that allows players to:
 - Modify equipment attributes (stat type, tier)
 - Apply changes instantly to the game board
 - Save and load custom setups
-Perfect for testing different monster and equipment combinations without having to collect and level them in-game.
+- Perfect for testing different monster and equipment combinations without having to collect and level them in-game
 
 ### Highscore Improvements
-Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements. Features include:
+Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements:
 - Detailed performance analysis
 - Potential time improvements compared to top scores
 - Room-by-room breakdown of performance
 - Visual indicators for time differences
+- Enhanced sorting and filtering options for better comparison
 
 ### Item Tier List
-Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts. The mod shows:
+Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts:
 - Item effectiveness by tier
 - Stat optimizations for different monsters
 - Best-in-slot recommendations
 - Visual quality indicators
+- Comprehensive equipment comparison and analysis
 
 ### Monster Tier List
-Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios. Features include:
+Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios:
 - Sortable tier list of monsters
 - Usage statistics across different room types
 - Win rate and performance metrics
 - Visual representation of monster effectiveness
+- Data-driven monster selection recommendations
 
 ### Setup Manager
-Allows players to save, load, and manage team configurations for different maps. Features include:
+Allows players to save, load, and manage team configurations for different maps:
 - Multiple saved team setups per map
 - Easy switching between configurations
 - Automatic detection of map changes
@@ -347,7 +316,7 @@ Enables sharing team configurations with other players through:
 - History of recently used seeds
 
 ### Tick Tracker
-Tracks and displays the number of game ticks (and optionally milliseconds) for each session. Features include:
+Tracks and displays the number of game ticks (and optionally milliseconds) for each session:
 - Real-time tick tracking widget
 - History of recent tick counts
 - Option to show milliseconds conversion
@@ -362,7 +331,8 @@ Speed up gameplay for faster testing and grinding:
 - Perfect for testing strategies quickly
 - Great for farming and grinding sessions
 
-Note: The UI Components Showcase mod and other example mods are available in the `Unused Mods/` folder as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+### Example Mods
+Some mods in the `Unused Mods/` folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
 
 ## Contributing
 
@@ -383,7 +353,7 @@ Occasionally, you may need to update the extension when new game versions are re
 Yes! If you know JavaScript, you can create your own mods. Check the [Mod Development Guide](docs/mod_development_guide.md) for technical details.
 
 ### How do I report bugs or suggest features?
-Visit the [GitHub Issues page](https://github.com/TheMegafuji/bestiary-arena-mod-loader/issues) to report bugs or suggest new features.
+Visit the [GitHub Issues page](https://github.com/styrserver/BestiaryArena-SuperMod-Loader/issues) to report bugs or suggest new features.
 
 ## Troubleshooting
 
