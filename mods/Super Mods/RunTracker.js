@@ -18,8 +18,8 @@ if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
       hidden: true
     };
   }
-  // Early return to prevent further execution
-  return;
+  // Early exit - wrap in IIFE to avoid return outside function
+  (function() { return; })();
 }
 
 // =======================
