@@ -11,6 +11,47 @@ const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
 let runTrackerAPI = null;
 const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '247px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
 
+// Maps Tab DOM Optimization System
+const MapsTabDOMOptimizer = {
+  // Cache for reusable DOM elements
+  elementCache: new Map(),
+  
+  // Track current state to avoid unnecessary updates
+  currentState: {
+    selectedMap: null,
+    selectedCategory: null,
+    roomData: null,
+    roomName: null
+  },
+  
+  // Get or create cached element
+  getCachedElement(key, createFn) {
+    if (!this.elementCache.has(key)) {
+      this.elementCache.set(key, createFn());
+    }
+    return this.elementCache.get(key);
+  },
+  
+  // Update element content without recreating
+  updateElementContent(element, newContent) {
+    if (element.innerHTML !== newContent) {
+      element.innerHTML = newContent;
+    }
+  },
+  
+  // Safe element removal with cleanup
+  safeRemoveElement(element) {
+    if (element && element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+  },
+  
+  // Clear cache when needed
+  clearCache() {
+    this.elementCache.clear();
+  }
+};
+
 // Custom confirmation modal function
 function showDeleteConfirmationModal(runType, runData, onConfirm) {
   // Create modal overlay
@@ -265,11 +306,11 @@ const MONSTER_STATS_CONFIG = [
     { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' }
 ];
 
-const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops', 'Willi Wasp'];
+const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dharalion', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops', 'Willi Wasp'];
 
 const ALL_CREATURES = ['Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord', 'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout', 'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin', 'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk', 'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman', 'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton', 'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental', 'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'];
 
-const ALL_EQUIPMENT = ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
+const ALL_EQUIPMENT = ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Earthborn Titan Armor', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Fireborn Giant Armor', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Paladin Armor', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull', 'Windborn Colossus Armor'];
 
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
@@ -283,6 +324,7 @@ const HARDCODED_MONSTER_STATS = {
   'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
   'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
   'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
+  'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
   'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
   'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
   'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
@@ -935,106 +977,391 @@ function formatLocalRunTime(ticks) {
   return `${ticks.toString()} ticks`;
 }
 
-// Global function to fetch leaderboard data for Maps Tab
-async function fetchMapsLeaderboardData() {
-  try {
+// Optimized data fetching system for Maps Tab
+const MapsDataFetcher = {
+  // Cache for different data types with individual TTLs
+  cache: new Map(),
+  pendingRequests: new Map(),
+  
+  // Rate limiting protection
+  rateLimit: {
+    lastRequestTime: 0,
+    requestCount: 0,
+    windowStart: 0,
+    maxRequests: 25, // Conservative limit (30 per 10s, but leave buffer)
+    windowMs: 10000  // 10 seconds
+  },
+  
+  // Cache TTLs in milliseconds
+  TTL: {
+    LEADERBOARDS: 5 * 60 * 1000, // 5 minutes
+    ROOM_DATA: 10 * 60 * 1000,   // 10 minutes
+    PLAYER_DATA: 2 * 60 * 1000   // 2 minutes
+  },
+  
+  // Get cached data with TTL check and error handling
+  getCached(key) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+    
+    const now = Date.now();
+    const ttl = this.TTL[key.split('-')[0].toUpperCase()] || this.TTL.LEADERBOARDS;
+    
+    // Check if cached data has an error
+    if (cached.data && cached.data.error) {
+      // For rate limit errors, use shorter TTL (30 seconds)
+      const errorTTL = cached.data.error === 'rate_limited' ? 30000 : 60000;
+      if (now - cached.timestamp < errorTTL) {
+        return cached.data; // Return error data to prevent repeated requests
+      }
+      this.cache.delete(key);
+      return null;
+    }
+    
+    // Normal TTL check
+    if (now - cached.timestamp > ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return cached.data;
+  },
+  
+  // Set cached data with timestamp
+  setCached(key, data) {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+    
+    // Limit cache size
+    if (this.cache.size > 20) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+  },
+  
+  // Check rate limit before making request
+  checkRateLimit() {
+    const now = Date.now();
+    
+    // Reset window if needed
+    if (now - this.rateLimit.windowStart > this.rateLimit.windowMs) {
+      this.rateLimit.requestCount = 0;
+      this.rateLimit.windowStart = now;
+    }
+    
+    // Check if we're at the limit
+    if (this.rateLimit.requestCount >= this.rateLimit.maxRequests) {
+      const timeToWait = this.rateLimit.windowMs - (now - this.rateLimit.windowStart);
+      throw new Error(`Rate limit exceeded. Please wait ${Math.ceil(timeToWait / 1000)} seconds.`);
+    }
+    
+    // Update rate limit counters
+    this.rateLimit.requestCount++;
+    this.rateLimit.lastRequestTime = now;
+  },
+  
+  // Optimized TRPC fetch with request deduplication and rate limiting
+  async fetchTRPC(method) {
+    // Check if request is already pending
+    if (this.pendingRequests.has(method)) {
+      return await this.pendingRequests.get(method);
+    }
+    
+    // Check cache first
+    const cached = this.getCached(method);
+    if (cached) {
+      return cached;
+    }
+    
+    // Check rate limit before making request
+    this.checkRateLimit();
+    
+    // Create new request
+    const requestPromise = this._makeTRPCRequest(method);
+    this.pendingRequests.set(method, requestPromise);
+    
+    try {
+      const result = await requestPromise;
+      this.setCached(method, result);
+      return result;
+    } finally {
+      this.pendingRequests.delete(method);
+    }
+  },
+  
+  // Actual TRPC request implementation with graceful error handling
+  async _makeTRPCRequest(method) {
+    const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
+    const url = `/api/trpc/${method}?batch=1&input=${inp}`;
+    
+    try {
+      const response = await fetch(url, {
+        headers: { 
+          'Accept': '*/*', 
+          'Content-Type': 'application/json', 
+          'X-Game-Version': '1' 
+        }
+      });
+      
+      if (response.status === 429) {
+        // Rate limited - cache this as a temporary failure
+        this.setCached(method, { error: 'rate_limited', timestamp: Date.now() });
+        throw new Error(`Rate limited. Please wait before trying again.`);
+      }
+      
+      if (!response.ok) {
+        throw new Error(`${method} → ${response.status}`);
+      }
+      
+      const json = await response.json();
+      return json[0].result.data.json;
+    } catch (error) {
+      // If it's a rate limit error, don't cache it
+      if (error.message.includes('Rate limited')) {
+        throw error;
+      }
+      
+      // For other errors, cache a temporary failure to prevent repeated requests
+      this.setCached(method, { error: 'request_failed', timestamp: Date.now() });
+      throw error;
+    }
+  },
+  
+  // Batch fetch all leaderboard data
+  async fetchAllLeaderboardData() {
     const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
     if (!playerState?.name) return null;
 
-    const cachedData = getCachedLeaderboardData('combined-leaderboards');
+    // Check for cached combined data
+    const cachedData = this.getCached('combined-leaderboards');
     if (cachedData) {
       return cachedData;
     }
 
-    // Create our own fetchTRPC function for Maps Tab
-    async function fetchTRPC(method) {
-      try {
-        if (cyclopediaState.pendingRequests.has(method)) return await cyclopediaState.pendingRequests.get(method);
+    try {
+      // Fetch all data in parallel with individual caching
+      const [best, lbs, roomsHighscores] = await Promise.all([
+        this.fetchTRPC('game.getTickHighscores'),
+        this.fetchTRPC('game.getTickLeaderboards'),
+        this.fetchTRPC('game.getRoomsHighscores')
+      ]);
 
-        const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
-        const url = `/api/trpc/${method}?batch=1&input=${inp}`;
-        
-        // Simple fetch for Maps Tab - match Characters Tab format
-        const promise = fetch(url, {
-          headers: { 'Accept': '*/*', 'Content-Type': 'application/json', 'X-Game-Version': '1' }
-        }).then(async (res) => {
-          if (!res.ok) throw new Error(`${method} → ${res.status}`);
-          const json = await res.json();
-          return json[0].result.data.json;
-        });
-        
-        cyclopediaState.pendingRequests.set(method, promise);
-        
-        const result = await promise;
-        cyclopediaState.pendingRequests.delete(method);
-        return result;
-      } catch (error) {
-        cyclopediaState.pendingRequests.delete(method);
-        throw error;
-      }
+      const data = {
+        best,
+        lbs,
+        roomsHighscores,
+        yourRooms: playerState.rooms,
+        ROOM_NAMES: globalThis.state.utils.ROOM_NAME
+      };
+
+      this.setCached('combined-leaderboards', data);
+      return data;
+    } catch (error) {
+      console.error('[Cyclopedia] Error fetching maps leaderboard data:', error);
+      return null;
     }
-
-    // Fetch fresh data if not cached
-    const [best, lbs, roomsHighscores] = await Promise.all([
-      fetchTRPC('game.getTickHighscores'),
-      fetchTRPC('game.getTickLeaderboards'),
-      fetchTRPC('game.getRoomsHighscores')
-    ]);
-
-    const data = {
-      best,
-      lbs,
-      roomsHighscores,
-      yourRooms: playerState.rooms,
-      ROOM_NAMES: globalThis.state.utils.ROOM_NAME
-    };
-
-    setCachedLeaderboardData('combined-leaderboards', data);
-    return data;
-  } catch (error) {
-    console.error('[Cyclopedia] Error fetching maps leaderboard data:', error);
-    return null;
+  },
+  
+  // Clear cache
+  clearCache() {
+    this.cache.clear();
+    this.pendingRequests.clear();
   }
+};
+
+// Global function to fetch leaderboard data for Maps Tab (now uses optimized fetcher)
+async function fetchMapsLeaderboardData() {
+  return await MapsDataFetcher.fetchAllLeaderboardData();
 }
 
-// Image caching functions for room thumbnails
-function getCachedRoomThumbnail(roomCode) {
-  return cyclopediaState.cache.roomThumbnails.get(roomCode);
-}
-
-function setCachedRoomThumbnail(roomCode, imgElement) {
-  cyclopediaState.cache.roomThumbnails.set(roomCode, imgElement);
-  // Enforce cache size limit
-  if (cyclopediaState.cache.roomThumbnails.size > cyclopediaState.cache.maxSize.roomThumbnails) {
-    const firstKey = cyclopediaState.cache.roomThumbnails.keys().next().value;
-    cyclopediaState.cache.roomThumbnails.delete(firstKey);
+// Optimized room thumbnail caching system
+const RoomThumbnailCache = {
+  cache: new Map(),
+  maxSize: 50,
+  
+  // Get cached thumbnail
+  get(roomCode) {
+    return this.cache.get(roomCode);
+  },
+  
+  // Set cached thumbnail with size info
+  set(roomCode, imgElement, size = 32) {
+    this.cache.set(roomCode, {
+      element: imgElement,
+      size: size,
+      timestamp: Date.now()
+    });
+    
+    // Enforce cache size limit
+    if (this.cache.size > this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+  },
+  
+  // Create or get cached thumbnail
+  createThumbnail(roomCode, roomName, size = 32) {
+    const cached = this.get(roomCode);
+    
+    if (cached && cached.size === size) {
+      // Return cached element if same size
+      return cached.element.cloneNode(true);
+    }
+    
+    // Create new thumbnail
+    const thumbnail = document.createElement('img');
+    thumbnail.src = `/assets/room-thumbnails/${roomCode}.png`;
+    thumbnail.alt = roomName;
+    thumbnail.style.cssText = `
+      width: ${size}px;
+      height: ${size}px;
+      border-radius: 4px;
+      object-fit: cover;
+      border: 1px solid #666;
+    `;
+    
+    // Cache the thumbnail
+    this.set(roomCode, thumbnail, size);
+    
+    return thumbnail;
+  },
+  
+  // Clear cache
+  clear() {
+    this.cache.clear();
   }
-}
+};
 
-function createRoomThumbnail(roomCode, roomName, size = 32) {
-  let cachedThumbnail = getCachedRoomThumbnail(roomCode);
+// Optimized creature list management system
+const CreatureListManager = {
+  // Element pool for reusing DOM elements
+  elementPool: {
+    creatureRows: [],
+    creatureIcons: [],
+    infoContainers: [],
+    equipmentContainers: []
+  },
   
-  if (cachedThumbnail) {
-    const clonedThumbnail = cachedThumbnail.cloneNode(true);
-    clonedThumbnail.style.width = `${size}px`;
-    clonedThumbnail.style.height = `${size}px`;
-    return clonedThumbnail;
+  // Cache for creature data to avoid repeated lookups
+  creatureDataCache: new Map(),
+  
+  // Get element from pool or create new one
+  getPooledElement(type, createFn) {
+    if (this.elementPool[type].length > 0) {
+      const element = this.elementPool[type].pop();
+      // Reset element state
+      element.innerHTML = '';
+      element.className = '';
+      element.removeAttribute('data-highlighted');
+      element.removeAttribute('data-recent');
+      element.removeAttribute('data-multiselected');
+      return element;
+    }
+    return createFn();
+  },
+  
+  // Return element to pool
+  returnToPool(type, element) {
+    if (element && element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+    // Clean up event listeners and references
+    if (element.removeEventListener) {
+      element.removeEventListener('click', null);
+      element.removeEventListener('mouseenter', null);
+      element.removeEventListener('mouseleave', null);
+    }
+    // Reset element
+    element.innerHTML = '';
+    element.className = '';
+    element.removeAttribute('data-highlighted');
+    element.removeAttribute('data-recent');
+    element.removeAttribute('data-multiselected');
+    
+    this.elementPool[type].push(element);
+  },
+  
+  // Get cached creature data
+  getCachedCreatureData(actorId) {
+    return this.creatureDataCache.get(actorId);
+  },
+  
+  // Cache creature data
+  cacheCreatureData(actorId, data) {
+    this.creatureDataCache.set(actorId, {
+      data,
+      timestamp: Date.now()
+    });
+    
+    // Limit cache size
+    if (this.creatureDataCache.size > 100) {
+      const firstKey = this.creatureDataCache.keys().next().value;
+      this.creatureDataCache.delete(firstKey);
+    }
+  },
+  
+  // Simplified creature icon creation
+  createSimplifiedCreatureIcon(actor) {
+    const iconContainer = this.getPooledElement('creatureIcons', () => {
+      const div = document.createElement('div');
+      div.style.cssText = `
+        width: 40px;
+        height: 40px;
+        position: relative;
+        border-radius: 4px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid #666;
+      `;
+      return div;
+    });
+    
+    // Create portrait image
+    const img = document.createElement('img');
+    img.src = `/assets/portraits/${actor.id}.png`;
+    img.alt = 'creature';
+    img.style.cssText = `
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    `;
+    
+    // Create level badge
+    const levelBadge = document.createElement('div');
+    levelBadge.textContent = actor.level || 1;
+    levelBadge.style.cssText = `
+      position: absolute;
+      bottom: 2px;
+      left: 2px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 3px;
+      border-radius: 2px;
+      font-weight: bold;
+    `;
+    
+    iconContainer.appendChild(img);
+    iconContainer.appendChild(levelBadge);
+    
+    return iconContainer;
+  },
+  
+  // Clean up all pooled elements
+  cleanup() {
+    Object.keys(this.elementPool).forEach(type => {
+      this.elementPool[type].forEach(element => {
+        if (element && element.parentNode) {
+          element.parentNode.removeChild(element);
+        }
+      });
+      this.elementPool[type] = [];
+    });
+    this.creatureDataCache.clear();
   }
-  
-  const thumbnail = document.createElement('img');
-  thumbnail.src = `/assets/room-thumbnails/${roomCode}.png`;
-  thumbnail.alt = roomName;
-  thumbnail.style.cssText = `
-    width: ${size}px;
-    height: ${size}px;
-    border-radius: 4px;
-    object-fit: cover;
-  `;
-  
-  setCachedRoomThumbnail(roomCode, thumbnail);
-  
-  return thumbnail;
-}
+};
 
 const MONSTER_MAP_CONFIG = { maxSearchId: 1000, maxConsecutiveFailures: 10, fallbackMaxId: 200 };
 const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
@@ -3329,7 +3656,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const roomHeader = document.createElement('div');
               roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
 
-              const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+              const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
 
               const roomTitle = document.createElement('div');
               roomTitle.style.cssText = `font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; font-size: 14px;`;
@@ -3375,7 +3702,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const roomHeader = document.createElement('div');
             roomHeader.style.cssText = `display: flex; align-items: center; gap: 10px; margin-bottom: 8px;`;
 
-            const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+            const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
 
             const roomTitle = document.createElement('div');
             roomTitle.style.cssText = `font-weight: bold; color: ${LAYOUT_CONSTANTS.COLORS.TEXT}; font-size: 14px;`;
@@ -3800,7 +4127,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-radius: 4px;
             overflow: hidden;
           `;
-          const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+          const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
           thumbnail.style.width = '100%';
           thumbnail.style.height = '100%';
           mapIcon.appendChild(thumbnail);
@@ -4137,24 +4464,39 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           return;
         }
         
+        // Use new rooms data from profilePageData if available, otherwise fall back to highscores
+        const searchedRooms = searchedProfileData.rooms || {};
         const searchedHighscores = searchedProfileData.highscores || [];
         
         const searchedHighscoresMap = {};
         const searchedRankPointsMap = {};
         
-        searchedHighscores.forEach(score => {
-          if (score.roomId) {
-            if (score.rank === -1) {
-              if (score.ticks && (!searchedHighscoresMap[score.roomId] || score.ticks < searchedHighscoresMap[score.roomId].ticks)) {
-                searchedHighscoresMap[score.roomId] = score;
-              }
-            } else if (score.rank > 0) {
-              if (!searchedRankPointsMap[score.roomId] || score.rank < searchedRankPointsMap[score.roomId].rank) {
-                searchedRankPointsMap[score.roomId] = score;
+        // First, try to use the new rooms data structure
+        if (Object.keys(searchedRooms).length > 0) {
+          Object.entries(searchedRooms).forEach(([roomId, roomData]) => {
+            if (roomData.ticks !== undefined && roomData.ticks >= 0) {
+              searchedHighscoresMap[roomId] = { roomId, ticks: roomData.ticks };
+            }
+            if (roomData.rank !== undefined && roomData.rank > 0) {
+              searchedRankPointsMap[roomId] = { roomId, rank: roomData.rank };
+            }
+          });
+        } else {
+          // Fall back to the old highscores data structure
+          searchedHighscores.forEach(score => {
+            if (score.roomId) {
+              if (score.rank === -1) {
+                if (score.ticks && (!searchedHighscoresMap[score.roomId] || score.ticks < searchedHighscoresMap[score.roomId].ticks)) {
+                  searchedHighscoresMap[score.roomId] = score;
+                }
+              } else if (score.rank > 0) {
+                if (!searchedRankPointsMap[score.roomId] || score.rank < searchedRankPointsMap[score.roomId].rank) {
+                  searchedRankPointsMap[score.roomId] = score;
+                }
               }
             }
-          }
-        });
+          });
+        }
         function formatTime(ms) {
           if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
           const totalSeconds = Math.floor(ms / 1000);
@@ -4240,7 +4582,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-radius: 4px;
             overflow: hidden;
           `;
-          const thumbnail = createRoomThumbnail(roomCode, roomName, 32);
+          const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
           thumbnail.style.width = '100%';
           thumbnail.style.height = '100%';
           mapIcon.appendChild(thumbnail);
@@ -6806,24 +7148,48 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   console.log('[Cyclopedia] Successfully copied speedrun replay command to clipboard:', replayCommand);
                   // Update status bar with success message
                   if (row3 && row3.statusBar) {
+                    // Check if there's an active delete confirmation
+                    const hasActiveDeleteConfirmation = document.querySelector('[data-confirming="true"]');
+                    if (hasActiveDeleteConfirmation) {
+                      // Don't change the status bar if there's an active delete confirmation
+                      return;
+                    }
+                    
+                    // Clear any existing timeout
+                    if (row3.statusBarTimeout) {
+                      clearTimeout(row3.statusBarTimeout);
+                    }
                     row3.statusBar.textContent = 'Successfully copied run!';
                     row3.statusBar.style.color = '#4CAF50';
                     // Reset status bar after 3 seconds
-                    setTimeout(() => {
-                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                    row3.statusBarTimeout = setTimeout(() => {
+                      row3.statusBar.textContent = 'These are your local top records.';
                       row3.statusBar.style.color = '#ccc';
+                      row3.statusBarTimeout = null;
                     }, 3000);
                   }
                 }).catch(err => {
                   console.error('[Cyclopedia] Failed to copy speedrun replay command:', err);
                   // Update status bar with error message
                   if (row3 && row3.statusBar) {
+                    // Check if there's an active delete confirmation
+                    const hasActiveDeleteConfirmation = document.querySelector('[data-confirming="true"]');
+                    if (hasActiveDeleteConfirmation) {
+                      // Don't change the status bar if there's an active delete confirmation
+                      return;
+                    }
+                    
+                    // Clear any existing timeout
+                    if (row3.statusBarTimeout) {
+                      clearTimeout(row3.statusBarTimeout);
+                    }
                     row3.statusBar.textContent = 'Failed to copy run!';
                     row3.statusBar.style.color = '#f44336';
                     // Reset status bar after 3 seconds
-                    setTimeout(() => {
-                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                    row3.statusBarTimeout = setTimeout(() => {
+                      row3.statusBar.textContent = 'These are your local top records.';
                       row3.statusBar.style.color = '#ccc';
+                      row3.statusBarTimeout = null;
                     }, 3000);
                   }
                 });
@@ -6869,11 +7235,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       if (success) {
                         // Update status bar
                         if (row3 && row3.statusBar) {
+                          // Clear any existing timeout
+                          if (row3.statusBarTimeout) {
+                            clearTimeout(row3.statusBarTimeout);
+                          }
                           row3.statusBar.textContent = 'Run deleted successfully!';
                           row3.statusBar.style.color = '#4CAF50';
-                          setTimeout(() => {
-                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                          row3.statusBarTimeout = setTimeout(() => {
+                            row3.statusBar.textContent = 'These are your local top records.';
                             row3.statusBar.style.color = '#ccc';
+                            row3.statusBarTimeout = null;
                           }, 3000);
                         }
                         // Refresh the table
@@ -6904,6 +7275,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   deleteCell.style.color = '#ff0000';
                   deleteCell.setAttribute('data-confirming', 'true');
                   deleteCell.title = 'Click again to confirm deletion';
+                  
+                  // Clear any existing timeout before showing delete confirmation
+                  if (row3 && row3.statusBar && row3.statusBarTimeout) {
+                    clearTimeout(row3.statusBarTimeout);
+                    row3.statusBarTimeout = null;
+                  }
                   
                   // Update status bar
                   if (row3 && row3.statusBar) {
@@ -7412,11 +7789,16 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       if (success) {
                         // Update status bar
                         if (row3 && row3.statusBar) {
+                          // Clear any existing timeout
+                          if (row3.statusBarTimeout) {
+                            clearTimeout(row3.statusBarTimeout);
+                          }
                           row3.statusBar.textContent = 'Run deleted successfully!';
                           row3.statusBar.style.color = '#4CAF50';
-                          setTimeout(() => {
-                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                          row3.statusBarTimeout = setTimeout(() => {
+                            row3.statusBar.textContent = 'These are your local top records.';
                             row3.statusBar.style.color = '#ccc';
+                            row3.statusBarTimeout = null;
                           }, 3000);
                         }
                         // Refresh the table
@@ -7447,6 +7829,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   deleteCell.style.color = '#ff0000';
                   deleteCell.setAttribute('data-confirming', 'true');
                   deleteCell.title = 'Click again to confirm deletion';
+                  
+                  // Clear any existing timeout before showing delete confirmation
+                  if (row3 && row3.statusBar && row3.statusBarTimeout) {
+                    clearTimeout(row3.statusBarTimeout);
+                    row3.statusBarTimeout = null;
+                  }
                   
                   // Update status bar
                   if (row3 && row3.statusBar) {
@@ -7495,7 +7883,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Descriptive bullet points
       const bulletPoints = document.createElement('div');
       bulletPoints.style.marginBottom = '15px';
-      bulletPoints.style.fontSize = '12px';
+      bulletPoints.style.fontSize = '11px';
       bulletPoints.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       bulletPoints.style.color = '#ccc';
       bulletPoints.style.lineHeight = '1.4';
@@ -7512,7 +7900,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       statusBar.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
       statusBar.style.border = '1px solid #444';
       statusBar.style.borderRadius = '4px';
-      statusBar.style.fontSize = '12px';
+      statusBar.style.fontSize = '11px';
       statusBar.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       statusBar.style.color = '#ccc';
       statusBar.style.textAlign = 'center';
@@ -7520,7 +7908,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       statusBar.style.display = 'flex';
       statusBar.style.alignItems = 'center';
       statusBar.style.justifyContent = 'center';
-      statusBar.textContent = 'Select to copy or delete run.';
+      statusBar.textContent = 'These are your local top records.';
       row3.appendChild(statusBar);
       
       // Store status bar reference for later use
@@ -7539,7 +7927,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         
         // Reset status bar
         if (row3 && row3.statusBar) {
-          row3.statusBar.textContent = 'Select to copy or delete run.';
+          // Clear any existing timeout
+          if (row3.statusBarTimeout) {
+            clearTimeout(row3.statusBarTimeout);
+            row3.statusBarTimeout = null;
+          }
+          row3.statusBar.textContent = 'These are your local top records.';
           row3.statusBar.style.color = '#ccc';
         }
       };
@@ -7561,9 +7954,21 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       statsContainer.appendChild(row2);
       statsContainer.appendChild(row3);
       
-      // Fetch and populate leaderboard data
+      // Fetch and populate leaderboard data with error handling
       fetchMapsLeaderboardData().then(data => {
         if (data && selectedMap) {
+          // Check if data contains error information
+          if (data.error) {
+            if (data.error === 'rate_limited') {
+              speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+              rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+            } else {
+              speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+              rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+            }
+            return;
+          }
+          
           const { best, roomsHighscores, yourRooms } = data;
           const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
           
@@ -7618,318 +8023,238 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
       }).catch(error => {
         console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
-        speedrunContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
-        rankPointsContent.innerHTML = '<div style="color: #666;">Error loading data</div>';
+        
+        // Handle different types of errors gracefully
+        if (error.message.includes('Rate limited')) {
+          speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+          rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+        } else {
+          speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+          rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+        }
       });
       
       return statsContainer;
     }
 
-    // Helper function to create creature list section
+    // Optimized creature list section with memory management
     function createCreatureListSection(roomActors, selectedMap) {
       const creaturesContainer = document.createElement('div');
       creaturesContainer.style.marginTop = '4px';
       creaturesContainer.style.textAlign = 'center';
 
       if (roomActors && roomActors.length > 0) {
-        // Filter out null/invalid actors first, then sort creatures by Level -> Name
+        // Filter and sort actors efficiently
         const validActors = roomActors.filter(actor => actor && actor.id);
         const sortedActors = validActors.sort((a, b) => {
-          // First sort by level (descending)
           const levelA = a.level || 1;
           const levelB = b.level || 1;
-          if (levelA !== levelB) {
-            return levelB - levelA;
-          }
+          if (levelA !== levelB) return levelB - levelA;
           
-          // If levels are equal, sort by name (ascending)
-          let nameA = 'Unknown';
-          let nameB = 'Unknown';
-          
-          try {
-            if (globalThis.state?.utils?.getMonster) {
-              const monsterDataA = globalThis.state.utils.getMonster(a.id);
-              if (monsterDataA?.metadata?.name) {
-                nameA = monsterDataA.metadata.name;
-              }
-            }
-          } catch (error) {}
-          
-          try {
-            if (globalThis.state?.utils?.getMonster) {
-              const monsterDataB = globalThis.state.utils.getMonster(b.id);
-              if (monsterDataB?.metadata?.name) {
-                nameB = monsterDataB.metadata.name;
-              }
-            }
-          } catch (error) {}
-          
+          // Use cached creature data for name comparison
+          const nameA = CreatureListManager.getCachedCreatureData(a.id)?.data?.name || 'Unknown';
+          const nameB = CreatureListManager.getCachedCreatureData(b.id)?.data?.name || 'Unknown';
           return nameA.localeCompare(nameB);
         });
         
         const creaturesGrid = document.createElement('div');
-        creaturesGrid.style.display = 'flex';
-        creaturesGrid.style.flexDirection = 'column';
-        creaturesGrid.style.gap = '4px';
-        creaturesGrid.style.width = '100%';
-        creaturesGrid.style.maxWidth = '100%';
+        creaturesGrid.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 100%;
+          max-width: 100%;
+        `;
         
-        sortedActors.forEach((actor, index) => {
-          if (actor && actor.id) {
-            try {
-              console.log('[Cyclopedia] Processing actor:', actor);
-              
-              // Create creature row container
-              const creatureRow = document.createElement('div');
-              creatureRow.style.display = 'flex';
-              creatureRow.style.alignItems = 'center';
-              creatureRow.style.justifyContent = 'space-between';
-              creatureRow.style.width = '100%';
-              creatureRow.style.padding = '4px 8px';
-              creatureRow.style.marginBottom = '4px';
-              creatureRow.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-              creatureRow.style.borderRadius = '4px';
-              
-              // Left: Creature icon (using Dice_Roller.js style)
-              const iconContainer = document.createElement('div');
-              iconContainer.style.flex = '0 0 50px';
-              iconContainer.style.display = 'flex';
-              iconContainer.style.justifyContent = 'center';
-              iconContainer.style.alignItems = 'center';
-              
-              // Create creature icon using Dice_Roller.js approach
-              const createCreatureIcon = (actor) => {
-                // Container slot
-                const slot = document.createElement('div');
-                slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
-                slot.setAttribute('data-highlighted', 'false');
-                slot.setAttribute('data-recent', 'false');
-                slot.setAttribute('data-multiselected', 'false');
-                slot.style.width = '40px';
-                slot.style.height = '40px';
-                slot.style.minWidth = '40px';
-                slot.style.minHeight = '40px';
-                slot.style.maxWidth = '40px';
-                slot.style.maxHeight = '40px';
-                
-                // Rarity border/background (calculate from stats if available)
-                const getRarityFromStats = (stats) => {
-                  const statSum = (stats.hp || 0) + (stats.ad || 0) + (stats.ap || 0) + (stats.armor || 0) + (stats.magicResist || 0);
-                  let rarity = 1;
-                  if (statSum >= 80) rarity = 5;
-                  else if (statSum >= 70) rarity = 4;
-                  else if (statSum >= 60) rarity = 3;
-                  else if (statSum >= 50) rarity = 2;
-                  return rarity;
-                };
-                
-                // Try to get creature stats for rarity calculation
-                let rarity = 1;
-                try {
-                  if (globalThis.state?.utils?.getMonster) {
-                    const monsterData = globalThis.state.utils.getMonster(actor.id);
-                    if (monsterData) {
-                      rarity = getRarityFromStats(monsterData);
-                    }
-                  }
-                } catch (error) {
-                  console.warn('[Cyclopedia] Could not get monster data for rarity calculation:', error);
-                }
-                
-                const rarityDiv = document.createElement('div');
-                rarityDiv.setAttribute('role', 'none');
-                rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-                rarityDiv.setAttribute('data-rarity', rarity);
-                slot.appendChild(rarityDiv);
-                
-                // Star tier icon (if available)
-                if (actor.tier) {
-                  const starImg = document.createElement('img');
-                  starImg.alt = 'star tier';
-                  starImg.src = `/assets/icons/star-tier-${actor.tier}.png`;
-                  starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-                  slot.appendChild(starImg);
-                }
-                
-                // Level badge
-                const levelDiv = document.createElement('div');
-                levelDiv.className = 'creature-level-badge';
-                levelDiv.style.position = 'absolute';
-                levelDiv.style.bottom = '2px';
-                levelDiv.style.left = '2px';
-                levelDiv.style.zIndex = '3';
-                levelDiv.style.fontSize = '16px';
-                levelDiv.style.color = '#fff';
-                levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
-                levelDiv.style.letterSpacing = '0.5px';
-                levelDiv.textContent = actor.level || 1;
-                slot.appendChild(levelDiv);
-                
-                // Portrait image
-                const img = document.createElement('img');
-                img.className = 'pixelated ml-auto';
-                img.alt = 'creature';
-                img.width = 40;
-                img.height = 40;
-                img.style.width = '40px';
-                img.style.height = '40px';
-                img.style.minWidth = '40px';
-                img.style.minHeight = '40px';
-                img.style.maxWidth = '40px';
-                img.style.maxHeight = '40px';
-                img.style.objectFit = 'contain';
-                img.src = `/assets/portraits/${actor.id}.png`;
-                slot.appendChild(img);
-                
-                return slot;
-              };
-              
-              const creatureIcon = createCreatureIcon(actor);
-              iconContainer.appendChild(creatureIcon);
-              
-              // Middle: Name and level
-              const infoContainer = document.createElement('div');
-              infoContainer.style.flex = '1';
-              infoContainer.style.display = 'flex';
-              infoContainer.style.flexDirection = 'column';
-              infoContainer.style.alignItems = 'center';
-              infoContainer.style.justifyContent = 'center';
-              infoContainer.style.padding = '0 8px';
-              
-              // Get creature name
-              let creatureName = 'Unknown';
+        sortedActors.forEach((actor) => {
+          if (!actor || !actor.id) return;
+          
+          try {
+            // Get or create creature row from pool
+            const creatureRow = CreatureListManager.getPooledElement('creatureRows', () => {
+              const row = document.createElement('div');
+              row.style.cssText = `
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                width: 100%;
+                padding: 4px 8px;
+                margin-bottom: 4px;
+                background-color: rgba(255, 255, 255, 0.05);
+                border-radius: 4px;
+              `;
+              return row;
+            });
+            
+            // Left: Creature icon
+            const iconContainer = document.createElement('div');
+            iconContainer.style.cssText = `
+              flex: 0 0 50px;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+            `;
+            
+            const creatureIcon = CreatureListManager.createSimplifiedCreatureIcon(actor);
+            iconContainer.appendChild(creatureIcon);
+            
+            // Middle: Name and level
+            const infoContainer = CreatureListManager.getPooledElement('infoContainers', () => {
+              const container = document.createElement('div');
+              container.style.cssText = `
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 0 8px;
+              `;
+              return container;
+            });
+            
+            // Get creature name from cache or fetch
+            let creatureName = 'Unknown';
+            const cachedData = CreatureListManager.getCachedCreatureData(actor.id);
+            if (cachedData) {
+              creatureName = cachedData.data.name;
+            } else {
               try {
                 if (globalThis.state?.utils?.getMonster) {
                   const monsterData = globalThis.state.utils.getMonster(actor.id);
                   if (monsterData?.metadata?.name) {
                     creatureName = monsterData.metadata.name;
+                    // Cache the data
+                    CreatureListManager.cacheCreatureData(actor.id, {
+                      name: creatureName,
+                      data: monsterData
+                    });
                   }
                 }
               } catch (error) {
                 console.warn('[Cyclopedia] Could not get creature name for ID:', actor.id);
               }
-              
-              const nameElement = document.createElement('div');
-              nameElement.textContent = creatureName;
-              nameElement.style.fontWeight = 'bold';
-              nameElement.style.fontSize = '14px';
-              nameElement.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
-              nameElement.style.textAlign = 'center';
-              
-              const levelElement = document.createElement('div');
-              levelElement.textContent = `Level ${actor.level || 1}`;
-              levelElement.style.fontSize = '12px';
-              levelElement.style.color = '#888';
-              levelElement.style.textAlign = 'center';
-              
-              infoContainer.appendChild(nameElement);
-              infoContainer.appendChild(levelElement);
-              
-              // Right: Equipment (if any)
-              const equipmentContainer = document.createElement('div');
-              equipmentContainer.style.flex = '0 0 60px';
-              equipmentContainer.style.display = 'flex';
-              equipmentContainer.style.justifyContent = 'center';
-              equipmentContainer.style.alignItems = 'center';
-              
-              if (actor.equip && actor.equip.gameId) {
-                // Show equipment using the same approach as Better Forge.js
-                try {
-                  let equipmentSprite;
-                  if (globalThis.state?.utils?.getEquipment) {
-                    const equipmentData = globalThis.state.utils.getEquipment(actor.equip.gameId);
-                    if (equipmentData?.metadata?.spriteId && api?.ui?.components?.createItemPortrait) {
-                      equipmentSprite = api.ui.components.createItemPortrait({
-                        itemId: equipmentData.metadata.spriteId,
-                        tier: actor.equip.tier || 1,
-                        stat: actor.equip.stat || 'hp',
-                        size: 'small'
-                      });
-                      
-                      // Remove button functionality while keeping visual appearance
-                      if (equipmentSprite.tagName === 'BUTTON') {
-                        // Extract the inner content and create a div instead
-                        const innerContent = equipmentSprite.innerHTML;
-                        const divSprite = document.createElement('div');
-                        divSprite.innerHTML = innerContent;
-                        divSprite.className = equipmentSprite.className;
-                        divSprite.style.cssText = equipmentSprite.style.cssText;
-                        
-                        // Remove all clickable behavior from the div and its children
-                        divSprite.style.pointerEvents = 'none';
-                        divSprite.style.cursor = 'default';
-                        
-                        // Remove any clickable elements inside
-                        const clickableElements = divSprite.querySelectorAll('button, [onclick], [role="button"]');
-                        clickableElements.forEach(el => {
-                          el.style.pointerEvents = 'none';
-                          el.style.cursor = 'default';
-                          el.removeAttribute('onclick');
-                          el.removeAttribute('role');
-                          el.removeAttribute('tabindex');
-                        });
-                        
-                        // Set size to 30px
-                        [divSprite.style.width, divSprite.style.height] = ['30px', '30px'];
-                        
-                        // Also adjust the inner portrait if it exists
-                        const portrait = divSprite.querySelector('.equipment-portrait');
-                        if (portrait) {
-                          portrait.style.width = '30px';
-                          portrait.style.height = '30px';
-                          portrait.style.pointerEvents = 'none';
-                        }
-                        
-                        equipmentSprite = divSprite;
-                      } else {
-                        // Set size to 30px
-                        [equipmentSprite.style.width, equipmentSprite.style.height] = ['30px', '30px'];
-                        
-                        // Also adjust the inner portrait if it exists
-                        const portrait = equipmentSprite.querySelector('.equipment-portrait');
-                        if (portrait) {
-                          portrait.style.width = '30px';
-                          portrait.style.height = '30px';
-                        }
-                      }
-                      
-                      console.log('[Cyclopedia] Created equipment sprite for:', actor.equip);
+            }
+            
+            const nameElement = document.createElement('div');
+            nameElement.textContent = creatureName;
+            nameElement.style.cssText = `
+              font-weight: bold;
+              font-size: 14px;
+              color: ${LAYOUT_CONSTANTS.COLORS.TEXT};
+              text-align: center;
+            `;
+            
+            const levelElement = document.createElement('div');
+            levelElement.textContent = `Level ${actor.level || 1}`;
+            levelElement.style.cssText = `
+              font-size: 12px;
+              color: #888;
+              text-align: center;
+            `;
+            
+            infoContainer.appendChild(nameElement);
+            infoContainer.appendChild(levelElement);
+            
+            // Right: Equipment (simplified)
+            const equipmentContainer = CreatureListManager.getPooledElement('equipmentContainers', () => {
+              const container = document.createElement('div');
+              container.style.cssText = `
+                flex: 0 0 60px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+              `;
+              return container;
+            });
+            
+            if (actor.equip && actor.equip.gameId) {
+              // Create equipment icon using the game's UI components
+              try {
+                if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
+                  // Get equipment data to get the correct spriteId
+                  let eqData = null;
+                  try {
+                    if (actor.equip.gameId && globalThis.state?.utils?.getEquipment) {
+                      eqData = globalThis.state.utils.getEquipment(actor.equip.gameId);
                     }
+                  } catch (e) {
+                    console.warn('[Cyclopedia] Error getting equipment data:', e);
                   }
                   
-                  if (equipmentSprite) {
-                    equipmentContainer.appendChild(equipmentSprite);
+                  const equipmentPortrait = api.ui.components.createItemPortrait({
+                    itemId: eqData?.metadata?.spriteId || actor.equip.gameId,
+                    tier: actor.equip.tier || 1
+                  });
+                  
+                  // Check if we got a valid DOM element
+                  if (equipmentPortrait && equipmentPortrait.nodeType) {
+                    // If it's a button, get the first child (the actual portrait)
+                    if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
+                      const firstChild = equipmentPortrait.firstChild;
+                      if (firstChild && firstChild.nodeType) {
+                        equipmentPortrait.removeChild(firstChild);
+                        equipmentContainer.appendChild(firstChild);
+                      } else {
+                        // Invalid first child, fallback to text
+                        equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                      }
+                    } else {
+                      // Direct append if it's not a button
+                      equipmentContainer.appendChild(equipmentPortrait);
+                    }
+                    
+                    // Style the equipment container
+                    equipmentContainer.style.cssText += `
+                      display: flex;
+                      justify-content: center;
+                      align-items: center;
+                      width: 40px;
+                      height: 40px;
+                    `;
                   } else {
-                    // Fallback to text representation
+                    // Invalid portrait returned, fallback to text
                     equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
-                    equipmentContainer.style.fontSize = '12px';
-                    equipmentContainer.style.color = '#888';
-                    equipmentContainer.style.fontWeight = 'bold';
+                    equipmentContainer.style.cssText += `
+                      font-size: 12px;
+                      color: #888;
+                      font-weight: bold;
+                    `;
                   }
-                } catch (error) {
-                  console.warn('[Cyclopedia] Could not create equipment sprite:', error);
+                } else {
+                  // Fallback to text if UI components not available
                   equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
-                  equipmentContainer.style.fontSize = '12px';
-                  equipmentContainer.style.color = '#888';
-                  equipmentContainer.style.fontWeight = 'bold';
+                  equipmentContainer.style.cssText += `
+                    font-size: 12px;
+                    color: #888;
+                    font-weight: bold;
+                  `;
                 }
-              } else {
-                equipmentContainer.textContent = '—';
-                equipmentContainer.style.fontSize = '14px';
-                equipmentContainer.style.color = '#666';
+              } catch (error) {
+                console.warn('[Cyclopedia] Error creating equipment portrait:', error);
+                // Fallback to text
+                equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
+                equipmentContainer.style.cssText += `
+                  font-size: 12px;
+                  color: #888;
+                  font-weight: bold;
+                `;
               }
-              
-              // Assemble the row
-              creatureRow.appendChild(iconContainer);
-              creatureRow.appendChild(infoContainer);
-              creatureRow.appendChild(equipmentContainer);
-              
-              creaturesGrid.appendChild(creatureRow);
-            } catch (error) {
-              console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
+            } else {
+              equipmentContainer.textContent = '—';
+              equipmentContainer.style.cssText += `
+                font-size: 14px;
+                color: #666;
+              `;
             }
-          } else {
-            console.log('[Cyclopedia] Skipping invalid actor:', actor);
+            
+            // Assemble the row
+            creatureRow.appendChild(iconContainer);
+            creatureRow.appendChild(infoContainer);
+            creatureRow.appendChild(equipmentContainer);
+            
+            creaturesGrid.appendChild(creatureRow);
+          } catch (error) {
+            console.error('[Cyclopedia] Error creating creature row for actor:', actor, error);
           }
         });
         
@@ -7937,23 +8262,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       } else {
         const noCreaturesMsg = document.createElement('p');
         noCreaturesMsg.textContent = `No creatures found on this map. (Room ID: ${selectedMap})`;
-        noCreaturesMsg.style.color = '#888';
-        noCreaturesMsg.style.fontStyle = 'italic';
-        creaturesContainer.appendChild(noCreaturesMsg);
-        
-        // Add debug info
-        const debugInfo = document.createElement('div');
-        debugInfo.style.marginTop = '10px';
-        debugInfo.style.fontSize = '12px';
-        debugInfo.style.color = '#666';
-        debugInfo.innerHTML = `
-          <strong>Debug Info:</strong><br>
-          Available Rooms: ${Object.keys(globalThis.state?.utils?.ROOMS || {}).length}<br>
-          Available Regions: ${globalThis.state?.utils?.REGIONS?.length || 0}<br>
-          Room Data: ${roomData ? 'Found' : 'Not found'}<br>
-          Actors: ${roomActors ? roomActors.length : 'None'}
+        noCreaturesMsg.style.cssText = `
+          color: #888;
+          font-style: italic;
         `;
-        creaturesContainer.appendChild(debugInfo);
+        creaturesContainer.appendChild(noCreaturesMsg);
       }
       
       return creaturesContainer;
@@ -8181,6 +8494,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         fontWeight: 'bold', color: LAYOUT_CONSTANTS.COLORS.TEXT
       });
       col3.classList.add('text-whiteHighlight');
+      
+      // Add content areas for optimized updates
+      const col2Content = document.createElement('div');
+      col2Content.className = 'maps-content-area';
+      col2Content.style.flex = '1';
+      col2Content.style.width = '100%';
+      col2Content.style.overflowY = 'auto';
+      
+      const col3Content = document.createElement('div');
+      col3Content.className = 'maps-content-area';
+      col3Content.style.flex = '1';
+      col3Content.style.width = '100%';
+      col3Content.style.overflowY = 'auto';
 
       // Create titles for the columns
       const col2Title = document.createElement('h2');
@@ -8198,6 +8524,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       col2TitleP.textContent = 'Map Information';
       col2Title.appendChild(col2TitleP);
       col2.appendChild(col2Title);
+      col2.appendChild(col2Content);
 
       const col3Title = document.createElement('h2');
       col3Title.className = 'widget-top widget-top-text pixel-font-16';
@@ -8214,24 +8541,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       col3TitleP.textContent = 'Statistics';
       col3Title.appendChild(col3TitleP);
       col3.appendChild(col3Title);
+      col3.appendChild(col3Content);
       
 
       
       function updateRightCol() {
         try {
-          // Clear both columns
-          col2.innerHTML = '';
-          col3.innerHTML = '';
+          // Check if we actually need to update
+          const roomData = globalThis.state?.utils?.ROOMS?.[selectedMap];
+          const roomName = globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap;
           
-          // Re-add titles
-          col2.appendChild(col2Title);
-          col3.appendChild(col3Title);
+          // Only update if state actually changed
+          if (MapsTabDOMOptimizer.currentState.selectedMap === selectedMap && 
+              MapsTabDOMOptimizer.currentState.roomData === roomData &&
+              MapsTabDOMOptimizer.currentState.roomName === roomName) {
+            return; // No change needed
+          }
+          
+          // Update current state
+          MapsTabDOMOptimizer.currentState.selectedMap = selectedMap;
+          MapsTabDOMOptimizer.currentState.roomData = roomData;
+          MapsTabDOMOptimizer.currentState.roomName = roomName;
+          
+          // Clear only content areas, preserve structure
+          const col2Content = col2.querySelector('.maps-content-area');
+          const col3Content = col3.querySelector('.maps-content-area');
+          
+          if (col2Content) col2Content.innerHTML = '';
+          if (col3Content) col3Content.innerHTML = '';
           
           if (selectedMap) {
-            // Get map data from game state
-            const roomData = globalThis.state?.utils?.ROOMS?.[selectedMap];
-            const roomName = globalThis.state?.utils?.ROOM_NAME?.[selectedMap] || selectedMap;
-            
             // Column 2: Two separate divs - Map Information and Creature Information
             
             // First div: Map Information
@@ -8355,9 +8694,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               contentContainer.appendChild(creaturesContainer);
             }
             
-            // Add both divs to col2
-            col2.appendChild(mapInfoDiv);
-            col2.appendChild(creatureInfoDiv);
+            // Add both divs to col2 content area
+            col2Content.appendChild(mapInfoDiv);
+            col2Content.appendChild(creatureInfoDiv);
             
             // Add the content container to the creature info div
             creatureInfoDiv.appendChild(contentContainer);
@@ -8373,7 +8712,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             // Column 3: Statistics
             const statsContainer = createStatisticsSection(selectedMap);
-            col3.appendChild(statsContainer);
+            col3Content.appendChild(statsContainer);
             
             // Tables are populated automatically when createStatisticsSection is called
           } else {
@@ -8388,7 +8727,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             col2Msg.style.fontWeight = 'bold';
             col2Msg.style.textAlign = 'center';
             col2Msg.textContent = 'Select a map to view information.';
-            col2.appendChild(col2Msg);
+            col2Content.appendChild(col2Msg);
             
             const col3Msg = document.createElement('div');
             col3Msg.style.display = 'flex';
@@ -8400,12 +8739,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             col3Msg.style.fontWeight = 'bold';
             col3Msg.style.textAlign = 'center';
             col3Msg.textContent = 'Select a map to view statistics.';
-            col3.appendChild(col3Msg);
+            col3Content.appendChild(col3Msg);
           }
         } catch (error) {
           console.error('[Cyclopedia] Error updating right columns:', error);
-          col2.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading map information.</div>';
-          col3.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading statistics.</div>';
+          col2Content.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading map information.</div>';
+          col3Content.innerHTML = '<div style="padding: 20px; color: #ccc; text-align: center;">Error loading statistics.</div>';
         }
       }
 
@@ -8526,8 +8865,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         content: content,
         buttons: [],
         onClose: () => {
-  
-
+          // Clean up creature list manager
+          CreatureListManager.cleanup();
+          
           cleanupCyclopediaModal();
         }
       });
@@ -9739,10 +10079,10 @@ function renderCyclopediaWelcomeColumn(playerName) {
 
 const CYCLOPEDIA_MAX_VALUES = {
   perfectCreatures: 68,
-  bisEquipments: 102,
+  bisEquipments: 114,
   exploredMaps: 64,
   bagOutfits: 192,
-  raids: 13
+  raids: 15
 };
 
 const CYCLOPEDIA_PROGRESS_STATS = [

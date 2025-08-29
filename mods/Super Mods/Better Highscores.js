@@ -452,6 +452,37 @@
     }
   }
 
+  // NEW: Function to detect autoplay mode
+  function isAutoplayMode() {
+    try {
+      // Method 1: Check player flags for autoplay
+      const playerSnapshot = globalThis.state?.player?.getSnapshot();
+      if (playerSnapshot?.context?.flags) {
+        const flags = new globalThis.state.utils.Flags(playerSnapshot.context.flags);
+        if (flags.isSet("autoplay")) {
+          return true;
+        }
+      }
+      
+      // Method 2: Check for autoplay UI elements
+      const autoplayContainer = document.querySelector(".widget-bottom[data-minimized='false']");
+      if (autoplayContainer) {
+        return true;
+      }
+      
+      // Method 3: Check for autoplay controls
+      const autoplayControls = document.querySelector('[data-autoplay], .autoplay-controls, .autoplay-panel');
+      if (autoplayControls) {
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.warn('[Better Highscores] Error checking autoplay mode:', error);
+      return false;
+    }
+  }
+
   function isBoardAnalyzing() {
     try {
       const now = Date.now();
@@ -468,6 +499,12 @@
         
         const pageText = document.body.textContent || '';
         const isAnalyzing = analysisIndicators.some(indicator => pageText.includes(indicator));
+        
+        // NEW: Don't treat autoplay as board analysis
+        if (isAutoplayMode() && isAnalyzing) {
+          log('[Better Highscores] Autoplay mode detected, ignoring board analysis indicators');
+          return false;
+        }
         
         if (isAnalyzing !== BetterHighscoresState.isBoardAnalyzing) {
           const wasAnalyzing = BetterHighscoresState.isBoardAnalyzing;
@@ -823,6 +860,7 @@
     }
     
     const currentlyInSandbox = isSandboxMode();
+    const currentlyInAutoplay = isAutoplayMode();
     
     // Handle sandbox mode entry (preserve container when first entering)
     if (currentlyInSandbox && !BetterHighscoresState.wasInSandboxMode) {
@@ -841,11 +879,13 @@
         return;
       }
       
-      // Don't update if it's the same map and we have recent data
+      // NEW: More lenient throttling for autoplay mode
       const now = Date.now();
+      const throttleDelay = currentlyInAutoplay ? 100 : PERFORMANCE.REFRESH_COOLDOWN;
+      
       if (mapCode === currentMapCode && 
           leaderboardContainer && 
-          now - BetterHighscoresState.lastUpdateTime < PERFORMANCE.REFRESH_COOLDOWN) {
+          now - BetterHighscoresState.lastUpdateTime < throttleDelay) {
         log('[Better Highscores] Skipping update - same map and recent data');
         return;
       }
@@ -979,8 +1019,11 @@
            if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
              const now = Date.now();
              
+             // NEW: More lenient throttling for autoplay mode
+             const throttleDelay = isAutoplayMode() ? 200 : 500;
+             
              // Throttle container updates to prevent spam
-             if (now - BetterHighscoresState.lastContainerUpdateTime < 500) {
+             if (now - BetterHighscoresState.lastContainerUpdateTime < throttleDelay) {
                log('[Better Highscores] Container update throttled');
                return;
              }
@@ -1033,8 +1076,11 @@
             if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
               const now = Date.now();
               
+              // NEW: More lenient throttling for autoplay mode
+              const throttleDelay = isAutoplayMode() ? 200 : 500;
+              
               // Throttle container updates to prevent spam
-              if (now - BetterHighscoresState.lastContainerUpdateTime < 500) {
+              if (now - BetterHighscoresState.lastContainerUpdateTime < throttleDelay) {
                 log('[Better Highscores] Game container update throttled');
                 return;
               }
@@ -1076,6 +1122,25 @@
                  setTimeout(() => {
                    restoreContainer();
                  }, 100);
+                 return;
+               }
+               
+               // NEW: Handle autoplay mode battle completion
+               if (isAutoplayMode()) {
+                 log('[Better Highscores] Battle completed in autoplay mode, ensuring leaderboard is visible');
+                 
+                 // Small delay to ensure game state is fully updated
+                 setTimeout(() => {
+                   // Check if leaderboard is missing and restore it
+                   if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
+                     log('[Better Highscores] Leaderboard missing after autoplay battle, restoring');
+                     updateLeaderboards();
+                   } else {
+                     // Just refresh the data
+                     log('[Better Highscores] Refreshing leaderboard data after autoplay battle');
+                     updateLeaderboards();
+                   }
+                 }, 200);
                  return;
                }
                
@@ -1126,9 +1191,76 @@
                }, 100);
              }
              
+             // NEW: Detect transition from 'playing' to 'initial' (autoplay game ended)
+             if (previousState === 'playing' && currentState === 'initial' && isAutoplayMode()) {
+               log('[Better Highscores] Autoplay game ended, ensuring leaderboard is visible');
+               
+               // Small delay to ensure game state is fully updated
+               setTimeout(() => {
+                 // Check if leaderboard is missing and restore it
+                 if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
+                   log('[Better Highscores] Leaderboard missing after autoplay game ended, restoring');
+                   updateLeaderboards();
+                 } else {
+                   // Just refresh the data
+                   log('[Better Highscores] Refreshing leaderboard data after autoplay game ended');
+                   updateLeaderboards();
+                 }
+               }, 200);
+             }
+             
+             // NEW: Detect transition from 'initial' to 'playing' (autoplay game started)
+             if (previousState === 'initial' && currentState === 'playing' && isAutoplayMode()) {
+               log('[Better Highscores] Autoplay game started, ensuring leaderboard is visible');
+               
+               // Small delay to ensure game state is fully updated
+               setTimeout(() => {
+                 // Ensure leaderboard is visible when autoplay starts
+                 if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
+                   log('[Better Highscores] Leaderboard missing when autoplay started, restoring');
+                   updateLeaderboards();
+                 }
+               }, 200);
+             }
+             
              previousState = currentState;
            });
          }
+        
+        // NEW: Set up periodic check for autoplay mode to ensure leaderboard stays visible
+        window.betterHighscoresInterval = setInterval(() => {
+          if (isAutoplayMode() && (!leaderboardContainer || !document.contains(leaderboardContainer))) {
+            log('[Better Highscores] Periodic check: Leaderboard missing in autoplay mode, restoring');
+            updateLeaderboards();
+          }
+        }, 5000); // Check every 5 seconds
+        
+        // NEW: Set up MutationObserver to detect when leaderboard gets removed from DOM
+        window.betterHighscoresObserver = new MutationObserver((mutations) => {
+          if (!isAutoplayMode()) return;
+          
+          for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+              for (const removedNode of mutation.removedNodes) {
+                if (removedNode === leaderboardContainer || 
+                    (removedNode.nodeType === Node.ELEMENT_NODE && 
+                     removedNode.contains && removedNode.contains(leaderboardContainer))) {
+                  log('[Better Highscores] Leaderboard removed from DOM during autoplay, restoring');
+                  setTimeout(() => {
+                    updateLeaderboards();
+                  }, 100);
+                  break;
+                }
+              }
+            }
+          }
+        });
+        
+        // Observe the document body for leaderboard removal
+        window.betterHighscoresObserver.observe(document.body, { 
+          childList: true, 
+          subtree: true 
+        });
         
         log('[Better Highscores] Initialization complete');
       } else {
@@ -1165,6 +1297,17 @@
     // Clear caches
     DOMCache.clear();
     BetterHighscoresState.leaderboardCache.clear();
+    
+    // NEW: Clean up observers and intervals
+    if (window.betterHighscoresInterval) {
+      clearInterval(window.betterHighscoresInterval);
+      window.betterHighscoresInterval = null;
+    }
+    
+    if (window.betterHighscoresObserver) {
+      window.betterHighscoresObserver.disconnect();
+      window.betterHighscoresObserver = null;
+    }
     
     log('[Better Highscores] Cleanup complete');
   }
@@ -1238,6 +1381,28 @@
         console.log('- URL:', window.location.href);
         console.log('- Pathname:', window.location.pathname);
         console.log('- Search params:', window.location.search);
+      },
+      debugAutoplay: () => {
+        console.log('[Better Highscores] Debug autoplay detection:');
+        console.log('- Is autoplay mode:', isAutoplayMode());
+        console.log('- Is sandbox mode:', isSandboxMode());
+        console.log('- Is board analyzing:', isBoardAnalyzing());
+        console.log('- Player flags:', globalThis.state?.player?.getSnapshot()?.context?.flags);
+        console.log('- Autoplay container:', !!document.querySelector(".widget-bottom[data-minimized='false']"));
+        console.log('- Autoplay controls:', !!document.querySelector('[data-autoplay], .autoplay-controls, .autoplay-panel'));
+        console.log('- Leaderboard container exists:', !!leaderboardContainer);
+        console.log('- Preserved container exists:', !!BetterHighscoresState.preservedContainer);
+        console.log('- Leaderboard in DOM:', !!document.contains(leaderboardContainer));
+        console.log('- Periodic check interval:', !!window.betterHighscoresInterval);
+        console.log('- DOM observer:', !!window.betterHighscoresObserver);
+      },
+      forceRestoreAutoplay: () => {
+        console.log('[Better Highscores] Force restoring leaderboard for autoplay');
+        if (isAutoplayMode()) {
+          updateLeaderboards();
+        } else {
+          console.log('[Better Highscores] Not in autoplay mode');
+        }
       }
     };
   }
