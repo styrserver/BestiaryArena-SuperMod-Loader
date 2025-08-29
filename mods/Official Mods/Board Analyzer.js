@@ -812,18 +812,20 @@ class StatisticsCalculator {
     this.runTimes.push(runTime);
     this.runTimesSum += runTime;
     
+    // Include all runs in time statistics (both completed and failed)
+    this.ticksArray.push(result.ticks);
+    this.ticksSum += result.ticks;
+    
+    // Update min/max ticks for all runs
+    if (result.ticks < this.minTicks) {
+      this.minTicks = result.ticks;
+    }
+    if (result.ticks > this.maxTicks) {
+      this.maxTicks = result.ticks;
+    }
+    
     if (result.completed) {
       this.completedRuns++;
-      this.ticksArray.push(result.ticks);
-      this.ticksSum += result.ticks;
-      
-      // Update min/max ticks
-      if (result.ticks < this.minTicks) {
-        this.minTicks = result.ticks;
-      }
-      if (result.ticks > this.maxTicks) {
-        this.maxTicks = result.ticks;
-      }
     }
     
     // Update S+ stats
@@ -842,7 +844,7 @@ class StatisticsCalculator {
     const sPlusRate = this.totalRuns > 0 ? (this.sPlusCount / this.totalRuns * 100).toFixed(2) : '0.00';
     const completionRate = this.totalRuns > 0 ? (this.completedRuns / this.totalRuns * 100).toFixed(2) : '0.00';
     const averageRunTime = this.runTimes.length > 0 ? this.runTimesSum / this.runTimes.length : 0;
-    const averageTicks = this.ticksArray.length > 0 ? this.ticksSum / this.ticksArray.length : 0;
+    const averageTicks = this.totalRuns > 0 ? this.ticksSum / this.totalRuns : 0;
     const medianTicks = this.calculateMedian(this.ticksArray);
     
     return {
