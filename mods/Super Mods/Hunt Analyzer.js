@@ -60,6 +60,20 @@ const itemVisualCache = new Map();
 // =======================
 // 2. Utility Functions
 // =======================
+/**
+ * Checks if the current game mode is sandbox mode.
+ * @returns {boolean} True if in sandbox mode, false otherwise.
+ */
+function isSandboxMode() {
+    try {
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        return boardContext.mode === 'sandbox';
+    } catch (error) {
+        console.error("[Hunt Analyzer] Error checking sandbox mode:", error);
+        return false;
+    }
+}
+
 function formatNameToTitleCase(name) {
     if (!name || typeof name !== 'string') return 'Unknown Item';
     let formatted = name.replace(/-/g, ' ');
@@ -1983,6 +1997,12 @@ function updatePanelLayout(panel) {
 // Listen for game start and end events using the game's global API.
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.on) {
     globalThis.state.board.on('newGame', (event) => {
+        // Skip recording if in sandbox mode
+        if (isSandboxMode()) {
+            if (window.DEBUG) console.log("[Hunt Analyzer] Skipping sandbox mode session");
+            return;
+        }
+        
         autoplayCount++;
         isGameActive = true;
         sessionStartTime = Date.now();
@@ -1993,6 +2013,13 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         globalThis.state.board.subscribe(({ context }) => {
             const serverResults = context.serverResults;
             if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') return;
+            
+            // Skip processing if in sandbox mode
+            if (isSandboxMode()) {
+                if (window.DEBUG) console.log("[Hunt Analyzer] Skipping sandbox mode results");
+                return;
+            }
+            
             const seed = serverResults.seed;
             if (seed === lastSeed) return;
             lastSeed = seed;
@@ -2006,6 +2033,11 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
 // Add game end detection using gameTimer.
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.gameTimer && globalThis.state.gameTimer.subscribe) {
     globalThis.state.gameTimer.subscribe((data) => {
+        // Skip processing if in sandbox mode
+        if (isSandboxMode()) {
+            return;
+        }
+        
         const { readableGrade, rankPoints } = data.context;
         if ((readableGrade !== undefined && readableGrade !== null) || (rankPoints !== undefined && rankPoints !== null)) {
             if (isGameActive) {

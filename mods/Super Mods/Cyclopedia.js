@@ -1197,11 +1197,25 @@ function removeCyclopediaFromMenus() {
     parent.tagName === 'NAV' || parent.classList?.contains('w-full')
   );
   
+  // Enhanced menu detection
+  const isInAccountMenu = (el) => {
+    const menuText = el.textContent?.toLowerCase() || '';
+    return menuText.includes('my account') || menuText.includes('logout') || menuText.includes('profile') || 
+           menuText.includes('outfit') || menuText.includes('history') || menuText.includes('redeem code') || 
+           menuText.includes('rewards') || menuText.includes('language');
+  };
+  
+  const isInGameModeMenu = (el) => {
+    const menuText = el.textContent?.toLowerCase() || '';
+    return menuText.includes('game mode') || menuText.includes('cyclopedia') || menuText.includes('manual') || 
+           menuText.includes('autoplay') || menuText.includes('sandbox');
+  };
+  
   // Process all cyclopedia elements
   document.querySelectorAll('div, li').forEach(el => {
     if (el.textContent.trim().toLowerCase() === 'cyclopedia') {
-      const inMyAccount = isInMenu(el, 'My account');
-      const inGameMode = isInMenu(el, 'Game mode');
+      const inMyAccount = isInMenu(el, 'My account') || isInAccountMenu(el);
+      const inGameMode = isInMenu(el, 'Game mode') || isInGameModeMenu(el);
       const isHeader = isHeaderButton(el);
       const inHeader = isInHeader(el);
       
@@ -1399,9 +1413,14 @@ function injectCyclopediaButton(menuElem) {
   const monsterName = getMonsterNameFromMenu(menuElem);
   const equipmentName = getEquipmentNameFromMenu(menuElem);
   
-  // Only inject Cyclopedia button if we found a valid creature or equipment
-  if (!monsterName && !equipmentName) {
-    return; // Don't add Cyclopedia button to menus that don't contain creatures or equipment
+  // Additional check: ensure we're not in "My Account" or "Game Mode" menus
+  const menuText = menuElem.textContent?.toLowerCase() || '';
+  const isAccountMenu = menuText.includes('my account') || menuText.includes('logout') || menuText.includes('profile');
+  const isGameModeMenu = menuText.includes('game mode') || menuText.includes('cyclopedia') || menuText.includes('manual') || menuText.includes('autoplay') || menuText.includes('sandbox');
+  
+  // Only inject Cyclopedia button if we found a valid creature or equipment AND we're not in account/game mode menus
+  if ((!monsterName && !equipmentName) || isAccountMenu || isGameModeMenu) {
+    return; // Don't add Cyclopedia button to menus that don't contain creatures or equipment, or are account/game mode menus
   }
   
   const allEquipment = GAME_DATA.ALL_EQUIPMENT;

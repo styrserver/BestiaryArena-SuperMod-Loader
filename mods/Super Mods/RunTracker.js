@@ -44,8 +44,7 @@ let runStorage = {
   metadata: {
     totalRuns: 0,
     totalMaps: 0,
-    totalReplays: 0,
-    lastCleanup: Date.now()
+    totalReplays: 0
   }
 };
 
@@ -308,8 +307,7 @@ async function initializeStorage() {
         metadata: {
           totalRuns: 0,
           totalMaps: 0,
-          totalReplays: 0,
-          lastCleanup: Date.now()
+          totalReplays: 0
         }
       };
     }
@@ -321,8 +319,7 @@ async function initializeStorage() {
       runStorage.metadata = {
         totalRuns: 0,
         totalMaps: 0,
-        totalReplays: 0,
-        lastCleanup: Date.now()
+        totalReplays: 0
       };
     }
     
@@ -338,8 +335,7 @@ async function initializeStorage() {
       metadata: {
         totalRuns: 0,
         totalMaps: 0,
-        totalReplays: 0,
-        lastCleanup: Date.now()
+        totalReplays: 0
       }
     };
   }
@@ -647,20 +643,7 @@ function parseServerResults(serverResults) {
         console.warn('[RunTracker] Error resolving region name:', error);
       }
     
-    // Check if this map is currently boosted - SKIP BOOSTED MAPS
-    try {
-      const dailyContext = globalThis.state?.daily?.getSnapshot()?.context;
-      if (dailyContext?.boostedMap?.roomId) {
-        // Check if the current map matches the boosted map (case-insensitive)
-        if (dailyContext.boostedMap.roomId.toLowerCase() === runData.mapName.toLowerCase()) {
-          console.log(`[RunTracker] Skipping boosted map run: ${runData.mapName}`);
-          return null; // Don't track runs on boosted maps
-        }
-      }
-    } catch (error) {
-      // If we can't check boosted status, continue with the run
-      console.log('[RunTracker] Could not check boosted map status, continuing with run');
-    }
+
     
     // Extract player name
     const gameState = globalThis.state?.player?.getSnapshot()?.context;
@@ -753,9 +736,9 @@ function parseReplayData(replayMessage) {
     try {
       const dailyContext = globalThis.state?.daily?.getSnapshot()?.context;
       if (dailyContext?.boostedMap?.roomId) {
-        // Check if the current map matches the boosted map (case-insensitive)
+        // Check if the current map matches the boosted map (compare map IDs)
         if (dailyContext.boostedMap.roomId.toLowerCase() === replayData.map.toLowerCase()) {
-          console.log(`[RunTracker] Skipping boosted map replay: ${replayData.map}`);
+          console.log(`[RunTracker] Skipping boosted map replay: ${replayData.map} (ID: ${replayData.map})`);
           return null; // Don't track replays on boosted maps
         }
       }
@@ -822,6 +805,45 @@ async function addRun(runData) {
     // Get current board setup for comparison
     const currentSetup = getCurrentBoardSetup();
     runData.setup = currentSetup;
+    
+    // Check if this map is currently boosted - SKIP BOOSTED MAPS
+    try {
+      const dailyContext = globalThis.state?.daily?.getSnapshot()?.context;
+      console.log('[RunTracker] Daily context for boosted map check:', dailyContext);
+      
+      if (dailyContext?.boostedMap?.roomId) {
+        console.log(`[RunTracker] Current boosted map: ${dailyContext.boostedMap.roomId}`);
+        console.log(`[RunTracker] Current run map ID: ${runData.setup?.mapId}`);
+        
+        // Check if the current map matches the boosted map (compare map IDs)
+        if (runData.setup?.mapId && dailyContext.boostedMap.roomId.toLowerCase() === runData.setup.mapId.toLowerCase()) {
+          console.log(`[RunTracker] Skipping boosted map run: ${runData.mapName} (ID: ${runData.setup.mapId})`);
+          return false; // Don't track runs on boosted maps
+        } else {
+          console.log(`[RunTracker] Map is not boosted: ${runData.mapName} (ID: ${runData.setup?.mapId})`);
+        }
+      } else {
+        console.log('[RunTracker] No boosted map found in daily context');
+      }
+    } catch (error) {
+      // If we can't check boosted status, continue with the run
+      console.log('[RunTracker] Could not check boosted map status, continuing with run:', error);
+    }
+    
+    // Fallback: Check if we can get boosted map info from other sources
+    try {
+      // Try to get boosted map from board context
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      if (boardContext?.selectedMap?.boosted) {
+        console.log('[RunTracker] Found boosted map in board context');
+        if (runData.setup?.mapId && boardContext.selectedMap.id === runData.setup.mapId) {
+          console.log(`[RunTracker] Skipping boosted map run (board context): ${runData.mapName} (ID: ${runData.setup.mapId})`);
+          return false;
+        }
+      }
+    } catch (fallbackError) {
+      console.log('[RunTracker] Fallback boosted map check failed:', fallbackError);
+    }
     
     // Check if we have an existing run with the same setup
     const existingRun = findExistingRun(runData);
@@ -1339,10 +1361,10 @@ if (!window.RunTrackerAPI) {
   },
   getAllRuns: () => {
     try {
-      return runStorage || { lastUpdated: Date.now(), runs: {}, replays: {}, metadata: { totalRuns: 0, totalMaps: 0, totalReplays: 0, lastCleanup: Date.now() } };
+      return runStorage || { lastUpdated: Date.now(), runs: {}, replays: {}, metadata: { totalRuns: 0, totalMaps: 0, totalReplays: 0 } };
     } catch (error) {
       console.error('[RunTracker] Error getting all runs:', error);
-      return { lastUpdated: Date.now(), runs: {}, replays: {}, metadata: { totalRuns: 0, totalMaps: 0, totalReplays: 0, lastCleanup: Date.now() } };
+      return { lastUpdated: Date.now(), runs: {}, replays: {}, metadata: { totalRuns: 0, totalMaps: 0, totalReplays: 0 } };
     }
   },
   getRunStats: () => {
@@ -1386,8 +1408,7 @@ if (!window.RunTrackerAPI) {
         metadata: {
           totalRuns: 0,
           totalMaps: 0,
-          totalReplays: 0,
-          lastCleanup: Date.now()
+          totalReplays: 0
         }
       };
       await StorageManager.flushSaves();
