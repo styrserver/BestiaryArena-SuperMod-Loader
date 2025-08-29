@@ -983,9 +983,10 @@ async function checkAndUpdateSpeedruns(runData) {
 async function checkAndUpdateRankRuns(runData) {
   const rankRuns = runStorage.runs[runData.mapKey].rank;
   
-  // Check if it has equal or higher rank points AND equal or better time
+  // Check if it has higher rank points OR same rank points with better time
+  // For rank runs, we prioritize rank points over time
   const qualifyingRuns = rankRuns.filter(run => 
-    (run.points <= runData.points) && (run.time >= runData.time)
+    (run.points < runData.points) || (run.points === runData.points && run.time >= runData.time)
   );
   
   if (qualifyingRuns.length === 0 && rankRuns.length >= MAX_RUNS_PER_MAP) {
