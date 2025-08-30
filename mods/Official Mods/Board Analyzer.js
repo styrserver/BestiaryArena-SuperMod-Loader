@@ -1451,6 +1451,17 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       window.turboButton.title = '';
       console.log('[Board Analyzer] Turbo Mode button re-enabled');
     }
+    
+    // NEW: Also restore Turbo Mode button text and style if it was modified
+    if (window.turboButton && window.__turboState) {
+      // Only restore if turbo is actually inactive (not re-enabled by user)
+      if (!window.__turboState.active) {
+        window.turboButton.textContent = 'Enable Turbo';
+        window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+        window.turboButton.style.color = "#ffe066";
+        console.log('[Board Analyzer] Turbo Mode button style restored');
+      }
+    }
   }
 
   // NEW: Use optimized statistics calculator
@@ -2604,13 +2615,40 @@ async function runAnalysis() {
     if (window.__turboState.disable && typeof window.__turboState.disable === 'function') {
       window.__turboState.disable();
     } else {
-      // Fallback: manually set the state to inactive
+      // Fallback: manually disable turbo completely
       window.__turboState.active = false;
       
-      // Also try to reset the tick interval if possible
+      // Remove speedup subscription - this is crucial for actually stopping turbo
+      if (window.__turboState.speedupSubscription) {
+        try {
+          window.__turboState.speedupSubscription.unsubscribe();
+          window.__turboState.speedupSubscription = null;
+          console.log('[Board Analyzer] Turbo speedup subscription removed');
+        } catch (e) {
+          console.warn('[Board Analyzer] Error removing turbo subscription:', e);
+        }
+      }
+      
+      // Reset tick interval to default
       if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
-        const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
-        tickEngine.setTickInterval(62.5); // Reset to default tick interval
+        try {
+          const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
+          tickEngine.setTickInterval(62.5); // Reset to default tick interval
+          console.log('[Board Analyzer] Tick interval reset to default');
+        } catch (e) {
+          console.warn('[Board Analyzer] Error resetting tick interval:', e);
+        }
+      }
+      
+      // Also try to reset any other turbo-related state
+      if (window.__turboState.timerSubscribed) {
+        window.__turboState.timerSubscribed = false;
+      }
+      
+      // Clear any intervals
+      if (window.__turboState.timerCheckInterval) {
+        clearInterval(window.__turboState.timerCheckInterval);
+        window.__turboState.timerCheckInterval = null;
       }
     }
     
@@ -2621,7 +2659,7 @@ async function runAnalysis() {
       window.turboButton.style.color = "#ffe066";
     }
     
-    console.log('Turbo Mode mod has been disabled for analysis');
+    console.log('Turbo Mode mod has been completely disabled for analysis');
   }
   
   // Force close any existing modals first

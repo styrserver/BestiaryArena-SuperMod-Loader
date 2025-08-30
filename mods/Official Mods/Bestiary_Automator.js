@@ -63,7 +63,7 @@ const TRANSLATIONS = {
     minimumStaminaLabel: 'Minimum Stamina Without Refill',
     autoCollectRewards: 'Auto Collect Rewards',
     autoDayCare: 'Auto Handle Day Care',
-    autoPlayAfterDefeat: 'Autoplay after defeat',
+    autoPlayAfterDefeat: 'Autoplay after defeat and network issues',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -85,7 +85,7 @@ const TRANSLATIONS = {
     minimumStaminaLabel: 'Stamina Mínima Sem Reabastecimento',
     autoCollectRewards: 'Coletar Recompensas Automaticamente',
     autoDayCare: 'Cuidar Automaticamente da Creche',
-    autoPlayAfterDefeat: 'Jogar automaticamente após derrota',
+    autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -252,6 +252,28 @@ const sleep = (timeout = 1000) => {
   });
 };
 
+// Cancellable sleep function for countdowns
+const cancellableSleep = (timeout = 1000, checkCancellation = () => false) => {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const checkInterval = setInterval(() => {
+      // Check if we should cancel
+      if (checkCancellation()) {
+        clearInterval(checkInterval);
+        resolve('cancelled');
+        return;
+      }
+      
+      // Check if time has elapsed
+      if (Date.now() - startTime >= timeout) {
+        clearInterval(checkInterval);
+        resolve('completed');
+        return;
+      }
+    }, 100); // Check every 100ms for cancellation
+  });
+};
+
 // Cancel current async operations
 const cancelCurrentTask = () => {
   if (timeoutId) {
@@ -259,6 +281,20 @@ const cancelCurrentTask = () => {
     timeoutId = null;
   }
   currentTask = null;
+};
+
+// Cancel current countdown task
+const cancelCurrentCountdown = () => {
+  if (currentCountdownTask) {
+    currentCountdownTask.cancelled = true;
+    currentCountdownTask = null;
+    countdownCancelled = true;
+    // Reset cooldown so system can track toasters again
+    battleOngoingToastCooldown = false;
+    console.log('[Bestiary Automator] Countdown cancelled due to board state change, cooldown reset');
+    console.log('[Bestiary Automator] Ready to detect new toasters');
+    console.log('[Bestiary Automator] Note: Main countdown function will complete its sleep and then confirm cancellation');
+  }
 };
 
 // Show a notification message
@@ -584,7 +620,11 @@ const updateRequiredStamina = () => {
 let automationInterval = null;
 let gameStateObserver = null;
 let defeatToastCooldown = false;
+let battleOngoingToastCooldown = false;
 let focusEventListeners = null;
+let currentCountdownTask = null;
+let countdownCancelled = false;
+let processedToastHashes = new Set();
 
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
@@ -594,6 +634,40 @@ const subscribeToGameState = () => {
       globalThis.state.board.on('newGame', (event) => {
         if (window.DEBUG) console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
         rewardsCollectedThisSession = false;
+        // Cancel any ongoing countdown when new game starts
+        if (currentCountdownTask) {
+          cancelCurrentCountdown();
+        }
+      });
+      
+      // Monitor for other board state changes that should cancel countdowns
+      globalThis.state.board.on('stateChange', (event) => {
+        const boardContext = event.context;
+        
+        // Cancel countdown if map picker opens (user changing maps)
+        if (boardContext.openMapPicker) {
+          cancelCurrentCountdown();
+        }
+        
+        // Cancel countdown if game state changes significantly
+        if (boardContext.gameStarted !== boardContext.gameStarted) {
+          cancelCurrentCountdown();
+        }
+      });
+      
+      // Monitor specific game events that should cancel countdowns
+      globalThis.state.board.on('emitNewGame', (event) => {
+        if (currentCountdownTask) {
+          console.log('[Bestiary Automator] Game started during countdown, cancelling...');
+          cancelCurrentCountdown();
+        }
+      });
+      
+      globalThis.state.board.on('emitEndGame', (event) => {
+        if (currentCountdownTask) {
+          console.log('[Bestiary Automator] Game ended during countdown, cancelling...');
+          cancelCurrentCountdown();
+        }
       });
     }
     
@@ -601,17 +675,41 @@ const subscribeToGameState = () => {
     if (!config.autoPlayAfterDefeat) return;
     
     if (api.game && api.game.subscribeToState) {
+      // Add debouncing to prevent excessive calls
+      let gameStateToastTimeout = null;
       gameStateObserver = api.game.subscribeToState((state) => {
-        checkForDefeatToast();
+        // Clear any existing timeout
+        if (gameStateToastTimeout) {
+          clearTimeout(gameStateToastTimeout);
+        }
+        
+        // Debounce toast checking to prevent spam
+        gameStateToastTimeout = setTimeout(() => {
+          // Only check if we haven't checked recently
+          if (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 2000)) {
+            window.__lastToastCheck = Date.now();
+            handleToasts();
+          }
+        }, 500); // Wait 500ms after last state change
       });
     } else {
       // Fallback: use MutationObserver to watch for DOM changes
+      // Add debouncing to prevent excessive calls
+      let toastCheckTimeout = null;
       gameStateObserver = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-            checkForDefeatToast();
+        // Clear any existing timeout
+        if (toastCheckTimeout) {
+          clearTimeout(toastCheckTimeout);
+        }
+        
+        // Debounce toast checking to prevent spam
+        toastCheckTimeout = setTimeout(() => {
+          // Only check if we haven't checked recently
+          if (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 2000)) {
+            window.__lastToastCheck = Date.now();
+            handleToasts();
           }
-        });
+        }, 500); // Wait 500ms after last DOM change
       });
       
       // Start observing the document body for added nodes
@@ -641,17 +739,53 @@ const unsubscribeFromGameState = () => {
   }
 };
 
-// Check for defeat toast and restart if found
-const checkForDefeatToast = async () => {
-  if (!config.autoPlayAfterDefeat || defeatToastCooldown) return;
+// Unified toast handler for different types of toasts
+const handleToasts = async () => {
+  if (!config.autoPlayAfterDefeat) return;
+  
+  // Early return if battle ongoing cooldown is active to reduce spam
+  if (battleOngoingToastCooldown) return;
   
   try {
-    // Look for the defeat toast
-    const defeatToast = document.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
+    // Look for any toast with the "no" icon (same logic as original defeat toast)
+    const toasts = document.querySelectorAll('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
     
-    if (defeatToast) {
-      const toastText = defeatToast.textContent;
+    // Only proceed if we actually found toasts to check
+    if (toasts.length === 0) return;
+    
+    console.log(`[Bestiary Automator] Found ${toasts.length} potential toasts, checking for "no" icon...`);
+    
+    for (const toast of toasts) {
+      // Check if this toast has the "no" icon (same as original defeat toast logic)
+      const noIcon = toast.querySelector('img[alt="no"]');
+      if (!noIcon) continue;
+      
+      // Check if this toast contains text
+      const textElement = toast.querySelector('.text-left');
+      if (!textElement) continue;
+      
+      const toastText = textElement.textContent;
+      
+      // Create a hash of the toast content to avoid processing the same toast repeatedly
+      const toastHash = btoa(toastText).slice(0, 16); // Simple hash of toast text
+      
+      // Skip if we've already processed this exact toast
+      if (processedToastHashes.has(toastHash)) {
+        continue;
+      }
+      
+      console.log(`[Bestiary Automator] Found toaster with "no" icon!`);
+      console.log(`[Bestiary Automator] Checking toast with "no" icon, text: "${toastText}"`);
+      
+      // Handle defeat toast
       if (toastText.includes('Autoplay stopped because your creatures were') && toastText.includes('defeated')) {
+        if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast detected!');
+        
+        if (defeatToastCooldown) {
+          if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast cooldown active, skipping...');
+          continue;
+        }
+        
         // Set cooldown to prevent multiple executions
         defeatToastCooldown = true;
         
@@ -683,10 +817,199 @@ const checkForDefeatToast = async () => {
           defeatToastCooldown = false;
           if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast cooldown reset');
         }, 3000);
+        
+        return; // Exit after processing defeat toast
+      }
+      
+      // Handle battle ongoing toast
+      if (toastText.includes('Battle still ongoing') && toastText.includes('ms diff')) {
+        // Check cooldown to prevent multiple executions
+        if (battleOngoingToastCooldown) {
+          return; // Silent return when cooldown is active
+        }
+        
+        // Set cooldown to prevent multiple executions
+        battleOngoingToastCooldown = true;
+        
+        console.log('[Bestiary Automator] Battle ongoing toast detected!');
+        
+        // Extract the time difference from the toast
+        const timeMatch = toastText.match(/\((\d+)ms diff\)/);
+        if (timeMatch) {
+          const timeDiff = parseInt(timeMatch[1], 10);
+          
+          // Round down to nearest 1000ms (1 second) for more predictable timing
+          const roundedTimeDiff = Math.floor(timeDiff / 1000) * 1000;
+          
+          console.log(`[Bestiary Automator] Battle ongoing toast detected, original time: ${timeDiff}ms, rounded down to: ${roundedTimeDiff}ms, waiting then clicking autoplay...`);
+          
+          // Create a cancellable countdown task
+          const countdownTask = { cancelled: false };
+          currentCountdownTask = countdownTask;
+          countdownCancelled = false; // Reset global cancellation flag
+          
+          // Store initial board state for comparison
+          const initialBoardContext = globalThis.state.board ? globalThis.state.board.getSnapshot().context : {};
+          const initialPlayerContext = globalThis.state.player ? globalThis.state.player.getSnapshot().context : {};
+          const initialGameTimerContext = globalThis.state.gameTimer ? globalThis.state.gameTimer.getSnapshot().context : {};
+          const initialMenuContext = globalThis.state.menu ? globalThis.state.menu.getSnapshot().context : {};
+          
+          console.log('[Bestiary Automator] Starting countdown with comprehensive state monitoring...');
+          
+          // Set up state monitoring subscriptions
+          const stateSubscriptions = [];
+          let stateChanged = false;
+          
+          // Monitor board state changes
+          if (globalThis.state && globalThis.state.board) {
+            const boardSubscription = globalThis.state.board.subscribe((state) => {
+              if (countdownTask.cancelled) return;
+              
+              const context = state.context;
+              // Check for significant board changes
+              if (context.openMapPicker !== initialBoardContext.openMapPicker ||
+                  context.gameStarted !== initialBoardContext.gameStarted ||
+                  context.mode !== initialBoardContext.mode ||
+                  context.selectedMap !== initialBoardContext.selectedMap ||
+                  context.boardConfig !== initialBoardContext.boardConfig) {
+                stateChanged = true;
+                countdownTask.cancelled = true;
+                console.log('[Bestiary Automator] Board state changed during countdown, aborting...', {
+                  openMapPicker: context.openMapPicker,
+                  gameStarted: context.gameStarted,
+                  mode: context.mode,
+                  selectedMap: context.selectedMap
+                });
+              }
+            });
+            stateSubscriptions.push(boardSubscription);
+          }
+          
+          // Monitor player state changes
+          if (globalThis.state && globalThis.state.player) {
+            const playerSubscription = globalThis.state.player.subscribe((state) => {
+              if (countdownTask.cancelled) return;
+              
+              const context = state.context;
+              // Check for significant player changes
+              if (context.exp !== initialPlayerContext.exp ||
+                  context.gold !== initialPlayerContext.gold ||
+                  context.staminaWillBeFullAt !== initialPlayerContext.staminaWillBeFullAt ||
+                  context.battleWillBeReadyAt !== initialPlayerContext.battleWillBeReadyAt) {
+                stateChanged = true;
+                countdownTask.cancelled = true;
+                console.log('[Bestiary Automator] Player state changed during countdown, aborting...', {
+                  exp: context.exp,
+                  gold: context.gold,
+                  staminaWillBeFullAt: context.staminaWillBeFullAt,
+                  battleWillBeReadyAt: context.battleWillBeReadyAt
+                });
+              }
+            });
+            stateSubscriptions.push(playerSubscription);
+          }
+          
+          // Monitor game timer changes
+          if (globalThis.state && globalThis.state.gameTimer) {
+            const timerSubscription = globalThis.state.gameTimer.subscribe((state) => {
+              if (countdownTask.cancelled) return;
+              
+              const context = state.context;
+              // Check for game state changes
+              if (context.state !== initialGameTimerContext.state || 
+                  context.currentTick !== initialGameTimerContext.currentTick) {
+                stateChanged = true;
+                countdownTask.cancelled = true;
+                console.log('[Bestiary Automator] Game timer changed during countdown, aborting...', {
+                  state: context.state,
+                  currentTick: context.currentTick
+                });
+              }
+            });
+            stateSubscriptions.push(timerSubscription);
+          }
+          
+          // Monitor menu state changes
+          if (globalThis.state && globalThis.state.menu) {
+            const menuSubscription = globalThis.state.menu.subscribe((state) => {
+              if (countdownTask.cancelled) return;
+              
+              const context = state.context;
+              // Check for menu mode changes
+              if (context.mode !== initialMenuContext.mode) {
+                stateChanged = true;
+                countdownTask.cancelled = true;
+                console.log('[Bestiary Automator] Menu state changed during countdown, aborting...', {
+                  mode: context.mode
+                });
+              }
+            });
+            stateSubscriptions.push(menuSubscription);
+          }
+          
+          // Wait for the rounded time difference with cancellation support
+          const sleepResult = await cancellableSleep(roundedTimeDiff, () => {
+            return countdownTask.cancelled || countdownCancelled || currentCountdownTask !== countdownTask;
+          });
+          
+          // Check if countdown was cancelled during the wait
+          if (sleepResult === 'cancelled') {
+            console.log('[Bestiary Automator] Countdown was cancelled during wait period, not clicking Start button');
+            // Clean up state subscriptions
+            stateSubscriptions.forEach(sub => sub.unsubscribe());
+            // Reset cooldown so system can track toasters again
+            battleOngoingToastCooldown = false;
+            // Reset the global cancellation flag
+            countdownCancelled = false;
+            console.log('[Bestiary Automator] Cooldown reset after countdown cancellation');
+            console.log('[Bestiary Automator] Ready to detect new toasters');
+            return;
+          }
+          
+          // Clean up state subscriptions before proceeding
+          stateSubscriptions.forEach(sub => sub.unsubscribe());
+          
+          // Find and click the Start button (same logic as defeat toast)
+          const startButtons = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
+          let startButton = null;
+          
+          for (const button of startButtons) {
+            if (button.textContent.trim() === 'Start') {
+              startButton = button;
+              break;
+            }
+          }
+          
+          if (startButton) {
+            startButton.click();
+            console.log('[Bestiary Automator] Start button clicked after battle ongoing toast');
+          } else {
+            console.log('[Bestiary Automator] Start button not found after battle ongoing toast');
+          }
+          
+          // Reset cooldown after processing to allow for future battle ongoing toasts
+          setTimeout(() => {
+            battleOngoingToastCooldown = false;
+            console.log('[Bestiary Automator] Battle ongoing toast cooldown reset');
+          }, 3000); // 3 second cooldown
+          
+        } else {
+          console.log('[Bestiary Automator] Could not extract time from battle ongoing toast');
+          // Reset cooldown if we couldn't process the toast
+          battleOngoingToastCooldown = false;
+        }
+        
+        return; // Exit after processing battle ongoing toast
+      } else {
+        // Mark this toast as processed even if it doesn't match our patterns
+        processedToastHashes.add(toastHash);
+        console.log(`[Bestiary Automator] Toast text does not match our patterns: "${toastText}"`);
       }
     }
+    
+    if (window.DEBUG) console.log('[Bestiary Automator] No relevant toasts found');
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error checking for defeat toast:', error);
+    if (window.DEBUG) console.error('[Bestiary Automator] Error handling toasts:', error);
   }
 };
 
@@ -771,9 +1094,14 @@ const stopAutomation = () => {
   // Clear global timeout and cancel current task
   cancelCurrentTask();
   
+  // Cancel any ongoing countdown
+  cancelCurrentCountdown();
+  
   // Reset retry counters
   staminaRefillRetryCount = 0;
   defeatToastCooldown = false;
+  battleOngoingToastCooldown = false;
+  countdownCancelled = false;
   
   // Clear element cache
   elementCache.clear();
@@ -796,6 +1124,13 @@ const runAutomationTasks = async () => {
     await handleDayCare();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
+    
+    // Check for any relevant toasts if autoplay after defeat is enabled
+    // Only check every 5 seconds to reduce spam (main loop runs every 2 seconds)
+    if (config.autoPlayAfterDefeat && !window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 5000)) {
+      window.__lastToastCheck = Date.now();
+      await handleToasts();
+    }
   } catch (error) {
     if (window.DEBUG) console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
