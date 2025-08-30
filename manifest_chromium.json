@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "BestiaryArena SuperMod Loader",
+  "version": "1.6.3",
+  "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and comprehensive tools.",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
+      "js": ["content/injector.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
+      "js": ["content/utility_injector.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
+      "js": ["content/dashboard_bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage", "scripting", "tabs", "activeTab"],
+  "host_permissions": [
+    "*://*.gist.githubusercontent.com/*",
+    "*://*.bestiaryarena.com/*",
+    "*://bestiaryarena.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/client.js",
+        "content/local_mods.js",
+        "content/utility_injector.js",
+        "content/ba-sandbox-utils.mjs",
+        "assets/icons/*",
+        "assets/js/*",
+        "assets/fonts/*",
+        "assets/locales/*",
+        "mods/*",
+        "database/*"
+      ],
+      "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"]
+    }
+  ],
+  "options_ui": {
+    "page": "dashboard/dashboard.html",
+    "open_in_tab": true
+  }
+} 

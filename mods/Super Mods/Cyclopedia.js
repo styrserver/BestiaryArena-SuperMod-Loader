@@ -1409,20 +1409,60 @@ const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
   return cyclopediaState.monsterNameMap;
 });
 
-const MENU_UTILS = {
-  getGroup: (menuElem) => menuElem.querySelector('div[role="group"]'),
-  getFirstItem: (group) => group?.querySelector('.dropdown-menu-item'),
-  getTierItem: (group) => Array.from(group?.querySelectorAll('.dropdown-menu-item') || []).find(item => /\(Tier[: ]?\d+\)/.test(item.textContent)) || group?.querySelector('.dropdown-menu-item'),
-  extractName: (text, pattern) => {
-    const match = text.trim().match(pattern);
-    return match ? match[1] : text.trim();
-  }
+// Regex patterns for item detection
+const ITEM_PATTERNS = {
+  MONSTER: /^(.*?)\s*\(\d+%\)/,
+  EQUIPMENT: /^(.*?)\s*\(Tier: \d+\)/
 };
 
-function getMonsterNameFromMenu(menuElem) {
+// Inject CSS rules for cyclopedia button visibility (one-time setup)
+if (!document.getElementById('cyclopedia-force-visible')) {
+  const style = document.createElement('style');
+  style.id = 'cyclopedia-force-visible';
+  style.textContent = `
+    .dropdown-menu-item[data-radix-collection-item] {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+    
+    .dropdown-menu-item[data-radix-collection-item]:hover {
+      background-color: rgba(255, 255, 255, 0.1) !important;
+    }
+    
+    .dropdown-menu-item[data-radix-collection-item]:focus {
+      background-color: rgba(255, 255, 255, 0.15) !important;
+      outline: none !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+const MENU_UTILS = {
+  getGroup: (menuElem) => menuElem.querySelector('div[role="group"]'),
+  getFirstItem: (group) => group?.querySelector('.dropdown-menu-item')
+};
+
+function getItemNameFromMenu(menuElem) {
   const group = MENU_UTILS.getGroup(menuElem);
   const firstItem = MENU_UTILS.getFirstItem(group);
-  return firstItem ? MENU_UTILS.extractName(firstItem.textContent, /^(.*?)\s*\(/) : null;
+  if (!firstItem) return null;
+  
+  const text = firstItem.textContent;
+  
+  // Check for monster pattern first (X%)
+  const monsterMatch = text.match(ITEM_PATTERNS.MONSTER);
+  if (monsterMatch) {
+    return { type: 'monster', name: monsterMatch[1] };
+  }
+  
+  // Check for equipment pattern (Tier: X)
+  const equipmentMatch = text.match(ITEM_PATTERNS.EQUIPMENT);
+  if (equipmentMatch) {
+    return { type: 'equipment', name: equipmentMatch[1] };
+  }
+  
+  return null;
 }
 
 const LOCATION_UTILS = {
@@ -1716,16 +1756,15 @@ function addCyclopediaHeaderButton() {
   }
 }
 
-function getEquipmentNameFromMenu(menuElem) {
-  const group = MENU_UTILS.getGroup(menuElem);
-  const tierItem = MENU_UTILS.getTierItem(group);
-  return tierItem ? MENU_UTILS.extractName(tierItem.textContent, /^(.*?)\s*\(Tier[: ]?\d+\)/) : null;
-}
+
 
 function injectCyclopediaButton(menuElem) {
   const body = document.body;
   const scrollLocked = body.getAttribute('data-scroll-locked');
-  if (scrollLocked >= '2') return;
+  if (scrollLocked >= '2') {
+    console.log('[Cyclopedia] Button injection blocked: scroll locked (level:', scrollLocked, ')');
+    return false;
+  }
   
   const existingButtons = menuElem.querySelectorAll('.cyclopedia-menu-item');
   existingButtons.forEach(btn => {
@@ -1734,11 +1773,23 @@ function injectCyclopediaButton(menuElem) {
     } catch (error) {}
   });
   
-  if (existingButtons.length > 0) return;
+  if (existingButtons.length > 0) {
+    console.log('[Cyclopedia] Button injection skipped: existing buttons found (count:', existingButtons.length, ')');
+    return false;
+  }
   
   // Check if this menu contains creature or equipment items
-  const monsterName = getMonsterNameFromMenu(menuElem);
-  const equipmentName = getEquipmentNameFromMenu(menuElem);
+  const itemInfo = getItemNameFromMenu(menuElem);
+  const monsterName = itemInfo?.type === 'monster' ? itemInfo.name : null;
+  const equipmentName = itemInfo?.type === 'equipment' ? itemInfo.name : null;
+  
+  console.log('[Cyclopedia] Content detection:', {
+    itemInfo: itemInfo,
+    monsterName: monsterName || 'null',
+    equipmentName: equipmentName || 'null',
+    itemType: itemInfo?.type || 'null',
+    menuText: menuElem.textContent?.substring(0, 200) || 'null'
+  });
   
   // Additional check: ensure we're not in "My Account" or "Game Mode" menus
   const menuText = menuElem.textContent?.toLowerCase() || '';
@@ -1747,7 +1798,14 @@ function injectCyclopediaButton(menuElem) {
   
   // Only inject Cyclopedia button if we found a valid creature or equipment AND we're not in account/game mode menus
   if ((!monsterName && !equipmentName) || isAccountMenu || isGameModeMenu) {
-    return; // Don't add Cyclopedia button to menus that don't contain creatures or equipment, or are account/game mode menus
+    console.log('[Cyclopedia] Button injection failed:', {
+      monsterName: monsterName || 'null',
+      equipmentName: equipmentName || 'null',
+      isAccountMenu,
+      isGameModeMenu,
+      menuText: menuText.substring(0, 100) + (menuText.length > 100 ? '...' : '')
+    });
+    return false; // Don't add Cyclopedia button to menus that don't contain creatures or equipment, or are account/game mode menus
   }
   
   const allEquipment = GAME_DATA.ALL_EQUIPMENT;
@@ -1758,28 +1816,80 @@ function injectCyclopediaButton(menuElem) {
     matchedEquipment = allEquipment.find(e => e.toLowerCase() === normalizedEquipmentName.toLowerCase());
   }
   const cyclopediaItem = document.createElement('div');
-  cyclopediaItem.className = 'dropdown-menu-item cyclopedia-menu-item relative flex cursor-default select-none items-center gap-2 outline-none';
+  cyclopediaItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none text-whiteHighlight';
   cyclopediaItem.setAttribute('role', 'menuitem');
   cyclopediaItem.setAttribute('tabindex', '-1');
+  cyclopediaItem.setAttribute('data-orientation', 'vertical');
+  cyclopediaItem.setAttribute('data-radix-collection-item', '');
+  
+  // Add styling to match in-game appearance
+  cyclopediaItem.style.color = 'white';
+  cyclopediaItem.style.background = 'transparent';
+  cyclopediaItem.style.padding = '4px 8px';
+  cyclopediaItem.style.borderRadius = '0';
+  cyclopediaItem.style.margin = '0';
+  cyclopediaItem.style.border = 'none';
+  cyclopediaItem.style.fontFamily = 'inherit';
+  cyclopediaItem.style.fontSize = '16px';
+  cyclopediaItem.style.fontWeight = '400';
+  cyclopediaItem.style.lineHeight = '1';
+  
+  // Force visibility through multiple methods
+  cyclopediaItem.style.setProperty('display', 'flex', 'important');
+  cyclopediaItem.style.setProperty('visibility', 'visible', 'important');
+  cyclopediaItem.style.setProperty('opacity', '1', 'important');
+  
+
   cyclopediaItem.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open"><path d="M2 19V6a2 2 0 0 1 2-2h7"></path><path d="M22 19V6a2 2 0 0 0-2-2h-7"></path><path d="M2 19a2 2 0 0 0 2 2h7"></path><path d="M22 19a2 2 0 0 1-2 2h-7"></path></svg>Cyclopedia`;
   cyclopediaItem.addEventListener('click', (e) => {
     e.stopPropagation();
-    const equipmentToOpen = matchedEquipment;
-    const creatureToOpen = monsterName;
-    if (equipmentToOpen) {
-      openCyclopediaModal({ equipment: equipmentToOpen });
-    } else if (creatureToOpen && typeof creatureToOpen === 'string') {
-      openCyclopediaModal({ creature: creatureToOpen });
-    } else {
-      openCyclopediaModal({});
-    }
+    
+    // Sequence: 10ms delay, press ESC, 10ms delay, then open cyclopedia
+    setTimeout(() => {
+      // Press ESC to close context menu
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+      
+      setTimeout(() => {
+        // Open cyclopedia
+        const equipmentToOpen = matchedEquipment;
+        const creatureToOpen = monsterName;
+        if (equipmentToOpen) {
+          openCyclopediaModal({ equipment: equipmentToOpen });
+        } else if (creatureToOpen && typeof creatureToOpen === 'string') {
+          openCyclopediaModal({ creature: creatureToOpen });
+        } else {
+          openCyclopediaModal({});
+        }
+      }, 10);
+    }, 10);
   });
   const separator = menuElem.querySelector('.separator');
   if (separator) {
     separator.parentNode.insertBefore(cyclopediaItem, separator);
+    console.log('[Cyclopedia] Button inserted before separator');
   } else {
     menuElem.appendChild(cyclopediaItem);
+    console.log('[Cyclopedia] Button appended to menu end');
   }
+  
+  // Verify the button is actually in the DOM
+  const buttonInDOM = menuElem.querySelector('[data-radix-collection-item]');
+  console.log('[Cyclopedia] Button verification:', {
+    buttonInDOM: !!buttonInDOM,
+    buttonText: buttonInDOM?.textContent || 'null',
+    buttonClasses: buttonInDOM?.className || 'null',
+    menuChildren: menuElem.children.length,
+    menuHTML: menuElem.innerHTML.substring(0, 300) + '...'
+  });
+  
+  console.log('[Cyclopedia] Button injected successfully:', {
+    monsterName: monsterName || 'null',
+    equipmentName: equipmentName || 'null',
+    hasSeparator: !!separator
+  });
+  
+  return true; // Return true to indicate successful injection
 }
 
 function addCyclopediaPressedStateListeners(btn) {
@@ -1822,12 +1932,34 @@ function startContextMenuObserver() {
         if (node.nodeType === 1) {
           if (node.matches && node.matches('div[data-radix-popper-content-wrapper]')) {
             const menu = node.querySelector('[role="menu"]');
-            if (menu) setTimeout(() => injectCyclopediaButton(menu), 10);
+            if (menu) {
+              console.log('[Cyclopedia] Menu detected, attempting injection...');
+              setTimeout(() => {
+                if (!injectCyclopediaButton(menu)) {
+                  console.log('[Cyclopedia] First injection failed, retrying in 75ms...');
+                  setTimeout(() => {
+                    const retryResult = injectCyclopediaButton(menu);
+                    console.log('[Cyclopedia] Retry result:', retryResult ? 'SUCCESS' : 'FAILED');
+                  }, 75);
+                }
+              }, 25);
+            }
           } else if (node.querySelector) {
             const wrapper = node.querySelector('div[data-radix-popper-content-wrapper]');
             if (wrapper) {
               const menu = wrapper.querySelector('[role="menu"]');
-              if (menu) setTimeout(() => injectCyclopediaButton(menu), 10);
+              if (menu) {
+                console.log('[Cyclopedia] Menu detected (nested), attempting injection...');
+                setTimeout(() => {
+                  if (!injectCyclopediaButton(menu)) {
+                    console.log('[Cyclopedia] First injection failed (nested), retrying in 75ms...');
+                    setTimeout(() => {
+                      const retryResult = injectCyclopediaButton(menu);
+                      console.log('[Cyclopedia] Retry result (nested):', retryResult ? 'SUCCESS' : 'FAILED');
+                    }, 75);
+                  }
+                }, 25);
+              }
             }
           }
         }
@@ -10779,27 +10911,6 @@ function setupEventHandlers() {
   };
   document.addEventListener('click', headerClickHandler);
   cyclopediaEventHandlers.push({ type: 'click', handler: headerClickHandler });
-
-  const tabClickHandler = function (e) {
-    if (e.target && e.target.classList.contains('cyclopedia-tab-btn')) {
-    }
-  };
-  document.addEventListener('click', tabClickHandler);
-  cyclopediaEventHandlers.push({ type: 'click', handler: tabClickHandler });
-
-  const searchClickHandler = function (e) {
-    if (e.target && e.target.textContent === 'Search' && e.target.parentElement.classList.contains('cyclopedia-search-bar')) {
-    }
-  };
-  document.addEventListener('click', searchClickHandler);
-  cyclopediaEventHandlers.push({ type: 'click', handler: searchClickHandler });
-
-  const listItemClickHandler = function (e) {
-    if (e.target && e.target.classList.contains('cyclopedia-list-item')) {
-    }
-  };
-  document.addEventListener('click', listItemClickHandler);
-  cyclopediaEventHandlers.push({ type: 'click', handler: listItemClickHandler });
 }
 
 function removeCyclopediaEventListeners() {
