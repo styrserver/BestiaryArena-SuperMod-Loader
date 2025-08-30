@@ -2510,7 +2510,7 @@
   function getUserCurrentDust() {
     try {
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-      return playerContext?.dust || 0;
+      return Number(playerContext?.dust) || 0;
     } catch (error) {
       console.error('[Better Forge] Error getting user dust:', error);
       return 0;
@@ -3354,7 +3354,7 @@
   function injectDustDisplayIntoModal() {
     try {
              const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-       const currentDust = playerContext?.dust || 0;
+       const currentDust = Number(playerContext?.dust) || 0;
        
        const buttonContainer = document.querySelector('div[role="dialog"][data-state="open"] .flex.justify-end.gap-2');
        if (!buttonContainer) return;
@@ -3379,7 +3379,7 @@
               if (globalThis.state?.player?.subscribe) {
           let previousDust = currentDust;
           const unsubscribe = globalThis.state.player.subscribe((state) => {
-            const newDust = state.context?.dust || 0;
+            const newDust = Number(state.context?.dust) || 0;
             const dustChange = newDust - previousDust;
             
             if (dustChange > 0) {
@@ -3407,7 +3407,7 @@
       const dustAmountElement = document.getElementById('better-forge-dust-amount');
       if (dustAmountElement) {
         const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-        const currentDust = playerContext?.dust || 0;
+        const currentDust = Number(playerContext?.dust) || 0;
         dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       }
     } catch (error) {
@@ -3467,7 +3467,7 @@
       }
       
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-      const currentDust = playerContext?.dust || 0;
+      const currentDust = Number(playerContext?.dust) || 0;
       console.log(`[Better Forge] 📊 Current dust:`, currentDust);
       
       if (numericDustChange > 0) {
@@ -4914,8 +4914,8 @@
           const newState = { ...prev };
           newState.inventory = { ...prev.inventory };
           
-          const currentGold = prev.inventory?.gold ?? prev.gold ?? 0;
-          const currentDust = prev.inventory?.dust ?? prev.dust ?? 0;
+          const currentGold = Number(prev.inventory?.gold ?? prev.gold ?? 0);
+          const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? 0);
           
           if (goldChange !== 0) {
             newState.inventory.gold = currentGold + goldChange;

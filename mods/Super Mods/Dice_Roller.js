@@ -90,7 +90,7 @@
   };
   
   let lastApiCall = 0;
-  const API_THROTTLE_DELAY = 200;
+  const API_THROTTLE_DELAY = 400;
   let rateLimitedInterval = null;
 
   let diceRulesConfig = null;
@@ -2437,6 +2437,23 @@
     }
     lastApiCall = Date.now();
     
+    // Debug logging for high-tier dice operations
+    if (window.DiceRollerDebugMode === true && requiredDiceTier >= 4) {
+      const playerContext = globalThis.state.player.getSnapshot().context;
+      const inventory = playerContext.inventory || {};
+      const diceKey = `diceManipulator${requiredDiceTier}`;
+      const availableDice = inventory[diceKey] || 0;
+      
+      console.log('[Dice Roller] Debug - High-tier dice operation:', {
+        diceTier: requiredDiceTier,
+        availableStats,
+        availableDice,
+        inventory: inventory[diceKey],
+        timeSinceLastCall,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     // Prepare request body based on mode
     let requestBody;
     if (window.DiceRollerMode === 'tier') {
@@ -2533,14 +2550,22 @@
                 }
               }
               
-              // Deselect dice that are no longer needed (lower tier dice that can't be used)
-              const diceToRemove = selectedDice.filter(dice => dice < diceToUseForStats);
-              if (diceToRemove.length > 0) {
-                // Remove the lower tier dice from selectedDice array
-                selectedDice.splice(0, selectedDice.length, ...selectedDice.filter(dice => dice >= diceToUseForStats));
-                // Update the UI to reflect the new selection
-                updateDiceButtonStates(selectedDice);
-              }
+                              // Deselect dice that are no longer needed (lower tier dice that can't be used)
+                const diceToRemove = selectedDice.filter(dice => dice < diceToUseForStats);
+                if (diceToRemove.length > 0) {
+                  if (window.DiceRollerDebugMode === true) {
+                    console.log('[Dice Roller] Debug - Auto-deselecting dice:', {
+                      originalSelection: [...selectedDice],
+                      diceToRemove,
+                      diceToUseForStats,
+                      newSelection: selectedDice.filter(dice => dice >= diceToUseForStats)
+                    });
+                  }
+                  // Remove the lower tier dice from selectedDice array
+                  selectedDice.splice(0, selectedDice.length, ...selectedDice.filter(dice => dice >= diceToUseForStats));
+                  // Update the UI to reflect the new selection
+                  updateDiceButtonStates(selectedDice);
+                }
             }
           } else {
             // No higher tier dice selected, but still apply smart stat selection for lowest stats
@@ -3247,9 +3272,20 @@
                   break;
                 }
               } catch (err) {
-                updateStatusWithError(statsStatusDiv, err.message);
-                autorolling = false;
-                break;
+                console.warn('[Dice Roller] Roll failed:', err.message);
+                if (window.DiceRollerDebugMode === true) {
+                  console.log('[Dice Roller] Debug - Roll failure details:', {
+                    attempt: autorollAttempt,
+                    selectedGameId,
+                    selectedDiceTier,
+                    availableStats,
+                    error: err.message,
+                    timestamp: new Date().toISOString()
+                  });
+                }
+                updateRollStatus(`Roll failed: ${err.message}. Retrying...`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                continue; // Try again instead of stopping
               }
             // Check if target met (for each stat - tier mode is handled in autoroll function)
             const monsters = safeGetMonsters();
@@ -3268,10 +3304,32 @@
                   
                   if (target > 0 && currentValue === target) {
                     reachedTargets.push({ stat, diceIndex: i });
-                  } else if (target > 0 && currentValue < target) {
+                  } else if (target > 0 && currentValue !== target) {
                     allMet = false;
                   }
                 }
+              }
+              
+              // Debug logging for target validation
+              if (window.DiceRollerDebugMode === true) {
+                console.log('[Dice Roller] Debug - Target validation:', {
+                  mode: 'genes',
+                  availableStats,
+                  reachedTargets,
+                  allMet,
+                  creatureStats: {
+                    hp: creature.hp || 0,
+                    ad: creature.ad || 0,
+                    ap: creature.ap || 0,
+                    armor: creature.armor || 0,
+                    magicResist: creature.magicResist || 0
+                  },
+                  targets: availableStats.map(stat => ({
+                    stat,
+                    current: creature[stat] || 0,
+                    target: currentDiceRulesConfig[stat]?.target || 0
+                  }))
+                });
               }
             }
             // If in stopWhenChangingDice mode and any target is reached, stop, deselect dice/stat, and print message
@@ -3359,6 +3417,23 @@
               }
             }
             if (window.DiceRollerMode === 'genes' && allMet) {
+              // Debug logging for target met condition
+              if (window.DiceRollerDebugMode === true) {
+                console.log('[Dice Roller] Debug - Target met condition triggered:', {
+                  mode: 'genes',
+                  allMet,
+                  availableStats,
+                  reachedTargets,
+                  creatureStats: {
+                    hp: creature.hp || 0,
+                    ad: creature.ad || 0,
+                    ap: creature.ap || 0,
+                    armor: creature.armor || 0,
+                    magicResist: creature.magicResist || 0
+                  }
+                });
+              }
+              
               // Show message in stats area temporarily
               const originalText = statsStatusDiv.textContent;
               statsStatusDiv.textContent = 'Target met!';
@@ -4471,6 +4546,11 @@
 // =======================
 // 8. Cleanup & Exports
 // =======================
+  // Debug mode disabled by default - set window.DiceRollerDebugMode = true to enable
+  if (typeof window !== 'undefined') {
+    window.DiceRollerDebugMode = false;
+  }
+  
   if (config.enabled) {
     observeInventory();
   }

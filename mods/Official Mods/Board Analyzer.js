@@ -600,6 +600,11 @@ const TRANSLATIONS = {
 function injectCustomStyles() {
   const styleElement = document.createElement('style');
   styleElement.textContent = `
+    #${BUTTON_ID} {
+      background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important;
+      background-size: auto !important;
+    }
+    
     #${CONFIG_PANEL_ID} input[type="number"], 
     #${CONFIG_PANEL_ID} input[type="text"] {
       background-color: #333;
@@ -2754,7 +2759,11 @@ function init() {
     modId: MOD_ID,
     tooltip: t('buttonTooltip'),
     primary: false,
-    onClick: showConfigAndPrepareAnalysis
+    onClick: showConfigAndPrepareAnalysis,
+    style: {
+      background: "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+      backgroundSize: 'auto'
+    }
   });
   
   // REMOVED: Cogwheel button - redundant since main button opens the same config panel
