@@ -744,53 +744,31 @@ function restoreBoardState() {
 let gameStateTracker = null;
 let currentGameState = null;
 
-// NEW: Board serialization cache to avoid redundant calls
-let boardSerializationCache = {
-  lastSerialized: null,
-  lastSerializedTime: 0,
-  cacheTimeout: 100, // Cache for 100ms to avoid redundant calls
-  
-  serialize(seed = null) {
-    const now = Date.now();
-    
-    // Return cached version if it's recent enough
-    if (this.lastSerialized && (now - this.lastSerializedTime) < this.cacheTimeout) {
-      const cached = JSON.parse(JSON.stringify(this.lastSerialized));
-      if (seed) cached.seed = seed;
-      return cached;
-    }
-    
-    // Serialize fresh board data
-    let boardData;
-    
+// Simple board data storage - serialize once, store, reuse
+let currentBoardData = null;
+
+function getBoardData(seed = null) {
+  if (!currentBoardData) {
     try {
       if (typeof window.$serializeBoard === 'function') {
-        boardData = JSON.parse(window.$serializeBoard());
+        currentBoardData = JSON.parse(window.$serializeBoard());
       } else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
-        boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
+        currentBoardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
       } else {
-        boardData = serializeBoard();
+        currentBoardData = serializeBoard();
       }
-      
-      // Cache the result
-      this.lastSerialized = JSON.parse(JSON.stringify(boardData));
-      this.lastSerializedTime = now;
-      
-      // Add seed if provided
-      if (seed) boardData.seed = seed;
-      
-      return boardData;
     } catch (error) {
       console.error('Error serializing board:', error);
       return null;
     }
-  },
-  
-  clear() {
-    this.lastSerialized = null;
-    this.lastSerializedTime = 0;
   }
-};
+  
+  // Return a copy with seed if provided
+  if (seed) {
+    return { ...currentBoardData, seed };
+  }
+  return { ...currentBoardData };
+}
 
 // NEW: Optimized statistics calculator to avoid repeated array operations
 class StatisticsCalculator {
@@ -1122,8 +1100,8 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   // Reset force stop flag
   forceStop = false;
   
-  // NEW: Clear board serialization cache for fresh analysis
-  boardSerializationCache.clear();
+      // Reset board data for fresh analysis
+    currentBoardData = null;
   
   // NEW: Disable Turbo Mode button during analysis
   if (window.turboButton) {
@@ -1293,15 +1271,15 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
               runIndex: i
             };
             
-            // NEW: Use cached board serialization for best time replay
-            const boardData = boardSerializationCache.serialize(runSeed);
-            
-            if (boardData) {
-              console.log('Best time: Using cached board serialization');
-            } else {
-              console.warn('Failed to serialize board for best time replay');
-              continue;
-            }
+                  // Get board data for best time replay
+      const boardData = getBoardData(runSeed);
+      
+      if (boardData) {
+        console.log('Best time: Using board data');
+      } else {
+        console.warn('Failed to get board data for best time replay');
+        continue;
+      }
             
             bestTimeRun = {
               seed: runSeed,
@@ -1329,13 +1307,13 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
           console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
           
-          // NEW: Use cached board serialization for target ticks replay
-          const boardData = boardSerializationCache.serialize(runSeed);
+          // Get board data for target ticks replay
+          const boardData = getBoardData(runSeed);
           
           if (boardData) {
-            console.log('Target ticks: Using cached board serialization');
+            console.log('Target ticks: Using board data');
           } else {
-            console.warn('Failed to serialize board for target ticks replay');
+            console.warn('Failed to get board data for target ticks replay');
             break;
           }
           
@@ -1361,15 +1339,15 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
             runIndex: i
           };
           
-          // NEW: Use cached board serialization for max points replay
-          const boardData = boardSerializationCache.serialize(runSeed);
-          
-          if (boardData) {
-            console.log('Max points: Using cached board serialization');
-          } else {
-            console.warn('Failed to serialize board for max points replay');
-            continue;
-          }
+                      // Get board data for max points replay
+            const boardData = getBoardData(runSeed);
+            
+            if (boardData) {
+              console.log('Max points: Using board data');
+            } else {
+              console.warn('Failed to get board data for max points replay');
+              continue;
+            }
           
           bestScoreRun = {
             seed: runSeed,
@@ -1441,9 +1419,9 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       console.log('[Board Analyzer] Game state tracker cleaned up');
     }
     
-    // NEW: Clear board serialization cache
-    boardSerializationCache.clear();
-    console.log('[Board Analyzer] Board serialization cache cleared');
+    // Reset board data
+    currentBoardData = null;
+    console.log('[Board Analyzer] Board data reset');
     
     // NEW: Re-enable Turbo Mode button after analysis
     if (window.turboButton) {
@@ -1515,15 +1493,15 @@ function formatMilliseconds(ms) {
 // Create replay data in the required format
 function createReplayData(seed = null) {
   try {
-    // NEW: Use cached board serialization
-    const boardData = boardSerializationCache.serialize(seed);
+    // Get board data
+    const boardData = getBoardData(seed);
     
     if (!boardData) {
-      console.error('Failed to serialize board data');
+      console.error('Failed to get board data');
       return null;
     }
     
-    console.log('Used cached board serialization for replay data');
+    console.log('Used board data for replay data');
     
     // Log the serialized data to see what we got
     console.log('Serialized board data:', boardData);
@@ -2151,9 +2129,16 @@ function showResultsModal(results) {
     
     // Only show chart if there are results
     if (results.results.length > 0) {
-      // Create a chart visualization
-      const chartContainer = document.createElement('div');
-      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
+      try {
+        // Debug: Log results data
+        console.log('Creating chart with results:', {
+          totalResults: results.results.length,
+          results: results.results.slice(0, 5) // Log first 5 results for debugging
+        });
+        
+        // Create a chart visualization
+        const chartContainer = document.createElement('div');
+        chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
       
       // Add note about clickable bars above the chart
       const chartClickableNote = document.createElement('div');
@@ -2208,6 +2193,12 @@ function showResultsModal(results) {
       
       // Use all results for the chart
       const displayResults = results.results;
+      
+      // Validate displayResults
+      if (!Array.isArray(displayResults) || displayResults.length === 0) {
+        console.warn('No valid results to display in chart');
+        return;
+      }
       
       // Calculate bar width and total chart width
       const spacing = 4; // Spacing between bars
@@ -2293,10 +2284,20 @@ function showResultsModal(results) {
         // Find the maximum tick value for proper scaling
         const maxTicks = Math.max(...sortedResults.map(r => r.ticks));
         
-        // Create bars
-        sortedResults.forEach((result, index) => {
+              // Create bars with error handling and debugging
+      sortedResults.forEach((result, index) => {
+        try {
+          // Validate result data
+          if (!result || typeof result.ticks !== 'number') {
+            console.warn(`Invalid result data at index ${index}:`, result);
+            return;
+          }
+          
           const bar = document.createElement('div');
           const height = Math.max(10, Math.floor((result.ticks / maxTicks) * 120));
+          
+          // Debug logging for height calculation
+          console.log(`Bar ${index}: ticks=${result.ticks}, maxTicks=${maxTicks}, height=${height}`);
           
           // Determine bar color based on grade and rank points
           let barColor;
@@ -2330,17 +2331,25 @@ function showResultsModal(results) {
             barColor = '#e74c3c'; // Red for failed runs
           }
           
-          bar.style.cssText = `
-            position: absolute;
-            bottom: 0;
-            left: ${index * (barWidth + spacing)}px;
-            width: ${barWidth}px;
-            height: ${height}px;
-            background-color: ${barColor};
-            transition: height 0.3s ease;
-            cursor: pointer;
-            border: 1px solid transparent;
-          `;
+          // Ensure minimum dimensions for visibility
+          const finalHeight = Math.max(10, height);
+          const finalWidth = Math.max(4, barWidth);
+          
+          // Use individual style properties for better browser compatibility
+          bar.style.position = 'absolute';
+          bar.style.bottom = '0';
+          bar.style.left = `${index * (barWidth + spacing)}px`;
+          bar.style.width = `${finalWidth}px`;
+          bar.style.height = `${finalHeight}px`;
+          bar.style.backgroundColor = barColor;
+          bar.style.transition = 'height 0.3s ease';
+          bar.style.cursor = 'pointer';
+          bar.style.border = '1px solid transparent';
+          bar.style.zIndex = '1';
+          
+          // Additional fallback styles for problematic browsers
+          bar.style.display = 'block';
+          bar.style.boxSizing = 'border-box';
           
           // Add hover effects
           bar.addEventListener('mouseenter', () => {
@@ -2403,8 +2412,21 @@ function showResultsModal(results) {
             }
           });
           
+          // Debug: Log bar creation
+          console.log(`Created bar ${index}:`, {
+            ticks: result.ticks,
+            height: finalHeight,
+            width: finalWidth,
+            color: barColor,
+            left: index * (barWidth + spacing)
+          });
+          
           barsContainer.appendChild(bar);
-        });
+          
+        } catch (error) {
+          console.error(`Error creating bar ${index}:`, error, result);
+        }
+      });
         
         // Reset scroll position to left when sorting
         scrollWrapper.scrollLeft = 0;
@@ -2422,6 +2444,16 @@ function showResultsModal(results) {
       // No need for limit note since we show all runs with scrollbar
       
       content.appendChild(chartContainer);
+      
+      } catch (error) {
+        console.error('Error creating chart:', error);
+        
+        // Fallback: Show error message
+        const errorMessage = document.createElement('div');
+        errorMessage.textContent = 'Error creating chart. Please check console for details.';
+        errorMessage.style.cssText = 'text-align: center; color: #e74c3c; margin-top: 15px; padding: 10px; border: 1px solid #e74c3c; border-radius: 4px;';
+        content.appendChild(errorMessage);
+      }
     } else {
       // Show a message if no results
       const noResultsMessage = document.createElement('p');
@@ -2532,15 +2564,15 @@ function verifyAndFixReplayData(replayData) {
 // Function to create replay data for a specific run
 function createReplayDataForRun(runResult) {
   try {
-    // NEW: Use cached board serialization
-    const boardData = boardSerializationCache.serialize(runResult.seed);
+    // Get board data
+    const boardData = getBoardData(runResult.seed);
     
     if (!boardData) {
-      console.error('Failed to serialize board for run replay data');
+      console.error('Failed to get board data for run replay data');
       return null;
     }
     
-    console.log('Using cached board serialization for run replay data');
+    console.log('Using board data for run replay data');
     
     // Verify the replay data is valid
     if (!verifyAndFixReplayData(boardData)) {
@@ -2831,80 +2863,4 @@ context.exports = {
   }
 };
 
-// Display the results in the modal
-function displayResults(results, element) {
-  if (!results || !Array.isArray(results) || results.length === 0) {
-    element.innerHTML = `<p class="error">${t('noResults')}</p>`;
-    return;
-  }
-
-  // Sort results by sPlus (descending)
-  const sortedResults = [...results].sort((a, b) => b.sPlus - a.sPlus);
-  
-  // Calculate statistics
-  const splusRates = results.map(r => r.sPlus);
-  const completionRates = results.map(r => r.boardCompleted);
-  const times = results.map(r => r.timeMs);
-
-  const avgSPlus = calculateAverage(splusRates);
-  const avgCompleted = calculateAverage(completionRates);
-  const minTime = Math.min(...times);
-  const maxTime = Math.max(...times);
-  const medianTime = calculateMedian(times);
-  const avgTime = calculateAverage(times);
-
-  // Build statistics section
-  const statsHTML = `
-    <div class="analysis-stats">
-      <div class="stat">
-        <span class="stat-label">${t('statSPlus')}</span>
-        <span class="stat-value">${(avgSPlus * 100).toFixed(2)}%</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('statCompleted')}</span>
-        <span class="stat-value">${(avgCompleted * 100).toFixed(2)}%</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('statMinTime')}</span>
-        <span class="stat-value">${(minTime / 1000).toFixed(2)}s</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('statMaxTime')}</span>
-        <span class="stat-value">${(maxTime / 1000).toFixed(2)}s</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('statMedianTime')}</span>
-        <span class="stat-value">${(medianTime / 1000).toFixed(2)}s</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">${t('statAvgTime')}</span>
-        <span class="stat-value">${(avgTime / 1000).toFixed(2)}s</span>
-      </div>
-    </div>
-  `;
-
-  // Build chart section - limit displayed bars to MAX_VISIBLE_BARS
-  const MAX_VISIBLE_BARS = 15; // Maximum number of bars to display to prevent overflow
-  const displayResults = sortedResults.length > MAX_VISIBLE_BARS 
-    ? sortedResults.slice(0, MAX_VISIBLE_BARS) 
-    : sortedResults;
-  
-  const chartHTML = createResultsChart(displayResults);
-  
-  // Add a note if we're not showing all results
-  const noteHTML = sortedResults.length > MAX_VISIBLE_BARS 
-    ? `<div class="chart-note">${t('chartLimitedNote').replace('{shown}', MAX_VISIBLE_BARS).replace('{total}', sortedResults.length)}</div>` 
-    : '';
-
-  // Combine all sections
-  element.innerHTML = `
-    <div class="analysis-results">
-      ${statsHTML}
-      <div class="analysis-chart-container">
-        <h3>${t('runResultsChart')}</h3>
-        ${chartHTML}
-        ${noteHTML}
-      </div>
-    </div>
-  `;
-} 
+// Legacy displayResults function removed - chart functionality is now handled in showResultsModal 

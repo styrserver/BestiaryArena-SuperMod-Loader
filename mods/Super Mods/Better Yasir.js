@@ -2398,7 +2398,7 @@
       const widgetBottoms = document.querySelectorAll('.widget-bottom');
       for (const widget of widgetBottoms) {
         const text = widget.textContent || '';
-        if (text.includes('Yasir') && text.includes('Current stock') && text.includes('Exchange items for dust')) {
+        if (text.includes('Yasir') && text.includes('Current stock') && text.includes('Exchange your items for dust')) {
           modal = widget;
           break;
         }
@@ -2451,7 +2451,7 @@
           header.textContent = 'Buy';
           header.style.textAlign = 'center';
           header.style.color = '#32cd32'; // Green color
-        } else if (text === 'Exchange items for dust') {
+        } else if (text === 'Exchange your items for dust') {
           header.textContent = 'Sell';
           header.style.textAlign = 'center';
           header.style.color = '#ff4d4d'; // Red color
