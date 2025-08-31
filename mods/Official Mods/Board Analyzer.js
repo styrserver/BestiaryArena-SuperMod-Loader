@@ -523,8 +523,10 @@ const TRANSLATIONS = {
     completionRateLabel: 'Completion Rate:',
     bestTimeLabel: 'Best Time:',
     maxPointsLabel: 'Max Rank Points:',
-    minTimeLabel: 'Min Time:',
-    maxTimeLabel: 'Max Time:',
+    minTimeLabel: 'Min Win Time:',
+    maxTimeLabel: 'Max Win Time:',
+    minDefeatTimeLabel: 'Min Defeat Time:',
+    maxDefeatTimeLabel: 'Max Defeat Time:',
     medianTimeLabel: 'Median Time:',
     averageTimeLabel: 'Average Time:',
     closeButton: 'Close',
@@ -571,8 +573,10 @@ const TRANSLATIONS = {
     completionRateLabel: 'Taxa de Conclusão:',
     bestTimeLabel: 'Melhor Tempo:',
     maxPointsLabel: 'Pontos Máximos:',
-    minTimeLabel: 'Tempo Mínimo:',
-    maxTimeLabel: 'Tempo Máximo:',
+    minTimeLabel: 'Tempo Mínimo Vitória:',
+    maxTimeLabel: 'Tempo Máximo Vitória:',
+    minDefeatTimeLabel: 'Tempo Mínimo Derrota:',
+    maxDefeatTimeLabel: 'Tempo Máximo Derrota:',
     medianTimeLabel: 'Tempo Mediana:',
     averageTimeLabel: 'Tempo Médio:',
     closeButton: 'Fechar',
@@ -784,6 +788,8 @@ class StatisticsCalculator {
     this.maxRankPoints = 0;
     this.minTicks = Infinity;
     this.maxTicks = 0;
+    this.minDefeatTicks = Infinity;
+    this.maxDefeatTicks = 0;
     this.ticksSum = 0;
     this.ticksArray = [];
     this.runTimes = [];
@@ -799,16 +805,24 @@ class StatisticsCalculator {
     this.ticksArray.push(result.ticks);
     this.ticksSum += result.ticks;
     
-    // Update min/max ticks for all runs
-    if (result.ticks < this.minTicks) {
-      this.minTicks = result.ticks;
-    }
-    if (result.ticks > this.maxTicks) {
-      this.maxTicks = result.ticks;
-    }
-    
+    // Update min/max ticks for completed runs
     if (result.completed) {
       this.completedRuns++;
+      
+      if (result.ticks < this.minTicks) {
+        this.minTicks = result.ticks;
+      }
+      if (result.ticks > this.maxTicks) {
+        this.maxTicks = result.ticks;
+      }
+    } else {
+      // Update min/max ticks for failed runs
+      if (result.ticks < this.minDefeatTicks) {
+        this.minDefeatTicks = result.ticks;
+      }
+      if (result.ticks > this.maxDefeatTicks) {
+        this.maxDefeatTicks = result.ticks;
+      }
     }
     
     // Update S+ stats
@@ -839,6 +853,8 @@ class StatisticsCalculator {
       completionRate,
       minTicks: isFinite(this.minTicks) ? this.minTicks : 0,
       maxTicks: this.maxTicks,
+      minDefeatTicks: isFinite(this.minDefeatTicks) ? this.minDefeatTicks : 0,
+      maxDefeatTicks: this.maxDefeatTicks,
       medianTicks,
       averageTicks,
       maxRankPoints: this.maxRankPoints,
@@ -1458,6 +1474,8 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       completionRate: stats.completionRate,
       minTicks: stats.minTicks,
       maxTicks: stats.maxTicks,
+      minDefeatTicks: stats.minDefeatTicks,
+      maxDefeatTicks: stats.maxDefeatTicks,
       medianTicks: stats.medianTicks,
       averageTicks: stats.averageTicks,
       maxRankPoints: stats.maxRankPoints,
@@ -2002,22 +2020,25 @@ function showResultsModal(results) {
     completionRateValue.textContent = `${results.summary.completionRate}% (${results.summary.completedRuns}/${results.summary.totalRuns})`;
     completionRateValue.style.cssText = 'text-align: right; color: green;';
     
-    // Best Time (Min Time)
+    // Best Time (Min Time) - Dynamic label based on completion status
     const minTimeLabel = document.createElement('div');
-    minTimeLabel.textContent = t('minTimeLabel');
+    const hasWins = results.summary.completedRuns > 0;
+    minTimeLabel.textContent = hasWins ? t('minTimeLabel') : t('minDefeatTimeLabel');
     minTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const minTimeValue = document.createElement('div');
-    minTimeValue.textContent = `${results.summary.minTicks} ${t('ticksSuffix')}`;
+    const minTimeToShow = hasWins ? results.summary.minTicks : results.summary.minDefeatTicks;
+    minTimeValue.textContent = `${minTimeToShow} ${t('ticksSuffix')}`;
     minTimeValue.style.cssText = 'text-align: right;';
     
-    // Max Time
+    // Max Time - Dynamic label based on completion status
     const maxTimeLabel = document.createElement('div');
-    maxTimeLabel.textContent = t('maxTimeLabel');
+    maxTimeLabel.textContent = hasWins ? t('maxTimeLabel') : t('maxDefeatTimeLabel');
     maxTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const maxTimeValue = document.createElement('div');
-    maxTimeValue.textContent = `${results.summary.maxTicks} ${t('ticksSuffix')}`;
+    const maxTimeToShow = hasWins ? results.summary.maxTicks : results.summary.maxDefeatTicks;
+    maxTimeValue.textContent = `${maxTimeToShow} ${t('ticksSuffix')}`;
     maxTimeValue.style.cssText = 'text-align: right;';
     
     // Median Time
