@@ -2294,7 +2294,7 @@ function showResultsModal(results) {
           }
           
           const bar = document.createElement('div');
-          const height = Math.max(10, Math.floor((result.ticks / maxTicks) * 120));
+          const height = Math.max(20, Math.floor((result.ticks / maxTicks) * 120));
           
           // Debug logging for height calculation
           console.log(`Bar ${index}: ticks=${result.ticks}, maxTicks=${maxTicks}, height=${height}`);
@@ -2332,7 +2332,7 @@ function showResultsModal(results) {
           }
           
           // Ensure minimum dimensions for visibility
-          const finalHeight = Math.max(10, height);
+          const finalHeight = Math.max(20, height);
           const finalWidth = Math.max(4, barWidth);
           
           // Use individual style properties for better browser compatibility
