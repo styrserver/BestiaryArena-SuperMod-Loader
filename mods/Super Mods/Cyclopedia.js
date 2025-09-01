@@ -2,6 +2,8 @@
 // 1. Configuration
 // =======================
 'use strict';
+
+console.log('[Cyclopedia] initializing...');
 const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
 var inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
 if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}

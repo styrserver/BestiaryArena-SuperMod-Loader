@@ -1,5 +1,5 @@
 // Dashboard Button Mod
-if (window.DEBUG) console.log('DashboardButton initializing...');
+console.log('DashboardButton initializing...');
 
 function openDashboardInNewTab() {
   window.postMessage({ type: 'OPEN_SUPERMOD_DASHBOARD' }, '*');

@@ -41,6 +41,8 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
 
 The Bestiary Arena Mod Loader allows you to create custom modifications for the game that can extend its functionality, add new features, or change the user experience. Mods are JavaScript files that run in the context of the game and have access to a powerful API that lets them interact with game state and UI.
 
+**Note**: The Mod Loader includes a global debug system controlled by the popup interface. All `console.log()` calls in your mods automatically respect the debug toggle - no manual debug wrappers needed!
+
 ## Getting Started
 
 To create a mod, you need to:
@@ -48,6 +50,16 @@ To create a mod, you need to:
 1. Create a JavaScript file
 2. Add it to the extension through the popup interface, either as a local mod or via a Gist URL
 3. Enable the mod in the Mod Loader settings
+
+### Debug System
+
+The Mod Loader includes a **global debug system** that automatically controls all console output from mods:
+
+- **Debug OFF**: All `console.log()` calls are automatically suppressed
+- **Debug ON**: All `console.log()` calls work normally
+- **No manual checks needed**: Just use `console.log()` directly - the system handles debug control automatically
+
+**Important**: You do NOT need to wrap your console.log calls in `if (window.BESTIARY_DEBUG)` checks. The popup's debug toggle controls all console output globally through the content scripts.
 
 ### Basic Mod Template
 
@@ -643,6 +655,7 @@ For more details on the game state API, see the [Game State API Documentation](g
 - Comment your code, especially complex parts
 - Structure your code into logical sections
 - Handle errors gracefully
+- **Use `console.log()` directly** - no need for debug wrappers since the popup controls all console output globally
 
 ### Compatibility
 
@@ -651,6 +664,14 @@ For more details on the game state API, see the [Game State API Documentation](g
 - Ensure your mod works well with other mods
 - Use feature detection instead of assuming availability
 - Handle API changes gracefully by checking for the existence of methods before using them
+
+### Logging Best Practices
+
+- **Use `console.log()` directly** for all debug output
+- **No debug wrappers needed**: The popup's debug toggle controls all console output automatically
+- **Keep logs informative**: Include context like mod name, function name, or relevant data
+- **Use appropriate log levels**: `console.log()` for info, `console.warn()` for warnings, `console.error()` for errors
+- **Clean up sensitive data**: Don't log user credentials or sensitive game state information
 
 ## Examples
 

@@ -1,6 +1,5 @@
 // DOM Turbo with Ticks mod for Bestiary Arena
-window.DEBUG = false;
-if (window.DEBUG) console.log('Turbo Mod initializing...');
+console.log('Turbo Mod initializing...');
 
 // Constants
 const DEFAULT_TICK_INTERVAL_MS = 62.5;
@@ -26,7 +25,7 @@ const turboState = window.__turboState;
 function enableTurbo() {
   if (turboState.active) return; // Already active
   
-  if (window.DEBUG) console.log('Enabling Turbo mode...');
+  console.log('Enabling Turbo mode...');
   turboState.active = true;
   
   // Apply time scale using the new approach
@@ -43,7 +42,7 @@ function enableTurbo() {
   // Watch for game controls
   watchForGameControls();
   
-  if (window.DEBUG) console.log('Turbo mode enabled with factor:', turboState.speedupFactor);
+  console.log('Turbo mode enabled with factor:', turboState.speedupFactor);
   
   // Update button text
   if (window.turboButton) {
@@ -65,7 +64,7 @@ function setTimeScale(factor) {
 
   // Otherwise, set up a custom handler that adjusts the tick interval.
   const interval = Math.max(DEFAULT_TICK_INTERVAL_MS / factor, 16); // Minimum 16ms (60fps) for performance
-  if (window.DEBUG) console.log(`Setting tick interval to ${interval}ms (${factor}x speed)`);
+      console.log(`Setting tick interval to ${interval}ms (${factor}x speed)`);
   
   turboState.speedupSubscription = globalThis.state.board.on('newGame', (event) => {
     event.world.tickEngine.setTickInterval(interval);
@@ -74,7 +73,7 @@ function setTimeScale(factor) {
   // Try to adjust tick interval of current game if it exists
   if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
     const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
-    if (window.DEBUG) console.log(`Setting tick interval for existing game to ${interval}ms`);
+    console.log(`Setting tick interval for existing game to ${interval}ms`);
     tickEngine.setTickInterval(interval);
   }
 }
@@ -83,7 +82,7 @@ function setTimeScale(factor) {
 function disableTurbo() {
   if (!turboState.active) return; // Not active
   
-  if (window.DEBUG) console.log('Disabling Turbo mode...');
+  console.log('Disabling Turbo mode...');
   
   // Update tick display
   if (turboState.tickDisplayElement) {
@@ -117,7 +116,7 @@ function disableTurbo() {
   
   turboState.active = false;
   turboState.timerSubscribed = false;
-  if (window.DEBUG) console.log('Turbo mode disabled');
+  console.log('Turbo mode disabled');
   
   // Update button text
   if (window.turboButton) {
@@ -128,7 +127,7 @@ function disableTurbo() {
   // Reset tick interval of current game if it exists
   if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
     const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
-    if (window.DEBUG) console.log(`Resetting tick interval to ${DEFAULT_TICK_INTERVAL_MS}ms`);
+    console.log(`Resetting tick interval to ${DEFAULT_TICK_INTERVAL_MS}ms`);
     tickEngine.setTickInterval(DEFAULT_TICK_INTERVAL_MS);
   }
 }
@@ -148,14 +147,14 @@ function setupTimerWatcher() {
     // Check if we need to create the tick display
     if (!tickDisplayExists) {
       if (tryInitTickDisplay()) {
-        if (window.DEBUG) console.log('Tick display created during watcher interval');
+        console.log('Tick display created during watcher interval');
       }
       return;
     }
     
     // If the game timer is available but we're not subscribed, subscribe
     if (timerAvailable && !turboState.timerSubscribed) {
-      if (window.DEBUG) console.log('Timer available but not subscribed, subscribing now...');
+      console.log('Timer available but not subscribed, subscribing now...');
       subscribeToGameTimer();
       return;
     }
@@ -164,7 +163,7 @@ function setupTimerWatcher() {
     if (tickDisplayExists && timerAvailable && 
         (turboState.tickDisplayElement.textContent === 'Turbo: ON' || 
          turboState.tickDisplayElement.textContent === 'Turbo: ON | Lost connection to timer')) {
-      if (window.DEBUG) console.log('Display shows no ticks or lost connection, subscribing...');
+      console.log('Display shows no ticks or lost connection, subscribing...');
       subscribeToGameTimer();
     }
   }, 1000); // Check every second for better performance at high speeds
@@ -191,7 +190,7 @@ function subscribeToGameTimer() {
       
       // If tick count went down, that means game was restarted
       if (context.currentTick < turboState.lastKnownTick && turboState.lastKnownTick > 0) {
-        if (window.DEBUG) console.log('Detected game restart (tick reset)');
+        console.log('Detected game restart (tick reset)');
       }
       
       turboState.lastKnownTick = context.currentTick;
@@ -209,7 +208,7 @@ function subscribeToGameTimer() {
     try {
       const timerState = state.gameTimer.getSnapshot();
       isGameRunning = timerState && timerState.context && timerState.context.isRunning;
-      if (window.DEBUG) console.log('Game running state:', isGameRunning);
+      console.log('Game running state:', isGameRunning);
     } catch (e) {
       console.warn('Could not get timer state:', e);
     }
@@ -218,7 +217,7 @@ function subscribeToGameTimer() {
     const subscription = state.gameTimer.subscribe(timerCallback);
     
     if (subscription) {
-      if (window.DEBUG) console.log('Successfully subscribed to game timer');
+      console.log('Successfully subscribed to game timer');
       turboState.timerSubscribed = true;
       
       // If game is not running, show a special message
@@ -254,7 +253,7 @@ function tryInitTickDisplay() {
   const container = document.querySelector('.flex.flex-col.items-end.overflow-hidden');
   if (!container || document.getElementById('mb-game-timer')) return false;
   
-  if (window.DEBUG) console.log('Creating tick display element...');
+        console.log('Creating tick display element...');
   const tickEl = document.createElement('div');
   tickEl.id = 'mb-game-timer';
   Object.assign(tickEl.style, {
@@ -291,7 +290,7 @@ function setupMutationObserver() {
   });
   
   turboState.observer.observe(document.body, { childList: true, subtree: true });
-  if (window.DEBUG) console.log('Set up mutation observer for tick display');
+      console.log('Set up mutation observer for tick display');
 }
 
 // Add a function to detect game reset by watching for play button
@@ -316,7 +315,7 @@ function watchForGameControls() {
         
         // If play button appears (game stopped), mark timer as unsubscribed so we resubscribe on next play
         if (playButton && turboState.timerSubscribed) {
-          if (window.DEBUG) console.log('Game stopped (play button found), will resubscribe when started');
+          console.log('Game stopped (play button found), will resubscribe when started');
           turboState.timerSubscribed = false;
           
           if (turboState.tickDisplayElement) {
@@ -326,7 +325,7 @@ function watchForGameControls() {
         
         // If stop button appears (game started), try to subscribe
         if (stopButton && !turboState.timerSubscribed && turboState.active) {
-          if (window.DEBUG) console.log('Game started (stop button found), subscribing to timer');
+          console.log('Game started (stop button found), subscribing to timer');
           // Add a delay to ensure the game is fully initialized
           setTimeout(() => {
             // Force resubscription
@@ -346,14 +345,14 @@ function watchForGameControls() {
       subtree: false,
       attributes: false
     });
-    if (window.DEBUG) console.log('Watching game controls for play/stop events');
+    console.log('Watching game controls for play/stop events');
   } else {
     // If game area not found, watch the whole document and try again later
     turboState.gameControlsObserver.observe(document.body, { 
       childList: true, 
       subtree: false
     });
-    if (window.DEBUG) console.log('Game area not found, watching body for changes');
+          console.log('Game area not found, watching body for changes');
     
     // Try again later to find the game area
     setTimeout(() => {
@@ -365,7 +364,7 @@ function watchForGameControls() {
           subtree: true,
           attributes: true
         });
-        if (window.DEBUG) console.log('Found game area, now watching it specifically');
+        console.log('Found game area, now watching it specifically');
       }
     }, 2000);
   }
@@ -373,7 +372,7 @@ function watchForGameControls() {
   // Also check for play/pause buttons right now
   const playButton = document.querySelector('button[aria-label="Play"]');
   if (playButton) {
-    if (window.DEBUG) console.log('Found play button initially - game is paused');
+          console.log('Found play button initially - game is paused');
     if (turboState.tickDisplayElement && turboState.active) {
       turboState.tickDisplayElement.textContent = 'Turbo: ON | Game paused';
     }
@@ -513,7 +512,7 @@ function createConfigPanel() {
 
 // Create the Turbo button and config panel using the API
 if (api) {
-  if (window.DEBUG) console.log('BestiaryModAPI available in Turbo Mod');
+      console.log('BestiaryModAPI available in Turbo Mod');
   
   // Check if config has saved state
   api.service.updateScriptConfig('local_DOM_Turbo_with_ticks.js', {})
@@ -522,7 +521,7 @@ if (api) {
     })
     .then(scripts => {
       const turboConfig = scripts.find(s => s.hash === 'local_DOM_Turbo_with_ticks.js')?.config || {};
-      if (window.DEBUG) console.log('Loaded Turbo config:', turboConfig);
+      console.log('Loaded Turbo config:', turboConfig);
       
       // Update speed from saved config
       if (turboConfig.speedupFactor) {
@@ -531,7 +530,7 @@ if (api) {
       
       // If it was active before, reactivate it
       if (turboConfig.active) {
-        if (window.DEBUG) console.log('Turbo was previously active, re-enabling...');
+        console.log('Turbo was previously active, re-enabling...');
         enableTurbo();
       }
       
@@ -544,7 +543,7 @@ if (api) {
         onClick: toggleTurbo
       });
       
-      if (window.DEBUG) console.log('Turbo button added');
+      console.log('Turbo button added');
       
       // Create configuration panel
       createConfigPanel();
@@ -584,7 +583,7 @@ if (turboState.active) {
 // Always set up game controls watcher so we're ready when turbo is enabled
 setTimeout(watchForGameControls, 1000);
 
-if (window.DEBUG) console.log('Turbo Mod initialization complete');
+  console.log('Turbo Mod initialization complete');
 
 // Export control functions
 exports = {

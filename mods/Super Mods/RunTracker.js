@@ -1539,7 +1539,7 @@ if (!window.RunTrackerAPI) {
   };
 }
 
-console.log('[RunTracker] API loaded immediately');
+  console.log('[RunTracker] API loaded immediately');
 
 // Start initialization
 initializeMod().then(() => {

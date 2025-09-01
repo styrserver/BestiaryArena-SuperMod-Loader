@@ -1146,7 +1146,7 @@ function createAutoplayAnalyzerPanel() {
 
     // Start resizing on mousedown near edge/corner
     panel.addEventListener('mousedown', function(e) {
-        if (window.DEBUG) console.log('Current mode:', currentLayoutMode);
+        console.log('Current mode:', currentLayoutMode);
         if (currentLayoutMode === LAYOUT_MODES.MINIMIZED) {
             const layout = LAYOUT_DIMENSIONS[LAYOUT_MODES.MINIMIZED];
             panel.style.width = layout.width + 'px';
@@ -1999,7 +1999,7 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
     globalThis.state.board.on('newGame', (event) => {
         // Skip recording if in sandbox mode
         if (isSandboxMode()) {
-            if (window.DEBUG) console.log("[Hunt Analyzer] Skipping sandbox mode session");
+            console.log("[Hunt Analyzer] Skipping sandbox mode session");
             return;
         }
         
@@ -2016,7 +2016,7 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             
             // Skip processing if in sandbox mode
             if (isSandboxMode()) {
-                if (window.DEBUG) console.log("[Hunt Analyzer] Skipping sandbox mode results");
+                console.log("[Hunt Analyzer] Skipping sandbox mode results");
                 return;
             }
             
@@ -2075,11 +2075,11 @@ if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
     testButton.style.cursor = "pointer";
     testButton.addEventListener("click", createAutoplayAnalyzerPanel);
     document.body.appendChild(testButton);
-    if (window.DEBUG) console.log("[Hunt Analyzer] Fallback test button added.");
+    console.log("[Hunt Analyzer] Fallback test button added.");
 }
 
 // Initial script execution setup.
-if (window.DEBUG) console.log("[Hunt Analyzer] Hunt Analyzer script initialized.");
+console.log("[Hunt Analyzer] Hunt Analyzer script initialized.");
 
 // Add these functions before createAutoplayAnalyzerPanel()
 function savePanelSettings(panel) {

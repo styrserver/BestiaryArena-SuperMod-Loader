@@ -1,10 +1,7 @@
 // Bestiary Automator Mod for Bestiary Arena
 // Code by MathiasBynens and TheMegafuji
 
-// Enable debug mode (set to false for production)
-window.DEBUG = false;
-
-if (window.DEBUG) console.log('Bestiary Automator initializing...');
+console.log('[Bestiary Automator] initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -14,6 +11,7 @@ const defaultConfig = {
   autoCollectRewards: false,
   autoDayCare: false,
   autoPlayAfterDefeat: false,
+  autoFinishTasks: true,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -35,7 +33,7 @@ const loadConfig = () => {
       return Object.assign({}, defaultConfig, savedConfig);
     }
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error loading config:', error);
+    console.error('[Bestiary Automator] Error loading config:', error);
   }
   
   // Fallback to context or defaults
@@ -59,11 +57,12 @@ const TRANSLATIONS = {
     configButtonTooltip: 'Automator Settings',
     modalTitle: 'Bestiary Automator Settings',
     enabled: 'Enable Automation',
-    autoRefillStamina: 'Auto Refill Stamina',
+    autoRefillStamina: 'Autorefill Stamina',
     minimumStaminaLabel: 'Minimum Stamina Without Refill',
-    autoCollectRewards: 'Auto Collect Rewards',
-    autoDayCare: 'Auto Handle Day Care',
-    autoPlayAfterDefeat: 'Autoplay after defeat and network issues',
+    autoCollectRewards: 'Autocollect Rewards',
+    autoDayCare: 'Autohandle Daycare',
+    autoPlayAfterDefeat: 'Autoplay after Defeat and Network Issues',
+    autoFinishTasks: 'Autofinish Tasks',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -86,6 +85,7 @@ const TRANSLATIONS = {
     autoCollectRewards: 'Coletar Recompensas Automaticamente',
     autoDayCare: 'Cuidar Automaticamente da Creche',
     autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
+    autoFinishTasks: 'Finalizar Tarefas Automaticamente',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -164,11 +164,11 @@ const findButtonWithText = (textKey) => {
 const clickButtonWithText = (textKey) => {
   const button = findButtonWithText(textKey);
   if (button) {
-    if (window.DEBUG) console.log(`[Bestiary Automator] Clicking button: "${textKey}" (${button.textContent.trim()})`);
+    console.log(`[Bestiary Automator] Clicking button: "${textKey}" (${button.textContent.trim()})`);
     button.click();
     return true;
   }
-  if (window.DEBUG) console.log(`[Bestiary Automator] Button not found: "${textKey}"`);
+  console.log(`[Bestiary Automator] Button not found: "${textKey}"`);
   return false;
 };
 
@@ -176,7 +176,7 @@ const clickButtonWithText = (textKey) => {
 const handleScrollLock = () => {
   // Don't handle scroll lock if Board Analyzer is running
   if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-    if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, skipping scroll lock handling');
+    console.log('[Bestiary Automator] Board Analyzer is running, skipping scroll lock handling');
     return false;
   }
   
@@ -185,7 +185,7 @@ const handleScrollLock = () => {
     const scrollLockValue = body.getAttribute('data-scroll-locked');
     
     if (scrollLockValue && parseInt(scrollLockValue) > 0) {
-      if (window.DEBUG) console.log(`[Bestiary Automator] Scroll lock detected (${scrollLockValue}), simulating ESC key`);
+      console.log(`[Bestiary Automator] Scroll lock detected (${scrollLockValue}), simulating ESC key`);
       
       // Simulate ESC key press
       const escEvent = new KeyboardEvent('keydown', {
@@ -203,7 +203,7 @@ const handleScrollLock = () => {
     
     return false;
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error handling scroll lock:', error);
+    console.error('[Bestiary Automator] Error handling scroll lock:', error);
     return false;
   }
 };
@@ -212,7 +212,7 @@ const handleScrollLock = () => {
 const clickAllCloseButtons = () => {
   // Don't close modals if Board Analyzer is running
   if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-    if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, skipping modal close operations');
+    console.log('[Bestiary Automator] Board Analyzer is running, skipping modal close operations');
     return false;
   }
   
@@ -222,13 +222,13 @@ const clickAllCloseButtons = () => {
   for (const button of closeButtons) {
     const buttonText = button.textContent.trim();
     if (buttonText === 'Close' || buttonText === 'Fechar') {
-      if (window.DEBUG) console.log(`[Bestiary Automator] Clicking close button: "${buttonText}"`);
+      console.log(`[Bestiary Automator] Clicking close button: "${buttonText}"`);
       button.click();
       clickedCount++;
     }
   }
   
-  if (window.DEBUG && clickedCount > 0) {
+        if (clickedCount > 0) {
     console.log(`[Bestiary Automator] Clicked ${clickedCount} close button(s)`);
   }
   
@@ -328,7 +328,7 @@ const isGameActive = () => {
   try {
     // Check if Board Analyzer is running - if so, pause automation
     if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-      if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
+      console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
       return false;
     }
     
@@ -337,7 +337,7 @@ const isGameActive = () => {
     
     // Check if Game State API is available
     if (!globalThis.state || !globalThis.state.board) {
-      if (window.DEBUG) console.log('[Bestiary Automator] Game State API not available');
+      console.log('[Bestiary Automator] Game State API not available');
       return false;
     }
     
@@ -345,19 +345,19 @@ const isGameActive = () => {
     
     // Only run automation if a game is started and active
     if (!boardContext.gameStarted) {
-      if (window.DEBUG) console.log('[Bestiary Automator] No active game detected');
+      console.log('[Bestiary Automator] No active game detected');
       return false;
     }
     
     // Check if we're in a playable mode (not in menus/dialogs)
     if (boardContext.openMapPicker) {
-      if (window.DEBUG) console.log('[Bestiary Automator] Map picker is open');
+      console.log('[Bestiary Automator] Map picker is open');
       return false;
     }
     
     return true;
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error checking game state:', error);
+    console.error('[Bestiary Automator] Error checking game state:', error);
     return false;
   }
 };
@@ -367,7 +367,7 @@ const isGameReadyForStaminaRefill = () => {
   try {
     // Check if Board Analyzer is running - if so, pause automation
     if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-      if (window.DEBUG) console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
+      console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
       return false;
     }
     
@@ -388,20 +388,20 @@ const isGameReadyForStaminaRefill = () => {
       
       // Only check stamina if a game is started and active
       if (!boardContext.gameStarted) {
-        if (window.DEBUG) console.log('[Bestiary Automator] No active game detected');
+        console.log('[Bestiary Automator] No active game detected');
         return false;
       }
       
       // Check if we're in a playable mode (not in menus/dialogs)
       if (boardContext.openMapPicker) {
-        if (window.DEBUG) console.log('[Bestiary Automator] Map picker is open');
+        console.log('[Bestiary Automator] Map picker is open');
         return false;
       }
     }
     
     return true;
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error checking game readiness:', error);
+    console.error('[Bestiary Automator] Error checking game readiness:', error);
     return false;
   }
 };
@@ -418,7 +418,7 @@ const refillStaminaIfNeeded = async () => {
   try {
     // Check if game is ready
     if (!isGameReadyForStaminaRefill()) {
-      if (window.DEBUG) console.log('[Bestiary Automator] Game not ready for stamina refill, will retry');
+      console.log('[Bestiary Automator] Game not ready for stamina refill, will retry');
       return;
     }
     
@@ -432,7 +432,7 @@ const refillStaminaIfNeeded = async () => {
       return;
     }
     
-    if (window.DEBUG) console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}, retry=${staminaRefillRetryCount}`);
+    console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}, retry=${staminaRefillRetryCount}`);
     
     // Attempt refill
     elStamina.click();
@@ -450,7 +450,7 @@ const refillStaminaIfNeeded = async () => {
     if (newStaminaElement) {
       const newStamina = Number(newStaminaElement.textContent);
       if (newStamina < config.minimumStaminaWithoutRefill) {
-        if (window.DEBUG) console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, attempting another refill`);
+        console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, attempting another refill`);
         // Don't close yet, let the loop try again
         return;
       }
@@ -467,21 +467,21 @@ const refillStaminaIfNeeded = async () => {
     staminaRefillRetryCount = 0;
     
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error refilling stamina:', error);
+    console.error('[Bestiary Automator] Error refilling stamina:', error);
     
     // Implement exponential backoff retry
     staminaRefillRetryCount++;
     if (staminaRefillRetryCount <= 3) {
       const retryDelay = Math.pow(2, staminaRefillRetryCount) * 1000; // 2s, 4s, 8s
       
-      if (window.DEBUG) console.log(`[Bestiary Automator] Scheduling retry in ${retryDelay}ms (attempt ${staminaRefillRetryCount})`);
+      console.log(`[Bestiary Automator] Scheduling retry in ${retryDelay}ms (attempt ${staminaRefillRetryCount})`);
       
       clearTimeout(staminaRefillRetryTimeout);
       staminaRefillRetryTimeout = setTimeout(() => {
         refillStaminaIfNeeded();
       }, retryDelay);
     } else {
-      if (window.DEBUG) console.log('[Bestiary Automator] Max retry attempts reached, giving up');
+      console.log('[Bestiary Automator] Max retry attempts reached, giving up');
       staminaRefillRetryCount = 0;
     }
   }
@@ -506,7 +506,7 @@ const takeRewardsIfAvailable = async () => {
     const available = document.querySelector('button[aria-haspopup="menu"]:has(.animate-ping)');
     if (!available) return;
     
-    if (window.DEBUG) console.log(`[Bestiary Automator] Taking rewards at level ${currentLevel}`);
+    console.log(`[Bestiary Automator] Taking rewards at level ${currentLevel}`);
     
     // Open rewards menu
     globalThis.state.menu.send({
@@ -530,7 +530,7 @@ const takeRewardsIfAvailable = async () => {
     // Check for scroll lock after collecting rewards
     handleScrollLock();
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error taking rewards:', error);
+    console.error('[Bestiary Automator] Error taking rewards:', error);
   }
 };
 
@@ -542,7 +542,7 @@ const handleDayCare = async () => {
     const dayCareBlip = document.querySelector('div[data-radix-scroll-area-viewport]:has(div:not(.text-invalid) > .animate-ping)');
     if (!dayCareBlip) return;
     
-    if (window.DEBUG) console.log('[Bestiary Automator] Handling day care');
+    console.log('[Bestiary Automator] Handling day care');
     
     clickButtonWithText('inventory');
     await sleep(500);
@@ -557,7 +557,75 @@ const handleDayCare = async () => {
     clickAllCloseButtons();
     await sleep(500);
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error handling day care:', error);
+    console.error('[Bestiary Automator] Error handling day care:', error);
+  }
+};
+
+// Handle task finishing
+const handleTaskFinishing = async () => {
+  if (!config.autoFinishTasks) return;
+  
+  try {
+    // Check if Game State API is available
+    if (!globalThis.state || !globalThis.state.player || !globalThis.state.board) {
+      return; // Silent return when API not available
+    }
+    
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    
+    // Only finish tasks when no game is active (not in manual/autoplay mode)
+    if (boardContext.gameStarted && (boardContext.mode === 'manual' || boardContext.mode === 'autoplay')) {
+      return; // Silent return when game is active
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    
+    // Check if there's a hunting task that's ready
+    if (playerContext.questLog && playerContext.questLog.task) {
+      const task = playerContext.questLog.task;
+      
+      if (task.ready) {
+        console.log('[Bestiary Automator] Hunting task is ready, finishing...');
+        
+        // Make API call to finish the hunting task
+        const response = await fetch('https://bestiaryarena.com/api/trpc/quest.finishHuntingTask?batch=1', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Game-Version': '1'
+          },
+          body: JSON.stringify({
+            "0": {
+              "json": null,
+              "meta": {
+                "values": ["undefined"]
+              }
+            }
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('[Bestiary Automator] Task finished successfully:', result);
+          
+          // Wait a moment for the UI to update
+          await sleep(1000);
+          
+          // Check for any reward modals or notifications that need to be closed
+          clickAllCloseButtons();
+          await sleep(500);
+          
+          // Check for scroll lock after finishing task
+          handleScrollLock();
+        } else {
+          console.error('[Bestiary Automator] Failed to finish task:', response.status, response.statusText);
+        }
+      }
+      // Removed the else clause that was logging "Hunting task not ready yet"
+    }
+    // Removed the implicit else that was causing the function to continue and log nothing
+  } catch (error) {
+    console.error('[Bestiary Automator] Error handling task finishing:', error);
   }
 };
 
@@ -568,8 +636,7 @@ const updateRequiredStamina = () => {
     // Check if user has manually set a custom value (different from default)
     const hasCustomValue = config.minimumStaminaWithoutRefill !== defaultConfig.minimumStaminaWithoutRefill;
     if (hasCustomValue) {
-      if (window.DEBUG) console.log(`[Bestiary Automator] Skipping auto-update - user has custom value: ${config.minimumStaminaWithoutRefill}`);
-      return;
+      return; // Silent return when user has custom value
     }
     
     const elements = document.querySelectorAll('.action-link');
@@ -586,7 +653,7 @@ const updateRequiredStamina = () => {
         (1 <= staminaRequired && staminaRequired <= 360)
       ) {
         config.minimumStaminaWithoutRefill = staminaRequired;
-        if (window.DEBUG) console.log(`[Bestiary Automator] Auto-setting minimum stamina without refill to ${staminaRequired}`);
+        console.log(`[Bestiary Automator] Auto-setting minimum stamina without refill to ${staminaRequired}`);
         
         // Save the new value to both localStorage and API
         const configToSave = {
@@ -599,20 +666,20 @@ const updateRequiredStamina = () => {
             ...configToSave
           }));
         } catch (error) {
-          if (window.DEBUG) console.error('[Bestiary Automator] Error saving to localStorage:', error);
+          console.error('[Bestiary Automator] Error saving to localStorage:', error);
         }
         
         try {
           api.service.updateScriptConfig(context.hash, configToSave);
         } catch (error) {
-          if (window.DEBUG) console.error('[Bestiary Automator] Error saving via API:', error);
+          console.error('[Bestiary Automator] Error saving via API:', error);
         }
         
         return;
       }
     }
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error updating required stamina:', error);
+    console.error('[Bestiary Automator] Error updating required stamina:', error);
   }
 };
 
@@ -632,7 +699,7 @@ const subscribeToGameState = () => {
     // Subscribe to board state changes for new game detection
     if (globalThis.state && globalThis.state.board) {
       globalThis.state.board.on('newGame', (event) => {
-        if (window.DEBUG) console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
+        console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
         rewardsCollectedThisSession = false;
         // Cancel any ongoing countdown when new game starts
         if (currentCountdownTask) {
@@ -719,9 +786,9 @@ const subscribeToGameState = () => {
       });
     }
     
-    if (window.DEBUG) console.log('[Bestiary Automator] Subscribed to game state changes for autoplay after defeat');
+    console.log('[Bestiary Automator] Subscribed to game state changes for autoplay after defeat');
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error subscribing to game state:', error);
+    console.error('[Bestiary Automator] Error subscribing to game state:', error);
   }
 };
 
@@ -735,7 +802,7 @@ const unsubscribeFromGameState = () => {
     }
     gameStateObserver = null;
     
-    if (window.DEBUG) console.log('[Bestiary Automator] Unsubscribed from game state changes');
+    console.log('[Bestiary Automator] Unsubscribed from game state changes');
   }
 };
 
@@ -779,17 +846,17 @@ const handleToasts = async () => {
       
       // Handle defeat toast
       if (toastText.includes('Autoplay stopped because your creatures were') && toastText.includes('defeated')) {
-        if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast detected!');
+        console.log('[Bestiary Automator] Defeat toast detected!');
         
         if (defeatToastCooldown) {
-          if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast cooldown active, skipping...');
+          console.log('[Bestiary Automator] Defeat toast cooldown active, skipping...');
           continue;
         }
         
         // Set cooldown to prevent multiple executions
         defeatToastCooldown = true;
         
-        if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast detected, waiting 1s then restarting...');
+        console.log('[Bestiary Automator] Defeat toast detected, waiting 1s then restarting...');
         
         // Wait 1 second
         await sleep(1000);
@@ -807,15 +874,15 @@ const handleToasts = async () => {
         
         if (startButton) {
           startButton.click();
-          if (window.DEBUG) console.log('[Bestiary Automator] Start button clicked after defeat');
+          console.log('[Bestiary Automator] Start button clicked after defeat');
         } else {
-          if (window.DEBUG) console.log('[Bestiary Automator] Start button not found after defeat');
+          console.log('[Bestiary Automator] Start button not found after defeat');
         }
         
         // Reset cooldown after 3 seconds to allow for future defeats
         setTimeout(() => {
           defeatToastCooldown = false;
-          if (window.DEBUG) console.log('[Bestiary Automator] Defeat toast cooldown reset');
+          console.log('[Bestiary Automator] Defeat toast cooldown reset');
         }, 3000);
         
         return; // Exit after processing defeat toast
@@ -1007,9 +1074,9 @@ const handleToasts = async () => {
       }
     }
     
-    if (window.DEBUG) console.log('[Bestiary Automator] No relevant toasts found');
+    console.log('[Bestiary Automator] No relevant toasts found');
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error handling toasts:', error);
+    console.error('[Bestiary Automator] Error handling toasts:', error);
   }
 };
 
@@ -1018,7 +1085,7 @@ const setupFocusEventListeners = () => {
   if (focusEventListeners) return;
   
   const handleVisibilityChange = () => {
-    if (window.DEBUG) console.log(`[Bestiary Automator] Visibility changed: hidden=${document.hidden}`);
+    console.log(`[Bestiary Automator] Visibility changed: hidden=${document.hidden}`);
     
     if (!document.hidden) {
       // Page became visible, run tasks immediately
@@ -1029,7 +1096,7 @@ const setupFocusEventListeners = () => {
   };
   
   const handleFocus = () => {
-    if (window.DEBUG) console.log('[Bestiary Automator] Window gained focus');
+    console.log('[Bestiary Automator] Window gained focus');
     // Run tasks when window gains focus
     setTimeout(() => {
       runAutomationTasks();
@@ -1041,7 +1108,7 @@ const setupFocusEventListeners = () => {
   
   focusEventListeners = { handleVisibilityChange, handleFocus };
   
-  if (window.DEBUG) console.log('[Bestiary Automator] Focus event listeners setup complete');
+  console.log('[Bestiary Automator] Focus event listeners setup complete');
 };
 
 // Remove focus event listeners
@@ -1052,13 +1119,13 @@ const removeFocusEventListeners = () => {
   window.removeEventListener('focus', focusEventListeners.handleFocus);
   focusEventListeners = null;
   
-  if (window.DEBUG) console.log('[Bestiary Automator] Focus event listeners removed');
+  console.log('[Bestiary Automator] Focus event listeners removed');
 };
 
 const startAutomation = () => {
   if (automationInterval) return;
   
-  if (window.DEBUG) console.log('[Bestiary Automator] Starting automation loop');
+  console.log('[Bestiary Automator] Starting automation loop');
   
   // Reset rewards collection flag when starting automation
   rewardsCollectedThisSession = false;
@@ -1079,7 +1146,7 @@ const startAutomation = () => {
 const stopAutomation = () => {
   if (!automationInterval) return;
   
-  if (window.DEBUG) console.log('[Bestiary Automator] Stopping automation loop');
+  console.log('[Bestiary Automator] Stopping automation loop');
   
   // Clear main interval
   clearInterval(automationInterval);
@@ -1122,6 +1189,7 @@ const runAutomationTasks = async () => {
     
     await takeRewardsIfAvailable();
     await handleDayCare();
+    await handleTaskFinishing();
     updateRequiredStamina();
     await refillStaminaIfNeeded();
     
@@ -1132,7 +1200,7 @@ const runAutomationTasks = async () => {
       await handleToasts();
     }
   } catch (error) {
-    if (window.DEBUG) console.error('[Bestiary Automator] Error in automation tasks:', error);
+    console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
 };
 
@@ -1169,6 +1237,9 @@ const createConfigPanel = () => {
   // Auto day care checkbox
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('autoDayCare'), config.autoDayCare);
   
+  // Auto finish tasks checkbox
+  const autoFinishTasksContainer = createCheckboxContainer('auto-finish-tasks-checkbox', t('autoFinishTasks'), config.autoFinishTasks);
+  
   // Auto play after defeat checkbox
   const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
@@ -1177,6 +1248,7 @@ const createConfigPanel = () => {
   content.appendChild(staminaContainer);
   content.appendChild(rewardsContainer);
   content.appendChild(dayCareContainer);
+  content.appendChild(autoFinishTasksContainer);
   content.appendChild(autoPlayContainer);
   
   // Update checkboxes with current config values after creation
@@ -1185,12 +1257,14 @@ const createConfigPanel = () => {
     const rewardsCheckbox = document.getElementById('auto-rewards-checkbox');
     const dayCareCheckbox = document.getElementById('auto-daycare-checkbox');
     const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
+    const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox');
     const staminaInput = document.getElementById('min-stamina-input');
     
     if (refillCheckbox) refillCheckbox.checked = config.autoRefillStamina;
     if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
+    if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
   }, 100);
   
@@ -1221,6 +1295,7 @@ const createConfigPanel = () => {
           config.autoCollectRewards = document.getElementById('auto-rewards-checkbox').checked;
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
+          config.autoFinishTasks = document.getElementById('auto-finish-tasks-checkbox').checked;
           
           // Save configuration
           const configToSave = {
@@ -1228,29 +1303,22 @@ const createConfigPanel = () => {
             minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill,
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
-            autoPlayAfterDefeat: config.autoPlayAfterDefeat
+            autoPlayAfterDefeat: config.autoPlayAfterDefeat,
+            autoFinishTasks: config.autoFinishTasks
           };
           
-          if (window.DEBUG) console.log('[Bestiary Automator] Attempting to save config:', configToSave);
+          console.log('[Bestiary Automator] Attempting to save config:', configToSave);
           
           // Save to localStorage
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
-            if (window.DEBUG) console.log('[Bestiary Automator] Config saved to localStorage successfully');
+            console.log('[Bestiary Automator] Config saved to localStorage successfully');
           } catch (error) {
-            if (window.DEBUG) console.error('[Bestiary Automator] Error saving config to localStorage:', error);
+            console.error('[Bestiary Automator] Error saving config to localStorage:', error);
           }
           
-          // Also save via the mod config API for compatibility
-          if (window.DEBUG) console.log('[Bestiary Automator] Using hash:', context.hash);
-          if (window.DEBUG) console.log('[Bestiary Automator] updateScriptConfig available:', !!(api.service && api.service.updateScriptConfig));
-          
-          try {
-            api.service.updateScriptConfig(context.hash, configToSave);
-            if (window.DEBUG) console.log('[Bestiary Automator] Config saved via API successfully');
-          } catch (error) {
-            if (window.DEBUG) console.error('[Bestiary Automator] Error saving config via API:', error);
-          }
+          // Skip API save to prevent reload/reinitialization issues
+          console.log('[Bestiary Automator] Skipping API save to prevent reload issues');
           
           // Always start automation when settings are saved
           startAutomation();
@@ -1262,7 +1330,7 @@ const createConfigPanel = () => {
             unsubscribeFromGameState();
           }
           
-          // Update button styling based on enabled features
+          // Only update button styling if configuration actually changed
           updateAutomatorButton();
           
           showNotification(t('settingsSaved'), 'success');
@@ -1335,16 +1403,13 @@ const createConfigPanel = () => {
 
 // Create buttons
 const createButtons = () => {
-  // Check if any automation features are enabled
-  const hasEnabledFeatures = config.autoRefillStamina || config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat;
-  
   // Create only the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
     text: 'Automator',
     modId: MOD_ID,
     tooltip: t('configButtonTooltip'),
-    primary: hasEnabledFeatures,
+    primary: false, // Never use primary to avoid solid green color
     onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
   });
   
@@ -1352,35 +1417,71 @@ const createButtons = () => {
   setTimeout(() => {
     const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
-      // Clear any existing background styling first
-      btn.style.background = '';
-      btn.style.backgroundColor = '';
-      
-      if (config.autoRefillStamina) {
-        // Priority 1: Green background for auto refill stamina
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-        btn.style.backgroundSize = "auto";
-        btn.style.color = "#ffffff";
-        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-      } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
-        // Priority 2: Blue background for other auto features
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
-        btn.style.backgroundSize = "auto";
-        btn.style.color = "#ffffff";
-        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-      } else {
-        // Default: No features enabled
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-        btn.style.color = "#ffe066";
-        btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-      }
+      applyButtonStyling(btn);
     }
   }, 100);
 };
 
+// Simple background image preloading
+const preloadBackgroundImages = () => {
+  const imageUrls = [
+    'https://bestiaryarena.com/_next/static/media/background-green.be515334.png',
+    'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png',
+    'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png'
+  ];
+  
+  imageUrls.forEach(url => {
+    const img = new Image();
+    img.src = url;
+  });
+  
+  console.log('[Bestiary Automator] Background images preloaded');
+};
+
+// Apply button styling - simple and direct
+const applyButtonStyling = (btn) => {
+  // Clear any existing background styling first
+  btn.style.background = '';
+  btn.style.backgroundColor = '';
+  
+  const greenBgUrl = 'https://bestiaryarena.com/_next/static/media/background-green.be515334.png';
+  const blueBgUrl = 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png';
+  const regularBgUrl = 'https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png';
+  
+  {
+    console.log('[Bestiary Automator] Applying button styling:');
+    console.log('  - autoRefillStamina:', config.autoRefillStamina);
+    console.log('  - autoCollectRewards:', config.autoCollectRewards);
+    console.log('  - autoDayCare:', config.autoDayCare);
+    console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
+    console.log('  - autoFinishTasks:', config.autoFinishTasks);
+  }
+  
+  if (config.autoRefillStamina) {
+    // Priority 1: Green background for auto refill stamina
+    btn.style.background = `url('${greenBgUrl}') repeat`;
+    btn.style.backgroundSize = "auto";
+    btn.style.color = "#ffffff";
+  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
+    // Priority 2: Blue background for other auto features
+    btn.style.background = `url('${blueBgUrl}') repeat`;
+    btn.style.backgroundSize = "auto";
+    btn.style.color = "#ffffff";
+  } else {
+    // Default: No features enabled
+    btn.style.background = `url('${regularBgUrl}') repeat`;
+    btn.style.color = "#ffe066";
+  }
+  
+  btn.title = t('configButtonTooltip');
+};
+
 // Initialize the mod
 function init() {
-  if (window.DEBUG) console.log('[Bestiary Automator] Initializing UI...');
+  console.log('[Bestiary Automator] Initializing UI...');
+  
+  // Preload background images
+  preloadBackgroundImages();
   
   // Reset rewards collection flag on initialization
   rewardsCollectedThisSession = false;
@@ -1399,7 +1500,7 @@ function init() {
     subscribeToGameState();
   }
   
-  if (window.DEBUG) console.log('[Bestiary Automator] Initialization complete');
+  console.log('[Bestiary Automator] Initialization complete');
 }
 
 // Initialize the mod
@@ -1407,77 +1508,47 @@ init();
 
 // Track button state to prevent unnecessary updates
 let lastButtonState = {
-  autoRefillStamina: false,
-  autoCollectRewards: false,
-  autoDayCare: false,
-  autoPlayAfterDefeat: false,
+  autoRefillStamina: config.autoRefillStamina,
+  autoCollectRewards: config.autoCollectRewards,
+  autoDayCare: config.autoDayCare,
+  autoPlayAfterDefeat: config.autoPlayAfterDefeat,
+  autoFinishTasks: config.autoFinishTasks,
+  boardAnalyzerRunning: false
+};
+
+// Initialize lastButtonState with current config values to prevent unnecessary updates
+lastButtonState = {
+  autoRefillStamina: config.autoRefillStamina,
+  autoCollectRewards: config.autoCollectRewards,
+  autoDayCare: config.autoDayCare,
+  autoPlayAfterDefeat: config.autoPlayAfterDefeat,
+  autoFinishTasks: config.autoFinishTasks,
   boardAnalyzerRunning: false
 };
 
 // Update the Automator button style based on enabled features
 function updateAutomatorButton() {
-  if (api && api.ui) {
-    const hasEnabledFeatures = config.autoRefillStamina || config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat;
-    
-    api.ui.updateButton(CONFIG_BUTTON_ID, {
-      primary: hasEnabledFeatures,
-      tooltip: t('configButtonTooltip')
-    });
-    
-    // Check current state
-    const currentState = {
-      autoRefillStamina: config.autoRefillStamina,
-      autoCollectRewards: config.autoCollectRewards,
-      autoDayCare: config.autoDayCare,
-      autoPlayAfterDefeat: config.autoPlayAfterDefeat,
-      boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
-    };
-    
-    // Only update button styling if state has changed
-    const stateChanged = JSON.stringify(currentState) !== JSON.stringify(lastButtonState);
-    
-    if (stateChanged) {
-      const btn = document.getElementById(CONFIG_BUTTON_ID);
-      if (btn) {
-        // Clear any existing background styling first
-        btn.style.background = '';
-        btn.style.backgroundColor = '';
-        
-        // Check if Board Analyzer is running and we should show paused state
-        if (currentState.boardAnalyzerRunning) {
-          // Show paused state with gray background
-          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat";
-          btn.style.color = "#888";
-          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-          btn.title = t('configButtonTooltip') + ' (Paused - Board Analyzer Running)';
-        } else if (config.autoRefillStamina) {
-          // Priority 1: Green background for auto refill stamina
-          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
-          btn.style.backgroundSize = "auto";
-          btn.style.color = "#ffffff";
-          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-        } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat) {
-          // Priority 2: Blue background for other auto features
-          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') repeat";
-          btn.style.backgroundSize = "auto";
-          btn.style.color = "#ffffff";
-          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-        } else {
-          // Default: No features enabled
-          btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-          btn.style.color = "#ffe066";
-          btn.style.backgroundColor = "transparent"; // Ensure no fallback color
-        }
-        
-        // Reset tooltip to normal if not paused
-        if (!currentState.boardAnalyzerRunning) {
-          btn.title = t('configButtonTooltip');
-        }
-      }
-      
-      // Update last known state
-      lastButtonState = currentState;
+  // Check current state
+  const currentState = {
+    autoRefillStamina: config.autoRefillStamina,
+    autoCollectRewards: config.autoCollectRewards,
+    autoDayCare: config.autoDayCare,
+    autoPlayAfterDefeat: config.autoPlayAfterDefeat,
+    autoFinishTasks: config.autoFinishTasks,
+    boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
+  };
+  
+  // Only update button styling if state has changed
+  const stateChanged = JSON.stringify(currentState) !== JSON.stringify(lastButtonState);
+  
+  if (stateChanged) {
+    const btn = document.getElementById(CONFIG_BUTTON_ID);
+    if (btn) {
+      applyButtonStyling(btn);
     }
+    
+    // Update last known state
+    lastButtonState = currentState;
   }
 }
 
@@ -1505,6 +1576,6 @@ context.exports = {
     elementCache.clear();
     cancelCurrentTask();
     
-    if (window.DEBUG) console.log('[Bestiary Automator] Cleanup completed');
+    console.log('[Bestiary Automator] Cleanup completed');
   }
 }; 

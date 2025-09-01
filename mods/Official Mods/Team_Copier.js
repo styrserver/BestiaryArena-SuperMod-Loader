@@ -1,5 +1,5 @@
 // Team Copier Mod for Bestiary Arena
-if (window.DEBUG) console.log('Team Copier initializing...');
+console.log('Team Copier initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -130,12 +130,12 @@ function serializeBoard() {
     // Method 1: Use the raw function directly from window if available
     if (typeof window.$serializeBoard === 'function') {
       boardData = JSON.parse(window.$serializeBoard());
-      if (window.DEBUG) console.log('Used window.$serializeBoard directly for board data');
+      console.log('Used window.$serializeBoard directly for board data');
     } 
     // Method 2: Use the function from the API if available
     else if (window.BestiaryModAPI && window.BestiaryModAPI.utility && window.BestiaryModAPI.utility.serializeBoard) {
       boardData = JSON.parse(window.BestiaryModAPI.utility.serializeBoard());
-      if (window.DEBUG) console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
+              console.log('Used BestiaryModAPI.utility.serializeBoard for board data');
     } 
     // Method 3: Fallback to custom implementation
     else {
@@ -193,7 +193,7 @@ function serializeBoard() {
         board: board
       };
       
-      if (window.DEBUG) console.log('Used custom serializeBoard implementation');
+              console.log('Used custom serializeBoard implementation');
     }
     
     // Include current seed if enabled in config
@@ -204,7 +204,7 @@ function serializeBoard() {
         const currentSeed = boardContext.sandboxSeed || boardContext.customSandboxSeed;
         
         if (currentSeed) {
-          if (window.DEBUG) console.log('Including seed in board data:', currentSeed);
+          console.log('Including seed in board data:', currentSeed);
           boardData.seed = currentSeed;
           
           // Save this seed in our recent seeds list
@@ -384,7 +384,7 @@ function copyTeamSetup() {
       showNotification(t('errorMessage'), 'error');
     }
     
-    if (window.DEBUG) console.log('Team setup copied to clipboard:', boardData);
+    console.log('Team setup copied to clipboard:', boardData);
   } catch (error) {
     console.error('Error copying team setup:', error);
     showNotification(t('errorMessage'), 'error');
@@ -874,7 +874,7 @@ function createButton() {
 
 // Initialize the mod
 function init() {
-  if (window.DEBUG) console.log('Team Copier Mod initializing UI...');
+  console.log('Team Copier Mod initializing UI...');
   
   // Create the button
   createButton();
@@ -882,7 +882,7 @@ function init() {
   // Check for shared team configuration data in localStorage
   checkForSharedTeamData();
   
-  if (window.DEBUG) console.log('Team Copier Mod initialized');
+  console.log('Team Copier Mod initialized');
 }
 
 // Initialize the mod
@@ -901,7 +901,7 @@ function checkForSharedTeamData() {
   
   if (replayDataStr && loadedWithShare) {
     try {
-      if (window.DEBUG) console.log('Found shared team data to apply');
+      console.log('Found shared team data to apply');
       const boardData = JSON.parse(replayDataStr);
       
       // Wait a moment to ensure the game is fully loaded
@@ -918,11 +918,11 @@ function checkForSharedTeamData() {
 // Apply shared team data to the game
 function applySharedTeamData(boardData) {
   try {
-    if (window.DEBUG) console.log('Applying shared team data:', boardData);
+            console.log('Applying shared team data:', boardData);
     
     // Check if we should use replay or configureBoard based on presence of seed
     if (boardData.seed) {
-      if (window.DEBUG) console.log('Using replay function with seed');
+              console.log('Using replay function with seed');
       if (typeof window.$replay === 'function') {
         window.$replay(boardData);
       } else if (BestiaryModAPI?.utility?.replay) {
@@ -931,7 +931,7 @@ function applySharedTeamData(boardData) {
         throw new Error('No replay function available');
       }
     } else {
-      if (window.DEBUG) console.log('Using configureBoard function without seed');
+              console.log('Using configureBoard function without seed');
       if (typeof window.$configureBoard === 'function') {
         window.$configureBoard(boardData);
       } else if (BestiaryModAPI?.utility?.configureBoard) {

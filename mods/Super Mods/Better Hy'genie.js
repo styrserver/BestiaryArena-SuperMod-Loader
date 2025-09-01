@@ -2,7 +2,7 @@
 // 0. Version & Metadata
 // =======================
 (function() {
-  console.warn('[Better Hy\'genie] initializing...');
+  console.log('[Better Hy\'genie] initializing...');
   
 // =======================
 // 1. Configuration & Constants

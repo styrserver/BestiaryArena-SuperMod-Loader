@@ -40,17 +40,35 @@ async function updateDebugMode(enabled) {
       });
       
       // Also send to page context
-      await window.browserAPI.tabs.executeScript(tab.id, {
-        code: `
-          window.BESTIARY_DEBUG = ${enabled};
-          localStorage.setItem('bestiary-debug', '${enabled}');
-          window.postMessage({
-            from: 'BESTIARY_EXTENSION',
-            action: 'updateDebugMode',
-            enabled: ${enabled}
-          }, '*');
-        `
-      });
+      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
+        // Chrome Manifest V3 - use scripting API
+        await window.browserAPI.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (enabled) => {
+            window.BESTIARY_DEBUG = enabled;
+            localStorage.setItem('bestiary-debug', enabled.toString());
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateDebugMode',
+              enabled: enabled
+            }, '*');
+          },
+          args: [enabled]
+        });
+      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
+        // Firefox fallback - use tabs API
+        await window.browserAPI.tabs.executeScript(tab.id, {
+          code: `
+            window.BESTIARY_DEBUG = ${enabled};
+            localStorage.setItem('bestiary-debug', '${enabled}');
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateDebugMode',
+              enabled: ${enabled}
+            }, '*');
+          `
+        });
+      }
     }
   } catch (error) {
     originalConsoleLog('Could not send debug mode to content script:', error);

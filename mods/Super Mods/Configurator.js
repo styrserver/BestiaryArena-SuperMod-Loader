@@ -1,6 +1,6 @@
 // Configurator Mod for Bestiary Arena
 // Handles import/export of configuration data
-if (window.DEBUG) console.log('Configurator initializing...');
+console.log('Configurator initializing...');
 
 // Safe DOM element removal helper
 function safeRemoveElement(element) {

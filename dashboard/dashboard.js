@@ -129,6 +129,7 @@ async function scanAndRegisterLocalMods() {
     { name: 'DashboardButton.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
+    { name: 'RunTracker.js', enabled: true },
     
   ];
   // Build mod objects
@@ -264,7 +265,8 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
 
   const hiddenMods = [
     'inventory-tooltips.js',
-    'DashboardButton.js'
+    'DashboardButton.js',
+    'RunTracker.js'
   ];
 
 // Helper to normalize mod names for comparison
