@@ -5,6 +5,18 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
+// Global Debug Flag System for Mod Console Logs
+// Read initial debug setting from localStorage
+window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+
+// Dynamic console.log override that checks flag on each call
+const originalLog = console.log;
+console.log = function(...args) {
+  if (window.BESTIARY_DEBUG) {
+    originalLog.apply(console, args);
+  }
+};
+
 function injectScript(file) {
   console.log(`Injecting script: ${file}`);
   const script = document.createElement('script');
@@ -194,6 +206,14 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }, '*');
     
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === 'updateDebugMode') {
+    // Update the debug flag immediately
+    window.BESTIARY_DEBUG = message.enabled;
+    console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
     sendResponse({ success: true });
     return true;
   }

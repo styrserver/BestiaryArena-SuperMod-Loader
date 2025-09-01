@@ -32,14 +32,35 @@
     </section>
   </main>
   
-  <div style="text-align: center; margin: 20px 0; padding: 15px; border-top: 1px solid var(--theme-border, #444);">
+  <div style="text-align: center; margin: 15px 0; padding: 15px; border-top: 1px solid var(--theme-border, #444);">
     <a href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank" style="color: var(--theme-accent, #ffe066); text-decoration: none; font-size: 14px; font-weight: bold;">
       Find more user-generated mods here! →
     </a>
   </div>
   
+  <!-- Debug Mode Section -->
+  <div style="border-top: 1px solid var(--theme-border, #444); padding-top: 15px; margin-top: 5px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <label for="debug-toggle" style="font-size: 14px; font-weight: bold; color: var(--theme-text, #fff);">
+        Debug Mode
+      </label>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="debug-status" style="font-size: 12px; color: var(--theme-text-secondary, #aaa);">OFF</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="debug-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <p style="font-size: 12px; color: var(--theme-text-secondary, #aaa); margin: 0; line-height: 1.4;">
+      Enable to show console logs from all mods. Disable for a cleaner console. Changes require page refresh.
+    </p>
+  </div>
+  
   <footer>
-            <p id="version-display">Version loading...</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <p id="version-display">Version loading...</p>
+    </div>
   </footer>
   
   <script src="../assets/js/localization.js"></script>

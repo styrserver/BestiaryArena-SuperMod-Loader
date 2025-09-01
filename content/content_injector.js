@@ -5,6 +5,29 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
+// Global Debug Flag System
+// Read initial debug setting from localStorage
+window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+
+// Dynamic console.log override that checks flag on each call
+const originalLog = console.log;
+console.log = function(...args) {
+  if (window.BESTIARY_DEBUG) {
+    originalLog.apply(console, args);
+  }
+};
+
+// Also override console.log in the page context immediately
+if (typeof window !== 'undefined') {
+  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+  const pageOriginalLog = window.console.log;
+  window.console.log = function(...args) {
+    if (window.BESTIARY_DEBUG) {
+      pageOriginalLog.apply(window.console, args);
+    }
+  };
+}
+
 // Content Script Injector for Bestiary Arena Mod Loader
 if (window.DEBUG) console.log('Content Script Injector initializing...');
 
@@ -161,6 +184,32 @@ window.addEventListener('message', function(event) {
 
 // Initialization
 if (window.DEBUG) console.log('Starting script injection sequence...');
+
+// Inject debug override directly into page context
+const debugOverrideScript = document.createElement('script');
+debugOverrideScript.textContent = `
+  // Global Debug Flag System for Mod Console Logs
+  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+  
+  // Override console.log in page context
+  const originalLog = console.log;
+  console.log = function(...args) {
+    if (window.BESTIARY_DEBUG) {
+      originalLog.apply(console, args);
+    }
+  };
+  
+  // Listen for debug mode changes
+  window.addEventListener('message', function(event) {
+    if (event.source !== window) return;
+    if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.action === 'updateDebugMode') {
+      window.BESTIARY_DEBUG = event.data.enabled;
+      console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
+    }
+  });
+`;
+document.head.appendChild(debugOverrideScript);
+
 loadScripts();
 
 // Listen for messages from background script
@@ -184,6 +233,13 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message: message
     }, '*');
     
+    sendResponse({success: true});
+  }
+  
+  if (message.action === 'updateDebugMode') {
+    // Update the debug flag immediately
+    window.BESTIARY_DEBUG = message.enabled;
+    console.log('Debug mode updated to:', window.BESTIARY_DEBUG ? 'enabled' : 'disabled');
     sendResponse({success: true});
   }
   

@@ -610,14 +610,16 @@ function debounce(func, wait) {
 
 const DOMCache = {
   cache: new Map(),
-  cacheTimeout: 1000,
+  cacheTimeout: 5000, // Increased timeout for better performance
 
   get: function(selector, context = document) {
     const key = `${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) return cached.element;
     const element = context.querySelector(selector);
-    this.cache.set(key, { element, timestamp: Date.now() });
+    if (element) {
+      this.cache.set(key, { element, timestamp: Date.now() });
+    }
     return element;
   },
 
@@ -625,8 +627,10 @@ const DOMCache = {
     const key = `all_${selector}_${context === document ? 'doc' : context.id || 'ctx'}`;
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) return cached.elements;
-    const elements = context.querySelectorAll(selector);
-    this.cache.set(key, { elements, timestamp: Date.now() });
+    const elements = Array.from(context.querySelectorAll(selector));
+    if (elements.length > 0) {
+      this.cache.set(key, { elements, timestamp: Date.now() });
+    }
     return elements;
   },
 
@@ -636,6 +640,19 @@ const DOMCache = {
     for (const key of this.cache.keys()) {
       if (key.includes(selector)) this.cache.delete(key);
     }
+  },
+
+  // Enhanced methods for better performance
+  getModalElement: function(selector) {
+    const modal = this.get('div[role="dialog"][data-state="open"]');
+    if (!modal) return null;
+    return modal.querySelector(selector);
+  },
+
+  getModalElements: function(selector) {
+    const modal = this.get('div[role="dialog"][data-state="open"]');
+    if (!modal) return [];
+    return Array.from(modal.querySelectorAll(selector));
   }
 };
 
@@ -716,7 +733,33 @@ const FormatUtils = {
 
 const CURRENCY_UI_SELECTORS = { gold: { button: true, title: 'Gold', alt: 'Player gold' }, beastCoins: { button: true, title: 'Beast Coins', alt: 'Player Beast Coins' }, dust: { div: true, title: 'Dust', alt: 'Dust' } };
 const CURRENCY_GAME_STATE_PATHS = { dust: ['inventory?.dust', 'inventory?.dust?.count', 'resources?.dust', 'player?.dust', 'dust'], huntingMarks: ['inventory?.huntingMarks', 'inventory?.huntingMarks?.count', 'resources?.huntingMarks', 'player?.huntingMarks', 'huntingMarks', 'hunting?.marks', 'marks', 'huntingMarks?.count', 'huntingMarks?.amount', 'huntingMarks?.quantity', 'hunting?.huntingMarks', 'hunting?.huntingMarks?.count', 'player?.hunting?.marks', 'player?.hunting?.huntingMarks', 'player?.huntingMarks', 'player?.marks', 'inventory?.marks', 'inventory?.marks?.count', 'player?.inventory?.huntingMarks', 'player?.inventory?.huntingMarks?.count', 'player?.resources?.huntingMarks', 'player?.resources?.huntingMarks?.count', 'context?.inventory?.huntingMarks', 'context?.inventory?.huntingMarks?.count', 'context?.player?.huntingMarks', 'context?.player?.huntingMarks?.count', 'context?.huntingMarks', 'context?.huntingMarks?.count', 'context?.hunting?.marks', 'context?.hunting?.marks?.count', 'questLog?.hunting?.marks', 'questLog?.hunting?.huntingMarks', 'questLog?.task?.huntingMarks', 'questLog?.task?.marks', 'questLog?.task?.points', 'questLog?.seashell?.huntingMarks', 'questLog?.seashell?.marks', 'huntingMarks', 'huntingMarksCount', 'huntingMarksAmount', 'huntingMarksQuantity', 'huntingMarksTotal', 'totalHuntingMarks', 'huntingMarksEarned', 'huntingMarksCollected'] };
-function getCurrencyFromUI(currencyType) { try { const config = CURRENCY_UI_SELECTORS[currencyType]; if (!config) return null; const selector = config.button ? 'button' : 'div'; const element = Array.from(DOMCache.getAll(selector)).find(el => { const div = el.querySelector(`.frame-pressed-1[title="${config.title}"]`); const img = el.querySelector(`img[alt="${config.alt}"]`); return div || img; }); if (!element) return null; const span = element.querySelector('span'); if (!span) return null; const value = span.textContent.replace(/,/g, ''); const parsedValue = parseInt(value, 10); return isNaN(parsedValue) ? null : parsedValue; } catch (error) { console.warn(`[Cyclopedia] Error getting ${currencyType} from UI:`, error); return null; } }
+function getCurrencyFromUI(currencyType) { 
+  try { 
+    const config = CURRENCY_UI_SELECTORS[currencyType]; 
+    if (!config) return null; 
+    
+    const selector = config.button ? 'button' : 'div'; 
+    const elements = DOMCache.getAll(selector);
+    
+    // Use for...of loop instead of Array.from().find() for better performance
+    for (const el of elements) {
+      const div = el.querySelector(`.frame-pressed-1[title="${config.title}"]`);
+      const img = el.querySelector(`img[alt="${config.alt}"]`);
+      if (div || img) {
+        const span = el.querySelector('span');
+        if (span) {
+          const value = span.textContent.replace(/,/g, '');
+          const parsedValue = parseInt(value, 10);
+          return isNaN(parsedValue) ? null : parsedValue;
+        }
+      }
+    }
+    return null;
+  } catch (error) { 
+    console.warn(`[Cyclopedia] Error getting ${currencyType} from UI:`, error); 
+    return null; 
+  } 
+}
 function getCurrencyFromGameState(currencyType) { try { const gameState = globalThis.state?.player?.getSnapshot()?.context; if (!gameState) return null; const paths = CURRENCY_GAME_STATE_PATHS[currencyType]; if (!paths) return null; for (const path of paths) { const value = path.split('?.').reduce((obj, key) => obj?.[key], gameState); if (typeof value === 'number' && !isNaN(value) && value >= 0) return value; } return null; } catch (error) { return null; } }
 function getGoldFromUI() { return getCurrencyFromUI('gold'); }
 
@@ -726,16 +769,26 @@ function getDustFromGameState() { return getCurrencyFromGameState('dust'); }
 
 function getHuntingMarksFromUI() {
   try {
-    let huntingMarksSprite = HUNTING_MARKS_UI_SELECTORS.reduce((found, selector) => {
-      if (found) return found;
+    let huntingMarksSprite = null;
+    // Use for...of loop instead of reduce for better performance
+    for (const selector of HUNTING_MARKS_UI_SELECTORS) {
       const element = DOMCache.get(selector);
-      return element?.tagName === 'IMG' ? element.closest('.sprite.item.relative') : element;
-    }, null);
+      if (element) {
+        huntingMarksSprite = element?.tagName === 'IMG' ? element.closest('.sprite.item.relative') : element;
+        break;
+      }
+    }
     
     if (!huntingMarksSprite) {
-      const huntingMarksText = Array.from(DOMCache.getAll('*')).find(el => 
-        el.textContent?.includes('Hunting Marks')
-      );
+      const allElements = DOMCache.getAll('*');
+      let huntingMarksText = null;
+      // Use for...of loop instead of Array.from().find() for better performance
+      for (const el of allElements) {
+        if (el.textContent?.includes('Hunting Marks')) {
+          huntingMarksText = el;
+          break;
+        }
+      }
       huntingMarksSprite = huntingMarksText?.closest('.sprite.item.relative') || huntingMarksText;
     }
     
@@ -1524,13 +1577,13 @@ function getLevelFromExp(exp) {
 // 6. DOM/CSS Injection Helpers
 // =======================
 const CYCLOPEDIA_BUTTON_CSS = `.cyclopedia-subnav { display: flex; gap: 0; margin-bottom: 0; width: 100%; } nav.cyclopedia-subnav > button.cyclopedia-btn, nav.cyclopedia-subnav > button.cyclopedia-btn:hover, nav.cyclopedia-subnav > button.cyclopedia-btn:focus { background: url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat !important; border: 6px solid transparent !important; border-color: #ffe066 !important; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch !important; color: var(--theme-text, #e6d7b0) !important; font-weight: 700 !important; border-radius: 0 !important; box-sizing: border-box !important; transition: color 0.2s, border-image 0.1s !important; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif !important; outline: none !important; position: relative !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; font-size: 16px !important; padding: 7px 24px !important; cursor: pointer; flex: 1 1 0; min-width: 0; } nav.cyclopedia-subnav > button.cyclopedia-btn.pressed, nav.cyclopedia-subnav > button.cyclopedia-btn:active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn.active { border-image: url('https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png') 6 fill stretch !important; } nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="home"], nav.cyclopedia-subnav > button.cyclopedia-btn[data-tab="wiki"] { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; max-width: 42px !important; max-height: 42px !important; flex: 0 0 42px !important; padding: 0 !important; font-size: 12px !important; }`;
-function injectCyclopediaButtonStyles() { if (!document.getElementById('cyclopedia-btn-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-btn-css'; style.textContent = CYCLOPEDIA_BUTTON_CSS; document.head.appendChild(style); } }
+function injectCyclopediaButtonStyles() { if (!DOMCache.get('#cyclopedia-btn-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-btn-css'; style.textContent = CYCLOPEDIA_BUTTON_CSS; document.head.appendChild(style); } }
 
 const CYCLOPEDIA_BOX_CSS = `.cyclopedia-box { display: flex; flex-direction: column; border: none; background: none; margin-bottom: 16px; min-height: 120px; box-sizing: border-box; } .cyclopedia-box-title { border: 6px solid transparent; border-image: url('https://bestiaryarena.com/_next/static/media/4-frame-top.b7a55115.png') 6 6 0 6 stretch; border-bottom: none; background: #232323; color: #ffe066; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; font-size: 15px; font-weight: bold; padding: 4px 12px; text-align: left; letter-spacing: 1px; } .cyclopedia-box-content { flex: 1 1 0; overflow-y: auto; background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat; padding: 8px 12px; color: #e6d7b0; font-size: 14px; font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif; min-height: 0; max-height: none; scrollbar-width: thin !important; scrollbar-color: #444 #222 !important; } .cyclopedia-box-content::-webkit-scrollbar { width: 12px !important; background: transparent !important; } .cyclopedia-box-content::-webkit-scrollbar-thumb { background: url('https://bestiaryarena.com/_next/static/media/scrollbar-handle-vertical.962972d4.png') repeat-y !important; border-radius: 4px !important; } .cyclopedia-box-content::-webkit-scrollbar-corner { background: transparent !important; }`;
-function injectCyclopediaBoxStyles() { if (!document.getElementById('cyclopedia-box-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-box-css'; style.textContent = CYCLOPEDIA_BOX_CSS; document.head.appendChild(style); } }
+function injectCyclopediaBoxStyles() { if (!DOMCache.get('#cyclopedia-box-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-box-css'; style.textContent = CYCLOPEDIA_BOX_CSS; document.head.appendChild(style); } }
 
 const CYCLOPEDIA_SELECTED_CSS = `.cyclopedia-selected { background: rgba(255,255,255,0.18) !important; color: #ffe066 !important; } .cyclopedia-box .equipment-portrait .absolute { background: none !important; } .cyclopedia-box .equipment-portrait[data-highlighted="true"] .absolute { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="background: radial-gradient"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute[style*="rgba(0, 0, 0, 0.5)"] { background: none !important; } .cyclopedia-box .equipment-portrait .absolute.bottom-0.left-0 { background: none !important; }`;
-function injectCyclopediaSelectedCss() { if (!document.getElementById('cyclopedia-selected-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-selected-css'; style.textContent = CYCLOPEDIA_SELECTED_CSS; document.head.appendChild(style); } }
+function injectCyclopediaSelectedCss() { if (!DOMCache.get('#cyclopedia-selected-css')) { const style = document.createElement('style'); style.id = 'cyclopedia-selected-css'; style.textContent = CYCLOPEDIA_SELECTED_CSS; document.head.appendChild(style); } }
 
 function removeCyclopediaFromMenus() {
   // Generic DOM traversal helper
@@ -1766,7 +1819,7 @@ function injectCyclopediaButton(menuElem) {
     return false;
   }
   
-  const existingButtons = menuElem.querySelectorAll('.cyclopedia-menu-item');
+        const existingButtons = Array.from(menuElem.querySelectorAll('.cyclopedia-menu-item'));
   existingButtons.forEach(btn => {
     try {
       if (btn.parentNode) btn.parentNode.removeChild(btn);
@@ -5396,7 +5449,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Set default selection and add click handlers, plus show player's own profile
       setTimeout(() => {
         // Only select divs that are actual character items (not titles or other elements)
-        const items = charactersBox.querySelectorAll('div');
+        const items = DOMCache.getAll('div', charactersBox);
         const characterItems = Array.from(items).filter(item => {
           const text = item.textContent.trim();
           return text === 'Player Information' || text === 'Leaderboards' || text === 'Rankings';
@@ -7291,7 +7344,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   // Update status bar with success message
                   if (row3 && row3.statusBar) {
                     // Check if there's an active delete confirmation
-                    const hasActiveDeleteConfirmation = document.querySelector('[data-confirming="true"]');
+                    const hasActiveDeleteConfirmation = DOMCache.get('[data-confirming="true"]');
                     if (hasActiveDeleteConfirmation) {
                       // Don't change the status bar if there's an active delete confirmation
                       return;
@@ -7315,7 +7368,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   // Update status bar with error message
                   if (row3 && row3.statusBar) {
                     // Check if there's an active delete confirmation
-                    const hasActiveDeleteConfirmation = document.querySelector('[data-confirming="true"]');
+                    const hasActiveDeleteConfirmation = DOMCache.get('[data-confirming="true"]');
                     if (hasActiveDeleteConfirmation) {
                       // Don't change the status bar if there's an active delete confirmation
                       return;
@@ -8069,7 +8122,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Global click listener to reset delete confirmation states
       const resetDeleteStates = () => {
         // Reset all delete cells in both tables
-        const allDeleteCells = document.querySelectorAll('[data-confirming="true"]');
+        const allDeleteCells = DOMCache.getAll('[data-confirming="true"]');
         allDeleteCells.forEach(cell => {
           cell.innerHTML = '🗑️';
           cell.style.color = '#f44336';
@@ -8089,14 +8142,14 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
       };
       
-      // Add global click listener
+      // Add global click listener with event delegation
       document.addEventListener('click', (e) => {
         // Only reset if the click is not on a delete cell that's in confirming state
         const clickedDeleteCell = e.target.closest('[data-confirming="true"]');
         if (!clickedDeleteCell) {
           resetDeleteStates();
         }
-      });
+      }, { passive: true }); // Use passive listener for better performance
       
       // Store the reset function for potential cleanup
       row3.resetDeleteStates = resetDeleteStates;
@@ -8484,7 +8537,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           roomId: selectedMap
         });
         // Try to close the modal if present
-        const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
+        const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
           btn => btn.textContent.trim() === 'Close'
         );
         if (closeBtn) {
@@ -9027,7 +9080,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Fallback cleanup for when onClose doesn't work
       
       setTimeout(() => {
-        const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+        const modalElement = DOMCache.get('div[role="dialog"][data-state="open"]');
         if (modalElement) {
   
           
@@ -9301,7 +9354,7 @@ function renderCreatureTemplate(name) {
   }
   if (!monstersArr || monstersArr.length === 0) {
     setTimeout(() => {
-      const flexRows = document.querySelectorAll('div[role="dialog"] .modal-content > div');
+      const flexRows = DOMCache.getAll('div[role="dialog"] .modal-content > div');
       let rightCol = null;
       if (flexRows && flexRows.length > 0) {
         for (const flexRow of flexRows) {
@@ -9440,7 +9493,7 @@ function renderCreatureTemplate(name) {
       if (starTierIcon) starTierIcon.remove();
       col1Picture.innerHTML = '';
       col1Picture.appendChild(monsterSprite);
-      const allDivs = monsterSprite.querySelectorAll('div');
+      const allDivs = Array.from(monsterSprite.querySelectorAll('div'));
       let firstFixedDiv = null;
       allDivs.forEach((div, idx) => {
         const style = div.getAttribute('style') || '';
@@ -9899,7 +9952,7 @@ function renderCreatureTemplate(name) {
                   type: 'selectRoomById',
                   roomId: roomCode
                 });
-                const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
+                const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
                   btn => btn.textContent.trim() === 'Close'
                 );
                 if (closeBtn) {
@@ -10055,6 +10108,10 @@ function renderCreatureTemplate(name) {
 
       return rarityB - rarityA;
     });
+    
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
     ownedMonsters.forEach(monster => {
       const row = document.createElement('div');
       row.style.display = 'flex';
@@ -10130,7 +10187,7 @@ function renderCreatureTemplate(name) {
 
       row.appendChild(portrait);
       row.appendChild(statsGrid);
-      col3Content.appendChild(row);
+      fragment.appendChild(row);
       const statSum = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
       let rarity = 1;
       if (statSum >= 80) rarity = 5;
@@ -10138,13 +10195,17 @@ function renderCreatureTemplate(name) {
       else if (statSum >= 60) rarity = 3;
       else if (statSum >= 50) rarity = 2;
 
-      setTimeout(() => {
+      // Use requestAnimationFrame for smoother DOM updates
+      requestAnimationFrame(() => {
         const borderElem = portrait.querySelector('.has-rarity');
         if (borderElem) {
           borderElem.setAttribute('data-rarity', rarity);
         }
-      }, 0);
+      });
     });
+    
+    // Append all rows at once for better performance
+    col3Content.appendChild(fragment);
   } else {
     if (isUnobtainable) {
       col3Content.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
@@ -10162,7 +10223,7 @@ function renderCreatureTemplate(name) {
 
   col3Content.id = 'cyclopedia-owned-scroll';
 
-  if (!document.getElementById('cyclopedia-owned-scrollbar-style')) {
+  if (!DOMCache.get('#cyclopedia-owned-scrollbar-style')) {
     const style = document.createElement('style');
     style.id = 'cyclopedia-owned-scrollbar-style';
     style.textContent = `
@@ -10264,9 +10325,9 @@ const CYCLOPEDIA_TRANSLATION = {
   loyaltyPoints: { label: 'Loyalty Points', value: d => d.loyaltyPoints }
 };
 
-if (!document.getElementById('cyclopedia-maxed-style')) {
-  const style = document.createElement('style');
-  style.id = 'cyclopedia-maxed-style';
+  if (!DOMCache.get('#cyclopedia-maxed-style')) {
+    const style = document.createElement('style');
+    style.id = 'cyclopedia-maxed-style';
   style.textContent = `.stat-maxed { color: #3ecf4a !important; }`;
   document.head.appendChild(style);
 }
@@ -10781,7 +10842,7 @@ function renderBoostedBox(boosted, utils, formatTime, msUntilNextEpochDay) {
         type: 'selectRoomById',
         roomId: boosted.roomId
       });
-      const closeBtn = Array.from(document.querySelectorAll('button.pixel-font-14')).find(
+      const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
         btn => btn.textContent.trim() === 'Close'
       );
       if (closeBtn) {
@@ -10801,12 +10862,13 @@ function renderBoostedBox(boosted, utils, formatTime, msUntilNextEpochDay) {
 
   boostedIconWrap.querySelectorAll('.has-rarity[data-rarity="1"]').forEach(el => el.remove());
   
-  setTimeout(() => {
+  // Use requestAnimationFrame for smoother DOM updates
+  requestAnimationFrame(() => {
     const gradientElements = boostedDiv.querySelectorAll('.absolute[style*="radial-gradient"]');
     gradientElements.forEach(el => {
       el.style.background = 'none';
     });
-  }, 0);
+  });
   
   return boostedDiv;
 }
@@ -10895,6 +10957,19 @@ function initCyclopedia() {
     // Store interval ID for cleanup
     cyclopediaState.timers.set('cacheCleanup', cacheCleanupInterval);
     
+    // Set up periodic DOM cache cleanup (every 2 minutes)
+    const domCacheCleanupInterval = setInterval(() => {
+      try {
+        DOMCache.clear();
+        // DOM cache cleanup completed
+      } catch (error) {
+        console.error('[Cyclopedia] Error during DOM cache cleanup:', error);
+      }
+    }, 120000); // 2 minutes
+    
+    // Store interval ID for cleanup
+    cyclopediaState.timers.set('domCacheCleanup', domCacheCleanupInterval);
+    
 
     return true;
   } catch (error) {
@@ -10968,6 +11043,18 @@ function cleanupCyclopediaModal() {
   // Clear utility caches
   DOMCache.clear();
   
+  // Clear all timers
+  cyclopediaState.timers.forEach(timer => {
+    if (timer) {
+      try {
+        clearInterval(timer);
+      } catch (error) {
+        console.warn('[Cyclopedia] Error clearing timer:', error);
+      }
+    }
+  });
+  cyclopediaState.timers.clear();
+  
   // Reset state
   cyclopediaState.modalOpen = false;
   cyclopediaState.currentModal = null;
@@ -11013,7 +11100,7 @@ function cleanupCyclopedia() {
     }
     
     // Remove header button
-    const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
+    const headerUl = DOMCache.get('header ul.pixel-font-16.flex.items-center');
     if (headerUl) {
       const btnLi = headerUl.querySelector('li:has(.cyclopedia-header-btn)');
       if (btnLi) btnLi.remove();

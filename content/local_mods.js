@@ -5,6 +5,11 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
+// Initialize debug flag immediately at the top level
+if (typeof window !== 'undefined') {
+  window.BESTIARY_DEBUG = localStorage.getItem('bestiary-debug') === 'true';
+}
+
 console.log('Local Mods Loader initializing...');
 console.log('Browser API available:', {
   browserAPI: !!window.browserAPI,
@@ -599,11 +604,22 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
             const scriptContext = {
               hash: `local_${modName}`,
               config: modConfig,
-              api: window.BestiaryModAPI
+              api: window.BestiaryModAPI,
+              // Add debug flag to context
+              BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true'
             };
             
             console.log(`Preparing to execute mod: ${modName}`);
             const scriptFunction = new Function('context', `
+              // Override console.log based on debug flag
+              const originalLog = console.log;
+              console.log = function(...args) {
+                const currentDebug = localStorage.getItem('bestiary-debug') === 'true' || window.BESTIARY_DEBUG === true;
+                if (currentDebug) {
+                  originalLog.apply(console, args);
+                }
+              };
+              
               with (context) {
                 ${content}
               }
@@ -634,11 +650,22 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
       const scriptContext = {
         hash: `local_${modName}`,
         config: {},
-        api: window.BestiaryModAPI
+        api: window.BestiaryModAPI,
+        // Add debug flag to context
+        BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true'
       };
       
       console.log(`Preparing to execute mod: ${modName}`);
       const scriptFunction = new Function('context', `
+        // Override console.log based on debug flag
+        const originalLog = console.log;
+        console.log = function(...args) {
+          const currentDebug = localStorage.getItem('bestiary-debug') === 'true' || window.BESTIARY_DEBUG === true;
+          if (currentDebug) {
+            originalLog.apply(console, args);
+          }
+        };
+        
         with (context) {
           ${content}
         }

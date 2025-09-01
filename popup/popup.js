@@ -5,6 +5,84 @@ if (typeof window.browser === 'undefined') {
 
 window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null));
 
+// Global Debug System for Mod Console Logs
+const DEBUG_STORAGE_KEY = 'bestiary-debug';
+let DEBUG_MODE = false;
+
+// Keep original console.log for popup use
+const originalConsoleLog = console.log;
+
+// Function to update debug mode
+async function updateDebugMode(enabled) {
+  DEBUG_MODE = enabled;
+  
+  // Save to localStorage (shared with content script)
+  localStorage.setItem(DEBUG_STORAGE_KEY, enabled.toString());
+  
+  // Update UI
+  const debugToggle = document.getElementById('debug-toggle');
+  const debugStatus = document.getElementById('debug-status');
+  if (debugToggle) {
+    debugToggle.checked = enabled;
+  }
+  if (debugStatus) {
+    debugStatus.textContent = enabled ? 'ON' : 'OFF';
+  }
+  
+  // Send message to content script to update debug flag
+  try {
+    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
+      // Send to content script
+      await window.browserAPI.tabs.sendMessage(tab.id, {
+        action: 'updateDebugMode',
+        enabled: enabled
+      });
+      
+      // Also send to page context
+      await window.browserAPI.tabs.executeScript(tab.id, {
+        code: `
+          window.BESTIARY_DEBUG = ${enabled};
+          localStorage.setItem('bestiary-debug', '${enabled}');
+          window.postMessage({
+            from: 'BESTIARY_EXTENSION',
+            action: 'updateDebugMode',
+            enabled: ${enabled}
+          }, '*');
+        `
+      });
+    }
+  } catch (error) {
+    originalConsoleLog('Could not send debug mode to content script:', error);
+  }
+  
+  // Always show debug mode changes
+  originalConsoleLog('Mod debug mode:', enabled ? 'enabled' : 'disabled');
+}
+
+// Function to load debug mode from storage
+async function loadDebugMode() {
+  try {
+    DEBUG_MODE = localStorage.getItem(DEBUG_STORAGE_KEY) === 'true';
+    
+    // Update UI
+    const debugToggle = document.getElementById('debug-toggle');
+    const debugStatus = document.getElementById('debug-status');
+    if (debugToggle) {
+      debugToggle.checked = DEBUG_MODE;
+    }
+    if (debugStatus) {
+      debugStatus.textContent = DEBUG_MODE ? 'ON' : 'OFF';
+    }
+    
+    // Always show debug mode loading
+    originalConsoleLog('Mod debug mode loaded:', DEBUG_MODE ? 'enabled' : 'disabled');
+  } catch (error) {
+    originalConsoleLog.error('Failed to load debug mode:', error);
+    DEBUG_MODE = false;
+  }
+}
+
 const i18n = window.i18n;
 
 const localModsContainer = document.getElementById('local-mods-container');
@@ -30,8 +108,6 @@ async function getManualMods() {
     });
   });
 }
-
-const DEBUG = false; // Set to true for development
 
 document.addEventListener('DOMContentLoaded', async () => {
   // === VERSION DISPLAY ===
@@ -82,6 +158,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   await i18n.init();
+  
+  // Load debug mode and set up toggle
+  await loadDebugMode();
+  
+  // Set up debug toggle event listener
+  const debugToggle = document.getElementById('debug-toggle');
+  if (debugToggle) {
+    originalConsoleLog('Debug toggle found, setting up event listener');
+    debugToggle.addEventListener('change', (e) => {
+      originalConsoleLog('Debug toggle changed to:', e.target.checked);
+      updateDebugMode(e.target.checked);
+    });
+  } else {
+    originalConsoleLog('Debug toggle not found in DOM');
+  }
   
   // Update version display
   await updateVersionDisplay();

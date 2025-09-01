@@ -40,6 +40,7 @@ let activeConfigPanel = null;
 // NEW: Lightweight modal registry to replace excessive DOM queries
 const modalRegistry = {
   modals: new Set(),
+  isClosing: false, // Add recursion protection flag
   register(modal) {
     this.modals.add(modal);
   },
@@ -47,50 +48,72 @@ const modalRegistry = {
     this.modals.delete(modal);
   },
   closeAll() {
-    this.modals.forEach(modal => {
-      try {
-        // Handle different modal structures
-        if (modal && typeof modal === 'function') {
-          // Modal is a function (like closeModal)
-          modal();
-        } else if (modal && typeof modal.close === 'function') {
-          // Modal has a close method
-          modal.close();
-        } else if (modal && modal.element && typeof modal.element.remove === 'function') {
-          // Modal has an element with remove method
-          modal.element.remove();
-        } else if (modal && typeof modal.remove === 'function') {
-          // Modal has a remove method
-          modal.remove();
-        } else {
-          console.warn('Unknown modal structure:', modal);
+    // Prevent recursive calls
+    if (this.isClosing) {
+      console.warn('Modal registry is already closing modals, skipping recursive call');
+      return;
+    }
+    
+    this.isClosing = true;
+    try {
+      this.modals.forEach(modal => {
+        try {
+          // Handle different modal structures
+          if (modal && typeof modal === 'function') {
+            // Modal is a function (like closeModal)
+            modal();
+          } else if (modal && typeof modal.close === 'function') {
+            // Modal has a close method
+            modal.close();
+          } else if (modal && modal.element && typeof modal.element.remove === 'function') {
+            // Modal has an element with remove method
+            modal.element.remove();
+          } else if (modal && typeof modal.remove === 'function') {
+            // Modal has a remove method
+            modal.remove();
+          } else {
+            console.warn('Unknown modal structure:', modal);
+          }
+        } catch (e) {
+          console.warn('Error closing modal:', e);
         }
-      } catch (e) {
-        console.warn('Error closing modal:', e);
-      }
-    });
-    this.modals.clear();
+      });
+      this.modals.clear();
+    } finally {
+      this.isClosing = false;
+    }
   },
   closeByType(type) {
-    this.modals.forEach(modal => {
-      try {
-        if (modal && modal.type === type) {
-          // Handle different modal structures
-          if (typeof modal === 'function') {
-            modal();
-          } else if (typeof modal.close === 'function') {
-            modal.close();
-          } else if (modal.element && typeof modal.element.remove === 'function') {
-            modal.element.remove();
-          } else if (typeof modal.remove === 'function') {
-            modal.remove();
+    // Prevent recursive calls
+    if (this.isClosing) {
+      console.warn('Modal registry is already closing modals, skipping recursive call');
+      return;
+    }
+    
+    this.isClosing = true;
+    try {
+      this.modals.forEach(modal => {
+        try {
+          if (modal && modal.type === type) {
+            // Handle different modal structures
+            if (typeof modal === 'function') {
+              modal();
+            } else if (typeof modal.close === 'function') {
+              modal.close();
+            } else if (modal.element && typeof modal.element.remove === 'function') {
+              modal.element.remove();
+            } else if (typeof modal.remove === 'function') {
+              modal.remove();
+            }
+            this.modals.delete(modal);
           }
-          this.modals.delete(modal);
+        } catch (e) {
+          console.warn('Error closing modal by type:', e);
         }
-      } catch (e) {
-        console.warn('Error closing modal by type:', e);
-      }
-    });
+      });
+    } finally {
+      this.isClosing = false;
+    }
   }
 };
 
@@ -2047,7 +2070,7 @@ function showResultsModal(results) {
     medianTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const medianTimeValue = document.createElement('div');
-    medianTimeValue.textContent = `${results.summary.medianTicks} ${t('ticksSuffix')}`;
+    medianTimeValue.textContent = `${Math.round(results.summary.medianTicks)} ${t('ticksSuffix')}`;
     medianTimeValue.style.cssText = 'text-align: right;';
     
     // Max Rank Points - Removed as redundant since we show S+ breakdown above

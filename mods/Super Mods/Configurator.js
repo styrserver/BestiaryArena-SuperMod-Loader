@@ -2,6 +2,15 @@
 // Handles import/export of configuration data
 if (window.DEBUG) console.log('Configurator initializing...');
 
+// Safe DOM element removal helper
+function safeRemoveElement(element) {
+  if (element && element.parentNode && element.parentNode.contains(element)) {
+    element.parentNode.removeChild(element);
+  } else if (element && element.remove) {
+    element.remove();
+  }
+}
+
 // Configuration
 const defaultConfig = {
   enabled: true,
@@ -555,9 +564,7 @@ async function importConfiguration(modal) {
                  onClick: () => {
                    // Close modal by removing it from DOM
                    document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
-                     if (el && el.parentNode) {
-                       el.parentNode.removeChild(el);
-                     }
+                     safeRemoveElement(el);
                    });
                    resolve(false);
                  }
@@ -568,9 +575,7 @@ async function importConfiguration(modal) {
                  onClick: () => {
                    // Close modal by removing it from DOM
                    document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
-                     if (el && el.parentNode) {
-                       el.parentNode.removeChild(el);
-                     }
+                     safeRemoveElement(el);
                    });
                    resolve(true);
                  }
@@ -800,18 +805,14 @@ async function importConfiguration(modal) {
            } else {
              // Fallback: remove modal elements from DOM
              document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
-               if (el && el.parentNode) {
-                 el.parentNode.removeChild(el);
-               }
+               safeRemoveElement(el);
              });
            }
          } catch (closeError) {
            console.warn('Could not close modal:', closeError);
            // Final fallback: remove all modal-like elements
            document.querySelectorAll('div[style*="position: fixed"][style*="z-index: 999"]').forEach(el => {
-             if (el && el.parentNode) {
-               el.parentNode.removeChild(el);
-             }
+             safeRemoveElement(el);
            });
          }
         
