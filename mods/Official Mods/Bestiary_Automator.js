@@ -11,7 +11,7 @@ const defaultConfig = {
   autoCollectRewards: false,
   autoDayCare: false,
   autoPlayAfterDefeat: false,
-  autoFinishTasks: true,
+  autoFinishTasks: false,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -50,17 +50,14 @@ const BUTTON_ID = `${MOD_ID}-button`;
 const CONFIG_BUTTON_ID = `${MOD_ID}-config-button`;
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
-// Single state machine to replace scattered boolean flags
+// Only track states that prevent conflicts
 const AUTOMATION_STATES = {
-  IDLE: 'idle',                    // Ready to process new tasks
-  RUNNING: 'running',              // Automation loop is active
   PROCESSING_DEFEAT: 'processing_defeat',  // Handling defeat toast
   PROCESSING_BATTLE: 'processing_battle',  // Handling battle ongoing toast
-  COUNTDOWN: 'countdown',          // Waiting for countdown to complete
-  STOPPED: 'stopped'               // Automation is stopped
+  COUNTDOWN: 'countdown'                   // Waiting for countdown to complete
 };
 
-let currentState = AUTOMATION_STATES.IDLE;
+let currentState = null;
 
 // Translations
 const TRANSLATIONS = {
@@ -123,18 +120,20 @@ function t(key) {
 const setState = (newState) => {
   const oldState = currentState;
   currentState = newState;
-  console.log(`[Bestiary Automator] State changed: ${oldState} → ${newState}`);
+  if (newState) {
+    console.log(`[Bestiary Automator] State changed: ${oldState || 'none'} → ${newState}`);
+  } else {
+    console.log(`[Bestiary Automator] State cleared: ${oldState} → none`);
+  }
 };
 
 const isState = (state) => currentState === state;
 const canTransitionTo = (newState) => {
-  // Allow most transitions - only prevent invalid ones
-  const invalidTransitions = {
-    [AUTOMATION_STATES.STOPPED]: [AUTOMATION_STATES.PROCESSING_DEFEAT, AUTOMATION_STATES.PROCESSING_BATTLE, AUTOMATION_STATES.COUNTDOWN]
-  };
-  
-  const currentInvalid = invalidTransitions[currentState] || [];
-  return !currentInvalid.includes(newState);
+  // Only prevent transitions if we're already in a conflicting state
+  if (currentState && currentState !== newState) {
+    return false;
+  }
+  return true;
 };
 
 // Helper functions for automation
@@ -322,8 +321,8 @@ const cancelCurrentCountdown = () => {
     
     // Reset state if we were in countdown
     if (isState(AUTOMATION_STATES.COUNTDOWN)) {
-      setState(AUTOMATION_STATES.IDLE);
-      console.log('[Bestiary Automator] Countdown cancelled due to board state change, returning to idle');
+      setState(null);
+      console.log('[Bestiary Automator] Countdown cancelled due to board state change');
       console.log('[Bestiary Automator] Ready to detect new toasters');
       console.log('[Bestiary Automator] Note: Main countdown function will complete its sleep and then confirm cancellation');
     }
@@ -606,6 +605,12 @@ const handleTaskFinishing = async () => {
     return;
   }
   
+  // Check if we should skip task checking due to sleep mode
+  if (shouldSkipTaskChecking()) {
+    console.log('[Bestiary Automator] Task checking sleeping, skipping...');
+    return 'sleeping';
+  }
+  
   // Only process quest log once per board state
   if (questLogProcessedThisBoardState) {
     console.log('[Bestiary Automator] Quest log already processed for this board state, skipping...');
@@ -626,8 +631,51 @@ const handleTaskFinishing = async () => {
     if (playerContext.questLog && playerContext.questLog.task) {
       const task = playerContext.questLog.task;
       
-      if (task.ready) {
-        console.log('[Bestiary Automator] Hunting task is ready, finishing...');
+      // Early return if no active hunting task (killCount is 0 or undefined)
+      if (!task.killCount || task.killCount === 0) {
+        console.log('[Bestiary Automator] No active hunting task (killCount is 0), skipping...');
+        return 'no_task';
+      }
+      
+      // Check if task is ready OR if autoplay is active
+      const isTaskReady = task.ready;
+      let isAutoplayActive = checkIfAutoplayIsActive();
+      
+      // If autoplay shows "Auto" state, wait for it to transition to "Autoplay" state
+      if (!isTaskReady && !isAutoplayActive) {
+        const autoButton = document.querySelector('button[data-full="true"][data-state="closed"]');
+        if (autoButton && autoButton.textContent.includes('Auto') && autoButton.hasAttribute('disabled')) {
+          console.log('[Bestiary Automator] Waiting for autoplay button to transition from "Auto" to "Autoplay" state...');
+          
+          // Wait up to 30 seconds for the transition
+          let waitAttempts = 0;
+          const maxWaitAttempts = 300; // 30 seconds with 100ms intervals
+          
+          while (!isAutoplayActive && waitAttempts < maxWaitAttempts) {
+            await sleep(100);
+            waitAttempts++;
+            isAutoplayActive = checkIfAutoplayIsActive();
+            
+            if (waitAttempts % 100 === 0) { // Log every 10 seconds
+              console.log(`[Bestiary Automator] Still waiting for autoplay transition... (${waitAttempts / 10}s)`);
+            }
+          }
+          
+          if (isAutoplayActive) {
+            console.log('[Bestiary Automator] Autoplay button transitioned to accessible state');
+          } else {
+            console.log('[Bestiary Automator] Autoplay button never transitioned, skipping quest log check');
+            return;
+          }
+        }
+      }
+      
+      if (isTaskReady || isAutoplayActive) {
+        if (isTaskReady) {
+          console.log('[Bestiary Automator] Hunting task is ready, finishing...');
+        } else {
+          console.log('[Bestiary Automator] Autoplay is active and quest log accessible, checking...');
+        }
         
         // Mark quest log as processed for this board state
         questLogProcessedThisBoardState = true;
@@ -641,14 +689,41 @@ const handleTaskFinishing = async () => {
           questBlip.click();
           console.log('[Bestiary Automator] Quest log opened');
           
-          // Wait for quest log to fully load
-          await sleep(1000);
+          // Wait for quest log to fully load - reduced for faster response
+          await sleep(300);
           
-          // 2. Wait up to 2 minutes for Finish button
+          // 2. Wait up to 2 minutes for Finish button with mutation observer
           let finishButton = null;
           let attempts = 0;
-          while (!finishButton && attempts < 240) {
-            await sleep(500);
+          const maxAttempts = 240; // Keep 2 minute delay
+          
+          // Use mutation observer to watch for Finish button changes
+          const finishButtonObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+              if (mutation.type === 'attributes' && mutation.attributeName === 'disabled') {
+                const target = mutation.target;
+                if (target.textContent.includes('Finish')) {
+                  // Check if button is now enabled
+                  if (!target.hasAttribute('disabled') && !target.disabled) {
+                    finishButton = target;
+                    console.log('[Bestiary Automator] Finish button enabled via mutation observer');
+                  }
+                }
+              }
+            }
+          });
+          
+          // Start observing the document body for button changes
+          finishButtonObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['disabled']
+          });
+          
+          // Poll for Finish button with faster intervals
+          while (!finishButton && attempts < maxAttempts) {
+            await sleep(100); // Faster polling - 100ms instead of 500ms
             attempts++;
             
             // Look for Finish button that's not disabled
@@ -660,16 +735,13 @@ const handleTaskFinishing = async () => {
             );
             
             if (finishButton) {
-              console.log('[Bestiary Automator] Finish button found, checking if truly ready...');
-              console.log('[Bestiary Automator] Button disabled attribute:', finishButton.hasAttribute('disabled'));
-              console.log('[Bestiary Automator] Button disabled property:', finishButton.disabled);
-            }
-            
-            if (finishButton) {
               console.log('[Bestiary Automator] Finish button found and ready, attempts:', attempts);
               break;
             }
           }
+          
+          // Stop observing
+          finishButtonObserver.disconnect();
           
           // 3. Click Finish
           if (finishButton) {
@@ -677,12 +749,18 @@ const handleTaskFinishing = async () => {
             finishButton.click();
             console.log('[Bestiary Automator] Finish clicked');
             
-            // 4. Close modal
-            await sleep(1000);
+            // 4. Close modal - reduced for faster response
+            await sleep(300);
             clickAllCloseButtons();
             console.log('[Bestiary Automator] Modal closed');
           } else {
-            console.log('[Bestiary Automator] Finish button never became ready');
+            // If we were checking during autoplay and no finish button appeared, just close the quest log
+            if (isAutoplayActive && !isTaskReady) {
+              console.log('[Bestiary Automator] No finish button found during autoplay, closing quest log');
+              clickAllCloseButtons();
+            } else {
+              console.log('[Bestiary Automator] Finish button never became ready');
+            }
           }
         } else {
           console.log('[Bestiary Automator] Quest blip not found');
@@ -696,6 +774,9 @@ const handleTaskFinishing = async () => {
   } catch (error) {
     console.error('[Bestiary Automator] Error handling task finishing:', error);
   }
+  
+  // Return success if we reach here
+  return 'success';
 };
 
 // Update minimum stamina if game shows a stamina requirement
@@ -754,10 +835,10 @@ const updateRequiredStamina = () => {
 
 // Main automation loop
 let automationInterval = null;
+let taskCheckingInterval = null;
 let gameStateObserver = null;
 let focusEventListeners = null;
 let currentCountdownTask = null;
-let processedToastHashes = new Set();
 
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
@@ -769,21 +850,29 @@ const subscribeToGameState = () => {
         rewardsCollectedThisSession = false;
         questLogProcessedThisBoardState = false;
         
+        // Reset sleep state when new game starts (new hunting task might be available)
+        if (isTaskCheckingSleeping) {
+          console.log('[Bestiary Automator] New game detected during sleep mode, waking up early');
+          isTaskCheckingSleeping = false;
+          sleepStartTime = 0;
+          sleepDuration = 0;
+        }
+        
+        // No complex verification needed - defeat toast is dismissed immediately when processed
+        
         // Log current task status when new game starts
         try {
           if (globalThis.state?.player) {
             const playerContext = globalThis.state.player.getSnapshot().context;
             const task = playerContext?.questLog?.task;
             
-            if (task) {
+            if (task && task.killCount !== undefined) {
               console.log(`[Bestiary Automator] Progress: ${task.killCount} creatures killed`);
               
               // Calculate remaining kills if we can determine the target
               if (task.ready) {
                 console.log('[Bestiary Automator] Task is ready to complete!');
               }
-            } else {
-              console.log('[Bestiary Automator] No active hunting task');
             }
           }
         } catch (error) {
@@ -834,15 +923,13 @@ const subscribeToGameState = () => {
             const playerContext = globalThis.state.player.getSnapshot().context;
             const task = playerContext?.questLog?.task;
             
-            if (task) {
+            if (task && task.killCount !== undefined) {
               console.log(`[Bestiary Automator] Progress: ${task.killCount} creatures killed`);
               
               // Calculate remaining kills if we can determine the target
               if (task.ready) {
                 console.log('[Bestiary Automator] Task is ready to complete!');
               }
-            } else {
-              console.log('[Bestiary Automator] No active hunting task');
             }
           }
         } catch (error) {
@@ -946,15 +1033,7 @@ const handleToasts = async () => {
       if (!textElement) continue;
       
       const toastText = textElement.textContent;
-      const toastHash = btoa(toastText).slice(0, 16);
-      
-      // Skip if already processed
-      if (processedToastHashes.has(toastHash)) {
-        console.log(`[Bestiary Automator] Toast already processed, skipping: "${toastText}"`);
-        continue;
-      }
-      
-      console.log(`[Bestiary Automator] Processing new toast: "${toastText}"`);
+      console.log(`[Bestiary Automator] Processing toast: "${toastText}"`);
       
       console.log(`[Bestiary Automator] Found toaster with "no" icon! Text: "${toastText}"`);
       console.log(`[Bestiary Automator] Text length: ${toastText.length}, Contains 'Autoplay stopped because your creatures were defeated': ${toastText.includes('Autoplay stopped because your creatures were defeated')}`);
@@ -976,10 +1055,6 @@ const handleToasts = async () => {
       if (toastText.includes('Battle still ongoing') && toastText.includes('ms diff')) {
         if (await processBattleOngoingToast(toastText)) return;
       }
-      
-      // Mark as processed if we didn't process it
-      processedToastHashes.add(toastHash);
-      console.log(`[Bestiary Automator] Toast marked as processed: "${toastText}"`);
     }
     
     console.log('[Bestiary Automator] No relevant toasts found');
@@ -988,7 +1063,7 @@ const handleToasts = async () => {
   }
 };
 
-// Simplified defeat toast processor
+// Simplified defeat toast processor - no cooldown, process each immediately
 const processDefeatToast = async () => {
   if (!canTransitionTo(AUTOMATION_STATES.PROCESSING_DEFEAT)) {
     console.log('[Bestiary Automator] Cannot process defeat toast, system is busy');
@@ -1012,14 +1087,18 @@ const processDefeatToast = async () => {
   if (startButton) {
     startButton.click();
     console.log('[Bestiary Automator] Start button clicked after defeat');
+    
+    // Click the defeat toast to dismiss it naturally
+    dismissDefeatToast();
+    
   } else {
     console.log('[Bestiary Automator] Start button not found after defeat');
   }
   
   // Reset state after 3 seconds
   setTimeout(() => {
-    setState(AUTOMATION_STATES.IDLE);
-    console.log('[Bestiary Automator] Defeat processing complete, returning to idle');
+    setState(null);
+    console.log('[Bestiary Automator] Defeat processing complete');
   }, 3000);
   
   return true;
@@ -1041,7 +1120,7 @@ const processBattleOngoingToast = async (toastText) => {
   const timeMatch = toastText.match(/\((\d+)ms diff\)/);
   if (!timeMatch) {
     console.log('[Bestiary Automator] Could not extract time from battle ongoing toast');
-    setState(AUTOMATION_STATES.IDLE);
+    setState(null);
     return false;
   }
   
@@ -1063,12 +1142,26 @@ const processBattleOngoingToast = async (toastText) => {
     
     // Reset state after 3 seconds
     setTimeout(() => {
-      setState(AUTOMATION_STATES.IDLE);
-      console.log('[Bestiary Automator] Battle processing complete, returning to idle');
+      setState(null);
+      console.log('[Bestiary Automator] Battle processing complete');
     }, 3000);
   }
   
   return true;
+};
+
+// Helper function to dismiss defeat toast after successful game start
+const dismissDefeatToast = () => {
+  try {
+    // Look for the defeat toast and click it to dismiss naturally
+    const defeatToast = document.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
+    if (defeatToast && defeatToast.textContent.includes('Autoplay stopped because your creatures were defeated')) {
+      defeatToast.click();
+      console.log('[Bestiary Automator] Defeat toast clicked to dismiss');
+    }
+  } catch (error) {
+    console.error('[Bestiary Automator] Error dismissing defeat toast:', error);
+  }
 };
 
 // Helper function to find start button
@@ -1082,6 +1175,59 @@ const findStartButton = () => {
   return null;
 };
 
+// Helper function to check if we should skip task checking due to sleep mode
+const shouldSkipTaskChecking = () => {
+  if (!isTaskCheckingSleeping) return false;
+  
+  const now = Date.now();
+  const elapsed = now - sleepStartTime;
+  
+  // Check if sleep period is complete (safety check)
+  if (elapsed >= sleepDuration) {
+    console.log(`[Bestiary Automator] Sleep period complete (${Math.round(elapsed / 1000)}s elapsed), resuming task checking`);
+    isTaskCheckingSleeping = false;
+    sleepStartTime = 0;
+    sleepDuration = 0;
+    return false;
+  }
+  
+  // Still sleeping, skip task checking
+  const remaining = Math.round((sleepDuration - elapsed) / 1000);
+  console.log(`[Bestiary Automator] Task checking sleeping (${remaining}s remaining) - other automation continues`);
+  return true;
+};
+
+// Helper function to check if autoplay is active and quest log is accessible
+const checkIfAutoplayIsActive = () => {
+  try {
+    // Look for the autoplay button with the specific pattern that allows quest log access
+    const autoplayButton = document.querySelector('button[data-full="false"][data-state="closed"]');
+    if (!autoplayButton) return false;
+    
+    // Check if it has the autoplay text and is disabled (indicating autoplay is running)
+    const buttonText = autoplayButton.textContent;
+    const isDisabled = autoplayButton.hasAttribute('disabled') || autoplayButton.disabled;
+    
+    // Check for autoplay text and disabled state
+    if (buttonText.includes('Autoplay') && isDisabled) {
+      console.log('[Bestiary Automator] Autoplay button detected as active and quest log accessible');
+      return true;
+    }
+    
+    // If we see "Auto" with data-full="true", quest log is not accessible yet
+    const autoButton = document.querySelector('button[data-full="true"][data-state="closed"]');
+    if (autoButton && autoButton.textContent.includes('Auto') && autoButton.hasAttribute('disabled')) {
+      console.log('[Bestiary Automator] Autoplay button shows "Auto" - quest log not accessible yet');
+      return false;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking autoplay state:', error);
+    return false;
+  }
+};
+
 // Helper function to log task progress
 const logTaskProgress = (context) => {
   try {
@@ -1089,13 +1235,15 @@ const logTaskProgress = (context) => {
       const playerContext = globalThis.state.player.getSnapshot().context;
       const task = playerContext?.questLog?.task;
       
-      if (task) {
-        console.log(`[Bestiary Automator] Progress: ${task.killCount} creatures killed`);
-        if (task.ready) {
-          console.log('[Bestiary Automator] Task is ready to complete!');
-        }
-      } else {
-        console.log('[Bestiary Automator] No active hunting task');
+      // Early return if no active hunting task
+      if (!task || task.killCount === undefined || task.killCount === 0) {
+        return;
+      }
+      
+      // Only log progress if there's actually a hunting task
+      console.log(`[Bestiary Automator] Progress: ${task.killCount} creatures killed`);
+      if (task.ready) {
+        console.log('[Bestiary Automator] Task is ready to complete!');
       }
     }
   } catch (error) {
@@ -1176,9 +1324,6 @@ const startAutomation = () => {
   
   console.log('[Bestiary Automator] Starting automation loop');
   
-  // Set state to running
-  setState(AUTOMATION_STATES.RUNNING);
-  
   // Reset rewards collection flag when starting automation
   rewardsCollectedThisSession = false;
   
@@ -1187,22 +1332,29 @@ const startAutomation = () => {
   
   // Run immediately once
   runAutomationTasks();
+  runTaskChecking();
   
-  // Then set up interval - reduced from 5000ms for faster response
-  automationInterval = setInterval(runAutomationTasks, 2000);
+  // Set up separate intervals for different concerns
+  automationInterval = setInterval(runAutomationTasks, 2000); // Core automation every 2s
+  taskCheckingInterval = setInterval(runTaskChecking, 2000);  // Task checking every 2s
   
   // Subscribe to game state for autoplay after defeat
   subscribeToGameState();
-};
+ };
 
 const stopAutomation = () => {
   if (!automationInterval) return;
   
   console.log('[Bestiary Automator] Stopping automation loop');
   
-  // Clear main interval
+  // Clear main intervals
   clearInterval(automationInterval);
   automationInterval = null;
+  
+  if (taskCheckingInterval) {
+    clearInterval(taskCheckingInterval);
+    taskCheckingInterval = null;
+  }
   
   // Clear any pending retry timeouts
   if (staminaRefillRetryTimeout) {
@@ -1218,9 +1370,6 @@ const stopAutomation = () => {
   
   // Reset retry counters
   staminaRefillRetryCount = 0;
-  
-  // Reset state to stopped
-  setState(AUTOMATION_STATES.STOPPED);
   
   // Clear element cache
   elementCache.clear();
@@ -1239,6 +1388,7 @@ const runAutomationTasks = async () => {
       return;
     }
     
+    // Core automation tasks that should always run
     await takeRewardsIfAvailable();
     await handleDayCare();
     updateRequiredStamina();
@@ -1246,12 +1396,66 @@ const runAutomationTasks = async () => {
     
     // Check for any relevant toasts if autoplay after defeat is enabled
     // Only check every 5 seconds to reduce spam (main loop runs every 2 seconds)
-    if (config.autoPlayAfterDefeat && !window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 5000)) {
+    if (config.autoPlayAfterDefeat && (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 5000))) {
       window.__lastToastCheck = Date.now();
       await handleToasts();
     }
   } catch (error) {
     console.error('[Bestiary Automator] Error in automation tasks:', error);
+  }
+};
+
+// Separate function for task checking that runs independently
+const runTaskChecking = async () => {
+  try {
+    // Only run task checking if game is active and feature is enabled
+    if (!isGameActive() || !config.autoFinishTasks) {
+      return;
+    }
+    
+    // Check if we should skip task checking due to sleep mode
+    if (shouldSkipTaskChecking()) {
+      return;
+    }
+    
+    // Check and finish tasks proactively
+    const taskResult = await handleTaskFinishing();
+    
+    // If no active hunting task, set sleep mode for task checking only
+    if (taskResult === 'no_task') {
+      console.log('[Bestiary Automator] No active hunting task, entering sleep mode for task checking only...');
+      
+      // Set global sleep state for task checking only
+      isTaskCheckingSleeping = true;
+      sleepStartTime = Date.now();
+      sleepDuration = 300000; // 5 minutes = 300,000ms
+      
+      console.log('[Bestiary Automator] Task checking sleeping for 5 minutes, but other automation continues...');
+      
+      // Pause the task checking interval while sleeping to reduce spam
+      if (taskCheckingInterval) {
+        clearInterval(taskCheckingInterval);
+        taskCheckingInterval = null;
+        
+        // Resume after sleep duration
+        setTimeout(() => {
+          console.log('[Bestiary Automator] Task checking sleep complete, resuming...');
+          isTaskCheckingSleeping = false;
+          sleepStartTime = 0;
+          sleepDuration = 0;
+          
+          // Restart the task checking interval
+          taskCheckingInterval = setInterval(runTaskChecking, 2000);
+        }, sleepDuration);
+      }
+    }
+    
+    // If task checking is sleeping, skip further processing
+    if (taskResult === 'sleeping') {
+      return;
+    }
+  } catch (error) {
+    console.error('[Bestiary Automator] Error in task checking:', error);
   }
 };
 
@@ -1557,6 +1761,11 @@ function init() {
 // Initialize the mod
 init();
 
+// Global sleep state management
+let isTaskCheckingSleeping = false;
+let sleepStartTime = 0;
+let sleepDuration = 0;
+
 // Track button state to prevent unnecessary updates
 let lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
@@ -1564,8 +1773,7 @@ let lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
-  boardAnalyzerRunning: false,
-  currentState: currentState
+  boardAnalyzerRunning: false
 };
 
 // Initialize lastButtonState with current config values to prevent unnecessary updates
@@ -1575,8 +1783,7 @@ lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
-  boardAnalyzerRunning: false,
-  currentState: currentState
+  boardAnalyzerRunning: false
 };
 
 // Update the Automator button style based on enabled features
@@ -1588,8 +1795,7 @@ function updateAutomatorButton() {
     autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     autoFinishTasks: config.autoFinishTasks,
-    boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning,
-    currentState: currentState
+    boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
   };
   
   // Only update button styling if state has changed
