@@ -938,58 +938,67 @@ const subscribeToGameState = () => {
         
         // Check and finish tasks immediately after game ends
         handleTaskFinishing();
+        
+        // Defeat toasts are now detected automatically via MutationObserver - no need for manual checking
       });
     }
     
-    // Subscribe to game state changes for autoplay after defeat
+    // Set up MutationObserver for real-time toast detection
     if (!config.autoPlayAfterDefeat) return;
     
-    if (api.game && api.game.subscribeToState) {
-      // Add debouncing to prevent excessive calls
-      let gameStateToastTimeout = null;
-      gameStateObserver = api.game.subscribeToState((state) => {
-        // Clear any existing timeout
-        if (gameStateToastTimeout) {
-          clearTimeout(gameStateToastTimeout);
-        }
-        
-        // Debounce toast checking to prevent spam
-        gameStateToastTimeout = setTimeout(() => {
-          // Only check if we haven't checked recently
-          if (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 2000)) {
-            window.__lastToastCheck = Date.now();
-            handleToasts();
+    // Use MutationObserver to watch for new toast elements in real-time
+    gameStateObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          // Check each added node for toasts
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              // Check if the added element is a defeat toast
+              if (isDefeatToast(node)) {
+                console.log('[Bestiary Automator] Defeat toast detected via MutationObserver!');
+                // Process immediately without debouncing
+                processDefeatToast();
+                return; // Exit early since we found a defeat toast
+              }
+              
+              // Check for battle ongoing toasts (network issues)
+              if (isBattleOngoingToast(node)) {
+                console.log('[Bestiary Automator] Battle ongoing toast detected via MutationObserver!');
+                // Process immediately without debouncing
+                const toastText = getToastText(node);
+                processBattleOngoingToast(toastText);
+                return; // Exit early since we found a battle ongoing toast
+              }
+              
+              // Also check child elements for toasts
+              const defeatToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
+              if (defeatToast && defeatToast.textContent.includes('Autoplay stopped because your creatures were defeated')) {
+                console.log('[Bestiary Automator] Defeat toast found in child elements via MutationObserver!');
+                processDefeatToast();
+                return;
+              }
+              
+              // Check child elements for battle ongoing toasts
+              const battleToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
+              if (battleToast && battleToast.textContent.includes('Battle still ongoing') && battleToast.textContent.includes('ms diff')) {
+                console.log('[Bestiary Automator] Battle ongoing toast found in child elements via MutationObserver!');
+                const toastText = getToastText(battleToast);
+                processBattleOngoingToast(toastText);
+                return;
+              }
+            }
           }
-        }, 500); // Wait 500ms after last state change
-      });
-    } else {
-      // Fallback: use MutationObserver to watch for DOM changes
-      // Add debouncing to prevent excessive calls
-      let toastCheckTimeout = null;
-      gameStateObserver = new MutationObserver((mutations) => {
-        // Clear any existing timeout
-        if (toastCheckTimeout) {
-          clearTimeout(toastCheckTimeout);
         }
-        
-        // Debounce toast checking to prevent spam
-        toastCheckTimeout = setTimeout(() => {
-          // Only check if we haven't checked recently
-          if (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 2000)) {
-            window.__lastToastCheck = Date.now();
-            handleToasts();
-          }
-        }, 500); // Wait 500ms after last DOM change
-      });
-      
-      // Start observing the document body for added nodes
-      gameStateObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-    }
+      }
+    });
     
-    console.log('[Bestiary Automator] Subscribed to game state changes for autoplay after defeat');
+    // Start observing the document body for added nodes
+    gameStateObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    console.log('[Bestiary Automator] MutationObserver set up for real-time defeat toast detection');
   } catch (error) {
     console.error('[Bestiary Automator] Error subscribing to game state:', error);
   }
@@ -998,70 +1007,14 @@ const subscribeToGameState = () => {
 // Unsubscribe from game state changes
 const unsubscribeFromGameState = () => {
   if (gameStateObserver) {
-    if (api.game && api.game.unsubscribeFromState) {
-      api.game.unsubscribeFromState(gameStateObserver);
-    } else if (gameStateObserver.disconnect) {
-      gameStateObserver.disconnect();
-    }
+    gameStateObserver.disconnect();
     gameStateObserver = null;
     
-    console.log('[Bestiary Automator] Unsubscribed from game state changes');
+    console.log('[Bestiary Automator] MutationObserver disconnected');
   }
 };
 
-// Unified toast handler with simplified logic
-const handleToasts = async () => {
-  if (!config.autoPlayAfterDefeat) return;
-  
-  // Simple check: only prevent multiple toast processing at the same time
-  if (isState(AUTOMATION_STATES.PROCESSING_DEFEAT) || isState(AUTOMATION_STATES.PROCESSING_BATTLE) || isState(AUTOMATION_STATES.COUNTDOWN)) {
-    return; // Already processing a toast
-  }
-  
-  try {
-    // Look for toasts with the "no" icon
-    const toasts = document.querySelectorAll('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
-    if (toasts.length === 0) return;
-    
-    console.log(`[Bestiary Automator] Found ${toasts.length} potential toasts, checking for "no" icon...`);
-    
-    for (const toast of toasts) {
-      const noIcon = toast.querySelector('img[alt="no"]');
-      if (!noIcon) continue;
-      
-      const textElement = toast.querySelector('.text-left');
-      if (!textElement) continue;
-      
-      const toastText = textElement.textContent;
-      console.log(`[Bestiary Automator] Processing toast: "${toastText}"`);
-      
-      console.log(`[Bestiary Automator] Found toaster with "no" icon! Text: "${toastText}"`);
-      console.log(`[Bestiary Automator] Text length: ${toastText.length}, Contains 'Autoplay stopped because your creatures were defeated': ${toastText.includes('Autoplay stopped because your creatures were defeated')}`);
-      
-      // Process defeat toast - check multiple patterns
-      const isDefeatToast = toastText.includes('Autoplay stopped because your creatures were defeated') ||
-                           (toastText.includes('Autoplay stopped') && toastText.includes('defeated')) ||
-                           toastText.includes('creatures were defeated');
-      
-      console.log(`[Bestiary Automator] Defeat pattern check: "${toastText}" -> ${isDefeatToast}`);
-      console.log(`[Bestiary Automator] Checking patterns: defeat=${isDefeatToast}, battle=${toastText.includes('Battle still ongoing') && toastText.includes('ms diff')}`);
-      
-      if (isDefeatToast) {
-        console.log('[Bestiary Automator] Defeat toast pattern matched, processing...');
-        if (await processDefeatToast(toastText)) return;
-      }
-      
-      // Process battle ongoing toast
-      if (toastText.includes('Battle still ongoing') && toastText.includes('ms diff')) {
-        if (await processBattleOngoingToast(toastText)) return;
-      }
-    }
-    
-    console.log('[Bestiary Automator] No relevant toasts found');
-  } catch (error) {
-    console.error('[Bestiary Automator] Error handling toasts:', error);
-  }
-};
+// Toast detection is now handled by MutationObserver - this function is no longer needed
 
 // Simplified defeat toast processor - no cooldown, process each immediately
 const processDefeatToast = async () => {
@@ -1116,10 +1069,17 @@ const processBattleOngoingToast = async (toastText) => {
   // Check and finish tasks immediately when battle ongoing is detected
   handleTaskFinishing();
   
+  // Validate toastText parameter
+  if (!toastText || typeof toastText !== 'string') {
+    console.log('[Bestiary Automator] Invalid toastText parameter:', toastText);
+    setState(null);
+    return false;
+  }
+  
   // Extract time difference
   const timeMatch = toastText.match(/\((\d+)ms diff\)/);
   if (!timeMatch) {
-    console.log('[Bestiary Automator] Could not extract time from battle ongoing toast');
+    console.log('[Bestiary Automator] Could not extract time from battle ongoing toast:', toastText);
     setState(null);
     return false;
   }
@@ -1173,6 +1133,69 @@ const findStartButton = () => {
     }
   }
   return null;
+};
+
+// Helper function to check if an element is a defeat toast
+const isDefeatToast = (element) => {
+  try {
+    // Check if the element has the toast structure
+    if (!element.classList || !element.classList.contains('widget-bottom')) {
+      return false;
+    }
+    
+    // Check for the "no" icon
+    const noIcon = element.querySelector('img[alt="no"]');
+    if (!noIcon) {
+      return false;
+    }
+    
+    // Check for the text content indicating defeat
+    const textElement = element.querySelector('.text-left');
+    if (!textElement) {
+      return false;
+    }
+    
+    const toastText = textElement.textContent;
+    return toastText.includes('Autoplay stopped because your creatures were defeated') ||
+           (toastText.includes('Autoplay stopped') && toastText.includes('defeated')) ||
+           toastText.includes('creatures were defeated');
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking if element is defeat toast:', error);
+    return false;
+  }
+};
+
+// Helper function to check if an element is a battle ongoing toast (network issues)
+const isBattleOngoingToast = (element) => {
+  try {
+    // Check if the element has the toast structure
+    if (!element.classList || !element.classList.contains('widget-bottom')) {
+      return false;
+    }
+    
+    // Check for the text content indicating battle ongoing
+    const textElement = element.querySelector('.text-left');
+    if (!textElement) {
+      return false;
+    }
+    
+    const toastText = textElement.textContent;
+    return toastText.includes('Battle still ongoing') && toastText.includes('ms diff');
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking if element is battle ongoing toast:', error);
+    return false;
+  }
+};
+
+// Helper function to extract toast text from an element
+const getToastText = (element) => {
+  try {
+    const textElement = element.querySelector('.text-left');
+    return textElement ? textElement.textContent : '';
+  } catch (error) {
+    console.error('[Bestiary Automator] Error extracting toast text:', error);
+    return '';
+  }
 };
 
 // Helper function to check if we should skip task checking due to sleep mode
@@ -1394,12 +1417,7 @@ const runAutomationTasks = async () => {
     updateRequiredStamina();
     await refillStaminaIfNeeded();
     
-    // Check for any relevant toasts if autoplay after defeat is enabled
-    // Only check every 5 seconds to reduce spam (main loop runs every 2 seconds)
-    if (config.autoPlayAfterDefeat && (!window.__lastToastCheck || (Date.now() - window.__lastToastCheck > 5000))) {
-      window.__lastToastCheck = Date.now();
-      await handleToasts();
-    }
+    // Toast detection is now handled by MutationObserver - no need for interval checking
   } catch (error) {
     console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
