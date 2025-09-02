@@ -572,6 +572,9 @@
       // Clear preserved state
       BetterHighscoresState.preservedContainer = null;
       BetterHighscoresState.wasInSandboxMode = false;
+      
+      // Force update to ensure correct map data is displayed
+      setTimeout(() => updateLeaderboards(), 100);
     } else if (BetterHighscoresState.preservedContainer) {
       // We have a preserved container but not in sandbox mode (probably from board analysis)
       log('[Better Highscores] Restoring preserved container from board analysis');
@@ -594,6 +597,9 @@
       
       // Clear preserved state
       BetterHighscoresState.preservedContainer = null;
+      
+      // Force update to ensure correct map data is displayed after board analysis
+      setTimeout(() => updateLeaderboards(), 100);
     } else {
       // Only log this once to avoid spam
       if (!BetterHighscoresState.lastNoContainerLog || Date.now() - BetterHighscoresState.lastNoContainerLog > 5000) {

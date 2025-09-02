@@ -598,7 +598,6 @@ const handleDayCare = async () => {
 
 // Handle task finishing
 const handleTaskFinishing = async () => {
-  console.log('[Bestiary Automator] handleTaskFinishing called');
   
   if (!config.autoFinishTasks) {
     console.log('[Bestiary Automator] autoFinishTasks disabled, returning');
@@ -625,7 +624,6 @@ const handleTaskFinishing = async () => {
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
-    console.log('[Bestiary Automator] Player context:', playerContext?.questLog?.task);
     
     // Check if there's a hunting task that's ready
     if (playerContext.questLog && playerContext.questLog.task) {
@@ -835,17 +833,29 @@ const updateRequiredStamina = () => {
 
 // Main automation loop
 let automationInterval = null;
-let taskCheckingInterval = null;
+
 let gameStateObserver = null;
 let focusEventListeners = null;
 let currentCountdownTask = null;
+
+// Add debouncing for game state events
+let lastGameStateChange = 0;
+const GAME_STATE_DEBOUNCE_MS = 1000; // 1 second debounce
 
 // Subscribe to board game state changes
 const subscribeToGameState = () => {
   try {
     // Subscribe to board state changes for new game detection
     if (globalThis.state && globalThis.state.board) {
-      globalThis.state.board.on('newGame', (event) => {
+      // Consolidated new game handler with debouncing
+      const handleNewGame = (event) => {
+        const now = Date.now();
+        if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
+          console.log('[Bestiary Automator] Ignoring rapid new game event (debounced)');
+          return;
+        }
+        lastGameStateChange = now;
+        
         console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
         rewardsCollectedThisSession = false;
         questLogProcessedThisBoardState = false;
@@ -857,8 +867,6 @@ const subscribeToGameState = () => {
           sleepStartTime = 0;
           sleepDuration = 0;
         }
-        
-        // No complex verification needed - defeat toast is dismissed immediately when processed
         
         // Log current task status when new game starts
         try {
@@ -872,6 +880,9 @@ const subscribeToGameState = () => {
               // Calculate remaining kills if we can determine the target
               if (task.ready) {
                 console.log('[Bestiary Automator] Task is ready to complete!');
+                
+                // Check and finish tasks immediately if they're ready
+                handleTaskFinishing();
               }
             }
           }
@@ -881,6 +892,17 @@ const subscribeToGameState = () => {
         
         // Cancel any ongoing countdown when new game starts
         if (currentCountdownTask) {
+          cancelCurrentCountdown();
+        }
+      };
+      
+      // Subscribe to newGame event (primary handler)
+      globalThis.state.board.on('newGame', handleNewGame);
+      
+      // Subscribe to emitNewGame event (secondary handler for countdown cancellation only)
+      globalThis.state.board.on('emitNewGame', (event) => {
+        if (currentCountdownTask) {
+          console.log('[Bestiary Automator] Game started during countdown, cancelling...');
           cancelCurrentCountdown();
         }
       });
@@ -900,15 +922,15 @@ const subscribeToGameState = () => {
         }
       });
       
-      // Monitor specific game events that should cancel countdowns
-      globalThis.state.board.on('emitNewGame', (event) => {
-        if (currentCountdownTask) {
-          console.log('[Bestiary Automator] Game started during countdown, cancelling...');
-          cancelCurrentCountdown();
+      // Consolidated end game handler with debouncing
+      const handleEndGame = (event) => {
+        const now = Date.now();
+        if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
+          console.log('[Bestiary Automator] Ignoring rapid end game event (debounced)');
+          return;
         }
-      });
-      
-      globalThis.state.board.on('emitEndGame', (event) => {
+        lastGameStateChange = now;
+        
         if (currentCountdownTask) {
           console.log('[Bestiary Automator] Game ended during countdown, cancelling...');
           cancelCurrentCountdown();
@@ -940,7 +962,10 @@ const subscribeToGameState = () => {
         handleTaskFinishing();
         
         // Defeat toasts are now detected automatically via MutationObserver - no need for manual checking
-      });
+      };
+      
+      // Subscribe to emitEndGame event
+      globalThis.state.board.on('emitEndGame', handleEndGame);
     }
     
     // Set up MutationObserver for real-time toast detection
@@ -1355,11 +1380,9 @@ const startAutomation = () => {
   
   // Run immediately once
   runAutomationTasks();
-  runTaskChecking();
   
-  // Set up separate intervals for different concerns
+  // Set up core automation interval
   automationInterval = setInterval(runAutomationTasks, 2000); // Core automation every 2s
-  taskCheckingInterval = setInterval(runTaskChecking, 2000);  // Task checking every 2s
   
   // Subscribe to game state for autoplay after defeat
   subscribeToGameState();
@@ -1374,10 +1397,7 @@ const stopAutomation = () => {
   clearInterval(automationInterval);
   automationInterval = null;
   
-  if (taskCheckingInterval) {
-    clearInterval(taskCheckingInterval);
-    taskCheckingInterval = null;
-  }
+
   
   // Clear any pending retry timeouts
   if (staminaRefillRetryTimeout) {
@@ -1449,23 +1469,6 @@ const runTaskChecking = async () => {
       sleepDuration = 300000; // 5 minutes = 300,000ms
       
       console.log('[Bestiary Automator] Task checking sleeping for 5 minutes, but other automation continues...');
-      
-      // Pause the task checking interval while sleeping to reduce spam
-      if (taskCheckingInterval) {
-        clearInterval(taskCheckingInterval);
-        taskCheckingInterval = null;
-        
-        // Resume after sleep duration
-        setTimeout(() => {
-          console.log('[Bestiary Automator] Task checking sleep complete, resuming...');
-          isTaskCheckingSleeping = false;
-          sleepStartTime = 0;
-          sleepDuration = 0;
-          
-          // Restart the task checking interval
-          taskCheckingInterval = setInterval(runTaskChecking, 2000);
-        }, sleepDuration);
-      }
     }
     
     // If task checking is sleeping, skip further processing

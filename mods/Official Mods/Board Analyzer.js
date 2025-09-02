@@ -719,7 +719,7 @@ function restoreBoardState() {
       setTimeout(() => {
         // Force a small state change to trigger any watchers
         window.__modCoordination.boardAnalyzerRunning = false;
-      }, 50);
+      }, 25);
     }
     
     // Stop any running game
@@ -755,9 +755,61 @@ function restoreBoardState() {
         // Small delay to ensure DOM is ready
         setTimeout(() => {
           window.BetterHighscores.restoreContainer();
-        }, 100);
+        }, 50);
       } catch (error) {
         console.warn('[Board Analyzer] Error restoring Better Highscores container:', error);
+      }
+    }
+    
+    // NEW: Restore the original map that was active before analysis
+    if (currentRoomId) {
+      try {
+        globalThis.state.board.send({
+          type: 'selectRoomById',
+          roomId: currentRoomId,
+        });
+        console.log('[Board Analyzer] Restored original map:', currentRoomId);
+        
+        // NEW: Also restore the original board configuration if we have it
+        if (boardSetup && boardSetup.length > 0) {
+          console.log('[Board Analyzer] Restoring original board configuration with', boardSetup.length, 'pieces');
+          console.log('[Board Analyzer] Board setup to restore:', boardSetup);
+          
+          // Small delay to ensure map is loaded before setting board
+          setTimeout(() => {
+            try {
+              // Set the board configuration back to what it was before analysis
+              globalThis.state.board.send({
+                type: "setState",
+                fn: prevState => ({
+                  ...prevState,
+                  boardConfig: boardSetup
+                })
+              });
+              console.log('[Board Analyzer] Original board configuration restored');
+              
+              // Verify the restoration worked
+              setTimeout(() => {
+                try {
+                  const restoredContext = globalThis.state.board.getSnapshot().context;
+                  if (restoredContext.boardConfig && restoredContext.boardConfig.length > 0) {
+                    console.log('[Board Analyzer] Verification: Board now has', restoredContext.boardConfig.length, 'pieces');
+                  } else {
+                    console.warn('[Board Analyzer] Verification: Board restoration may have failed');
+                  }
+                } catch (verifyError) {
+                  console.warn('[Board Analyzer] Error verifying board restoration:', verifyError);
+                }
+              }, 50);
+            } catch (error) {
+              console.warn('[Board Analyzer] Error restoring board configuration:', error);
+            }
+          }, 50); // Reduced delay for faster restoration
+        } else {
+          console.log('[Board Analyzer] No board configuration to restore');
+        }
+      } catch (error) {
+        console.warn('[Board Analyzer] Error restoring original map:', error);
       }
     }
     
@@ -1170,6 +1222,20 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   
   // Ensure sandbox mode
   const modeSwitched = ensureSandboxMode();
+  
+  // NEW: Capture the current board configuration before starting analysis
+  try {
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
+      // Deep clone the board configuration to preserve it
+      boardSetup = JSON.parse(JSON.stringify(boardContext.boardConfig));
+      console.log('[Board Analyzer] Captured board configuration with', boardSetup.length, 'pieces');
+    } else {
+      console.log('[Board Analyzer] No board configuration found to capture');
+    }
+  } catch (error) {
+    console.warn('[Board Analyzer] Error capturing board configuration:', error);
+  }
   
   // NEW: Preserve Better Highscores container before hiding game board
   if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
