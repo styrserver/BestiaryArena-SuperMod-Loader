@@ -10293,11 +10293,11 @@ function renderCyclopediaWelcomeColumn(playerName) {
 }
 
 const CYCLOPEDIA_MAX_VALUES = {
-  perfectCreatures: 68,
+  perfectCreatures: 69,
   bisEquipments: 114,
   exploredMaps: 64,
-  bagOutfits: 192,
-  raids: 15
+  bagOutfits: 199,
+  raids: 16
 };
 
 const CYCLOPEDIA_PROGRESS_STATS = [
