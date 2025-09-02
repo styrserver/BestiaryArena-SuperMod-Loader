@@ -3,8 +3,12 @@
 // =======================
 
 (function() {
+    console.log('[Autoseller] Script loading...');
+    
     if (window.__autosellerLoaded) return;
     window.__autosellerLoaded = true;
+    
+    console.log('[Autoseller] Script initialized successfully');
 
     // =======================
     // 1. Configuration & Constants
@@ -105,31 +109,7 @@
     };
     
     // =======================
-    // 2. Logging & Debugging
-    // =======================
-    
-    const logger = {
-        error: (functionName, message, error = null) => {
-            if (error) {
-                console.error(`[${modName}][ERROR][${functionName}] ${message}`, error);
-            } else {
-                console.error(`[${modName}][ERROR][${functionName}] ${message}`);
-            }
-        },
-        warn: (functionName, message, error = null) => {
-            if (error) {
-                console.warn(`[${modName}][WARN][${functionName}] ${message}`, error);
-            } else {
-                console.warn(`[${modName}][WARN][${functionName}] ${message}`);
-            }
-        },
-        info: (functionName, message) => {
-            console.info(`[${modName}][INFO][${functionName}] ${message}`);
-        }
-    };
-    
-    // =======================
-    // 3. DOM Utilities & Settings
+    // 2. DOM Utilities & Settings
     // =======================
     
     function queryElement(selector, context = document) {
@@ -154,7 +134,7 @@
             const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
             settingsCache = { ...DEFAULT_SETTINGS, ...stored };
         } catch (e) { 
-            logger.warn('getSettings', 'Failed to parse settings from localStorage', e);
+            console.warn(`[${modName}][WARN][getSettings] Failed to parse settings from localStorage`, e);
             settingsCache = { ...DEFAULT_SETTINGS };
         }
         
@@ -189,7 +169,7 @@
         try {
             localStorage.setItem('autoseller-settings', JSON.stringify(settingsCache));
         } catch (e) {
-            logger.warn('debouncedSaveSettings', 'Failed to save settings to localStorage', e);
+            console.warn(`[${modName}][WARN][debouncedSaveSettings] Failed to save settings from localStorage`, e);
         }
     }, SETTINGS_SAVE_DELAY_MS);
     
@@ -201,89 +181,8 @@
     }
 
     // =======================
-    // 4. Utility Functions
+    // 3. Core Utility Functions
     // =======================
-    
-    // Mutex for API calls to prevent race conditions
-    const apiMutex = {
-        daycare: false,
-        monsters: false,
-        
-        async acquire(type) {
-            while (this[type]) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            this[type] = true;
-        },
-        
-        release(type) {
-            this[type] = false;
-        }
-    };
-    
-    // Cache for daycare data to reduce API calls
-    const daycareCache = {
-        data: null,
-        timestamp: 0,
-        ttl: 30000,
-        
-        isValid() {
-            return this.data && (Date.now() - this.timestamp) < this.ttl;
-        },
-        
-        set(data) {
-            this.data = data;
-            this.timestamp = Date.now();
-        },
-        
-        clear() {
-            this.data = null;
-            this.timestamp = 0;
-        }
-    };
-    
-    // Cache for server monsters to reduce API calls
-    const serverMonsterCache = {
-        data: null,
-        timestamp: 0,
-        ttl: 5000,
-        
-        isValid() {
-            return this.data && (Date.now() - this.timestamp) < this.ttl;
-        },
-        
-        set(data) {
-            this.data = data;
-            this.timestamp = Date.now();
-        },
-        
-        clear() {
-            this.data = null;
-            this.timestamp = 0;
-        }
-    };
-    
-    // Shared rate limiter for all API operations
-    const apiRateLimiter = {
-        requestTimes: [],
-        
-        canMakeRequest() {
-            const now = Date.now();
-            this.requestTimes = this.requestTimes.filter(time => now - time < SELL_RATE_LIMIT.WINDOW_SIZE_MS);
-            return this.requestTimes.length < SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S;
-        },
-        
-        recordRequest() {
-            this.requestTimes.push(Date.now());
-        },
-        
-        async waitForSlot() {
-            while (!this.canMakeRequest()) {
-                const waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
-                await new Promise(resolve => setTimeout(resolve, waitTime));
-            }
-        }
-    };
     
     function getGenes(m) {
         return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
@@ -374,6 +273,91 @@
     }
 
     // =======================
+    // 4. Data Management & Caching
+    // =======================
+    
+    // Mutex for API calls to prevent race conditions
+    const apiMutex = {
+        daycare: false,
+        monsters: false,
+        
+        async acquire(type) {
+            while (this[type]) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            this[type] = true;
+        },
+        
+        release(type) {
+            this[type] = false;
+        }
+    };
+    
+    // Cache for daycare data to reduce API calls
+    const daycareCache = {
+        data: null,
+        timestamp: 0,
+        ttl: 30000,
+        
+        isValid() {
+            return this.data && (Date.now() - this.timestamp) < this.ttl;
+        },
+        
+        set(data) {
+            this.data = data;
+            this.timestamp = Date.now();
+        },
+        
+        clear() {
+            this.data = null;
+            this.timestamp = 0;
+        }
+    };
+    
+    // Cache for server monsters to reduce API calls
+    const serverMonsterCache = {
+        data: null,
+        timestamp: 0,
+        ttl: 5000,
+        
+        isValid() {
+            return this.data && (Date.now() - this.timestamp) < this.ttl;
+        },
+        
+        set(data) {
+            this.data = data;
+            this.timestamp = Date.now();
+        },
+        
+        clear() {
+            this.data = null;
+            this.timestamp = 0;
+        }
+    };
+    
+    // Shared rate limiter for all API operations
+    const apiRateLimiter = {
+        requestTimes: [],
+        
+        canMakeRequest() {
+            const now = Date.now();
+            this.requestTimes = this.requestTimes.filter(time => now - time < SELL_RATE_LIMIT.WINDOW_SIZE_MS);
+            return this.requestTimes.length < SELL_RATE_LIMIT.MAX_MONSTERS_PER_10S;
+        },
+        
+        recordRequest() {
+            this.requestTimes.push(Date.now());
+        },
+        
+        async waitForSlot() {
+            while (!this.canMakeRequest()) {
+                const waitTime = SELL_RATE_LIMIT.WINDOW_SIZE_MS - (Date.now() - Math.min(...this.requestTimes)) + 100;
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    };
+
+    // =======================
     // 5. API Utilities
     // =======================
     
@@ -431,7 +415,7 @@
         try {
             const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
             if (!myName) {
-                logger.warn('fetchDaycareData', 'Could not determine player name.');
+                console.warn(`[${modName}][WARN][fetchDaycareData] Could not determine player name.`);
                 return daycareCache.data || [];
             }
             
@@ -440,7 +424,7 @@
             
             if (!result.success) {
                 stateManager.updateErrorStats('fetchErrors');
-                logger.warn('fetchDaycareData', 'API request failed, using cached data');
+                console.warn(`[${modName}][WARN][fetchDaycareData] API request failed, using cached data`);
                 return daycareCache.data || [];
             }
             
@@ -475,7 +459,7 @@
             
             return false;
         } catch (e) {
-            logger.warn('hasDaycareIconInInventory', 'Error checking for daycare icon in DOM', e);
+            console.warn(`[${modName}][WARN][hasDaycareIconInInventory] Error checking for daycare icon in DOM`, e);
             return false;
         }
     }
@@ -513,7 +497,7 @@
             
             return false;
         } catch (e) {
-            logger.warn('isCreatureInDaycare', `Error checking daycare status for monster ${monsterId}`, e);
+            console.warn(`[${modName}][WARN][isCreatureInDaycare] Error checking daycare status for monster ${monsterId}`, e);
             return false;
         }
     }
@@ -528,7 +512,7 @@
         try {
             const myName = globalThis.state?.player?.getSnapshot?.()?.context?.name;
             if (!myName) {
-                logger.warn('fetchServerMonsters', 'Could not determine player name.');
+                console.warn(`[${modName}][WARN][fetchServerMonsters] Could not determine player name.`);
                 return serverMonsterCache.data || [];
             }
             
@@ -537,7 +521,7 @@
             
             if (!result.success) {
                 stateManager.updateErrorStats('fetchErrors');
-                logger.warn('fetchServerMonsters', 'API request failed, using cached data');
+                console.warn(`[${modName}][WARN][fetchServerMonsters] API request failed, using cached data`);
                 return serverMonsterCache.data || [];
             }
             
@@ -554,29 +538,29 @@
     function removeMonstersFromLocalInventory(idsToRemove) {
         try {
             if (!Array.isArray(idsToRemove) || idsToRemove.length === 0) {
-                logger.warn('removeMonstersFromLocalInventory', 'Invalid or empty IDs array provided');
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Invalid or empty IDs array provided`);
                 return;
             }
             
             if (!globalThis.state) {
-                logger.warn('removeMonstersFromLocalInventory', 'Global state not available');
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Global state not available`);
                 return;
             }
             
             const player = globalThis.state.player;
             if (!player) {
-                logger.warn('removeMonstersFromLocalInventory', 'Player state not available');
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player state not available`);
                 return;
             }
             
             if (typeof player.send !== 'function') {
-                logger.warn('removeMonstersFromLocalInventory', 'Player send method not available');
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player send method not available`);
                 return;
             }
             
             const currentState = player.getSnapshot?.();
             if (!currentState?.context?.monsters) {
-                logger.warn('removeMonstersFromLocalInventory', 'Monsters array not available in current state');
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Monsters array not available in current state`);
                 return;
             }
             
@@ -584,7 +568,7 @@
                 type: "setState",
                 fn: (prev) => {
                     if (!prev || !Array.isArray(prev.monsters)) {
-                        logger.warn('removeMonstersFromLocalInventory', 'Previous state or monsters array not available');
+                        console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Previous state or monsters array not available`);
                         return prev;
                     }
                     
@@ -595,7 +579,7 @@
                 },
             });
         } catch (e) {
-            logger.warn('removeMonstersFromLocalInventory', `Failed to update local inventory for IDs: ${idsToRemove.join(', ')}`, e);
+            console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Failed to update local inventory for IDs: ${idsToRemove.join(', ')}`, e);
         }
     }
 
@@ -1148,7 +1132,7 @@
                     ).length;
                 }
             } catch (e) {
-                logger.warn('safeGetCreatureCount', `Error getting creature count for ${type}: ${e?.message || 'Unknown error'}`, e);
+                console.warn(`[${modName}][WARN][safeGetCreatureCount] Error getting creature count for ${type}: ${e?.message || 'Unknown error'}`, e);
                 summaryDiv.textContent = `${type} error: ${e?.message || 'Unknown error'}`;
                 summaryDiv.style.color = '#ff6b6b';
                 return null;
@@ -1188,7 +1172,7 @@
     }
 
     // =======================
-    // 7. State Management & Processing
+    // 7. State Management & Processing Logic
     // =======================
     
     const stateManager = {
@@ -1275,13 +1259,14 @@
     
     async function processEligibleMonsters(monsters, type) {
         try {
+            console.log(`[Autoseller] Processing ${type} for ${monsters?.length || 0} monsters...`);
             const settings = getSettings();
             
             if (!monsters) {
                 monsters = await fetchServerMonsters();
             }
             if (!Array.isArray(monsters)) {
-                logger.warn(`processEligibleMonsters`, 'Could not access monster list.');
+                console.warn(`[${modName}][WARN][processEligibleMonsters] Could not access monster list.`);
                 return;
             }
             
@@ -1289,8 +1274,12 @@
             
             if (type === 'sell') {
                 toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
-                if (!toSell.length) return;
+                if (!toSell.length) {
+                    console.log('[Autoseller] No eligible monsters to sell');
+                    return;
+                }
                 
+                console.log(`[Autoseller] Selling ${toSell.length} monsters in batches of ${SELL_RATE_LIMIT.BATCH_SIZE}`);
                 const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
                 for (let i = 0; i < toSell.length; i += batchSize) {
                     const batch = toSell.slice(i, i + batchSize);
@@ -1306,7 +1295,7 @@
                         const result = await apiRequest(url, { method: 'POST', body });
                     
                         if (!result.success && result.status === 429) {
-                            logger.warn('processEligibleMonsters', `Rate limited (429) for monster ${id}, waiting...`);
+                            console.warn(`[${modName}][WARN][processEligibleMonsters] Rate limited (429) for monster ${id}, waiting...`);
                             await new Promise(resolve => setTimeout(resolve, 5000));
                             continue;
                         }
@@ -1325,12 +1314,11 @@
                             stateManager.markProcessed([id]);
                             removeMonstersFromLocalInventory([id]);
                         } else if (!result.success && result.status === 404) {
-                            if (result.isNotFound) {
-                                stateManager.markProcessed([id]);
-                                removeMonstersFromLocalInventory([id]);
-                            }
+                            // 404 means creature no longer exists on server - always remove from local inventory
+                            stateManager.markProcessed([id]);
+                            removeMonstersFromLocalInventory([id]);
                         } else if (!result.success) {
-                            logger.warn('processEligibleMonsters', `Sell API failed for ID ${id}: HTTP ${result.status}`);
+                            console.warn(`[${modName}][WARN][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status}`);
                         }
                         
                         await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
@@ -1341,8 +1329,12 @@
                     }
                 }
             } else if (type === 'squeeze') {
-                if (!toSqueeze.length) return;
+                if (!toSqueeze.length) {
+                    console.log('[Autoseller] No eligible monsters to squeeze');
+                    return;
+                }
                 
+                console.log(`[Autoseller] Squeezing ${toSqueeze.length} monsters in batches of ${SELL_RATE_LIMIT.BATCH_SIZE}`);
                 for (let i = 0; i < toSqueeze.length; i += SELL_RATE_LIMIT.BATCH_SIZE) {
                     const batch = toSqueeze.slice(i, i + SELL_RATE_LIMIT.BATCH_SIZE);
                     const ids = batch.map(m => m.id).filter(Boolean);
@@ -1369,12 +1361,11 @@
                         stateManager.markProcessed(ids);
                         removeMonstersFromLocalInventory(ids);
                     } else if (!result.success && result.status === 404) {
-                        if (result.isNotFound) {
-                            stateManager.markProcessed(ids);
-                            removeMonstersFromLocalInventory(ids);
-                        }
+                        // 404 means creatures no longer exist on server - always remove from local inventory
+                        stateManager.markProcessed(ids);
+                        removeMonstersFromLocalInventory(ids);
                     } else if (!result.success) {
-                        logger.warn('processEligibleMonsters', `Squeeze API failed: HTTP ${result.status}`);
+                        console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
                         continue;
                     }
                 
@@ -1384,16 +1375,17 @@
                 }
             }
         } catch (e) {
-            logger.error(`processEligibleMonsters`, `Failed to ${type} monsters. Error: ${e.message}`, e);
+            console.error(`[${modName}][ERROR][processEligibleMonsters] Failed to ${type} monsters. Error: ${e.message}`, e);
             stateManager.updateErrorStats(`${type}Errors`);
         }
     }
 
     // =======================
-    // 8. Modal Management
+    // 8. Modal & Settings Management
     // =======================
     
     function openAutosellerModal() {
+        console.log('[Autoseller] Opening settings modal...');
         clearSettingsCache();
         
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
@@ -1542,10 +1534,11 @@
     }
 
     // =======================
-    // 9. UI Injection
+    // 9. Navigation & UI Injection
     // =======================
     
     function addAutosellerNavButton() {
+        console.log('[Autoseller] Adding navigation button...');
         function tryInsert() {
             const nav = queryElement('nav.shrink-0');
             if (!nav) {
@@ -1573,6 +1566,7 @@
             li.appendChild(btn);
             ul.appendChild(li);
             
+            console.log('[Autoseller] Navigation button added successfully');
             updateAutosellerNavButtonColor();
         }
         tryInsert();
@@ -1589,7 +1583,7 @@
     }
 
     // =======================
-    // 10. Autoseller Session Widget
+    // 10. Session Widget & Display
     // =======================
     
     function injectAutosellerWidgetStyles() {
@@ -1739,10 +1733,13 @@
         const settings = getSettings();
         const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
         
+        console.log(`[Autoseller] Widget creation - autosell: ${settings.autosellChecked}, autosqueeze: ${settings.autosqueezeChecked}`);
+        
         const existingWidget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
         if (!shouldShowWidget) {
             if (existingWidget && existingWidget.parentNode) {
                 existingWidget.parentNode.removeChild(existingWidget);
+                console.log('[Autoseller] Widget removed - no features enabled');
                 // Reset session stats when widget is removed
                 stateManager.resetSession();
             }
@@ -1809,6 +1806,7 @@
         
         // Add widget to the autoplay container
         autoplayContainer.appendChild(widget);
+        console.log('[Autoseller] Session widget created and added to UI');
     }
 
 
@@ -1836,7 +1834,7 @@
     }
 
     // =======================
-    // 11. Widget Observer
+    // 11. Widget Observer & Lifecycle
     // =======================
     
     // Inject the widget when autoplay UI appears
@@ -1903,13 +1901,13 @@
             });
             
         } else {
-            logger.warn('setupAutosellerWidgetObserver', 'MutationObserver not available');
+            console.warn(`[${modName}][WARN][setupAutosellerWidgetObserver] MutationObserver not available`);
             isObserverActive = false;
         }
     }
 
     // =======================
-    // 12. Initialization & Exports
+    // 12. Initialization & Event Handlers
     // =======================
     
     function initAutoseller() {
@@ -1922,27 +1920,35 @@
         
         let lastProcessedBattleKey = null;
         if (globalThis.state.board && globalThis.state.board.subscribe) {
+            console.log('[Autoseller] Setting up board subscription for battle completion...');
             globalThis.state.board.subscribe(async ({ context }) => {
                 const serverResults = context.serverResults;
                 if (!serverResults || !serverResults.rewardScreen || typeof serverResults.rewardScreen.gameTicks !== 'number') return;
+                
                 const seed = serverResults.seed;
                 const gameTicks = serverResults.rewardScreen.gameTicks;
                 const battleKey = `${seed}:${gameTicks}`;
                 if (battleKey === lastProcessedBattleKey) return;
                 lastProcessedBattleKey = battleKey;
+                
+                console.log(`[Autoseller] Battle completed (${seed}:${gameTicks}), processing inventory...`);
                 const inventorySnapshot = await fetchServerMonsters();
                 const waitSeconds = gameTicks / 16;
+                
                 setTimeout(async () => {
                     if (!stateManager.canRun()) {
+                        console.log('[Autoseller] Skipping processing - rate limit active');
                         return;
                     }
                     
                     const settings = getSettings();
                     
                     if (!settings.autosellChecked && !settings.autosqueezeChecked) {
+                        console.log('[Autoseller] Skipping processing - no features enabled');
                         return;
                     }
                     
+                    console.log('[Autoseller] Processing inventory after battle completion...');
                     await processEligibleMonsters(inventorySnapshot, 'squeeze');
                     await processEligibleMonsters(inventorySnapshot, 'sell');
                 }, (waitSeconds + 5) * 1000);
