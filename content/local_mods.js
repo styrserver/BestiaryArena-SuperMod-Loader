@@ -68,7 +68,7 @@ async function getLocalModContent(modName) {
     console.log(`Mod URL: ${modUrl}`);
     
     // Firefox-specific handling
-    if (typeof browser !== 'undefined') {
+    if (typeof browser !== 'undefined' && browser !== window.chrome) {
       console.log('Firefox detected, using Firefox-specific content loading');
       
       const api = window.browserAPI || window.chrome || window.browser;
@@ -146,7 +146,7 @@ async function checkFileExists(modName) {
     }
     
     // Firefox-specific handling
-    if (typeof browser !== 'undefined') {
+    if (typeof browser !== 'undefined' && browser !== window.chrome) {
       console.log('Firefox detected, using Firefox-specific file checking');
       
       // For Firefox, we'll assume the file exists if we can get a URL
