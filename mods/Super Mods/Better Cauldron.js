@@ -61,10 +61,12 @@
         // Check if this element or its children contain the cauldron modal
         const hasCauldronTitle = element.querySelector && 
             element.querySelector('h2') && 
-            element.querySelector('h2').textContent === 'Monster Cauldron';
+            (element.querySelector('h2').textContent === 'Monster Cauldron' || 
+             element.querySelector('h2').textContent === 'Caldeirão de Monstros');
         
         const hasCauldronText = element.textContent && 
-            element.textContent.includes('All sold creatures go to the cauldron');
+            (element.textContent.includes('All sold creatures go to the cauldron') ||
+             element.textContent.includes('Todas as criaturas vendidas vão para o caldeirão'));
         
         return hasCauldronTitle || hasCauldronText;
     }

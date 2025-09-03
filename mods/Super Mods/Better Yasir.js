@@ -270,8 +270,10 @@
     getTableContext(container) {
       const tableRow = container.closest('tr');
       const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+      // Check for both English and Portuguese variants
       const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || 
-                               tableHeader?.textContent?.includes('Sell');
+                               tableHeader?.textContent?.includes('Sell') ||
+                               tableHeader?.textContent?.includes('Trocar seus itens por dust');
       
       return { tableRow, tableHeader, isExchangeSection };
     }
@@ -672,7 +674,8 @@
   // Check if item is out of stock
   function isItemOutOfStock(shopRow) {
     return safeExecute(() => {
-      return shopRow.textContent.includes('Out of stock');
+      // Check for both English and Portuguese variants
+      return shopRow.textContent.includes('Out of stock') || shopRow.textContent.includes('Fora de estoque');
     }, 'Error checking if item is out of stock', false);
   }
   
@@ -871,8 +874,16 @@
         currency = 'dust';
       }
       
-      const costText = totalCost > 0 ? ` for ${priceUtils.formatNumberWithCommas(totalCost)} ${currency}` : '';
-      msgElem.textContent = `Are you sure you want to ${actionText} ${quantity} ${itemName}${costText}?`;
+              const costText = totalCost > 0 ? ` for ${priceUtils.formatNumberWithCommas(totalCost)} ${currency}` : '';
+        
+        // For dice manipulators, show the actual dice quantity being purchased
+        let displayQuantity = quantity;
+        if (actionType === 'buy' && itemKey && itemKey.startsWith('diceManipulator')) {
+          const minQuantity = getMinimumQuantityFromDOM(document.querySelector(`[data-item-key="${itemKey}"]`)) || 10;
+          displayQuantity = quantity * minQuantity; // Show actual dice count (e.g., 1 pack = 30 dice)
+        }
+        
+        msgElem.textContent = `Are you sure you want to ${actionText} ${displayQuantity} ${itemName}${costText}?`;
       msgElem.style.color = '#ff4d4d';
       actionButton.dataset.confirm = 'pending';
       actionButton.classList.add('confirm');
@@ -1173,7 +1184,8 @@
           if (actionButton) {
             // More reliable way to determine action type: check the table section first
             const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-            const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+            // Check for both English and Portuguese variants
+            const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
             
             if (isExchangeSection) {
               // If we're in the exchange/sell section, it's definitely a sell action
@@ -1185,7 +1197,8 @@
           } else {
             // Fallback: determine action type by looking at the table header
             const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-            const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+            // Check for both English and Portuguese variants
+            const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
             isBuyAction = !isExchangeSection;
           }
         }
@@ -1246,7 +1259,8 @@
         // Check if this slot is in the Buy section or Sell section
         const tableRow = slot.closest('tr');
         const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-        const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+        // Check for both English and Portuguese variants
+        const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
         
         // Only update quantities for items in the Sell section
         // For Buy section items (like dice manipulators), preserve the original quantity display
@@ -1288,7 +1302,8 @@
           // Check if this slot is in the Sell section
           const tableRow = slot.closest('tr');
           const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-          const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+          // Check for both English and Portuguese variants
+          const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
           
           if (isSellSection) {
             const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1305,10 +1320,11 @@
           const slots = modal.querySelectorAll(`.container-slot[data-item-key="${itemKey}"]`);
           if (slots.length > 0) {
             slots.forEach((slot, index) => {
-              // Check if this slot is in the Sell section
-              const tableRow = slot.closest('tr');
-              const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-              const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+                          // Check if this slot is in the Sell section
+            const tableRow = slot.closest('tr');
+            const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
+            // Check for both English and Portuguese variants
+            const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
               
               if (isSellSection) {
                 const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1334,7 +1350,8 @@
             // Check if this slot is in the Sell section
             const tableRow = slot.closest('tr');
             const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-            const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+            // Check for both English and Portuguese variants
+            const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
             
             if (isSellSection) {
               const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1593,7 +1610,8 @@
               const tableRow = container.closest('tr');
               if (tableRow) {
                 const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                // Check for both English and Portuguese variants
+                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
                 isBuyAction = !isExchangeSection;
               } else {
                 // Fallback: determine by item type (Exaltation Chest is always buy)
@@ -1604,7 +1622,8 @@
               const tableRow = container.closest('tr');
               if (tableRow) {
                 const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                // Check for both English and Portuguese variants
+                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Trocar seus itens por dust');
                 isBuyAction = !isExchangeSection;
               } else {
                 // Second fallback: determine by item type (Exaltation Chest is always buy)
@@ -1774,14 +1793,15 @@
     // Check if item is out of stock
     isItemOutOfStock(container) {
       const containerText = container.textContent || '';
-      if (containerText.includes('Out of stock')) return true;
+      // Check for both English and Portuguese variants
+      if (containerText.includes('Out of stock') || containerText.includes('Fora de estoque')) return true;
       
       const currentCell = container.closest('td');
       if (currentCell) {
         const nextCell = currentCell.nextElementSibling;
         if (nextCell) {
           const nextCellText = nextCell.textContent || '';
-          if (nextCellText.includes('Out of stock')) return true;
+          if (nextCellText.includes('Out of stock') || nextCellText.includes('Fora de estoque')) return true;
         }
       }
       
@@ -2447,11 +2467,12 @@
       sectionHeaders.forEach((header, index) => {
         const text = header.textContent?.trim();
         
-        if (text === 'Current stock') {
+        // Check for English and Portuguese variants
+        if (text === 'Current stock' || text === 'Produtos disponíveis') {
           header.textContent = 'Buy';
           header.style.textAlign = 'center';
           header.style.color = '#32cd32'; // Green color
-        } else if (text === 'Exchange your items for dust') {
+        } else if (text === 'Exchange your items for dust' || text === 'Trocar seus itens por dust') {
           header.textContent = 'Sell';
           header.style.textAlign = 'center';
           header.style.color = '#ff4d4d'; // Red color

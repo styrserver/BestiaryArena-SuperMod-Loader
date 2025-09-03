@@ -462,7 +462,9 @@
 
       if (!detectedKey) {
         const parentSection = itemSlot.closest(SELECTORS.SECTIONS);
-        if (parentSection?.textContent.includes('Dice Manipulators')) {
+        // Check for both English and Portuguese variants
+        if (parentSection?.textContent.includes('Dice Manipulators') || 
+            parentSection?.textContent.includes('Dados Manipuladores')) {
           if (rarityElement) {
             const rarity = rarityElement.getAttribute('data-rarity');
             detectedKey = `diceManipulator${rarity}`;
@@ -898,39 +900,47 @@
     let hygenieTitle = null;
     let modal = null;
     
-    hygenieTitle = document.querySelector('h2 p');
-    if (hygenieTitle && hygenieTitle.textContent.includes('Hy\'genie')) {
-      hygenieTitle.textContent = "Better Hy'genie activated!";
-      hygenieTitle.style.color = '#32cd32';
-      const widgetBottom = hygenieTitle.closest('.widget-bottom');
-      if (widgetBottom && widgetBottom.textContent.includes('Summon Scrolls')) {
-        modal = widgetBottom;
-      }
-    }
+         hygenieTitle = document.querySelector('h2 p');
+     // Check for both English and Portuguese variants
+     if (hygenieTitle && (hygenieTitle.textContent.includes('Hy\'genie') || hygenieTitle.textContent.includes('Hi\'giênio'))) {
+       hygenieTitle.textContent = "Better Hy'genie activated!";
+       hygenieTitle.style.color = '#32cd32';
+       const widgetBottom = hygenieTitle.closest('.widget-bottom');
+       // Check for both English and Portuguese section text
+       if (widgetBottom && (widgetBottom.textContent.includes('Summon Scrolls') || widgetBottom.textContent.includes('Pergaminhos de Invocação'))) {
+         modal = widgetBottom;
+       }
+     }
     
-    if (!modal) {
-      const widgetBottoms = document.querySelectorAll('.widget-bottom');
-      for (const widget of widgetBottoms) {
-        const text = widget.textContent || '';
-        if (text.includes('Hy\'genie') && text.includes('Summon Scrolls') && text.includes('Dice Manipulators')) {
-          modal = widget;
-          break;
-        }
-      }
-    }
+         if (!modal) {
+       const widgetBottoms = document.querySelectorAll('.widget-bottom');
+       for (const widget of widgetBottoms) {
+         const text = widget.textContent || '';
+         // Check for both English and Portuguese variants
+         if ((text.includes('Hy\'genie') || text.includes('Hi\'giênio')) && 
+             (text.includes('Summon Scrolls') || text.includes('Pergaminhos de Invocação')) && 
+             (text.includes('Dice Manipulators') || text.includes('Dados Manipuladores'))) {
+           modal = widget;
+           break;
+         }
+       }
+     }
     
-    if (!modal) {
-      const hygenieElements = document.querySelectorAll('*');
-      for (const element of hygenieElements) {
-        if (element.textContent && element.textContent.includes('Hy\'genie')) {
-          const widgetBottom = element.closest('.widget-bottom');
-          if (widgetBottom && widgetBottom.textContent.includes('Summon Scrolls') && widgetBottom.textContent.includes('Dice Manipulators')) {
-            modal = widgetBottom;
-            break;
-          }
-        }
-      }
-    }
+         if (!modal) {
+       const hygenieElements = document.querySelectorAll('*');
+       for (const element of hygenieElements) {
+         // Check for both English and Portuguese variants
+         if (element.textContent && (element.textContent.includes('Hy\'genie') || element.textContent.includes('Hi\'giênio'))) {
+           const widgetBottom = element.closest('.widget-bottom');
+           if (widgetBottom && 
+               (widgetBottom.textContent.includes('Summon Scrolls') || widgetBottom.textContent.includes('Pergaminhos de Invocação')) && 
+               (widgetBottom.textContent.includes('Dice Manipulators') || widgetBottom.textContent.includes('Dados Manipuladores'))) {
+             modal = widgetBottom;
+             break;
+           }
+         }
+       }
+     }
     
     if (!modal) {
       return false;
@@ -956,7 +966,9 @@
       
       const sectionText = sectionHeader.textContent || '';
       
-      if (sectionText.includes('Summon Scrolls') || sectionText.includes('Dice Manipulators')) {
+      // Check for both English and Portuguese variants
+      if (sectionText.includes('Summon Scrolls') || sectionText.includes('Dice Manipulators') ||
+          sectionText.includes('Pergaminhos de Invocação') || sectionText.includes('Dados Manipuladores')) {
         const sectionContent = sectionContainer.querySelector('.widget-bottom');
         
         if (sectionContent) {
@@ -980,17 +992,18 @@
   let observer = null;
   let observerTimeout = null;
   
-  function transformHygenieTooltip() {
-    try {
-      const tooltip = document.querySelector('.tooltip-prose');
-      if (!tooltip) return;
-      const titleElem = tooltip.querySelector('p');
-      if (titleElem && titleElem.textContent.includes("Hy'genie") && titleElem.textContent !== "Better Hy'genie activated!") {
-        titleElem.textContent = "Better Hy'genie activated!";
-        titleElem.style.color = '#32cd32';
-      }
-    } catch (e) { /* silent */ }
-  }
+     function transformHygenieTooltip() {
+     try {
+       const tooltip = document.querySelector('.tooltip-prose');
+       if (!tooltip) return;
+       const titleElem = tooltip.querySelector('p');
+       // Check for both English and Portuguese variants
+       if (titleElem && (titleElem.textContent.includes("Hy'genie") || titleElem.textContent.includes("Hi'giênio")) && titleElem.textContent !== "Better Hy'genie activated!") {
+         titleElem.textContent = "Better Hy'genie activated!";
+         titleElem.style.color = '#32cd32';
+       }
+     } catch (e) { /* silent */ }
+   }
 
   function debouncedProcessMutations(mutations) {
     if (observerTimeout) {
@@ -1004,17 +1017,17 @@
         return;
       }
       
-      const hasRelevantMutation = mutations.some(mutation => 
-        mutation.type === 'childList' && 
-        Array.from(mutation.addedNodes).some(node => 
-          node.nodeType === Node.ELEMENT_NODE && 
-          (node.textContent?.includes('Hy\'genie') || 
-           node.querySelector?.('*') && 
-           Array.from(node.querySelectorAll('*')).some(el => 
-             el.textContent?.includes('Hy\'genie')
-           ))
-        )
-      );
+             const hasRelevantMutation = mutations.some(mutation => 
+         mutation.type === 'childList' && 
+         Array.from(mutation.addedNodes).some(node => 
+           node.nodeType === Node.ELEMENT_NODE && 
+           (node.textContent?.includes('Hy\'genie') || node.textContent?.includes('Hi\'giênio') || 
+            node.querySelector?.('*') && 
+            Array.from(node.querySelectorAll('*')).some(el => 
+              el.textContent?.includes('Hy\'genie') || el.textContent?.includes('Hi\'giênio')
+            ))
+         )
+       );
       
       if (!hasRelevantMutation) {
         return;
