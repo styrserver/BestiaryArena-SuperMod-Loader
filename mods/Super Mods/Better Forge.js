@@ -15,11 +15,25 @@
     BUTTON_CHECK_TIMEOUT: 10000,
     LOG_AFTER_ATTEMPTS: 3,
     DISENCHANT_INTERVAL: 1000,
-    DUST_PER_EQUIPMENT: 10,
     FORGE_DELAY_MS: 500,
     MAX_RETRIES: 3,
     RETRY_DELAY_MS: 500
   };
+
+  // Hardcoded disenchant values based on equipment tier
+  const DISENCHANT_VALUES = {
+    1: 25,  // Tier 1 (grey): 25 dust
+    2: 40,  // Tier 2 (green): 40 dust
+    3: 120, // Tier 3 (blue): 120 dust
+    4: 240, // Tier 4 (purple): 240 dust
+    5: 400  // Tier 5 (yellow): 400 dust
+  };
+
+  // Calculate disenchant dust based on equipment tier
+  function getDisenchantDust(equipment) {
+    const tier = equipment.tier || 1;
+    return DISENCHANT_VALUES[tier] || DISENCHANT_VALUES[1];
+  }
   
   const forgeState = {
     isDisenchanting: false,
@@ -1473,7 +1487,9 @@
       forgeState.isDisenchantingInProgress = false;
       
       if (currentIndex >= equipmentToProcess.length && forgeState.isDisenchanting) {
-        const totalDustGained = equipmentToProcess.length * FORGE_CONFIG.DUST_PER_EQUIPMENT;
+        const totalDustGained = equipmentToProcess.reduce((total, equipment) => {
+          return total + getDisenchantDust(equipment);
+        }, 0);
         showDisenchantCompletionInColumn(totalDustGained);
         
         const disenchantBtn = getDisenchantButton();
@@ -1526,7 +1542,7 @@
                        equipment.element.remove();
            removeEquipmentFromArsenal(equipment.id);
            removeEquipmentFromLocalInventory(equipment.id);
-            const dustGained = FORGE_CONFIG.DUST_PER_EQUIPMENT;
+            const dustGained = getDisenchantDust(equipment);
             console.log(`[Better Forge] 💰 Disenchant successful, dust gained:`, dustGained);
             updateLocalInventoryGoldDust(0, dustGained);
             updateDustDisplayWithAnimation(dustGained);
@@ -3684,7 +3700,15 @@
                      searchTimeout = setTimeout(() => {
                        currentSearchTerm = value;
                        const freshEquipment = getUserOwnedEquipment();
-                       applyEquipmentSearch(scrollArea, value, freshEquipment, transferToDisenchant);
+                       
+                       // Apply tier filter to fresh equipment before searching
+                       let equipmentToSearch = freshEquipment;
+                       if (currentFilter !== 'all') {
+                         const tierNum = parseInt(currentFilter.substring(1));
+                         equipmentToSearch = freshEquipment.filter(equip => equip.tier === tierNum);
+                       }
+                       
+                       applyEquipmentSearch(scrollArea, value, equipmentToSearch, transferToDisenchant);
                        
                        setTimeout(() => {
                          hideSelectedEquipmentFromArsenal();
@@ -3704,6 +3728,7 @@
                      const selectedFilter = filterOptions[currentFilterIndex];
                      
                      filterBtn.textContent = selectedFilter;
+                     currentFilter = selectedFilter.toLowerCase(); // Update currentFilter variable
                      
                      const freshEquipment = getUserOwnedEquipment();
                      
@@ -4116,8 +4141,9 @@
            stopForging();
          }
          
-         // Clear equipment highlights when switching to disenchant tab
-         highlightEquipmentForForging(null, null, null);
+                 // Clear equipment highlights and auto-upgrade selection when switching to disenchant tab
+        clearAutoUpgradeSelection();
+        highlightEquipmentForForging(null, null, null);
          
          const disenchantContent = getDisenchantContent();
          contentArea.innerHTML = '';
@@ -4625,6 +4651,7 @@
      btn.className = 'focus-style-visible active:opacity-70';
      btn.setAttribute('data-equipment-id', equipment.id);
      btn.setAttribute('data-source-column', sourceColumn);
+     btn.setAttribute('data-tier', equipment.tier || 1);
      
      btn.style.width = '34px';
      btn.style.height = '34px';
@@ -4719,10 +4746,20 @@
       
       if (totalItems === 0) {
         statusText.textContent = 'No equipment selected';
-      } else if (totalItems === 1) {
-        statusText.textContent = `1 item selected for disenchant`;
       } else {
-        statusText.textContent = `${totalItems} items selected for disenchant`;
+        // Calculate total dust preview
+        let totalDust = 0;
+        equipmentItems.forEach(btn => {
+          const tier = parseInt(btn.getAttribute('data-tier')) || 1;
+          const equipment = { tier: tier };
+          totalDust += getDisenchantDust(equipment);
+        });
+        
+        if (totalItems === 1) {
+          statusText.textContent = `1 item selected - ${totalDust} dust`;
+        } else {
+          statusText.textContent = `${totalItems} items selected - ${totalDust} dust`;
+        }
       }
     } catch (error) {
       handleError(error, 'updateDisenchantStatus', false);
