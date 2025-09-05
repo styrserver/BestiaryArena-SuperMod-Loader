@@ -82,7 +82,9 @@ const TRANSLATIONS = {
     close: 'Close',
     collect: 'Collect',
     inventory: 'Inventory',
-    levelUp: 'Level up'
+    levelUp: 'Level up',
+    // Toast detection text
+    defeatToastText: 'Autoplay stopped because your creatures were defeated'
   },
   pt: {
     buttonTooltip: 'Automatizador do Bestiário',
@@ -105,7 +107,9 @@ const TRANSLATIONS = {
     close: 'Fechar',
     collect: 'Resgatar',
     inventory: 'Inventário',
-    levelUp: 'Level up'
+    levelUp: 'Level up',
+    // Toast detection text
+    defeatToastText: 'Autoplay parou porque suas criaturas foram derrotadas'
   }
 };
 
@@ -960,10 +964,16 @@ const subscribeToGameState = () => {
               
               // Also check child elements for toasts
               const defeatToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
-              if (defeatToast && defeatToast.textContent.includes('Autoplay stopped because your creatures were defeated')) {
-                console.log('[Bestiary Automator] Defeat toast found in child elements via MutationObserver!');
-                processDefeatToast();
-                return;
+              if (defeatToast) {
+                const toastText = defeatToast.textContent;
+                const englishDefeat = toastText.includes('Autoplay stopped because your creatures were defeated');
+                const portugueseDefeat = toastText.includes('Autoplay parou porque suas criaturas foram derrotadas');
+                
+                if (englishDefeat || portugueseDefeat) {
+                  console.log('[Bestiary Automator] Defeat toast found in child elements via MutationObserver!');
+                  processDefeatToast();
+                  return;
+                }
               }
               
               // Check child elements for battle ongoing toasts
@@ -1103,9 +1113,17 @@ const dismissDefeatToast = () => {
   try {
     // Look for the defeat toast and click it to dismiss naturally
     const defeatToast = document.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
-    if (defeatToast && defeatToast.textContent.includes('Autoplay stopped because your creatures were defeated')) {
-      defeatToast.click();
-      console.log('[Bestiary Automator] Defeat toast clicked to dismiss');
+    if (defeatToast) {
+      const toastText = defeatToast.textContent || defeatToast.innerText;
+      
+      // Check for English or Portuguese defeat text
+      const isEnglishDefeat = toastText.includes('Autoplay stopped because your creatures were defeated');
+      const isPortugueseDefeat = toastText.includes('Autoplay parou porque suas criaturas foram derrotadas');
+      
+      if (isEnglishDefeat || isPortugueseDefeat) {
+        defeatToast.click();
+        console.log('[Bestiary Automator] Defeat toast clicked to dismiss');
+      }
     }
   } catch (error) {
     console.error('[Bestiary Automator] Error dismissing defeat toast:', error);
@@ -1116,7 +1134,8 @@ const dismissDefeatToast = () => {
 const findStartButton = () => {
   const startButtons = document.querySelectorAll('button[data-full="false"][data-state="closed"]');
   for (const button of startButtons) {
-    if (button.textContent.trim() === 'Start') {
+    const buttonText = button.textContent.trim();
+    if (buttonText === 'Start' || buttonText === 'Iniciar') {
       return button;
     }
   }
@@ -1126,27 +1145,56 @@ const findStartButton = () => {
 // Helper function to check if an element is a defeat toast
 const isDefeatToast = (element) => {
   try {
-    // Check if the element has the toast structure
-    if (!element.classList || !element.classList.contains('widget-bottom')) {
+    // Check if the element is a toast (either root toast element or child widget-bottom)
+    const isToastElement = element.classList && (
+      element.classList.contains('non-dismissable-dialogs') || 
+      element.classList.contains('widget-bottom')
+    );
+    
+    if (!isToastElement) {
+      return false;
+    }
+    
+    // Find the widget-bottom element (either the element itself or a child)
+    const widgetBottom = element.classList.contains('widget-bottom') 
+      ? element 
+      : element.querySelector('.widget-bottom');
+    
+    if (!widgetBottom) {
       return false;
     }
     
     // Check for the "no" icon
-    const noIcon = element.querySelector('img[alt="no"]');
+    const noIcon = widgetBottom.querySelector('img[alt="no"]');
     if (!noIcon) {
       return false;
     }
     
     // Check for the text content indicating defeat
-    const textElement = element.querySelector('.text-left');
+    const textElement = widgetBottom.querySelector('.text-left');
     if (!textElement) {
       return false;
     }
     
-    const toastText = textElement.textContent;
-    return toastText.includes('Autoplay stopped because your creatures were defeated') ||
-           (toastText.includes('Autoplay stopped') && toastText.includes('defeated')) ||
-           toastText.includes('creatures were defeated');
+    // Get the full text content including nested spans
+    const toastText = textElement.textContent || textElement.innerText;
+    
+    // Debug logging
+    console.log('[Bestiary Automator] Checking defeat toast text:', toastText);
+    
+    // Check for English defeat text
+    const englishDefeat = toastText.includes('Autoplay stopped because your creatures were defeated') ||
+                         (toastText.includes('Autoplay stopped') && toastText.includes('defeated')) ||
+                         toastText.includes('creatures were defeated');
+    
+    // Check for Portuguese defeat text
+    const portugueseDefeat = toastText.includes('Autoplay parou porque suas criaturas foram derrotadas') ||
+                            (toastText.includes('Autoplay parou') && toastText.includes('derrotadas')) ||
+                            toastText.includes('criaturas foram derrotadas');
+    
+    console.log('[Bestiary Automator] Defeat detection - English:', englishDefeat, 'Portuguese:', portugueseDefeat);
+    
+    return englishDefeat || portugueseDefeat;
   } catch (error) {
     console.error('[Bestiary Automator] Error checking if element is defeat toast:', error);
     return false;
