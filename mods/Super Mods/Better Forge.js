@@ -309,12 +309,39 @@
     }
   }
   
+  // Check if any selected items are T3, T4, or T5
+  function hasHighTierItems() {
+    try {
+      const col2 = document.getElementById('disenchant-col2');
+      if (!col2) return false;
+      
+      const equipmentItems = col2.querySelectorAll('button[data-equipment-id]');
+      for (const btn of equipmentItems) {
+        const tier = parseInt(btn.getAttribute('data-tier')) || 1;
+        if (tier >= 3) {
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('[Better Forge] Error checking for high tier items:', error);
+      return false;
+    }
+  }
+
   function startDisenchanting(button) {
     try {
       if (!forgeState.isConfirmationMode) {
         forgeState.isConfirmationMode = true;
         updateDisenchantButtonState(button, 'confirmation');
-        updateDisenchantStatus('Click "Confirm Disenchant" to start disenchanting process');
+        
+        // Check for high-tier items and show appropriate message
+        if (hasHighTierItems()) {
+          updateDisenchantStatus('⚠️ WARNING: High-tier items (T3/T4/T5) detected! Click "Confirm Disenchant" to proceed');
+        } else {
+          updateDisenchantStatus('Click "Confirm Disenchant" to start disenchanting process');
+        }
+        
         addEscKeyHandler(button);
         return;
       }

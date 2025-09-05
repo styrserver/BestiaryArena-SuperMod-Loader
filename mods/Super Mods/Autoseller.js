@@ -761,6 +761,7 @@
             text: 'ALL',
             styles: { 
                 textDecoration: 'underline',
+                color: '#4A90E2',
                 cursor: showTooltip ? 'help' : 'default'
             }
         });
@@ -775,12 +776,12 @@
             
             allSpan.addEventListener('mouseenter', () => {
                 allSpan.style.textDecoration = 'underline double';
-                allSpan.style.color = '#ff8a8a';
+                allSpan.style.color = '#87CEEB';
             });
             
             allSpan.addEventListener('mouseleave', () => {
                 allSpan.style.textDecoration = 'underline';
-                allSpan.style.color = '#ff6b6b';
+                allSpan.style.color = '#4A90E2';
             });
         }
         

@@ -9,6 +9,10 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
 const DEBUG_STORAGE_KEY = 'bestiary-debug';
 let DEBUG_MODE = false;
 
+// Global Outfiter System
+const OUTFITER_STORAGE_KEY = 'outfiter-enabled';
+let OUTFITER_ENABLED = false;
+
 // Keep original console.log for popup use
 const originalConsoleLog = console.log;
 
@@ -78,6 +82,72 @@ async function updateDebugMode(enabled) {
   originalConsoleLog('Mod debug mode:', enabled ? 'enabled' : 'disabled');
 }
 
+// Function to update outfiter mode
+async function updateOutfiterMode(enabled) {
+  OUTFITER_ENABLED = enabled;
+  
+  // Save to localStorage (shared with content script)
+  localStorage.setItem(OUTFITER_STORAGE_KEY, enabled.toString());
+  
+  // Update UI
+  const outfiterToggle = document.getElementById('outfiter-toggle');
+  const outfiterStatus = document.getElementById('outfiter-status');
+  if (outfiterToggle) {
+    outfiterToggle.checked = enabled;
+  }
+  if (outfiterStatus) {
+    outfiterStatus.textContent = enabled ? 'ON' : 'OFF';
+  }
+  
+  // Send message to content script to update outfiter flag
+  try {
+    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
+      // Send to content script
+      await window.browserAPI.tabs.sendMessage(tab.id, {
+        action: 'updateOutfiterMode',
+        enabled: enabled
+      });
+      
+      // Also send to page context
+      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
+        // Chrome Manifest V3 - use scripting API
+        await window.browserAPI.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (enabled) => {
+            window.OUTFITER_ENABLED = enabled;
+            localStorage.setItem('outfiter-enabled', enabled.toString());
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateOutfiterMode',
+              enabled: enabled
+            }, '*');
+          },
+          args: [enabled]
+        });
+      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
+        // Firefox fallback - use tabs API
+        await window.browserAPI.tabs.executeScript(tab.id, {
+          code: `
+            window.OUTFITER_ENABLED = ${enabled};
+            localStorage.setItem('outfiter-enabled', '${enabled}');
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateOutfiterMode',
+              enabled: ${enabled}
+            }, '*');
+          `
+        });
+      }
+    }
+  } catch (error) {
+    originalConsoleLog('Could not send outfiter mode to content script:', error);
+  }
+  
+  // Always show outfiter mode changes
+  originalConsoleLog('Outfiter mode:', enabled ? 'enabled' : 'disabled');
+}
+
 // Function to load debug mode from storage
 async function loadDebugMode() {
   try {
@@ -98,6 +168,29 @@ async function loadDebugMode() {
   } catch (error) {
     originalConsoleLog.error('Failed to load debug mode:', error);
     DEBUG_MODE = false;
+  }
+}
+
+// Function to load outfiter mode from storage
+async function loadOutfiterMode() {
+  try {
+    OUTFITER_ENABLED = localStorage.getItem(OUTFITER_STORAGE_KEY) === 'true';
+    
+    // Update UI
+    const outfiterToggle = document.getElementById('outfiter-toggle');
+    const outfiterStatus = document.getElementById('outfiter-status');
+    if (outfiterToggle) {
+      outfiterToggle.checked = OUTFITER_ENABLED;
+    }
+    if (outfiterStatus) {
+      outfiterStatus.textContent = OUTFITER_ENABLED ? 'ON' : 'OFF';
+    }
+    
+    // Always show outfiter mode loading
+    originalConsoleLog('Outfiter mode loaded:', OUTFITER_ENABLED ? 'enabled' : 'disabled');
+  } catch (error) {
+    originalConsoleLog.error('Failed to load outfiter mode:', error);
+    OUTFITER_ENABLED = false;
   }
 }
 
@@ -192,6 +285,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     originalConsoleLog('Debug toggle not found in DOM');
   }
   
+  // Load outfiter mode and set up toggle
+  await loadOutfiterMode();
+  
+  // Set up outfiter toggle event listener
+  const outfiterToggle = document.getElementById('outfiter-toggle');
+  if (outfiterToggle) {
+    originalConsoleLog('Outfiter toggle found, setting up event listener');
+    outfiterToggle.addEventListener('change', (e) => {
+      originalConsoleLog('Outfiter toggle changed to:', e.target.checked);
+      updateOutfiterMode(e.target.checked);
+    });
+  } else {
+    originalConsoleLog('Outfiter toggle not found in DOM');
+  }
+  
   // Update version display
   await updateVersionDisplay();
   
@@ -268,13 +376,15 @@ function renderLocalMods(mods) {
     'DashboardButton.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
+    'Outfiter.js',
     
   ];
 
   const hiddenMods = [
     'inventory-tooltips.js',
     'DashboardButton.js',
-    'RunTracker.js'
+    'RunTracker.js',
+    'Outfiter.js'
   ];
 
   function normalizeModName(name) {

@@ -364,26 +364,9 @@ const isGameActive = () => {
       return false;
     }
     
-    // Check if document is visible and focused
-    if (document.hidden) return false;
-    
     // Check if Game State API is available
     if (!globalThis.state || !globalThis.state.board) {
       console.log('[Bestiary Automator] Game State API not available');
-      return false;
-    }
-    
-    const boardContext = globalThis.state.board.getSnapshot().context;
-    
-    // Only run automation if a game is started and active
-    if (!boardContext.gameStarted) {
-      console.log('[Bestiary Automator] No active game detected');
-      return false;
-    }
-    
-    // Check if we're in a playable mode (not in menus/dialogs)
-    if (boardContext.openMapPicker) {
-      console.log('[Bestiary Automator] Map picker is open');
       return false;
     }
     
@@ -403,9 +386,6 @@ const isGameReadyForStaminaRefill = () => {
       return false;
     }
     
-    // Check if document is visible and focused
-    if (document.hidden) return false;
-    
     // Check if stamina element exists and is visible
     const elStamina = document.querySelector('[title="Stamina"]');
     if (!elStamina || !elStamina.offsetParent) return false;
@@ -413,23 +393,6 @@ const isGameReadyForStaminaRefill = () => {
     // Check if stamina value is readable
     const staminaElement = elStamina.querySelector('span span');
     if (!staminaElement || !staminaElement.textContent) return false;
-    
-    // Check if a game is actually active using Game State API
-    if (globalThis.state && globalThis.state.board) {
-      const boardContext = globalThis.state.board.getSnapshot().context;
-      
-      // Only check stamina if a game is started and active
-      if (!boardContext.gameStarted) {
-        console.log('[Bestiary Automator] No active game detected');
-        return false;
-      }
-      
-      // Check if we're in a playable mode (not in menus/dialogs)
-      if (boardContext.openMapPicker) {
-        console.log('[Bestiary Automator] Map picker is open');
-        return false;
-      }
-    }
     
     return true;
   } catch (error) {
@@ -1325,47 +1288,7 @@ const startCountdown = async (duration) => {
   return true;
 };
 
-// Setup focus event listeners
-const setupFocusEventListeners = () => {
-  if (focusEventListeners) return;
-  
-  const handleVisibilityChange = () => {
-    console.log(`[Bestiary Automator] Visibility changed: hidden=${document.hidden}`);
-    
-    if (!document.hidden) {
-      // Page became visible, run tasks immediately
-      setTimeout(() => {
-        runAutomationTasks();
-      }, 300); // Reduced delay for faster response
-    }
-  };
-  
-  const handleFocus = () => {
-    console.log('[Bestiary Automator] Window gained focus');
-    // Run tasks when window gains focus
-    setTimeout(() => {
-      runAutomationTasks();
-    }, 300); // Reduced delay for faster response
-  };
-  
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  window.addEventListener('focus', handleFocus);
-  
-  focusEventListeners = { handleVisibilityChange, handleFocus };
-  
-  console.log('[Bestiary Automator] Focus event listeners setup complete');
-};
 
-// Remove focus event listeners
-const removeFocusEventListeners = () => {
-  if (!focusEventListeners) return;
-  
-  document.removeEventListener('visibilitychange', focusEventListeners.handleVisibilityChange);
-  window.removeEventListener('focus', focusEventListeners.handleFocus);
-  focusEventListeners = null;
-  
-  console.log('[Bestiary Automator] Focus event listeners removed');
-};
 
 const startAutomation = () => {
   if (automationInterval) return;
@@ -1375,14 +1298,12 @@ const startAutomation = () => {
   // Reset rewards collection flag when starting automation
   rewardsCollectedThisSession = false;
   
-  // Setup focus event listeners
-  setupFocusEventListeners();
   
   // Run immediately once
   runAutomationTasks();
   
   // Set up core automation interval
-  automationInterval = setInterval(runAutomationTasks, 2000); // Core automation every 2s
+  automationInterval = setInterval(runAutomationTasks, 5000); // Core automation every 5s
   
   // Subscribe to game state for autoplay after defeat
   subscribeToGameState();
@@ -1426,11 +1347,6 @@ const stopAutomation = () => {
 
 const runAutomationTasks = async () => {
   try {
-    // Only run automation if game is active
-    if (!isGameActive()) {
-      return;
-    }
-    
     // Core automation tasks that should always run
     await takeRewardsIfAvailable();
     await handleDayCare();

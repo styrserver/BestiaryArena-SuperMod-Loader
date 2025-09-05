@@ -231,6 +231,7 @@ async function listAllModFiles() {
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
+      'Super Mods/Outfiter.js',
       'Super Mods/RunTracker.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods];
@@ -262,6 +263,7 @@ async function listAllModFiles() {
       'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
+      'Super Mods/Outfiter.js',
       'Super Mods/RunTracker.js'
     ];
   }

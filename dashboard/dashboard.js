@@ -266,7 +266,8 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   const hiddenMods = [
     'inventory-tooltips.js',
     'DashboardButton.js',
-    'RunTracker.js'
+    'RunTracker.js',
+    'Outfiter.js'
   ];
 
 // Helper to normalize mod names for comparison
