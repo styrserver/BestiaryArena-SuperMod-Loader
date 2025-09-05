@@ -1,9 +1,9 @@
 // DOM Improved Highscore mod for Bestiary Arena
-console.log('Improved Highscore Mod initializing...');
+if (window.DEBUG) console.log('Improved Highscore Mod initializing...');
 
 // Create the Highscore button using the API
 if (api) {
-  console.log('BestiaryModAPI available in Improved Highscore Mod');
+  if (window.DEBUG) console.log('BestiaryModAPI available in Improved Highscore Mod');
   
   // Create button to show highscore modal
   window.highscoreButton = api.ui.addButton({
@@ -14,7 +14,7 @@ if (api) {
     onClick: showImprovementsModal
   });
   
-  console.log('Highscore improvement button added');
+  if (window.DEBUG) console.log('Highscore improvement button added');
 } else {
   console.error('BestiaryModAPI not available in Improved Highscore Mod');
 }
@@ -86,10 +86,19 @@ function createTickContent(opportunities, total, minTheo, gain) {
       itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
       itemEl.innerHTML = `
         <div class="frame-pressed-1 shrink-0" style="width: 48px; height: 48px;">
-          <img alt="${o.name}" class="pixelated size-full object-cover" src="/assets/room-thumbnails/${o.code}.png" />
+          <img 
+            alt="${o.name}" 
+            class="pixelated size-full object-cover cursor-pointer" 
+            src="/assets/room-thumbnails/${o.code}.png" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" />
         </div>
         <div class="grid w-full gap-1">
-          <div class="text-whiteExp">${o.name}</div>
+          <div 
+            class="text-whiteExp 
+            cursor-pointer" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });">
+              ${o.name}
+            </div>
           <div class="pixel-font-14">Your ${o.yours} → Top ${o.best}</div>
           <div class="pixel-font-14" style="color: #8f8;">+${o.diff} ticks (${o.pct}%)</div>
           <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
@@ -134,11 +143,19 @@ function createRankContent(opportunities) {
       const itemEl = document.createElement('div');
       itemEl.className = 'frame-1 surface-regular flex items-center gap-2 p-1';
       itemEl.innerHTML = `
-        <div class="frame-pressed-1 shrink-0" style="width: 48px; height: 48px;">
-          <img alt="${o.name}" class="pixelated size-full object-cover" src="/assets/room-thumbnails/${o.code}.png" />
+        <div class="frame-pressed-1 shrink-0 cursor-pointer" style="width: 48px; height: 48px;">
+          <img 
+            alt="${o.name}" 
+            class="pixelated size-full object-cover" 
+            src="/assets/room-thumbnails/${o.code}.png" 
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" />
         </div>
         <div class="grid w-full gap-1">
-          <div class="text-whiteExp">${o.name}</div>
+          <div 
+            class="text-whiteExp cursor-pointer"
+            onclick="globalThis.state.board.send({ type: 'selectRoomById', roomId: '${o.code}' });" >
+              ${o.name}
+            </div>
           <div class="pixel-font-14">Your score ${o.yourScore} → Top ${o.bestScore}</div>
           <div class="pixel-font-14" style="color: #8f8;">+${o.diff} rank points</div>
           <div class="pixel-font-14" style="font-size: 11px; color: #ccc;">by ${o.player}</div>
@@ -235,7 +252,7 @@ function createTabs(tickContent, rankContent) {
 
 // Function to show improvement opportunities modal
 async function showImprovementsModal() {
-  console.log('Showing improvement opportunities modal...');
+  if (window.DEBUG) console.log('Showing improvement opportunities modal...');
   
   try {
     ROOM_NAMES = globalThis.state.utils.ROOM_NAME;
@@ -323,7 +340,7 @@ async function showImprovementsModal() {
       ]
     });
     
-    console.log('Improvement opportunities modal displayed successfully');
+    if (window.DEBUG) console.log('Improvement opportunities modal displayed successfully');
   } catch (error) {
     console.error('Error showing improvement opportunities:', error);
     
@@ -341,7 +358,7 @@ async function showImprovementsModal() {
   }
 }
 
-  console.log('Improved Highscore Mod initialization complete');
+if (window.DEBUG) console.log('Improved Highscore Mod initialization complete');
 
 // Export control functions
 exports = {

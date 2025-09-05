@@ -715,8 +715,8 @@
         // Enhanced retry mechanism for both autoplay and manual modes when server results aren't available
         if ((gameMode === 'autoplay' || gameMode === 'manual') && gameTicks === null) {
             let retryAttempts = 0;
-            const maxRetries = 10;
-            const retryInterval = 100;
+            const maxRetries = 20;
+            const baseInterval = 100;
             
             const retryWithServerResults = () => {
                 retryAttempts++;
@@ -759,13 +759,23 @@
                         dpsDisplay.textContent = `(${finalDPS}/s)`;
                     });
                 } else if (retryAttempts < maxRetries) {
+                    // Progressive backoff: increase interval with each retry
+                    const retryInterval = baseInterval + (retryAttempts * 50);
                     setTimeout(retryWithServerResults, retryInterval);
                 } else {
-                    logger.warn('restoreFrozenDPSDisplays', `${gameMode} mode: Server results still not available after ${maxRetries} retries`);
+                    // Only warn every 5th occurrence to reduce spam
+                    if (!window._betterAnalyticsWarningCount) {
+                        window._betterAnalyticsWarningCount = 0;
+                    }
+                    window._betterAnalyticsWarningCount++;
+                    
+                    if (window._betterAnalyticsWarningCount % 5 === 0) {
+                        logger.warn('restoreFrozenDPSDisplays', `${gameMode} mode: Server results still not available after ${maxRetries} retries (warning ${window._betterAnalyticsWarningCount})`);
+                    }
                 }
             };
             
-            setTimeout(retryWithServerResults, retryInterval);
+            setTimeout(retryWithServerResults, baseInterval);
         }
     }
     
