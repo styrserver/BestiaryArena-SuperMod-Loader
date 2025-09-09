@@ -257,6 +257,13 @@ const inventoryTooltips = {
     rarity: '3',
     obtain: 'Store'
   },
+  dragonPlant: {
+    displayName: "Dragon Plant",
+    text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!\n\nUpgrade to Dragon Plant for 100% gold efficiency.',
+    icon: 'sprite://37022',
+    rarity: '4',
+    obtain: 'Store'
+  },
   forge: {
     displayName: "The Sweaty Cyclop's Forge",
     text: 'Bring me two of the same thing.\n\nMe smelt, me smash, until make better thing.',

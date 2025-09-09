@@ -256,6 +256,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Better Highscores.js',
     'Better Hy\'genie.js',
     'Better Yasir.js',
+    'Board Advisor.js',
     'Configurator.js',
     'Cyclopedia.js',
     'DashboardButton.js',

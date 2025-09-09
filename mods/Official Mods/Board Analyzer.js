@@ -2860,6 +2860,10 @@ async function runAnalysis() {
     console.log('Force stopped:', results.summary.forceStopped);
     console.log('Total runs completed:', results.summary.totalRuns);
     
+    // NEW: Store results globally for Board Advisor to access
+    window.__boardAnalyzerResults = results;
+    console.log('[Board Analyzer] Results stored globally for Board Advisor access');
+    
     // Force close all modals again
     forceCloseAllModals();
     

@@ -97,6 +97,7 @@
     
     // Default Settings
     const DEFAULT_SETTINGS = {
+        autoplantChecked: false,
         autosellChecked: false,
         autosqueezeChecked: false,
         autosellGenesMin: UI_CONSTANTS.SELL_GENE_MIN,
@@ -105,7 +106,8 @@
         autosqueezeGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
         autosellMinCount: 1,
         autosqueezeMinCount: 1,
-        autosellMaxExp: UI_CONSTANTS.MAX_EXP_DEFAULT
+        autosellMaxExp: UI_CONSTANTS.MAX_EXP_DEFAULT,
+        autoplantIgnoreList: []
     };
     
     // =======================
@@ -661,7 +663,7 @@
         });
     }
     
-    function createBox({title, content, icon = null}) {
+    function createBox({title, content, icon = null, tabs = null}) {
         const box = document.createElement('div');
         box.style.flex = '1 1 0';
         box.style.display = 'flex';
@@ -683,31 +685,110 @@
         titleEl.style.textAlign = 'center';
         titleEl.style.color = 'rgb(255, 255, 255)';
         
-        const p = document.createElement('p');
-        p.className = 'pixel-font-16';
-        p.style.margin = '0';
-        p.style.padding = '0';
-        p.style.textAlign = 'center';
-        p.style.color = 'rgb(255, 255, 255)';
-        p.style.display = 'flex';
-        p.style.alignItems = 'center';
-        p.style.justifyContent = 'center';
-        p.style.gap = '6px';
-        
-        if (icon) {
-            const iconImg = document.createElement('img');
-            iconImg.src = icon;
-            iconImg.alt = 'Icon';
-            iconImg.width = 16;
-            iconImg.height = 16;
-            iconImg.style.verticalAlign = 'middle';
-            p.appendChild(iconImg);
+        // If tabs are provided, create tab navigation instead of simple title
+        if (tabs && tabs.length > 0) {
+            const tabContainer = document.createElement('div');
+            tabContainer.style.display = 'flex';
+            tabContainer.style.width = '100%';
+            tabContainer.style.height = '100%';
+            
+            tabs.forEach((tab, index) => {
+                const tabBtn = document.createElement('button');
+                tabBtn.className = 'pixel-font-16';
+                tabBtn.style.flex = '1';
+                tabBtn.style.margin = '0';
+                tabBtn.style.padding = '2px 4px';
+                tabBtn.style.textAlign = 'center';
+                tabBtn.style.color = 'rgb(255, 255, 255)';
+                tabBtn.style.display = 'flex';
+                tabBtn.style.alignItems = 'center';
+                tabBtn.style.justifyContent = 'center';
+                tabBtn.style.gap = '4px';
+                tabBtn.style.border = 'none';
+                tabBtn.style.background = 'transparent';
+                tabBtn.style.cursor = 'pointer';
+                tabBtn.style.borderBottom = index === 0 ? '2px solid #ffe066' : '2px solid transparent';
+                tabBtn.style.fontSize = '14px';
+                tabBtn.style.fontWeight = 'bold';
+                
+                if (tab.icon) {
+                    if (tab.icon.includes('plant.png')) {
+                        // Use SVG for plant icon
+                        const iconDiv = document.createElement('div');
+                        iconDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-sprout"><path d="M7 20h10"></path><path d="M10 20c5.5-2.5.8-6.4 3-10"></path><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"></path></svg>';
+                        iconDiv.style.color = 'currentColor';
+                        iconDiv.style.display = 'flex';
+                        iconDiv.style.alignItems = 'center';
+                        tabBtn.appendChild(iconDiv);
+                    } else {
+                        // Use regular img for other icons
+                        const iconImg = document.createElement('img');
+                        iconImg.src = tab.icon;
+                        iconImg.alt = 'Icon';
+                        iconImg.width = 12;
+                        iconImg.height = 12;
+                        iconImg.style.verticalAlign = 'middle';
+                        tabBtn.appendChild(iconImg);
+                    }
+                }
+                
+                const tabText = document.createElement('span');
+                tabText.textContent = tab.title;
+                tabBtn.appendChild(tabText);
+                
+                tabBtn.addEventListener('click', () => {
+                    // Update tab button styles
+                    tabs.forEach((_, i) => {
+                        const btn = tabContainer.children[i];
+                        btn.style.borderBottom = i === index ? '2px solid #ffe066' : '2px solid transparent';
+                        btn.style.color = i === index ? 'rgb(255, 255, 255)' : 'rgb(144, 144, 144)';
+                    });
+                    
+                    // Show/hide tab content
+                    const contentWrapper = box.querySelector('.column-content-wrapper');
+                    if (contentWrapper) {
+                        contentWrapper.innerHTML = '';
+                        if (tab.content instanceof HTMLElement) {
+                            contentWrapper.appendChild(tab.content);
+                        } else if (typeof tab.content === 'string') {
+                            contentWrapper.innerHTML = tab.content;
+                        }
+                    }
+                });
+                
+                tabContainer.appendChild(tabBtn);
+            });
+            
+            titleEl.appendChild(tabContainer);
+        } else {
+            // Original title logic for non-tabbed boxes
+            const p = document.createElement('p');
+            p.className = 'pixel-font-16';
+            p.style.margin = '0';
+            p.style.padding = '0';
+            p.style.textAlign = 'center';
+            p.style.color = 'rgb(255, 255, 255)';
+            p.style.display = 'flex';
+            p.style.alignItems = 'center';
+            p.style.justifyContent = 'center';
+            p.style.gap = '6px';
+            
+            if (icon) {
+                const iconImg = document.createElement('img');
+                iconImg.src = icon;
+                iconImg.alt = 'Icon';
+                iconImg.width = 16;
+                iconImg.height = 16;
+                iconImg.style.verticalAlign = 'middle';
+                p.appendChild(iconImg);
+            }
+            
+            const titleText = document.createElement('span');
+            titleText.textContent = title;
+            p.appendChild(titleText);
+            titleEl.appendChild(p);
         }
         
-        const titleText = document.createElement('span');
-        titleText.textContent = title;
-        p.appendChild(titleText);
-        titleEl.appendChild(p);
         box.appendChild(titleEl);
         
         const contentWrapper = document.createElement('div');
@@ -721,19 +802,32 @@
         contentWrapper.style.alignItems = 'flex-start';
         contentWrapper.style.justifyContent = 'space-between';
         contentWrapper.style.padding = '10px';
-        if (content instanceof HTMLElement && content.querySelector && content.querySelector('div[style*="color: #ffe066"]')) {
-            const statusArea = content.querySelector('div[style*="flex-direction: column"]');
-            const topContent = document.createElement('div');
-            Array.from(content.childNodes).forEach(child => {
-                if (child !== statusArea) topContent.appendChild(child.cloneNode(true));
-            });
-            contentWrapper.appendChild(topContent);
-            if (statusArea) contentWrapper.appendChild(statusArea.cloneNode(true));
-        } else if (typeof content === 'string') {
-            contentWrapper.innerHTML = content;
-        } else if (content instanceof HTMLElement) {
-            contentWrapper.appendChild(content);
+        
+        // Handle content based on whether it's tabbed or not
+        if (tabs && tabs.length > 0) {
+            // For tabbed content, show the first tab by default
+            if (tabs[0].content instanceof HTMLElement) {
+                contentWrapper.appendChild(tabs[0].content);
+            } else if (typeof tabs[0].content === 'string') {
+                contentWrapper.innerHTML = tabs[0].content;
+            }
+        } else {
+            // Original content logic
+            if (content instanceof HTMLElement && content.querySelector && content.querySelector('div[style*="color: #ffe066"]')) {
+                const statusArea = content.querySelector('div[style*="flex-direction: column"]');
+                const topContent = document.createElement('div');
+                Array.from(content.childNodes).forEach(child => {
+                    if (child !== statusArea) topContent.appendChild(child.cloneNode(true));
+                });
+                contentWrapper.appendChild(topContent);
+                if (statusArea) contentWrapper.appendChild(statusArea.cloneNode(true));
+            } else if (typeof content === 'string') {
+                contentWrapper.innerHTML = content;
+            } else if (content instanceof HTMLElement) {
+                contentWrapper.appendChild(content);
+            }
         }
+        
         box.appendChild(contentWrapper);
         return box;
     }
@@ -997,6 +1091,509 @@
         return { row, minCountInput, validateMinCountInput };
     }
     
+    function createAutplantPlaceholder() {
+        const placeholder = document.createElement('div');
+        placeholder.style.display = 'flex';
+        placeholder.style.flexDirection = 'column';
+        placeholder.style.alignItems = 'flex-start';
+        placeholder.style.justifyContent = 'flex-start';
+        placeholder.style.height = '100%';
+        placeholder.style.padding = '10px';
+        placeholder.style.gap = '16px';
+        
+        // Add the checkbox at the top
+        const checkboxContainer = document.createElement('div');
+        checkboxContainer.className = 'mt-0.5 px-0.5';
+        
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.className = 'pixel-font-16 flex text-whiteBrightest items-center gap-1.5';
+        checkboxLabel.style.color = '#ffffff';
+        checkboxLabel.style.display = 'flex';
+        checkboxLabel.style.alignItems = 'center';
+        checkboxLabel.style.gap = '6px';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'autoplant-checkbox';
+        checkbox.className = 'pixel-font-16';
+        checkbox.tabIndex = 1;
+        checkbox.style.marginRight = '8px';
+        
+        // Set initial state from saved settings
+        const initialSettings = getSettings();
+        checkbox.checked = initialSettings.autoplantChecked !== undefined ? initialSettings.autoplantChecked : false;
+        
+        // Store reference to this checkbox globally for mutual exclusivity
+        window.autoplantCheckbox = checkbox;
+        
+        // Add change handler for mutual exclusivity and saving settings
+        checkbox.addEventListener('change', () => {
+            console.log('[Autoplant] Checkbox changed, checked:', checkbox.checked);
+            
+            // Save the setting
+            setSettings({ autoplantChecked: checkbox.checked });
+            
+            // Update status text
+            updateAutoplantStatus();
+            
+            // Update plant monster filter based on ignore list
+            updatePlantMonsterFilter(selectedCreatures);
+            
+            // Update widget label if it exists
+            updateAutosellerSessionWidget();
+            
+            // Immediately control the game's Dragon Plant checkbox
+            setTimeout(() => {
+                controlDragonPlantCheckbox();
+            }, 100);
+            
+            // If Autoplant is being checked, uncheck Autosell
+            if (checkbox.checked) {
+                console.log('[Autoplant] Being checked, looking for Autosell checkbox...');
+                setTimeout(() => {
+                    // Try to find the Autosell checkbox using stored reference or DOM search
+                    let autosellCheckbox = window.autosellCheckbox;
+                    if (!autosellCheckbox) {
+                        // Fallback to DOM search
+                        autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
+                    }
+                    console.log('[Autoplant] Found Autosell checkbox:', autosellCheckbox);
+                    if (autosellCheckbox) {
+                        console.log('[Autoplant] Autosell checkbox checked state:', autosellCheckbox.checked);
+                        if (autosellCheckbox.checked) {
+                            console.log('[Autoplant] Unchecking Autosell checkbox');
+                            autosellCheckbox.checked = false;
+                            autosellCheckbox.dispatchEvent(new Event('change'));
+                        } else {
+                            console.log('[Autoplant] Autosell checkbox already unchecked');
+                        }
+                    } else {
+                        console.log('[Autoplant] Autosell checkbox not found');
+                    }
+                }, 0);
+            } else {
+                console.log('[Autoplant] Being unchecked, no action needed');
+            }
+        });
+        
+        checkboxLabel.appendChild(checkbox);
+        
+        const labelText = document.createElement('span');
+        labelText.textContent = 'Enable Dragon Plant';
+        checkboxLabel.appendChild(labelText);
+        
+        checkboxContainer.appendChild(checkboxLabel);
+        placeholder.appendChild(checkboxContainer);
+
+        // Creature selection state
+        let availableCreatures = [...getAllAutoplantCreatures()];
+        let selectedCreatures = [];
+        
+        // Load ignore list from settings
+        const savedSettings = getSettings();
+        if (savedSettings.autoplantIgnoreList && Array.isArray(savedSettings.autoplantIgnoreList)) {
+            selectedCreatures = [...savedSettings.autoplantIgnoreList];
+            // Remove selected creatures from available list
+            availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
+        }
+        
+        // Ensure available creatures are sorted alphabetically
+        availableCreatures.sort();
+        
+        // Function to save ignore list to settings
+        function saveIgnoreList() {
+            setSettings({ autoplantIgnoreList: [...selectedCreatures] });
+        }
+
+        // Function to render the creature columns
+        function renderCreatureColumns() {
+            // Get or create the columns container
+            let columnsContainer = placeholder.querySelector('.creature-columns-container');
+            
+            if (!columnsContainer) {
+                // Create the container only if it doesn't exist
+                columnsContainer = document.createElement('div');
+                columnsContainer.className = 'creature-columns-container';
+                columnsContainer.style.display = 'flex';
+                columnsContainer.style.gap = '8px';
+                columnsContainer.style.justifyContent = 'center';
+                columnsContainer.style.minHeight = '0';
+                columnsContainer.style.width = '100%';
+                
+                // Insert before the status area to maintain DOM order (if it exists)
+                const statusElement = placeholder.querySelector('#autoplant-status');
+                if (statusElement && statusElement.parentElement) {
+                    placeholder.insertBefore(columnsContainer, statusElement.parentElement);
+                } else {
+                    // If status area doesn't exist yet, just append to placeholder
+                    placeholder.appendChild(columnsContainer);
+                }
+            } else {
+                // Clear existing content but keep the container
+                columnsContainer.innerHTML = '';
+            }
+            
+            // Debug: Log current state
+            console.log('[Autoseller] Rendering creature columns - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+
+            // Available creatures column
+            const availableBox = createAutoplantCreaturesBox({
+                title: 'Creatures',
+                items: availableCreatures,
+                selectedCreature: null,
+                onSelectCreature: (creatureName) => {
+                    console.log('[Autoseller] Moving creature to ignore list:', creatureName);
+                    console.log('[Autoseller] Before - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    
+                    // Move creature from available to selected
+                    availableCreatures = availableCreatures.filter(c => c !== creatureName);
+                    selectedCreatures.push(creatureName);
+                    
+                    console.log('[Autoseller] After - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    
+                    renderCreatureColumns();
+                    
+                    // Save ignore list to settings
+                    saveIgnoreList();
+                    
+                    // Update plant monster filter with new ignore list
+                    updatePlantMonsterFilter(selectedCreatures);
+                }
+            });
+            availableBox.style.width = '125px';
+            availableBox.style.height = '140px';
+            availableBox.style.minHeight = '0';
+
+            // Selected creatures column
+            const selectedBox = createAutoplantCreaturesBox({
+                title: 'Ignore List',
+                items: selectedCreatures,
+                selectedCreature: null,
+                onSelectCreature: (creatureName) => {
+                    console.log('[Autoseller] Moving creature back to available list:', creatureName);
+                    console.log('[Autoseller] Before - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    
+                    // Move creature from selected back to available
+                    selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
+                    availableCreatures.push(creatureName);
+                    
+                    // Sort available creatures to maintain alphabetical order
+                    availableCreatures.sort();
+                    
+                    console.log('[Autoseller] After - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    
+                    renderCreatureColumns();
+                    
+                    // Save ignore list to settings
+                    saveIgnoreList();
+                    
+                    // Update plant monster filter with new ignore list
+                    updatePlantMonsterFilter(selectedCreatures);
+                }
+            });
+            selectedBox.style.width = '125px';
+            selectedBox.style.height = '140px';
+            selectedBox.style.minHeight = '0';
+
+            columnsContainer.appendChild(availableBox);
+            columnsContainer.appendChild(selectedBox);
+        }
+
+        // Initial render
+        renderCreatureColumns();
+
+        // Add status bar under the columns
+        const statusArea = document.createElement('div');
+        statusArea.style.display = 'flex';
+        statusArea.style.flexDirection = 'column';
+        statusArea.style.justifyContent = 'flex-end';
+        statusArea.style.height = '48px';
+        statusArea.style.marginTop = 'auto';
+        statusArea.style.width = '100%';
+
+        const separator = document.createElement('div');
+        separator.className = 'separator my-2.5';
+        separator.setAttribute('role', 'none');
+        separator.style.margin = '6px 0px';
+
+        const summary = document.createElement('div');
+        summary.className = 'pixel-font-16';
+        summary.style.color = '#ffe066';
+        summary.style.fontSize = '13px';
+        summary.style.margin = '8px 0 0 0';
+        summary.id = 'autoplant-status';
+
+        statusArea.appendChild(separator);
+        statusArea.appendChild(summary);
+        placeholder.appendChild(statusArea);
+
+        // Update status function
+        function updateAutoplantStatus() {
+            const ignoredCount = selectedCreatures.length;
+            const isEnabled = window.autoplantCheckbox ? window.autoplantCheckbox.checked : false;
+            
+            let statusText = `Autoplant is ${isEnabled ? 'enabled' : 'disabled'}.`;
+            
+            if (isEnabled && ignoredCount > 0) {
+                statusText += ` Ignoring ${ignoredCount} creatures.`;
+            }
+            
+            summary.textContent = statusText;
+            summary.style.color = isEnabled ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
+        }
+
+        // Update status when creatures are moved
+        const originalRender = renderCreatureColumns;
+        renderCreatureColumns = function() {
+            originalRender();
+            updateAutoplantStatus();
+        };
+
+        // Initial status update
+        updateAutoplantStatus();
+        
+        // Initialize plant monster filter
+        updatePlantMonsterFilter(selectedCreatures);
+        
+        return placeholder;
+    }
+
+    // Helper function to get all creatures for Autoplant
+    function getAllAutoplantCreatures() {
+        return [
+            'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
+            'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
+            'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
+            'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
+            'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
+            'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
+            'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
+            'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
+        ];
+    }
+
+    // Helper function to create creature boxes for Autoplant
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature}) {
+        const box = document.createElement('div');
+        box.style.display = 'flex';
+        box.style.flexDirection = 'column';
+        box.style.margin = '0';
+        box.style.padding = '0';
+        box.style.minHeight = '0';
+        box.style.height = '100%';
+        box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        box.style.border = '4px solid transparent';
+        box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        box.style.borderRadius = '6px';
+        box.style.overflow = 'hidden';
+        
+        const titleEl = document.createElement('h2');
+        titleEl.className = 'widget-top widget-top-text pixel-font-16';
+        titleEl.style.margin = '0';
+        titleEl.style.padding = '2px 8px';
+        titleEl.style.textAlign = 'center';
+        titleEl.style.color = 'rgb(255, 255, 255)';
+        
+        const p = document.createElement('p');
+        p.textContent = title;
+        p.className = 'pixel-font-16';
+        p.style.margin = '0';
+        p.style.padding = '0';
+        p.style.textAlign = 'center';
+        p.style.color = 'rgb(255, 255, 255)';
+        titleEl.appendChild(p);
+        box.appendChild(titleEl);
+        
+        const scrollContainer = document.createElement('div');
+        scrollContainer.style.flex = '1 1 0';
+        scrollContainer.style.minHeight = '0';
+        scrollContainer.style.overflowY = 'auto';
+        scrollContainer.style.padding = '4px';
+        
+        items.forEach(name => {
+            const item = document.createElement('div');
+            item.textContent = name;
+            item.className = 'pixel-font-14 autoplant-creature-item';
+            item.style.color = 'rgb(230, 215, 176)';
+            item.style.cursor = 'pointer';
+            item.style.padding = '2px 4px';
+            item.style.borderRadius = '2px';
+            item.style.textAlign = 'left';
+            item.style.marginBottom = '1px';
+            
+            const handleMouseEnter = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+            };
+            
+            const handleMouseLeave = () => {
+                item.style.background = 'none';
+            };
+            
+            const handleMouseDown = () => {
+                item.style.background = 'rgba(255,255,255,0.18)';
+            };
+            
+            const handleMouseUp = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+            };
+            
+            const handleClick = () => {
+                // Call the onSelectCreature function immediately to move the creature
+                if (onSelectCreature) {
+                    onSelectCreature(name);
+                }
+            };
+            
+            item.addEventListener('mouseenter', handleMouseEnter);
+            item.addEventListener('mouseleave', handleMouseLeave);
+            item.addEventListener('mousedown', handleMouseDown);
+            item.addEventListener('mouseup', handleMouseUp);
+            item.addEventListener('click', handleClick);
+            
+            scrollContainer.appendChild(item);
+        });
+        
+        box.appendChild(scrollContainer);
+        return box;
+    }
+
+    // Helper function to re-render creature boxes for Autoplant
+    function renderAutoplantCreatureBox(box, items, selectedCreature, onSelectCreature) {
+        // Find the scroll container more reliably - it's the second div child
+        const scrollContainer = box.children[1]; // First child is title, second is scroll container
+        if (!scrollContainer) {
+            return;
+        }
+        
+        scrollContainer.innerHTML = '';
+        
+        items.forEach(name => {
+            const item = document.createElement('div');
+            item.textContent = name;
+            item.className = 'pixel-font-14 autoplant-creature-item';
+            item.style.color = 'rgb(230, 215, 176)';
+            item.style.cursor = 'pointer';
+            item.style.padding = '2px 4px';
+            item.style.borderRadius = '2px';
+            item.style.textAlign = 'left';
+            item.style.marginBottom = '1px';
+            
+            const handleMouseEnter = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+            };
+            
+            const handleMouseLeave = () => {
+                item.style.background = 'none';
+            };
+            
+            const handleMouseDown = () => {
+                item.style.background = 'rgba(255,255,255,0.18)';
+            };
+            
+            const handleMouseUp = () => {
+                item.style.background = 'rgba(255,255,255,0.08)';
+            };
+            
+            const handleClick = () => {
+                // Call the onSelectCreature function immediately to move the creature
+                if (onSelectCreature) {
+                    onSelectCreature(name);
+                }
+            };
+            
+            item.addEventListener('mouseenter', handleMouseEnter);
+            item.addEventListener('mouseleave', handleMouseLeave);
+            item.addEventListener('mousedown', handleMouseDown);
+            item.addEventListener('mouseup', handleMouseUp);
+            item.addEventListener('click', handleClick);
+            
+            scrollContainer.appendChild(item);
+        });
+    }
+
+    // =======================
+    // Plant Monster Filter Functions
+    // =======================
+    
+    function setPlantMonsterFilter(ignoreList) {
+        console.log('[Autoseller] Setting plantMonsterFilter with ignore list:', ignoreList);
+        console.log('[Autoseller] globalThis.state:', globalThis.state);
+        console.log('[Autoseller] clientConfig:', globalThis.state?.clientConfig);
+        
+        if (!globalThis.state?.clientConfig?.trigger?.setState) {
+            console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
+            console.log('[Autoseller] Available state keys:', Object.keys(globalThis.state || {}));
+            return;
+        }
+        
+        try {
+            globalThis.state.clientConfig.trigger.setState({
+                fn: (prev) => {
+                    console.log('[Autoseller] Setting plantMonsterFilter in clientConfig, prev state:', prev);
+                    return {
+                        ...prev,
+                        plantMonsterFilter: (monster) => {
+                            // if you want to sell the creature, return TRUE
+                            // if you want to keep it, return FALSE
+                            
+                            // Debug: Log monster object structure
+                            console.log('[Autoseller] plantMonsterFilter called with monster:', monster);
+                            console.log('[Autoseller] Monster name:', monster?.metadata?.name || monster?.name || 'unknown');
+                            console.log('[Autoseller] Ignore list:', ignoreList);
+                            
+                            // If ignore list is empty, devour all monsters
+                            if (ignoreList.length === 0) {
+                                console.log('[Autoseller] Ignore list is empty, devouring all monsters');
+                                return true; // Devour all creatures when ignore list is empty
+                            }
+                            
+                            // Check if monster is in ignore list
+                            const monsterName = monster?.metadata?.name || monster?.name;
+                            if (monsterName && ignoreList.includes(monsterName)) {
+                                console.log('[Autoseller] Keeping monster (in ignore list):', monsterName);
+                                return false; // Keep creatures in ignore list (DON'T devour them)
+                            }
+                            
+                            console.log('[Autoseller] Devouring monster (not in ignore list):', monsterName);
+                            return true; // Devour creatures NOT in ignore list
+                        },
+                    };
+                },
+            });
+            console.log('[Autoseller] Successfully set plantMonsterFilter');
+        } catch (error) {
+            console.error('[Autoseller] Error setting plantMonsterFilter:', error);
+        }
+        
+        console.log('[Autoseller] Plant monster filter set with ignore list:', ignoreList);
+    }
+    
+    function removePlantMonsterFilter() {
+        if (!globalThis.state?.clientConfig?.trigger?.setState) {
+            console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
+            return;
+        }
+        
+        globalThis.state.clientConfig.trigger.setState({
+            fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
+        });
+        
+        console.log('[Autoseller] Plant monster filter removed');
+    }
+    
+    function updatePlantMonsterFilter(selectedCreatures = []) {
+        const settings = getSettings();
+        
+        // Only set filter if autoplant is enabled
+        if (settings.autoplantChecked) {
+            // Use provided selectedCreatures, or fall back to saved ignore list from settings
+            const ignoreList = selectedCreatures.length > 0 ? selectedCreatures : (settings.autoplantIgnoreList || []);
+            setPlantMonsterFilter(ignoreList);
+        } else {
+            removePlantMonsterFilter();
+        }
+    }
+
     function createSettingsSection(opts) {
         const section = document.createElement('div');
         
@@ -1010,6 +1607,11 @@
         section.appendChild(warningWrapper);
         
         const { row: row1, checkbox, label } = createCheckboxRow(opts.persistKey, opts.label, opts.icon);
+        
+        // Store reference to Autosell checkbox globally for mutual exclusivity
+        if (opts.persistKey === 'autosell') {
+            window.autosellCheckbox = checkbox;
+        }
         section.appendChild(row1);
         
         const { row: row2, inputMin, inputMax } = createGeneInputRow(opts);
@@ -1101,6 +1703,34 @@
                 [opts.persistKey + 'GenesMax']: parseInt(inputMax.value, 10),
                 [opts.persistKey + 'MinCount']: parseInt(minCountInput.value, 10)
             });
+            
+            // If Autosell is being checked, uncheck Autoplant
+            if (opts.persistKey === 'autosell' && checkbox.checked) {
+                console.log('[Autosell] Being checked, looking for Autoplant checkbox...');
+                setTimeout(() => {
+                    // Try to find the Autoplant checkbox using stored reference or DOM search
+                    let autoplantCheckbox = window.autoplantCheckbox;
+                    if (!autoplantCheckbox) {
+                        // Fallback to DOM search
+                        autoplantCheckbox = document.querySelector('input[id="autoplant-checkbox"]');
+                    }
+                    console.log('[Autosell] Found Autoplant checkbox:', autoplantCheckbox);
+                    if (autoplantCheckbox) {
+                        console.log('[Autosell] Autoplant checkbox checked state:', autoplantCheckbox.checked);
+                        if (autoplantCheckbox.checked) {
+                            console.log('[Autosell] Unchecking Autoplant checkbox');
+                            autoplantCheckbox.checked = false;
+                            autoplantCheckbox.dispatchEvent(new Event('change'));
+                        } else {
+                            console.log('[Autosell] Autoplant checkbox already unchecked');
+                        }
+                    } else {
+                        console.log('[Autosell] Autoplant checkbox not found');
+                    }
+                }, 0);
+            } else if (opts.persistKey === 'autosell') {
+                console.log('[Autosell] Checkbox changed, checked:', checkbox.checked, 'persistKey:', opts.persistKey);
+            }
         }
         [checkbox, inputMin, inputMax, minCountInput].forEach(el => {
             el.addEventListener('change', saveSettings);
@@ -1156,7 +1786,7 @@
                 } else {
                     summary.textContent = opts.summaryType + ' is disabled.';
                 }
-                summary.style.color = '#ffe066';
+                summary.style.color = checkbox.checked ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
             }
         }
         [checkbox, inputMin, inputMax, minCountInput].forEach(el => {
@@ -1176,10 +1806,70 @@
     // 7. State Management & Processing Logic
     // =======================
     
+    // Monitor Dragon Plant API for devoured creatures
+    function setupDragonPlantAPIMonitor() {
+        if (!window.fetch) return;
+        
+        const originalFetch = window.fetch;
+        window.fetch = function(...args) {
+            const [url, options] = args;
+            
+            // Check if this is a Dragon Plant API call
+            if (typeof url === 'string' && url.includes('quest.plantEat')) {
+                console.log('[Autoseller] Dragon Plant API call detected:', url);
+                
+                return originalFetch.apply(this, args).then(response => {
+                    // Clone the response so we can read it without affecting the original
+                    const clonedResponse = response.clone();
+                    
+                    // Process the response asynchronously
+                    clonedResponse.json().then(data => {
+                        try {
+                            if (data && Array.isArray(data) && data[0]?.result?.data?.json) {
+                                const result = data[0].result.data.json;
+                                
+                                // Check if creatures were devoured and gold was received
+                                if (result.goldValue && result.goldValue > 0) {
+                                    // Count creatures from the request body
+                                    let devouredCount = 1; // Default to 1
+                                    try {
+                                        const requestBody = JSON.parse(options.body);
+                                        if (requestBody[0]?.json?.monsterIds && Array.isArray(requestBody[0].json.monsterIds)) {
+                                            devouredCount = requestBody[0].json.monsterIds.length;
+                                        }
+                                    } catch (e) {
+                                        console.warn('[Autoseller] Could not parse request body for creature count');
+                                    }
+                                    
+                                    const goldReceived = result.goldValue;
+                                    
+                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold`);
+                                    stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Autoseller] Error processing Dragon Plant API response:', e);
+                        }
+                    }).catch(e => {
+                        // Ignore JSON parsing errors
+                    });
+                    
+                    return response;
+                });
+            }
+            
+            return originalFetch.apply(this, args);
+        };
+        
+        console.log('[Autoseller] Dragon Plant API monitor setup complete');
+    }
+    
     const stateManager = {
         sessionStats: {
             soldCount: 0,
             soldGold: 0,
+            devouredCount: 0,
+            devouredGold: 0,
             squeezedCount: 0,
             squeezedDust: 0
         },
@@ -1199,6 +1889,9 @@
             if (type === 'sold') {
                 this.sessionStats.soldCount += count;
                 this.sessionStats.soldGold += value;
+            } else if (type === 'devoured') {
+                this.sessionStats.devouredCount += count;
+                this.sessionStats.devouredGold += value;
             } else if (type === 'squeezed') {
                 this.sessionStats.squeezedCount += count;
                 this.sessionStats.squeezedDust += value;
@@ -1234,6 +1927,8 @@
             this.sessionStats = {
                 soldCount: 0,
                 soldGold: 0,
+                devouredCount: 0,
+                devouredGold: 0,
                 squeezedCount: 0,
                 squeezedDust: 0
             };
@@ -1260,8 +1955,17 @@
     
     async function processEligibleMonsters(monsters, type) {
         try {
-            console.log(`[Autoseller] Processing ${type} for ${monsters?.length || 0} monsters...`);
             const settings = getSettings();
+            
+            // Check if the feature is enabled before processing
+            if (type === 'sell' && !settings.autosellChecked) {
+                return;
+            }
+            if (type === 'squeeze' && !settings.autosqueezeChecked) {
+                return;
+            }
+            
+            console.log(`[Autoseller] Processing ${type} for ${monsters?.length || 0} monsters...`);
             
             if (!monsters) {
                 monsters = await fetchServerMonsters();
@@ -1389,6 +2093,13 @@
         console.log('[Autoseller] Opening settings modal...');
         clearSettingsCache();
         
+        // Ensure mutual exclusivity on initialization
+        const settings = getSettings();
+        if (settings.autoplantChecked && settings.autosellChecked) {
+            console.log('[Autoseller] Both Autoplant and Autosell are checked, prioritizing Autoplant');
+            setSettings({ autosellChecked: false });
+        }
+        
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
             const autosellSection = createSettingsSection({
                 label: 'Sell creatures equal or below:',
@@ -1403,6 +2114,9 @@
                 persistKey: 'autosell',
                 icon: 'https://bestiaryarena.com/assets/icons/goldpile.png'
             });
+            
+            // Add data attribute to help find the autosell section
+            autosellSection.setAttribute('data-autosell-section', 'true');
             
             const autosqueezeSection = createSettingsSection({
                 label: 'Squeeze creatures equal or below:',
@@ -1421,7 +2135,19 @@
             const col1 = createBox({ 
                 title: 'Autosell', 
                 content: autosellSection, 
-                icon: 'https://bestiaryarena.com/assets/icons/goldpile.png' 
+                icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
+                tabs: [
+                    {
+                        title: 'Autoplant',
+                        icon: 'https://bestiaryarena.com/assets/icons/plant.png',
+                        content: createAutplantPlaceholder()
+                    },
+                    {
+                        title: 'Autosell',
+                        icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
+                        content: autosellSection
+                    }
+                ]
             });
             col1.style.width = '240px';
             col1.style.minWidth = '240px';
@@ -1529,6 +2255,22 @@
                         contentElem.style.flexDirection = 'column';
                         contentElem.style.justifyContent = 'flex-start';
                     }
+                    
+                    // Ensure mutual exclusivity after modal is rendered
+                    const currentSettings = getSettings();
+                    const autoplantCheckbox = document.querySelector('input[id="autoplant-checkbox"]');
+                    const autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
+                    
+                    if (autoplantCheckbox && autosellCheckbox) {
+                        console.log('[Autoseller] Initializing checkbox states - Autoplant:', currentSettings.autoplantChecked, 'Autosell:', currentSettings.autosellChecked);
+                        
+                        // If both are checked, prioritize Autoplant
+                        if (currentSettings.autoplantChecked && currentSettings.autosellChecked) {
+                            console.log('[Autoseller] Both checked on init, unchecking Autosell');
+                            autosellCheckbox.checked = false;
+                            setSettings({ autosellChecked: false });
+                        }
+                    }
                 }
             }, 0);
         }
@@ -1578,7 +2320,7 @@
         if (!btn) return;
         
         const settings = getSettings();
-        const isActive = settings.autosellChecked || settings.autosqueezeChecked;
+        const isActive = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
         
         btn.style.color = isActive ? '#22c55e' : '#ef4444';
     }
@@ -1732,7 +2474,7 @@
 
     function createAutosellerSessionWidget() {
         const settings = getSettings();
-        const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
+        const shouldShowWidget = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
         
         console.log(`[Autoseller] Widget creation - autosell: ${settings.autosellChecked}, autosqueeze: ${settings.autosqueezeChecked}`);
         
@@ -1769,11 +2511,12 @@
         widget.id = UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET;
         
         // Create widget using the same structure that worked in manual injection
+        const soldLabel = settings.autoplantChecked ? 'Devoured:' : 'Sold:';
         widget.innerHTML = `
             <div class="widget-top">Autoseller session</div>
             <div class="widget-bottom p-0">
                 <div class="stat-row">
-                    <div class="stat-label">Sold:</div>
+                    <div class="stat-label">${soldLabel}</div>
                     <div class="stat-value" id="autoseller-session-sold-count">0</div>
                     <div class="stat-value" id="autoseller-session-sold-gold">
                         <img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="Gold" class="stat-icon">
@@ -1799,6 +2542,7 @@
         
         // Store references to stat elements for updates
         widget._statEls = {
+            soldLabel: widget.querySelector('.stat-label:first-child'),
             soldCount: widget.querySelector('#autoseller-session-sold-count'),
             soldGold: widget.querySelector('#autoseller-session-sold-gold'),
             squeezedCount: widget.querySelector('#autoseller-session-squeezed-count'),
@@ -1821,11 +2565,24 @@
         
         const currentValues = stateManager.getSessionStats();
         
-        // Update stats directly
-        if (statEls.soldCount) statEls.soldCount.textContent = `${currentValues.soldCount}`;
+        // Update the sold/devoured label based on autoplant setting
+        const settings = getSettings();
+        const soldLabel = settings.autoplantChecked ? 'Devoured:' : 'Sold:';
+        if (statEls.soldLabel) {
+            statEls.soldLabel.textContent = soldLabel;
+        }
+        
+        // Update stats directly - show devoured stats when autoplant is enabled, sold stats otherwise
+        if (statEls.soldCount) {
+            const count = settings.autoplantChecked ? currentValues.devouredCount : currentValues.soldCount;
+            statEls.soldCount.textContent = `${count}`;
+        }
         if (statEls.soldGold) {
             const goldText = statEls.soldGold.querySelector('span');
-            if (goldText) goldText.textContent = `${currentValues.soldGold}`;
+            if (goldText) {
+                const gold = settings.autoplantChecked ? currentValues.devouredGold : currentValues.soldGold;
+                goldText.textContent = `${gold}`;
+            }
         }
         if (statEls.squeezedCount) statEls.squeezedCount.textContent = `${currentValues.squeezedCount}`;
         if (statEls.squeezedDust) {
@@ -1880,15 +2637,20 @@
                     const widgetExists = !!widget;
                     
                     const settings = getSettings();
-                    const shouldShowWidget = settings.autosellChecked || settings.autosqueezeChecked;
+                    const shouldShowWidget = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
                     const containerExists = !!autoplayContainer;
+                    
+                    console.log(`[Autoseller] Observer check - containerExists: ${containerExists}, shouldShowWidget: ${shouldShowWidget}, widgetExists: ${widgetExists}, autosell: ${settings.autosellChecked}, autosqueeze: ${settings.autosqueezeChecked}, autoplant: ${settings.autoplantChecked}`);
                     
                     if (containerExists && shouldShowWidget && !widgetExists) {
                         createAutosellerSessionWidget();
                         updateAutosellerSessionWidget();
-                    } else if ((!containerExists || !shouldShowWidget) && widgetExists) {
+                    } else if (!containerExists && widgetExists) {
+                        // Only remove widget if container doesn't exist (autoplay session ended)
+                        // Don't remove based on shouldShowWidget here - let createAutosellerSessionWidget handle that
                         if (widget && widget.parentNode) {
                             widget.parentNode.removeChild(widget);
+                            console.log('[Autoseller] Widget removed - autoplay session ended');
                         }
                     }
                 }, OBSERVER_DEBOUNCE_MS);
@@ -1908,12 +2670,321 @@
     }
 
     // =======================
-    // 12. Initialization & Event Handlers
+    // 12. Dragon Plant Checkbox Control
+    // =======================
+    
+    let dragonPlantObserver = null;
+    let dragonPlantObserverAttempts = 0;
+    
+    function setupDragonPlantObserver() {
+        if (dragonPlantObserver || dragonPlantObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
+        
+        dragonPlantObserverAttempts++;
+        
+        if (typeof MutationObserver !== 'undefined') {
+            let debounceTimer = null;
+            
+            dragonPlantObserver = new MutationObserver((mutations) => {
+                const hasRelevantMutations = mutations.some(mutation => {
+                    return mutation.type === 'childList' || 
+                           (mutation.type === 'attributes' && 
+                            (mutation.attributeName === 'data-state' || 
+                             mutation.attributeName === 'aria-checked'));
+                });
+                
+                if (!hasRelevantMutations) return;
+                
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                debounceTimer = setTimeout(() => {
+                    controlDragonPlantCheckbox();
+                }, OBSERVER_DEBOUNCE_MS);
+            });
+            
+            dragonPlantObserver.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['data-state', 'aria-checked']
+            });
+            
+            console.log(`[${modName}] Dragon Plant observer setup complete`);
+        } else {
+            console.warn(`[${modName}][WARN][setupDragonPlantObserver] MutationObserver not available`);
+        }
+    }
+    
+    function controlDragonPlantCheckbox() {
+        // Find the game's Dragon Plant checkbox in autoplay session
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        let gameCheckbox = null;
+        
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                // Look for the settings checkbox (role="checkbox")
+                const settingsCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+                if (settingsCheckbox) {
+                    gameCheckbox = settingsCheckbox;
+                    break;
+                }
+            }
+        }
+        
+        if (!gameCheckbox) return;
+        
+        const settings = getSettings();
+        const shouldBeChecked = settings.autoplantChecked;
+        const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
+        
+        // Only change state if it differs from our setting
+        if (shouldBeChecked !== isCurrentlyChecked) {
+            console.log(`[${modName}] Controlling Dragon Plant settings: ${shouldBeChecked ? 'enabling' : 'disabling'}`);
+            gameCheckbox.click();
+        }
+    }
+    
+    function stopDragonPlantObserver() {
+        if (dragonPlantObserver) {
+            dragonPlantObserver.disconnect();
+            dragonPlantObserver = null;
+            console.log(`[${modName}] Dragon Plant observer stopped`);
+        }
+    }
+    
+    // =======================
+    // 12.1. Autoplant Auto-Click for 5+ Creatures
+    // =======================
+    
+    let autoplantClickObserver = null;
+    let autoplantClickObserverAttempts = 0;
+    
+    function setupAutoplantClickObserver() {
+        if (autoplantClickObserver || autoplantClickObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
+        
+        autoplantClickObserverAttempts++;
+        
+        if (typeof MutationObserver !== 'undefined') {
+            let debounceTimer = null;
+            
+            autoplantClickObserver = new MutationObserver((mutations) => {
+                const hasRelevantMutations = mutations.some(mutation => {
+                    return mutation.type === 'childList' || 
+                           (mutation.type === 'attributes' && 
+                            (mutation.attributeName === 'data-state' || 
+                             mutation.attributeName === 'aria-checked'));
+                });
+                
+                if (!hasRelevantMutations) return;
+                
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                debounceTimer = setTimeout(() => {
+                    checkAndClickDragonPlant();
+                }, OBSERVER_DEBOUNCE_MS);
+            });
+            
+            // Only observe autoplay sessions, not the entire document
+            const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+            if (autoplaySessions.length > 0) {
+                autoplaySessions.forEach(session => {
+                    autoplantClickObserver.observe(session, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        attributeFilter: ['data-state', 'aria-checked']
+                    });
+                });
+            } else {
+                // Fallback to document body if no autoplay sessions found yet
+                autoplantClickObserver.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['data-state', 'aria-checked']
+                });
+            }
+            
+            console.log(`[${modName}] Autoplant click observer setup complete`);
+        } else {
+            console.warn(`[${modName}][WARN][setupAutoplantClickObserver] MutationObserver not available`);
+        }
+    }
+    
+    function checkAndClickDragonPlant() {
+        const settings = getSettings();
+        
+        // Only proceed if autoplant is enabled in mod settings
+        if (!settings.autoplantChecked) return;
+        
+        // Only proceed if we're actually in an autoplay session
+        const autoplaySessionsCheck = document.querySelectorAll('div[data-autosetup]');
+        if (autoplaySessionsCheck.length === 0) return;
+        
+        // Check if there are any creatures in the autoplay session
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        let hasCreatures = false;
+        
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                const creatureDropsSection = widgetBottom.querySelector('#drop-widget-bottom-element');
+                if (creatureDropsSection) {
+                    // Check if there are any creature buttons
+                    const creatureButtons = creatureDropsSection.querySelectorAll('button:not([disabled])');
+                    hasCreatures = Array.from(creatureButtons).some(button => {
+                        const img = button.querySelector('img[alt]');
+                        if (!img) return false;
+                        const alt = img.getAttribute('alt');
+                        return alt === 'creature';
+                    });
+                    if (hasCreatures) break; // Found creatures, no need to check other sessions
+                }
+            }
+        }
+        
+        // Find the Dragon Plant button
+        let dragonPlantButton = null;
+        
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                
+                // Find the Dragon Plant game button (not the settings checkbox)
+                const allButtons = widgetBottom.querySelectorAll('button');
+                for (const button of allButtons) {
+                    // Look for the Dragon Plant game button with specific item ID
+                    // Exclude the settings checkbox by checking it doesn't have role="checkbox"
+                    const img = button.querySelector('img[alt="37022"]');
+                    const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
+                    
+                    if (img && isNotCheckbox) {
+                        dragonPlantButton = button;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Only proceed if we found the Dragon Plant button
+        if (!dragonPlantButton) return;
+        
+        // Check if Dragon Plant is currently enabled
+        const isCurrentlyEnabled = dragonPlantButton.getAttribute('data-state') === 'open' && 
+                                 !dragonPlantButton.hasAttribute('disabled');
+        
+        console.log(`[${modName}] Dragon Plant decision: hasCreatures=${hasCreatures}, enabled=${isCurrentlyEnabled}`);
+        
+        // Click Dragon Plant if there are creatures and it's not already enabled
+        if (hasCreatures && !isCurrentlyEnabled) {
+            console.log(`[${modName}] Auto-clicking Dragon Plant - creatures detected`);
+            setTimeout(() => {
+                dragonPlantButton.click();
+            }, 100);
+        }
+        // Click Dragon Plant to disable if there are no creatures and it's currently enabled
+        else if (!hasCreatures && isCurrentlyEnabled) {
+            console.log(`[${modName}] Auto-disabling Dragon Plant - no creatures detected`);
+            setTimeout(() => {
+                dragonPlantButton.click();
+            }, 100);
+        }
+    }
+    
+    function stopAutoplantClickObserver() {
+        if (autoplantClickObserver) {
+            autoplantClickObserver.disconnect();
+            autoplantClickObserver = null;
+            console.log(`[${modName}] Autoplant click observer stopped`);
+        }
+    }
+    
+    // =======================
+    // 12.2. Game Start Listener for Dragon Plant
+    // =======================
+    
+    function setupGameStartListener() {
+        if (globalThis.state?.board?.on) {
+            // Listen for game start events
+            globalThis.state.board.on('emitNewGame', (event) => {
+                console.log(`[${modName}] Game started, checking for creatures to devour...`);
+                // Check if there are creatures that would be devoured (not in ignore list)
+                checkAndActivateDragonPlant();
+            });
+            
+            // Also listen for other game events to debug
+            globalThis.state.board.on('newGame', (event) => {
+                checkAndActivateDragonPlant();
+            });
+            
+            console.log(`[${modName}] Game start listener setup complete`);
+        } else {
+            console.warn(`[${modName}] Board state not available for game start listener`);
+        }
+    }
+    
+    function checkAndActivateDragonPlant() {
+        const settings = getSettings();
+        
+        // Only proceed if autoplant is enabled
+        if (!settings.autoplantChecked) return;
+        
+        // Check if we're in an autoplay session
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        if (autoplaySessions.length === 0) return;
+        
+        // Find the Dragon Plant button
+        let dragonPlantButton = null;
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                const allButtons = widgetBottom.querySelectorAll('button');
+                for (const button of allButtons) {
+                    const img = button.querySelector('img[alt="37022"]');
+                    const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
+                    
+                    if (img && isNotCheckbox) {
+                        dragonPlantButton = button;
+                        break;
+                    }
+                }
+                if (dragonPlantButton) break;
+            }
+        }
+        
+        if (!dragonPlantButton) return;
+        
+        // Check if Dragon Plant is currently enabled
+        const isCurrentlyEnabled = dragonPlantButton.getAttribute('data-state') === 'open' && 
+                                 !dragonPlantButton.hasAttribute('disabled');
+        
+        // Only activate if not already enabled
+        if (!isCurrentlyEnabled) {
+            console.log(`[${modName}] Auto-clicking Dragon Plant on game start`);
+            setTimeout(() => {
+                dragonPlantButton.click();
+            }, 100);
+        }
+    }
+
+    // =======================
+    // 13. Initialization & Event Handlers
     // =======================
     
     function initAutoseller() {
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
+        setupDragonPlantObserver();
+        // setupAutoplantClickObserver(); // Disabled - using game start listener instead
+        setupGameStartListener();
+        setupDragonPlantAPIMonitor();
+        
+        // Initialize plant monster filter with saved ignore list
+        updatePlantMonsterFilter();
         
         setTimeout(() => {
             updateAutosellerNavButtonColor();
@@ -1944,7 +3015,7 @@
                     
                     const settings = getSettings();
                     
-                    if (!settings.autosellChecked && !settings.autosqueezeChecked) {
+                    if (!settings.autoplantChecked && !settings.autosellChecked && !settings.autosqueezeChecked) {
                         console.log('[Autoseller] Skipping processing - no features enabled');
                         return;
                     }
@@ -1992,6 +3063,8 @@
                     autosellerWidgetObserver.disconnect();
                     autosellerWidgetObserver = null;
                 }
+                stopDragonPlantObserver();
+                stopAutoplantClickObserver();
                 isObserverActive = false;
                 observerSetupAttempts = 0;
                 

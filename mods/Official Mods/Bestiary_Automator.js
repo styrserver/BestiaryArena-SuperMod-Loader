@@ -206,7 +206,7 @@ const clickButtonWithText = (textKey) => {
 };
 
 // Check and handle scroll lock
-const handleScrollLock = () => {
+const handleScrollLock = async () => {
   // Don't handle scroll lock if Board Analyzer is running
   if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
     console.log('[Bestiary Automator] Board Analyzer is running, skipping scroll lock handling');
@@ -231,6 +231,18 @@ const handleScrollLock = () => {
       });
       
       document.dispatchEvent(escEvent);
+      
+      // Wait briefly and verify the scroll lock was actually resolved
+      await sleep(150);
+      const newScrollLockValue = body.getAttribute('data-scroll-locked');
+      const wasResolved = !newScrollLockValue || parseInt(newScrollLockValue) <= 0;
+      
+      if (wasResolved) {
+        console.log(`[Bestiary Automator] Scroll lock successfully resolved (was: ${scrollLockValue}, now: ${newScrollLockValue || '0'})`);
+      } else {
+        console.log(`[Bestiary Automator] Scroll lock still active after ESC (was: ${scrollLockValue}, now: ${newScrollLockValue})`);
+      }
+      
       return true;
     }
     
@@ -460,7 +472,7 @@ const refillStaminaIfNeeded = async () => {
     await sleep(200); // Reduced from 500ms
     
     // Check for scroll lock after using potion
-    handleScrollLock();
+    await handleScrollLock();
     
     // Reset retry count on success
     staminaRefillRetryCount = 0;
@@ -530,7 +542,7 @@ const takeRewardsIfAvailable = async () => {
     rewardsCollectedThisSession = true;
     
     // Check for scroll lock after collecting rewards
-    handleScrollLock();
+    await handleScrollLock();
   } catch (error) {
     console.error('[Bestiary Automator] Error taking rewards:', error);
   }
@@ -538,26 +550,58 @@ const takeRewardsIfAvailable = async () => {
 
 // Handle day care
 const handleDayCare = async () => {
-  if (!config.autoDayCare) return;
+  if (!config.autoDayCare) {
+    console.log('[Bestiary Automator] autoDayCare disabled, skipping');
+    return;
+  }
   
   try {
-    const dayCareBlip = document.querySelector('div[data-radix-scroll-area-viewport]:has(div:not(.text-invalid) > .animate-ping)');
-    if (!dayCareBlip) return;
+    // Check for daycare button with visual indicator
+    const dayCareButton = document.querySelector('button:has(img[alt="daycare"])');
+    let hasDayCareButtonIndicator = false;
+    
+    if (dayCareButton) {
+      console.log('[Bestiary Automator] Found daycare button, classes:', dayCareButton.className);
+      if (dayCareButton.classList.contains('focus-style-visible') && dayCareButton.classList.contains('active:opacity-70')) {
+        hasDayCareButtonIndicator = true;
+        console.log('[Bestiary Automator] Daycare button has visual indicator');
+      }
+    } else {
+      console.log('[Bestiary Automator] No daycare button found');
+    }
+    
+    // Check for creature at daycare with blip indicator
+    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="daycare"])');
+    if (creatureAtDaycare) {
+      console.log('[Bestiary Automator] Found creature at daycare with blip');
+    } else {
+      console.log('[Bestiary Automator] No creature at daycare with blip found');
+    }
+    
+    // Only proceed if there are actually creatures ready (with blip="true")
+    if (!creatureAtDaycare) {
+      console.log('[Bestiary Automator] No creatures ready at daycare, skipping');
+      return;
+    }
     
     console.log('[Bestiary Automator] Handling day care');
     
     clickButtonWithText('inventory');
     await sleep(500);
     
-    const button = document.querySelector('button:has(img[alt=daycare])');
-    if (!button) return;
+    // Double-check after opening inventory
+    const dayCareButtonAfter = document.querySelector('button:has(img[alt="daycare"])');
+    if (!dayCareButtonAfter) return;
     
-    button.click();
+    dayCareButtonAfter.click();
     await sleep(500);
     clickButtonWithText('levelUp');
     await sleep(500);
     clickAllCloseButtons();
     await sleep(500);
+    
+    // Check for scroll lock after daycare operations
+    await handleScrollLock();
   } catch (error) {
     console.error('[Bestiary Automator] Error handling day care:', error);
   }

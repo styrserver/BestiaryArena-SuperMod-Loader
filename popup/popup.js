@@ -384,7 +384,8 @@ function renderLocalMods(mods) {
     'inventory-tooltips.js',
     'DashboardButton.js',
     'RunTracker.js',
-    'Outfiter.js'
+    'Outfiter.js',
+    'Board Advisor.js'
   ];
 
   function normalizeModName(name) {
