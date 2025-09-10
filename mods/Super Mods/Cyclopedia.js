@@ -244,7 +244,7 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-  'Upgrades': ['Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
+  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
 const INVENTORY_VARIANTS = {
@@ -256,7 +256,7 @@ const INVENTORY_VARIANTS = {
   'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
-  'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
+  'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
@@ -267,7 +267,7 @@ const INVENTORY_STATIC_ITEMS = {
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
-  'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
+  'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
   'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
   'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
   'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
@@ -317,7 +317,7 @@ const ALL_EQUIPMENT = ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
   CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: ['dailyBoostedMap', 'daycare', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
 const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
@@ -6411,19 +6411,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
 
         return `
-          <button class="focus-style-visible active:opacity-70">
-            <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled='true']:dithered data-[highlighted='true']:unset-border-image data-[hoverable='true']:hover:unset-border-image" style="overflow: visible;">
-              <div class="has-rarity relative grid h-full place-items-center" data-rarity="${rarity}">
-                <div class="relative size-sprite" style="overflow: visible;">
-                  <div class="sprite item id-${id} absolute bottom-0 right-0">
-                    <div class="viewport">
-                      <img alt="${id}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;">
-                    </div>
+          <div class="container-slot surface-darker" style="overflow: visible;">
+            <div class="has-rarity relative grid h-full place-items-center" data-rarity="${rarity}">
+              <div class="relative size-sprite" style="overflow: visible;">
+                <div class="sprite item id-${id} absolute bottom-0 right-0">
+                  <div class="viewport">
+                    <img alt="${id}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;">
                   </div>
                 </div>
               </div>
             </div>
-          </button>
+          </div>
         `;
       };
 
@@ -6436,13 +6434,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
 
         return `
-          <button class="focus-style-visible active:opacity-70" tabindex="-1" style="all: unset; display: block;">
-            <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker" style="overflow: visible;">
-              <div class="has-rarity relative grid h-full place-items-center" data-rarity="${rarity || ''}">
-                <img src="${iconSrc}" class="pixelated" width="32" height="32" alt="${displayName || ''}">
-              </div>
+          <div class="container-slot surface-darker" style="overflow: visible;">
+            <div class="has-rarity relative grid h-full place-items-center" data-rarity="${rarity || ''}">
+              <img src="${iconSrc}" class="pixelated" width="32" height="32" alt="${displayName || ''}">
             </div>
-          </button>
+          </div>
         `;
       };
 
@@ -6614,8 +6610,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333;">
                   <span style="color: #888; font-size: 12px;">${upgradeKeys.includes(itemKey) ? 'Status:' : 'In Your Inventory:'}</span>
                   <span 
-                    style="color: #ffe066; font-size: 16px; font-weight: bold; cursor: help;"
-                    title="${upgradeKeys.includes(itemKey) ? (count > 0 ? 'Owned' : 'Not owned') : count.toLocaleString()}"
+                    style="color: #ffe066; font-size: 16px; font-weight: bold;"
                   >
                     ${formattedCount}
                   </span>

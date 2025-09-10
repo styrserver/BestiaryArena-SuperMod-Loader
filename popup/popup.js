@@ -371,6 +371,7 @@ function renderLocalMods(mods) {
     'Better Highscores.js',
     'Better Hy\'genie.js',
     'Better Yasir.js',
+    'Board Advisor.js',
     'Configurator.js',
     'Cyclopedia.js',
     'DashboardButton.js',
@@ -384,8 +385,7 @@ function renderLocalMods(mods) {
     'inventory-tooltips.js',
     'DashboardButton.js',
     'RunTracker.js',
-    'Outfiter.js',
-    'Board Advisor.js'
+    'Outfiter.js'
   ];
 
   function normalizeModName(name) {

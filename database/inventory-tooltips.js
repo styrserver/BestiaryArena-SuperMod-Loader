@@ -250,6 +250,13 @@ const inventoryTooltips = {
   // =======================
   // Upgrades
   // =======================
+  babyDragonPlant: {
+    displayName: "Baby Dragon Plant",
+    text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!\n\nUpgrades to Dragon Plant.',
+    icon: 'sprite://28689',
+    rarity: '3',
+    obtain: 'Store'
+  },
   daycare: {
     displayName: "Daycare",
     text: 'Leave your creatures training at the daycare.\n\nDuring this time, your creatures will slowly earn xp.',
@@ -259,7 +266,7 @@ const inventoryTooltips = {
   },
   dragonPlant: {
     displayName: "Dragon Plant",
-    text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!\n\nUpgrade to Dragon Plant for 100% gold efficiency.',
+    text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!',
     icon: 'sprite://37022',
     rarity: '4',
     obtain: 'Store'

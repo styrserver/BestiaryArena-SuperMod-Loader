@@ -13,7 +13,7 @@ console.log('Board Advisor Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
-  enabled: true,
+  enabled: false,
   analysisDepth: 50, // Number of simulations to run for analysis
   learningEnabled: true, // Enable pattern learning from successful runs
   recommendationThreshold: 0.1, // Minimum improvement threshold for recommendations
@@ -33,6 +33,17 @@ const config = Object.assign({}, defaultConfig, context.config);
 let analysisTimeout = null;
 let lastAnalysisTime = 0;
 const ANALYSIS_DEBOUNCE_TIME = 1000; // 1 second debounce
+let pendingAnalysisRequest = null; // Track pending analysis to prevent duplicates
+
+// Helper function to generate board hash for duplicate detection
+function generateBoardHash(boardSetup) {
+  if (!boardSetup || boardSetup.length === 0) return 'empty';
+  
+  return boardSetup
+    .map(piece => `${piece.tileIndex}-${piece.monsterName || 'empty'}-${piece.equipmentName || 'empty'}`)
+    .sort()
+    .join('|');
+}
 
 // Constants
 const MOD_ID = 'board-advisor';
@@ -46,7 +57,17 @@ let analysisState = {
   historicalData: [],
   patterns: {},
   recommendations: null,
-  lastBoardHash: null
+  lastBoardHash: null,
+  lastDataLoadTime: 0
+};
+
+// Performance optimization caches
+let performanceCache = {
+  lastRoomDetection: null,
+  lastRoomDetectionTime: 0,
+  roomDetectionCache: new Map(),
+  patternMatchingCache: new Map(),
+  dataLoadingCache: new Map()
 };
 
 // State-based refresh system
@@ -78,6 +99,10 @@ const getRoomStoreName = (roomId) => `room_${roomId}`;
 // IndexedDB instance
 let sandboxDB = null;
 let isDBReady = false;
+
+// Tile highlighting constants
+const TILE_HIGHLIGHT_OVERLAY_ID = 'board-advisor-tile-highlight';
+const TILE_HIGHLIGHT_STYLE_ID = 'board-advisor-highlight-styles';
 
 
 
@@ -392,6 +417,15 @@ async function addSandboxRunToDB(runData) {
         } catch (error) {
           console.warn('[Board Advisor] Failed to update room metadata:', error);
           // Don't fail the entire operation if metadata update fails
+        }
+        
+        // CACHE FIX: Clear caches and refresh data immediately after saving
+        try {
+          console.log('[Board Advisor] Clearing caches and refreshing data after sandbox run save...');
+          await invalidateCachesAndRefreshData(roomId);
+        } catch (error) {
+          console.warn('[Board Advisor] Failed to refresh data after sandbox run save:', error);
+          // Don't fail the entire operation if refresh fails
         }
         
         resolve(request.result);
@@ -747,6 +781,248 @@ function getEquipmentName(equipId) {
 }
 
 // =======================
+// TILE HIGHLIGHTING SYSTEM
+// =======================
+
+// Highlight recommended tiles on empty board
+function highlightRecommendedTiles(recommendedSetup) {
+  if (!recommendedSetup || !Array.isArray(recommendedSetup) || recommendedSetup.length === 0) {
+    return;
+  }
+  
+  console.log('[Board Advisor] Highlighting recommended tiles:', recommendedSetup);
+  
+  // Clean up any existing highlights
+  cleanupTileHighlights();
+  
+  // Create highlight overlay
+  createTileHighlightOverlay(recommendedSetup);
+}
+
+// Create overlay to highlight recommended tiles
+function createTileHighlightOverlay(recommendedSetup) {
+  try {
+    // Find the tiles container
+    const tilesContainer = document.getElementById('tiles');
+    if (!tilesContainer) {
+      console.error('[Board Advisor] Could not find #tiles container for highlighting');
+      return;
+    }
+    
+    // Create overlay container
+    const overlayContainer = document.createElement('div');
+    overlayContainer.id = TILE_HIGHLIGHT_OVERLAY_ID;
+    overlayContainer.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 200;
+    `;
+    
+    // Create highlight styles
+    const styleElement = document.createElement('style');
+    styleElement.id = TILE_HIGHLIGHT_STYLE_ID;
+    styleElement.textContent = `
+      .board-advisor-tile-highlight {
+        position: absolute;
+        width: calc(32px * var(--zoomFactor));
+        height: calc(32px * var(--zoomFactor));
+        border: 3px solid #ff6b35;
+        background-color: rgba(255, 107, 53, 0.2);
+        border-radius: 4px;
+        pointer-events: none;
+        animation: board-advisor-pulse 2s ease-in-out infinite;
+        box-shadow: 0 0 10px #ff6b35, inset 0 0 10px rgba(255, 107, 53, 0.3);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      
+      .board-advisor-tile-info {
+        position: absolute;
+        top: calc(100% + 2px);
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: rgba(0, 0, 0, 0.95);
+        color: #fff;
+        padding: 6px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-family: "Press Start 2P", "VT323", monospace;
+        white-space: nowrap;
+        border: 2px solid #ff6b35;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8), 0 0 8px rgba(255, 107, 53, 0.5);
+        z-index: 1000;
+        max-width: 250px;
+        text-align: center;
+        line-height: 1.3;
+        pointer-events: none;
+        min-width: 120px;
+      }
+      
+      .board-advisor-tile-info .monster-name {
+        color: #4CAF50;
+        font-weight: bold;
+        font-size: 12px;
+        text-shadow: 0 0 4px rgba(76, 175, 80, 0.8);
+      }
+      
+      .board-advisor-tile-info .equipment-name {
+        color: #2196F3;
+        font-size: 11px;
+        text-shadow: 0 0 4px rgba(33, 150, 243, 0.8);
+        margin-top: 2px;
+      }
+      
+      /* Tile number CSS removed - no longer needed */
+      
+      @keyframes board-advisor-pulse {
+        0%, 100% { 
+          border-color: #ff6b35;
+          box-shadow: 0 0 10px #ff6b35, inset 0 0 10px rgba(255, 107, 53, 0.3);
+        }
+        50% { 
+          border-color: #ff8c42;
+          box-shadow: 0 0 15px #ff8c42, inset 0 0 15px rgba(255, 140, 66, 0.4);
+        }
+      }
+    `;
+    document.head.appendChild(styleElement);
+    
+    // Process each recommended tile
+    recommendedSetup.forEach((piece, index) => {
+      if (!piece.tileIndex && piece.tileIndex !== 0) {
+        console.warn('[Board Advisor] Piece missing tileIndex:', piece);
+        return;
+      }
+      
+      const tileId = piece.tileIndex;
+      const tileElement = document.getElementById(`tile-index-${tileId}`);
+      
+      if (!tileElement) {
+        console.warn(`[Board Advisor] Could not find tile element for index ${tileId}`);
+        return;
+      }
+      
+      // Get positioning from the tile element
+      const style = tileElement.getAttribute('style');
+      let rightValue = '';
+      let bottomValue = '';
+      
+      // Extract the right, bottom values using regex (same as Custom Display)
+      const rightMatch = /right:\s*calc\(([^)]+)\)/.exec(style);
+      if (rightMatch) rightValue = rightMatch[1];
+      
+      const bottomMatch = /bottom:\s*calc\(([^)]+)\)/.exec(style);
+      if (bottomMatch) bottomValue = bottomMatch[1];
+      
+      if (!rightValue || !bottomValue) {
+        console.warn(`[Board Advisor] Could not extract positioning for tile ${tileId}`);
+        return;
+      }
+      
+      // Create highlight overlay
+      const highlightOverlay = document.createElement('div');
+      highlightOverlay.classList.add('board-advisor-tile-highlight');
+      highlightOverlay.setAttribute('data-tile-index', tileId);
+      highlightOverlay.setAttribute('data-piece-index', index);
+      
+      // Position the highlight overlay
+      highlightOverlay.style.position = 'absolute';
+      highlightOverlay.style.right = `calc(${rightValue})`;
+      highlightOverlay.style.bottom = `calc(${bottomValue})`;
+      
+      // Create info display
+      const monsterName = piece.monsterName || 'Unknown Monster';
+      const equipmentName = piece.equipmentName || (piece.equipId ? 'Equipment' : '');
+      
+      console.log(`[Board Advisor] Creating info box for tile ${tileId}: ${monsterName} + ${equipmentName}`);
+      
+      // Create the info box
+      const infoBox = document.createElement('div');
+      infoBox.classList.add('board-advisor-tile-info');
+      
+      // Add monster name
+      const monsterSpan = document.createElement('div');
+      monsterSpan.classList.add('monster-name');
+      monsterSpan.textContent = monsterName;
+      infoBox.appendChild(monsterSpan);
+      
+      // Add equipment name if available
+      if (equipmentName) {
+        const equipSpan = document.createElement('div');
+        equipSpan.classList.add('equipment-name');
+        equipSpan.textContent = equipmentName;
+        infoBox.appendChild(equipSpan);
+      }
+      
+      // Tile number removed - redundant since tile is already highlighted
+      
+      highlightOverlay.appendChild(infoBox);
+      
+      // Add a simple text overlay directly on the tile as a fallback
+      const tileText = document.createElement('div');
+      tileText.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff;
+        font-size: 8px;
+        font-family: monospace;
+        text-align: center;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        z-index: 10;
+        line-height: 1.1;
+      `;
+      tileText.innerHTML = `
+        <div style="color: #4CAF50; font-weight: bold; font-size: 10px;">${monsterName}</div>
+        <div style="color: #2196F3; font-size: 9px;">${equipmentName}</div>
+      `;
+      highlightOverlay.appendChild(tileText);
+      
+      // Add tooltip as backup
+      highlightOverlay.title = `Recommended: ${monsterName}${equipmentName ? ' + ' + equipmentName : ''} (Tile ${tileId})`;
+      
+      overlayContainer.appendChild(highlightOverlay);
+    });
+    
+    // Add the overlay container to the tiles container
+    tilesContainer.appendChild(overlayContainer);
+    
+    console.log(`[Board Advisor] Created highlights for ${recommendedSetup.length} recommended tiles`);
+    
+  } catch (error) {
+    console.error('[Board Advisor] Error creating tile highlight overlay:', error);
+  }
+}
+
+// Clean up tile highlights
+function cleanupTileHighlights() {
+  // Remove the overlay container
+  const overlayContainer = document.getElementById(TILE_HIGHLIGHT_OVERLAY_ID);
+  if (overlayContainer) {
+    overlayContainer.remove();
+  }
+  
+  // Remove the style element
+  const styleElement = document.getElementById(TILE_HIGHLIGHT_STYLE_ID);
+  if (styleElement) {
+    styleElement.remove();
+  }
+  
+  // Remove any stray highlight elements
+  const highlightElements = document.querySelectorAll('.board-advisor-tile-highlight');
+  highlightElements.forEach(el => el.remove());
+}
+
+// =======================
 // 2. DATA COLLECTION SYSTEM
 // =======================
 
@@ -1020,6 +1296,22 @@ document.addEventListener('utility-api-ready', () => {
 // Force-update all data sources when panel opens
 async function forceUpdateAllData() {
   try {
+    const now = Date.now();
+    const timeSinceLastLoad = now - analysisState.lastDataLoadTime;
+    const MIN_LOAD_INTERVAL = 2000; // 2 seconds minimum between loads
+    
+    // Skip force-update if data was recently loaded, but still trigger analysis
+    if (timeSinceLastLoad < MIN_LOAD_INTERVAL) {
+      console.log(`[Board Advisor] Skipping force-update - data loaded ${timeSinceLastLoad}ms ago`);
+      
+      // Still trigger analysis even if we skip the force-update
+      console.log('[Board Advisor] Triggering analysis after skipped force-update...');
+      setTimeout(() => {
+        debouncedAnalyzeCurrentBoard();
+      }, 100);
+      return;
+    }
+    
     console.log('[Board Advisor] Starting force-update of all data sources...');
     
     // 1. Force-update RunTracker data
@@ -1029,6 +1321,9 @@ async function forceUpdateAllData() {
     // 2. Force-update Board Analyzer data
     console.log('[Board Advisor] Force-updating Board Analyzer data...');
     await loadBoardAnalyzerData(false); // Don't trigger analysis yet
+    
+    // Update last load time
+    analysisState.lastDataLoadTime = now;
     
     // 4. Current map data is already refreshed by the data loading above
     
@@ -1082,11 +1377,11 @@ async function loadAllDataSources(triggerAnalysis = true) {
     
     console.log('[Board Advisor] Data loading completed:', {
       runTracker: results[0]?.status === 'fulfilled' ? 'success' : 'failed',
-      sandbox: results[1]?.status === 'fulfilled' ? 'success' : 'failed', 
-      boardAnalyzer: results[2]?.status === 'fulfilled' ? 'success' : 'failed'
+      boardAnalyzer: results[1]?.status === 'fulfilled' ? 'success' : 'failed'
     });
     
-    // Clear data loading state
+    // Update last load time and clear data loading state
+    analysisState.lastDataLoadTime = Date.now();
     analysisState.isDataLoading = false;
     
     // Only trigger analysis after all data is loaded
@@ -1205,7 +1500,7 @@ async function convertBoardAnalyzerData() {
     const currentBoard = dataCollector.getCurrentBoardData();
     if (!currentBoard) {
       console.log('[Board Advisor] No current board data available, skipping Board Analyzer conversion');
-      return;
+      return false;
     }
     
     const roomId = currentBoard.roomId;
@@ -1215,10 +1510,10 @@ async function convertBoardAnalyzerData() {
     
     if (!boardAnalyzerRunsForRoom || boardAnalyzerRunsForRoom.length === 0) {
       console.log(`[Board Advisor] No Board Analyzer data for current room ${roomId}`);
-      return;
+      return false;
     }
     
-    console.log(`[Board Advisor] Converting ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for room: ${roomId}`);
+    // console.log(`[Board Advisor] Converting ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for room: ${roomId}`);
     
     // Note: We can convert Board Analyzer data even without a current board setup
     // The Board Analyzer data contains its own board setups that we can analyze
@@ -1254,9 +1549,11 @@ async function convertBoardAnalyzerData() {
       }
     });
     
-    console.log(`[Board Advisor] Converted ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for ${roomId}`);
+    // console.log(`[Board Advisor] Converted ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for ${roomId}`);
+    return true;
   } catch (error) {
     console.error('[Board Advisor] Error converting sandbox data:', error);
+    return false;
   }
 }
 
@@ -1264,7 +1561,7 @@ async function convertBoardAnalyzerData() {
 async function loadBoardAnalyzerData(triggerAnalysis = true) {
   try {
     console.log('[Board Advisor] Loading Board Analyzer data...');
-    await convertBoardAnalyzerData();
+    const success = await convertBoardAnalyzerData();
     
     // Only trigger automatic analysis if explicitly requested and panel is open
     if (triggerAnalysis && panelState.isOpen) {
@@ -1274,7 +1571,7 @@ async function loadBoardAnalyzerData(triggerAnalysis = true) {
       }, 200);
     }
     
-    return true;
+    return success;
   } catch (error) {
     console.error('[Board Advisor] Error loading sandbox data:', error);
     return false;
@@ -1443,31 +1740,21 @@ function convertRunTrackerData() {
       const mapName = mapKey.replace('map_', '').replace(/_/g, ' ');
       let roomId = 'unknown';
       
-      // Quick room ID lookup without verbose logging
-      if (mapName.toLowerCase().includes('corym') || mapName.toLowerCase().includes('lounge')) {
+      // Find room ID by map name
+      for (const [id, name] of Object.entries(roomNames)) {
+        if (name.toLowerCase() === mapName.toLowerCase()) {
+          roomId = id;
+          break;
+        }
+      }
+      
+      // If not found by exact name, try partial match
+      if (roomId === 'unknown') {
         for (const [id, name] of Object.entries(roomNames)) {
-          if (id === 'vcor1' || name.toLowerCase().includes('corym') || name.toLowerCase().includes('lounge')) {
+          if (name.toLowerCase().includes(mapName.toLowerCase()) || 
+              mapName.toLowerCase().includes(name.toLowerCase())) {
             roomId = id;
             break;
-          }
-        }
-      } else {
-        // Find room ID by map name
-        for (const [id, name] of Object.entries(roomNames)) {
-          if (name.toLowerCase() === mapName.toLowerCase()) {
-            roomId = id;
-            break;
-          }
-        }
-        
-        // If not found by name, try partial match
-        if (roomId === 'unknown') {
-          for (const [id, name] of Object.entries(roomNames)) {
-            if (name.toLowerCase().includes(mapName.toLowerCase()) || 
-                mapName.toLowerCase().includes(name.toLowerCase())) {
-              roomId = id;
-              break;
-            }
           }
         }
       }
@@ -1488,7 +1775,7 @@ function convertRunTrackerData() {
     // If we found a matching map, process only that one
     if (targetMapKey && runTrackerData.runs[targetMapKey]) {
       const mapData = runTrackerData.runs[targetMapKey];
-      console.log(`[Board Advisor] Processing runs for current room: ${currentRoomId}`);
+      // console.log(`[Board Advisor] Processing runs for current room: ${currentRoomId}`);
       
       // Process speedrun data
       if (mapData.speedrun && Array.isArray(mapData.speedrun)) {
@@ -1772,8 +2059,8 @@ class DataCollector {
               id: Date.now() + index,
               timestamp: Date.now(),
               seed: result.seed,
-              roomId: result.roomId || currentBoard?.roomId || 'rkswrs',
-              mapName: result.mapName || currentBoard?.mapName || 'Sewers',
+              roomId: result.roomId || currentBoard?.roomId || 'unknown',
+              mapName: result.mapName || currentBoard?.mapName || 'Unknown Map',
               completed: result.completed,
               winner: result.completed ? 'nonVillains' : 'villains',
               ticks: result.ticks,
@@ -2400,39 +2687,139 @@ class DataCollector {
 
   getCurrentBoardData() {
     try {
+      const now = Date.now();
+      const CACHE_DURATION = 1000; // Cache for 1 second
+      
+      // Check cache first
+      if (performanceCache.lastRoomDetection && 
+          (now - performanceCache.lastRoomDetectionTime) < CACHE_DURATION) {
+        return performanceCache.lastRoomDetection;
+      }
+      
       const boardContext = globalThis.state.board.getSnapshot().context;
       const playerContext = globalThis.state.player.getSnapshot().context;
       
       // Use same room ID detection logic as RunTracker
       let roomId = 'unknown';
       let mapName = 'unknown';
+      let detectionMethod = 'none';
       
       if (boardContext.selectedMap?.selectedRoom?.id) {
         roomId = boardContext.selectedMap.selectedRoom.id;
         mapName = this.resolveMapName(roomId);
+        detectionMethod = 'selectedMap.selectedRoom.id';
       } else if (boardContext.selectedMap?.id) {
         roomId = boardContext.selectedMap.id;
         mapName = this.resolveMapName(roomId);
+        detectionMethod = 'selectedMap.id';
       } else if (boardContext.area?.id) {
         roomId = boardContext.area.id;
         mapName = this.resolveMapName(roomId);
+        detectionMethod = 'area.id';
       } else if (playerContext.currentRoomId) {
         roomId = playerContext.currentRoomId;
         mapName = this.resolveMapName(roomId);
+        detectionMethod = 'playerContext.currentRoomId (fallback)';
       }
       
-      return {
+      const result = {
         boardSetup: this.serializeBoardSetup(boardContext.boardConfig),
         playerMonsters: playerContext.monsters,
         playerEquipment: playerContext.equips,
         roomId: roomId,
         mapName: mapName,
-        gameStarted: boardContext.gameStarted
+        gameStarted: boardContext.gameStarted,
+        detectionMethod: detectionMethod
       };
+      
+      // Cache the result
+      performanceCache.lastRoomDetection = result;
+      performanceCache.lastRoomDetectionTime = now;
+      
+      return result;
     } catch (error) {
       console.error('[Board Advisor] Error getting current board data:', error);
       return null;
     }
+  }
+
+  // Force refresh room detection by clearing any cached data
+  forceRefreshRoomDetection() {
+    console.log('[Board Advisor] Forcing room detection refresh...');
+    
+    // Clear all performance caches
+    performanceCache.lastRoomDetection = null;
+    performanceCache.lastRoomDetectionTime = 0;
+    performanceCache.roomDetectionCache.clear();
+    performanceCache.patternMatchingCache.clear();
+    performanceCache.dataLoadingCache.clear();
+    
+    // Clear any cached analysis data
+    analysisState.currentAnalysis = null;
+    analysisState.lastBoardHash = null;
+    
+    // Force a fresh room detection
+    const currentBoard = this.getCurrentBoardData();
+    if (currentBoard) {
+      console.log('[Board Advisor] Fresh room detection result:', {
+        roomId: currentBoard.roomId,
+        mapName: currentBoard.mapName,
+        detectionMethod: currentBoard.detectionMethod
+      });
+    }
+    
+    return currentBoard;
+  }
+  
+  // Clear pattern matching cache when board changes significantly
+  clearPatternMatchingCache() {
+    console.log('[Board Advisor] Clearing pattern matching cache due to board changes...');
+    performanceCache.patternMatchingCache.clear();
+  }
+}
+
+// CACHE FIX: Invalidate caches and refresh data after sandbox run saves
+async function invalidateCachesAndRefreshData(roomId) {
+  try {
+    console.log(`[Board Advisor] Invalidating caches for room ${roomId} after sandbox run save...`);
+    
+    // 1. Clear all performance caches
+    dataCollector.forceRefreshRoomDetection();
+    
+    // 2. Clear data loading cache specifically for this room
+    const roomCacheKey = `room_${roomId}`;
+    performanceCache.dataLoadingCache.delete(roomCacheKey);
+    performanceCache.dataLoadingCache.delete('all_rooms');
+    
+    // 3. Clear pattern matching cache for current setup
+    performanceCache.patternMatchingCache.clear();
+    
+    // 4. Clear analysis state to force fresh analysis
+    analysisState.currentAnalysis = null;
+    analysisState.lastBoardHash = null;
+    
+    // 5. Force refresh the data for the current room
+    console.log('[Board Advisor] Force-refreshing data for current room...');
+    await loadBoardAnalyzerData(false); // Don't trigger analysis yet
+    
+    // 6. If panel is open, refresh the display immediately
+    if (panelState.isOpen) {
+      console.log('[Board Advisor] Panel is open, refreshing display with fresh data...');
+      setTimeout(async () => {
+        try {
+          await refreshPanelData();
+          // Trigger fresh analysis with new data
+          debouncedAnalyzeCurrentBoard();
+        } catch (error) {
+          console.warn('[Board Advisor] Error refreshing panel after cache invalidation:', error);
+        }
+      }, 100); // Small delay to ensure data is loaded
+    }
+    
+    console.log('[Board Advisor] Cache invalidation and data refresh completed');
+  } catch (error) {
+    console.error('[Board Advisor] Error during cache invalidation:', error);
+    throw error;
   }
 }
 
@@ -2630,12 +3017,12 @@ class AnalysisEngine {
     }
 
     analysisState.isAnalyzing = true;
-    console.log('[Board Advisor] Starting board analysis...');
+    // console.log('[Board Advisor] Starting board analysis...');
 
     try {
       const currentBoard = this.dataCollector.getCurrentBoardData();
-      console.log('[Board Advisor] Current board data:', currentBoard);
-      console.log('[Board Advisor] Current board setup length:', currentBoard?.boardSetup?.length);
+      // console.log('[Board Advisor] Current board data:', currentBoard);
+      // console.log('[Board Advisor] Current board setup length:', currentBoard?.boardSetup?.length);
       
       if (!currentBoard || !currentBoard.boardSetup.length) {
         // Board is empty - recommend best run from available data
@@ -2643,15 +3030,16 @@ class AnalysisEngine {
         return this.createEmptyBoardRecommendation();
       }
 
+      // Board is not empty - clean up any existing tile highlights
+      cleanupTileHighlights();
+
       const roomId = currentBoard.roomId;
       const roomPatterns = performanceTracker.patterns.get(roomId);
       
       // Only log detailed info if we have patterns or if debugging is needed
       if (roomPatterns && roomPatterns.size > 0) {
         console.log(`[Board Advisor] Looking for patterns for room: ${roomId}`);
-        console.log(`[Board Advisor] Room patterns found:`, roomPatterns.size);
-        console.log(`[Board Advisor] Pattern hashes:`, Array.from(roomPatterns.keys()));
-        console.log(`[Board Advisor] Pattern setups:`, Array.from(roomPatterns.values()).map(p => p.setup));
+        console.log(`[Board Advisor] Room patterns found: ${roomPatterns.size}`);
         
         // Check if we have patterns but they're empty or in old format
         const hasValidPatterns = Array.from(roomPatterns.values()).some(pattern => 
@@ -2737,6 +3125,10 @@ class AnalysisEngine {
         leaderboard: leaderboardComparison,
         timestamp: Date.now()
       };
+      
+      // Update board hash to prevent duplicate analysis
+      analysisState.lastBoardHash = generateBoardHash(currentBoard.boardSetup);
+      analysisState.lastAnalysisTime = Date.now();
 
       console.log('[Board Advisor] Analysis completed');
       console.log('[Board Advisor] Analysis result structure:', {
@@ -2879,7 +3271,14 @@ class AnalysisEngine {
         bestRuns.sort((a, b) => (a.ticks || Infinity) - (b.ticks || Infinity));
       } else {
         console.log('[Board Advisor] Sorting by points (highest first = best)');
-        bestRuns.sort((a, b) => (b.points || 0) - (a.points || 0));
+        bestRuns.sort((a, b) => {
+          // Primary sort: rank points (highest first)
+          const pointsDiff = (b.points || 0) - (a.points || 0);
+          if (pointsDiff !== 0) return pointsDiff;
+          
+          // Secondary sort: ticks (lowest first) as tiebreaker
+          return (a.ticks || Infinity) - (b.ticks || Infinity);
+        });
       }
       
       const bestRun = bestRuns[0];
@@ -2946,6 +3345,7 @@ class AnalysisEngine {
           tier: piece.tier,
           level: piece.level,
           monsterName: piece.monsterName,
+          equipmentName: piece.equipmentName,
           monsterStats: piece.monsterStats
         };
         console.log('[Board Advisor] Converted piece:', convertedPiece);
@@ -2960,6 +3360,13 @@ class AnalysisEngine {
       }) : [];
       
       console.log('[Board Advisor] Converted setup format:', setupManagerFormat);
+      
+      // Highlight recommended tiles on the board
+      if (setupManagerFormat.length > 0) {
+        setTimeout(() => {
+          highlightRecommendedTiles(setupManagerFormat);
+        }, 500); // Small delay to ensure DOM is ready
+      }
       
       return {
         roomId: bestRun.roomId,
@@ -3007,50 +3414,66 @@ class AnalysisEngine {
   async getBestRunsFromAllSources() {
     const allRuns = [];
     
+    // Get current room ID to filter runs
+    const currentBoard = this.dataCollector.getCurrentBoardData();
+    if (!currentBoard || !currentBoard.roomId) {
+      console.warn('[Board Advisor] No current room detected, cannot filter runs');
+      return [];
+    }
+    
+    const currentRoomId = currentBoard.roomId;
+    console.log(`[Board Advisor] Filtering runs for current room: ${currentRoomId} (${currentBoard.mapName})`);
+    
     try {
-      // Get runs from IndexedDB (sandbox data)
+      // Get runs from IndexedDB (sandbox data) - ONLY for current room
       console.log('[Board Advisor] Getting runs from IndexedDB...');
-      const allRoomMetadata = await getAllRoomMetadata();
-      console.log('[Board Advisor] Found', allRoomMetadata.length, 'rooms in IndexedDB');
+      const roomRuns = await getSandboxRunsForRoom(currentRoomId, 50); // Get top 50 runs for current room only
+      console.log(`[Board Advisor] Got ${roomRuns.length} runs from current room ${currentRoomId}`);
       
-      for (const metadata of allRoomMetadata) {
-        try {
-          const roomRuns = await getSandboxRunsForRoom(metadata.roomId, 50); // Get top 50 runs per room
-          console.log(`[Board Advisor] Got ${roomRuns.length} runs from room ${metadata.roomId}`);
-          
-          // Debug: Show ticks range for this room
-          if (roomRuns.length > 0) {
-            const ticks = roomRuns.map(run => run.ticks).filter(t => t > 0).sort((a, b) => a - b);
-            console.log(`[Board Advisor] Room ${metadata.roomId} ticks range: ${ticks[0]} - ${ticks[ticks.length - 1]} (best: ${ticks[0]})`);
-          }
-          
-          allRuns.push(...roomRuns);
-        } catch (error) {
-          console.warn(`[Board Advisor] Could not get runs for room ${metadata.roomId}:`, error);
-        }
+      // Debug: Show ticks range for this room
+      if (roomRuns.length > 0) {
+        const ticks = roomRuns.map(run => run.ticks).filter(t => t > 0).sort((a, b) => a - b);
+        console.log(`[Board Advisor] Room ${currentRoomId} ticks range: ${ticks[0]} - ${ticks[ticks.length - 1]} (best: ${ticks[0]})`);
       }
+      
+      allRuns.push(...roomRuns);
     } catch (error) {
-      console.warn('[Board Advisor] Could not get IndexedDB data:', error);
+      console.warn(`[Board Advisor] Could not get runs for current room ${currentRoomId}:`, error);
     }
     
     try {
-      // Get runs from RunTracker (localStorage)
+      // Get runs from RunTracker (localStorage) - ONLY for current room
       console.log('[Board Advisor] Getting runs from RunTracker...');
       if (window.RunTrackerAPI && window.RunTrackerAPI.getAllRuns) {
         const runTrackerData = window.RunTrackerAPI.getAllRuns();
         if (runTrackerData.runs) {
           let runTrackerCount = 0;
-          Object.values(runTrackerData.runs).forEach(mapRuns => {
-            if (mapRuns.speedrun) {
-              allRuns.push(...mapRuns.speedrun);
-              runTrackerCount += mapRuns.speedrun.length;
+          
+          // Find runs for the current room only
+          const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+          const currentRoomName = roomNames[currentRoomId] || currentRoomId;
+          
+          // Look for map keys that match the current room
+          for (const [mapKey, mapData] of Object.entries(runTrackerData.runs)) {
+            const mapName = mapKey.replace('map_', '').replace(/_/g, ' ');
+            
+            // Check if this map key corresponds to our current room
+            if (mapName.toLowerCase().includes(currentRoomName.toLowerCase()) || 
+                mapKey.includes(currentRoomId)) {
+              console.log(`[Board Advisor] Found RunTracker data for current room: ${mapKey}`);
+              
+              if (mapData.speedrun) {
+                allRuns.push(...mapData.speedrun);
+                runTrackerCount += mapData.speedrun.length;
+              }
+              if (mapData.rank) {
+                allRuns.push(...mapData.rank);
+                runTrackerCount += mapData.rank.length;
+              }
             }
-            if (mapRuns.rank) {
-              allRuns.push(...mapRuns.rank);
-              runTrackerCount += mapRuns.rank.length;
-            }
-          });
-          console.log('[Board Advisor] Got', runTrackerCount, 'runs from RunTracker');
+          }
+          
+          console.log(`[Board Advisor] Got ${runTrackerCount} runs from RunTracker for room ${currentRoomId}`);
         }
       }
     } catch (error) {
@@ -3075,26 +3498,42 @@ class AnalysisEngine {
     const similar = [];
     const exactMatches = [];
     
+    // Create cache key for current setup
+    const setupKey = this.createSetupKey(currentSetup);
+    
+    // Check cache first
+    if (performanceCache.patternMatchingCache.has(setupKey)) {
+      const cached = performanceCache.patternMatchingCache.get(setupKey);
+      console.log(`[Board Advisor] Using cached pattern matching results for setup: ${setupKey}`);
+      return cached;
+    }
+    
     console.log(`[Board Advisor] Finding similar setups for current setup:`, currentSetup);
-    console.log(`[Board Advisor] Current setup details:`, currentSetup.map(p => ({
-      tileIndex: p.tileIndex,
-      monsterName: p.monsterName,
-      equipmentName: p.equipmentName,
-      monsterId: p.monsterId,
-      equipId: p.equipId
-    })));
-    console.log(`[Board Advisor] Current setup full object:`, JSON.stringify(currentSetup, null, 2));
     console.log(`[Board Advisor] Available patterns:`, roomPatterns.size);
     
+    // Pre-filter patterns by monster/equipment combinations for better performance
+    const currentMonsters = new Set(currentSetup.map(p => p.monsterName || p.monsterId));
+    const currentEquipment = new Set(currentSetup.map(p => p.equipmentName || p.equipId));
+    const relevantPatterns = new Map();
+    
     for (const [hash, pattern] of roomPatterns) {
-      console.log(`[Board Advisor] Comparing with pattern hash: ${hash}`);
-      console.log(`[Board Advisor] Pattern setup:`, JSON.stringify(pattern.setup, null, 2));
+      const patternMonsters = new Set(pattern.setup.map(p => p.monsterName || p.monsterId));
+      const patternEquipment = new Set(pattern.setup.map(p => p.equipmentName || p.equipId));
+      
+      // Consider patterns that share at least one monster OR equipment combination
+      if (this.setsIntersect(currentMonsters, patternMonsters) || 
+          this.setsIntersect(currentEquipment, patternEquipment)) {
+        relevantPatterns.set(hash, pattern);
+      }
+    }
+    
+    console.log(`[Board Advisor] Filtered to ${relevantPatterns.size} relevant patterns (from ${roomPatterns.size} total) based on monster/equipment combinations`);
+    
+    for (const [hash, pattern] of relevantPatterns) {
       const similarity = this.calculateSimilarity(currentSetup, pattern.setup);
       
       // Check if this is an exact creature match
       const isExactMatch = this.isExactCreatureMatch(currentSetup, pattern.setup);
-      
-      console.log(`[Board Advisor] Pattern similarity: ${similarity.toFixed(2)}, exact match: ${isExactMatch}, setup:`, pattern.setup);
       
       if (similarity > 0.1) { // 10% similarity threshold (more lenient)
         const setupData = {
@@ -3113,8 +3552,24 @@ class AnalysisEngine {
     }
     
     // Prioritize exact matches first, then other similar setups
-    return [...exactMatches.sort((a, b) => b.similarity - a.similarity), 
-            ...similar.sort((a, b) => b.similarity - a.similarity)];
+    const result = [...exactMatches.sort((a, b) => b.similarity - a.similarity), 
+                   ...similar.sort((a, b) => b.similarity - a.similarity)];
+    
+    // Cache the result
+    performanceCache.patternMatchingCache.set(setupKey, result);
+    
+    return result;
+  }
+  
+  createSetupKey(setup) {
+    return setup.map(p => `${p.tileIndex}-${p.monsterName || p.monsterId}-${p.equipmentName || p.equipId}`).sort().join('|');
+  }
+  
+  setsIntersect(set1, set2) {
+    for (const item of set1) {
+      if (set2.has(item)) return true;
+    }
+    return false;
   }
 
   isExactCreatureMatch(setup1, setup2) {
@@ -3126,9 +3581,31 @@ class AnalysisEngine {
       const piece1 = setup1[i];
       const piece2 = setup2[i];
       
-      // Must have same monster ID and tier
-      if (piece1.monsterId !== piece2.monsterId || 
-          piece1.tier !== piece2.tier) {
+      // Must have same tile, monster name, and equipment name
+      if (piece1.tileIndex !== piece2.tileIndex) {
+        return false;
+      }
+      
+      // Monster matching: prioritize name over ID
+      if (piece1.monsterName && piece2.monsterName) {
+        if (piece1.monsterName !== piece2.monsterName) {
+          return false;
+        }
+      } else if (piece1.monsterId !== piece2.monsterId) {
+        return false;
+      }
+      
+      // Equipment matching: prioritize name over ID
+      if (piece1.equipmentName && piece2.equipmentName) {
+        if (piece1.equipmentName !== piece2.equipmentName) {
+          return false;
+        }
+      } else if (piece1.equipId !== piece2.equipId) {
+        return false;
+      }
+      
+      // Tier matching is flexible - undefined tier matches any tier
+      if (piece1.tier !== undefined && piece2.tier !== undefined && piece1.tier !== piece2.tier) {
         return false;
       }
     }
@@ -3143,6 +3620,7 @@ class AnalysisEngine {
     if (maxLength === 0) return 1;
     
     let matches = 0;
+    let tileMatches = 0;
     const used = new Set();
     
     for (const piece1 of setup1) {
@@ -3153,28 +3631,69 @@ class AnalysisEngine {
         if (this.piecesMatch(piece1, piece2)) {
           matches++;
           used.add(i);
+          
+          // Check if tiles also match for confidence calculation
+          if (piece1.tileIndex === piece2.tileIndex) {
+            tileMatches++;
+          }
           break;
         }
       }
     }
     
-    return matches / maxLength;
+    const baseSimilarity = matches / maxLength;
+    
+    // Reduce confidence if tiles don't match (but still allow the match)
+    const tileMatchRatio = matches > 0 ? tileMatches / matches : 0;
+    const tilePenalty = 1 - tileMatchRatio; // 0 if all tiles match, 1 if no tiles match
+    
+    // Apply tile penalty: reduce similarity by up to 30% for tile mismatches
+    const adjustedSimilarity = baseSimilarity * (1 - (tilePenalty * 0.3));
+    
+    return adjustedSimilarity;
   }
 
   piecesMatch(piece1, piece2) {
-    // Match on tile and monster name (core requirements)
-    const coreMatch = piece1.tileIndex === piece2.tileIndex &&
-                      piece1.monsterName === piece2.monsterName;
+    // Monster matching: prioritize monster name over ID
+    // If either piece has no monster name, fall back to ID matching
+    let monsterMatch = false;
+    if (piece1.monsterName && piece2.monsterName) {
+      // Both have monster names - they must match exactly
+      monsterMatch = piece1.monsterName === piece2.monsterName;
+    } else if (!piece1.monsterName && !piece2.monsterName) {
+      // Neither has monster name - fall back to ID matching
+      monsterMatch = piece1.monsterId === piece2.monsterId;
+    } else {
+      // One has monster name, one doesn't - try ID matching as fallback
+      monsterMatch = piece1.monsterId === piece2.monsterId;
+    }
     
-    if (!coreMatch) return false;
+    if (!monsterMatch) {
+      return false;
+    }
     
-    // Equipment matching is flexible - null equipment matches any equipment
-    const equipmentMatch = !piece1.equipmentName || !piece2.equipmentName || piece1.equipmentName === piece2.equipmentName;
+    // Equipment matching: prioritize equipment name over ID
+    // If either piece has no equipment name, fall back to ID matching
+    let equipmentMatch = false;
+    if (piece1.equipmentName && piece2.equipmentName) {
+      // Both have equipment names - they must match exactly
+      equipmentMatch = piece1.equipmentName === piece2.equipmentName;
+    } else if (!piece1.equipmentName && !piece2.equipmentName) {
+      // Neither has equipment name - fall back to ID matching
+      equipmentMatch = piece1.equipId === piece2.equipId;
+    } else {
+      // One has equipment name, one doesn't - try ID matching as fallback
+      equipmentMatch = piece1.equipId === piece2.equipId;
+    }
+    
+    if (!equipmentMatch) {
+      return false;
+    }
     
     // Tier matching is flexible - undefined tier matches any tier
     const tierMatch = piece1.tier === undefined || piece2.tier === undefined || piece1.tier === piece2.tier;
     
-    return equipmentMatch && tierMatch;
+    return tierMatch;
   }
 
   analyzeSetup(setup, roomPatterns) {
@@ -3625,7 +4144,42 @@ class AnalysisEngine {
       };
     }
 
-    // Filter to only setups with exact creature matches
+    // First, try to find the actual best run for this exact setup
+    const currentRoomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
+    const exactSetupRuns = currentRoomRuns.filter(run => {
+      if (!run.boardSetup || run.boardSetup.length !== currentBoard.boardSetup.length) return false;
+      
+      // Check if all pieces match exactly (monster, equipment, tile)
+      for (let i = 0; i < currentBoard.boardSetup.length; i++) {
+        const currentPiece = currentBoard.boardSetup[i];
+        const runPiece = run.boardSetup[i];
+        
+        if (currentPiece.monsterId !== runPiece.monsterId || 
+            currentPiece.equipId !== runPiece.equipId ||
+            currentPiece.tileIndex !== runPiece.tileIndex) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // If we have exact setup runs, use the best one for prediction
+    if (exactSetupRuns.length > 0) {
+      const bestRun = exactSetupRuns.reduce((best, current) => 
+        (current.ticks < best.ticks) ? current : best
+      );
+      
+      console.log(`[Board Advisor] Found ${exactSetupRuns.length} exact setup runs, using best: ${bestRun.ticks} ticks`);
+      
+      return {
+        confidence: 1.0,
+        predictedTime: bestRun.ticks,
+        predictedPoints: bestRun.rankPoints || null,
+        successRate: 100
+      };
+    }
+
+    // Fallback to pattern-based prediction for similar setups
     const exactMatches = similarSetups.filter(similar => {
       const currentSetup = currentBoard.boardSetup;
       const similarSetup = similar.pattern.setup;
@@ -3670,8 +4224,20 @@ class AnalysisEngine {
       const weight = similar.similarity;
       totalWeight += weight;
       
-      if (similar.pattern.averageTime > 0) {
-        weightedTime += similar.pattern.averageTime * weight;
+      // For predictions, prioritize best time over average time
+      // This gives more accurate predictions for tile-specific setups
+      let timeToUse = similar.pattern.averageTime;
+      
+      // If we have runs in this pattern, use the best time instead of average
+      if (similar.pattern.runs && similar.pattern.runs.length > 0) {
+        const bestTime = Math.min(...similar.pattern.runs.map(r => r.ticks || Infinity));
+        if (bestTime !== Infinity) {
+          timeToUse = bestTime;
+        }
+      }
+      
+      if (timeToUse > 0) {
+        weightedTime += timeToUse * weight;
       }
       
       if (similar.pattern.averagePoints > 0) {
@@ -3856,6 +4422,9 @@ function closePanel() {
   }
   panelState.isOpen = false;
   
+  // Clean up tile highlights when panel closes
+  cleanupTileHighlights();
+  
   // Stop state-based refresh when panel closes
   stopStateRefresh();
   
@@ -3940,7 +4509,6 @@ function createPanelHeader() {
     display: flex;
     gap: 8px;
   `;
-  
   
   // Close button
   const closeBtn = document.createElement('button');
@@ -4645,6 +5213,7 @@ function debouncedAnalyzeCurrentBoard() {
   // Clear any existing timeout
   if (analysisTimeout) {
     clearTimeout(analysisTimeout);
+    analysisTimeout = null;
   }
   
   // Check if we're already analyzing or if it's too soon since last analysis
@@ -4653,19 +5222,33 @@ function debouncedAnalyzeCurrentBoard() {
     return;
   }
   
+  // Check if we have a pending analysis request for the same board state
+  const currentBoard = dataCollector.getCurrentBoardData();
+  const currentBoardHash = currentBoard ? generateBoardHash(currentBoard.boardSetup) : null;
+  
+  if (pendingAnalysisRequest === currentBoardHash) {
+    console.log('[Board Advisor] Analysis already pending for this board state, skipping');
+    return;
+  }
+  
   if (now - lastAnalysisTime < ANALYSIS_DEBOUNCE_TIME) {
     console.log('[Board Advisor] Analysis too soon, debouncing request');
+    pendingAnalysisRequest = currentBoardHash;
     analysisTimeout = setTimeout(() => {
+      pendingAnalysisRequest = null;
       debouncedAnalyzeCurrentBoard();
     }, ANALYSIS_DEBOUNCE_TIME - (now - lastAnalysisTime));
     return;
   }
   
   // Proceed with analysis
-  analyzeCurrentBoard();
+  pendingAnalysisRequest = currentBoardHash;
+  analyzeCurrentBoard().finally(() => {
+    pendingAnalysisRequest = null;
+  });
 }
 
-function analyzeCurrentBoard() {
+async function analyzeCurrentBoard() {
   if (!config.enabled) {
     updatePanelStatus('Board Advisor is disabled. Enable it in the config panel.', 'error');
     return Promise.resolve(null);
@@ -4674,6 +5257,34 @@ function analyzeCurrentBoard() {
   if (analysisState.isAnalyzing) {
     console.log('[Board Advisor] Analysis already in progress, skipping');
     return Promise.resolve(null);
+  }
+
+  // Check if we're analyzing the same board state
+  const currentBoard = dataCollector.getCurrentBoardData();
+  const currentBoardHash = currentBoard ? generateBoardHash(currentBoard.boardSetup) : null;
+  
+  // Check if RunTracker data has been updated since last analysis
+  let shouldForceAnalysis = false;
+  if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
+    const runTrackerData = window.RunTrackerAPI.getAllRuns();
+    const runTrackerLastUpdated = runTrackerData?.lastUpdated || 0;
+    const lastAnalysisTime = analysisState.lastAnalysisTime || 0;
+    
+    if (runTrackerLastUpdated > lastAnalysisTime) {
+      console.log('[Board Advisor] RunTracker data updated since last analysis, forcing refresh');
+      shouldForceAnalysis = true;
+    }
+  }
+  
+  if (currentBoardHash && currentBoardHash === analysisState.lastBoardHash && !shouldForceAnalysis) {
+    console.log('[Board Advisor] Board state unchanged, skipping duplicate analysis');
+    return Promise.resolve(analysisState.currentAnalysis);
+  }
+
+  // If we're forcing analysis due to RunTracker data update, refresh the data first
+  if (shouldForceAnalysis) {
+    console.log('[Board Advisor] Refreshing RunTracker data before analysis...');
+    await loadRunTrackerData(false); // Don't trigger analysis yet
   }
 
   lastAnalysisTime = Date.now();
@@ -4841,7 +5452,6 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
 async function updatePanelWithAnalysis(analysis) {
   console.log('[Board Advisor] updatePanelWithAnalysis called with:', analysis);
   console.log('[Board Advisor] Recommendations in analysis:', analysis.recommendations?.length || 0);
-  console.log('[Board Advisor] Starting updatePanelWithAnalysis function...');
   
   const analysisDisplay = document.getElementById('analysis-display');
   const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -4855,10 +5465,8 @@ async function updatePanelWithAnalysis(analysis) {
   
   // Get room name for display
   const roomName = globalThis.state?.utils?.ROOM_NAME?.[analysis.roomId] || analysis.roomId;
-  console.log('[Board Advisor] Room name:', roomName);
     
   // Update analysis section with comprehensive information
-  console.log('[Board Advisor] About to create analysis HTML...');
   let analysisHTML = `
     <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #98C379;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
@@ -5031,14 +5639,11 @@ async function updatePanelWithAnalysis(analysis) {
   }
   
   analysisDisplay.innerHTML = analysisHTML;
-  console.log('[Board Advisor] Analysis HTML set, length:', analysisHTML.length);
   
   // Update separate recommendation sections
   
   // Update recommendations section with enhanced display (filtered by focus area)
-  console.log('[Board Advisor] About to process recommendations, count:', analysis.recommendations?.length || 0);
   if (analysis.recommendations && analysis.recommendations.length > 0) {
-    console.log('[Board Advisor] Processing recommendations...');
     // Filter recommendations by focus area
     const filteredRecommendations = analysis.recommendations.filter(rec => {
       // Always show leaderboard recommendations
@@ -5046,7 +5651,6 @@ async function updatePanelWithAnalysis(analysis) {
       // Show recommendations that match the current focus area or are for both
       return rec.focusArea === config.focusArea || rec.focusArea === 'both' || !rec.focusArea;
     });
-    console.log('[Board Advisor] Filtered recommendations count:', filteredRecommendations.length);
     
     // Store setup data in global variable for button access
     window.boardAdvisorSetups = [];
@@ -5056,10 +5660,8 @@ async function updatePanelWithAnalysis(analysis) {
         rec.setupIndex = index; // Add index to recommendation object
       }
     });
-    console.log('[Board Advisor] Stored', window.boardAdvisorSetups.length, 'setups in global variable');
     
     // Group recommendations by type for better organization
-    console.log('[Board Advisor] About to group recommendations...');
     const groupedRecs = {
       leaderboard: [],
       improvement: [],
@@ -5069,7 +5671,6 @@ async function updatePanelWithAnalysis(analysis) {
     };
     
     filteredRecommendations.forEach(rec => {
-      console.log('[Board Advisor] Processing recommendation type:', rec.type);
       if (rec.type === 'leaderboard') {
         groupedRecs.leaderboard.push(rec);
       } else if (rec.type === 'improvement') {
@@ -5082,7 +5683,6 @@ async function updatePanelWithAnalysis(analysis) {
         groupedRecs.other.push(rec);
       }
     });
-    console.log('[Board Advisor] Grouped recommendations:', groupedRecs);
     
     let recsHTML = '';
     
@@ -5103,9 +5703,7 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Improvement recommendations
-    console.log('[Board Advisor] About to process improvement recommendations, count:', groupedRecs.improvement.length);
     if (groupedRecs.improvement.length > 0) {
-      console.log('[Board Advisor] Processing improvement recommendations...');
       recsHTML += '<div style="margin-bottom: 12px;">';
       recsHTML += '<div style="font-weight: bold; color: #E06C75; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
       recsHTML += '<span>⚡</span><span>Performance Improvements</span></div>';
@@ -5162,7 +5760,6 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Positioning recommendations
-    console.log('[Board Advisor] About to process positioning recommendations, count:', groupedRecs.positioning.length);
     if (groupedRecs.positioning.length > 0) {
       recsHTML += '<div style="margin-bottom: 12px;">';
       recsHTML += '<div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
@@ -5181,7 +5778,6 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Equipment recommendations
-    console.log('[Board Advisor] About to process equipment recommendations, count:', groupedRecs.equipment.length);
     if (groupedRecs.equipment.length > 0) {
       recsHTML += '<div style="margin-bottom: 12px;">';
       recsHTML += '<div style="font-weight: bold; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
@@ -5213,7 +5809,6 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Other recommendations
-    console.log('[Board Advisor] About to process other recommendations, count:', groupedRecs.other.length);
     if (groupedRecs.other.length > 0) {
       recsHTML += '<div style="margin-bottom: 12px;">';
       recsHTML += '<div style="font-weight: bold; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
@@ -5230,7 +5825,6 @@ async function updatePanelWithAnalysis(analysis) {
       recsHTML += '</div>';
     }
     
-    console.log('[Board Advisor] About to set recommendations HTML, length:', recsHTML?.length || 0);
     try {
       recommendationsDisplay.innerHTML = recsHTML;
       console.log('[Board Advisor] Recommendations HTML set successfully');
@@ -5945,11 +6539,28 @@ if (!window.BoardAdvisorAPI) {
             Object.keys(globalThis.state.utils.ROOMS).forEach(roomId => {
               roomIds.push(roomId);
             });
+            console.log(`[Board Advisor] Found ${roomIds.length} rooms from game state for clearing`);
           } else {
-            roomIds.push('rkswrs', 'vcor1', 'dungeon', 'forest', 'cave', 'tower', 'castle', 'abbane', 'kof', 'molse', 'carlin');
+            console.warn('[Board Advisor] No game state available for room detection, skipping room-specific clearing');
+            // Instead of hardcoded fallback, clear all existing object stores
+            const existingStores = Array.from(sandboxDB.objectStoreNames);
+            const roomStores = existingStores.filter(storeName => storeName.startsWith('room_'));
+            roomStores.forEach(storeName => {
+              const roomId = storeName.replace('room_', '');
+              roomIds.push(roomId);
+            });
+            console.log(`[Board Advisor] Found ${roomIds.length} existing room stores to clear`);
           }
         } catch (error) {
-          roomIds.push('rkswrs', 'vcor1', 'dungeon', 'forest', 'cave', 'tower', 'castle', 'abbane', 'kof', 'molse', 'carlin');
+          console.warn('[Board Advisor] Error getting room IDs, using existing stores:', error);
+          // Fallback: clear all existing room stores
+          const existingStores = Array.from(sandboxDB.objectStoreNames);
+          const roomStores = existingStores.filter(storeName => storeName.startsWith('room_'));
+          roomStores.forEach(storeName => {
+            const roomId = storeName.replace('room_', '');
+            roomIds.push(roomId);
+          });
+          console.log(`[Board Advisor] Using ${roomIds.length} existing room stores for clearing`);
         }
         
         // Clear each room store
@@ -6169,8 +6780,17 @@ exports = {
     performanceTracker.patterns.clear();
     performanceTracker.optimalSetups.clear();
     performanceTracker.roomStats.clear();
+    
+  // CACHE FIX: Also clear all performance caches
+  dataCollector.forceRefreshRoomDetection();
+  performanceCache.dataLoadingCache.clear();
+  // Don't clear pattern matching cache on refresh - it's expensive to rebuild
+  // performanceCache.patternMatchingCache.clear();
+  analysisState.currentAnalysis = null;
+  analysisState.lastBoardHash = null;
+    
     await loadAllDataSources(false); // Don't trigger analysis automatically
-    console.log('[Board Advisor] Data refreshed from all sources');
+    console.log('[Board Advisor] Data refreshed from all sources with cache invalidation');
   },
   clearData: () => {
     performanceTracker.runs = [];
@@ -6178,6 +6798,47 @@ exports = {
     performanceTracker.optimalSetups.clear();
     performanceTracker.roomStats.clear();
     console.log('[Board Advisor] Historical data cleared');
+  },
+  
+  // CACHE FIX: Manual cache invalidation function
+  invalidateCaches: async (roomId = null) => {
+    try {
+      console.log('[Board Advisor] Manual cache invalidation requested...');
+      
+      if (roomId) {
+        // Invalidate caches for specific room
+        await invalidateCachesAndRefreshData(roomId);
+      } else {
+        // Invalidate all caches
+        dataCollector.forceRefreshRoomDetection();
+        performanceCache.dataLoadingCache.clear();
+        // Only clear pattern matching cache when explicitly requested
+        performanceCache.patternMatchingCache.clear();
+        analysisState.currentAnalysis = null;
+        analysisState.lastBoardHash = null;
+        
+        // Refresh data from all sources
+        await loadAllDataSources(false);
+        
+        // If panel is open, refresh display
+        if (panelState.isOpen) {
+          setTimeout(async () => {
+            try {
+              await refreshPanelData();
+              debouncedAnalyzeCurrentBoard();
+            } catch (error) {
+              console.warn('[Board Advisor] Error refreshing panel after manual cache invalidation:', error);
+            }
+          }, 100);
+        }
+      }
+      
+      console.log('[Board Advisor] Manual cache invalidation completed');
+      return true;
+    } catch (error) {
+      console.error('[Board Advisor] Error during manual cache invalidation:', error);
+      return false;
+    }
   },
   cleanup: () => {
     // Cleanup function for when mod is disabled

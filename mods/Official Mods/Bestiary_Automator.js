@@ -54,6 +54,7 @@ const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const AUTOMATION_STATES = {
   PROCESSING_DEFEAT: 'processing_defeat',  // Handling defeat toast
   PROCESSING_BATTLE: 'processing_battle',  // Handling battle ongoing toast
+  PROCESSING_SOMETHING_WRONG: 'processing_something_wrong',  // Handling "Something went wrong" toast
   COUNTDOWN: 'countdown'                   // Waiting for countdown to complete
 };
 
@@ -1006,6 +1007,14 @@ const subscribeToGameState = () => {
                 return; // Exit early since we found a battle ongoing toast
               }
               
+              // Check for "Something went wrong" toasts
+              if (isSomethingWrongToast(node)) {
+                console.log('[Bestiary Automator] Something went wrong toast detected via MutationObserver!');
+                // Process immediately without debouncing
+                processSomethingWrongToast();
+                return; // Exit early since we found a something wrong toast
+              }
+              
               // Also check child elements for toasts
               const defeatToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight:has(img[alt="no"])');
               if (defeatToast) {
@@ -1026,6 +1035,14 @@ const subscribeToGameState = () => {
                 console.log('[Bestiary Automator] Battle ongoing toast found in child elements via MutationObserver!');
                 const toastText = getToastText(battleToast);
                 processBattleOngoingToast(toastText);
+                return;
+              }
+              
+              // Check child elements for "Something went wrong" toasts
+              const somethingWrongToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
+              if (somethingWrongToast && somethingWrongToast.textContent.includes('Something went wrong')) {
+                console.log('[Bestiary Automator] Something went wrong toast found in child elements via MutationObserver!');
+                processSomethingWrongToast();
                 return;
               }
             }
@@ -1152,6 +1169,40 @@ const processBattleOngoingToast = async (toastText) => {
   return true;
 };
 
+// Simplified something wrong toast processor
+const processSomethingWrongToast = async () => {
+  if (!canTransitionTo(AUTOMATION_STATES.PROCESSING_SOMETHING_WRONG)) {
+    console.log('[Bestiary Automator] Cannot process something wrong toast, system is busy');
+    return false;
+  }
+  
+  setState(AUTOMATION_STATES.PROCESSING_SOMETHING_WRONG);
+  console.log('[Bestiary Automator] Something went wrong toast detected!');
+  
+  // Check and finish tasks immediately when something wrong is detected
+  handleTaskFinishing();
+  
+  console.log('[Bestiary Automator] Something went wrong toast detected, waiting 1s then restarting...');
+  await sleep(1000);
+  
+  // Click start button
+  const startButton = findStartButton();
+  if (startButton) {
+    startButton.click();
+    console.log('[Bestiary Automator] Start button clicked after something went wrong');
+  } else {
+    console.log('[Bestiary Automator] Start button not found after something went wrong');
+  }
+  
+  // Reset state after 3 seconds
+  setTimeout(() => {
+    setState(null);
+    console.log('[Bestiary Automator] Something wrong processing complete');
+  }, 3000);
+  
+  return true;
+};
+
 // Helper function to dismiss defeat toast after successful game start
 const dismissDefeatToast = () => {
   try {
@@ -1263,6 +1314,28 @@ const isBattleOngoingToast = (element) => {
     return toastText.includes('Battle still ongoing') && toastText.includes('ms diff');
   } catch (error) {
     console.error('[Bestiary Automator] Error checking if element is battle ongoing toast:', error);
+    return false;
+  }
+};
+
+// Helper function to check if an element is a "Something went wrong" toast
+const isSomethingWrongToast = (element) => {
+  try {
+    // Check if the element has the toast structure
+    if (!element.classList || !element.classList.contains('widget-bottom')) {
+      return false;
+    }
+    
+    // Check for the text content indicating something went wrong
+    const textElement = element.querySelector('.text-left');
+    if (!textElement) {
+      return false;
+    }
+    
+    const toastText = textElement.textContent;
+    return toastText.includes('Something went wrong');
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking if element is something wrong toast:', error);
     return false;
   }
 };

@@ -2847,7 +2847,7 @@
             }
         }
         
-        // Find the Dragon Plant button
+        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
         let dragonPlantButton = null;
         
         for (const session of autoplaySessions) {
@@ -2859,12 +2859,22 @@
                 for (const button of allButtons) {
                     // Look for the Dragon Plant game button with specific item ID
                     // Exclude the settings checkbox by checking it doesn't have role="checkbox"
-                    const img = button.querySelector('img[alt="37022"]');
                     const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
                     
+                    // First try Dragon Plant (ID 37022)
+                    let img = button.querySelector('img[alt="37022"]');
                     if (img && isNotCheckbox) {
                         dragonPlantButton = button;
                         break;
+                    }
+                    
+                    // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
+                    if (!dragonPlantButton) {
+                        img = button.querySelector('img[alt="28689"]');
+                        if (img && isNotCheckbox) {
+                            dragonPlantButton = button;
+                            break;
+                        }
                     }
                 }
             }
@@ -2937,19 +2947,29 @@
         const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
         if (autoplaySessions.length === 0) return;
         
-        // Find the Dragon Plant button
+        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
         let dragonPlantButton = null;
         for (const session of autoplaySessions) {
             const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
             if (widgetBottom) {
                 const allButtons = widgetBottom.querySelectorAll('button');
                 for (const button of allButtons) {
-                    const img = button.querySelector('img[alt="37022"]');
                     const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
                     
+                    // First try Dragon Plant (ID 37022)
+                    let img = button.querySelector('img[alt="37022"]');
                     if (img && isNotCheckbox) {
                         dragonPlantButton = button;
                         break;
+                    }
+                    
+                    // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
+                    if (!dragonPlantButton) {
+                        img = button.querySelector('img[alt="28689"]');
+                        if (img && isNotCheckbox) {
+                            dragonPlantButton = button;
+                            break;
+                        }
                     }
                 }
                 if (dragonPlantButton) break;
