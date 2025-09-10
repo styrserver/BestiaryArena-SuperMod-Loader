@@ -13,6 +13,10 @@ let DEBUG_MODE = false;
 const OUTFITER_STORAGE_KEY = 'outfiter-enabled';
 let OUTFITER_ENABLED = false;
 
+// Global Welcome Page System
+const WELCOME_STORAGE_KEY = 'welcome-enabled';
+let WELCOME_ENABLED = true;
+
 // Keep original console.log for popup use
 const originalConsoleLog = console.log;
 
@@ -148,6 +152,62 @@ async function updateOutfiterMode(enabled) {
   originalConsoleLog('Outfiter mode:', enabled ? 'enabled' : 'disabled');
 }
 
+// Function to enable welcome page
+async function enableWelcomePage() {
+  WELCOME_ENABLED = true;
+  
+  // Save to localStorage (shared with content script)
+  localStorage.setItem(WELCOME_STORAGE_KEY, 'true');
+  
+  // Send message to content script to update welcome flag
+  try {
+    const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
+      // Send to content script
+      await window.browserAPI.tabs.sendMessage(tab.id, {
+        action: 'updateWelcomeMode',
+        enabled: true
+      });
+      
+      // Also send to page context
+      if (window.browserAPI.scripting && window.browserAPI.scripting.executeScript) {
+        // Chrome Manifest V3 - use scripting API
+        await window.browserAPI.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            window.WELCOME_ENABLED = true;
+            localStorage.setItem('welcome-enabled', 'true');
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateWelcomeMode',
+              enabled: true
+            }, '*');
+          }
+        });
+      } else if (window.browserAPI.tabs && window.browserAPI.tabs.executeScript) {
+        // Firefox fallback - use tabs API
+        await window.browserAPI.tabs.executeScript(tab.id, {
+          code: `
+            window.WELCOME_ENABLED = true;
+            localStorage.setItem('welcome-enabled', 'true');
+            window.postMessage({
+              from: 'BESTIARY_EXTENSION',
+              action: 'updateWelcomeMode',
+              enabled: true
+            }, '*');
+          `
+        });
+      }
+    }
+  } catch (error) {
+    originalConsoleLog('Could not send welcome mode to content script:', error);
+  }
+  
+  // Always show welcome mode changes
+  originalConsoleLog('Welcome page enabled');
+}
+
+
 // Function to load debug mode from storage
 async function loadDebugMode() {
   try {
@@ -191,6 +251,20 @@ async function loadOutfiterMode() {
   } catch (error) {
     originalConsoleLog.error('Failed to load outfiter mode:', error);
     OUTFITER_ENABLED = false;
+  }
+}
+
+// Function to load welcome page mode from storage
+async function loadWelcomeMode() {
+  try {
+    const welcomeEnabled = localStorage.getItem(WELCOME_STORAGE_KEY);
+    WELCOME_ENABLED = welcomeEnabled !== 'false'; // Default to true if not set
+    
+    // Always show welcome mode loading
+    originalConsoleLog('Welcome page mode loaded:', WELCOME_ENABLED ? 'enabled' : 'disabled');
+  } catch (error) {
+    originalConsoleLog.error('Failed to load welcome page mode:', error);
+    WELCOME_ENABLED = true; // Default to enabled on error
   }
 }
 
@@ -300,6 +374,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     originalConsoleLog('Outfiter toggle not found in DOM');
   }
   
+  // Load welcome page mode and set up button
+  await loadWelcomeMode();
+  
+  // Set up enable welcome button event listener
+  const enableWelcomeBtn = document.getElementById('enable-welcome-btn');
+  if (enableWelcomeBtn) {
+    originalConsoleLog('Enable welcome button found, setting up event listener');
+    
+    // Add click animation
+    enableWelcomeBtn.addEventListener('mousedown', () => {
+      enableWelcomeBtn.style.transform = 'scale(0.95)';
+      enableWelcomeBtn.style.background = '#e6d15c';
+    });
+    
+    enableWelcomeBtn.addEventListener('mouseup', () => {
+      enableWelcomeBtn.style.transform = 'scale(1)';
+      enableWelcomeBtn.style.background = 'var(--theme-accent, #ffe066)';
+    });
+    
+    enableWelcomeBtn.addEventListener('mouseleave', () => {
+      enableWelcomeBtn.style.transform = 'scale(1)';
+      enableWelcomeBtn.style.background = 'var(--theme-accent, #ffe066)';
+    });
+    
+    enableWelcomeBtn.addEventListener('click', () => {
+      originalConsoleLog('Enable welcome button clicked');
+      enableWelcomePage();
+    });
+  } else {
+    originalConsoleLog('Enable welcome button not found in DOM');
+  }
+  
   // Update version display
   await updateVersionDisplay();
   
@@ -324,6 +430,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('focus', () => {
     loadLocalMods();
   });
+  
 });
 
 // Track whether we're currently loading mods to prevent loops
@@ -371,7 +478,6 @@ function renderLocalMods(mods) {
     'Better Highscores.js',
     'Better Hy\'genie.js',
     'Better Yasir.js',
-    'Board Advisor.js',
     'Configurator.js',
     'Cyclopedia.js',
     'DashboardButton.js',
@@ -385,6 +491,7 @@ function renderLocalMods(mods) {
     'inventory-tooltips.js',
     'DashboardButton.js',
     'RunTracker.js',
+    'Welcome.js',
     'Outfiter.js'
   ];
 

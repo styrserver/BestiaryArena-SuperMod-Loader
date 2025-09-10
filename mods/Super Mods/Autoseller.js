@@ -1142,10 +1142,8 @@
             // Update widget label if it exists
             updateAutosellerSessionWidget();
             
-            // Immediately control the game's Dragon Plant checkbox
-            setTimeout(() => {
-                controlDragonPlantCheckbox();
-            }, 100);
+            // Sync to autoplay session checkbox immediately
+            syncToAutoplaySession(checkbox.checked);
             
             // If Autoplant is being checked, uncheck Autosell
             if (checkbox.checked) {
@@ -1541,10 +1539,10 @@
                             console.log('[Autoseller] Monster name:', monster?.metadata?.name || monster?.name || 'unknown');
                             console.log('[Autoseller] Ignore list:', ignoreList);
                             
-                            // If ignore list is empty, devour all monsters
-                            if (ignoreList.length === 0) {
-                                console.log('[Autoseller] Ignore list is empty, devouring all monsters');
-                                return true; // Devour all creatures when ignore list is empty
+                            // Keep creatures with high genes (80+)
+                            if (monster.totalGenes >= 80) {
+                                console.log('[Autoseller] Keeping monster (high genes):', monster.totalGenes);
+                                return false; // Keep creatures with 80+ genes
                             }
                             
                             // Check if monster is in ignore list
@@ -1554,8 +1552,8 @@
                                 return false; // Keep creatures in ignore list (DON'T devour them)
                             }
                             
-                            console.log('[Autoseller] Devouring monster (not in ignore list):', monsterName);
-                            return true; // Devour creatures NOT in ignore list
+                            console.log('[Autoseller] Devouring monster (low genes and not in ignore list):', monsterName, 'genes:', monster.totalGenes);
+                            return true; // Devour creatures with low genes and not in ignore list
                         },
                     };
                 },
@@ -1703,6 +1701,9 @@
                 [opts.persistKey + 'GenesMax']: parseInt(inputMax.value, 10),
                 [opts.persistKey + 'MinCount']: parseInt(minCountInput.value, 10)
             });
+            
+            // Update widget visibility when checkbox state changes
+            createAutosellerSessionWidget();
             
             // If Autosell is being checked, uncheck Autoplant
             if (opts.persistKey === 'autosell' && checkbox.checked) {
@@ -2699,7 +2700,7 @@
                 }
                 
                 debounceTimer = setTimeout(() => {
-                    controlDragonPlantCheckbox();
+                    syncFromAutoplaySession();
                 }, OBSERVER_DEBOUNCE_MS);
             });
             
@@ -2710,40 +2711,106 @@
                 attributeFilter: ['data-state', 'aria-checked']
             });
             
+            // Add click event listener for immediate response to user clicks
+            document.addEventListener('click', handleDragonPlantClick);
+            
             console.log(`[${modName}] Dragon Plant observer setup complete`);
         } else {
             console.warn(`[${modName}][WARN][setupDragonPlantObserver] MutationObserver not available`);
         }
     }
     
-    function controlDragonPlantCheckbox() {
-        // Find the game's Dragon Plant checkbox in autoplay session
+    // Simple sync functions that read/write directly to localStorage
+    function syncToAutoplaySession(shouldBeEnabled) {
         const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        let gameCheckbox = null;
         
         for (const session of autoplaySessions) {
             const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
             if (widgetBottom) {
-                // Look for the settings checkbox (role="checkbox")
                 const settingsCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
                 if (settingsCheckbox) {
-                    gameCheckbox = settingsCheckbox;
+                    const isCurrentlyChecked = settingsCheckbox.getAttribute('aria-checked') === 'true';
+                    if (shouldBeEnabled !== isCurrentlyChecked) {
+                        console.log(`[${modName}] Syncing autoplay session to ${shouldBeEnabled ? 'enabled' : 'disabled'}`);
+                        settingsCheckbox.click();
+                    }
                     break;
                 }
             }
         }
+    }
+    
+    function syncFromAutoplaySession() {
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
         
-        if (!gameCheckbox) return;
-        
-        const settings = getSettings();
-        const shouldBeChecked = settings.autoplantChecked;
-        const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
-        
-        // Only change state if it differs from our setting
-        if (shouldBeChecked !== isCurrentlyChecked) {
-            console.log(`[${modName}] Controlling Dragon Plant settings: ${shouldBeChecked ? 'enabling' : 'disabling'}`);
-            gameCheckbox.click();
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                const settingsCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+                if (settingsCheckbox) {
+                    const isCurrentlyChecked = settingsCheckbox.getAttribute('aria-checked') === 'true';
+                    const currentSettings = getSettings();
+                    
+                    if (currentSettings.autoplantChecked !== isCurrentlyChecked) {
+                        console.log(`[${modName}] Syncing mod settings from autoplay session: ${isCurrentlyChecked ? 'enabled' : 'disabled'}`);
+                        setSettings({ autoplantChecked: isCurrentlyChecked });
+                        
+                        // Update mod checkbox
+                        const modCheckbox = document.querySelector('#autoplant-checkbox');
+                        if (modCheckbox) {
+                            modCheckbox.checked = isCurrentlyChecked;
+                            window.autoplantCheckbox = modCheckbox;
+                        }
+                        
+                        // Handle mutual exclusivity when autoplant is enabled
+                        if (isCurrentlyChecked) {
+                            // If autoplant is being enabled, disable autosell
+                            const currentSettings = getSettings();
+                            if (currentSettings.autosellChecked) {
+                                console.log('[Autoseller] Autoplant enabled via autoplay session, disabling Autosell');
+                                setSettings({ autosellChecked: false });
+                                
+                                // Also update the DOM checkbox if it exists (when settings modal is open)
+                                const autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
+                                if (autosellCheckbox) {
+                                    autosellCheckbox.checked = false;
+                                }
+                            }
+                        }
+                        
+                        // Update status and filter
+                        if (typeof updateAutoplantStatus === 'function') {
+                            updateAutoplantStatus();
+                        }
+                        updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                        createAutosellerSessionWidget();
+                        updateAutosellerSessionWidget();
+                    }
+                    break;
+                }
+            }
         }
+    }
+    
+    function handleDragonPlantClick(event) {
+        // Check if the clicked element is a Dragon Plant checkbox in autoplay session
+        const target = event.target.closest('button[role="checkbox"]');
+        if (!target) return;
+        
+        // Check if this is in an autoplay session
+        const autoplaySession = target.closest('div[data-autosetup]');
+        if (!autoplaySession) return;
+        
+        // Check if this is the Dragon Plant checkbox (look for the checkbox in widget bottom)
+        const widgetBottom = autoplaySession.querySelector('.widget-bottom[data-minimized="false"]');
+        if (!widgetBottom || !widgetBottom.contains(target)) return;
+        
+        console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
+        
+        // Use a small delay to let the game update the checkbox state first, then sync
+        setTimeout(() => {
+            syncFromAutoplaySession();
+        }, 50);
     }
     
     function stopDragonPlantObserver() {
@@ -2752,6 +2819,9 @@
             dragonPlantObserver = null;
             console.log(`[${modName}] Dragon Plant observer stopped`);
         }
+        
+        // Remove click event listener
+        document.removeEventListener('click', handleDragonPlantClick);
     }
     
     // =======================

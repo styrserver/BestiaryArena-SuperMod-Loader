@@ -13,7 +13,7 @@ console.log('Board Advisor Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
-  enabled: false,
+  enabled: true,
   analysisDepth: 50, // Number of simulations to run for analysis
   learningEnabled: true, // Enable pattern learning from successful runs
   recommendationThreshold: 0.1, // Minimum improvement threshold for recommendations
@@ -5354,6 +5354,9 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
   // Get room name for display
   const roomName = globalThis.state?.utils?.ROOM_NAME?.[currentBoard.roomId] || currentBoard.roomId;
   
+  // Check if board is empty
+  const isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
+  
   // Check if we have historical data for this room
   const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
   const hasHistoricalData = roomRuns.length > 0;
@@ -5370,7 +5373,17 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
       </div>
     </div>
     
-    ${hasHistoricalData ? `
+    ${isBoardEmpty ? `
+    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+      <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <span>🎯</span>
+        <span>Empty Board</span>
+      </div>
+      <div style="font-size: 11px; color: #ABB2BF;">
+        Place creatures on the board to get analysis and recommendations for your setup.
+      </div>
+    </div>
+    ` : hasHistoricalData ? `
     <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
       <div style="font-weight: bold; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>📊</span>
@@ -5465,6 +5478,9 @@ async function updatePanelWithAnalysis(analysis) {
   
   // Get room name for display
   const roomName = globalThis.state?.utils?.ROOM_NAME?.[analysis.roomId] || analysis.roomId;
+  
+  // Check if board is empty
+  const isBoardEmpty = !analysis.currentBoard || !analysis.currentBoard.boardSetup || analysis.currentBoard.boardSetup.length === 0;
     
   // Update analysis section with comprehensive information
   let analysisHTML = `
@@ -5625,17 +5641,31 @@ async function updatePanelWithAnalysis(analysis) {
       </div>
     `;
   } else {
-    analysisHTML += `
-      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-        <div style="font-weight: bold; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-          <span>⚠️</span>
-          <span>No Historical Data</span>
+    if (isBoardEmpty) {
+      analysisHTML += `
+        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+          <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>🎯</span>
+            <span>Empty Board</span>
+          </div>
+          <div style="font-size: 11px; color: #ABB2BF;">
+            Place creatures on the board to get analysis and recommendations for your setup.
+          </div>
         </div>
-        <div style="font-size: 11px; color: #ABB2BF;">
-          Play some games with this setup to build data for better analysis and recommendations.
+      `;
+    } else {
+      analysisHTML += `
+        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+          <div style="font-weight: bold; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>⚠️</span>
+            <span>No Historical Data</span>
+          </div>
+          <div style="font-size: 11px; color: #ABB2BF;">
+            Play some games with this setup to build data for better analysis and recommendations.
+          </div>
         </div>
-      </div>
-    `;
+      `;
+    }
   }
   
   analysisDisplay.innerHTML = analysisHTML;
@@ -6006,6 +6036,8 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   const currentBoard = dataCollector.getCurrentBoardData();
   if (currentBoard) {
     const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
+    const isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
+    
     if (roomRuns.length > 0) {
       // Show data available message instead of no data warning
       analysisHTML += `
@@ -6016,6 +6048,19 @@ async function updatePanelWithNoDataAnalysis(analysis) {
           </div>
           <div style="font-size: 11px; color: #ABB2BF;">
             Found ${roomRuns.length} runs for this map. Analysis and recommendations are being processed.
+          </div>
+        </div>
+      `;
+    } else if (isBoardEmpty) {
+      // Show empty board message
+      analysisHTML += `
+        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+          <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>🎯</span>
+            <span>Empty Board</span>
+          </div>
+          <div style="font-size: 11px; color: #ABB2BF;">
+            Place creatures on the board to get analysis and recommendations for your setup.
           </div>
         </div>
       `;
