@@ -97,16 +97,13 @@
   
   function getAllCreatures() {
     if (!ALL_CREATURES_CACHE) {
-      ALL_CREATURES_CACHE = [
-        'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
-        'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
-        'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
-        'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
-        'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
-        'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
-        'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
-        'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
-      ];
+      // Use centralized creature database
+      ALL_CREATURES_CACHE = window.creatureDatabase?.ALL_CREATURES || [];
+      
+      console.log('[Autoscroller] Creature database integration:', {
+        hasDatabase: !!window.creatureDatabase,
+        allCreaturesFromDB: window.creatureDatabase?.ALL_CREATURES?.length || 0
+      });
     }
     return ALL_CREATURES_CACHE;
   }

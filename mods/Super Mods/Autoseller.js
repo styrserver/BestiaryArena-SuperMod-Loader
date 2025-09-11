@@ -1357,17 +1357,11 @@
     }
 
     // Helper function to get all creatures for Autoplant
-    function getAllAutoplantCreatures() {
-        return [
-            'Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord',
-            'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout',
-            'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin',
-            'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk',
-            'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman',
-            'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton',
-            'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental',
-            'Witch', 'Winter Wolf', 'Wolf', 'Wyvern'
-        ];
+    function     getAllAutoplantCreatures() {
+        console.log('[Autoseller] Checking creature database...');
+        console.log('[Autoseller] window.creatureDatabase:', window.creatureDatabase);
+        console.log('[Autoseller] ALL_CREATURES:', window.creatureDatabase?.ALL_CREATURES);
+        return window.creatureDatabase?.ALL_CREATURES || [];
     }
 
     // Helper function to create creature boxes for Autoplant
@@ -2593,81 +2587,66 @@
     }
 
     // =======================
-    // 11. Widget Observer & Lifecycle
+    // 11. Widget Lifecycle Management
     // =======================
     
-    // Inject the widget when autoplay UI appears
-    let autosellerWidgetObserver = null;
-    let observerSetupAttempts = 0;
-    let isObserverActive = false;
-    
+    // Event-driven widget management using game state API
     function setupAutosellerWidgetObserver() {
-        if (autosellerWidgetObserver || observerSetupAttempts >= MAX_OBSERVER_ATTEMPTS || isObserverActive) return;
-        
-        observerSetupAttempts++;
-        isObserverActive = true;
-        
-        if (typeof MutationObserver !== 'undefined') {
-            let debounceTimer = null;
-            
-            autosellerWidgetObserver = new MutationObserver((mutations) => {
-                const hasRelevantMutations = mutations.some(mutation => {
-                    return mutation.type === 'childList' || 
-                           (mutation.type === 'attributes' && mutation.attributeName === 'data-minimized');
-                });
+        // Listen for autoplay mode changes
+        if (globalThis.state && globalThis.state.board) {
+            globalThis.state.board.subscribe((state) => {
+                const mode = state.context.mode;
+                const shouldShowWidget = shouldShowAutosellerWidget();
                 
-                if (!hasRelevantMutations) return;
-                
-                if (debounceTimer) {
-                    clearTimeout(debounceTimer);
+                if (mode === 'autoplay' && shouldShowWidget) {
+                    // Small delay to ensure autoplay UI is rendered
+                    setTimeout(() => {
+                        if (!getAutosellerWidget()) {
+                            createAutosellerSessionWidget();
+                            updateAutosellerSessionWidget();
+                            console.log('[Autoseller] Widget created - autoplay mode started');
+                        }
+                    }, 100);
+                } else if (mode !== 'autoplay') {
+                    // Remove widget when not in autoplay mode
+                    const widget = getAutosellerWidget();
+                    if (widget && widget.parentNode) {
+                        widget.parentNode.removeChild(widget);
+                        console.log('[Autoseller] Widget removed - autoplay mode ended');
+                    }
                 }
-                
-                debounceTimer = setTimeout(() => {
-                    const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-                    let autoplayContainer = null;
-                    
-                    for (const session of autoplaySessions) {
-                        const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-                        if (widgetBottom) {
-                            autoplayContainer = widgetBottom;
-                            break;
-                        }
-                    }
-                    
-                    const widget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
-                    const widgetExists = !!widget;
-                    
-                    const settings = getSettings();
-                    const shouldShowWidget = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
-                    const containerExists = !!autoplayContainer;
-                    
-                    console.log(`[Autoseller] Observer check - containerExists: ${containerExists}, shouldShowWidget: ${shouldShowWidget}, widgetExists: ${widgetExists}, autosell: ${settings.autosellChecked}, autosqueeze: ${settings.autosqueezeChecked}, autoplant: ${settings.autoplantChecked}`);
-                    
-                    if (containerExists && shouldShowWidget && !widgetExists) {
-                        createAutosellerSessionWidget();
+            });
+            
+            // Listen for game start/end events for additional widget updates
+            globalThis.state.board.on('emitNewGame', () => {
+                if (shouldShowAutosellerWidget()) {
+                    setTimeout(() => {
                         updateAutosellerSessionWidget();
-                    } else if (!containerExists && widgetExists) {
-                        // Only remove widget if container doesn't exist (autoplay session ended)
-                        // Don't remove based on shouldShowWidget here - let createAutosellerSessionWidget handle that
-                        if (widget && widget.parentNode) {
-                            widget.parentNode.removeChild(widget);
-                            console.log('[Autoseller] Widget removed - autoplay session ended');
-                        }
-                    }
-                }, OBSERVER_DEBOUNCE_MS);
+                    }, 100);
+                }
             });
             
-            autosellerWidgetObserver.observe(document.body, {
-                childList: true,
-                subtree: true,
-                attributes: true,
-                attributeFilter: ['data-minimized', 'data-autosetup']
+            globalThis.state.board.on('emitEndGame', () => {
+                if (shouldShowAutosellerWidget()) {
+                    setTimeout(() => {
+                        updateAutosellerSessionWidget();
+                    }, 100);
+                }
             });
-            
         } else {
-            console.warn(`[${modName}][WARN][setupAutosellerWidgetObserver] MutationObserver not available`);
-            isObserverActive = false;
+            console.warn(`[${modName}][WARN] Game state API not available for widget management`);
         }
+    }
+    
+    // Helper function to check if widget should be shown
+    function shouldShowAutosellerWidget() {
+        const settings = getSettings();
+        return settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
+    }
+    
+    // Helper function to get existing widget
+    function getAutosellerWidget() {
+        return queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
     }
 
     // =======================
@@ -3149,14 +3128,8 @@
                 if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
                 if (style && style.parentNode) style.parentNode.removeChild(style);
                 
-                if (autosellerWidgetObserver) {
-                    autosellerWidgetObserver.disconnect();
-                    autosellerWidgetObserver = null;
-                }
                 stopDragonPlantObserver();
                 stopAutoplantClickObserver();
-                isObserverActive = false;
-                observerSetupAttempts = 0;
                 
                 serverMonsterCache.clear();
                 daycareCache.clear();

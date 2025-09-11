@@ -2203,8 +2203,8 @@
     const utils = globalThis.state?.utils;
     
     if (!utils) {
-      // Fallback to hardcoded list if game data is unavailable
-      return ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
+      // Fallback to equipment database if game data is unavailable
+      return window.equipmentDatabase?.ALL_EQUIPMENT || [];
     }
     
     // Iterate through all equipment IDs in the game
@@ -2221,9 +2221,9 @@
       }
     }
     
-    // If no equipment found, fall back to hardcoded list
+    // If no equipment found, fall back to equipment database
     if (equipmentList.length === 0) {
-      return ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull'];
+      return window.equipmentDatabase?.ALL_EQUIPMENT || [];
     }
     
     return equipmentList.sort(); // Alphabetical order

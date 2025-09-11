@@ -308,11 +308,29 @@ const MONSTER_STATS_CONFIG = [
     { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' }
 ];
 
-const UNOBTAINABLE_CREATURES = ['Black Knight', 'Dharalion', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Old Giant Spider', 'Orc', 'Sweaty Cyclops', 'Willi Wasp'];
+// Get creature data from centralized database
+const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
 
-const ALL_CREATURES = ['Amazon', 'Banshee', 'Bear', 'Bog Raider', 'Bug', 'Corym Charlatan', 'Corym Skirmisher', 'Corym Vanguard', 'Cyclops', 'Deer', 'Demon Skeleton', 'Dragon', 'Dragon Lord', 'Druid', 'Dwarf', 'Dwarf Geomancer', 'Dwarf Guard', 'Dwarf Soldier', 'Elf', 'Elf Arcanist', 'Elf Scout', 'Fire Devil', 'Fire Elemental', 'Firestarter', 'Frost Troll', 'Ghost', 'Ghoul', 'Giant Spider', 'Goblin', 'Goblin Assassin', 'Goblin Scavenger', 'Knight', 'Minotaur', 'Minotaur Archer', 'Minotaur Guard', 'Minotaur Mage', 'Monk', 'Mummy', 'Nightstalker', 'Orc Berserker', 'Orc Leader', 'Orc Rider', 'Orc Shaman', 'Orc Spearman', 'Orc Warlord', 'Poison Spider', 'Polar Bear', 'Rat', 'Rorc', 'Rotworm', 'Scorpion', 'Sheep', 'Skeleton', 'Slime', 'Snake', 'Spider', 'Stalker', 'Swamp Troll', 'Tortoise', 'Troll', 'Valkyrie', 'Warlock', 'Wasp', 'Water Elemental', 'Witch', 'Winter Wolf', 'Wolf', 'Wyvern', 'Yeti'];
+const ALL_CREATURES = window.creatureDatabase?.ALL_CREATURES || [];
 
-const ALL_EQUIPMENT = ['Amazon Armor', 'Amazon Helmet', 'Amazon Shield', 'Amulet of Loss', 'Bear Skin', 'Bloody Edge', 'Blue Robe', 'Bonelord Helmet', 'Boots of Haste', 'Chain Bolter', 'Cranial Basher', 'Dwarven Helmet', 'Dwarven Legs', 'Earthborn Titan Armor', 'Ectoplasmic Shield', 'Epee', 'Fire Axe', 'Fireborn Giant Armor', 'Giant Sword', 'Glacial Rod', 'Glass of Goo', 'Hailstorm Rod', 'Ice Rapier', 'Jester Hat', 'Medusa Shield', 'Paladin Armor', 'Ratana', 'Royal Scale Robe', 'Rubber Cap', 'Skull Helmet', 'Skullcracker Armor', 'Springsprout Rod', 'Steel Boots', 'Stealth Ring', 'Vampire Shield', 'Wand of Decay', 'White Skull', 'Windborn Colossus Armor'];
+// Debug logging for creature database integration
+console.log('[Cyclopedia] Creature database integration:', {
+  hasDatabase: !!window.creatureDatabase,
+  allCreaturesFromDB: window.creatureDatabase?.ALL_CREATURES?.length || 0,
+  unobtainableFromDB: window.creatureDatabase?.UNOBTAINABLE_CREATURES?.length || 0,
+  monsterStatsFromDB: Object.keys(window.creatureDatabase?.HARDCODED_MONSTER_STATS || {}).length,
+  usingFallback: !window.creatureDatabase
+});
+
+// Debug logging for equipment database integration
+console.log('[Cyclopedia] Equipment database integration:', {
+  hasDatabase: !!window.equipmentDatabase,
+  allEquipmentFromDB: window.equipmentDatabase?.ALL_EQUIPMENT?.length || 0,
+  usingFallback: !window.equipmentDatabase
+});
+
+// Get equipment data from centralized database
+const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
 
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
@@ -322,16 +340,8 @@ const GAME_KEYS = {
 
 const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
 
-const HARDCODED_MONSTER_STATS = {
-  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
-  'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
-  'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
-  'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
-  'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
-  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
-  'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
-  'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 }
-};
+// Get hardcoded monster stats from centralized database
+const HARDCODED_MONSTER_STATS = window.creatureDatabase?.HARDCODED_MONSTER_STATS || {};
 
 const MAP_INTERACTION_CONFIG = {
   cursor: 'pointer',
@@ -552,7 +562,30 @@ const DOMUtils = {
 };
 
 // =======================
-// 4. Event Handler Management
+// 4. Utility Functions
+// =======================
+
+// Function to get creature roles from monster data
+function getCreatureRoles(creatureName) {
+  try {
+    if (!cyclopediaState.monsterNameMap || typeof creatureName !== 'string') {
+      return null;
+    }
+    
+    const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
+    if (entry && entry.monster && entry.monster.metadata && entry.monster.metadata.roles) {
+      return entry.monster.metadata.roles;
+    }
+    
+    return null;
+  } catch (error) {
+    console.warn('[Cyclopedia] Error getting creature roles:', error);
+    return null;
+  }
+}
+
+// =======================
+// 5. Event Handler Management
 // =======================
 const EventHandlerManager = {
   handlers: new Map(),
@@ -1367,7 +1400,7 @@ const CreatureListManager = {
         position: relative;
         border-radius: 4px;
         overflow: hidden;
-        background: rgba(255, 255, 255, 0.1);
+        background: url('https://bestiaryarena.com/_next/static/media/background-darker.2679c837.png') repeat;
         border: 1px solid #666;
       `;
       return div;
@@ -9429,6 +9462,7 @@ function renderCreatureTemplate(name) {
   col1TitleP.style.textAlign = 'center';
   col1TitleP.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
   col1Title.appendChild(col1TitleP);
+  
   const col1Picture = document.createElement('div');
   col1Picture.style.textAlign = 'center';
   col1Picture.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
@@ -9456,6 +9490,12 @@ function renderCreatureTemplate(name) {
           itemId: monster.metadata.spriteId,
           size: 'large'
         });
+        
+        // Remove button wrapper if present
+        if (monsterSprite.tagName === 'BUTTON' && monsterSprite.firstChild) {
+          monsterSprite = monsterSprite.firstChild;
+        }
+        
         [monsterSprite.style.width,
          monsterSprite.style.height,
          monsterSprite.style.minWidth,
@@ -9735,6 +9775,42 @@ function renderCreatureTemplate(name) {
   col1FlexRows.appendChild(col1TopArea);
   col1FlexRows.appendChild(abilitySection);
   col1.appendChild(col1Title);
+  
+  // Add creature roles if available - positioned directly under the title
+  const roles = getCreatureRoles(name);
+  if (roles && roles.length > 0) {
+    const rolesContainer = document.createElement('div');
+    rolesContainer.style.cssText = `
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: center;
+      margin: 8px 0;
+      padding: 0 8px;
+    `;
+    
+    roles.forEach(role => {
+      const roleBadge = document.createElement('span');
+      roleBadge.textContent = role;
+      roleBadge.className = 'frame-pressed-1 surface-dark';
+      roleBadge.style.cssText = `
+        padding: 2px 6px;
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+        color: #ffe066;
+        margin: 0;
+        border-radius: 0;
+        display: inline-block;
+      `;
+      rolesContainer.appendChild(roleBadge);
+    });
+    
+    col1.appendChild(rolesContainer);
+  }
+  
   col1.appendChild(col1FlexRows);
   const col2 = document.createElement('div');
   col2.style.display = 'flex';
@@ -10208,6 +10284,12 @@ function renderCreatureTemplate(name) {
     if (isUnobtainable) {
       col3Content.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
       col3Content.textContent = 'This creature is unobtainable.';
+      // Center the text and add padding for unobtainable creatures
+      col3Content.style.textAlign = 'center';
+      col3Content.style.padding = '20px';
+      col3Content.style.display = 'flex';
+      col3Content.style.alignItems = 'center';
+      col3Content.style.justifyContent = 'center';
     } else {
       col3Content.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
       col3Content.textContent = 'You do not own this creature.';

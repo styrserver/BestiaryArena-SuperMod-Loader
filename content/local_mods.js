@@ -202,7 +202,9 @@ async function listAllModFiles() {
   try {
     // If you have a dynamic index, update this logic accordingly
     const databaseMods = [
-      'database/inventory-tooltips.js'
+      'database/inventory-tooltips.js',
+      'database/creature-database.js',
+      'database/equipment-database.js'
     ];
     const officialMods = [
       'Official Mods/Board Analyzer.js',
@@ -240,6 +242,8 @@ async function listAllModFiles() {
     // fallback: hardcoded list
     return [
       'database/inventory-tooltips.js',
+      'database/creature-database.js',
+      'database/equipment-database.js',
       'Official Mods/Board Analyzer.js',
       'Official Mods/Bestiary_Automator.js',
       'Official Mods/Custom_Display.js',
@@ -274,6 +278,8 @@ async function listAllModFiles() {
 // List of mods to enable by default
 const defaultEnabledMods = [
   'database/inventory-tooltips.js',
+  'database/creature-database.js',
+  'database/equipment-database.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Hero_Editor.js',

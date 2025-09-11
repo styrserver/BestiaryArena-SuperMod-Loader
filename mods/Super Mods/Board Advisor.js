@@ -85,6 +85,22 @@ let performanceTracker = {
   roomStats: new Map()
 };
 
+// Helper function to add run if not already exists (deduplication)
+function addRunIfNotExists(newRun) {
+  const exists = performanceTracker.runs.some(r => 
+    r.roomId === newRun.roomId && 
+    r.ticks === newRun.ticks && 
+    r.timestamp === newRun.timestamp &&
+    r.source === newRun.source
+  );
+  if (!exists) {
+    performanceTracker.runs.push(newRun);
+    updatePatterns(newRun);
+    return true;
+  }
+  return false;
+}
+
 // RunTracker integration
 let runTrackerData = null;
 
@@ -103,6 +119,10 @@ let isDBReady = false;
 // Tile highlighting constants
 const TILE_HIGHLIGHT_OVERLAY_ID = 'board-advisor-tile-highlight';
 const TILE_HIGHLIGHT_STYLE_ID = 'board-advisor-highlight-styles';
+
+// Smart cleanup tracking
+let currentRecommendedSetup = null;
+let placedRecommendedPieces = new Set();
 
 
 
@@ -411,6 +431,14 @@ async function addSandboxRunToDB(runData) {
       request.onsuccess = async () => {
         console.log('[Board Advisor] Sandbox run added to IndexedDB:', roomId, runData.ticks);
         
+        // Check if we need to cleanup old runs for this room
+        try {
+          await cleanupRoomRunsIfNeeded(roomId);
+        } catch (error) {
+          console.warn('[Board Advisor] Failed to cleanup room runs:', error);
+          // Don't fail the entire operation if cleanup fails
+        }
+        
         // Update room metadata with error handling
         try {
           await updateRoomMetadataAfterRun(roomId, roomRunData);
@@ -470,6 +498,69 @@ async function updateRoomMetadataAfterRun(roomId, runData) {
     };
     request.onerror = () => reject(request.error);
   });
+}
+
+// Cleanup room runs if they exceed the limit, keeping the best runs
+async function cleanupRoomRunsIfNeeded(roomId) {
+  try {
+    // Get current run count for this room
+    const currentRuns = await getSandboxRunsForRoom(roomId, MAX_RUNS_PER_ROOM + 1);
+    
+    if (currentRuns.length <= MAX_RUNS_PER_ROOM) {
+      return; // No cleanup needed
+    }
+    
+    console.log(`[Board Advisor] Room ${roomId} has ${currentRuns.length} runs, cleaning up to ${MAX_RUNS_PER_ROOM}`);
+    
+    // Sort runs by priority (best runs first)
+    const sortedRuns = currentRuns.sort((a, b) => {
+      // 1. Failed runs go to the end (lowest priority)
+      if (a.completed !== b.completed) {
+        return a.completed ? -1 : 1;
+      }
+      
+      // 2. Among completed runs, sort by ticks (best time first)
+      if (a.completed && b.completed) {
+        return a.ticks - b.ticks;
+      }
+      
+      // 3. Among failed runs, keep more recent ones
+      return b.timestamp - a.timestamp;
+    });
+    
+    // Keep only the best runs
+    const runsToKeep = sortedRuns.slice(0, MAX_RUNS_PER_ROOM);
+    const runsToRemove = currentRuns.length - MAX_RUNS_PER_ROOM;
+    
+    // Clear the room store and re-add only the best runs
+    const storeName = await ensureRoomStoreExists(roomId);
+    if (!storeName) return;
+    
+    const transaction = sandboxDB.transaction([storeName], 'readwrite');
+    const store = transaction.objectStore(storeName);
+    
+    // Clear all runs for this room
+    await new Promise((resolve, reject) => {
+      const clearRequest = store.clear();
+      clearRequest.onsuccess = () => resolve();
+      clearRequest.onerror = () => reject(clearRequest.error);
+    });
+    
+    // Add back only the best runs
+    for (const run of runsToKeep) {
+      await new Promise((resolve, reject) => {
+        const addRequest = store.add(run);
+        addRequest.onsuccess = () => resolve();
+        addRequest.onerror = () => reject(addRequest.error);
+      });
+    }
+    
+    console.log(`[Board Advisor] Room cleanup complete: removed ${runsToRemove} runs (kept ${runsToKeep.filter(r => r.completed).length} completed, ${runsToKeep.filter(r => !r.completed).length} failed)`);
+    
+  } catch (error) {
+    console.error('[Board Advisor] Error during room cleanup:', error);
+    throw error;
+  }
 }
 
 // Get sandbox runs for a specific room (optimized for room-based structure)
@@ -795,6 +886,10 @@ function highlightRecommendedTiles(recommendedSetup) {
   // Clean up any existing highlights
   cleanupTileHighlights();
   
+  // Track the new recommended setup
+  currentRecommendedSetup = recommendedSetup;
+  placedRecommendedPieces.clear();
+  
   // Create highlight overlay
   createTileHighlightOverlay(recommendedSetup);
 }
@@ -1000,6 +1095,53 @@ function createTileHighlightOverlay(recommendedSetup) {
     
   } catch (error) {
     console.error('[Board Advisor] Error creating tile highlight overlay:', error);
+  }
+}
+
+// Smart cleanup function that checks if all recommended pieces are placed
+function smartCleanupTileHighlights() {
+  if (!currentRecommendedSetup || currentRecommendedSetup.length === 0) {
+    cleanupTileHighlights();
+    return;
+  }
+  
+  // Get current board state
+  const currentBoard = dataCollector.getCurrentBoardData();
+  if (!currentBoard || !currentBoard.boardSetup) {
+    cleanupTileHighlights();
+    return;
+  }
+  
+  // Check which recommended pieces have been placed
+  const currentPieces = new Set();
+  currentBoard.boardSetup.forEach(piece => {
+    if (piece.tileIndex !== undefined) {
+      currentPieces.add(piece.tileIndex);
+    }
+  });
+  
+  // Check if all recommended pieces are placed
+  const allRecommendedPlaced = currentRecommendedSetup.every(rec => 
+    currentPieces.has(rec.tileIndex)
+  );
+  
+  if (allRecommendedPlaced) {
+    console.log('[Board Advisor] All recommended pieces placed, cleaning up highlights');
+    cleanupTileHighlights();
+    currentRecommendedSetup = null;
+    placedRecommendedPieces.clear();
+  } else {
+    console.log('[Board Advisor] Not all recommended pieces placed yet, keeping/restoring highlights');
+    
+    // Re-highlight missing recommended pieces
+    const missingPieces = currentRecommendedSetup.filter(rec => 
+      !currentPieces.has(rec.tileIndex)
+    );
+    
+    if (missingPieces.length > 0) {
+      console.log('[Board Advisor] Re-highlighting missing pieces:', missingPieces);
+      highlightRecommendedTiles(missingPieces);
+    }
   }
 }
 
@@ -1349,6 +1491,12 @@ async function forceUpdateAllData() {
 async function loadAllDataSources(triggerAnalysis = true) {
   console.log('[Board Advisor] Starting coordinated data loading...');
   
+  // Prevent duplicate data loading
+  if (analysisState.isDataLoading) {
+    console.log('[Board Advisor] Data loading already in progress, skipping...');
+    return false;
+  }
+  
   // Set data loading state to prevent analysis from running
   analysisState.isDataLoading = true;
   
@@ -1385,7 +1533,7 @@ async function loadAllDataSources(triggerAnalysis = true) {
     analysisState.isDataLoading = false;
     
     // Only trigger analysis after all data is loaded
-    if (triggerAnalysis && panelState.isOpen) {
+    if (triggerAnalysis) {
       setTimeout(() => {
         console.log('[Board Advisor] All data loaded, triggering analysis...');
         debouncedAnalyzeCurrentBoard();
@@ -1519,9 +1667,13 @@ async function convertBoardAnalyzerData() {
     // The Board Analyzer data contains its own board setups that we can analyze
     
     // Convert all Board Analyzer runs for this room
+    console.log(`[Board Advisor] Converting ${boardAnalyzerRunsForRoom.length} runs from IndexedDB for room ${roomId}`);
+    let convertedCount = 0;
+    let skippedCount = 0;
+    
     boardAnalyzerRunsForRoom.forEach((run, index) => {
       const convertedRun = {
-        id: `board_analyzer_${run.timestamp}_${index}`,
+        id: `sandbox_${run.timestamp}_${index}`,
         timestamp: run.timestamp,
         seed: run.seed,
         roomId: run.roomId,
@@ -1533,21 +1685,19 @@ async function convertBoardAnalyzerData() {
         boardSetup: run.boardSetup ? dataCollector.serializeBoardSetup(run.boardSetup) : (currentBoard.boardSetup || []),
         playerMonsters: run.playerMonsters,
         playerEquipment: run.playerEquipment,
-        source: 'board_analyzer',
+        source: 'sandbox',
         isSandbox: true
       };
       
-      // Check if this run already exists in performance tracker
-      const existingRun = performanceTracker.runs.find(r => 
-        r.id === convertedRun.id || 
-        (r.source === 'board_analyzer' && r.roomId === convertedRun.roomId && r.ticks === convertedRun.ticks)
-      );
-      
-      if (!existingRun) {
-        performanceTracker.runs.push(convertedRun);
-        updatePatterns(convertedRun);
+      // Use deduplication function
+      if (addRunIfNotExists(convertedRun)) {
+        convertedCount++;
+      } else {
+        skippedCount++;
       }
     });
+    
+    console.log(`[Board Advisor] Converted ${convertedCount} runs, skipped ${skippedCount} duplicates`);
     
     // console.log(`[Board Advisor] Converted ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for ${roomId}`);
     return true;
@@ -1789,11 +1939,11 @@ function convertRunTrackerData() {
               completed: true,
               boardSetup: convertRunTrackerSetup(run.setup),
               seed: run.seed,
-              timestamp: run.timestamp || Date.now()
+              timestamp: run.timestamp || Date.now(),
+              source: 'run_tracker'
             };
             
-            performanceTracker.runs.push(convertedRun);
-            updatePatterns(convertedRun);
+            addRunIfNotExists(convertedRun);
           }
         });
       }
@@ -1810,11 +1960,11 @@ function convertRunTrackerData() {
               completed: true,
               boardSetup: convertRunTrackerSetup(run.setup),
               seed: run.seed,
-              timestamp: run.timestamp || Date.now()
+              timestamp: run.timestamp || Date.now(),
+              source: 'run_tracker'
             };
             
-            performanceTracker.runs.push(convertedRun);
-            updatePatterns(convertedRun);
+            addRunIfNotExists(convertedRun);
           }
         });
       }
@@ -1831,7 +1981,7 @@ function convertRunTrackerData() {
       currentRoomId: currentRoomId,
       runsForCurrentRoom: currentRoomRuns.length,
       totalAvailableRuns: totalAvailableRuns,
-      optimizationRatio: totalAvailableRuns > 0 ? (currentRoomRuns.length / totalAvailableRuns * 100).toFixed(1) + '%' : 'N/A'
+      optimizationRatio: totalAvailableRuns > 0 ? Math.min(currentRoomRuns.length / totalAvailableRuns * 100, 100).toFixed(1) + '%' : 'N/A'
     });
     
     if (currentRoomRuns.length > 0) {
@@ -2245,6 +2395,9 @@ class DataCollector {
 
   onBoardChange(boardContext) {
     try {
+      // Use smart cleanup that waits for all recommended pieces to be placed
+      smartCleanupTileHighlights();
+      
       // Debounce board changes to avoid excessive analysis
       if (this.boardChangeTimeout) {
         clearTimeout(this.boardChangeTimeout);
@@ -2582,14 +2735,51 @@ class DataCollector {
   storeRunData(runData) {
     performanceTracker.runs.push(runData);
     
-    // Keep only last 1000 runs to prevent memory issues
+    // Smart cleanup: prioritize keeping best runs when we exceed 1000 runs
     if (performanceTracker.runs.length > 1000) {
-      performanceTracker.runs = performanceTracker.runs.slice(-1000);
+      this.cleanupRuns();
     }
 
     // Update room statistics
     this.updateRoomStats(runData);
+  }
+
+  // Smart cleanup function that prioritizes keeping the best runs
+  cleanupRuns() {
+    const maxRuns = 1000;
+    const currentRuns = performanceTracker.runs.length;
     
+    if (currentRuns <= maxRuns) return;
+    
+    console.log(`[Board Advisor] Cleaning up runs: ${currentRuns} -> ${maxRuns}`);
+    
+    // Sort runs by priority (best runs first)
+    const sortedRuns = [...performanceTracker.runs].sort((a, b) => {
+      // 1. Failed runs go to the end (lowest priority)
+      if (a.completed !== b.completed) {
+        return a.completed ? -1 : 1;
+      }
+      
+      // 2. Among completed runs, sort by ticks (best time first)
+      if (a.completed && b.completed) {
+        return a.ticks - b.ticks;
+      }
+      
+      // 3. Among failed runs, keep more recent ones
+      return b.timestamp - a.timestamp;
+    });
+    
+    // Keep the best runs
+    const runsToKeep = sortedRuns.slice(0, maxRuns);
+    const runsToRemove = currentRuns - maxRuns;
+    
+    performanceTracker.runs = runsToKeep;
+    
+    console.log(`[Board Advisor] Cleanup complete: removed ${runsToRemove} runs (${runsToKeep.filter(r => !r.completed).length} failed, ${runsToKeep.filter(r => r.completed).length} completed)`);
+  }
+
+  // Update room statistics
+  updateRoomStats(runData) {
     console.log('[Board Advisor] Stored run data:', {
       roomId: runData.roomId,
       ticks: runData.ticks,
@@ -3030,8 +3220,8 @@ class AnalysisEngine {
         return this.createEmptyBoardRecommendation();
       }
 
-      // Board is not empty - clean up any existing tile highlights
-      cleanupTileHighlights();
+      // Board is not empty - use smart cleanup for tile highlights
+      smartCleanupTileHighlights();
 
       const roomId = currentBoard.roomId;
       const roomPatterns = performanceTracker.patterns.get(roomId);
@@ -3909,16 +4099,21 @@ class AnalysisEngine {
   generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis) {
     const recommendations = [];
     
-    // Check if we have Board Analyzer data
+    // Check if we have Board Analyzer or sandbox data
     const boardAnalyzerRuns = performanceTracker.runs.filter(r => r.source === 'board_analyzer');
-    if (boardAnalyzerRuns.length === 0) {
+    const sandboxRuns = performanceTracker.runs.filter(r => r.source === 'sandbox');
+    const allRuns = [...boardAnalyzerRuns, ...sandboxRuns];
+    
+    if (allRuns.length === 0) {
       return recommendations;
     }
     
-    console.log(`[Board Advisor] Generating Board Analyzer recommendations based on ${boardAnalyzerRuns.length} runs`);
+    console.log(`[Board Advisor] Generating recommendations based on ${boardAnalyzerRuns.length} board_analyzer runs and ${sandboxRuns.length} sandbox runs`);
+    console.log(`[Board Advisor] Total runs in performance tracker: ${performanceTracker.runs.length}`);
+    console.log(`[Board Advisor] Run sources in performance tracker:`, [...new Set(performanceTracker.runs.map(r => r.source))]);
     
-    // Analyze performance patterns from Board Analyzer
-    const completedRuns = boardAnalyzerRuns.filter(r => r.completed);
+    // Analyze performance patterns from all available data
+    const completedRuns = allRuns.filter(r => r.completed);
     const failedRuns = boardAnalyzerRuns.filter(r => !r.completed);
     
     // Generate recommendations based on selected focus area
@@ -3955,9 +4150,19 @@ class AnalysisEngine {
     
     if (completedRuns.length === 0) return recommendations;
     
-    const avgTime = completedRuns.reduce((sum, r) => sum + r.ticks, 0) / completedRuns.length;
+    // Calculate average from top 10 best runs instead of all runs
+    const sortedRuns = [...completedRuns].sort((a, b) => a.ticks - b.ticks);
+    const top10Runs = sortedRuns.slice(0, Math.min(10, sortedRuns.length));
+    const avgTime = top10Runs.reduce((sum, r) => sum + r.ticks, 0) / top10Runs.length;
     const bestTime = Math.min(...completedRuns.map(r => r.ticks));
     const worstTime = Math.max(...completedRuns.map(r => r.ticks));
+    
+    // Debug logging
+    console.log('[Board Advisor] generateTicksRecommendations - completedRuns length:', completedRuns.length);
+    console.log('[Board Advisor] generateTicksRecommendations - top10Runs length:', top10Runs.length);
+    console.log('[Board Advisor] generateTicksRecommendations - avgTime (top 10):', Math.round(avgTime));
+    console.log('[Board Advisor] generateTicksRecommendations - bestTime:', bestTime);
+    console.log('[Board Advisor] generateTicksRecommendations - top10Runs ticks:', top10Runs.map(r => r.ticks));
     
     // Time consistency analysis
     const timeVariance = completedRuns.reduce((sum, r) => sum + Math.pow(r.ticks - avgTime, 2), 0) / completedRuns.length;
@@ -3976,13 +4181,26 @@ class AnalysisEngine {
     }
     
     // Speed optimization suggestions
-    if (bestTime > avgTime * 0.8) {
+    const timeDifference = avgTime - bestTime;
+    const improvementRatio = timeDifference / bestTime;
+    
+    // Only show speed optimization if there's meaningful room for improvement (at least 5% difference)
+    if (improvementRatio > 0.05) {
       recommendations.push({
         type: 'speed',
         title: 'Optimize for Speed',
-        message: `Your best time (${bestTime}) is close to your average (${Math.round(avgTime)}). Room for improvement.`,
+        message: `Your best time (${bestTime}) is ${Math.round(improvementRatio * 100)}% better than your average (${Math.round(avgTime)}). Room for improvement.`,
         suggestion: 'Focus on faster monster movement patterns and efficient positioning.',
         priority: 'high',
+        focusArea: 'ticks'
+      });
+    } else if (improvementRatio > 0 && improvementRatio <= 0.05) {
+      recommendations.push({
+        type: 'speed',
+        title: 'Consistent Performance',
+        message: `Your best time (${bestTime}) is very close to your average (${Math.round(avgTime)}). Great consistency!`,
+        suggestion: 'Try experimenting with different setups to find even better strategies.',
+        priority: 'medium',
         focusArea: 'ticks'
       });
     }
@@ -4270,9 +4488,27 @@ const PANEL_ID = "board-advisor-panel";
 // Panel state
 let panelState = {
   isOpen: false,
-  position: { x: 50, y: 50 },
-  size: { width: 450, height: 850 }
+  position: { x: 10, y: 40 },
+  size: { width: 350, height: 800 }
 };
+
+// =======================
+// IMMEDIATE INITIALIZATION
+// =======================
+// Create panel UI elements immediately on mod load to ensure they exist
+// for recommendation execution during initialization
+console.log('[Board Advisor] Creating panel UI elements during initialization...');
+createPanel();
+
+// Hide the panel initially (it will be shown when user clicks the button)
+const panel = document.getElementById(PANEL_ID);
+if (panel) {
+  panel.style.display = 'none';
+  panelState.isOpen = false;
+  console.log('[Board Advisor] Panel created and hidden during initialization');
+} else {
+  console.warn('[Board Advisor] Failed to create panel during initialization');
+}
 
 function createUI() {
   // Create clickable icon in bottom left corner
@@ -4377,8 +4613,16 @@ async function togglePanel() {
 async function openPanel() {
   if (panelState.isOpen) return;
   
-  createPanel();
-  panelState.isOpen = true;
+  // Show the panel (it was created during initialization)
+  const panel = document.getElementById(PANEL_ID);
+  if (panel) {
+    panel.style.display = 'block';
+    panelState.isOpen = true;
+  } else {
+    // Fallback: create panel if it doesn't exist
+    createPanel();
+    panelState.isOpen = true;
+  }
   
   // Update icon status
   updateIconStatus();
@@ -4418,7 +4662,7 @@ async function openPanel() {
 function closePanel() {
   const panel = document.getElementById(PANEL_ID);
   if (panel) {
-    panel.remove();
+    panel.style.display = 'none';
   }
   panelState.isOpen = false;
   
@@ -4494,6 +4738,7 @@ function createPanelHeader() {
     color: white;
     cursor: move;
     user-select: none;
+    flex-shrink: 0;
   `;
   
   const title = document.createElement('h3');
@@ -4896,6 +5141,7 @@ function createPanelFooter() {
     display: flex;
     justify-content: center;
     align-items: center;
+    flex-shrink: 0;
   `;
   
   // Auto-refresh status indicator
@@ -5342,7 +5588,48 @@ function updatePanelStatus(message, type = 'info') {
   }
   
   const color = type === 'error' ? '#E06C75' : type === 'loading' ? '#FF9800' : '#61AFEF';
-  analysisDisplay.innerHTML = `<div style="color: ${color};">${message}${mapInfo}</div>`;
+  
+  // For temporary status messages, add them as overlays instead of replacing content
+  if (type === 'loading' || type === 'error') {
+    // Create a temporary status overlay
+    const statusOverlay = document.createElement('div');
+    statusOverlay.id = 'temp-status-overlay';
+    statusOverlay.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(40, 44, 52, 0.95);
+      color: ${color};
+      padding: 8px 12px;
+      font-size: 11px;
+      z-index: 1000;
+      border-bottom: 1px solid #4B5563;
+    `;
+    statusOverlay.innerHTML = `${message}${mapInfo}`;
+    
+    // Remove any existing overlay
+    const existingOverlay = document.getElementById('temp-status-overlay');
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
+    
+    // Add the new overlay
+    analysisDisplay.style.position = 'relative';
+    analysisDisplay.appendChild(statusOverlay);
+    
+    // Auto-remove loading messages after a short delay
+    if (type === 'loading') {
+      setTimeout(() => {
+        if (statusOverlay.parentNode) {
+          statusOverlay.remove();
+        }
+      }, 2000);
+    }
+  } else {
+    // For info messages, still replace content but preserve footer
+    analysisDisplay.innerHTML = `<div style="color: ${color};">${message}${mapInfo}</div>`;
+  }
 }
 
 async function updatePanelWithBasicAnalysis(currentBoard) {
@@ -5496,7 +5783,8 @@ async function updatePanelWithAnalysis(analysis) {
   `;
   
   // Add performance prediction as the main focus (filtered by focus area)
-  if (config.showPredictions && analysis.prediction) {
+  // Only show if board has creatures and predictions are enabled
+  if (config.showPredictions && analysis.prediction && !isBoardEmpty) {
     const confidence = Math.round(analysis.prediction.confidence * 100);
     const confidenceColor = confidence >= 80 ? '#98C379' : confidence >= 60 ? '#E5C07B' : '#E06C75';
     
@@ -5918,38 +6206,45 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     </div>
   `;
   
-  // Add performance prediction section (showing Unknown values)
+  // Add performance prediction section - only show if board has creatures
   if (config.showPredictions && analysis.prediction) {
-    let predictionContent = '';
-    if (config.focusArea === 'ticks') {
-      predictionContent = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-          <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'} ticks</span></div>
-          <div><strong>Confidence:</strong> <span style="color: #E06C75;">0%</span></div>
-          <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
-          <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">0 found</span></div>
-        </div>
-      `;
-    } else if (config.focusArea === 'ranks') {
-      predictionContent = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-          <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'}</span></div>
-          <div><strong>Predicted Points:</strong> <span style="color: #98C379;">${analysis.prediction.predictedPoints || 'Unknown'}</span></div>
-          <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
-          <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">0 found</span></div>
+    // Check if board is empty
+    const currentBoard = dataCollector.getCurrentBoardData();
+    const isBoardEmpty = !currentBoard || !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
+    
+    // Only show prediction section if board is not empty
+    if (!isBoardEmpty) {
+      let predictionContent = '';
+      if (config.focusArea === 'ticks') {
+        predictionContent = `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+            <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'} ticks</span></div>
+            <div><strong>Confidence:</strong> <span style="color: #E06C75;">0%</span></div>
+            <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
+            <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">0 found</span></div>
+          </div>
+        `;
+      } else if (config.focusArea === 'ranks') {
+        predictionContent = `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
+            <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'}</span></div>
+            <div><strong>Predicted Points:</strong> <span style="color: #98C379;">${analysis.prediction.predictedPoints || 'Unknown'}</span></div>
+            <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
+            <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">0 found</span></div>
+          </div>
+        `;
+      }
+      
+      analysisHTML += `
+        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
+          <div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>🎯</span>
+            <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
+          </div>
+          ${predictionContent}
         </div>
       `;
     }
-    
-    analysisHTML += `
-      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
-        <div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-          <span>🎯</span>
-          <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
-        </div>
-        ${predictionContent}
-      </div>
-    `;
   }
   
   // Add leaderboard comparison section with real WR data
