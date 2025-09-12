@@ -237,7 +237,11 @@ async function listAllModFiles() {
       'Super Mods/RunTracker.js',
       'Super Mods/Welcome.js'
     ];
-    return [...databaseMods, ...officialMods, ...superMods];
+    const testMods = [
+      'Test Mods/Board Advisor.js',
+      'Test Mods/Raid_Hunter.js'
+    ];
+    return [...databaseMods, ...officialMods, ...superMods, ...testMods];
   } catch (e) {
     // fallback: hardcoded list
     return [
@@ -270,7 +274,9 @@ async function listAllModFiles() {
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
       'Super Mods/RunTracker.js',
-      'Super Mods/Welcome.js'
+      'Super Mods/Welcome.js',
+      'Test Mods/Board Advisor.js',
+      'Test Mods/Raid_Hunter.js'
     ];
   }
 }
@@ -387,11 +393,12 @@ async function initLocalMods() {
         const exists = await checkFileExists(file);
         console.log(`File ${file} exists: ${exists}`);
         if (exists) {
-          // Enable only if in defaultEnabledMods or if it's a Super Mod or Database Mod
+          // Enable only if in defaultEnabledMods or if it's a Super Mod or Database Mod (but not Test Mods)
           const isSuperMod = file.startsWith('Super Mods/');
           const isDatabaseMod = file.startsWith('database/');
-          const enabled = defaultEnabledMods.includes(file) || isSuperMod || isDatabaseMod;
-          console.log(`Mod ${file} enabled: ${enabled} (isSuperMod: ${isSuperMod}, isDatabaseMod: ${isDatabaseMod})`);
+          const isTestMod = file.startsWith('Test Mods/');
+          const enabled = defaultEnabledMods.includes(file) || ((isSuperMod || isDatabaseMod) && !isTestMod);
+          console.log(`Mod ${file} enabled: ${enabled} (isSuperMod: ${isSuperMod}, isDatabaseMod: ${isDatabaseMod}, isTestMod: ${isTestMod})`);
           
           validMods.push({
             name: file,
@@ -450,8 +457,9 @@ async function initLocalMods() {
           if (modName.startsWith('database/')) return 0;
           if (modName.startsWith('Official Mods/')) return 1;
           if (modName.startsWith('Super Mods/')) return 2;
-          if (modName.startsWith('User Mods/')) return 3;
-          return 4; // Unknown mods go last
+          if (modName.startsWith('Test Mods/')) return 3;
+          if (modName.startsWith('User Mods/')) return 4;
+          return 5; // Unknown mods go last
         };
         
         const orderA = getModOrder(a.name);
@@ -793,14 +801,15 @@ window.addEventListener('message', function(event) {
           }
         }
         
-        // Sort mods in the correct order: Database -> Official -> Super -> User
+        // Sort mods in the correct order: Database -> Official -> Super -> Test -> User
         const sortedMods = Array.from(existingByName.values()).sort((a, b) => {
           const getModOrder = (modName) => {
             if (modName.startsWith('database/')) return 0;
             if (modName.startsWith('Official Mods/')) return 1;
             if (modName.startsWith('Super Mods/')) return 2;
-            if (modName.startsWith('User Mods/')) return 3;
-            return 4; // Unknown mods go last
+            if (modName.startsWith('Test Mods/')) return 3;
+            if (modName.startsWith('User Mods/')) return 4;
+            return 5; // Unknown mods go last
           };
           
           const orderA = getModOrder(a.name);
@@ -824,11 +833,12 @@ window.addEventListener('message', function(event) {
         const enabledMods = window.localMods.filter(mod => mod.enabled);
         if (enabledMods.length > 0 && !isBatchExecuting) {
           console.log(`Executing ${enabledMods.length} enabled mods in correct order:`);
-          console.log('Loading order: Database -> Official -> Super -> User');
+          console.log('Loading order: Database -> Official -> Super -> Test -> User');
           enabledMods.forEach((mod, index) => {
             const category = mod.name.startsWith('database/') ? 'Database' :
                            mod.name.startsWith('Official Mods/') ? 'Official' :
                            mod.name.startsWith('Super Mods/') ? 'Super' :
+                           mod.name.startsWith('Test Mods/') ? 'Test' :
                            mod.name.startsWith('User Mods/') ? 'User' : 'Unknown';
             console.log(`  ${index + 1}. [${category}] ${mod.name}`);
           });

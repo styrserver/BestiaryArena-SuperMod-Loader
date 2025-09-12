@@ -453,10 +453,12 @@ async function loadLocalMods() {
 function renderLocalMods(mods) {
   const officialModsList = document.getElementById('official-mods-list');
   const superModsList = document.getElementById('super-mods-list');
+  const testModsList = document.getElementById('test-mods-list');
   const userModsList = document.getElementById('user-mods-list');
 
   if (officialModsList) officialModsList.innerHTML = '';
   if (superModsList) superModsList.innerHTML = '';
+  if (testModsList) testModsList.innerHTML = '';
   if (userModsList) userModsList.innerHTML = '';
 
   if (!mods || mods.length === 0) {
@@ -465,6 +467,7 @@ function renderLocalMods(mods) {
     emptyMessage.textContent = i18n.t('messages.noLocalMods');
     if (officialModsList) officialModsList.appendChild(emptyMessage.cloneNode(true));
     if (superModsList) superModsList.appendChild(emptyMessage.cloneNode(true));
+    if (testModsList) testModsList.appendChild(emptyMessage.cloneNode(true));
     if (userModsList) userModsList.appendChild(emptyMessage.cloneNode(true));
     return;
   }
@@ -483,8 +486,12 @@ function renderLocalMods(mods) {
     'DashboardButton.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
-    'Outfiter.js',
-    
+    'Outfiter.js'
+  ];
+
+  const testModNames = [
+    'Board Advisor.js',
+    'Raid_Hunter.js'
   ];
 
   const hiddenMods = [
@@ -532,7 +539,15 @@ function renderLocalMods(mods) {
     modControls.style.justifyContent = 'flex-end';
     modControls.style.alignItems = 'center';
 
-    // Toggle
+    // Group mods by type using filename only
+    const isSuper = superModNames.some(
+      n => normalizeModName(n) === normalizeModName(modFileName)
+    );
+    const isTest = testModNames.some(
+      n => normalizeModName(n) === normalizeModName(modFileName)
+    );
+
+    // Toggle (functional for all mods including test mods)
     const modToggle = document.createElement('div');
     modToggle.className = 'script-toggle';
     modToggle.style.marginLeft = 'auto';
@@ -557,12 +572,10 @@ function renderLocalMods(mods) {
     modControls.appendChild(modToggle);
     modCard.appendChild(modControls);
 
-    // Group mods by type using filename only
-    const isSuper = superModNames.some(
-      n => normalizeModName(n) === normalizeModName(modFileName)
-    );
     if (mod.type === 'manual' && userModsList) {
       userModsList.appendChild(modCard);
+    } else if (isTest && testModsList) {
+      testModsList.appendChild(modCard);
     } else if (isSuper && superModsList) {
       superModsList.appendChild(modCard);
     } else if (officialModsList) {

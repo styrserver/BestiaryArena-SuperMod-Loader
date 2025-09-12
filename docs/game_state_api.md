@@ -605,6 +605,52 @@ console.log(snapshot.status); // 'active' or other status
 console.log(snapshot.context);
 ```
 
+### Listening for New Raids
+
+The raids component allows you to listen for new raid events:
+
+```javascript
+// Listen for new raids
+const unsubscribe = globalThis.state.raids.on("newRaid", (e) => {
+  // Will execute every time a new raid appears
+  console.log("new raid", e.raid);
+});
+
+// Unsubscribe when finished
+unsubscribe();
+```
+
+## Client Configuration
+
+The clientConfig component allows you to customize various client-side behaviors and filters.
+
+### Customizing Dragon Plant Monster Filter
+
+You can customize which monsters are automatically sold when using the Dragon Plant feature:
+
+```javascript
+// Set a custom monster filter
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    plantMonsterFilter: (monster) => {
+      // If you want to sell the creature, return TRUE
+      // If you want to keep it, return FALSE
+
+      if (monster.totalGenes < 95) return true;
+      if (monster.metadata.name === "Orc Spearman") return true;
+
+      return false;
+    },
+  }),
+});
+
+// Remove any custom filter (use default behavior)
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
+});
+```
+
 ## Advanced Use Cases
 
 ### Forcing a Specific Seed

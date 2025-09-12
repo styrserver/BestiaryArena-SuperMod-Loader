@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Real-time Mods List with Toggle
 const officialModsList = document.getElementById('official-mods-list');
 const superModsList = document.getElementById('super-mods-list');
+const testModsList = document.getElementById('test-mods-list');
 const userModsList = document.getElementById('user-mods-list');
 
 import { getLocalMods } from '../mods/modsLoader.js';
@@ -130,7 +131,9 @@ async function scanAndRegisterLocalMods() {
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
     { name: 'RunTracker.js', enabled: true },
-    
+    // Test Mods
+    { name: 'Board Advisor.js', enabled: false },
+    { name: 'Raid_Hunter.js', enabled: false }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -260,7 +263,13 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',
+    'Raid_Hunter.js',
     'Hunt Analyzer.js'
+  ];
+
+  const testModNames = [
+    'Board Advisor.js',
+    'Raid_Hunter.js'
   ];
 
   const hiddenMods = [
@@ -283,6 +292,7 @@ async function renderMods(fileMods) {
   const manualMods = await getManualMods();
   officialModsList.innerHTML = '';
   superModsList.innerHTML = '';
+  testModsList.innerHTML = '';
   userModsList.innerHTML = '';
   
   const visibleMods = fileMods.filter(mod => {
@@ -293,9 +303,12 @@ async function renderMods(fileMods) {
   });
   
   visibleMods.forEach(mod => {
-    // Robust comparison for Super Mods
+    // Robust comparison for mod types
     const modFileName = mod.name.split('/').pop(); // Get just the filename
     const isSuper = superModNames.some(
+      n => normalizeModName(n) === normalizeModName(modFileName)
+    );
+    const isTest = testModNames.some(
       n => normalizeModName(n) === normalizeModName(modFileName)
     );
     const card = document.createElement('div');
@@ -304,7 +317,7 @@ async function renderMods(fileMods) {
     nameSpan.className = 'mod-name';
     nameSpan.textContent = modFileName.replace('.js', '').replace(/_/g, ' ');
     const editBtn = document.createElement('button');
-    editBtn.innerHTML = '<span>' + (isSuper || true ? 'View' : 'Edit') + '</span>';
+    editBtn.innerHTML = '<span>' + (isSuper || isTest || true ? 'View' : 'Edit') + '</span>';
     editBtn.className = 'unified-btn mod-action-btn';
     editBtn.style.marginLeft = '16px';
     editBtn.onclick = async () => {
@@ -312,14 +325,16 @@ async function renderMods(fileMods) {
       setEditorContent(
         mod.displayName || mod.name,
         content,
-        false, // read-only for official and super mods
+        false, // read-only for official, super, and test mods
         null,
         mod.name // pass filename for download
       );
     };
     card.appendChild(nameSpan);
     card.appendChild(editBtn);
-    if (isSuper) {
+    if (isTest) {
+      testModsList.appendChild(card);
+    } else if (isSuper) {
       superModsList.appendChild(card);
     } else {
       officialModsList.appendChild(card);
