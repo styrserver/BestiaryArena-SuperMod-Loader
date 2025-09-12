@@ -133,7 +133,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 17 Super Mods listed below are included by default in this loader:
 
 ### Autoseller
 Automatically sells or squeezes creatures based on gene thresholds and user settings:
@@ -239,9 +239,40 @@ Advanced autoplay and loot tracking system:
 - View session summaries and performance metrics
 - Export data for further analysis
 
+### Board Advisor
+Advanced board analysis and recommendations system:
+- Room-based data storage and pattern analysis
+- Performance predictions and optimization suggestions
+- Learning from successful runs to improve recommendations
+- Automatic analysis when board changes
+- Configurable analysis depth and recommendation thresholds
+
+### Outfiter
+Comprehensive outfit management system:
+- Browse and preview all available outfits
+- Save and manage custom outfit combinations
+- Color customization for outfits
+- Outfit storage and retrieval system
+- Integration with game's outfit system
+
+### RunTracker
+Local run data tracking and storage system:
+- Automatically tracks and stores run data locally
+- Stores run history with detailed statistics
+- Replay data management and storage
+- Integration with other mods for comprehensive tracking
+- Hidden mod that works behind the scenes
+
+### Welcome
+User onboarding and introduction system:
+- Shows welcome page on first mod loader initialization
+- Introduces users to available mods and features
+- Configurable welcome display preferences
+- User-friendly introduction to the mod ecosystem
+
 ### Official Mods
 
-These are the core mods that provide essential gameplay enhancements. All Official Mods listed below are included by default:
+These are the core mods that provide essential gameplay enhancements. All 11 Official Mods listed below are included by default:
 
 ### Bestiary Automator
 Automates routine gameplay actions to streamline your Bestiary Arena experience:

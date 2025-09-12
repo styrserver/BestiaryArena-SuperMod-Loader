@@ -82,24 +82,48 @@ async function setNeverShowAgain() {
 
 // Get extension version dynamically
 async function getExtensionVersion() {
+  console.log('[Welcome] Getting extension version...');
   try {
-    // Try to get version from browser extension API
-    if (window.browserAPI && window.browserAPI.runtime && window.browserAPI.runtime.getManifest) {
-      const manifest = window.browserAPI.runtime.getManifest();
-      return manifest.version || '1.8.7'; // fallback to current version
+    // Use the same message passing pattern as other mods
+    const response = await new Promise((resolve) => {
+      const messageId = `welcome_version_${Date.now()}_${Math.random()}`;
+      
+      // Set up response listener
+      const handleResponse = (event) => {
+        if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+          window.removeEventListener('message', handleResponse);
+          resolve(event.data.response);
+        }
+      };
+      
+      window.addEventListener('message', handleResponse);
+      
+      // Send request to content script
+      window.postMessage({
+        from: 'BESTIARY_CLIENT',
+        id: messageId,
+        message: { action: 'getVersion' }
+      }, '*');
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout' });
+      }, 5000);
+    });
+    
+    console.log('[Welcome] Version response:', response);
+    
+    if (response && response.success && response.version) {
+      return response.version;
     }
     
-    // Fallback: try to fetch from extension context
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) {
-      const manifest = chrome.runtime.getManifest();
-      return manifest.version || '1.8.7';
-    }
-    
-    // Final fallback
-    return '1.8.7';
+    // If no version found, return unknown
+    console.log('[Welcome] No version found, returning unknown');
+    return 'unknown';
   } catch (error) {
     console.warn('[Welcome] Could not get extension version:', error);
-    return '1.8.7';
+    return 'unknown';
   }
 }
 
@@ -112,6 +136,7 @@ async function showWelcomeModal() {
 
   try {
     const version = await getExtensionVersion();
+    console.log('[Welcome] Version received:', version);
     const modal = api.ui.components.createModal({
       title: 'Welcome to Bestiary Arena Mod Loader!',
       width: 900,
@@ -128,11 +153,12 @@ async function showWelcomeModal() {
           <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="color: #a6adc8; margin-bottom: 15px;">✨ What's Included:</h3>
             <div style="text-align: left; color: #a6adc8; line-height: 1.8;">
-              <p><strong>🔧 Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, and more!</p>
-              <p><strong>🚀 Super Mods:</strong> Autoseller, Cyclopedia, Better Analytics, Hunt Analyzer, and more!</p>
+              <p><strong>🔧 11 Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, Custom Display, and more!</p>
+              <p><strong>🚀 17 Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Board Advisor, Outfiter, and more!</p>
               <p><strong>⚙️ Configuration:</strong> Import/export your settings and mod preferences</p>
               <p><strong>📊 Dashboard:</strong> Access the SuperMod dashboard for advanced features</p>
               <p><strong>🎛️ Popup Controls:</strong> Enable/disable mods directly from the extension popup</p>
+              <p><strong>📈 Analytics:</strong> Track runs, analyze performance, and optimize your gameplay</p>
             </div>
           </div>
           
@@ -152,7 +178,7 @@ async function showWelcomeModal() {
           <div style="color: #a6adc8; font-size: 14px; text-align: center;">
             <p style="margin-bottom: 10px;">Enjoy your enhanced Bestiary Arena experience! 🎉</p>
             <p style="font-size: 12px; opacity: 0.7; margin: 0;">
-              Bestiary Arena SuperMod Loader v${version}
+              Bestiary Arena SuperMod Loader${version !== 'unknown' ? ` v${version}` : ''}
             </p>
           </div>
         </div>

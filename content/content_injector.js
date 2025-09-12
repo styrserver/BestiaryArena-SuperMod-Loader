@@ -134,6 +134,23 @@ window.addEventListener('message', function(event) {
       });
     }
     
+    if (event.data.message && event.data.message.action === 'getVersion') {
+      // Get extension version
+      browserAPI.runtime.sendMessage(event.data.message, response => {
+        if (window.DEBUG) console.log('Get version response:', response);
+        
+        // Forward version to page
+        window.postMessage({
+          from: 'BESTIARY_EXTENSION',
+          id: event.data.id,
+          response: {
+            success: !!response?.success,
+            version: response?.version || 'unknown'
+          }
+        }, '*');
+      });
+    }
+    
     if (event.data.message && event.data.message.action === 'getManualMods') {
       console.log('Content injector: Processing getManualMods request');
       

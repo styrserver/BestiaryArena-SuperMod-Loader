@@ -856,6 +856,16 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true });
     return true; // Indicate async response
   }
+
+  if (message.action === 'getVersion') {
+    try {
+      const manifest = browserAPI.runtime.getManifest();
+      sendResponse({ success: true, version: manifest.version });
+    } catch (error) {
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Indicate async response
+  }
 });
 
 // Clean up registered tabs when they're closed

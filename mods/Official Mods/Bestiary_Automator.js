@@ -557,31 +557,172 @@ const handleDayCare = async () => {
   }
   
   try {
+    console.log('[Bestiary Automator] === Starting daycare detection ===');
+    
     // Check for daycare button with visual indicator
     const dayCareButton = document.querySelector('button:has(img[alt="daycare"])');
     let hasDayCareButtonIndicator = false;
     
     if (dayCareButton) {
       console.log('[Bestiary Automator] Found daycare button, classes:', dayCareButton.className);
+      console.log('[Bestiary Automator] Daycare button HTML:', dayCareButton.outerHTML.substring(0, 200) + '...');
+      
       if (dayCareButton.classList.contains('focus-style-visible') && dayCareButton.classList.contains('active:opacity-70')) {
         hasDayCareButtonIndicator = true;
         console.log('[Bestiary Automator] Daycare button has visual indicator');
+      } else {
+        console.log('[Bestiary Automator] Daycare button does NOT have visual indicator');
+        console.log('[Bestiary Automator] - focus-style-visible:', dayCareButton.classList.contains('focus-style-visible'));
+        console.log('[Bestiary Automator] - active:opacity-70:', dayCareButton.classList.contains('active:opacity-70'));
       }
     } else {
       console.log('[Bestiary Automator] No daycare button found');
     }
     
-    // Check for creature at daycare with blip indicator
-    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="daycare"])');
+    // Check for creature at daycare with blip indicator - let's debug this step by step
+    console.log('[Bestiary Automator] Looking for blip elements...');
+    
+    // First, let's find ALL elements with data-blip="true"
+    const allBlipElements = document.querySelectorAll('[data-blip="true"]');
+    console.log('[Bestiary Automator] Found', allBlipElements.length, 'elements with data-blip="true"');
+    
+    allBlipElements.forEach((element, index) => {
+      console.log(`[Bestiary Automator] Blip element ${index + 1}:`, element.outerHTML.substring(0, 150) + '...');
+    });
+    
+    // Now let's find ALL elements with img[alt="daycare"]
+    const allDaycareImages = document.querySelectorAll('img[alt="daycare"]');
+    console.log('[Bestiary Automator] Found', allDaycareImages.length, 'images with alt="daycare"');
+    
+    allDaycareImages.forEach((img, index) => {
+      console.log(`[Bestiary Automator] Daycare image ${index + 1}:`, img.outerHTML);
+      console.log(`[Bestiary Automator] Daycare image ${index + 1} parent:`, img.parentElement?.outerHTML.substring(0, 150) + '...');
+    });
+    
+    // Look for creatures that are actually in daycare slots (have both creature and daycare images)
+    // This selector ensures we only get actual creatures, not Dragon Plants or other items
+    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="daycare"])');
+    console.log('[Bestiary Automator] Daycare creature selector result:', creatureAtDaycare);
+    
     if (creatureAtDaycare) {
       console.log('[Bestiary Automator] Found creature at daycare with blip');
+      console.log('[Bestiary Automator] Creature element HTML:', creatureAtDaycare.outerHTML.substring(0, 200) + '...');
+      
+      // Check if this specific creature is ready (not max level)
+      const isRedBlip = creatureAtDaycare.querySelector('.text-invalid');
+      const isGreenBlip = creatureAtDaycare.querySelector('.text-expBar');
+      const maxLevelText = creatureAtDaycare.querySelector('span[data-state="closed"]');
+      
+      console.log('[Bestiary Automator] This creature analysis:');
+      console.log('[Bestiary Automator] - Red blip (max level):', !!isRedBlip);
+      console.log('[Bestiary Automator] - Green blip (ready):', !!isGreenBlip);
+      console.log('[Bestiary Automator] - Max level text:', maxLevelText?.textContent);
+      
+      if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
+        console.log('[Bestiary Automator] This creature is at max level, not ready');
+      } else if (isGreenBlip) {
+        console.log('[Bestiary Automator] This creature is ready for level up!');
+      } else {
+        console.log('[Bestiary Automator] This creature status unclear');
+      }
     } else {
       console.log('[Bestiary Automator] No creature at daycare with blip found');
     }
     
-    // Only proceed if there are actually creatures ready (with blip="true")
-    if (!creatureAtDaycare) {
-      console.log('[Bestiary Automator] No creatures ready at daycare, skipping');
+    // Let's also check if there are any elements that contain both a blip AND a daycare image
+    // This loop correctly filters for actual creatures only (not Dragon Plants or other items)
+    const blipElements = document.querySelectorAll('[data-blip="true"]');
+    let foundBlipWithDaycare = false;
+    let foundReadyCreature = false;
+    
+    console.log('[Bestiary Automator] Analyzing', blipElements.length, 'blip elements...');
+    
+    for (let i = 0; i < blipElements.length; i++) {
+      const blipElement = blipElements[i];
+      console.log(`[Bestiary Automator] Blip element ${i + 1}:`, blipElement.outerHTML.substring(0, 300) + '...');
+      
+      // Only check blip elements that have both creature and daycare images (actual daycare creatures)
+      // This ensures we ignore Dragon Plants and other non-creature blips
+      const daycareImg = blipElement.querySelector('img[alt="daycare"]');
+      const creatureImg = blipElement.querySelector('img[alt="creature"]');
+      
+      if (daycareImg && creatureImg) {
+        console.log(`[Bestiary Automator] Found blip element ${i + 1} that contains daycare image`);
+        foundBlipWithDaycare = true;
+        
+        // Check if this creature is at max level (red blip = max level)
+        const isRedBlip = blipElement.querySelector('.text-invalid');
+        const isGreenBlip = blipElement.querySelector('.text-expBar');
+        const maxLevelText = blipElement.querySelector('span[data-state="closed"]');
+        
+        console.log(`[Bestiary Automator] Creature ${i + 1} analysis:`);
+        console.log(`[Bestiary Automator] - Red blip (max level):`, !!isRedBlip);
+        console.log(`[Bestiary Automator] - Green blip (ready):`, !!isGreenBlip);
+        console.log(`[Bestiary Automator] - Max level text:`, maxLevelText?.textContent);
+        
+        // Only consider it ready if it has a green blip (not red) and no "Max" text
+        if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
+          console.log(`[Bestiary Automator] Creature ${i + 1} is ready for level up!`);
+          foundReadyCreature = true;
+        } else if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
+          console.log(`[Bestiary Automator] Creature ${i + 1} is at max level, skipping`);
+        } else {
+          console.log(`[Bestiary Automator] Creature ${i + 1} status unclear, skipping`);
+        }
+      } else {
+        console.log(`[Bestiary Automator] Blip element ${i + 1} is not a daycare creature (missing creature or daycare image)`);
+      }
+    }
+    
+    // Also check if there are any daycare images that don't have blips but might be ready
+    // BUT only if they are actual creatures (not Dragon Plants or other items)
+    console.log('[Bestiary Automator] Checking daycare images without blips...');
+    for (let i = 0; i < allDaycareImages.length; i++) {
+      const daycareImg = allDaycareImages[i];
+      const parentElement = daycareImg.closest('[data-blip="true"]');
+      
+      if (!parentElement) {
+        console.log(`[Bestiary Automator] Daycare image ${i + 1} has no blip parent - checking if it's a creature...`);
+        
+        // Check the parent container for level info
+        const container = daycareImg.closest('.container-slot');
+        if (container) {
+          // CRITICAL: Only process if this is actually a creature, not a Dragon Plant or other item
+          const creatureImg = container.querySelector('img[alt="creature"]');
+          if (!creatureImg) {
+            console.log(`[Bestiary Automator] Daycare image ${i + 1} is not a creature (no creature image found), skipping`);
+            continue;
+          }
+          
+          const maxLevelText = container.querySelector('span[data-state="closed"]');
+          const levelInfo = container.querySelector('.pixel-font-16');
+          
+          console.log('[Bestiary Automator] Container analysis:');
+          console.log('[Bestiary Automator] - Max level text:', maxLevelText?.textContent);
+          console.log('[Bestiary Automator] - Level info:', levelInfo?.textContent);
+          
+          // For creatures without blips, check if they're not at max level
+          if (!maxLevelText?.textContent?.includes('Max')) {
+            console.log('[Bestiary Automator] Found ready creature without blip!');
+            foundReadyCreature = true;
+          } else {
+            console.log('[Bestiary Automator] Creature without blip is at max level');
+          }
+        }
+      }
+    }
+    
+    if (!foundBlipWithDaycare) {
+      console.log('[Bestiary Automator] No blip elements contain daycare images');
+    }
+    
+    if (foundBlipWithDaycare && !foundReadyCreature) {
+      console.log('[Bestiary Automator] Found daycare blip but no creatures ready for level up');
+    }
+    
+    // Only proceed if there are actually creatures ready for level up
+    if (!foundReadyCreature) {
+      console.log('[Bestiary Automator] No creatures ready for level up at daycare, skipping');
       return;
     }
     
@@ -596,8 +737,74 @@ const handleDayCare = async () => {
     
     dayCareButtonAfter.click();
     await sleep(500);
-    clickButtonWithText('levelUp');
-    await sleep(500);
+    
+    // Handle all creatures that can level up in one session
+    let levelUpCount = 0;
+    const maxLevelUps = 4; // Maximum 4 creatures can be in daycare
+    
+    while (levelUpCount < maxLevelUps) {
+      console.log(`[Bestiary Automator] === Level up attempt ${levelUpCount + 1} ===`);
+      
+      // Check if there are any creatures ready to level up
+      const readyCreatures = document.querySelectorAll('[data-blip="true"]');
+      let foundReadyCreature = false;
+      let readyCreatureCount = 0;
+      
+      console.log(`[Bestiary Automator] Checking ${readyCreatures.length} blip elements for ready creatures...`);
+      
+      for (let i = 0; i < readyCreatures.length; i++) {
+        const creature = readyCreatures[i];
+        const daycareImg = creature.querySelector('img[alt="daycare"]');
+        
+        if (daycareImg) {
+          const isRedBlip = creature.querySelector('.text-invalid');
+          const isGreenBlip = creature.querySelector('.text-expBar');
+          const maxLevelText = creature.querySelector('span[data-state="closed"]');
+          
+          console.log(`[Bestiary Automator] Creature ${i + 1} in daycare modal:`);
+          console.log(`[Bestiary Automator] - Red blip:`, !!isRedBlip);
+          console.log(`[Bestiary Automator] - Green blip:`, !!isGreenBlip);
+          console.log(`[Bestiary Automator] - Max text:`, maxLevelText?.textContent);
+          
+          if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
+            console.log(`[Bestiary Automator] Creature ${i + 1} is ready for level up!`);
+            foundReadyCreature = true;
+            readyCreatureCount++;
+          } else {
+            console.log(`[Bestiary Automator] Creature ${i + 1} is not ready`);
+          }
+        }
+      }
+      
+      console.log(`[Bestiary Automator] Found ${readyCreatureCount} creatures ready for level up`);
+      
+      if (!foundReadyCreature) {
+        console.log('[Bestiary Automator] No more creatures ready for level up, stopping');
+        break;
+      }
+      
+      // Click level up
+      console.log('[Bestiary Automator] Attempting to click level up button...');
+      const levelUpClicked = clickButtonWithText('levelUp');
+      
+      if (!levelUpClicked) {
+        console.log('[Bestiary Automator] Level up button not found, stopping');
+        break;
+      }
+      
+      levelUpCount++;
+      console.log(`[Bestiary Automator] Successfully clicked level up for creature ${levelUpCount}`);
+      
+      // Wait for the level up to process
+      console.log('[Bestiary Automator] Waiting 1 second for level up to process...');
+      await sleep(1000);
+      
+      console.log(`[Bestiary Automator] Level up ${levelUpCount} completed`);
+    }
+    
+    console.log(`[Bestiary Automator] Completed ${levelUpCount} level ups`);
+    
+    // Close the modal after handling all creatures
     clickAllCloseButtons();
     await sleep(500);
     

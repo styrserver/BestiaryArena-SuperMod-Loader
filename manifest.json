@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "1.8.9",
+  "version": "1.9.0",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and comprehensive tools.",
   "icons": {
     "16": "assets/icons/icon-16.png",
