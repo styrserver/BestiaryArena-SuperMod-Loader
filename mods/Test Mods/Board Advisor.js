@@ -50,6 +50,7 @@ let sandboxDB = null;
 let isDBReady = false;
 let currentRecommendedSetup = null;
 let placedRecommendedPieces = new Set();
+let previousRoomId = null;
 
 // Analysis State
 let analysisState = {
@@ -108,6 +109,12 @@ function generateBoardHash(boardSetup) {
 
 // Loading State Management
 function setUILoadingState(isLoading, reason = '') {
+  // Prevent setting loading to false if there are pending operations
+  if (!isLoading && analysisState.pendingBoardChange) {
+    console.log(`[Board Advisor] UI loading completion delayed - board change still pending`);
+    return;
+  }
+  
   analysisState.isUILoading = isLoading;
   if (isLoading) {
     console.log(`[Board Advisor] UI loading started: ${reason}`);
@@ -933,6 +940,20 @@ function highlightRecommendedTiles(recommendedSetup) {
   }
   
   console.log('[Board Advisor] Highlighting recommended tiles:', recommendedSetup);
+  
+  // Check if this is the same setup as already highlighted
+  const isSameSetup = currentRecommendedSetup && 
+    currentRecommendedSetup.length === recommendedSetup.length &&
+    currentRecommendedSetup.every((rec, index) => 
+      rec.tileIndex === recommendedSetup[index]?.tileIndex &&
+      rec.monsterName === recommendedSetup[index]?.monsterName &&
+      rec.equipmentName === recommendedSetup[index]?.equipmentName
+    );
+  
+  if (isSameSetup) {
+    console.log('[Board Advisor] Same setup already highlighted, skipping cleanup');
+    return;
+  }
   
   // Clean up any existing highlights
   cleanupTileHighlights();
@@ -2536,27 +2557,37 @@ class DataCollector {
   onBoardChange(boardContext) {
     try {
       const now = Date.now();
-      const currentBoard = this.getCurrentBoardData();
+      
+      // Get fresh room ID from context first
       const newRoomId = this.extractRoomIdFromContext(boardContext);
       
-      // Check if this is a duplicate board change event
-      if (isBoardChangeInProgress()) {
-        console.log('[Board Advisor] Board change already in progress, skipping duplicate event');
-        return;
+      // Get current board data
+      const currentBoard = this.getCurrentBoardData();
+      
+      console.log('[Board Advisor] Board change detected:', {
+        previousRoomId: previousRoomId,
+        currentRoomId: currentBoard?.roomId,
+        currentMapName: currentBoard?.mapName,
+        newRoomId: newRoomId,
+        boardContext: boardContext
+      });
+      
+      // Check if this is just a run start (same room, same board setup) vs actual map/board change
+      const isRunStart = previousRoomId === newRoomId && 
+                        currentBoard?.boardSetup && 
+                        currentBoard.boardSetup.length > 0;
+      
+      if (!isRunStart) {
+        // Only clear highlights on actual map/board changes, not run starts
+        console.log(`[Board Advisor] Board/map change detected, clearing highlights immediately`);
+        clearRecommendationsInstantly();
+      } else {
+        console.log(`[Board Advisor] Run start detected (same room/board), keeping UI stable`);
       }
       
-      // Set loading state and mark board change as in progress
-      setUILoadingState(true, 'Board change detected');
-      analysisState.pendingBoardChange = newRoomId;
-      analysisState.lastBoardChangeTime = now;
-      
-      // Use smart cleanup that waits for all recommended pieces to be placed
-      smartCleanupTileHighlights();
-      
-      // If room ID changed, immediately clear recommendations and start analysis faster
-      if (currentBoard && newRoomId && currentBoard.roomId !== newRoomId) {
-        console.log(`[Board Advisor] Map change detected: ${currentBoard.roomId} -> ${newRoomId}, clearing recommendations instantly`);
-        clearRecommendationsInstantly();
+      // Only trigger analysis for actual map changes, not run starts
+      if (previousRoomId && newRoomId && previousRoomId !== newRoomId) {
+        console.log(`[Board Advisor] Map change detected: ${previousRoomId} -> ${newRoomId}`);
         
         // Clear any existing timeout
         if (this.boardChangeTimeout) {
@@ -2566,18 +2597,21 @@ class DataCollector {
         // Start analysis immediately for map changes (no debounce)
         this.triggerAutomaticAnalysis();
         this.refreshDataForCurrentMap();
-        return;
+      } else if (!isRunStart) {
+        // For same-room board changes (not run starts), use debounce to avoid excessive analysis
+        if (this.boardChangeTimeout) {
+          clearTimeout(this.boardChangeTimeout);
+        }
+        
+        this.boardChangeTimeout = setTimeout(() => {
+          this.triggerAutomaticAnalysis();
+          this.refreshDataForCurrentMap();
+        }, BOARD_CHANGE_DEBOUNCE_TIME);
       }
+      // For run starts (same room, same board), do nothing - keep UI stable
       
-      // For non-map changes, use debounce to avoid excessive analysis
-      if (this.boardChangeTimeout) {
-        clearTimeout(this.boardChangeTimeout);
-      }
-      
-      this.boardChangeTimeout = setTimeout(() => {
-        this.triggerAutomaticAnalysis();
-        this.refreshDataForCurrentMap();
-      }, BOARD_CHANGE_DEBOUNCE_TIME); // Use configurable debounce time
+      // Update previous room ID for next comparison
+      previousRoomId = newRoomId;
     } catch (error) {
       console.error('[Board Advisor] Error in onBoardChange:', error);
       setUILoadingState(false, 'Error in board change handler');
@@ -2617,9 +2651,13 @@ class DataCollector {
           totalAvailableRuns: runTrackerData?.metadata?.totalRuns || 0
         });
         
-        // Clear loading state and pending board change
-        setUILoadingState(false, 'Data loading completed');
+        // Clear pending board change first, then loading state
         analysisState.pendingBoardChange = null;
+        if (this.loadingTimeout) {
+          clearTimeout(this.loadingTimeout);
+          this.loadingTimeout = null;
+        }
+        setUILoadingState(false, 'Data loading completed');
         
         // If we have data for this room, trigger analysis
         if (roomPatterns && roomPatterns.size > 0) {
@@ -3053,14 +3091,6 @@ class DataCollector {
 
   getCurrentBoardData() {
     try {
-      const now = Date.now();
-      const CACHE_DURATION = 1000; // Cache for 1 second
-      
-      // Check cache first
-      if (performanceCache.lastRoomDetection && 
-          (now - performanceCache.lastRoomDetectionTime) < CACHE_DURATION) {
-        return performanceCache.lastRoomDetection;
-      }
       
       const boardContext = globalThis.state.board.getSnapshot().context;
       const playerContext = globalThis.state.player.getSnapshot().context;
@@ -3088,7 +3118,7 @@ class DataCollector {
         detectionMethod = 'playerContext.currentRoomId (fallback)';
       }
       
-      const result = {
+      return {
         boardSetup: this.serializeBoardSetup(boardContext.boardConfig),
         playerMonsters: playerContext.monsters,
         playerEquipment: playerContext.equips,
@@ -3097,12 +3127,6 @@ class DataCollector {
         gameStarted: boardContext.gameStarted,
         detectionMethod: detectionMethod
       };
-      
-      // Cache the result
-      performanceCache.lastRoomDetection = result;
-      performanceCache.lastRoomDetectionTime = now;
-      
-      return result;
     } catch (error) {
       console.error('[Board Advisor] Error getting current board data:', error);
       return null;
@@ -3437,7 +3461,7 @@ class AnalysisEngine {
       if (!currentBoard || !currentBoard.boardSetup.length) {
         // Board is empty - recommend best run from available data
         console.log('[Board Advisor] Board is empty, recommending best run from available data');
-        return this.createEmptyBoardRecommendation();
+        return this.createEmptyBoardRecommendation(currentBoard);
       }
 
       // Board is not empty - use smart cleanup for tile highlights
@@ -3625,17 +3649,21 @@ class AnalysisEngine {
     };
   }
 
-  async createEmptyBoardRecommendation() {
+  async createEmptyBoardRecommendation(currentBoard = null) {
     console.log('[Board Advisor] Creating empty board recommendation');
     
     try {
       // Get best runs from all available data sources
       const bestRuns = await this.getBestRunsFromAllSources();
       
+      // Use current board room info
+      const roomId = currentBoard?.roomId;
+      const roomName = currentBoard?.mapName;
+      
       if (bestRuns.length === 0) {
         return {
-          roomId: 'empty',
-          roomName: 'Empty Board',
+          roomId: roomId,
+          roomName: roomName,
           hasData: false,
           totalRuns: 0,
           recommendations: [{
@@ -3728,7 +3756,8 @@ class AnalysisEngine {
         console.log('[Board Advisor] Monster pieces:', runsWithMonsters[0].boardSetup.filter(p => p.monsterId));
       }
       
-      const roomName = globalThis.state?.utils?.ROOM_NAME?.[bestRun.roomId] || bestRun.roomId;
+      // Use current board room name if available, otherwise use best run room name
+      const displayRoomName = currentBoard?.mapName || globalThis.state?.utils?.ROOM_NAME?.[bestRun.roomId] || bestRun.roomId;
       
       // Convert setup to Setup_Manager.js format
       console.log('[Board Advisor] Original setup data:', bestRun.boardSetup);
@@ -3779,8 +3808,8 @@ class AnalysisEngine {
       }
       
       return {
-        roomId: bestRun.roomId,
-        roomName: roomName,
+        roomId: roomId,
+        roomName: displayRoomName,
         hasData: true,
         totalRuns: bestRuns.length,
         recommendations: [{
@@ -5290,10 +5319,9 @@ function closePanel() {
   if (panel) {
     panel.style.display = 'none';
   }
-  panelState.isOpen = false;
   
-  // Clean up tile highlights when panel closes
-  cleanupTileHighlights();
+  // Set panel state to closed BEFORE stopping state refresh to prevent timing issues
+  panelState.isOpen = false;
   
   // Stop state-based refresh when panel closes
   stopStateRefresh();
@@ -5728,6 +5756,7 @@ function createFocusAreasSection() {
 
 function createRecommendationsSection() {
   const section = document.createElement('div');
+  section.id = 'recommendations-section';
   section.style.cssText = `
     margin-bottom: 12px;
     padding: 8px 10px;
@@ -5756,6 +5785,14 @@ function createRecommendationsSection() {
   section.appendChild(recommendations);
   
   return section;
+}
+
+// Function to show/hide recommendations section
+function setRecommendationsSectionVisibility(visible) {
+  const recommendationsSection = document.getElementById('recommendations-section');
+  if (recommendationsSection) {
+    recommendationsSection.style.display = visible ? 'block' : 'none';
+  }
 }
 
 function createPanelFooter() {
@@ -6490,8 +6527,10 @@ function loadPanelData() {
       </div>`
     ).join('');
     recommendationsDisplay.innerHTML = recs;
+    setRecommendationsSectionVisibility(true);
   } else {
     recommendationsDisplay.innerHTML = '<div style="color: #E06C75;">No recommendations available. Play some games to build data.</div>';
+    setRecommendationsSectionVisibility(false);
   }
 }
 
@@ -6825,6 +6864,10 @@ function clearRecommendationsInstantly() {
   // Clear any existing tile highlights immediately
   cleanupTileHighlights();
   
+  // Reset recommended setup tracking variables
+  currentRecommendedSetup = null;
+  placedRecommendedPieces.clear();
+  
   if (recommendationsDisplay) {
     recommendationsDisplay.innerHTML = `
       <div style="text-align: center; color: #777; font-style: italic; padding: 20px;">
@@ -6968,6 +7011,9 @@ async function updatePanelWithAnalysis(analysis) {
     });
     return;
   }
+  
+  // Show recommendations section when there's data
+  setRecommendationsSectionVisibility(true);
   
   // Get room name for display
   const roomName = globalThis.state?.utils?.ROOM_NAME?.[analysis.roomId] || analysis.roomId;
@@ -7436,13 +7482,16 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   const recommendationsDisplay = document.getElementById('recommendations-display');
   if (!analysisDisplay || !recommendationsDisplay) return;
   
+  // Hide recommendations section when there's no data
+  setRecommendationsSectionVisibility(false);
+  
   // Get room name for display
   const roomName = globalThis.state?.utils?.ROOM_NAME?.[analysis.roomId] || analysis.roomId;
   
-  // Update analysis section with no-data information
+  // Update analysis section with no-data information (consistent with data UI)
   let analysisHTML = `
-    <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: 600; color: #FF9800; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+    <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
+      <div style="font-weight: 600; color: #98C379; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
         <span>🗺️</span>
         <span>Current Map: ${roomName}</span>
       </div>
@@ -7452,21 +7501,28 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     </div>
   `;
   
-  // Add no-data information
+  // Add no-data information (consistent with data UI structure)
   analysisHTML += `
-    <div style="margin-bottom: 12px; padding: 15px; background: #1F2937; border-radius: 8px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: 600; color: #FF9800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
-        <span>📊</span>
-        <span>No Data Available</span>
+    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+      <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <span>⚠️</span>
+        <span>No Historical Data</span>
       </div>
-      <div style="font-size: 12px; color: #ABB2BF; margin-bottom: 12px;">
-        ${analysis.totalRuns > 0 
-          ? `No data found for ${roomName}. You have ${analysis.totalRuns} total runs recorded, but none in this specific room.`
-          : 'No historical data available for analysis. Start playing to build your first dataset!'
-        }
+      <div style="font-size: 11px; color: #ABB2BF;">
+        Play some games to build data for analysis and personalized recommendations.
       </div>
-      <div style="font-size: 11px; color: #98C379;">
-        💡 <strong>Tip:</strong> Play some games in this room or use the Board Analyzer mod to collect data for better analysis.
+    </div>
+    
+    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #61AFEF;">
+      <div style="font-weight: 600; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <span>🎯</span>
+        <span>Analysis Status</span>
+      </div>
+      <div style="font-size: 11px; color: #ABB2BF;">
+        <div>• Data Collection: <span style="color: #98C379;">Active</span></div>
+        <div>• Pattern Learning: <span style="color: #98C379;">Enabled</span></div>
+        <div>• Leaderboard Integration: <span style="color: #98C379;">Ready</span></div>
+        <div>• Recommendations: <span style="color: #FF9800;">Pending Data</span></div>
       </div>
     </div>
   `;
@@ -8070,6 +8126,9 @@ function getUserBestScores() {
 const dataCollector = new DataCollector();
 const leaderboardAnalyzer = new LeaderboardAnalyzer();
 const boardAnalyzer = new AnalysisEngine(dataCollector, leaderboardAnalyzer);
+
+// Initialize previous room ID for change detection
+previousRoomId = dataCollector.getCurrentBoardData()?.roomId || null;
 
 // Initialize sandbox storage
 initSandboxDB();

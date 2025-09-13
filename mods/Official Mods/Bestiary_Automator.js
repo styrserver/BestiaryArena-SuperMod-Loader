@@ -1725,6 +1725,7 @@ const runAutomationTasks = async () => {
     // Core automation tasks that should always run
     await takeRewardsIfAvailable();
     await handleDayCare();
+    await runTaskChecking(); // Add task checking to run continuously like daycare
     updateRequiredStamina();
     await refillStaminaIfNeeded();
     
