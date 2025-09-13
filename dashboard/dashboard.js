@@ -131,9 +131,9 @@ async function scanAndRegisterLocalMods() {
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
     { name: 'RunTracker.js', enabled: true },
+    { name: 'Raid_Hunter.js', enabled: true },
     // Test Mods
-    { name: 'Board Advisor.js', enabled: false },
-    { name: 'Raid_Hunter.js', enabled: false }
+    { name: 'Board Advisor.js', enabled: false }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -263,13 +263,12 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Cyclopedia.js',
     'DashboardButton.js',
     'Dice_Roller.js',
-    'Raid_Hunter.js',
-    'Hunt Analyzer.js'
+    'Hunt Analyzer.js',
+    'Raid_Hunter.js'
   ];
 
   const testModNames = [
-    'Board Advisor.js',
-    'Raid_Hunter.js'
+    'Board Advisor.js'
   ];
 
   const hiddenMods = [

@@ -486,12 +486,12 @@ function renderLocalMods(mods) {
     'DashboardButton.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
-    'Outfiter.js'
+    'Outfiter.js',
+    'Raid_Hunter.js'
   ];
 
   const testModNames = [
-    'Board Advisor.js',
-    'Raid_Hunter.js'
+    'Board Advisor.js'
   ];
 
   const hiddenMods = [

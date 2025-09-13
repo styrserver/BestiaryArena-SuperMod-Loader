@@ -1,0 +1,335 @@
+// Event Hunter Mod for Bestiary Arena
+if (window.DEBUG) console.log('Event Hunter Mod initializing...');
+
+// --- CONSTANTS ---
+const MOD_ID = 'event-hunter';
+const BUTTON_ID = `${MOD_ID}-toggle-button`;
+const STORAGE_KEY = 'event-hunter-active';
+const EVENT_TEXTS = ['Permafrosted', 'Whitewatch', 'Ritual', 'Heist'];// Array of event button texts to find
+const REFRESH_STANDARD = 5;
+const REFRESH_EVENT = 122;
+
+// --- STATE ---
+// Load initial state from localStorage, default to false.
+// localStorage stores strings, so we compare with 'true'.
+let isEnabled = localStorage.getItem(STORAGE_KEY) === 'true';
+let actionScheduled = false; // Flag to prevent multiple actions
+let nextActionTime = 0; // Timestamp for when the next action will happen
+let countdownIntervalId = null; // ID for the countdown timer
+let nextActionTimeoutId = null; // ID for the page reload/recheck timeout
+
+// --- UI FUNCTIONS ---
+
+/**
+ * Updates the button's appearance based on the current state.
+ */
+function updateButtonAppearance() {
+    let buttonText = isEnabled ? 'Event Hunter: ON' : 'Event Hunter: OFF';
+    const tooltipText = `Click to turn ${isEnabled ? 'OFF' : 'ON'}`;
+
+    if (isEnabled && actionScheduled && nextActionTime > 0) {
+        const remainingSeconds = Math.round((nextActionTime - Date.now()) / 1000);
+
+        if (remainingSeconds > 0) {
+            const minutes = Math.floor(remainingSeconds / 60);
+            const seconds = remainingSeconds % 60;
+            const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            buttonText += ` (${formattedTime})`;
+        } else {
+            // Stop the countdown when time is up
+            if (countdownIntervalId) clearInterval(countdownIntervalId);
+            countdownIntervalId = null;
+        }
+    }
+
+    // Use the API to update the button's text and tooltip.
+    // The `primary` property controls the button's style (true = green, false = yellow).
+    api.ui.updateButton(BUTTON_ID, {
+        text: buttonText,
+        primary: isEnabled,
+        tooltip: tooltipText
+    });
+
+    // The `primary` property should handle the color change, but we can be explicit
+    // to ensure it matches other mods if needed.
+    const buttonElement = document.getElementById(BUTTON_ID);
+    if (buttonElement) {
+        if (isEnabled) {
+            // This makes the button green, indicating it's active.
+            buttonElement.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+            buttonElement.style.color = "#ffffff";
+        } else {
+            // This is the default style for non-primary buttons.
+            buttonElement.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+            buttonElement.style.color = "#ffe066";
+        }
+    }
+}
+
+/**
+ * Toggles the state, saves it, and updates the UI.
+ */
+function toggleState() {
+    // Flip the boolean state.
+    isEnabled = !isEnabled;
+
+    // Save the new state to localStorage.
+    localStorage.setItem(STORAGE_KEY, isEnabled);
+
+    if (window.DEBUG) console.log(`Event Hunter state changed to: ${isEnabled}`);
+
+    // If the mod is now enabled, run the main loop.
+    if (isEnabled) {
+        checkForEvents();
+    } else {
+        // If disabled, cancel any scheduled actions and timers
+        if (nextActionTimeoutId) clearTimeout(nextActionTimeoutId);
+        if (countdownIntervalId) clearInterval(countdownIntervalId);
+        actionScheduled = false;
+        nextActionTime = 0;
+        nextActionTimeoutId = null;
+        countdownIntervalId = null;
+    }
+
+    // Update the button's appearance to reflect the new state.
+    updateButtonAppearance();
+}
+
+/**
+ * Checks if an element is visible and interactable.
+ * @param {HTMLElement} el The element to check.
+ * @returns {boolean} True if the element is visible.
+ */
+function isElementVisible(el) {
+    if (!el) return false;
+    // The button must not be disabled.
+    if (el.disabled) return false;
+    // The element must have a size to be visible. This is a reliable check.
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+}
+
+/**
+ * Helper function to find a button that includes a specific text.
+ * @param {string} text - The text to search for within the button.
+ * @returns {HTMLElement|null} The found button element or null.
+ */
+function findButtonByText(text) {
+    // First, try to find a simple button with the exact text content.
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const simpleButton = buttons.find(button => button.textContent.trim() === text && isElementVisible(button));
+    if (simpleButton) {
+        return simpleButton;
+    }
+
+    // If not found, search for complex action-link spans that contain the text.
+    // This handles cases where the text is a sibling to the button element.
+    const actionLinks = Array.from(document.querySelectorAll('span.action-link'));
+    for (const span of actionLinks) {
+        if (span.textContent.trim().includes(text) && isElementVisible(span)) {
+            const buttonInSpan = span.querySelector('button');
+            // Also check if the button inside the span is visible
+            if (buttonInSpan && isElementVisible(buttonInSpan)) {
+                return buttonInSpan;
+            }
+        }
+    }
+
+    // Fallback for buttons where text might be inside, e.g. "Auto-setup"
+    const fallbackButton = buttons.find(button => button.textContent.trim().includes(text) && isElementVisible(button));
+    if (fallbackButton) {
+        return fallbackButton;
+    }
+
+    return null;
+}
+
+/**
+ * Schedules a page reload and logs the action.
+ * @param {number} delayMinutes - The delay in minutes before reloading.
+ */
+function scheduleReload(delayMinutes) {
+    if (actionScheduled) return;
+    actionScheduled = true;
+
+    // Add a random variation of +/- 20% to the delay
+    const randomizationFactor = 1; //0.8 + (Math.random() * 0.4); // Random factor between 0.8 and 1.2
+    const randomizedDelayMinutes = delayMinutes;// * randomizationFactor;
+
+    const delayMs = randomizedDelayMinutes * 60 * 1000;
+    nextActionTime = Date.now() + delayMs;
+
+    // console.log(`Reloading page in approximately ${randomizedDelayMinutes.toFixed(2)} minutes.`);
+    nextActionTimeoutId = setTimeout(() => location.reload(), delayMs);
+
+    // Start the countdown timer to update the button
+    if (countdownIntervalId) clearInterval(countdownIntervalId);
+    countdownIntervalId = setInterval(updateButtonAppearance, 1000);
+    updateButtonAppearance(); // Initial update
+}
+
+/**
+ * Schedules a re-check for events without reloading the page.
+ * @param {number} delayMinutes - The delay in minutes before re-checking.
+ */
+function scheduleRecheck(delayMinutes) {
+    if (actionScheduled) return;
+    actionScheduled = true;
+
+    // Add a random variation of +/- 20% to the delay
+    const randomizationFactor = 0.8 + (Math.random() * 0.4);
+    const randomizedDelayMinutes = delayMinutes * randomizationFactor;
+
+    const delayMs = randomizedDelayMinutes * 60 * 1000;
+    nextActionTime = Date.now() + delayMs;
+
+    console.log(`Re-checking for events in approximately ${randomizedDelayMinutes.toFixed(2)} minutes.`);
+    nextActionTimeoutId = setTimeout(() => {
+        actionScheduled = false; // Reset flag before re-checking
+        checkForEvents();
+    }, delayMs);
+
+    // Start the countdown timer to update the button
+    if (countdownIntervalId) clearInterval(countdownIntervalId);
+    countdownIntervalId = setInterval(updateButtonAppearance, 1000);
+    updateButtonAppearance(); // Initial update
+}
+
+/**
+ * Checks for quest events and handles them.
+ */
+async function checkForEvents() {
+    if (actionScheduled) return;
+
+    while (true) {
+        const closeButton = findButtonByText('Close');
+        if (closeButton) {
+            console.log("Found 'Close' button, clicking it and waiting 10 seconds...");
+            closeButton.click();
+            await new Promise(resolve => setTimeout(resolve, 10000));
+        } else {
+            break; // Exit loop if no "Close" button is found
+        }
+    }
+
+    console.log("Attempting to check for events...");
+
+    const questsButton = findButtonByText('Quests');
+    if (!questsButton) {
+        console.log("'Quests' button not found.");
+        scheduleReload(REFRESH_STANDARD); // Refresh if Quests button isn't there, maybe it will appear later
+        return;
+    }
+
+    questsButton.click();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+
+    let eventFoundAndClicked = false;
+    for (const eventText of EVENT_TEXTS) {
+        const eventButton = findButtonByText(eventText);
+        if (eventButton) {
+            console.log(`Found event button: "${eventText}". Clicking it.`);
+            eventButton.click();
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+            eventFoundAndClicked = true;
+            break; // Stop after finding and clicking the first event
+        }
+    }
+
+    if (eventFoundAndClicked) {
+        scheduleReload(REFRESH_EVENT);
+    } else {
+        console.log("No target event buttons found.");
+        scheduleRecheck(REFRESH_STANDARD);
+        return;
+    }
+
+    const selectButton = findButtonByText('Select');
+    if (!selectButton) {
+        console.log("'Select' button not found.");
+        scheduleReload(REFRESH_STANDARD); // Refresh if Select button isn't there, maybe it will appear later
+        return;
+    }
+
+    selectButton.click();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+
+    const autoSetupButton = findButtonByText('Auto-setup');
+    if (!autoSetupButton) {
+        console.log("'Auto-setup' button not found.");
+        scheduleReload(REFRESH_STANDARD); // Refresh if Auto-setup button isn't there, maybe it will appear later
+        return;
+    }
+
+    autoSetupButton.click();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+
+    ensureAutoplayMode();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+
+    const startButton = findButtonByText('Start');
+    if (!startButton) {
+        console.log("'Start' button not found.");
+        scheduleReload(REFRESH_STANDARD); // Refresh if Start button isn't there, maybe it will appear later
+        return;
+    }
+
+    startButton.click();
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for UI to update
+}
+
+function ensureAutoplayMode() {
+  try {
+    // Get the current game mode
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const currentMode = boardContext.mode;
+    
+    // If not in autoplay mode, switch to it
+    if (currentMode !== 'autoplay') {
+      console.log(`Switching from ${currentMode} mode to autoplay mode`);
+      globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
+      return true; // Mode was changed
+    } else {
+      console.log('Already in autoplay mode');
+      return false; // No change needed
+    }
+  } catch (error) {
+    console.error('Error setting autoplay mode:', error);
+    return false;
+  }
+}
+
+// --- MAIN LOOP ---
+// function mainLoop() {
+//     if (isEnabled) {
+//         checkForEvents(); // Add event checking to the loop
+//     }
+// }
+
+// --- INITIALIZATION ---
+function init() {
+    // Create the button with initial properties.
+    api.ui.addButton({
+        id: BUTTON_ID,
+        text: 'Loading...', // This text will be updated shortly.
+        modId: MOD_ID,
+        onClick: toggleState // Set the function to call on click.
+    });
+
+    // If the mod is enabled on page load, run the main loop.
+    if (isEnabled) {
+        checkForEvents();
+    } else {
+        // Otherwise, just update the button to its "OFF" state.
+        // A small delay ensures the element exists before we try to update it.
+        setTimeout(updateButtonAppearance, 100);
+    }
+
+    if (window.DEBUG) console.log('Event Hunter Mod initialized with toggle button.');
+}
+
+// Run the initialization function.
+init();
+
+// --- EXPORTS ---
+// No exports are needed for this simple functionality.
+context.exports = {};

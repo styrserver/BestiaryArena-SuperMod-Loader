@@ -234,12 +234,12 @@ async function listAllModFiles() {
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
+      'Super Mods/Raid_Hunter.js',
       'Super Mods/RunTracker.js',
       'Super Mods/Welcome.js'
     ];
     const testMods = [
-      'Test Mods/Board Advisor.js',
-      'Test Mods/Raid_Hunter.js'
+      'Test Mods/Board Advisor.js'
     ];
     return [...databaseMods, ...officialMods, ...superMods, ...testMods];
   } catch (e) {
@@ -273,10 +273,10 @@ async function listAllModFiles() {
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
+      'Super Mods/Raid_Hunter.js',
       'Super Mods/RunTracker.js',
       'Super Mods/Welcome.js',
-      'Test Mods/Board Advisor.js',
-      'Test Mods/Raid_Hunter.js'
+      'Test Mods/Board Advisor.js'
     ];
   }
 }

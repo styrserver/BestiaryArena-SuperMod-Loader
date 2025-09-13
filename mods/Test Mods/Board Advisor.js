@@ -4030,6 +4030,10 @@ class AnalysisEngine {
     const equipmentTips = this.analyzeEquipment(currentBoard, similarSetups);
     recommendations.push(...equipmentTips);
 
+    // Creature recommendations
+    const creatureTips = this.analyzeCreatures(currentBoard, similarSetups);
+    recommendations.push(...creatureTips);
+
     // Board Analyzer specific recommendations
     const boardAnalyzerTips = this.generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis);
     recommendations.push(...boardAnalyzerTips);
@@ -4069,7 +4073,82 @@ class AnalysisEngine {
   analyzeEquipment(currentBoard, similarSetups) {
     const tips = [];
     
-    // Analyze equipment patterns in successful setups
+    // Get performance data for current room
+    const currentRoomId = currentBoard.roomId;
+    const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentRoomId);
+    
+    if (roomRuns.length === 0) return tips;
+    
+    // Sort runs by performance (best first)
+    const sortedRuns = roomRuns.sort((a, b) => {
+      if (config.focusArea === 'ticks') {
+        return a.ticks - b.ticks;
+      } else {
+        return b.rankPoints - a.rankPoints;
+      }
+    });
+    
+    // Get top 10% of runs as "best performing"
+    const topRunsCount = Math.max(1, Math.floor(sortedRuns.length * 0.1));
+    const bestRuns = sortedRuns.slice(0, topRunsCount);
+    const worstRuns = sortedRuns.slice(-topRunsCount);
+    
+    // Analyze equipment differences between best and worst runs
+    const bestEquipment = this.analyzeEquipmentPatterns(bestRuns.map(r => r.boardSetup));
+    const worstEquipment = this.analyzeEquipmentPatterns(worstRuns.map(r => r.boardSetup));
+    
+    // Find equipment that appears more in best runs than worst runs
+    for (const [equipId, bestPattern] of bestEquipment) {
+      const worstPattern = worstEquipment.get(equipId);
+      const worstFrequency = worstPattern ? worstPattern.frequency : 0;
+      const frequencyDifference = bestPattern.frequency - worstFrequency;
+      
+      // If this equipment appears significantly more in best runs
+      if (frequencyDifference > 0.3 && bestPattern.frequency > 0.5) {
+        const avgBestTime = config.focusArea === 'ticks' ? 
+          Math.round(bestRuns.reduce((sum, r) => sum + r.ticks, 0) / bestRuns.length) :
+          Math.round(bestRuns.reduce((sum, r) => sum + r.rankPoints, 0) / bestRuns.length);
+        
+        const equipmentName = getEquipmentName(equipId);
+        
+        tips.push({
+          type: 'equipment',
+          title: 'High-Performance Equipment',
+          message: `${Math.round(bestPattern.frequency * 100)}% of your best runs use this equipment (vs ${Math.round(worstFrequency * 100)}% of slower runs)`,
+          suggestion: `Consider using ${equipmentName} to achieve better times like your ${avgBestTime} ${config.focusArea === 'ticks' ? 'tick' : 'rank point'} runs`,
+          priority: 'high',
+          equipmentId: equipId,
+          stat: bestPattern.stat,
+          tier: bestPattern.tier
+        });
+      }
+    }
+    
+    // Also check for equipment that appears in worst runs but not best runs (avoid these)
+    for (const [equipId, worstPattern] of worstEquipment) {
+      const bestPattern = bestEquipment.get(equipId);
+      const bestFrequency = bestPattern ? bestPattern.frequency : 0;
+      const frequencyDifference = worstPattern.frequency - bestFrequency;
+      
+      // If this equipment appears significantly more in worst runs
+      if (frequencyDifference > 0.3 && worstPattern.frequency > 0.5) {
+        const equipmentName = getEquipmentName(equipId);
+        
+        tips.push({
+          type: 'equipment',
+          title: 'Performance Impact Equipment',
+          message: `${Math.round(worstPattern.frequency * 100)}% of your slower runs use this equipment (vs ${Math.round(bestFrequency * 100)}% of best runs)`,
+          suggestion: `Consider replacing ${equipmentName} with equipment from your faster runs`,
+          priority: 'medium',
+          equipmentId: equipId,
+          stat: worstPattern.stat,
+          tier: worstPattern.tier
+        });
+      }
+    }
+    
+    // Fallback to general popular equipment if no performance-based recommendations
+    if (tips.length === 0) {
     const successfulSetups = similarSetups
       .filter(s => s.pattern.successRate > 0.7)
       .map(s => s.pattern.setup);
@@ -4088,6 +4167,108 @@ class AnalysisEngine {
             stat: pattern.stat,
             tier: pattern.tier
           });
+          }
+        }
+      }
+    }
+
+    return tips;
+  }
+
+  analyzeCreatures(currentBoard, similarSetups) {
+    const tips = [];
+    
+    // Get performance data for current room
+    const currentRoomId = currentBoard.roomId;
+    const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentRoomId);
+    
+    if (roomRuns.length === 0) return tips;
+    
+    // Sort runs by performance (best first)
+    const sortedRuns = roomRuns.sort((a, b) => {
+      if (config.focusArea === 'ticks') {
+        return a.ticks - b.ticks;
+      } else {
+        return b.rankPoints - a.rankPoints;
+      }
+    });
+    
+    // Get top 10% of runs as "best performing"
+    const topRunsCount = Math.max(1, Math.floor(sortedRuns.length * 0.1));
+    const bestRuns = sortedRuns.slice(0, topRunsCount);
+    const worstRuns = sortedRuns.slice(-topRunsCount);
+    
+    // Analyze creature differences between best and worst runs
+    const bestCreatures = this.analyzeCreaturePatterns(bestRuns.map(r => r.boardSetup));
+    const worstCreatures = this.analyzeCreaturePatterns(worstRuns.map(r => r.boardSetup));
+    
+    // Find creatures that appear more in best runs than worst runs
+    for (const [monsterId, bestPattern] of bestCreatures) {
+      const worstPattern = worstCreatures.get(monsterId);
+      const worstFrequency = worstPattern ? worstPattern.frequency : 0;
+      const frequencyDifference = bestPattern.frequency - worstFrequency;
+      
+      // If this creature appears significantly more in best runs
+      if (frequencyDifference > 0.3 && bestPattern.frequency > 0.5) {
+        const avgBestTime = config.focusArea === 'ticks' ? 
+          Math.round(bestRuns.reduce((sum, r) => sum + r.ticks, 0) / bestRuns.length) :
+          Math.round(bestRuns.reduce((sum, r) => sum + r.rankPoints, 0) / bestRuns.length);
+        
+        tips.push({
+          type: 'creature',
+          title: 'High-Performance Creature',
+          message: `${Math.round(bestPattern.frequency * 100)}% of your best runs use this creature (vs ${Math.round(worstFrequency * 100)}% of slower runs)`,
+          suggestion: `Consider using ${bestPattern.monsterName} to achieve better times like your ${avgBestTime} ${config.focusArea === 'ticks' ? 'tick' : 'rank point'} runs`,
+          priority: 'high',
+          monsterId: monsterId,
+          monsterName: bestPattern.monsterName,
+          tier: bestPattern.tier
+        });
+      }
+    }
+    
+    // Also check for creatures that appear in worst runs but not best runs (avoid these)
+    for (const [monsterId, worstPattern] of worstCreatures) {
+      const bestPattern = bestCreatures.get(monsterId);
+      const bestFrequency = bestPattern ? bestPattern.frequency : 0;
+      const frequencyDifference = worstPattern.frequency - bestFrequency;
+      
+      // If this creature appears significantly more in worst runs
+      if (frequencyDifference > 0.3 && worstPattern.frequency > 0.5) {
+        tips.push({
+          type: 'creature',
+          title: 'Performance Impact Creature',
+          message: `${Math.round(worstPattern.frequency * 100)}% of your slower runs use this creature (vs ${Math.round(bestFrequency * 100)}% of best runs)`,
+          suggestion: `Consider replacing ${worstPattern.monsterName} with creatures from your faster runs`,
+          priority: 'medium',
+          monsterId: monsterId,
+          monsterName: worstPattern.monsterName,
+          tier: worstPattern.tier
+        });
+      }
+    }
+    
+    // Fallback to general popular creatures if no performance-based recommendations
+    if (tips.length === 0) {
+      const successfulSetups = similarSetups
+        .filter(s => s.pattern.successRate > 0.7)
+        .map(s => s.pattern.setup);
+
+      if (successfulSetups.length > 0) {
+        const creaturePatterns = this.analyzeCreaturePatterns(successfulSetups);
+        
+        for (const [monsterId, pattern] of creaturePatterns) {
+          if (pattern.frequency > 0.6) {
+            tips.push({
+              type: 'creature',
+              title: 'Popular Creature',
+              message: `${Math.round(pattern.frequency * 100)}% of successful setups use this creature`,
+              priority: 'medium',
+              monsterId: monsterId,
+              monsterName: pattern.monsterName,
+              tier: pattern.tier
+            });
+          }
         }
       }
     }
@@ -4106,6 +4287,85 @@ class AnalysisEngine {
     
     if (allRuns.length === 0) {
       return recommendations;
+    }
+
+    // Check if we have a better setup recommendation available or generate one
+    // Use available data source (prefer boardAnalyzerRuns if available, otherwise use allRuns)
+    const currentRoomRuns = boardAnalyzerRuns.length > 0 
+      ? boardAnalyzerRuns.filter(r => r.roomId === currentBoard.roomId)
+      : allRuns.filter(r => r.roomId === currentBoard.roomId);
+    const sortedRuns = currentRoomRuns.sort((a, b) => a.ticks - b.ticks);
+    const bestOverallRun = sortedRuns[0];
+    const currentPredictedTime = currentAnalysis?.prediction?.predictedTime || 366;
+    
+    if (bestOverallRun && bestOverallRun.ticks < currentPredictedTime) {
+      const timeImprovement = currentPredictedTime - bestOverallRun.ticks;
+      
+      console.log(`[Board Advisor] Adding best setup recommendation: ${bestOverallRun.ticks} ticks (improvement: ${timeImprovement})`);
+      
+      // Ensure setup data has proper monster names
+      const setupWithNames = bestOverallRun.boardSetup ? bestOverallRun.boardSetup.map(piece => {
+        // Strip INITIAL_ prefix if present for proper name resolution
+        let monsterId = piece.monsterId;
+        if (monsterId && monsterId.startsWith('INITIAL_')) {
+          monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters)
+        }
+        
+        // Try to resolve monster name from multiple sources
+        let monsterName = piece.monsterName;
+        
+        // If no monster name or it's the same as monster ID, try to resolve it
+        if (!monsterName || monsterName === piece.monsterId || monsterName.startsWith('INITIAL_')) {
+          // Try to get from player context first (same as IndexedDB data)
+          const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+          if (playerContext?.monsters) {
+            const monster = playerContext.monsters.find(m => m.id === monsterId);
+            if (monster?.name) {
+              monsterName = monster.name;
+            }
+          }
+          
+          // Try to get from game state utils
+          if (!monsterName && globalThis.state?.utils?.getMonster) {
+            try {
+              const monsterData = globalThis.state.utils.getMonster(monsterId);
+              if (monsterData?.metadata?.name) {
+                monsterName = monsterData.metadata.name;
+              }
+            } catch (e) {
+              // Try as numeric ID
+              const numericId = parseInt(monsterId);
+              if (!isNaN(numericId)) {
+                const monsterData = globalThis.state.utils.getMonster(numericId);
+                if (monsterData?.metadata?.name) {
+                  monsterName = monsterData.metadata.name;
+                }
+              }
+            }
+          }
+          
+          // Fallback to getMonsterName function
+          if (!monsterName) {
+            monsterName = getMonsterName(monsterId);
+          }
+        }
+        
+        return {
+          ...piece,
+          monsterName: monsterName
+        };
+      }) : [];
+      
+      recommendations.push({
+        type: 'improvement',
+        title: '🏆 Best Available Setup',
+        message: `Use this setup to achieve ${bestOverallRun.ticks} ticks (${timeImprovement} ticks faster than current prediction)`,
+        suggestion: `This setup achieved your best time of ${bestOverallRun.ticks} ticks`,
+        priority: 'high',
+        setup: setupWithNames,
+        expectedImprovement: timeImprovement,
+        focusArea: config.focusArea || 'ticks'
+      });
     }
     
     console.log(`[Board Advisor] Generating recommendations based on ${boardAnalyzerRuns.length} board_analyzer runs and ${sandboxRuns.length} sandbox runs`);
@@ -4164,20 +4424,44 @@ class AnalysisEngine {
     console.log('[Board Advisor] generateTicksRecommendations - bestTime:', bestTime);
     console.log('[Board Advisor] generateTicksRecommendations - top10Runs ticks:', top10Runs.map(r => r.ticks));
     
-    // Time consistency analysis
-    const timeVariance = completedRuns.reduce((sum, r) => sum + Math.pow(r.ticks - avgTime, 2), 0) / completedRuns.length;
-    const timeStdDev = Math.sqrt(timeVariance);
-    const consistencyRatio = timeStdDev / avgTime;
+    // Time consistency analysis - only for current setup
+    const currentSetupRuns = completedRuns.filter(run => {
+      if (!run.boardSetup || run.boardSetup.length !== currentBoard.boardSetup.length) return false;
+      
+      // Check if all pieces match exactly (monster, equipment, tile)
+      for (let i = 0; i < currentBoard.boardSetup.length; i++) {
+        const currentPiece = currentBoard.boardSetup[i];
+        const runPiece = run.boardSetup[i];
+        
+        if (currentPiece.monsterId !== runPiece.monsterId || 
+            currentPiece.equipId !== runPiece.equipId ||
+            currentPiece.tileIndex !== runPiece.tileIndex) {
+          return false;
+        }
+      }
+      return true;
+    });
     
-    if (consistencyRatio > 0.2) {
+    // Only analyze consistency if we have multiple runs with the current setup
+    if (currentSetupRuns.length >= 3) {
+      const currentSetupAvgTime = currentSetupRuns.reduce((sum, r) => sum + r.ticks, 0) / currentSetupRuns.length;
+      const currentSetupBestTime = Math.min(...currentSetupRuns.map(r => r.ticks));
+      const currentSetupWorstTime = Math.max(...currentSetupRuns.map(r => r.ticks));
+      
+      const currentSetupTimeVariance = currentSetupRuns.reduce((sum, r) => sum + Math.pow(r.ticks - currentSetupAvgTime, 2), 0) / currentSetupRuns.length;
+      const currentSetupTimeStdDev = Math.sqrt(currentSetupTimeVariance);
+      const currentSetupConsistencyRatio = currentSetupTimeStdDev / currentSetupAvgTime;
+      
+      if (currentSetupConsistencyRatio > 0.15) {
       recommendations.push({
         type: 'consistency',
         title: 'Improve Time Consistency',
-        message: `Your runs vary significantly (${Math.round(consistencyRatio * 100)}% variation). Best: ${bestTime}, Worst: ${worstTime}`,
-        suggestion: 'Focus on consistent positioning and strategy to reduce time variance.',
+          message: `Your runs with this setup vary significantly (${Math.round(currentSetupConsistencyRatio * 100)}% variation). Best: ${currentSetupBestTime}, Worst: ${currentSetupWorstTime}`,
+          suggestion: 'Focus on consistent positioning and strategy to reduce time variance with this specific setup.',
         priority: 'medium',
         focusArea: 'ticks'
       });
+      }
     }
     
     // Speed optimization suggestions
@@ -4348,6 +4632,34 @@ class AnalysisEngine {
     
     return patterns;
   }
+
+  analyzeCreaturePatterns(setups) {
+    const patterns = new Map();
+    
+    for (const setup of setups) {
+      for (const piece of setup) {
+        if (piece.monsterId) {
+          const key = piece.monsterId;
+          if (!patterns.has(key)) {
+            patterns.set(key, { 
+              count: 0, 
+              total: 0, 
+              monsterName: piece.monsterName || piece.name,
+              tier: piece.tier 
+            });
+          }
+          patterns.get(key).count++;
+        }
+      }
+    }
+    
+    for (const [monsterId, pattern] of patterns) {
+      pattern.total = setups.length;
+      pattern.frequency = pattern.count / pattern.total;
+    }
+    
+    return patterns;
+  }
   
   
   predictPerformance(currentBoard, similarSetups) {
@@ -4388,6 +4700,15 @@ class AnalysisEngine {
       );
       
       console.log(`[Board Advisor] Found ${exactSetupRuns.length} exact setup runs, using best: ${bestRun.ticks} ticks`);
+      
+      // Check if there are better runs available
+      const currentRoomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
+      const sortedRuns = currentRoomRuns.sort((a, b) => a.ticks - b.ticks);
+      const bestOverallRun = sortedRuns[0];
+      
+      if (bestOverallRun && bestOverallRun.ticks < bestRun.ticks) {
+        console.log(`[Board Advisor] Found better run available: ${bestOverallRun.ticks} vs current setup ${bestRun.ticks}`);
+      }
       
       return {
         confidence: 1.0,
@@ -5985,6 +6306,7 @@ async function updatePanelWithAnalysis(analysis) {
       improvement: [],
       positioning: [],
       equipment: [],
+      creature: [],
       other: []
     };
     
@@ -5997,6 +6319,8 @@ async function updatePanelWithAnalysis(analysis) {
         groupedRecs.positioning.push(rec);
       } else if (rec.type === 'equipment') {
         groupedRecs.equipment.push(rec);
+      } else if (rec.type === 'creature') {
+        groupedRecs.creature.push(rec);
       } else {
         groupedRecs.other.push(rec);
       }
@@ -6020,128 +6344,165 @@ async function updatePanelWithAnalysis(analysis) {
       recsHTML += '</div>';
     }
     
-    // Improvement recommendations
-    if (groupedRecs.improvement.length > 0) {
-      recsHTML += '<div style="margin-bottom: 12px;">';
-      recsHTML += '<div style="font-weight: bold; color: #E06C75; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
-      recsHTML += '<span>⚡</span><span>Performance Improvements</span></div>';
+    // Compact Tips & Strategies section
+    const hasRecommendations = groupedRecs.improvement.length > 0 || groupedRecs.equipment.length > 0 || groupedRecs.creature.length > 0 || groupedRecs.other.length > 0;
+    
+    if (hasRecommendations) {
+      recsHTML += '<div style="margin-bottom: 8px;">';
       
+      // Best setup recommendation (highest priority)
+      if (groupedRecs.improvement.length > 0) {
       groupedRecs.improvement.forEach(rec => {
-        console.log('[Board Advisor] Processing improvement rec:', rec.title);
-        recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E06C75;">
+          if (rec.title.includes('Best Available Setup') && rec.setup) {
+            recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E06C75;">
           <div style="font-weight: bold; color: #E06C75; font-size: 11px;">${rec.title}</div>
-          <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
-          ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
-          ${rec.expectedImprovement ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px;">Expected improvement: ${rec.expectedImprovement} ticks</div>` : ''}
-          ${rec.setup ? `
-            <div style="margin-top: 8px; padding: 6px; background: #2D3748; border-radius: 4px;">
-              <div style="font-size: 11px; color: #61AFEF; margin-bottom: 4px; font-weight: bold;">📋 Recommended Setup:</div>
-              <div style="font-size: 10px; color: #ABB2BF; line-height: 1.3; margin-bottom: 6px;">
-                ${(() => {
-                  console.log('[Board Advisor] Processing setup pieces:', rec.setup);
-                  try {
-                    return rec.setup.map((piece, index) => {
+              <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message || 'Use this setup to achieve better performance'}</div>
+              <div style="font-size: 9px; color: #98C379; margin-top: 2px;">💡 ${rec.setup.map(piece => {
                   const tile = piece.tileIndex || piece.tile || '?';
-                  const monsterId = piece.monsterId || piece.monster?.id || piece.monster?.name;
-                  
-                  // Use stored monster name, fall back to ID if not available
-                  const monster = piece.monsterName || monsterId;
-                  
-                  // Get monster stats for display
-                  const statsDisplay = piece.monsterStats ? formatMonsterStats(piece.monsterStats) : '';
-                  
-                  // Use stored equipment name, fall back to ID lookup if not available
-                  const equipment = piece.equipmentName || (piece.equipId ? getEquipmentName(piece.equipId) : null);
-                  const stat = piece.stat || piece.equipment?.stat || '';
-                  
-                  // Handle equipment-only pieces (no monster)
-                  const displayText = monster && monster !== 'Unknown' 
-                    ? `Tile ${tile}: ${monster} ${statsDisplay}${equipment ? ` + ${equipment}${stat ? ` (${stat})` : ''}` : ''}`
-                    : `Tile ${tile}: ${equipment}${stat ? ` (${stat})` : ''}`;
-                  
-                  return `<div style="margin: 2px 0; padding: 2px 4px; background: #1F2937; border-radius: 2px; display: inline-block; margin-right: 4px;">
-                    ${displayText}
-                  </div>`;
-                }).join('');
+                // Strip INITIAL_ prefix if present for proper name resolution
+                let monsterId = piece.monsterId;
+                if (monsterId && monsterId.startsWith('INITIAL_')) {
+                  monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters)
+                }
+                
+                // Prioritize existing monster name from piece data
+                let monster = piece.monsterName;
+                if (!monster || monster === piece.monsterId || monster.startsWith('INITIAL_')) {
+                  monster = piece.monster?.name || piece.name || 
+                           (monsterId ? getMonsterName(monsterId) : null) ||
+                           'Unknown';
+                }
+                const equipment = piece.equipmentName || (piece.equipId ? getEquipmentName(piece.equipId) : 'No Equipment');
+                return `Tile ${tile}: ${monster} + ${equipment}`;
+              }).join(' | ')}</div>
+            </div>`;
+          }
+        });
+      }
+      
+      // Equipment and creature suggestions (based on top 10 runs from IndexedDB)
+      const equipmentSuggestions = [];
+      const creatureSuggestions = [];
+      
+      // Get top 10 runs for this room from IndexedDB (same source as Best Available Setup)
+      const currentRoomId = analysis.currentBoard?.roomId || dataCollector.getCurrentBoardData()?.roomId;
+      if (!currentRoomId) return;
+      
+      // Use IndexedDB data instead of performanceTracker.runs for consistent monster names
+      const currentRoomRuns = analysis.runs || [];
+      const top10Runs = currentRoomRuns.sort((a, b) => a.ticks - b.ticks).slice(0, 10);
+      
+      if (top10Runs.length > 0) {
+        // Analyze equipment patterns in top 10 runs
+        const equipmentPatterns = new Map();
+        const creaturePatterns = new Map();
+        
+        top10Runs.forEach(run => {
+          if (run.boardSetup) {
+            run.boardSetup.forEach(piece => {
+              // Equipment analysis
+              if (piece.equipId) {
+                const key = piece.equipId;
+                if (!equipmentPatterns.has(key)) {
+                  equipmentPatterns.set(key, { count: 0, equipmentName: piece.equipmentName || getEquipmentName(piece.equipId) });
+                }
+                equipmentPatterns.get(key).count++;
+              }
+              
+              // Creature analysis - prioritize existing monster name from piece data
+              if (piece.monsterId) {
+                const key = piece.monsterId;
+                let monsterName = piece.monsterName;
+                
+                // Only try to resolve name if we don't have one or it's the same as monsterId
+                if (!monsterName || monsterName === piece.monsterId) {
+                  try {
+                    // Try to get from player context
+                    const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+                    if (playerContext?.monsters) {
+                      const monster = playerContext.monsters.find(m => m.id === piece.monsterId);
+                      if (monster?.name) {
+                        monsterName = monster.name;
+                      }
+                    }
+                    
+                    // Try to get from game state utils
+                    if (!monsterName && globalThis.state?.utils?.getMonster) {
+                      try {
+                        const monsterData = globalThis.state.utils.getMonster(piece.monsterId);
+                        if (monsterData?.metadata?.name) {
+                          monsterName = monsterData.metadata.name;
+                        }
+                      } catch (e) {
+                        // Try as numeric ID
+                        const numericId = parseInt(piece.monsterId);
+                        if (!isNaN(numericId)) {
+                          const monsterData = globalThis.state.utils.getMonster(numericId);
+                          if (monsterData?.metadata?.name) {
+                            monsterName = monsterData.metadata.name;
+                          }
+                        }
+                      }
+                    }
                   } catch (error) {
-                    console.error('[Board Advisor] Error processing setup pieces:', error);
-                    return 'Error processing setup';
+                    console.warn('[Board Advisor] Error resolving monster name:', error);
                   }
-                })()}
-              </div>
-            </div>
-          ` : ''}
-        </div>`;
-      });
-      recsHTML += '</div>';
-      console.log('[Board Advisor] Improvement recommendations HTML completed');
-    }
-    
-    // Positioning recommendations
-    if (groupedRecs.positioning.length > 0) {
-      recsHTML += '<div style="margin-bottom: 12px;">';
-      recsHTML += '<div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
-      recsHTML += '<span>🎯</span><span>Positioning Tips</span></div>';
-      
-      groupedRecs.positioning.forEach(rec => {
-        const tileDetails = rec.tile ? ` (Tile ${rec.tile})` : '';
-        recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-          <div style="font-weight: bold; color: #E5C07B; font-size: 11px;">${rec.title}${tileDetails}</div>
-          <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
-          ${rec.tile ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px;">Recommended tile: ${rec.tile}</div>` : ''}
-          ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
-        </div>`;
-      });
-      recsHTML += '</div>';
-    }
-    
-    // Equipment recommendations
-    if (groupedRecs.equipment.length > 0) {
-      recsHTML += '<div style="margin-bottom: 12px;">';
-      recsHTML += '<div style="font-weight: bold; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
-      recsHTML += '<span>⚔️</span><span>Equipment Suggestions</span></div>';
-      
-      groupedRecs.equipment.forEach(rec => {
-        const equipmentName = getEquipmentName(rec.equipmentId);
-        console.log('[Board Advisor] Equipment lookup:', {
-          equipmentId: rec.equipmentId,
-          equipmentName: equipmentName,
-          stat: rec.stat,
-          tier: rec.tier,
-          playerEquips: globalThis.state?.player?.getSnapshot()?.context?.equips?.length || 0,
-          utilityAPI: !!window.BestiaryModAPI?.utility?.maps?.equipmentGameIdsToNames
+                }
+                
+                // Final fallback to monster ID if no name found
+                if (!monsterName) {
+                  monsterName = piece.monsterId;
+                }
+                
+                if (!creaturePatterns.has(key)) {
+                  creaturePatterns.set(key, { count: 0, monsterName: monsterName });
+                }
+                creaturePatterns.get(key).count++;
+              }
+            });
+          }
         });
         
-        const equipmentDetails = rec.equipmentId ? ` (${equipmentName})` : '';
-        const statDetails = rec.stat ? ` - ${rec.stat}` : '';
-        const tierDetails = rec.tier ? ` (T${rec.tier})` : '';
+        // Get most popular equipment (appearing in 60%+ of top runs)
+        for (const [equipId, pattern] of equipmentPatterns) {
+          const frequency = pattern.count / top10Runs.length;
+          if (frequency >= 0.6) {
+            equipmentSuggestions.push(`${pattern.equipmentName} (${Math.round(frequency * 100)}%)`);
+          }
+        }
         
-        recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #61AFEF;">
-          <div style="font-weight: bold; color: #61AFEF; font-size: 11px;">${rec.title}${equipmentDetails}</div>
-          <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
-          ${rec.equipmentId ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px;">Equipment: ${equipmentName}${statDetails}${tierDetails}</div>` : ''}
-          ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
+        // Get most popular creatures (appearing in 60%+ of top runs)
+        for (const [monsterId, pattern] of creaturePatterns) {
+          const frequency = pattern.count / top10Runs.length;
+          if (frequency >= 0.6) {
+            creatureSuggestions.push(`${pattern.monsterName} (${Math.round(frequency * 100)}%)`);
+          }
+        }
+      }
+      
+      if (equipmentSuggestions.length > 0 || creatureSuggestions.length > 0) {
+        recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #61AFEF;">
+          <div style="font-weight: bold; color: #61AFEF; font-size: 11px;">⚔️ Popular Choices</div>
+          ${equipmentSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Equipment: ${equipmentSuggestions.join(', ')}</div>` : ''}
+          ${creatureSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Creatures: ${creatureSuggestions.join(', ')}</div>` : ''}
+        </div>`;
+      }
+      
+      // Other recommendations (consolidated)
+      const otherRecs = [...groupedRecs.improvement.filter(r => !r.title.includes('Best Available Setup')), ...groupedRecs.other];
+      if (otherRecs.length > 0) {
+        otherRecs.forEach(rec => {
+          recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #98C379;">
+            <div style="font-weight: bold; color: #98C379; font-size: 11px;">${rec.title}</div>
+            <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message}</div>
+            ${rec.suggestion ? `<div style="font-size: 9px; color: #61AFEF; margin-top: 2px;">💡 ${rec.suggestion}</div>` : ''}
         </div>`;
       });
+      }
+      
       recsHTML += '</div>';
     }
     
-    // Other recommendations
-    if (groupedRecs.other.length > 0) {
-      recsHTML += '<div style="margin-bottom: 12px;">';
-      recsHTML += '<div style="font-weight: bold; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
-      recsHTML += '<span>💡</span><span>Additional Tips</span></div>';
-      
-      groupedRecs.other.forEach(rec => {
-        const priorityColor = getPriorityColor(rec.priority);
-        recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid ${priorityColor};">
-          <div style="font-weight: bold; color: ${priorityColor}; font-size: 11px;">${rec.title}</div>
-          <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
-          ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
-        </div>`;
-      });
-      recsHTML += '</div>';
-    }
     
     try {
       recommendationsDisplay.innerHTML = recsHTML;
