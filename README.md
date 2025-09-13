@@ -133,7 +133,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 17 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 18 Super Mods listed below are included by default in this loader:
 
 ### Autoseller
 Automatically sells or squeezes creatures based on gene thresholds and user settings:
@@ -254,6 +254,16 @@ Comprehensive outfit management system:
 - Color customization for outfits
 - Outfit storage and retrieval system
 - Integration with game's outfit system
+
+### Raid Hunter
+Advanced raid automation system for Bestiary Arena:
+- Automatically detects and joins available raids based on user preferences
+- Configurable raid map selection with regional organization
+- Auto-setup and autoplay integration for seamless raid execution
+- Stamina monitoring and auto-refill integration with Bestiary Automator
+- Real-time raid status monitoring with countdown timers
+- Queue system for handling multiple raids efficiently
+- Comprehensive settings panel for customization
 
 ### RunTracker
 Local run data tracking and storage system:

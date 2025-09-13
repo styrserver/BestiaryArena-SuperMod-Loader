@@ -11,31 +11,92 @@ console.log('Board Advisor Mod initializing...');
 // 0. CONFIGURATION
 // =======================
 
-// Configuration with defaults
+// Constants
+const MOD_ID = 'board-advisor';
+const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
+const ANALYSIS_DEBOUNCE_TIME = 1000;
+const BOARD_CHANGE_DEBOUNCE_TIME = 2000; // Increased debounce for board changes
+const UI_LOADING_TIMEOUT = 5000; // Maximum UI loading time
+const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
+const ROOM_METADATA_STORE = 'roomMetadata';
+const MAX_RUNS_PER_ROOM = 500;
+const TILE_HIGHLIGHT_OVERLAY_ID = 'board-advisor-tile-highlight';
+const TILE_HIGHLIGHT_STYLE_ID = 'board-advisor-highlight-styles';
+const PANEL_ID = "board-advisor-panel";
+
+// Configuration
 const defaultConfig = {
   enabled: true,
-  analysisDepth: 50, // Number of simulations to run for analysis
-  learningEnabled: true, // Enable pattern learning from successful runs
-  recommendationThreshold: 0.1, // Minimum improvement threshold for recommendations
-  showPredictions: true, // Show performance predictions
-  autoAnalyze: true, // Automatically analyze when board changes
-  autoAnalyzeOnBoardChange: true, // Auto-analyze when board setup changes
-  autoAnalyzeOnPanelOpen: true, // Auto-analyze when panel opens
-  autoAnalyzeAfterRun: true, // Auto-analyze after successful runs
-  autoRefreshPanel: true, // Automatically refresh panel data
-  focusArea: 'ticks' // Focus area: 'ticks' for speed optimization, 'ranks' for points optimization
+  analysisDepth: 50,
+  learningEnabled: true,
+  recommendationThreshold: 0.1,
+  showPredictions: true,
+  autoAnalyze: true,
+  autoAnalyzeOnBoardChange: true,
+  autoAnalyzeOnPanelOpen: true,
+  autoAnalyzeAfterRun: true,
+  autoRefreshPanel: true,
+  focusArea: 'ticks'
 };
 
-// Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
 
-// Debouncing mechanism to prevent analysis loops
+// Runtime State
 let analysisTimeout = null;
 let lastAnalysisTime = 0;
-const ANALYSIS_DEBOUNCE_TIME = 1000; // 1 second debounce
-let pendingAnalysisRequest = null; // Track pending analysis to prevent duplicates
+let pendingAnalysisRequest = null;
+let runTrackerData = null;
+let sandboxDB = null;
+let isDBReady = false;
+let currentRecommendedSetup = null;
+let placedRecommendedPieces = new Set();
 
-// Helper function to generate board hash for duplicate detection
+// Analysis State
+let analysisState = {
+  isAnalyzing: false,
+  isDataLoading: false,
+  currentAnalysis: null,
+  historicalData: [],
+  patterns: {},
+  recommendations: null,
+  lastBoardHash: null,
+  lastDataLoadTime: 0,
+  isUILoading: false,
+  pendingBoardChange: null,
+  lastBoardChangeTime: 0
+};
+
+// Performance Cache
+let performanceCache = {
+  lastRoomDetection: null,
+  lastRoomDetectionTime: 0,
+  roomDetectionCache: new Map(),
+  patternMatchingCache: new Map(),
+  dataLoadingCache: new Map()
+};
+
+// State Management
+let stateRefreshSystem = {
+  lastRefreshTime: 0,
+  subscriptions: [],
+  isEnabled: false
+};
+
+let performanceTracker = {
+  runs: [],
+  patterns: new Map(),
+  optimalSetups: new Map(),
+  roomStats: new Map()
+};
+
+// UI State
+let panelState = {
+  isOpen: false,
+  position: { x: 10, y: 70 },
+    size: { width: 350, height: 820 }
+};
+
+// Utility Functions
 function generateBoardHash(boardSetup) {
   if (!boardSetup || boardSetup.length === 0) return 'empty';
   
@@ -45,47 +106,62 @@ function generateBoardHash(boardSetup) {
     .join('|');
 }
 
-// Constants
-const MOD_ID = 'board-advisor';
-const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
+// Loading State Management
+function setUILoadingState(isLoading, reason = '') {
+  analysisState.isUILoading = isLoading;
+  if (isLoading) {
+    console.log(`[Board Advisor] UI loading started: ${reason}`);
+    // Show loading indicator in panel if open
+    if (panelState.isOpen) {
+      showLoadingIndicator();
+    }
+  } else {
+    console.log(`[Board Advisor] UI loading completed: ${reason}`);
+    // Hide loading indicator
+    if (panelState.isOpen) {
+      hideLoadingIndicator();
+    }
+  }
+}
 
-// Analysis Engine state
-let analysisState = {
-  isAnalyzing: false,
-  isDataLoading: false,
-  currentAnalysis: null,
-  historicalData: [],
-  patterns: {},
-  recommendations: null,
-  lastBoardHash: null,
-  lastDataLoadTime: 0
-};
+function showLoadingIndicator() {
+  const recommendationsDisplay = document.getElementById('recommendations-display');
+  if (recommendationsDisplay && !recommendationsDisplay.querySelector('.loading-indicator')) {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading-indicator';
+    loadingDiv.style.cssText = `
+      margin: 8px 0; 
+      padding: 12px; 
+      background: #1F2937; 
+      border-radius: 6px; 
+      border-left: 4px solid #3B82F6;
+      text-align: center;
+    `;
+    loadingDiv.innerHTML = `
+      <div style="font-weight: 600; color: #3B82F6; font-size: 12px; margin-bottom: 6px;">
+        🔄 Loading Analysis...
+      </div>
+      <div style="font-size: 11px; color: #ABB2BF;">
+        Please wait while we analyze the current board
+      </div>
+    `;
+    recommendationsDisplay.appendChild(loadingDiv);
+  }
+}
 
-// Performance optimization caches
-let performanceCache = {
-  lastRoomDetection: null,
-  lastRoomDetectionTime: 0,
-  roomDetectionCache: new Map(),
-  patternMatchingCache: new Map(),
-  dataLoadingCache: new Map()
-};
+function hideLoadingIndicator() {
+  const loadingIndicator = document.querySelector('.loading-indicator');
+  if (loadingIndicator) {
+    loadingIndicator.remove();
+  }
+}
 
-// State-based refresh system
-let stateRefreshSystem = {
-  lastRefreshTime: 0,
-  subscriptions: [],
-  isEnabled: false
-};
+function isBoardChangeInProgress() {
+  const now = Date.now();
+  return analysisState.pendingBoardChange && 
+         (now - analysisState.lastBoardChangeTime) < BOARD_CHANGE_DEBOUNCE_TIME;
+}
 
-// Performance tracking
-let performanceTracker = {
-  runs: [],
-  patterns: new Map(),
-  optimalSetups: new Map(),
-  roomStats: new Map()
-};
-
-// Helper function to add run if not already exists (deduplication)
 function addRunIfNotExists(newRun) {
   const exists = performanceTracker.runs.some(r => 
     r.roomId === newRun.roomId && 
@@ -101,28 +177,7 @@ function addRunIfNotExists(newRun) {
   return false;
 }
 
-// RunTracker integration
-let runTrackerData = null;
-
-// Sandbox run storage using IndexedDB - Room-based structure for optimal performance
-const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
-const ROOM_METADATA_STORE = 'roomMetadata';
-const MAX_RUNS_PER_ROOM = 500;
-
-// Room-based object store naming convention
 const getRoomStoreName = (roomId) => `room_${roomId}`;
-
-// IndexedDB instance
-let sandboxDB = null;
-let isDBReady = false;
-
-// Tile highlighting constants
-const TILE_HIGHLIGHT_OVERLAY_ID = 'board-advisor-tile-highlight';
-const TILE_HIGHLIGHT_STYLE_ID = 'board-advisor-highlight-styles';
-
-// Smart cleanup tracking
-let currentRecommendedSetup = null;
-let placedRecommendedPieces = new Set();
 
 
 
@@ -231,7 +286,6 @@ async function initSandboxDB() {
   });
 }
 
-// Ensure all room stores exist by creating them if they don't
 async function ensureAllRoomStoresExist() {
   if (!isDBReady || !sandboxDB) {
     return;
@@ -361,7 +415,6 @@ async function ensureRoomStoreExists(roomId) {
 }
 
 
-// Validate run data before saving
 function validateRunData(runData) {
   if (!runData) {
     throw new Error('Run data is required');
@@ -744,7 +797,6 @@ function generateReplayLink(runData) {
   }
 }
 
-// Helper function to get region name from room ID
 function getRegionNameFromRoomId(roomId) {
   try {
     const rooms = globalThis.state?.utils?.ROOMS;
@@ -799,7 +851,6 @@ function getRegionNameFromRoomId(roomId) {
   }
 }
 
-// Helper function to get equipment name from ID
 function getEquipmentName(equipId) {
   try {
     if (!equipId) return 'Unknown';
@@ -872,7 +923,7 @@ function getEquipmentName(equipId) {
 }
 
 // =======================
-// TILE HIGHLIGHTING SYSTEM
+// 1.5. TILE HIGHLIGHTING SYSTEM
 // =======================
 
 // Highlight recommended tiles on empty board
@@ -926,7 +977,7 @@ function createTileHighlightOverlay(recommendedSetup) {
         width: calc(32px * var(--zoomFactor));
         height: calc(32px * var(--zoomFactor));
         border: 3px solid #ff6b35;
-        background-color: rgba(255, 107, 53, 0.2);
+        background-color: rgba(255, 107, 53, 0.4);
         border-radius: 4px;
         pointer-events: none;
         animation: board-advisor-pulse 2s ease-in-out infinite;
@@ -947,8 +998,8 @@ function createTileHighlightOverlay(recommendedSetup) {
         color: #fff;
         padding: 6px 8px;
         border-radius: 6px;
-        font-size: 11px;
-        font-family: "Press Start 2P", "VT323", monospace;
+        font-size: 13px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
         white-space: nowrap;
         border: 2px solid #ff6b35;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8), 0 0 8px rgba(255, 107, 53, 0.5);
@@ -962,14 +1013,14 @@ function createTileHighlightOverlay(recommendedSetup) {
       
       .board-advisor-tile-info .monster-name {
         color: #4CAF50;
-        font-weight: bold;
-        font-size: 12px;
+        font-weight: 600;
+        font-size: 13px;
         text-shadow: 0 0 4px rgba(76, 175, 80, 0.8);
       }
       
       .board-advisor-tile-info .equipment-name {
         color: #2196F3;
-        font-size: 11px;
+        font-size: 13px;
         text-shadow: 0 0 4px rgba(33, 150, 243, 0.8);
         margin-top: 2px;
       }
@@ -1068,8 +1119,8 @@ function createTileHighlightOverlay(recommendedSetup) {
         left: 50%;
         transform: translate(-50%, -50%);
         color: #fff;
-        font-size: 8px;
-        font-family: monospace;
+        font-size: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
         text-align: center;
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
         pointer-events: none;
@@ -1077,8 +1128,8 @@ function createTileHighlightOverlay(recommendedSetup) {
         line-height: 1.1;
       `;
       tileText.innerHTML = `
-        <div style="color: #4CAF50; font-weight: bold; font-size: 10px;">${monsterName}</div>
-        <div style="color: #2196F3; font-size: 9px;">${equipmentName}</div>
+        <div style="color: #4CAF50; font-weight: 600; font-size: 11px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95;">${monsterName}</div>
+        <div style="color: #2196F3; font-size: 10px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95;">${equipmentName}</div>
       `;
       highlightOverlay.appendChild(tileText);
       
@@ -1168,7 +1219,6 @@ function cleanupTileHighlights() {
 // 2. DATA COLLECTION SYSTEM
 // =======================
 
-// Helper function to create a pattern key from board setup
 function createPatternKey(boardSetup) {
   if (!boardSetup || !Array.isArray(boardSetup)) {
     return 'unknown';
@@ -1179,7 +1229,6 @@ function createPatternKey(boardSetup) {
   return JSON.stringify(sortedPieces);
 }
 
-// Helper function to format monster stats display
 function formatMonsterStats(monsterStats) {
   if (!monsterStats) return '';
   
@@ -1201,16 +1250,68 @@ function formatMonsterStats(monsterStats) {
   return lowStats.length > 0 ? `(${lowStats.join(', ')})` : '';
 }
 
-// Helper function to get monster name from ID
 function getMonsterName(monsterId) {
   try {
     if (!monsterId) return 'Unknown';
     
+    console.log('[Board Advisor] getMonsterName called with:', monsterId);
+    
     // Try to get from player context first
     const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+    console.log('[Board Advisor] Player context available:', !!playerContext);
+    console.log('[Board Advisor] Player monsters available:', !!playerContext?.monsters);
     if (playerContext?.monsters) {
-      const monster = playerContext.monsters.find(m => m.id === monsterId);
-      if (monster?.name) return monster.name;
+      console.log('[Board Advisor] Player monsters count:', playerContext.monsters.length);
+      console.log('[Board Advisor] Sample monster data:', playerContext.monsters[0]);
+      console.log('[Board Advisor] Looking for monster ID:', monsterId);
+      
+      // Try different ID fields
+      const monster = playerContext.monsters.find(m => 
+        m.id === monsterId || 
+        m.id === `INITIAL_${monsterId}` ||
+        m.monsterId === monsterId || 
+        m.gameId === monsterId ||
+        m.creatureId === monsterId
+      );
+      console.log('[Board Advisor] Found monster in player context:', !!monster);
+      if (monster) {
+        console.log('[Board Advisor] Monster data:', monster);
+        console.log('[Board Advisor] Monster data keys:', Object.keys(monster));
+        
+        // Use the monster's gameId to get the proper name from utils
+        console.log('[Board Advisor] Checking if monster has gameId:', monster.gameId);
+        if (monster.gameId) {
+          console.log('[Board Advisor] Using gameId to get monster name:', monster.gameId);
+          try {
+            const monsterData = globalThis.state.utils.getMonster(monster.gameId);
+            console.log('[Board Advisor] Monster data from utils:', monsterData);
+            const name = monsterData && monsterData.metadata ? monsterData.metadata.name : null;
+            console.log('[Board Advisor] Resolved name for gameId', monster.gameId, ':', name);
+            if (name) {
+              console.log('[Board Advisor] Returning resolved name:', name);
+              return name;
+            }
+          } catch (utilsError) {
+            console.error('[Board Advisor] Error getting monster data for gameId', monster.gameId, ':', utilsError);
+          }
+        } else {
+          console.log('[Board Advisor] Monster has no gameId, skipping utils lookup');
+        }
+        
+        // Fallback to monster's own name property
+        if (monster?.name) {
+          console.log('[Board Advisor] Found monster name in player context:', monster.name);
+          return monster.name;
+        }
+      }
+      
+      // Try searching by name if ID doesn't match
+      const monsterByName = playerContext.monsters.find(m => 
+        m.name && m.name.toLowerCase().includes('spearman')
+      );
+      if (monsterByName) {
+        console.log('[Board Advisor] Found spearman monster by name search:', monsterByName);
+      }
     }
     
     // Try to get from game state utils using getMonster
@@ -1218,14 +1319,17 @@ function getMonsterName(monsterId) {
       try {
         const monsterData = globalThis.state.utils.getMonster(monsterId);
         if (monsterData?.metadata?.name) {
+          console.log('[Board Advisor] Found monster name in getMonster:', monsterData.metadata.name);
           return monsterData.metadata.name;
         }
       } catch (e) {
+        console.log('[Board Advisor] getMonster failed, trying numeric ID');
         // getMonster might not work with string IDs, try as number
         const numericId = parseInt(monsterId);
         if (!isNaN(numericId)) {
           const monsterData = globalThis.state.utils.getMonster(numericId);
           if (monsterData?.metadata?.name) {
+            console.log('[Board Advisor] Found monster name in getMonster (numeric):', monsterData.metadata.name);
             return monsterData.metadata.name;
           }
         }
@@ -1233,16 +1337,22 @@ function getMonsterName(monsterId) {
     }
     
     // Try to get from monster names mapping
+    console.log('[Board Advisor] Checking MONSTER_NAMES mapping...');
     if (globalThis.state?.utils?.MONSTER_NAMES && globalThis.state.utils.MONSTER_NAMES[monsterId]) {
+      console.log('[Board Advisor] Found monster name in MONSTER_NAMES:', globalThis.state.utils.MONSTER_NAMES[monsterId]);
       return globalThis.state.utils.MONSTER_NAMES[monsterId];
     }
     
     // Try to get from monster game IDs to names mapping
+    console.log('[Board Advisor] Checking monsterGameIdsToNames mapping...');
     if (globalThis.state?.utils?.monsterGameIdsToNames && globalThis.state.utils.monsterGameIdsToNames.has(monsterId)) {
-      return globalThis.state.utils.monsterGameIdsToNames.get(monsterId);
+      const name = globalThis.state.utils.monsterGameIdsToNames.get(monsterId);
+      console.log('[Board Advisor] Found monster name in monsterGameIdsToNames:', name);
+      return name;
     }
     
     // Fallback to ID if no name found
+    console.log('[Board Advisor] No monster name found, falling back to ID:', monsterId);
     return monsterId;
   } catch (error) {
     console.warn('[Board Advisor] Error looking up monster name:', error);
@@ -1251,7 +1361,6 @@ function getMonsterName(monsterId) {
 }
 
 
-// Helper function to get monster stats from stored run data
 function getMonsterStats(monsterId, runData) {
   try {
     if (!monsterId || !runData?.setup?.pieces) {
@@ -1282,7 +1391,6 @@ function getMonsterStats(monsterId, runData) {
   }
 }
 
-// Helper function to get equipment stats from stored run data
 function getEquipmentStats(equipId, runData) {
   try {
     if (!equipId || !runData?.setup?.pieces) {
@@ -1360,7 +1468,6 @@ async function loadRecommendedSetup(setup) {
   }
 }
 
-// Keep the old function for backward compatibility but rename it
 async function copyReplayLink(setup) {
   // Redirect to the new load function
   return loadRecommendedSetup(setup);
@@ -1375,7 +1482,6 @@ window.formatMonsterStats = formatMonsterStats;
 window.getEquipmentStats = getEquipmentStats;
 window.copyReplayLink = copyReplayLink;
 
-// Add a simple test function to check button status
 window.testLoadSetupButton = function() {
   console.log('[Board Advisor] === TESTING LOAD SETUP BUTTON ===');
   
@@ -1410,7 +1516,6 @@ window.testLoadSetupButton = function() {
   };
 };
 
-// Add a manual test function to test setup loading directly
 window.testLoadSetupManually = function() {
   console.log('[Board Advisor] === MANUAL SETUP LOAD TEST ===');
   
@@ -1590,6 +1695,7 @@ function loadRunTrackerData(triggerAnalysis = true) {
 // Add a Board Analyzer run to storage (IndexedDB) - ONLY Board Analyzer runs are saved
 async function addBoardAnalyzerRun(runData) {
   try {
+    console.log('[Board Advisor] addBoardAnalyzerRun called with:', runData);
     if (!runData || !runData.roomId) {
       console.warn('[Board Advisor] Invalid run data:', runData);
       return false;
@@ -1625,7 +1731,15 @@ async function addBoardAnalyzerRun(runData) {
       completed: runData.completed,
       playerMonsters: runData.playerMonsters || [],
       playerEquipment: runData.playerEquipment || [],
-      boardSetup: runData.boardSetup,
+      boardSetup: runData.boardSetup ? runData.boardSetup.map(piece => {
+        console.log('[Board Advisor] Processing piece for storage:', piece);
+        const resolvedName = piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null);
+        console.log('[Board Advisor] Resolved name for storage:', resolvedName);
+        return {
+          ...piece,
+          monsterName: resolvedName
+        };
+      }) : [],
       date: new Date().toISOString().split('T')[0],
       source: 'board_analyzer' // Keep the source as board_analyzer
     };
@@ -1661,7 +1775,6 @@ async function convertBoardAnalyzerData() {
       return false;
     }
     
-    // console.log(`[Board Advisor] Converting ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for room: ${roomId}`);
     
     // Note: We can convert Board Analyzer data even without a current board setup
     // The Board Analyzer data contains its own board setups that we can analyze
@@ -1699,7 +1812,6 @@ async function convertBoardAnalyzerData() {
     
     console.log(`[Board Advisor] Converted ${convertedCount} runs, skipped ${skippedCount} duplicates`);
     
-    // console.log(`[Board Advisor] Converted ${boardAnalyzerRunsForRoom.length} Board Analyzer runs for ${roomId}`);
     return true;
   } catch (error) {
     console.error('[Board Advisor] Error converting sandbox data:', error);
@@ -1925,7 +2037,6 @@ function convertRunTrackerData() {
     // If we found a matching map, process only that one
     if (targetMapKey && runTrackerData.runs[targetMapKey]) {
       const mapData = runTrackerData.runs[targetMapKey];
-      // console.log(`[Board Advisor] Processing runs for current room: ${currentRoomId}`);
       
       // Process speedrun data
       if (mapData.speedrun && Array.isArray(mapData.speedrun)) {
@@ -2192,13 +2303,31 @@ class DataCollector {
 
   setupBoardAnalyzerListener() {
     try {
+      // Store board state when runs start
+      let capturedBoardState = null;
+      
+      // Listen for game start to capture board state
+      console.log('[Board Advisor] Setting up onGameStart listener');
+      const originalGameStart = window.onGameStart;
+      window.onGameStart = (...args) => {
+        console.log('[Board Advisor] onGameStart called!');
+        // Capture board state at the start of the run
+        capturedBoardState = this.getCurrentBoardData();
+        console.log('[Board Advisor] Captured board state at run start:', capturedBoardState);
+        
+        // Call original function if it exists
+        if (originalGameStart) {
+          originalGameStart.apply(window, args);
+        }
+      };
+      
       // Poll for Board Analyzer results (since Board Analyzer stores them globally)
       const checkForBoardAnalyzerResults = () => {
         if (window.__boardAnalyzerResults && window.__boardAnalyzerResults.results) {
           console.log('[Board Advisor] Found Board Analyzer results:', window.__boardAnalyzerResults);
           
-          // Get current board data for missing fields
-          const currentBoard = this.getCurrentBoardData();
+          // Use captured board state instead of current board state
+          const boardStateToUse = capturedBoardState || this.getCurrentBoardData();
           
           // Process each result
           window.__boardAnalyzerResults.results.forEach((result, index) => {
@@ -2209,19 +2338,23 @@ class DataCollector {
               id: Date.now() + index,
               timestamp: Date.now(),
               seed: result.seed,
-              roomId: result.roomId || currentBoard?.roomId || 'unknown',
-              mapName: result.mapName || currentBoard?.mapName || 'Unknown Map',
+              roomId: result.roomId || boardStateToUse?.roomId || 'unknown',
+              mapName: result.mapName || boardStateToUse?.mapName || 'Unknown Map',
               completed: result.completed,
               winner: result.completed ? 'nonVillains' : 'villains',
               ticks: result.ticks,
               rankPoints: result.rankPoints,
-              boardSetup: result.boardSetup || currentBoard?.boardSetup || [],
-              playerMonsters: result.playerMonsters || currentBoard?.playerMonsters || [],
-              playerEquipment: result.playerEquipment || currentBoard?.playerEquipment || [],
+              boardSetup: result.boardSetup || (boardStateToUse?.boardSetup ? boardStateToUse.boardSetup.map(piece => ({
+                ...piece,
+                monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
+              })) : []),
+              playerMonsters: result.playerMonsters || boardStateToUse?.playerMonsters || [],
+              playerEquipment: result.playerEquipment || boardStateToUse?.playerEquipment || [],
               source: 'board_analyzer'
             };
             
             // Save to IndexedDB
+            console.log(`[Board Advisor] About to call addBoardAnalyzerRun for run ${index + 1} with data:`, runData);
             addBoardAnalyzerRun(runData).then(saved => {
               if (saved) {
                 console.log(`[Board Advisor] Board Analyzer run ${index + 1} saved to IndexedDB: ${runData.ticks} ticks, ${runData.rankPoints} points`);
@@ -2235,6 +2368,9 @@ class DataCollector {
           
           // Clear the results to avoid reprocessing
           window.__boardAnalyzerResults = null;
+          
+          // Clear captured board state after processing
+          capturedBoardState = null;
         }
       };
       
@@ -2285,7 +2421,11 @@ class DataCollector {
       // Get current board setup
       const currentBoard = this.getCurrentBoardData();
       if (currentBoard) {
-        runData.boardSetup = currentBoard.boardSetup;
+        // Ensure monster names are preserved in board setup
+        runData.boardSetup = currentBoard.boardSetup.map(piece => ({
+          ...piece,
+          monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
+        }));
         runData.playerMonsters = currentBoard.playerMonsters;
         runData.playerEquipment = currentBoard.playerEquipment;
       }
@@ -2395,10 +2535,41 @@ class DataCollector {
 
   onBoardChange(boardContext) {
     try {
+      const now = Date.now();
+      const currentBoard = this.getCurrentBoardData();
+      const newRoomId = this.extractRoomIdFromContext(boardContext);
+      
+      // Check if this is a duplicate board change event
+      if (isBoardChangeInProgress()) {
+        console.log('[Board Advisor] Board change already in progress, skipping duplicate event');
+        return;
+      }
+      
+      // Set loading state and mark board change as in progress
+      setUILoadingState(true, 'Board change detected');
+      analysisState.pendingBoardChange = newRoomId;
+      analysisState.lastBoardChangeTime = now;
+      
       // Use smart cleanup that waits for all recommended pieces to be placed
       smartCleanupTileHighlights();
       
-      // Debounce board changes to avoid excessive analysis
+      // If room ID changed, immediately clear recommendations and start analysis faster
+      if (currentBoard && newRoomId && currentBoard.roomId !== newRoomId) {
+        console.log(`[Board Advisor] Map change detected: ${currentBoard.roomId} -> ${newRoomId}, clearing recommendations instantly`);
+        clearRecommendationsInstantly();
+        
+        // Clear any existing timeout
+        if (this.boardChangeTimeout) {
+          clearTimeout(this.boardChangeTimeout);
+        }
+        
+        // Start analysis immediately for map changes (no debounce)
+        this.triggerAutomaticAnalysis();
+        this.refreshDataForCurrentMap();
+        return;
+      }
+      
+      // For non-map changes, use debounce to avoid excessive analysis
       if (this.boardChangeTimeout) {
         clearTimeout(this.boardChangeTimeout);
       }
@@ -2406,16 +2577,20 @@ class DataCollector {
       this.boardChangeTimeout = setTimeout(() => {
         this.triggerAutomaticAnalysis();
         this.refreshDataForCurrentMap();
-      }, 1000); // Wait 1 second after board stops changing
+      }, BOARD_CHANGE_DEBOUNCE_TIME); // Use configurable debounce time
     } catch (error) {
       console.error('[Board Advisor] Error in onBoardChange:', error);
+      setUILoadingState(false, 'Error in board change handler');
     }
   }
   
   refreshDataForCurrentMap() {
     try {
       const currentBoard = this.getCurrentBoardData();
-      if (!currentBoard) return;
+      if (!currentBoard) {
+        setUILoadingState(false, 'No current board data');
+        return;
+      }
       
       const roomId = currentBoard.roomId;
       const roomName = currentBoard.mapName;
@@ -2442,6 +2617,10 @@ class DataCollector {
           totalAvailableRuns: runTrackerData?.metadata?.totalRuns || 0
         });
         
+        // Clear loading state and pending board change
+        setUILoadingState(false, 'Data loading completed');
+        analysisState.pendingBoardChange = null;
+        
         // If we have data for this room, trigger analysis
         if (roomPatterns && roomPatterns.size > 0) {
           console.log(`[Board Advisor] Found data for ${roomName}, triggering analysis...`);
@@ -2454,11 +2633,16 @@ class DataCollector {
         }
       }).catch(error => {
         console.error('[Board Advisor] Error loading data for current map:', error);
+        // Clear loading state on error
+        setUILoadingState(false, 'Error loading data');
+        analysisState.pendingBoardChange = null;
         // Show error state in panel
         updatePanelStatus('Error loading data. Please try again.', 'error');
       });
     } catch (error) {
       console.error('[Board Advisor] Error refreshing data for current map:', error);
+      setUILoadingState(false, 'Error in refreshDataForCurrentMap');
+      analysisState.pendingBoardChange = null;
     }
   }
 
@@ -2544,8 +2728,6 @@ class DataCollector {
   serializeBoardSetup(boardConfig) {
     if (!boardConfig) return [];
     
-    // Reduced logging - only log when debugging is needed
-    // console.log('[Board Advisor] serializeBoardSetup called with boardConfig:', boardConfig);
     
     // Filter for player pieces - be more flexible with the type check
     const playerPieces = boardConfig.filter(piece => {
@@ -2553,14 +2735,11 @@ class DataCollector {
       return piece.type === 'player' || !piece.type || piece.type === 'custom';
     });
     
-    // console.log('[Board Advisor] Player pieces after filtering:', playerPieces);
     
     return playerPieces.map(piece => {
-      // console.log('[Board Advisor] Processing piece in serializeBoardSetup:', piece);
       
       // Check if the piece has monster data directly
       if (piece.monster) {
-        // console.log('[Board Advisor] Piece has monster data:', piece.monster);
       }
       
       // Extract monster ID from multiple possible locations (like RunTracker does)
@@ -2577,10 +2756,8 @@ class DataCollector {
       if (monsterId && monsterId.startsWith('INITIAL_')) {
         originalMonsterId = monsterId; // Keep the full ID with prefix for lookup
         monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters) for display
-        // console.log('[Board Advisor] Stripped INITIAL_ prefix, real monster ID:', monsterId);
       }
       
-      // console.log('[Board Advisor] Extracted monsterId:', monsterId, 'from piece:', piece);
       
       // Get monster name and stats from player's inventory
       let monsterName = null;
@@ -2668,7 +2845,6 @@ class DataCollector {
         equipId: piece.equipId
       };
       
-      // console.log('[Board Advisor] Final serialized piece:', serializedPiece);
       return serializedPiece;
     });
   }
@@ -2733,6 +2909,14 @@ class DataCollector {
   }
 
   storeRunData(runData) {
+    // Ensure monster names are preserved in board setup
+    if (runData.boardSetup) {
+      runData.boardSetup = runData.boardSetup.map(piece => ({
+        ...piece,
+        monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
+      }));
+    }
+    
     performanceTracker.runs.push(runData);
     
     // Smart cleanup: prioritize keeping best runs when we exceed 1000 runs
@@ -2821,12 +3005,6 @@ class DataCollector {
     const roomId = runData.roomId;
     const setupHash = this.hashBoardSetup(runData.boardSetup);
     
-    // console.log('[Board Advisor] updatePatterns called with:', {
-    //   roomId,
-    //   setupHash,
-    //   boardSetup: runData.boardSetup,
-    //   boardSetupLength: runData.boardSetup?.length
-    // });
     
     if (!performanceTracker.patterns.has(roomId)) {
       performanceTracker.patterns.set(roomId, new Map());
@@ -2842,9 +3020,7 @@ class DataCollector {
         averageTime: 0,
         successRate: 0
       });
-      // console.log('[Board Advisor] Created new pattern with hash:', setupHash);
     } else {
-      // console.log('[Board Advisor] Pattern already exists with hash:', setupHash);
     }
     
     const pattern = roomPatterns.get(setupHash);
@@ -2929,6 +3105,28 @@ class DataCollector {
       return result;
     } catch (error) {
       console.error('[Board Advisor] Error getting current board data:', error);
+      return null;
+    }
+  }
+
+  extractRoomIdFromContext(boardContext) {
+    try {
+      const playerContext = globalThis.state.player.getSnapshot().context;
+      
+      // Use same room ID detection logic as getCurrentBoardData
+      if (boardContext.selectedMap?.selectedRoom?.id) {
+        return boardContext.selectedMap.selectedRoom.id;
+      } else if (boardContext.selectedMap?.id) {
+        return boardContext.selectedMap.id;
+      } else if (boardContext.area?.id) {
+        return boardContext.area.id;
+      } else if (playerContext.currentRoomId) {
+        return playerContext.currentRoomId;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('[Board Advisor] Error extracting room ID from context:', error);
       return null;
     }
   }
@@ -3100,15 +3298,28 @@ class LeaderboardAnalyzer {
 
   // Get leaderboard data for a specific room
   getRoomLeaderboard(leaderboardData, roomId) {
-    if (!leaderboardData || !leaderboardData.roomsHighscores) return null;
+    console.log('[Board Advisor] getRoomLeaderboard called for roomId:', roomId);
+    console.log('[Board Advisor] leaderboardData structure:', leaderboardData ? Object.keys(leaderboardData) : 'null');
+    if (!leaderboardData || !leaderboardData.roomsHighscores) {
+      console.log('[Board Advisor] Missing leaderboardData or roomsHighscores');
+      return null;
+    }
 
     const roomName = leaderboardData.ROOM_NAME?.[roomId];
+    console.log('[Board Advisor] Room name for', roomId, ':', roomName);
     if (!roomName) return null;
 
     // Handle the correct data structure from game.getRoomsHighscores
     // It returns {ticks: {roomId: data}, rank: {roomId: data}}
+    console.log('[Board Advisor] roomsHighscores structure:', leaderboardData.roomsHighscores);
+    console.log('[Board Advisor] Looking for roomId', roomId, 'in ticks:', leaderboardData.roomsHighscores.ticks);
+    console.log('[Board Advisor] Looking for roomId', roomId, 'in rank:', leaderboardData.roomsHighscores.rank);
+    
     const tickData = leaderboardData.roomsHighscores.ticks?.[roomId];
     const rankData = leaderboardData.roomsHighscores.rank?.[roomId];
+    
+    console.log('[Board Advisor] Found tickData:', tickData ? 'yes' : 'no');
+    console.log('[Board Advisor] Found rankData:', rankData ? 'yes' : 'no');
 
     if (!tickData && !rankData) return null;
 
@@ -3122,9 +3333,14 @@ class LeaderboardAnalyzer {
 
   // Compare current run with leaderboard
   compareWithLeaderboard(currentRun, leaderboardData) {
-    if (!currentRun || !leaderboardData) return null;
+    console.log('[Board Advisor] compareWithLeaderboard called with:', { currentRun, leaderboardData: leaderboardData ? 'present' : 'null' });
+    if (!currentRun || !leaderboardData) {
+      console.log('[Board Advisor] Missing currentRun or leaderboardData');
+      return null;
+    }
 
     const roomLeaderboard = this.getRoomLeaderboard(leaderboardData, currentRun.roomId);
+    console.log('[Board Advisor] Room leaderboard for', currentRun.roomId, ':', roomLeaderboard ? 'found' : 'not found');
     if (!roomLeaderboard) return null;
 
     const comparison = {
@@ -3141,6 +3357,7 @@ class LeaderboardAnalyzer {
         rankGap: null,
         speedrunRank: null,
         rankPosition: null,
+        yourBestTime: null, // Add user's best time from leaderboard
         recommendations: []
       }
     };
@@ -3152,6 +3369,12 @@ class LeaderboardAnalyzer {
       comparison.analysis.speedrunRank = comparison.leaderboard.speedrun
         .sort((a, b) => a.ticks - b.ticks)
         .findIndex(r => r.ticks >= currentRun.ticks) + 1;
+
+      // Find user's best time from leaderboard data
+      const userRuns = comparison.leaderboard.speedrun.filter(r => r.userName === globalThis.state?.user?.name);
+      if (userRuns.length > 0) {
+        comparison.analysis.yourBestTime = Math.min(...userRuns.map(r => r.ticks));
+      }
 
       if (comparison.analysis.speedrunGap > 0) {
         comparison.analysis.recommendations.push({
@@ -3207,12 +3430,9 @@ class AnalysisEngine {
     }
 
     analysisState.isAnalyzing = true;
-    // console.log('[Board Advisor] Starting board analysis...');
 
     try {
       const currentBoard = this.dataCollector.getCurrentBoardData();
-      // console.log('[Board Advisor] Current board data:', currentBoard);
-      // console.log('[Board Advisor] Current board setup length:', currentBoard?.boardSetup?.length);
       
       if (!currentBoard || !currentBoard.boardSetup.length) {
         // Board is empty - recommend best run from available data
@@ -3265,27 +3485,28 @@ class AnalysisEngine {
 
       // Proceed with analysis since we have data
 
-      // Fetch leaderboard data for comparison
+      // Get leaderboard data using existing functions
       let leaderboardComparison = null;
       try {
-        const leaderboardData = await this.leaderboardAnalyzer.fetchLeaderboardData();
-        if (leaderboardData) {
-          // Create a mock current run for comparison
-          // Only create comparison if we have actual pattern data
-          if (roomPatterns && roomPatterns.size > 0) {
-            const firstPattern = Array.from(roomPatterns.values())[0];
-            if (firstPattern && firstPattern.averageTime && firstPattern.averagePoints) {
-              const currentRun = {
-                roomId: roomId,
-                ticks: firstPattern.averageTime,
-                rankPoints: firstPattern.averagePoints
-              };
-              leaderboardComparison = this.leaderboardAnalyzer.compareWithLeaderboard(currentRun, leaderboardData);
+        console.log('[Board Advisor] Getting leaderboard data using existing functions...');
+        const userScores = getUserBestScores();
+        if (userScores && userScores.bestTicks) {
+          console.log('[Board Advisor] Found user best time:', userScores.bestTicks);
+          
+          // Create simple leaderboard comparison with user's best time
+          leaderboardComparison = {
+            roomId: roomId,
+            roomName: globalThis.state?.utils?.ROOM_NAME?.[roomId] || 'Unknown',
+            analysis: {
+              yourBestTime: userScores.bestTicks
             }
-          }
+          };
+          console.log('[Board Advisor] Created leaderboard comparison:', leaderboardComparison);
+        } else {
+          console.log('[Board Advisor] No user best time found');
         }
       } catch (error) {
-        console.warn('[Board Advisor] Could not fetch leaderboard data:', error);
+        console.warn('[Board Advisor] Could not get user best scores:', error);
       }
 
       // Find similar setups
@@ -3295,7 +3516,7 @@ class AnalysisEngine {
       const currentAnalysis = this.analyzeSetup(currentBoard.boardSetup, roomPatterns);
       
       // Generate recommendations
-      const recommendations = this.generateRecommendations(
+      const recommendations = await this.generateRecommendations(
         currentBoard, 
         similarSetups, 
         currentAnalysis,
@@ -3484,7 +3705,6 @@ class AnalysisEngine {
       console.log('[Board Advisor] Complete best run data from IndexedDB:', bestRun);
       console.log('[Board Advisor] Best run boardSetup:', bestRun.boardSetup);
       
-      // Debug: Show top 5 runs to see if 130-tick run is there
       console.log('[Board Advisor] Top 5 runs by ticks:');
       bestRuns.slice(0, 5).forEach((run, index) => {
         console.log(`  ${index + 1}. ${run.ticks} ticks (${run.source}, ${run.roomId})`);
@@ -3581,11 +3801,12 @@ class AnalysisEngine {
         leaderboardComparison: null,
         patterns: new Map(),
         summary: {
-          totalRuns: bestRuns.length,
-          averageTime: Math.round(bestRuns.reduce((sum, run) => sum + (run.ticks || 0), 0) / bestRuns.length),
+          totalRuns: Math.min(50, bestRuns.length),
+          averageTime: Math.round(bestRuns.slice(0, 50).reduce((sum, run) => sum + (run.ticks || 0), 0) / Math.min(50, bestRuns.length)),
           successRate: '100%',
           bestTime: bestRun.ticks,
-          worstTime: bestRuns[bestRuns.length - 1]?.ticks || 'N/A',
+          worstTime: bestRuns[Math.min(49, bestRuns.length - 1)]?.ticks || 'N/A',
+          bestPoints: Math.max(...bestRuns.map(r => r.rankPoints || 0)),
           dataQuality: 'Good'
         },
         prediction: {
@@ -3620,7 +3841,6 @@ class AnalysisEngine {
       const roomRuns = await getSandboxRunsForRoom(currentRoomId, 50); // Get top 50 runs for current room only
       console.log(`[Board Advisor] Got ${roomRuns.length} runs from current room ${currentRoomId}`);
       
-      // Debug: Show ticks range for this room
       if (roomRuns.length > 0) {
         const ticks = roomRuns.map(run => run.ticks).filter(t => t > 0).sort((a, b) => a - b);
         console.log(`[Board Advisor] Room ${currentRoomId} ticks range: ${ticks[0]} - ${ticks[ticks.length - 1]} (best: ${ticks[0]})`);
@@ -3887,20 +4107,7 @@ class AnalysisEngine {
   }
 
   analyzeSetup(setup, roomPatterns) {
-    const setupHash = this.dataCollector.hashBoardSetup(setup);
-    const pattern = roomPatterns.get(setupHash);
-    
-    if (pattern) {
-      return {
-        hasHistoricalData: true,
-        bestTime: pattern.bestTime,
-        averageTime: pattern.averageTime,
-        successRate: pattern.successRate,
-        totalRuns: pattern.runs.length
-      };
-    }
-    
-    // If no exact pattern but we have room patterns, we still have historical data
+    // Always return room-wide historical data, ignoring current board setup
     if (roomPatterns && roomPatterns.size > 0) {
       // Calculate aggregate stats from all patterns in this room
       const allRuns = [];
@@ -3916,8 +4123,13 @@ class AnalysisEngine {
       }
       
       const completedRuns = allRuns.filter(r => r.completed);
-      const averageTime = completedRuns.length > 0 ? 
-        completedRuns.reduce((sum, r) => sum + r.ticks, 0) / completedRuns.length : 0;
+      
+      // Sort by ticks (best first) and limit to top 50 runs
+      const sortedRuns = completedRuns.sort((a, b) => a.ticks - b.ticks);
+      const top50Runs = sortedRuns.slice(0, 50);
+      
+      const averageTime = top50Runs.length > 0 ? 
+        top50Runs.reduce((sum, r) => sum + r.ticks, 0) / top50Runs.length : 0;
       const successRate = completedRuns.length / allRuns.length;
       
       return {
@@ -3925,7 +4137,7 @@ class AnalysisEngine {
         bestTime: bestTime === Infinity ? null : bestTime,
         averageTime: averageTime,
         successRate: successRate,
-        totalRuns: totalRuns
+        totalRuns: Math.min(50, totalRuns)
       };
     }
     
@@ -3938,7 +4150,7 @@ class AnalysisEngine {
     };
   }
 
-  generateRecommendations(currentBoard, similarSetups, currentAnalysis, leaderboardComparison = null) {
+  async generateRecommendations(currentBoard, similarSetups, currentAnalysis, leaderboardComparison = null) {
     const recommendations = [];
     
     if (similarSetups.length === 0) {
@@ -4035,7 +4247,7 @@ class AnalysisEngine {
     recommendations.push(...creatureTips);
 
     // Board Analyzer specific recommendations
-    const boardAnalyzerTips = this.generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis);
+    const boardAnalyzerTips = await this.generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis, leaderboardComparison);
     recommendations.push(...boardAnalyzerTips);
 
     return recommendations;
@@ -4277,7 +4489,7 @@ class AnalysisEngine {
   }
 
   // Generate recommendations based on Board Analyzer data
-  generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis) {
+  async generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis, leaderboardComparison = null) {
     const recommendations = [];
     
     // Check if we have Board Analyzer or sandbox data
@@ -4296,9 +4508,16 @@ class AnalysisEngine {
       : allRuns.filter(r => r.roomId === currentBoard.roomId);
     const sortedRuns = currentRoomRuns.sort((a, b) => a.ticks - b.ticks);
     const bestOverallRun = sortedRuns[0];
-    const currentPredictedTime = currentAnalysis?.prediction?.predictedTime || 366;
+    const currentPredictedTime = currentAnalysis?.prediction?.predictedTime || currentAnalysis?.currentAnalysis?.predictedTime;
     
-    if (bestOverallRun && bestOverallRun.ticks < currentPredictedTime) {
+    console.log(`[Board Advisor] Current prediction values:`, {
+      prediction: currentAnalysis?.prediction?.predictedTime,
+      currentAnalysis: currentAnalysis?.currentAnalysis?.predictedTime,
+      final: currentPredictedTime,
+      bestRun: bestOverallRun?.ticks
+    });
+    
+    if (bestOverallRun && currentPredictedTime && bestOverallRun.ticks < currentPredictedTime) {
       const timeImprovement = currentPredictedTime - bestOverallRun.ticks;
       
       console.log(`[Board Advisor] Adding best setup recommendation: ${bestOverallRun.ticks} ticks (improvement: ${timeImprovement})`);
@@ -4314,8 +4533,15 @@ class AnalysisEngine {
         // Try to resolve monster name from multiple sources
         let monsterName = piece.monsterName;
         
+        console.log('[Board Advisor] setupWithNames - Original piece:', {
+          monsterId: piece.monsterId,
+          monsterName: piece.monsterName,
+          equipmentName: piece.equipmentName,
+          equipId: piece.equipId
+        });
+        
         // If no monster name or it's the same as monster ID, try to resolve it
-        if (!monsterName || monsterName === piece.monsterId || monsterName.startsWith('INITIAL_')) {
+        if (!monsterName || monsterName === piece.monsterId || monsterName.startsWith('INITIAL_') || monsterName === null) {
           // Try to get from player context first (same as IndexedDB data)
           const playerContext = globalThis.state?.player?.getSnapshot()?.context;
           if (playerContext?.monsters) {
@@ -4347,13 +4573,26 @@ class AnalysisEngine {
           // Fallback to getMonsterName function
           if (!monsterName) {
             monsterName = getMonsterName(monsterId);
+            console.log('[Board Advisor] setupWithNames - getMonsterName result:', {
+              monsterId,
+              resolvedName: monsterName
+            });
           }
         }
         
-        return {
+        const result = {
           ...piece,
           monsterName: monsterName
         };
+        
+        console.log('[Board Advisor] setupWithNames - Final result:', {
+          monsterId: result.monsterId,
+          monsterName: result.monsterName,
+          equipmentName: result.equipmentName,
+          equipId: result.equipId
+        });
+        
+        return result;
       }) : [];
       
       recommendations.push({
@@ -4378,10 +4617,10 @@ class AnalysisEngine {
     
     // Generate recommendations based on selected focus area
     if (config.focusArea === 'ticks') {
-      const ticksRecommendations = this.generateTicksRecommendations(completedRuns, similarSetups, currentBoard);
+      const ticksRecommendations = await this.generateTicksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison);
       recommendations.push(...ticksRecommendations);
     } else if (config.focusArea === 'ranks') {
-      const ranksRecommendations = this.generateRanksRecommendations(completedRuns, similarSetups, currentBoard);
+      const ranksRecommendations = await this.generateRanksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison);
       recommendations.push(...ranksRecommendations);
     }
     
@@ -4405,7 +4644,7 @@ class AnalysisEngine {
   }
 
   // Generate recommendations focused on time optimization
-  generateTicksRecommendations(completedRuns, similarSetups, currentBoard) {
+  async generateTicksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison = null) {
     const recommendations = [];
     
     if (completedRuns.length === 0) return recommendations;
@@ -4414,10 +4653,15 @@ class AnalysisEngine {
     const sortedRuns = [...completedRuns].sort((a, b) => a.ticks - b.ticks);
     const top10Runs = sortedRuns.slice(0, Math.min(10, sortedRuns.length));
     const avgTime = top10Runs.reduce((sum, r) => sum + r.ticks, 0) / top10Runs.length;
-    const bestTime = Math.min(...completedRuns.map(r => r.ticks));
+    
+    // Use leaderboard data for best time if available, otherwise use local data
+    let bestTime = Math.min(...completedRuns.map(r => r.ticks));
+    if (leaderboardComparison && leaderboardComparison.analysis && leaderboardComparison.analysis.yourBestTime) {
+      bestTime = leaderboardComparison.analysis.yourBestTime;
+    }
+    
     const worstTime = Math.max(...completedRuns.map(r => r.ticks));
     
-    // Debug logging
     console.log('[Board Advisor] generateTicksRecommendations - completedRuns length:', completedRuns.length);
     console.log('[Board Advisor] generateTicksRecommendations - top10Runs length:', top10Runs.length);
     console.log('[Board Advisor] generateTicksRecommendations - avgTime (top 10):', Math.round(avgTime));
@@ -4478,13 +4722,83 @@ class AnalysisEngine {
         priority: 'high',
         focusArea: 'ticks'
       });
-    } else if (improvementRatio > 0 && improvementRatio <= 0.05) {
+    } else if (improvementRatio >= 0 && improvementRatio <= 0.05) {
+      const roundedBestTime = Math.round(bestTime);
+      const roundedAvgTime = Math.round(avgTime);
+      const isEqual = roundedBestTime === roundedAvgTime;
+      
+      console.log(`[Board Advisor] Consistent Performance logic:`, {
+        improvementRatio: improvementRatio,
+        bestTime: bestTime,
+        avgTime: avgTime,
+        roundedBestTime: roundedBestTime,
+        roundedAvgTime: roundedAvgTime,
+        isEqual: isEqual
+      });
+      
+      // Check if we have world record data for comparison
+      let worldRecordTime = null;
+      let worldRecordHolder = null;
+      
+      // Try to get leaderboard data from the comparison first
+      if (leaderboardComparison && leaderboardComparison.leaderboard && leaderboardComparison.leaderboard.speedrun) {
+        const speedrunData = leaderboardComparison.leaderboard.speedrun;
+        if (speedrunData.length > 0) {
+          worldRecordTime = speedrunData[0].ticks;
+          worldRecordHolder = speedrunData[0].userName;
+        }
+      } else {
+        // Fallback: try to fetch leaderboard data directly if not available in comparison
+        try {
+          const leaderboardData = await fetchLeaderboardWRData(currentBoard.roomId);
+          if (leaderboardData && leaderboardData.tickData && leaderboardData.tickData.length > 0) {
+            worldRecordTime = leaderboardData.tickData[0].ticks;
+            worldRecordHolder = leaderboardData.tickData[0].userName;
+          }
+        } catch (error) {
+          console.log('[Board Advisor] Could not fetch leaderboard data for WR comparison:', error);
+        }
+      }
+      
+      let message, suggestion;
+      if (worldRecordTime !== null) {
+        const gapToWR = roundedBestTime - worldRecordTime;
+        
+        // Check if current user is the WR holder
+        const playerSnapshot = globalThis.state?.player?.getSnapshot?.();
+        const currentUserName = playerSnapshot?.context?.name;
+        const isCurrentUserWR = currentUserName && worldRecordHolder && currentUserName === worldRecordHolder;
+        
+        if (gapToWR <= 0) {
+          if (isCurrentUserWR) {
+            message = `Your best time (${roundedBestTime}) is the world record! You hold the record!`;
+            suggestion = 'You\'re the world record holder! Maintain this incredible performance and keep pushing the limits!';
+          } else {
+            message = `Your best time (${roundedBestTime}) equals the world record! You're tied with ${worldRecordHolder}!`;
+            suggestion = 'You\'ve achieved perfection! Try to maintain this level of consistency.';
+          }
+        } else if (gapToWR <= 5) {
+          message = `Your best time (${roundedBestTime}) is very close to the world record (${worldRecordTime} by ${worldRecordHolder}). Only ${gapToWR} tick${gapToWR === 1 ? '' : 's'} away!`;
+          suggestion = 'Focus on micro-optimizations: faster monster positioning, reduced idle time, and perfect timing.';
+        } else {
+          message = `Your best time (${roundedBestTime}) is ${gapToWR} ticks behind the world record (${worldRecordTime} by ${worldRecordHolder}).`;
+          suggestion = 'Study the world record holder\'s strategies and focus on major optimizations: better monster placement, equipment choices, and movement patterns.';
+        }
+      } else {
+        message = isEqual
+          ? `Your best time (${roundedBestTime}) equals your average (${roundedAvgTime}). Perfect consistency!`
+          : `Your best time (${roundedBestTime}) is very close to your average (${roundedAvgTime}). Great consistency!`;
+        suggestion = 'Try experimenting with different setups to find even better strategies.';
+      }
+      
+      console.log(`[Board Advisor] Generated message:`, message);
+      
       recommendations.push({
         type: 'speed',
         title: 'Consistent Performance',
-        message: `Your best time (${bestTime}) is very close to your average (${Math.round(avgTime)}). Great consistency!`,
-        suggestion: 'Try experimenting with different setups to find even better strategies.',
-        priority: 'medium',
+        message: message,
+        suggestion: suggestion,
+        priority: worldRecordTime !== null ? 'high' : 'medium',
         focusArea: 'ticks'
       });
     }
@@ -4513,20 +4827,22 @@ class AnalysisEngine {
   }
 
   // Generate recommendations focused on rank points optimization
-  generateRanksRecommendations(completedRuns, similarSetups, currentBoard) {
+  generateRanksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison = null) {
     const recommendations = [];
     
     if (completedRuns.length === 0) return recommendations;
     
-    // Rank points analysis
-    const highPointRuns = completedRuns.filter(r => r.rankPoints >= 1000);
+    // Rank points analysis - adjust thresholds based on actual data
+    const maxPoints = Math.max(...completedRuns.map(r => r.rankPoints));
+    const highPointThreshold = Math.max(3, Math.round(maxPoints * 0.8)); // Use 80% of max points as threshold
+    const highPointRuns = completedRuns.filter(r => r.rankPoints >= highPointThreshold);
     const highPointRate = highPointRuns.length / completedRuns.length;
     
-    if (highPointRate < 0.5) {
+    if (highPointRate < 0.5 && maxPoints > 1) {
       recommendations.push({
         type: 'points',
         title: 'Improve High Point Rate',
-        message: `Only ${Math.round(highPointRate * 100)}% of your runs achieve 1000+ points.`,
+        message: `Only ${Math.round(highPointRate * 100)}% of your runs achieve ${highPointThreshold}+ points.`,
         suggestion: 'Optimize monster stats and positioning to increase high point success rate.',
         priority: 'high',
         focusArea: 'ranks'
@@ -4534,7 +4850,6 @@ class AnalysisEngine {
     }
     
     // Rank points analysis
-    const maxPoints = Math.max(...completedRuns.map(r => r.rankPoints));
     const avgPoints = completedRuns.reduce((sum, r) => sum + r.rankPoints, 0) / completedRuns.length;
     
     if (avgPoints < maxPoints * 0.8) {
@@ -4803,18 +5118,8 @@ class AnalysisEngine {
 // 5. USER INTERFACE
 // =======================
 
-// Panel constants
-const PANEL_ID = "board-advisor-panel";
-
-// Panel state
-let panelState = {
-  isOpen: false,
-  position: { x: 10, y: 40 },
-  size: { width: 350, height: 800 }
-};
-
 // =======================
-// IMMEDIATE INITIALIZATION
+// 5.5. IMMEDIATE INITIALIZATION
 // =======================
 // Create panel UI elements immediately on mod load to ensure they exist
 // for recommendation execution during initialization
@@ -5019,7 +5324,7 @@ function createPanel() {
     z-index: 10001;
     display: flex;
     flex-direction: column;
-    font-family: 'Inter', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
     color: #ABB2BF;
     overflow: hidden;
   `;
@@ -5066,8 +5371,8 @@ function createPanelHeader() {
   title.textContent = '🤖 Board Advisor';
   title.style.cssText = `
     margin: 0;
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 18px;
+    font-weight: 600;
   `;
   
   const controls = document.createElement('div');
@@ -5087,7 +5392,7 @@ function createPanelHeader() {
     color: white;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -5147,7 +5452,7 @@ function createAnalysisSection() {
   title.style.cssText = `
     margin: 0 0 6px 0;
     color: #98C379;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     user-select: none;
@@ -5160,7 +5465,7 @@ function createAnalysisSection() {
   const collapseIcon = document.createElement('span');
   collapseIcon.textContent = '▲';
   collapseIcon.style.cssText = `
-    font-size: 10px;
+        font-size: 11px;
     transition: transform 0.2s ease;
   `;
   title.appendChild(collapseIcon);
@@ -5169,7 +5474,7 @@ function createAnalysisSection() {
   analysis.id = 'analysis-display';
   analysis.style.cssText = `
     display: block;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.3;
   `;
   
@@ -5201,7 +5506,7 @@ function createFocusAreasSection() {
   title.style.cssText = `
     margin: 0 0 8px 0;
     color: #FF9800;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   `;
   
@@ -5217,7 +5522,7 @@ function createFocusAreasSection() {
   ticksLabel.textContent = '⏱️ Ticks';
   ticksLabel.style.cssText = `
     color: #61AFEF;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
@@ -5228,7 +5533,7 @@ function createFocusAreasSection() {
   ranksLabel.textContent = '🏆 Rank Points';
   ranksLabel.style.cssText = `
     color: #E5C07B;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
@@ -5436,14 +5741,14 @@ function createRecommendationsSection() {
   title.style.cssText = `
     margin: 0 0 6px 0;
     color: #E5C07B;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   `;
   
   const recommendations = document.createElement('div');
   recommendations.id = 'recommendations-display';
   recommendations.style.cssText = `
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.3;
   `;
   
@@ -5469,7 +5774,7 @@ function createPanelFooter() {
   const statusIndicator = document.createElement('div');
   statusIndicator.id = 'auto-status';
   statusIndicator.style.cssText = `
-    font-size: 11px;
+    font-size: 13px;
     color: #61AFEF;
     display: flex;
     align-items: center;
@@ -5504,6 +5809,37 @@ function createPanelFooter() {
   updateStatus();
   footer.appendChild(statusIndicator);
   
+  // Settings button
+  const settingsButton = document.createElement('button');
+  settingsButton.innerHTML = '⚙️';
+  settingsButton.title = 'Open Settings';
+  settingsButton.style.cssText = `
+    background: #4B5563;
+    border: 1px solid #6B7280;
+    color: #E5E7EB;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-left: 8px;
+    transition: background-color 0.2s;
+  `;
+  
+  // Hover effects
+  settingsButton.addEventListener('mouseenter', () => {
+    settingsButton.style.background = '#6B7280';
+  });
+  settingsButton.addEventListener('mouseleave', () => {
+    settingsButton.style.background = '#4B5563';
+  });
+  
+  // Click handler to open settings
+  settingsButton.addEventListener('click', () => {
+    openSettingsModal();
+  });
+  
+  footer.appendChild(settingsButton);
+  
   // Update status when config changes
   const originalSaveConfig = saveConfig;
   saveConfig = function() {
@@ -5512,6 +5848,453 @@ function createPanelFooter() {
   };
   
   return footer;
+}
+
+function openSettingsModal() {
+  const modal = document.createElement('div');
+  modal.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+  `;
+  
+  const settingsPanel = document.createElement('div');
+  settingsPanel.style.cssText = `
+    background: #2D3748;
+    border: 1px solid #4A5568;
+    border-radius: 8px;
+    padding: 24px;
+    min-width: 400px;
+    max-width: 500px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  `;
+  
+  const header = document.createElement('div');
+  header.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #4A5568;
+  `;
+  
+  const title = document.createElement('h3');
+  title.textContent = 'Board Advisor Settings';
+  title.style.cssText = `
+    margin: 0;
+    color: #E2E8F0;
+    font-size: 20px;
+    font-weight: 600;
+  `;
+  
+  const closeButton = document.createElement('button');
+  closeButton.innerHTML = '×';
+  closeButton.style.cssText = `
+    background: none;
+    border: none;
+    color: #A0AEC0;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+  `;
+  
+  closeButton.addEventListener('mouseenter', () => {
+    closeButton.style.background = '#4A5568';
+  });
+  closeButton.addEventListener('mouseleave', () => {
+    closeButton.style.background = 'none';
+  });
+  
+  const content = document.createElement('div');
+  content.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  `;
+  
+  const resetSection = document.createElement('div');
+  resetSection.style.cssText = `
+    padding: 16px;
+    background: #1A202C;
+    border-radius: 6px;
+    border: 1px solid #4A5568;
+  `;
+  
+  const resetTitle = document.createElement('h4');
+  resetTitle.textContent = 'Database Management';
+  resetTitle.style.cssText = `
+    margin: 0 0 12px 0;
+    color: #E2E8F0;
+    font-size: 16px;
+    font-weight: 600;
+  `;
+  
+  const resetDescription = document.createElement('p');
+  resetDescription.textContent = 'Clear all stored analysis data and start fresh. This will remove all historical run data, patterns, and recommendations.';
+  resetDescription.style.cssText = `
+    margin: 0 0 16px 0;
+    color: #A0AEC0;
+    font-size: 14px;
+    line-height: 1.4;
+  `;
+  
+  const resetButton = document.createElement('button');
+  resetButton.textContent = 'Reset IndexedDB';
+  resetButton.style.cssText = `
+    background: #E53E3E;
+    border: 1px solid #C53030;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+  `;
+  
+  resetButton.addEventListener('mouseenter', () => {
+    resetButton.style.background = '#C53030';
+  });
+  resetButton.addEventListener('mouseleave', () => {
+    resetButton.style.background = '#E53E3E';
+  });
+  
+  resetButton.addEventListener('click', () => {
+    showResetConfirmation(resetSection, resetButton);
+  });
+  
+  // Close modal handlers
+  const closeModal = () => modal.remove();
+  closeButton.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+  
+  // ESC key handler
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') closeModal();
+  };
+  document.addEventListener('keydown', handleKeyDown);
+  modal.addEventListener('remove', () => {
+    document.removeEventListener('keydown', handleKeyDown);
+  });
+  
+  // Assemble the modal
+  header.appendChild(title);
+  header.appendChild(closeButton);
+  
+  resetSection.appendChild(resetTitle);
+  resetSection.appendChild(resetDescription);
+  resetSection.appendChild(resetButton);
+  
+  content.appendChild(resetSection);
+  
+  settingsPanel.appendChild(header);
+  settingsPanel.appendChild(content);
+  modal.appendChild(settingsPanel);
+  
+  document.body.appendChild(modal);
+}
+
+function showResetConfirmation(resetSection, resetButton) {
+  // Hide the original button
+  resetButton.style.display = 'none';
+  
+  // Create confirmation container
+  const confirmationContainer = document.createElement('div');
+  confirmationContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    background: #2D3748;
+    border-radius: 6px;
+    border: 1px solid #E53E3E;
+  `;
+  
+  // Warning message
+  const warningMessage = document.createElement('div');
+  warningMessage.style.cssText = `
+    color: #FED7D7;
+    font-size: 13px;
+    line-height: 1.4;
+    margin-bottom: 8px;
+  `;
+  warningMessage.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+      <span style="font-size: 16px;">⚠️</span>
+      <strong>Warning: This action cannot be undone!</strong>
+    </div>
+    <div>This will permanently delete all stored analysis data, patterns, and recommendations from all rooms.</div>
+  `;
+  
+  // Button container
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.cssText = `
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  `;
+  
+  // Cancel button
+  const cancelButton = document.createElement('button');
+  cancelButton.textContent = 'Cancel';
+  cancelButton.style.cssText = `
+    background: #4A5568;
+    border: 1px solid #6B7280;
+    color: #E2E8F0;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+  `;
+  
+  cancelButton.addEventListener('mouseenter', () => {
+    cancelButton.style.background = '#6B7280';
+  });
+  cancelButton.addEventListener('mouseleave', () => {
+    cancelButton.style.background = '#4A5568';
+  });
+  
+  cancelButton.addEventListener('click', () => {
+    // Restore original button
+    resetButton.style.display = 'block';
+    confirmationContainer.remove();
+  });
+  
+  // Confirm button
+  const confirmButton = document.createElement('button');
+  confirmButton.textContent = 'Reset Database';
+  confirmButton.style.cssText = `
+    background: #E53E3E;
+    border: 1px solid #C53030;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s;
+  `;
+  
+  confirmButton.addEventListener('mouseenter', () => {
+    confirmButton.style.background = '#C53030';
+  });
+  confirmButton.addEventListener('mouseleave', () => {
+    confirmButton.style.background = '#E53E3E';
+  });
+  
+  confirmButton.addEventListener('click', async () => {
+    // Show loading state
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Resetting...';
+    confirmButton.style.background = '#9CA3AF';
+    
+    try {
+      await resetIndexedDB();
+      
+      // Show success message
+      confirmationContainer.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        background: #065F46;
+        border-radius: 6px;
+        border: 1px solid #10B981;
+      `;
+      confirmationContainer.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 16px;">✅</span>
+          <div style="color: #D1FAE5; font-size: 13px;">
+            <strong>Success!</strong> IndexedDB has been reset and UI reloaded.
+          </div>
+        </div>
+      `;
+      
+      // Auto-close after 2 seconds
+      setTimeout(() => {
+        // Find and close the modal
+        const modal = confirmationContainer.closest('[style*="position: fixed"]');
+        if (modal) {
+          modal.remove();
+        }
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Error resetting IndexedDB:', error);
+      
+      // Show error message
+      confirmationContainer.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        background: #7F1D1D;
+        border-radius: 6px;
+        border: 1px solid #DC2626;
+      `;
+      confirmationContainer.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 16px;">❌</span>
+          <div style="color: #FED7D7; font-size: 13px;">
+            <strong>Error:</strong> Failed to reset IndexedDB. Please try again.
+          </div>
+        </div>
+      `;
+      
+      // Restore original button after 3 seconds
+      setTimeout(() => {
+        resetButton.style.display = 'block';
+        confirmationContainer.remove();
+      }, 3000);
+    }
+  });
+  
+  // Assemble confirmation dialog
+  buttonContainer.appendChild(cancelButton);
+  buttonContainer.appendChild(confirmButton);
+  
+  confirmationContainer.appendChild(warningMessage);
+  confirmationContainer.appendChild(buttonContainer);
+  
+  // Insert after the reset section
+  resetSection.parentNode.insertBefore(confirmationContainer, resetSection.nextSibling);
+}
+
+async function resetIndexedDB() {
+  return new Promise(async (resolve, reject) => {
+    try {
+      // If database is not open, open it first
+      if (!sandboxDB || !isDBReady) {
+        await initializeDatabase();
+      }
+      
+      if (!sandboxDB) {
+        reject(new Error('Failed to open database for reset'));
+        return;
+      }
+      
+      console.log('[Board Advisor] Starting IndexedDB reset...');
+      
+      // Get all existing store names
+      const storeNames = Array.from(sandboxDB.objectStoreNames);
+      console.log('[Board Advisor] Found stores:', storeNames);
+      
+      const clearPromises = [];
+      
+      // Clear each store individually
+      for (const storeName of storeNames) {
+        clearPromises.push(
+          new Promise((resolve, reject) => {
+            const transaction = sandboxDB.transaction([storeName], 'readwrite');
+            const store = transaction.objectStore(storeName);
+            const clearRequest = store.clear();
+            
+            clearRequest.onsuccess = () => {
+              console.log(`[Board Advisor] Cleared store: ${storeName}`);
+              resolve();
+            };
+            clearRequest.onerror = () => {
+              console.error(`[Board Advisor] Failed to clear store ${storeName}:`, clearRequest.error);
+              reject(clearRequest.error);
+            };
+          })
+        );
+      }
+      
+      // Wait for all clear operations to complete
+      await Promise.all(clearPromises);
+      
+      console.log('[Board Advisor] IndexedDB stores successfully cleared');
+      
+      // Reset runtime state
+      runTrackerData = null;
+      currentRecommendedSetup = null;
+      placedRecommendedPieces = new Set();
+      analysisState = {
+        isAnalyzing: false,
+        isDataLoading: false,
+        currentAnalysis: null,
+        historicalData: [],
+        patterns: {},
+        recommendations: null,
+        lastBoardHash: null,
+        lastDataLoadTime: 0
+      };
+      performanceCache = {
+        lastRoomDetection: null,
+        lastRoomDetectionTime: 0,
+        roomDetectionCache: new Map(),
+        patternMatchingCache: new Map(),
+        dataLoadingCache: new Map()
+      };
+      
+      // Reload UI to show clean state
+      reloadUI();
+      
+      resolve();
+      
+    } catch (error) {
+      console.error('[Board Advisor] Error during IndexedDB reset:', error);
+      reject(error);
+    }
+  });
+}
+
+function reloadUI() {
+  console.log('[Board Advisor] Reloading UI after reset...');
+  
+  // Clear any existing tile highlights
+  cleanupTileHighlights();
+  
+  // Reset panel content to show clean state
+  const panel = document.getElementById(PANEL_ID);
+  if (panel) {
+    // Update the analysis display to show no data
+    updatePanelStatus('Database cleared. Start playing to build new analysis data.', 'info');
+    
+    // Clear recommendations section
+    const recommendationsDisplay = document.getElementById('recommendations-display');
+    if (recommendationsDisplay) {
+      recommendationsDisplay.innerHTML = '<div style="color: #A0AEC0; font-style: italic;">No recommendations available. Play some games to build data.</div>';
+    }
+    
+    // Clear any analysis results
+    const analysisDisplay = document.getElementById('analysis-display');
+    if (analysisDisplay) {
+      analysisDisplay.innerHTML = '<div style="color: #A0AEC0; text-align: center; padding: 20px;">No analysis data available. Play some games to start building recommendations.</div>';
+    }
+    
+    // Reset historical data display
+    const historicalSection = panel.querySelector('.historical-data');
+    if (historicalSection) {
+      historicalSection.style.display = 'none';
+    }
+  }
+  
+  // Clear any cached recommendations
+  currentRecommendedSetup = null;
+  placedRecommendedPieces.clear();
+  
+  console.log('[Board Advisor] UI reloaded successfully');
 }
 
 function makeDraggable(panel, header) {
@@ -5557,30 +6340,84 @@ function makeDraggable(panel, header) {
 }
 
 function makeResizable(panel) {
-  const resizeHandle = document.createElement('div');
-  resizeHandle.style.cssText = `
-    position: absolute;
-    bottom: 0;
-    right: 0;
-    width: 20px;
-    height: 20px;
-    background: #4B5563;
-    cursor: se-resize;
-    border-radius: 0 0 8px 0;
-  `;
+  // Create resize handles for Windows-like resizing
+  const resizeHandles = {
+    right: createResizeHandle('right'),
+    bottom: createResizeHandle('bottom'),
+    corner: createResizeHandle('corner')
+  };
+  
+  function createResizeHandle(type) {
+    const handle = document.createElement('div');
+    const isCorner = type === 'corner';
+    
+    handle.style.cssText = `
+      position: absolute;
+      background: transparent;
+      z-index: 10002;
+      ${isCorner ? `
+        bottom: 0;
+        right: 0;
+        width: 12px;
+        height: 12px;
+        cursor: se-resize;
+      ` : type === 'right' ? `
+        top: 0;
+        right: 0;
+        width: 4px;
+        height: 100%;
+        cursor: e-resize;
+      ` : `
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 4px;
+        cursor: s-resize;
+      `}
+    `;
+    
+    // Add hover effect
+    handle.addEventListener('mouseenter', () => {
+      handle.style.background = isCorner ? '#61AFEF' : '#4B5563';
+    });
+    
+    handle.addEventListener('mouseleave', () => {
+      handle.style.background = 'transparent';
+    });
+    
+    return handle;
+  }
   
   let isResizing = false;
+  let resizeType = '';
   let startX, startY, startWidth, startHeight;
   
-  resizeHandle.addEventListener('mousedown', (e) => {
+  function startResize(e, type) {
     isResizing = true;
+    resizeType = type;
     startX = e.clientX;
     startY = e.clientY;
     startWidth = panel.offsetWidth;
     startHeight = panel.offsetHeight;
     document.body.style.userSelect = 'none';
+    document.body.style.cursor = getCursorForType(type);
     e.preventDefault();
-  });
+    e.stopPropagation();
+  }
+  
+  function getCursorForType(type) {
+    switch(type) {
+      case 'right': return 'e-resize';
+      case 'bottom': return 's-resize';
+      case 'corner': return 'se-resize';
+      default: return 'default';
+    }
+  }
+  
+  // Add event listeners to handles
+  resizeHandles.right.addEventListener('mousedown', (e) => startResize(e, 'right'));
+  resizeHandles.bottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
+  resizeHandles.corner.addEventListener('mousedown', (e) => startResize(e, 'corner'));
   
   document.addEventListener('mousemove', (e) => {
     if (!isResizing) return;
@@ -5588,12 +6425,24 @@ function makeResizable(panel) {
     const deltaX = e.clientX - startX;
     const deltaY = e.clientY - startY;
     
-    const newWidth = Math.max(300, startWidth + deltaX);
-    const newHeight = Math.max(200, startHeight + deltaY);
+    let newWidth = startWidth;
+    let newHeight = startHeight;
     
+    // Allow width resizing
+    if (resizeType === 'right' || resizeType === 'corner') {
+      newWidth = Math.max(300, Math.min(600, startWidth + deltaX));
+    }
+    
+    // Allow height resizing
+    if (resizeType === 'bottom' || resizeType === 'corner') {
+      newHeight = Math.max(200, Math.min(1200, startHeight + deltaY));
+    }
+    
+    // Update panel size
     panel.style.width = newWidth + 'px';
     panel.style.height = newHeight + 'px';
     
+    // Update state
     panelState.size.width = newWidth;
     panelState.size.height = newHeight;
   });
@@ -5601,11 +6450,16 @@ function makeResizable(panel) {
   document.addEventListener('mouseup', () => {
     if (isResizing) {
       isResizing = false;
+      resizeType = '';
       document.body.style.userSelect = '';
+      document.body.style.cursor = '';
     }
   });
   
-  panel.appendChild(resizeHandle);
+  // Add handles to panel
+  panel.appendChild(resizeHandles.right);
+  panel.appendChild(resizeHandles.bottom);
+  panel.appendChild(resizeHandles.corner);
 }
 
 
@@ -5742,11 +6596,11 @@ function showBasicAnalysis(currentBoard) {
     <h3 style="margin: 0 0 8px 0; color: #FF5722;">Getting Started</h3>
     <div style="font-size: 14px;">
       <div style="padding: 8px; margin: 4px 0; border-left: 3px solid #2196F3; background: rgba(0,0,0,0.05); border-radius: 4px;">
-        <div style="font-weight: bold; color: #2196F3;">Play Some Games</div>
+        <div style="font-weight: 600; color: #2196F3;">Play Some Games</div>
         <div style="font-size: 13px; margin-top: 4px;">Complete a few games to start building data for analysis</div>
       </div>
       <div style="padding: 8px; margin: 4px 0; border-left: 3px solid #4CAF50; background: rgba(0,0,0,0.05); border-radius: 4px;">
-        <div style="font-weight: bold; color: #4CAF50;">Try Different Setups</div>
+        <div style="font-weight: 600; color: #4CAF50;">Try Different Setups</div>
         <div style="font-size: 13px; margin-top: 4px;">Experiment with different monster and equipment combinations</div>
       </div>
     </div>
@@ -5773,7 +6627,6 @@ function showBasicAnalysis(currentBoard) {
   });
 }
 
-// Debounced analysis function to prevent loops
 function debouncedAnalyzeCurrentBoard() {
   const now = Date.now();
   
@@ -5786,6 +6639,12 @@ function debouncedAnalyzeCurrentBoard() {
   // Check if we're already analyzing or if it's too soon since last analysis
   if (analysisState.isAnalyzing) {
     console.log('[Board Advisor] Analysis already in progress, skipping duplicate request');
+    return;
+  }
+  
+  // Don't start analysis if UI is loading
+  if (analysisState.isUILoading) {
+    console.log('[Board Advisor] Analysis skipped - UI loading in progress');
     return;
   }
   
@@ -5823,6 +6682,12 @@ async function analyzeCurrentBoard() {
 
   if (analysisState.isAnalyzing) {
     console.log('[Board Advisor] Analysis already in progress, skipping');
+    return Promise.resolve(null);
+  }
+
+  // Don't start analysis if UI is loading
+  if (analysisState.isUILoading) {
+    console.log('[Board Advisor] Analysis skipped - UI loading in progress');
     return Promise.resolve(null);
   }
 
@@ -5923,7 +6788,7 @@ function updatePanelStatus(message, type = 'info') {
       background: rgba(40, 44, 52, 0.95);
       color: ${color};
       padding: 8px 12px;
-      font-size: 11px;
+      font-size: 13px;
       z-index: 1000;
       border-bottom: 1px solid #4B5563;
     `;
@@ -5953,6 +6818,36 @@ function updatePanelStatus(message, type = 'info') {
   }
 }
 
+function clearRecommendationsInstantly() {
+  const recommendationsDisplay = document.getElementById('recommendations-display');
+  const analysisDisplay = document.getElementById('analysis-display');
+  
+  // Clear any existing tile highlights immediately
+  cleanupTileHighlights();
+  
+  if (recommendationsDisplay) {
+    recommendationsDisplay.innerHTML = `
+      <div style="text-align: center; color: #777; font-style: italic; padding: 20px;">
+        Loading recommendations for new map...
+      </div>
+    `;
+  }
+  
+  if (analysisDisplay) {
+    analysisDisplay.innerHTML = `
+      <div style="text-align: center; color: #777; font-style: italic; padding: 20px;">
+        Analyzing new map...
+      </div>
+    `;
+  }
+  
+  // Clear any existing analysis state to prevent stale data
+  if (window.analysisState) {
+    window.analysisState.currentAnalysis = null;
+    window.analysisState.lastBoardHash = null;
+  }
+}
+
 async function updatePanelWithBasicAnalysis(currentBoard) {
   const analysisDisplay = document.getElementById('analysis-display');
   const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -5972,7 +6867,7 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
   // Update analysis section with comprehensive basic info
   analysisDisplay.innerHTML = `
     <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
-      <div style="font-weight: bold; color: #98C379; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #98C379; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
         <span>🗺️</span>
         <span>Current Map: ${roomName}</span>
       </div>
@@ -5981,19 +6876,9 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
       </div>
     </div>
     
-    ${isBoardEmpty ? `
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
-      <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>🎯</span>
-        <span>Empty Board</span>
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        Place creatures on the board to get analysis and recommendations for your setup.
-      </div>
-    </div>
-    ` : hasHistoricalData ? `
+    ${hasHistoricalData ? `
     <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
-      <div style="font-weight: bold; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>📊</span>
         <span>Historical Data Available</span>
       </div>
@@ -6003,18 +6888,18 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
     </div>
     ` : `
     <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: bold; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>⚠️</span>
         <span>No Historical Data</span>
       </div>
       <div style="font-size: 11px; color: #ABB2BF;">
-        Play some games with this setup to build data for analysis and personalized recommendations.
+        Play some games to build data for analysis and personalized recommendations.
       </div>
     </div>
     `}
     
     <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #61AFEF;">
-      <div style="font-weight: bold; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>🎯</span>
         <span>Analysis Status</span>
       </div>
@@ -6030,40 +6915,40 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
   // Update recommendations section with comprehensive tips
   recommendationsDisplay.innerHTML = `
     <div style="margin-bottom: 12px;">
-      <div style="font-weight: bold; color: #2196F3; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #2196F3; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>🚀</span>
         <span>Getting Started</span>
       </div>
       
       <div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #2196F3;">
-        <div style="font-weight: bold; color: #2196F3; font-size: 11px;">Play Some Games</div>
+        <div style="font-weight: 600; color: #2196F3; font-size: 11px;">Play Some Games</div>
         <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Complete 3-5 games with this setup to start building data for analysis</div>
       </div>
       
       <div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #4CAF50;">
-        <div style="font-weight: bold; color: #4CAF50; font-size: 11px;">Try Different Setups</div>
+        <div style="font-weight: 600; color: #4CAF50; font-size: 11px;">Try Different Setups</div>
         <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Experiment with different monster and equipment combinations for better data</div>
       </div>
     </div>
     
     <div style="margin-bottom: 12px;">
-      <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>💡</span>
         <span>Advanced Features Coming Soon</span>
       </div>
       
       <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: bold; color: #E5C07B; font-size: 11px;">Performance Predictions</div>
+        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Performance Predictions</div>
         <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Will predict your expected time and success rate</div>
       </div>
       
       <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: bold; color: #E5C07B; font-size: 11px;">Optimization Tips</div>
+        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Optimization Tips</div>
         <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Personalized recommendations for monster positioning and equipment</div>
       </div>
       
       <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: bold; color: #E5C07B; font-size: 11px;">Leaderboard Analysis</div>
+        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Leaderboard Analysis</div>
         <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Compare your performance against world records and rankings</div>
       </div>
     </div>
@@ -6091,14 +6976,14 @@ async function updatePanelWithAnalysis(analysis) {
   const isBoardEmpty = !analysis.currentBoard || !analysis.currentBoard.boardSetup || analysis.currentBoard.boardSetup.length === 0;
     
   // Update analysis section with comprehensive information
+  const similarSetupsCount = analysis.similarSetups?.length || 0;
+  const patternsText = similarSetupsCount === 1 ? 'setup' : 'setups';
+  
   let analysisHTML = `
-    <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #98C379;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-        <span style="font-weight: 600; color: #98C379; font-size: 12px;">🗺️ ${roomName}</span>
-        <span style="font-size: 10px; color: #61AFEF;">${analysis.similarSetups?.length || 0} patterns</span>
-      </div>
-      <div style="font-size: 10px; color: #9CA3AF;">
-        ${analysis.currentBoard ? analysis.currentBoard.boardSetup.length : 0} pieces
+    <div style="margin-bottom: 8px; padding: 8px 10px; background: #1F2937; border-radius: 4px; border-left: 3px solid #98C379;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 600; color: #98C379; font-size: 13px;">🗺️ ${roomName}</span>
+        <span style="font-size: 11px; color: #61AFEF; font-weight: 500;">${similarSetupsCount} ${patternsText}</span>
       </div>
     </div>
   `;
@@ -6133,7 +7018,7 @@ async function updatePanelWithAnalysis(analysis) {
     
     analysisHTML += `
       <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
-        <div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <div style="font-weight: 600; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>🎯</span>
           <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
         </div>
@@ -6154,7 +7039,7 @@ async function updatePanelWithAnalysis(analysis) {
       // Show only relevant leaderboard info based on focus area
       if (config.focusArea === 'ticks' && wrData.tickData && wrData.tickData.length > 0) {
         const wr = wrData.tickData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: bold;">${wr.ticks} ticks</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span></div>`;
         leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
         
         // Show user's best if available
@@ -6167,7 +7052,7 @@ async function updatePanelWithAnalysis(analysis) {
         }
       } else if (config.focusArea === 'ranks' && wrData.rankData && wrData.rankData.length > 0) {
         const wr = wrData.rankData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: bold;">${wr.rank} points</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span></div>`;
         leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
         
         // Show user's best if available
@@ -6213,36 +7098,61 @@ async function updatePanelWithAnalysis(analysis) {
     `;
   }
   
-  // Add historical data analysis (filtered by focus area)
-  if (analysis.currentAnalysis.hasHistoricalData) {
-    const successRate = Math.round(analysis.currentAnalysis.successRate * 100);
+  // Add historical data analysis (filtered by focus area) - always show when available
+  console.log('[Board Advisor] Checking historical data:', {
+    hasData: analysis.hasData,
+    currentAnalysis: analysis.currentAnalysis,
+    hasHistoricalData: analysis.currentAnalysis?.hasHistoricalData
+  });
+  
+  if (analysis.currentAnalysis?.hasHistoricalData || analysis.hasData) {
+    // Use data from currentAnalysis if available, otherwise fall back to top-level data
+    const historicalData = analysis.currentAnalysis?.hasHistoricalData ? analysis.currentAnalysis : {
+      bestTime: analysis.summary?.bestTime || 'Unknown',
+      averageTime: analysis.summary?.averageTime || 0,
+      successRate: analysis.summary?.successRate || 1.0, // Default to 100% if not available
+      totalRuns: analysis.totalRuns || 0,
+      bestPoints: analysis.summary?.bestPoints || 'Unknown'
+    };
+    
+    // Ensure successRate is a valid number between 0 and 1
+    const rawSuccessRate = historicalData.successRate;
+    const validSuccessRate = (typeof rawSuccessRate === 'number' && !isNaN(rawSuccessRate)) ? rawSuccessRate : 1.0;
+    const successRate = Math.round(validSuccessRate * 100);
     const successColor = successRate >= 80 ? '#98C379' : successRate >= 60 ? '#E5C07B' : '#E06C75';
+    
+    console.log('[Board Advisor] Historical data values:', {
+      rawSuccessRate,
+      validSuccessRate,
+      successRate,
+      historicalData
+    });
     
     // Show different historical data based on focus area
     let historicalContent = '';
     if (config.focusArea === 'ticks') {
       historicalContent = `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-          <div><strong>Best Time:</strong> <span style="color: #98C379;">${analysis.currentAnalysis.bestTime} ticks</span></div>
+          <div><strong>Best Time:</strong> <span style="color: #98C379;">${historicalData.bestTime} ticks</span></div>
           <div><strong>Success Rate:</strong> <span style="color: ${successColor};">${successRate}%</span></div>
-          <div><strong>Average Time:</strong> <span style="color: #61AFEF;">${Math.round(analysis.currentAnalysis.averageTime)} ticks</span></div>
-          <div><strong>Total Runs:</strong> <span style="color: #61AFEF;">${analysis.currentAnalysis.totalRuns}</span></div>
+          <div><strong>Average Time:</strong> <span style="color: #61AFEF;">${Math.round(historicalData.averageTime)} ticks</span></div>
+          <div><strong>Total Runs:</strong> <span style="color: #61AFEF;">${historicalData.totalRuns}</span></div>
         </div>
       `;
     } else if (config.focusArea === 'ranks') {
       historicalContent = `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
-          <div><strong>Best Time:</strong> <span style="color: #98C379;">${analysis.currentAnalysis.bestTime || 'Unknown'}</span></div>
+          <div><strong>Best Time:</strong> <span style="color: #98C379;">${historicalData.bestTime || 'Unknown'}</span></div>
           <div><strong>Success Rate:</strong> <span style="color: ${successColor};">${successRate}%</span></div>
-          <div><strong>Best Points:</strong> <span style="color: #61AFEF;">${analysis.currentAnalysis.bestPoints || 'Unknown'}</span></div>
-          <div><strong>Total Runs:</strong> <span style="color: #61AFEF;">${analysis.currentAnalysis.totalRuns}</span></div>
+          <div><strong>Best Points:</strong> <span style="color: #61AFEF;">${historicalData.bestPoints || 'Unknown'}</span></div>
+          <div><strong>Total Runs:</strong> <span style="color: #61AFEF;">${historicalData.totalRuns}</span></div>
         </div>
       `;
     }
     
     analysisHTML += `
       <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
-        <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>📊</span>
           <span>Historical Performance (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
         </div>
@@ -6250,31 +7160,18 @@ async function updatePanelWithAnalysis(analysis) {
       </div>
     `;
   } else {
-    if (isBoardEmpty) {
-      analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
-          <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>🎯</span>
-            <span>Empty Board</span>
-          </div>
-          <div style="font-size: 11px; color: #ABB2BF;">
-            Place creatures on the board to get analysis and recommendations for your setup.
-          </div>
+    // Only show empty board message if there's no historical data at all
+    analysisHTML += `
+      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+        <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>⚠️</span>
+          <span>No Historical Data</span>
         </div>
-      `;
-    } else {
-      analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-          <div style="font-weight: bold; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>⚠️</span>
-            <span>No Historical Data</span>
-          </div>
-          <div style="font-size: 11px; color: #ABB2BF;">
-            Play some games with this setup to build data for better analysis and recommendations.
-          </div>
+        <div style="font-size: 11px; color: #ABB2BF;">
+          Play some games to build data for analysis and recommendations.
         </div>
-      `;
-    }
+      </div>
+    `;
   }
   
   analysisDisplay.innerHTML = analysisHTML;
@@ -6331,12 +7228,12 @@ async function updatePanelWithAnalysis(analysis) {
     // Leaderboard recommendations (highest priority)
     if (groupedRecs.leaderboard.length > 0) {
       recsHTML += '<div style="margin-bottom: 12px;">';
-      recsHTML += '<div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
+      recsHTML += '<div style="font-weight: 600; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">';
       recsHTML += '<span>🏆</span><span>Leaderboard Insights</span></div>';
       
       groupedRecs.leaderboard.forEach(rec => {
         recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #3B82F6;">
-          <div style="font-weight: bold; color: #3B82F6; font-size: 11px;">${rec.title}</div>
+          <div style="font-weight: 600; color: #3B82F6; font-size: 11px;">${rec.title}</div>
           <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
           ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
         </div>`;
@@ -6355,7 +7252,7 @@ async function updatePanelWithAnalysis(analysis) {
       groupedRecs.improvement.forEach(rec => {
           if (rec.title.includes('Best Available Setup') && rec.setup) {
             recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E06C75;">
-          <div style="font-weight: bold; color: #E06C75; font-size: 11px;">${rec.title}</div>
+          <div style="font-weight: 600; color: #E06C75; font-size: 11px;">${rec.title}</div>
               <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message || 'Use this setup to achieve better performance'}</div>
               <div style="font-size: 9px; color: #98C379; margin-top: 2px;">💡 ${rec.setup.map(piece => {
                   const tile = piece.tileIndex || piece.tile || '?';
@@ -6367,6 +7264,13 @@ async function updatePanelWithAnalysis(analysis) {
                 
                 // Prioritize existing monster name from piece data
                 let monster = piece.monsterName;
+                console.log('[Board Advisor] Piece data for display:', {
+                  monsterId: piece.monsterId,
+                  monsterName: piece.monsterName,
+                  equipmentName: piece.equipmentName,
+                  equipId: piece.equipId
+                });
+                
                 if (!monster || monster === piece.monsterId || monster.startsWith('INITIAL_')) {
                   monster = piece.monster?.name || piece.name || 
                            (monsterId ? getMonsterName(monsterId) : null) ||
@@ -6482,7 +7386,7 @@ async function updatePanelWithAnalysis(analysis) {
       
       if (equipmentSuggestions.length > 0 || creatureSuggestions.length > 0) {
         recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #61AFEF;">
-          <div style="font-weight: bold; color: #61AFEF; font-size: 11px;">⚔️ Popular Choices</div>
+          <div style="font-weight: 600; color: #61AFEF; font-size: 11px;">⚔️ Popular Choices</div>
           ${equipmentSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Equipment: ${equipmentSuggestions.join(', ')}</div>` : ''}
           ${creatureSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Creatures: ${creatureSuggestions.join(', ')}</div>` : ''}
         </div>`;
@@ -6493,7 +7397,7 @@ async function updatePanelWithAnalysis(analysis) {
       if (otherRecs.length > 0) {
         otherRecs.forEach(rec => {
           recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #98C379;">
-            <div style="font-weight: bold; color: #98C379; font-size: 11px;">${rec.title}</div>
+            <div style="font-weight: 600; color: #98C379; font-size: 11px;">${rec.title}</div>
             <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message}</div>
             ${rec.suggestion ? `<div style="font-size: 9px; color: #61AFEF; margin-top: 2px;">💡 ${rec.suggestion}</div>` : ''}
         </div>`;
@@ -6515,7 +7419,7 @@ async function updatePanelWithAnalysis(analysis) {
   } else {
     recommendationsDisplay.innerHTML = `
       <div style="padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-        <div style="font-weight: bold; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>⚠️</span>
           <span>No Tips Available</span>
         </div>
@@ -6538,7 +7442,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   // Update analysis section with no-data information
   let analysisHTML = `
     <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: bold; color: #FF9800; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+      <div style="font-weight: 600; color: #FF9800; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
         <span>🗺️</span>
         <span>Current Map: ${roomName}</span>
       </div>
@@ -6551,7 +7455,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   // Add no-data information
   analysisHTML += `
     <div style="margin-bottom: 12px; padding: 15px; background: #1F2937; border-radius: 8px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: bold; color: #FF9800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+      <div style="font-weight: 600; color: #FF9800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
         <span>📊</span>
         <span>No Data Available</span>
       </div>
@@ -6598,7 +7502,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       
       analysisHTML += `
         <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
-          <div style="font-weight: bold; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <div style="font-weight: 600; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>🎯</span>
             <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
           </div>
@@ -6619,7 +7523,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       // Show only relevant leaderboard info based on focus area
       if (config.focusArea === 'ticks' && wrData.tickData && wrData.tickData.length > 0) {
         const wr = wrData.tickData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: bold;">${wr.ticks} ticks</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span></div>`;
         leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
         
         // Show user's best if available
@@ -6632,7 +7536,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
         }
       } else if (config.focusArea === 'ranks' && wrData.rankData && wrData.rankData.length > 0) {
         const wr = wrData.rankData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: bold;">${wr.rank} points</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span></div>`;
         leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
         
         // Show user's best if available
@@ -6698,7 +7602,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       // Show data available message instead of no data warning
       analysisHTML += `
         <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
-          <div style="font-weight: bold; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>📊</span>
             <span>Historical Data Available</span>
           </div>
@@ -6711,7 +7615,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       // Show empty board message
       analysisHTML += `
         <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
-          <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>🎯</span>
             <span>Empty Board</span>
           </div>
@@ -6724,7 +7628,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       // Show no data warning only when there's actually no data
       analysisHTML += `
         <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
-          <div style="font-weight: bold; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>⚠️</span>
             <span>No Historical Data</span>
           </div>
@@ -6751,7 +7655,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       if ((rec.type === 'setup' && rec.setup) || (rec.type === 'improvement' && rec.setup)) {
         recsHTML += `
           <div style="margin: 8px 0; padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid ${priorityColor};">
-            <div style="font-weight: bold; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
+            <div style="font-weight: 600; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
               ${rec.title}
             </div>
             <div style="font-size: 11px; color: #ABB2BF; margin-bottom: 8px;">
@@ -6778,7 +7682,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
             ` : ''}
             ${rec.setup && Array.isArray(rec.setup) ? `
               <div style="margin: 8px 0; padding: 6px; background: #2D3748; border-radius: 4px;">
-                <div style="font-size: 11px; color: #61AFEF; margin-bottom: 4px; font-weight: bold;">📋 Recommended Setup:</div>
+                <div style="font-size: 11px; color: #61AFEF; margin-bottom: 4px; font-weight: 600;">📋 Recommended Setup:</div>
                 <div style="font-size: 10px; color: #ABB2BF; line-height: 1.3; margin-bottom: 6px;">
                   ${rec.setup.map((piece, index) => {
                     const tile = piece.tileIndex || piece.tile || '?';
@@ -6812,7 +7716,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
         // Standard recommendation display
         recsHTML += `
           <div style="margin: 8px 0; padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid ${priorityColor};">
-            <div style="font-weight: bold; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
+            <div style="font-weight: 600; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
               ${rec.title}
             </div>
             <div style="font-size: 11px; color: #ABB2BF; margin-bottom: 8px;">
@@ -6857,7 +7761,6 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       console.log(`[Board Advisor] Attaching event handler to button ${index}`);
       console.log(`[Board Advisor] Button ${index} data-setup-index:`, button.getAttribute('data-setup-index'));
       
-      // Add a test click handler first
       button.addEventListener('click', (e) => {
         console.log('[Board Advisor] TEST: Button clicked!', e.target);
       });
@@ -6932,13 +7835,11 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     }
   });
   
-  // Test if button is clickable at all
   setTimeout(() => {
     const testButtons = recommendationsDisplay.querySelectorAll('.copy-replay-btn');
     console.log('[Board Advisor] Test: Found', testButtons.length, 'buttons after timeout');
     testButtons.forEach((button, index) => {
       console.log('[Board Advisor] Test: Button', index, 'has data-setup:', button.getAttribute('data-setup'));
-      // Add a simple test click handler
       button.addEventListener('click', () => {
         console.log('[Board Advisor] Test: Button clicked!');
       });
@@ -7046,6 +7947,12 @@ function handleStateChange(source, state) {
   // Rate limit: maximum once per second
   if (timeSinceLastRefresh < 1000) return;
   
+  // Don't refresh if UI is already loading or board change is in progress
+  if (analysisState.isUILoading || isBoardChangeInProgress()) {
+    console.log(`[Board Advisor] Skipping state refresh - UI loading or board change in progress`);
+    return;
+  }
+  
   stateRefreshSystem.lastRefreshTime = now;
   
   console.log(`[Board Advisor] State change detected from ${source}, refreshing panel`);
@@ -7056,6 +7963,11 @@ function handleStateChange(source, state) {
 async function refreshPanelData() {
   if (!panelState.isOpen) return;
   
+  // Don't refresh if UI is already loading
+  if (analysisState.isUILoading) {
+    console.log('[Board Advisor] Skipping panel refresh - UI loading in progress');
+    return;
+  }
   
   // If we have current analysis, refresh it
   if (analysisState.currentAnalysis) {
@@ -7076,7 +7988,6 @@ async function refreshPanelData() {
 // 8. LEADERBOARD DATA FUNCTIONS
 // =======================
 
-// Helper function to fetch data from TRPC API (same as Better Highscores.js)
 async function fetchTRPC(method) {
   try {
     const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
@@ -7184,7 +8095,6 @@ if (config.enabled) {
 // Make Board Advisor API available globally for manual testing
 if (!window.BoardAdvisorAPI) {
   window.BoardAdvisorAPI = {
-    // Add a Board Analyzer run manually (for testing)
     addBoardAnalyzerRun: async (runData) => {
       console.log('[Board Advisor] Manually adding Board Analyzer run:', runData);
       return await addBoardAnalyzerRun(runData);
@@ -7305,7 +8215,6 @@ if (!window.BoardAdvisorAPI) {
       return await getSandboxRunsForRoom(roomId, limit);
     },
     
-    // Room-based metadata functions
     getRoomMetadata: async (roomId) => {
       return await getRoomMetadata(roomId);
     },

@@ -151,6 +151,23 @@ window.addEventListener('message', function(event) {
       });
     }
     
+    if (event.data.message && event.data.message.action === 'getModCounts') {
+      // Get mod counts
+      browserAPI.runtime.sendMessage(event.data.message, response => {
+        if (window.DEBUG) console.log('Get mod counts response:', response);
+        
+        // Forward mod counts to page
+        window.postMessage({
+          from: 'BESTIARY_EXTENSION',
+          id: event.data.id,
+          response: {
+            success: !!response?.success,
+            counts: response?.counts || { official: 0, super: 0, test: 0 }
+          }
+        }, '*');
+      });
+    }
+    
     if (event.data.message && event.data.message.action === 'getManualMods') {
       console.log('Content injector: Processing getManualMods request');
       

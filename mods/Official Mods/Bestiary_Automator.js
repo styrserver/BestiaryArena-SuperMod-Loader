@@ -1710,8 +1710,11 @@ const stopAutomation = () => {
   // Clear element cache
   elementCache.clear();
   
-  // Remove focus event listeners
-  removeFocusEventListeners();
+  // Remove focus event listeners (if they exist)
+  if (focusEventListeners) {
+    focusEventListeners.forEach(removeListener => removeListener());
+    focusEventListeners = null;
+  }
   
   // Unsubscribe from game state changes
   unsubscribeFromGameState();
@@ -1838,6 +1841,11 @@ const createConfigPanel = () => {
     title: t('modalTitle'),
     modId: MOD_ID,
     content: content,
+    onOpen: () => {
+      // Update UI with current config values when modal opens
+      console.log('[Bestiary Automator] Settings modal opened, updating UI with current config');
+      updateSettingsModalUI();
+    },
     buttons: [
       {
         text: t('saveButton'),
@@ -2121,21 +2129,105 @@ function updateAutomatorButton() {
   }
 }
 
+// Update UI elements in the settings modal if it's open
+function updateSettingsModalUI() {
+  try {
+    console.log('[Bestiary Automator] Attempting to update settings modal UI...');
+    console.log('[Bestiary Automator] Current config.autoRefillStamina:', config.autoRefillStamina);
+    
+    // Try multiple ways to find the modal
+    let modal = document.querySelector(`#${CONFIG_PANEL_ID}`);
+    if (!modal) {
+      // Try alternative selectors
+      modal = document.querySelector('[data-radix-dialog-content]');
+      console.log('[Bestiary Automator] Modal found via alternative selector:', !!modal);
+    }
+    
+    if (!modal) {
+      console.log('[Bestiary Automator] Settings modal not found, skipping UI update');
+      return;
+    }
+    
+    // Check if modal is visible
+    const isVisible = modal.offsetParent !== null;
+    console.log('[Bestiary Automator] Modal visible:', isVisible);
+    
+    // Always update UI elements if they exist, regardless of modal visibility
+    // This ensures UI stays in sync when config is changed programmatically (e.g., by Raid Hunter)
+    if (!isVisible) {
+      console.log('[Bestiary Automator] Settings modal not visible, but updating UI elements anyway for programmatic changes');
+    }
+    
+    console.log('[Bestiary Automator] Updating settings modal UI with current config values');
+    
+    // Update checkboxes - try multiple selectors for each
+    const refillCheckbox = document.getElementById('auto-refill-checkbox') || 
+                          document.querySelector('input[type="checkbox"][id*="refill"]') ||
+                          document.querySelector('input[type="checkbox"]:has(+ label:contains("Autorefill Stamina"))');
+    
+    const rewardsCheckbox = document.getElementById('auto-rewards-checkbox') || 
+                           document.querySelector('input[type="checkbox"][id*="rewards"]');
+    
+    const dayCareCheckbox = document.getElementById('auto-daycare-checkbox') || 
+                           document.querySelector('input[type="checkbox"][id*="daycare"]');
+    
+    const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox') || 
+                            document.querySelector('input[type="checkbox"][id*="defeat"]');
+    
+    const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox') || 
+                                   document.querySelector('input[type="checkbox"][id*="finish"]');
+    
+    const staminaInput = document.getElementById('min-stamina-input') || 
+                        document.querySelector('input[type="number"][id*="stamina"]');
+    
+    console.log('[Bestiary Automator] Found elements:');
+    console.log('  - refillCheckbox:', !!refillCheckbox);
+    console.log('  - rewardsCheckbox:', !!rewardsCheckbox);
+    console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
+    console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
+    console.log('  - autoFinishTasksCheckbox:', !!autoFinishTasksCheckbox);
+    console.log('  - staminaInput:', !!staminaInput);
+    
+    if (refillCheckbox) {
+      const oldValue = refillCheckbox.checked;
+      refillCheckbox.checked = config.autoRefillStamina;
+      console.log('[Bestiary Automator] Updated autorefill stamina checkbox from', oldValue, 'to', config.autoRefillStamina);
+    } else {
+      console.log('[Bestiary Automator] Autorefill stamina checkbox not found!');
+    }
+    
+    if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
+    if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
+    if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
+    if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
+    if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
+    
+  } catch (error) {
+    console.error('[Bestiary Automator] Error updating settings modal UI:', error);
+  }
+}
+
 // Export functionality
 context.exports = {
   toggleAutomation,
   updateConfig: (newConfig) => {
+    const oldEnabled = config.enabled;
     Object.assign(config, newConfig);
     
-    // Start or stop automation based on enabled state
-    if (config.enabled) {
-      startAutomation();
-    } else {
-      stopAutomation();
+    // Only start or stop automation if the enabled state actually changed
+    if (newConfig.hasOwnProperty('enabled') && newConfig.enabled !== oldEnabled) {
+      if (config.enabled) {
+        startAutomation();
+      } else {
+        stopAutomation();
+      }
     }
     
     // Update button styling
     updateAutomatorButton();
+    
+    // Update UI elements in the settings modal if it's open
+    updateSettingsModalUI();
   },
   cleanup: () => {
     // Cleanup function for when mod is disabled
@@ -2147,4 +2239,7 @@ context.exports = {
     
     console.log('[Bestiary Automator] Cleanup completed');
   }
-}; 
+};
+
+// Also expose globally for other mods to access
+window.bestiaryAutomator = context.exports; 

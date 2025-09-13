@@ -127,6 +127,61 @@ async function getExtensionVersion() {
   }
 }
 
+// Get mod counts dynamically
+async function getModCounts() {
+  console.log('[Welcome] Getting mod counts...');
+  try {
+    const response = await new Promise((resolve) => {
+      const messageId = `welcome_modcounts_${Date.now()}_${Math.random()}`;
+      
+      // Set up response listener
+      const handleResponse = (event) => {
+        if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+          window.removeEventListener('message', handleResponse);
+          resolve(event.data.response);
+        }
+      };
+      
+      window.addEventListener('message', handleResponse);
+      
+      // Send request to content script
+      window.postMessage({
+        from: 'BESTIARY_CLIENT',
+        id: messageId,
+        message: { action: 'getModCounts' }
+      }, '*');
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        window.removeEventListener('message', handleResponse);
+        resolve({ success: false, error: 'Timeout' });
+      }, 5000);
+    });
+    
+    console.log('[Welcome] Mod counts response:', response);
+    
+    if (response && response.success && response.counts) {
+      return response.counts;
+    }
+    
+    // Fallback to hardcoded counts if API fails
+    console.log('[Welcome] Using fallback mod counts');
+    return {
+      official: 11,
+      super: 17,
+      test: 1
+    };
+  } catch (error) {
+    console.warn('[Welcome] Could not get mod counts:', error);
+    // Fallback to hardcoded counts
+    return {
+      official: 11,
+      super: 17,
+      test: 1
+    };
+  }
+}
+
 // Show the welcome modal
 async function showWelcomeModal() {
   if (!api || !api.ui || !api.ui.components) {
@@ -135,8 +190,12 @@ async function showWelcomeModal() {
   }
 
   try {
-    const version = await getExtensionVersion();
+    const [version, modCounts] = await Promise.all([
+      getExtensionVersion(),
+      getModCounts()
+    ]);
     console.log('[Welcome] Version received:', version);
+    console.log('[Welcome] Mod counts received:', modCounts);
     const modal = api.ui.components.createModal({
       title: 'Welcome to Bestiary Arena Mod Loader!',
       width: 900,
@@ -153,8 +212,9 @@ async function showWelcomeModal() {
           <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="color: #a6adc8; margin-bottom: 15px;">✨ What's Included:</h3>
             <div style="text-align: left; color: #a6adc8; line-height: 1.8;">
-              <p><strong>🔧 11 Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, Custom Display, and more!</p>
-              <p><strong>🚀 17 Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Board Advisor, Outfiter, and more!</p>
+              <p><strong>🔧 ${modCounts.official} Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, Custom Display, and more!</p>
+              <p><strong>🚀 ${modCounts.super} Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Outfiter, Raid Hunter, and more!</p>
+              <p><strong>🧪 ${modCounts.test} Test Mod${modCounts.test !== 1 ? 's' : ''}:</strong> Board Advisor (experimental features)</p>
               <p><strong>⚙️ Configuration:</strong> Import/export your settings and mod preferences</p>
               <p><strong>📊 Dashboard:</strong> Access the SuperMod dashboard for advanced features</p>
               <p><strong>🎛️ Popup Controls:</strong> Enable/disable mods directly from the extension popup</p>

@@ -866,6 +866,66 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return true; // Indicate async response
   }
+
+  if (message.action === 'getModCounts') {
+    try {
+      // Count mods in each directory
+      const modCounts = {
+        official: 0,
+        super: 0,
+        test: 0
+      };
+      
+      // Count Official Mods
+      const officialMods = [
+        'Bestiary_Automator.js',
+        'Board Analyzer.js', 
+        'Custom_Display.js',
+        'Hero_Editor.js',
+        'Highscore_Improvements.js',
+        'Item_tier_list.js',
+        'Monster_tier_list.js',
+        'Setup_Manager.js',
+        'Team_Copier.js',
+        'Tick_Tracker.js',
+        'Turbo Mode.js'
+      ];
+      modCounts.official = officialMods.length;
+      
+      // Count Super Mods
+      const superMods = [
+        'Autoscroller.js',
+        'Autoseller.js',
+        'Better Analytics.js',
+        'Better Cauldron.js',
+        'Better Forge.js',
+        'Better Highscores.js',
+        'Better Hy\'genie.js',
+        'Better Yasir.js',
+        'Configurator.js',
+        'Cyclopedia.js',
+        'DashboardButton.js',
+        'Dice_Roller.js',
+        'Hunt Analyzer.js',
+        'Outfiter.js',
+        'Raid_Hunter.js',
+        'RunTracker.js',
+        'Welcome.js'
+      ];
+      modCounts.super = superMods.length;
+      
+      // Count Test Mods
+      const testMods = [
+        'Board Advisor.js'
+      ];
+      modCounts.test = testMods.length;
+      
+      sendResponse({ success: true, counts: modCounts });
+    } catch (error) {
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // Indicate async response
+  }
 });
 
 // Clean up registered tabs when they're closed

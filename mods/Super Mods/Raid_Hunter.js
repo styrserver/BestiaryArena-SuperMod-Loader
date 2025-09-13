@@ -85,6 +85,9 @@ let stateManager = {
     isProcessing: false
 };
 
+// Toast detection for fight icon
+let fightToastObserver = null;
+
 // Safe execution wrapper to prevent race conditions
 function safeExecute(fn) {
     if (stateManager.isProcessing) return;
@@ -94,6 +97,66 @@ function safeExecute(fn) {
     } finally {
         stateManager.isProcessing = false;
     }
+}
+
+// Check if an element is a fight toast
+function isFightToast(element) {
+    try {
+        // First, check if the element is a toast
+        if (!element.classList || !element.classList.contains('widget-bottom')) {
+            return false;
+        }
+        
+        // Look for fight icon within the toast
+        const fightIcon = element.querySelector('img[src*="fight.png"]') || 
+                         element.querySelector('img[alt*="fight"]') ||
+                         element.querySelector('img[src*="assets/icons/fight.png"]');
+        
+        if (fightIcon) {
+            console.log('[Raid Hunter] Fight icon detected in toast');
+            return true;
+        }
+        
+        // Also check for fight-related content in the toast
+        const textContent = element.textContent || element.innerText || '';
+        const fightKeywords = ['raid', 'fight', 'battle', 'combat', 'attack'];
+        const hasFightKeyword = fightKeywords.some(keyword => 
+            textContent.toLowerCase().includes(keyword)
+        );
+        
+        if (hasFightKeyword) {
+            console.log('[Raid Hunter] Fight-related toast detected:', textContent);
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking if element is fight toast:', error);
+        return false;
+    }
+}
+
+// Handle fight toast detection
+function handleFightToast() {
+    if (!isAutomationEnabled) {
+        console.log('[Raid Hunter] Fight toast detected but automation is disabled');
+        return;
+    }
+    
+    console.log('[Raid Hunter] Fight toast detected - checking for raids...');
+    
+    // Check for existing raids and process them
+    safeExecute(() => {
+        updateRaidState();
+        if (raidQueue.length > 0 && !isCurrentlyRaiding) {
+            console.log('[Raid Hunter] Fight toast detected - processing next raid');
+            processNextRaid();
+        } else if (isCurrentlyRaiding) {
+            console.log('[Raid Hunter] Fight toast detected but already raiding');
+        } else {
+            console.log('[Raid Hunter] Fight toast detected but no raids in queue');
+        }
+    });
 }
 
 // Unified cleanup function to fix memory leaks
@@ -129,6 +192,10 @@ function cleanupAll() {
     if (retryTimeout) {
         clearTimeout(retryTimeout);
         retryTimeout = null;
+    }
+    if (fightToastObserver) {
+        fightToastObserver.disconnect();
+        fightToastObserver = null;
     }
 }
 
@@ -653,9 +720,9 @@ function startStaminaMonitoring() {
         clearInterval(window.staminaMonitorInterval);
     }
     
-    console.log('[Raid Hunter] Starting stamina monitoring - checking every 3 minutes');
+    console.log('[Raid Hunter] Starting stamina monitoring - checking every 30 seconds');
     
-    // Check stamina every 3 minutes
+    // Check stamina every 30 seconds
     window.staminaMonitorInterval = setInterval(async () => {
         try {
             console.log('[Raid Hunter] Checking stamina...');
@@ -685,7 +752,7 @@ function startStaminaMonitoring() {
         } catch (error) {
             console.error('[Raid Hunter] Error during stamina monitoring:', error);
         }
-    }, 3 * 60 * 1000); // Every 3 minutes
+    }, 30 * 1000); // Every 30 seconds
 }
 
 // Stop stamina monitoring
@@ -700,16 +767,78 @@ function stopStaminaMonitoring() {
 // Enable Bestiary Automator's autorefill stamina setting
 function enableBestiaryAutomatorStaminaRefill() {
     try {
-        // Check if Bestiary Automator is available
-        if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+        // Try multiple ways to access Bestiary Automator
+        let bestiaryAutomator = null;
+        
+        // Method 1: Check if Bestiary Automator is available in global scope
+        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+            bestiaryAutomator = window.bestiaryAutomator;
+            console.log('[Raid Hunter] Found Bestiary Automator via global window object');
+        }
+        // Method 2: Check if it's available in context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+            bestiaryAutomator = context.exports;
+            console.log('[Raid Hunter] Found Bestiary Automator via context exports');
+        }
+        // Method 3: Try to find it in the mod loader's context
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const automatorContext = window.modLoader.getModContext('bestiary-automator');
+            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                bestiaryAutomator = automatorContext.exports;
+                console.log('[Raid Hunter] Found Bestiary Automator via mod loader');
+            }
+        }
+        
+        if (bestiaryAutomator) {
             console.log('[Raid Hunter] Enabling Bestiary Automator autorefill stamina...');
-            context.exports.updateConfig({
+            bestiaryAutomator.updateConfig({
                 autoRefillStamina: true
             });
             console.log('[Raid Hunter] Bestiary Automator autorefill stamina enabled');
+            
+            // Additional verification for Chrome - check if the setting actually took effect
+            setTimeout(() => {
+                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                    console.log('[Raid Hunter] Verifying stamina refill setting:', window.bestiaryAutomator.config.autoRefillStamina);
+                }
+            }, 1000);
+            
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for autorefill stamina');
+            // Try again in 2 seconds
+            setTimeout(() => {
+                // Retry the same methods
+                let retryAutomator = null;
+                
+                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+                    retryAutomator = window.bestiaryAutomator;
+                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+                    retryAutomator = context.exports;
+                } else if (window.modLoader && window.modLoader.getModContext) {
+                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
+                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                        retryAutomator = automatorContext.exports;
+                    }
+                }
+                
+                if (retryAutomator) {
+                    console.log('[Raid Hunter] Retrying Bestiary Automator autorefill stamina...');
+                    retryAutomator.updateConfig({
+                        autoRefillStamina: true
+                    });
+                    console.log('[Raid Hunter] Bestiary Automator autorefill stamina enabled (retry)');
+                    
+                    // Additional verification for Chrome - check if the setting actually took effect
+                    setTimeout(() => {
+                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                            console.log('[Raid Hunter] Verifying stamina refill setting (retry):', window.bestiaryAutomator.config.autoRefillStamina);
+                        }
+                    }, 1000);
+                } else {
+                    console.log('[Raid Hunter] Bestiary Automator still not available - you may need to enable autorefill stamina manually');
+                }
+            }, 2000);
             return false;
         }
     } catch (error) {
@@ -721,10 +850,28 @@ function enableBestiaryAutomatorStaminaRefill() {
 // Disable Bestiary Automator's autorefill stamina setting
 function disableBestiaryAutomatorStaminaRefill() {
     try {
-        // Check if Bestiary Automator is available
-        if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+        // Try multiple ways to access Bestiary Automator
+        let bestiaryAutomator = null;
+        
+        // Method 1: Check if Bestiary Automator is available in global scope
+        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+            bestiaryAutomator = window.bestiaryAutomator;
+        }
+        // Method 2: Check if it's available in context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+            bestiaryAutomator = context.exports;
+        }
+        // Method 3: Try to find it in the mod loader's context
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const automatorContext = window.modLoader.getModContext('bestiary-automator');
+            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                bestiaryAutomator = automatorContext.exports;
+            }
+        }
+        
+        if (bestiaryAutomator) {
             console.log('[Raid Hunter] Disabling Bestiary Automator autorefill stamina...');
-            context.exports.updateConfig({
+            bestiaryAutomator.updateConfig({
                 autoRefillStamina: false
             });
             console.log('[Raid Hunter] Bestiary Automator autorefill stamina disabled');
@@ -942,7 +1089,7 @@ function setupRaidListMonitoring() {
                     }
                     
                     // If new raids were added and we're not currently raiding, process next raid
-                    if (currentList.length > lastRaidList.length && !isCurrentlyRaiding && isRaidActive) {
+                    if (currentList.length > lastRaidList.length && !isCurrentlyRaiding) {
                         console.log('[Raid Hunter] New raids detected - processing next raid');
                         processNextRaid();
                     }
@@ -1100,7 +1247,17 @@ async function handleEventOrRaid(roomId) {
     const settings = loadSettings();
     if (settings.autoRefillStamina) {
         console.log('[Raid Hunter] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
-        enableBestiaryAutomatorStaminaRefill();
+        // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
+        setTimeout(() => {
+            const success = enableBestiaryAutomatorStaminaRefill();
+            if (!success) {
+                // If first attempt failed, try again with longer delay for Chrome
+                console.log('[Raid Hunter] First attempt failed, retrying with longer delay for Chrome...');
+                setTimeout(() => {
+                    enableBestiaryAutomatorStaminaRefill();
+                }, 2000);
+            }
+        }, 500);
     }
     
     // Check stamina before attempting to start raid
@@ -1349,6 +1506,52 @@ function setupRaidMonitoring() {
         // Start periodic raid end checking
         startRaidEndChecking();
     }
+    
+    // Set up fight toast monitoring
+    setupFightToastMonitoring();
+}
+
+// Set up fight toast monitoring
+function setupFightToastMonitoring() {
+    if (fightToastObserver) {
+        fightToastObserver.disconnect();
+        fightToastObserver = null;
+    }
+    
+    // Create MutationObserver to watch for fight toasts
+    fightToastObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+                // Check each added node for fight toasts
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        // Check if the added element is a fight toast
+                        if (isFightToast(node)) {
+                            console.log('[Raid Hunter] Fight toast detected via MutationObserver!');
+                            handleFightToast();
+                            return; // Exit early since we found a fight toast
+                        }
+                        
+                        // Also check child elements for fight toasts
+                        const fightToast = node.querySelector && node.querySelector('img[src*="fight.png"]');
+                        if (fightToast) {
+                            console.log('[Raid Hunter] Fight toast found in child elements via MutationObserver!');
+                            handleFightToast();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Start observing the document body for added nodes
+    fightToastObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Raid Hunter] Fight toast monitoring set up');
 }
 
 // Handles new raid detection.
