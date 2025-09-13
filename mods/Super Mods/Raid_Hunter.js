@@ -1462,6 +1462,37 @@ function openRaidHunterSettingsModal() {
                                 }
                             });
                             
+                            // Inject auto-save indicator into the existing modal footer
+                            setTimeout(() => {
+                                const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+                                if (modalElement) {
+                                    const footer = modalElement.querySelector('.flex.justify-end.gap-2');
+                                    if (footer) {
+                                        // Create auto-save indicator
+                                        const autoSaveIndicator = document.createElement('div');
+                                        autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
+                                        autoSaveIndicator.className = 'pixel-font-16';
+                                        autoSaveIndicator.style.cssText = `
+                                            font-size: 11px;
+                                            color: #4ade80;
+                                            font-style: italic;
+                                            margin-right: auto;
+                                        `;
+                                        
+                                        // Modify footer to use space-between layout
+                                        footer.style.cssText = `
+                                            display: flex;
+                                            justify-content: space-between;
+                                            align-items: center;
+                                            gap: 2px;
+                                        `;
+                                        
+                                        // Insert auto-save indicator at the beginning
+                                        footer.insertBefore(autoSaveIndicator, footer.firstChild);
+                                    }
+                                }
+                            }, 100);
+                            
                             // Fallback cleanup for when onClose doesn't work
                             setTimeout(() => {
                                 const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
@@ -1580,7 +1611,7 @@ function createSettingsContent() {
     // Right column - Other Settings
     const rightColumn = document.createElement('div');
     rightColumn.style.cssText = `
-        flex: 1;
+        flex: 1 1 0%;
         padding: 0;
         margin: 0;
         display: flex;
@@ -1588,6 +1619,8 @@ function createSettingsContent() {
         min-height: 0;
         overflow-y: auto;
         background: rgba(0, 0, 0, 0.1);
+        width: auto;
+        height: 100%;
     `;
     
     // Left column content - Auto-Raid Settings
@@ -1614,6 +1647,7 @@ function createAutoRaidSettings() {
         height: 100%;
         padding: 15px;
         box-sizing: border-box;
+        justify-content: space-between;
     `;
     
     const title = document.createElement('h3');
@@ -1629,6 +1663,13 @@ function createAutoRaidSettings() {
     `;
     container.appendChild(title);
     
+    // Create wrapper for main settings content
+    const settingsWrapper = document.createElement('div');
+    settingsWrapper.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    `;
     
     // Raid Delay setting
     const delayDiv = document.createElement('div');
@@ -1678,7 +1719,7 @@ function createAutoRaidSettings() {
         margin-top: 4px;
     `;
     delayDiv.appendChild(delayDesc);
-    container.appendChild(delayDiv);
+    settingsWrapper.appendChild(delayDiv);
     
     // Auto-refill Stamina setting
     const staminaRefillDiv = document.createElement('div');
@@ -1734,7 +1775,29 @@ function createAutoRaidSettings() {
         margin-top: 4px;
     `;
     staminaRefillDiv.appendChild(staminaRefillDesc);
-    container.appendChild(staminaRefillDiv);
+    settingsWrapper.appendChild(staminaRefillDiv);
+    
+    // Add settings wrapper to container
+    container.appendChild(settingsWrapper);
+    
+    // Credit section - subtle at bottom
+    const creditDiv = document.createElement('div');
+    creditDiv.style.cssText = `
+        padding: 8px 0 0 0;
+        text-align: center;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    `;
+    
+    const creditText = document.createElement('div');
+    creditText.innerHTML = 'Inspired by <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>';
+    creditText.className = 'pixel-font-16';
+    creditText.style.cssText = `
+        font-size: 10px;
+        color: #666;
+        font-style: italic;
+    `;
+    creditDiv.appendChild(creditText);
+    container.appendChild(creditDiv);
     
     return container;
 }
@@ -1746,10 +1809,12 @@ function createOtherSettings() {
         display: flex;
         flex-direction: column;
         width: 100%;
+        height: 100%;
         padding: 10px;
         box-sizing: border-box;
         gap: 20px;
         min-height: 0;
+        justify-content: center;
     `;
     
     // Raid Map Selection
@@ -1767,7 +1832,10 @@ function createRaidMapSelection() {
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid #444;
         border-radius: 5px;
-        margin: 10px;
+        margin: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
     `;
     
     const title = document.createElement('h3');
@@ -1793,25 +1861,14 @@ function createRaidMapSelection() {
     `;
     section.appendChild(description);
     
-    // Add auto-save indicator
-    const autoSaveIndicator = document.createElement('div');
-    autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
-    autoSaveIndicator.className = 'pixel-font-16';
-    autoSaveIndicator.style.cssText = `
-        margin-bottom: 15px;
-        font-size: 11px;
-        color: #4ade80;
-        font-style: italic;
-    `;
-    section.appendChild(autoSaveIndicator);
-    
     // Create map selection container
     const mapContainer = document.createElement('div');
     mapContainer.style.cssText = `
         display: flex;
         flex-direction: column;
         gap: 8px;
-        max-height: 200px;
+        flex: 1;
+        max-height: 250px;
         overflow-y: auto;
         border: 1px solid #555;
         border-radius: 3px;
