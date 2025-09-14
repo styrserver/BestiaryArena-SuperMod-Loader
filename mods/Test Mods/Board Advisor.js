@@ -16,7 +16,6 @@ const MOD_ID = 'board-advisor';
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const ANALYSIS_DEBOUNCE_TIME = 1000;
 const BOARD_CHANGE_DEBOUNCE_TIME = 2000; // Increased debounce for board changes
-const UI_LOADING_TIMEOUT = 5000; // Maximum UI loading time
 const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
 const ROOM_METADATA_STORE = 'roomMetadata';
 const MAX_RUNS_PER_ROOM = 500;
@@ -36,10 +35,11 @@ const defaultConfig = {
   autoAnalyzeOnPanelOpen: true,
   autoAnalyzeAfterRun: true,
   autoRefreshPanel: true,
-  focusArea: 'ticks'
+  focusArea: 'ticks',
+  enableTileRecommendations: true
 };
 
-const config = Object.assign({}, defaultConfig, context.config);
+let config = Object.assign({}, defaultConfig, context.config);
 
 // Runtime State
 let analysisTimeout = null;
@@ -51,6 +51,7 @@ let isDBReady = false;
 let currentRecommendedSetup = null;
 let placedRecommendedPieces = new Set();
 let previousRoomId = null;
+let previousBoardPieceCount = 0;
 
 // Analysis State
 let analysisState = {
@@ -70,10 +71,7 @@ let analysisState = {
 // Performance Cache
 let performanceCache = {
   lastRoomDetection: null,
-  lastRoomDetectionTime: 0,
-  roomDetectionCache: new Map(),
-  patternMatchingCache: new Map(),
-  dataLoadingCache: new Map()
+  lastRoomDetectionTime: 0
 };
 
 // State Management
@@ -82,6 +80,12 @@ let stateRefreshSystem = {
   subscriptions: [],
   isEnabled: false
 };
+
+// Track active subscriptions for cleanup
+let activeSubscriptions = [];
+
+// Track document event listeners for cleanup
+let documentListeners = [];
 
 let performanceTracker = {
   runs: [],
@@ -178,7 +182,7 @@ function addRunIfNotExists(newRun) {
   );
   if (!exists) {
     performanceTracker.runs.push(newRun);
-    updatePatterns(newRun);
+    dataCollector.updatePatterns(newRun);
     return true;
   }
   return false;
@@ -726,83 +730,7 @@ async function getAllRoomMetadata() {
 
 
 
-// Transform stored run data to $replay format
-function transformRunToReplay(runData) {
-  try {
-    if (!runData || !runData.boardSetup || !Array.isArray(runData.boardSetup)) {
-      console.warn('[Board Advisor] Invalid run data for replay transformation:', runData);
-      return null;
-    }
 
-    // Get map and region info
-    const roomId = runData.roomId;
-    const mapName = globalThis.state?.utils?.ROOM_NAME?.[roomId] || roomId;
-    const regionName = getRegionNameFromRoomId(roomId);
-
-    // Transform board setup to replay format
-    const board = runData.boardSetup.map(piece => {
-      const replayPiece = {
-        tile: piece.tile || piece.tileIndex
-      };
-
-      // Add monster data - only if we have complete monster information
-      if (piece.monsterName && piece.monsterStats && 
-          piece.monsterStats.hp !== undefined && 
-          piece.monsterStats.ad !== undefined && 
-          piece.monsterStats.ap !== undefined && 
-          piece.monsterStats.armor !== undefined && 
-          piece.monsterStats.magicResist !== undefined) {
-        replayPiece.monster = {
-          name: piece.monsterName,
-          hp: piece.monsterStats.hp,
-          ad: piece.monsterStats.ad,
-          ap: piece.monsterStats.ap,
-          armor: piece.monsterStats.armor,
-          magicResist: piece.monsterStats.magicResist
-        };
-      }
-
-      // Add equipment data - only if we have complete equipment information
-      if (piece.equipmentName && piece.equipmentStat && piece.equipmentTier !== undefined) {
-        replayPiece.equipment = {
-          name: piece.equipmentName,
-          stat: piece.equipmentStat,
-          tier: piece.equipmentTier
-        };
-      }
-
-      return replayPiece;
-    }).filter(piece => piece.monster || piece.equipment); // Only include pieces with valid data
-
-    // Create replay data structure
-    const replayData = {
-      region: regionName,
-      map: mapName,
-      board: board,
-      seed: runData.seed
-    };
-
-    return replayData;
-  } catch (error) {
-    console.error('[Board Advisor] Error transforming run to replay:', error);
-    return null;
-  }
-}
-
-// Generate $replay link from stored run data
-function generateReplayLink(runData) {
-  try {
-    const replayData = transformRunToReplay(runData);
-    if (!replayData) {
-      return null;
-    }
-
-    return '$replay(' + JSON.stringify(replayData) + ')';
-  } catch (error) {
-    console.error('[Board Advisor] Error generating replay link:', error);
-    return null;
-  }
-}
 
 function getRegionNameFromRoomId(roomId) {
   try {
@@ -942,7 +870,8 @@ function highlightRecommendedTiles(recommendedSetup) {
   console.log('[Board Advisor] Highlighting recommended tiles:', recommendedSetup);
   
   // Check if this is the same setup as already highlighted
-  const isSameSetup = currentRecommendedSetup && 
+  // Only skip if we're highlighting the exact same full setup
+  const isSameFullSetup = currentRecommendedSetup && 
     currentRecommendedSetup.length === recommendedSetup.length &&
     currentRecommendedSetup.every((rec, index) => 
       rec.tileIndex === recommendedSetup[index]?.tileIndex &&
@@ -950,8 +879,8 @@ function highlightRecommendedTiles(recommendedSetup) {
       rec.equipmentName === recommendedSetup[index]?.equipmentName
     );
   
-  if (isSameSetup) {
-    console.log('[Board Advisor] Same setup already highlighted, skipping cleanup');
+  if (isSameFullSetup) {
+    console.log('[Board Advisor] Same full setup already highlighted, skipping cleanup');
     return;
   }
   
@@ -1203,7 +1132,35 @@ function smartCleanupTileHighlights() {
     currentRecommendedSetup = null;
     placedRecommendedPieces.clear();
   } else {
-    console.log('[Board Advisor] Not all recommended pieces placed yet, keeping/restoring highlights');
+    console.log('[Board Advisor] Not all recommended pieces placed yet, checking for new recommendations');
+    
+    // Check if pieces were removed (board has fewer pieces than before)
+    const hasRemovedPieces = currentBoard.boardSetup.length < previousBoardPieceCount;
+    console.log('[Board Advisor] Board piece count check:', {
+      current: currentBoard.boardSetup.length,
+      previous: previousBoardPieceCount,
+      hasRemovedPieces: hasRemovedPieces
+    });
+    
+    if (hasRemovedPieces) {
+      console.log('[Board Advisor] Pieces removed, regenerating recommendations for available tiles');
+      // Clear current recommendations and trigger new analysis
+      cleanupTileHighlights();
+      currentRecommendedSetup = null;
+      placedRecommendedPieces.clear();
+      
+      // Clear any pending analysis request to allow new analysis
+      pendingAnalysisRequest = null;
+      lastAnalysisTime = 0; // Reset debounce timer
+      
+      // Trigger new analysis to generate updated recommendations
+      if (dataCollector && typeof dataCollector.triggerAutomaticAnalysis === 'function') {
+        setTimeout(() => {
+          dataCollector.triggerAutomaticAnalysis();
+        }, 100); // Small delay to ensure board state is stable
+      }
+      return;
+    }
     
     // Re-highlight missing recommended pieces
     const missingPieces = currentRecommendedSetup.filter(rec => 
@@ -1212,9 +1169,15 @@ function smartCleanupTileHighlights() {
     
     if (missingPieces.length > 0) {
       console.log('[Board Advisor] Re-highlighting missing pieces:', missingPieces);
-      highlightRecommendedTiles(missingPieces);
+      // Clean up existing highlights first
+      cleanupTileHighlights();
+      // Re-highlight only the missing pieces
+      createTileHighlightOverlay(missingPieces);
     }
   }
+  
+  // Update the previous board piece count for next comparison
+  previousBoardPieceCount = currentBoard.boardSetup.length;
 }
 
 // Clean up tile highlights
@@ -1489,10 +1452,6 @@ async function loadRecommendedSetup(setup) {
   }
 }
 
-async function copyReplayLink(setup) {
-  // Redirect to the new load function
-  return loadRecommendedSetup(setup);
-}
 
 // Make lookup functions available globally for button onclick handlers
 window.getMonsterName = getMonsterName;
@@ -1501,7 +1460,6 @@ window.loadRecommendedSetup = loadRecommendedSetup;
 window.getMonsterStats = getMonsterStats;
 window.formatMonsterStats = formatMonsterStats;
 window.getEquipmentStats = getEquipmentStats;
-window.copyReplayLink = copyReplayLink;
 
 window.testLoadSetupButton = function() {
   console.log('[Board Advisor] === TESTING LOAD SETUP BUTTON ===');
@@ -1557,7 +1515,7 @@ window.testLoadSetupManually = function() {
 };
 
 // Wait for utility API to be ready for better equipment name lookups
-document.addEventListener('utility-api-ready', () => {
+addDocumentListener('utility-api-ready', () => {
   console.log('[Board Advisor] Utility API is ready, equipment lookups should work better now');
 });
 
@@ -2147,71 +2105,6 @@ function convertRunTrackerSetup(setup) {
 }
 
 // Update patterns from converted data
-function updatePatterns(runData) {
-  const roomId = runData.roomId;
-  const setupHash = dataCollector.hashBoardSetup(runData.boardSetup);
-  
-  if (!performanceTracker.patterns.has(roomId)) {
-    performanceTracker.patterns.set(roomId, new Map());
-  }
-  
-  const roomPatterns = performanceTracker.patterns.get(roomId);
-  
-  if (!roomPatterns.has(setupHash)) {
-    roomPatterns.set(setupHash, {
-      setup: runData.boardSetup,
-      runs: [],
-      bestTime: Infinity,
-      averageTime: 0,
-      successRate: 0
-    });
-  }
-  
-  const pattern = roomPatterns.get(setupHash);
-  pattern.runs.push(runData);
-  
-  // Update pattern statistics
-  if (runData.ticks < pattern.bestTime) {
-    pattern.bestTime = runData.ticks;
-  }
-  
-  const completedRuns = pattern.runs.filter(r => r.completed);
-  pattern.successRate = completedRuns.length / pattern.runs.length;
-  
-  if (completedRuns.length > 0) {
-    pattern.averageTime = completedRuns.reduce((sum, r) => sum + r.ticks, 0) / completedRuns.length;
-  }
-  
-  // Grade tracking removed - we only use ticks and rank points
-  
-  // Update room statistics
-  if (!performanceTracker.roomStats.has(roomId)) {
-    performanceTracker.roomStats.set(roomId, {
-      totalRuns: 0,
-      completedRuns: 0,
-      bestTime: Infinity,
-      averageTime: 0,
-      setups: []
-    });
-  }
-  
-  const stats = performanceTracker.roomStats.get(roomId);
-  stats.totalRuns++;
-  
-  if (runData.completed) {
-    stats.completedRuns++;
-    if (runData.ticks < stats.bestTime) {
-      stats.bestTime = runData.ticks;
-    }
-    stats.setups.push(runData.boardSetup);
-  }
-  
-  // Calculate average time for completed runs
-  const roomCompletedRuns = performanceTracker.runs.filter(r => r.roomId === roomId && r.completed);
-  if (roomCompletedRuns.length > 0) {
-    stats.averageTime = roomCompletedRuns.reduce((sum, r) => sum + r.ticks, 0) / roomCompletedRuns.length;
-  }
-}
 
 class DataCollector {
   constructor() {
@@ -2254,11 +2147,12 @@ class DataCollector {
     });
 
     // Listen for board changes to trigger automatic analysis
-    globalThis.state.board.subscribe(({ context }) => {
-      if (context.boardConfig && context.boardConfig.length > 0) {
-        this.onBoardChange(context);
-      }
+    const boardSubscription = globalThis.state.board.subscribe(({ context }) => {
+      // Always trigger board change detection, not just when boardConfig has length > 0
+      // This ensures we detect when auto-setup places/removes creatures
+      this.onBoardChange(context);
     });
+    activeSubscriptions.push(boardSubscription);
 
     // Listen for server results like RunTracker does
     this.setupServerResultsListener();
@@ -2271,7 +2165,7 @@ class DataCollector {
       
       // Listen for game board subscription (fallback for non-sandbox mode)
       if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
-        globalThis.state.board.subscribe(({ context }) => {
+        const fallbackSubscription = globalThis.state.board.subscribe(({ context }) => {
           const serverResults = context.serverResults;
           if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
             return;
@@ -2315,6 +2209,7 @@ class DataCollector {
             }
           }
         });
+        activeSubscriptions.push(fallbackSubscription);
         console.log('[Board Advisor] Server results listener set up');
       }
     } catch (error) {
@@ -2569,6 +2464,8 @@ class DataCollector {
         currentRoomId: currentBoard?.roomId,
         currentMapName: currentBoard?.mapName,
         newRoomId: newRoomId,
+        boardSetupLength: currentBoard?.boardSetup?.length || 0,
+        boardConfigLength: boardContext?.boardConfig?.length || 0,
         boardContext: boardContext
       });
       
@@ -2577,10 +2474,19 @@ class DataCollector {
                         currentBoard?.boardSetup && 
                         currentBoard.boardSetup.length > 0;
       
-      if (!isRunStart) {
-        // Only clear highlights on actual map/board changes, not run starts
+      // Check if this is an auto-setup change (same room, but board setup changed)
+      const isAutoSetupChange = previousRoomId === newRoomId && 
+                               currentBoard?.boardSetup && 
+                               currentBoard.boardSetup.length > 0 &&
+                               boardContext?.boardConfig && 
+                               boardContext.boardConfig.length > 0;
+      
+      if (!isRunStart && !isAutoSetupChange) {
+        // Only clear highlights on actual map/board changes, not run starts or auto-setup
         console.log(`[Board Advisor] Board/map change detected, clearing highlights immediately`);
         clearRecommendationsInstantly();
+      } else if (isAutoSetupChange) {
+        console.log(`[Board Advisor] Auto-setup change detected, updating analysis`);
       } else {
         console.log(`[Board Advisor] Run start detected (same room/board), keeping UI stable`);
       }
@@ -2597,16 +2503,19 @@ class DataCollector {
         // Start analysis immediately for map changes (no debounce)
         this.triggerAutomaticAnalysis();
         this.refreshDataForCurrentMap();
-      } else if (!isRunStart) {
-        // For same-room board changes (not run starts), use debounce to avoid excessive analysis
+      } else if (!isRunStart || isAutoSetupChange) {
+        // For same-room board changes (not run starts) or auto-setup changes, use debounce to avoid excessive analysis
         if (this.boardChangeTimeout) {
           clearTimeout(this.boardChangeTimeout);
         }
         
+        // Immediately check if highlighted tiles should be removed when pieces are placed
+        smartCleanupTileHighlights();
+        
         this.boardChangeTimeout = setTimeout(() => {
           this.triggerAutomaticAnalysis();
           this.refreshDataForCurrentMap();
-        }, BOARD_CHANGE_DEBOUNCE_TIME);
+        }, isAutoSetupChange ? 500 : BOARD_CHANGE_DEBOUNCE_TIME); // Faster response for auto-setup
       }
       // For run starts (same room, same board), do nothing - keep UI stable
       
@@ -2766,11 +2675,17 @@ class DataCollector {
   serializeBoardSetup(boardConfig) {
     if (!boardConfig) return [];
     
-    
     // Filter for player pieces - be more flexible with the type check
     const playerPieces = boardConfig.filter(piece => {
       // Accept pieces with type 'player' or pieces without a type (assuming they're player pieces)
-      return piece.type === 'player' || !piece.type || piece.type === 'custom';
+      const isPlayerPiece = piece.type === 'player' || !piece.type || piece.type === 'custom';
+      console.log('[Board Advisor] Piece type check:', {
+        type: piece.type,
+        isPlayerPiece: isPlayerPiece,
+        hasMonsterId: !!(piece.databaseId || piece.monsterId || piece.gameId),
+        hasEquipId: !!piece.equipId
+      });
+      return isPlayerPiece;
     });
     
     
@@ -2791,7 +2706,7 @@ class DataCollector {
       }
       
       // Strip INITIAL_ prefix if present, but keep originalMonsterId for lookup
-      if (monsterId && monsterId.startsWith('INITIAL_')) {
+      if (monsterId && typeof monsterId === 'string' && monsterId.startsWith('INITIAL_')) {
         originalMonsterId = monsterId; // Keep the full ID with prefix for lookup
         monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters) for display
       }
@@ -3000,14 +2915,6 @@ class DataCollector {
     console.log(`[Board Advisor] Cleanup complete: removed ${runsToRemove} runs (${runsToKeep.filter(r => !r.completed).length} failed, ${runsToKeep.filter(r => r.completed).length} completed)`);
   }
 
-  // Update room statistics
-  updateRoomStats(runData) {
-    console.log('[Board Advisor] Stored run data:', {
-      roomId: runData.roomId,
-      ticks: runData.ticks,
-      completed: runData.completed
-    });
-  }
 
   updateRoomStats(runData) {
     const roomId = runData.roomId;
@@ -3159,12 +3066,9 @@ class DataCollector {
   forceRefreshRoomDetection() {
     console.log('[Board Advisor] Forcing room detection refresh...');
     
-    // Clear all performance caches
+    // Clear performance cache
     performanceCache.lastRoomDetection = null;
     performanceCache.lastRoomDetectionTime = 0;
-    performanceCache.roomDetectionCache.clear();
-    performanceCache.patternMatchingCache.clear();
-    performanceCache.dataLoadingCache.clear();
     
     // Clear any cached analysis data
     analysisState.currentAnalysis = null;
@@ -3185,8 +3089,8 @@ class DataCollector {
   
   // Clear pattern matching cache when board changes significantly
   clearPatternMatchingCache() {
-    console.log('[Board Advisor] Clearing pattern matching cache due to board changes...');
-    performanceCache.patternMatchingCache.clear();
+    console.log('[Board Advisor] Pattern matching cache cleared due to board changes...');
+    // Cache removed - no action needed
   }
 }
 
@@ -3199,12 +3103,10 @@ async function invalidateCachesAndRefreshData(roomId) {
     dataCollector.forceRefreshRoomDetection();
     
     // 2. Clear data loading cache specifically for this room
-    const roomCacheKey = `room_${roomId}`;
-    performanceCache.dataLoadingCache.delete(roomCacheKey);
-    performanceCache.dataLoadingCache.delete('all_rooms');
+    // Cache removed - no action needed
     
     // 3. Clear pattern matching cache for current setup
-    performanceCache.patternMatchingCache.clear();
+    // Cache removed - no action needed
     
     // 4. Clear analysis state to force fresh analysis
     analysisState.currentAnalysis = null;
@@ -3457,6 +3359,11 @@ class AnalysisEngine {
 
     try {
       const currentBoard = this.dataCollector.getCurrentBoardData();
+      
+      // Initialize previous board piece count if not set
+      if (previousBoardPieceCount === 0 && currentBoard && currentBoard.boardSetup) {
+        previousBoardPieceCount = currentBoard.boardSetup.length;
+      }
       
       if (!currentBoard || !currentBoard.boardSetup.length) {
         // Board is empty - recommend best run from available data
@@ -3936,28 +3843,35 @@ class AnalysisEngine {
   findSimilarSetups(currentSetup, roomPatterns) {
     const similar = [];
     const exactMatches = [];
+    const creatureCountMatches = [];
     
     // Create cache key for current setup
     const setupKey = this.createSetupKey(currentSetup);
     
-    // Check cache first
-    if (performanceCache.patternMatchingCache.has(setupKey)) {
-      const cached = performanceCache.patternMatchingCache.get(setupKey);
-      console.log(`[Board Advisor] Using cached pattern matching results for setup: ${setupKey}`);
-      return cached;
-    }
+    // Cache removed - always calculate fresh results
     
     console.log(`[Board Advisor] Finding similar setups for current setup:`, currentSetup);
     console.log(`[Board Advisor] Available patterns:`, roomPatterns.size);
+    
+    const currentCreatureCount = currentSetup.length;
+    console.log(`[Board Advisor] Current setup has ${currentCreatureCount} creatures`);
     
     // Pre-filter patterns by monster/equipment combinations for better performance
     const currentMonsters = new Set(currentSetup.map(p => p.monsterName || p.monsterId));
     const currentEquipment = new Set(currentSetup.map(p => p.equipmentName || p.equipId));
     const relevantPatterns = new Map();
+    const creatureCountPatterns = new Map();
     
     for (const [hash, pattern] of roomPatterns) {
       const patternMonsters = new Set(pattern.setup.map(p => p.monsterName || p.monsterId));
       const patternEquipment = new Set(pattern.setup.map(p => p.equipmentName || p.equipId));
+      const patternCreatureCount = pattern.setup.length;
+      
+      // Group by creature count for cross-map learning
+      if (!creatureCountPatterns.has(patternCreatureCount)) {
+        creatureCountPatterns.set(patternCreatureCount, []);
+      }
+      creatureCountPatterns.get(patternCreatureCount).push({ hash, pattern });
       
       // Consider patterns that share at least one monster OR equipment combination
       if (this.setsIntersect(currentMonsters, patternMonsters) || 
@@ -3967,7 +3881,9 @@ class AnalysisEngine {
     }
     
     console.log(`[Board Advisor] Filtered to ${relevantPatterns.size} relevant patterns (from ${roomPatterns.size} total) based on monster/equipment combinations`);
+    console.log(`[Board Advisor] Found patterns for creature counts:`, Array.from(creatureCountPatterns.keys()).sort());
     
+    // First, find exact and similar matches from same room
     for (const [hash, pattern] of relevantPatterns) {
       const similarity = this.calculateSimilarity(currentSetup, pattern.setup);
       
@@ -3990,12 +3906,38 @@ class AnalysisEngine {
       }
     }
     
-    // Prioritize exact matches first, then other similar setups
-    const result = [...exactMatches.sort((a, b) => b.similarity - a.similarity), 
-                   ...similar.sort((a, b) => b.similarity - a.similarity)];
+    // Then, find patterns from other maps with same creature count for cross-map learning
+    const sameCreatureCountPatterns = creatureCountPatterns.get(currentCreatureCount) || [];
+    for (const { hash, pattern } of sameCreatureCountPatterns) {
+      // Skip if already processed in relevantPatterns
+      if (relevantPatterns.has(hash)) continue;
+      
+      const similarity = this.calculateSimilarity(currentSetup, pattern.setup);
+      
+      if (similarity > 0.05) { // Lower threshold for cross-map learning
+        const setupData = {
+          pattern,
+          similarity,
+          hash,
+          isExactMatch: false,
+          isCrossMap: true,
+          creatureCount: currentCreatureCount
+        };
+        
+        creatureCountMatches.push(setupData);
+      }
+    }
     
-    // Cache the result
-    performanceCache.patternMatchingCache.set(setupKey, result);
+    // Prioritize exact matches first, then similar setups, then cross-map creature count matches
+    const result = [
+      ...exactMatches.sort((a, b) => b.similarity - a.similarity), 
+      ...similar.sort((a, b) => b.similarity - a.similarity),
+      ...creatureCountMatches.sort((a, b) => b.similarity - a.similarity)
+    ];
+    
+    console.log(`[Board Advisor] Found ${exactMatches.length} exact matches, ${similar.length} similar setups, ${creatureCountMatches.length} cross-map creature count matches`);
+    
+    // Cache removed - no caching needed
     
     return result;
   }
@@ -4279,6 +4221,18 @@ class AnalysisEngine {
     const boardAnalyzerTips = await this.generateBoardAnalyzerRecommendations(currentBoard, similarSetups, currentAnalysis, leaderboardComparison);
     recommendations.push(...boardAnalyzerTips);
 
+    // Add map-based learning insights
+    const mapLearningTips = this.generateMapLearningInsights(currentBoard, similarSetups);
+    recommendations.push(...mapLearningTips);
+
+    // Add tile highlighting for positioning recommendations (if enabled)
+    if (config.enableTileRecommendations) {
+      const tileRecommendations = recommendations.filter(r => r.type === 'positioning' && r.tile);
+      if (tileRecommendations.length > 0) {
+        highlightRecommendedTiles(tileRecommendations);
+      }
+    }
+
     return recommendations;
   }
 
@@ -4295,20 +4249,188 @@ class AnalysisEngine {
       const tileUsage = this.analyzeTileUsage(successfulSetups);
       const currentTileUsage = this.getCurrentTileUsage(currentSetup);
       
-      for (const [tile, usage] of tileUsage) {
-        if (usage.frequency > 0.8 && !currentTileUsage.has(tile)) {
-          tips.push({
-            type: 'positioning',
-            title: 'Consider Using Tile ' + tile,
-            message: `${Math.round(usage.frequency * 100)}% of successful setups use this tile`,
-            priority: 'medium',
-            tile: tile
-          });
-        }
+      // Get performance data for tile recommendations
+      const tilePerformance = this.analyzeTilePerformance(successfulSetups);
+      
+      // Find optimal tiles that aren't currently used
+      const optimalTiles = this.findOptimalTiles(tileUsage, tilePerformance, currentTileUsage);
+      
+      for (const tileData of optimalTiles) {
+        tips.push({
+          type: 'positioning',
+          title: `Optimal Tile: ${tileData.tile}`,
+          message: `${Math.round(tileData.frequency * 100)}% of successful setups use this tile (avg: ${tileData.avgTime} ticks)`,
+          suggestion: `Try placing a monster on tile ${tileData.tile} - it's frequently used in faster runs`,
+          priority: tileData.priority,
+          tileIndex: tileData.tile,
+          avgTime: tileData.avgTime,
+          frequency: tileData.frequency,
+          isOptimal: true
+        });
+      }
+      
+      // Also suggest avoiding poorly performing tiles
+      const poorTiles = this.findPoorTiles(tileUsage, tilePerformance, currentTileUsage);
+      for (const tileData of poorTiles) {
+        tips.push({
+          type: 'positioning',
+          title: `Avoid Tile: ${tileData.tile}`,
+          message: `This tile appears in slower runs (avg: ${tileData.avgTime} ticks)`,
+          suggestion: `Consider moving monsters away from tile ${tileData.tile} for better performance`,
+          priority: 'low',
+          tileIndex: tileData.tile,
+          avgTime: tileData.avgTime,
+          isAvoid: true
+        });
       }
     }
 
     return tips;
+  }
+
+  analyzeTilePerformance(setups) {
+    const tilePerformance = new Map();
+    
+    for (const setup of setups) {
+      for (const piece of setup) {
+        const tile = piece.tileIndex;
+        if (!tile) continue;
+        
+        if (!tilePerformance.has(tile)) {
+          tilePerformance.set(tile, {
+            tile: tile,
+            times: [],
+            avgTime: 0,
+            count: 0
+          });
+        }
+        
+        // Get performance data for this setup
+        const performance = this.getSetupPerformance(setup);
+        if (performance) {
+          tilePerformance.get(tile).times.push(performance);
+          tilePerformance.get(tile).count++;
+        }
+      }
+    }
+    
+    // Calculate average times for each tile
+    for (const [tile, data] of tilePerformance) {
+      if (data.times.length > 0) {
+        data.avgTime = Math.round(data.times.reduce((sum, time) => sum + time, 0) / data.times.length);
+      }
+    }
+    
+    return tilePerformance;
+  }
+
+  getSetupPerformance(setup) {
+    // Try to find performance data for this setup
+    const setupHash = this.createSetupKey(setup);
+    
+    // Look in performance tracker
+    for (const run of performanceTracker.runs) {
+      if (run.boardSetup && this.createSetupKey(run.boardSetup) === setupHash) {
+        return run.ticks || run.rankPoints || null;
+      }
+    }
+    
+    return null;
+  }
+
+  findOptimalTiles(tileUsage, tilePerformance, currentTileUsage) {
+    const optimalTiles = [];
+    
+    for (const [tile, usage] of tileUsage) {
+      // Skip if tile is already used
+      if (currentTileUsage.has(tile)) continue;
+      
+      const performance = tilePerformance.get(tile);
+      if (!performance || performance.avgTime === 0) continue;
+      
+      // Calculate priority based on frequency and performance
+      let priority = 'medium';
+      if (usage.frequency > 0.8 && performance.avgTime < 100) priority = 'high';
+      else if (usage.frequency > 0.6 && performance.avgTime < 120) priority = 'medium';
+      else if (usage.frequency > 0.4) priority = 'low';
+      else continue;
+      
+      optimalTiles.push({
+        tile: tile,
+        frequency: usage.frequency,
+        avgTime: performance.avgTime,
+        priority: priority
+      });
+    }
+    
+    // Sort by priority and performance
+    return optimalTiles.sort((a, b) => {
+      const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+      if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+        return priorityOrder[b.priority] - priorityOrder[a.priority];
+      }
+      return a.avgTime - b.avgTime; // Lower time is better
+    });
+  }
+
+  findPoorTiles(tileUsage, tilePerformance, currentTileUsage) {
+    const poorTiles = [];
+    
+    for (const [tile, usage] of tileUsage) {
+      // Only consider tiles that are currently used
+      if (!currentTileUsage.has(tile)) continue;
+      
+      const performance = tilePerformance.get(tile);
+      if (!performance || performance.avgTime === 0) continue;
+      
+      // Consider it poor if it has low frequency and high average time
+      if (usage.frequency < 0.3 && performance.avgTime > 150) {
+        poorTiles.push({
+          tile: tile,
+          frequency: usage.frequency,
+          avgTime: performance.avgTime
+        });
+      }
+    }
+    
+    return poorTiles.sort((a, b) => b.avgTime - a.avgTime); // Higher time is worse
+  }
+
+
+  findTileElement(tileIndex) {
+    // Try to find the tile element in the game board
+    // This might need to be adjusted based on the actual game's DOM structure
+    const selectors = [
+      `[data-tile-index="${tileIndex}"]`,
+      `[data-tile="${tileIndex}"]`,
+      `.tile-${tileIndex}`,
+      `#tile-${tileIndex}`
+    ];
+    
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (element) return element;
+    }
+    
+    // Fallback: try to find by position if tile index corresponds to grid position
+    const gameBoard = document.querySelector('.game-board, .board, [class*="board"]');
+    if (gameBoard) {
+      const tiles = gameBoard.querySelectorAll('[class*="tile"], [data-tile], [class*="cell"]');
+      if (tiles[tileIndex]) {
+        return tiles[tileIndex];
+      }
+    }
+    
+    return null;
+  }
+
+  clearTileHighlights() {
+    const existingHighlights = document.querySelectorAll(`[id^="${TILE_HIGHLIGHT_OVERLAY_ID}"]`);
+    existingHighlights.forEach(highlight => {
+      if (highlight.parentNode) {
+        highlight.parentNode.removeChild(highlight);
+      }
+    });
   }
 
   analyzeEquipment(currentBoard, similarSetups) {
@@ -4388,26 +4510,30 @@ class AnalysisEngine {
       }
     }
     
+    // Add creature-equipment pairing recommendations
+    const creatureEquipmentTips = this.generateCreatureEquipmentRecommendations(currentBoard, similarSetups);
+    tips.push(...creatureEquipmentTips);
+    
     // Fallback to general popular equipment if no performance-based recommendations
     if (tips.length === 0) {
-    const successfulSetups = similarSetups
-      .filter(s => s.pattern.successRate > 0.7)
-      .map(s => s.pattern.setup);
+      const successfulSetups = similarSetups
+        .filter(s => s.pattern.successRate > 0.7)
+        .map(s => s.pattern.setup);
 
-    if (successfulSetups.length > 0) {
-      const equipmentPatterns = this.analyzeEquipmentPatterns(successfulSetups);
-      
-      for (const [equipId, pattern] of equipmentPatterns) {
-        if (pattern.frequency > 0.6) {
-          tips.push({
-            type: 'equipment',
-            title: 'Popular Equipment',
-            message: `${Math.round(pattern.frequency * 100)}% of successful setups use this equipment`,
-            priority: 'medium',
-            equipmentId: equipId,
-            stat: pattern.stat,
-            tier: pattern.tier
-          });
+      if (successfulSetups.length > 0) {
+        const equipmentPatterns = this.analyzeEquipmentPatterns(successfulSetups);
+        
+        for (const [equipId, pattern] of equipmentPatterns) {
+          if (pattern.frequency > 0.6) {
+            tips.push({
+              type: 'equipment',
+              title: 'Popular Equipment',
+              message: `${Math.round(pattern.frequency * 100)}% of successful setups use this equipment`,
+              priority: 'medium',
+              equipmentId: equipId,
+              stat: pattern.stat,
+              tier: pattern.tier
+            });
           }
         }
       }
@@ -4422,6 +4548,7 @@ class AnalysisEngine {
     // Get performance data for current room
     const currentRoomId = currentBoard.roomId;
     const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentRoomId);
+    const currentCreatureCount = currentBoard.boardSetup.length;
     
     if (roomRuns.length === 0) return tips;
     
@@ -4489,6 +4616,10 @@ class AnalysisEngine {
       }
     }
     
+    // Add cross-map creature recommendations based on creature count
+    const crossMapTips = this.generateCrossMapCreatureRecommendations(currentBoard, similarSetups);
+    tips.push(...crossMapTips);
+    
     // Fallback to general popular creatures if no performance-based recommendations
     if (tips.length === 0) {
       const successfulSetups = similarSetups
@@ -4515,6 +4646,440 @@ class AnalysisEngine {
     }
 
     return tips;
+  }
+
+  generateCreatureEquipmentRecommendations(currentBoard, similarSetups) {
+    const tips = [];
+    const currentSetup = currentBoard.boardSetup;
+    
+    // Analyze creature-equipment patterns from similar setups
+    const successfulSetups = similarSetups
+      .filter(s => s.pattern.successRate > 0.6)
+      .map(s => s.pattern.setup);
+    
+    if (successfulSetups.length === 0) return tips;
+    
+    // Analyze creature-equipment pairings
+    const creatureEquipmentPairs = this.analyzeCreatureEquipmentPairs(successfulSetups);
+    
+    // Check current setup for missing optimal equipment
+    for (const piece of currentSetup) {
+      const creatureName = piece.monsterName || piece.monsterId;
+      const currentEquipment = piece.equipmentName || piece.equipId;
+      
+      // Find optimal equipment for this creature
+      const optimalEquipment = creatureEquipmentPairs.get(creatureName);
+      
+      if (optimalEquipment && optimalEquipment.frequency > 0.5) {
+        const bestEquipment = optimalEquipment.equipment[0]; // Most frequent equipment
+        
+        if (bestEquipment.equipId !== currentEquipment) {
+          const equipmentName = getEquipmentName(bestEquipment.equipId);
+          const currentEquipmentName = getEquipmentName(currentEquipment);
+          
+          const strength = this.getPatternStrength(bestEquipment.frequency, bestEquipment.count);
+          
+          tips.push({
+            type: 'equipment',
+            title: `Optimal Equipment for ${creatureName}`,
+            message: `${Math.round(bestEquipment.frequency * 100)}% of successful setups use ${equipmentName} with ${creatureName} (${strength})`,
+            suggestion: `Consider changing ${currentEquipmentName} to ${equipmentName} for better performance`,
+            priority: 'high',
+            creatureName: creatureName,
+            currentEquipment: currentEquipment,
+            recommendedEquipment: bestEquipment.equipId,
+            equipmentName: equipmentName,
+            currentEquipmentName: currentEquipmentName,
+            strength: strength
+          });
+        }
+      }
+    }
+    
+    // Suggest equipment combinations that work well together
+    const equipmentCombinations = this.analyzeEquipmentCombinations(successfulSetups);
+    
+    for (const combination of equipmentCombinations) {
+      if (combination.frequency > 0.4) {
+        const currentEquipment = new Set(currentSetup.map(p => p.equipmentName || p.equipId));
+        const missingEquipment = combination.equipment.filter(eq => !currentEquipment.has(eq.equipId));
+        
+        if (missingEquipment.length > 0 && missingEquipment.length < combination.equipment.length) {
+          const equipmentNames = missingEquipment.map(eq => getEquipmentName(eq.equipId)).join(', ');
+          
+          tips.push({
+            type: 'equipment',
+            title: 'Effective Equipment Combination',
+            message: `${Math.round(combination.frequency * 100)}% of successful setups use this equipment combination`,
+            suggestion: `Consider adding ${equipmentNames} to complete this effective equipment combination`,
+            priority: 'medium',
+            combination: combination.equipment
+          });
+        }
+      }
+    }
+    
+    return tips;
+  }
+
+  analyzeCreatureEquipmentPairs(setups) {
+    const pairs = new Map();
+    
+    for (const setup of setups) {
+      for (const piece of setup) {
+        const creatureName = piece.monsterName || piece.monsterId;
+        const equipmentId = piece.equipId;
+        const equipmentName = piece.equipmentName;
+        
+        if (!creatureName || !equipmentId) continue;
+        
+        if (!pairs.has(creatureName)) {
+          pairs.set(creatureName, {
+            creatureName: creatureName,
+            equipment: new Map(),
+            totalCount: 0
+          });
+        }
+        
+        const creatureData = pairs.get(creatureName);
+        creatureData.totalCount++;
+        
+        if (!creatureData.equipment.has(equipmentId)) {
+          creatureData.equipment.set(equipmentId, {
+            equipId: equipmentId,
+            equipmentName: equipmentName,
+            count: 0,
+            frequency: 0
+          });
+        }
+        
+        creatureData.equipment.get(equipmentId).count++;
+      }
+    }
+    
+    // Calculate frequencies for each creature's equipment
+    for (const [creatureName, creatureData] of pairs) {
+      for (const [equipId, equipmentData] of creatureData.equipment) {
+        equipmentData.frequency = equipmentData.count / creatureData.totalCount;
+      }
+      
+      // Sort equipment by frequency
+      creatureData.equipment = new Map(
+        Array.from(creatureData.equipment.entries())
+          .sort((a, b) => b[1].frequency - a[1].frequency)
+      );
+    }
+    
+    return pairs;
+  }
+
+  analyzeEquipmentCombinations(setups) {
+    const combinations = new Map();
+    
+    for (const setup of setups) {
+      const equipment = setup
+        .map(p => ({
+          equipId: p.equipId,
+          equipmentName: p.equipmentName || p.equipId,
+          stat: p.stat,
+          tier: p.tier
+        }))
+        .filter(eq => eq.equipId)
+        .sort((a, b) => a.equipmentName.localeCompare(b.equipmentName));
+      
+      if (equipment.length < 2) continue;
+      
+      const key = equipment.map(eq => eq.equipId).join('+');
+      
+      if (!combinations.has(key)) {
+        combinations.set(key, {
+          equipment: equipment,
+          count: 0,
+          frequency: 0
+        });
+      }
+      
+      combinations.get(key).count++;
+    }
+    
+    // Calculate frequencies
+    const totalSetups = setups.length;
+    for (const [key, combination] of combinations) {
+      combination.frequency = combination.count / totalSetups;
+    }
+    
+    return Array.from(combinations.values()).sort((a, b) => b.frequency - a.frequency);
+  }
+
+  getPatternStrength(frequency, count) {
+    if (frequency >= 0.8 && count >= 10) return 'Very Strong';
+    if (frequency >= 0.7 && count >= 8) return 'Strong';
+    if (frequency >= 0.6 && count >= 5) return 'Moderate';
+    if (frequency >= 0.4 && count >= 3) return 'Weak';
+    return 'Very Weak';
+  }
+
+  generateCrossMapCreatureRecommendations(currentBoard, similarSetups) {
+    const tips = [];
+    const currentCreatureCount = currentBoard.boardSetup.length;
+    
+    // Find cross-map setups with same creature count
+    const crossMapSetups = similarSetups.filter(s => s.isCrossMap && s.creatureCount === currentCreatureCount);
+    
+    if (crossMapSetups.length === 0) return tips;
+    
+    console.log(`[Board Advisor] Found ${crossMapSetups.length} cross-map setups with ${currentCreatureCount} creatures`);
+    
+    // Analyze creatures from cross-map successful setups
+    const successfulCrossMapSetups = crossMapSetups
+      .filter(s => s.pattern.successRate > 0.6)
+      .map(s => s.pattern.setup);
+    
+    if (successfulCrossMapSetups.length === 0) return tips;
+    
+    // Get current creatures
+    const currentCreatures = new Set(currentBoard.boardSetup.map(p => p.monsterName || p.monsterId));
+    
+    // Analyze creature patterns from cross-map setups
+    const crossMapCreaturePatterns = this.analyzeCreaturePatterns(successfulCrossMapSetups);
+    
+    // Find creatures that work well in similar creature count maps but aren't in current setup
+    for (const [monsterId, pattern] of crossMapCreaturePatterns) {
+      const creatureName = pattern.monsterName || monsterId;
+      
+      // Skip if creature is already in current setup
+      if (currentCreatures.has(creatureName) || currentCreatures.has(monsterId)) continue;
+      
+      // Only recommend if it appears frequently in successful cross-map setups
+      if (pattern.frequency > 0.4) {
+        const avgPerformance = this.calculateAveragePerformance(crossMapSetups, pattern);
+        
+        tips.push({
+          type: 'creature',
+          title: `Cross-Map Learning: ${creatureName}`,
+          message: `${Math.round(pattern.frequency * 100)}% of successful ${currentCreatureCount}-creature maps use this creature`,
+          suggestion: `Based on data from other ${currentCreatureCount}-creature maps, ${creatureName} performs well in similar setups`,
+          priority: 'medium',
+          monsterId: monsterId,
+          monsterName: creatureName,
+          tier: pattern.tier,
+          isCrossMap: true,
+          avgPerformance: avgPerformance
+        });
+      }
+    }
+    
+    // Also suggest creature combinations that work well together
+    const combinationAnalysis = this.analyzeCreatureCombinations(successfulCrossMapSetups, currentCreatureCount);
+    
+    // Suggest creature pairs that work well together
+    for (const pair of combinationAnalysis.creaturePairs) {
+      if (pair.frequency > 0.4) { // High frequency threshold for pairs
+        const creature1InCurrent = currentCreatures.has(pair.creature1.monsterName) || currentCreatures.has(pair.creature1.monsterId);
+        const creature2InCurrent = currentCreatures.has(pair.creature2.monsterName) || currentCreatures.has(pair.creature2.monsterId);
+        
+        // If only one creature from the pair is in current setup
+        if (creature1InCurrent !== creature2InCurrent) {
+          const missingCreature = creature1InCurrent ? pair.creature2 : pair.creature1;
+          
+          const strength = this.getPatternStrength(pair.frequency, pair.count);
+          
+          tips.push({
+            type: 'creature',
+            title: `Strong Creature Pair: ${pair.creature1.monsterName} + ${pair.creature2.monsterName}`,
+            message: `${Math.round(pair.frequency * 100)}% of successful ${currentCreatureCount}-creature maps use this pair together (${strength})`,
+            suggestion: `Consider adding ${missingCreature.monsterName} - it pairs well with ${creature1InCurrent ? pair.creature1.monsterName : pair.creature2.monsterName}`,
+            priority: 'high',
+            isCrossMap: true,
+            pair: pair,
+            strength: strength
+          });
+        }
+      }
+    }
+    
+    // Suggest full combinations
+    for (const combination of combinationAnalysis.fullCombinations) {
+      if (combination.frequency > 0.3 && combination.creatures.length <= currentCreatureCount) {
+        const missingCreatures = combination.creatures.filter(creature => 
+          !currentCreatures.has(creature.monsterName) && !currentCreatures.has(creature.monsterId)
+        );
+        
+        if (missingCreatures.length > 0 && missingCreatures.length < combination.creatures.length) {
+          const creatureNames = missingCreatures.map(c => c.monsterName).join(', ');
+          
+          tips.push({
+            type: 'creature',
+            title: `Effective Creature Combination`,
+            message: `${Math.round(combination.frequency * 100)}% of successful ${currentCreatureCount}-creature maps use this combination`,
+            suggestion: `Consider adding ${creatureNames} to complete this effective creature combination`,
+            priority: 'medium',
+            isCrossMap: true,
+            combination: combination.creatures
+          });
+        }
+      }
+    }
+    
+    return tips;
+  }
+
+  calculateAveragePerformance(crossMapSetups, pattern) {
+    const relevantSetups = crossMapSetups.filter(s => 
+      s.pattern.setup.some(p => (p.monsterName || p.monsterId) === pattern.monsterName)
+    );
+    
+    if (relevantSetups.length === 0) return null;
+    
+    const totalTime = relevantSetups.reduce((sum, s) => sum + (s.pattern.bestTime || 0), 0);
+    return Math.round(totalTime / relevantSetups.length);
+  }
+
+  analyzeCreatureCombinations(setups, creatureCount) {
+    const combinations = new Map();
+    const creaturePairs = new Map();
+    
+    for (const setup of setups) {
+      if (setup.length !== creatureCount) continue;
+      
+      const creatures = setup.map(p => ({
+        monsterId: p.monsterId,
+        monsterName: p.monsterName || p.monsterId,
+        tier: p.tier
+      })).sort((a, b) => a.monsterName.localeCompare(b.monsterName));
+      
+      // Track full combinations
+      const key = creatures.map(c => c.monsterName).join('+');
+      
+      if (!combinations.has(key)) {
+        combinations.set(key, {
+          creatures: creatures,
+          frequency: 0,
+          count: 0,
+          avgPerformance: 0,
+          totalPerformance: 0
+        });
+      }
+      
+      const combination = combinations.get(key);
+      combination.count++;
+      
+      // Track creature pairs (any 2 creatures that appear together)
+      for (let i = 0; i < creatures.length; i++) {
+        for (let j = i + 1; j < creatures.length; j++) {
+          const pairKey = [creatures[i].monsterName, creatures[j].monsterName].sort().join('+');
+          
+          if (!creaturePairs.has(pairKey)) {
+            creaturePairs.set(pairKey, {
+              creature1: creatures[i],
+              creature2: creatures[j],
+              count: 0,
+              frequency: 0,
+              avgPerformance: 0,
+              totalPerformance: 0
+            });
+          }
+          
+          creaturePairs.get(pairKey).count++;
+        }
+      }
+    }
+    
+    // Calculate frequencies and performance metrics
+    const totalSetups = setups.length;
+    for (const [key, combination] of combinations) {
+      combination.frequency = combination.count / totalSetups;
+    }
+    
+    for (const [key, pair] of creaturePairs) {
+      pair.frequency = pair.count / totalSetups;
+    }
+    
+    return {
+      fullCombinations: Array.from(combinations.values()).sort((a, b) => b.frequency - a.frequency),
+      creaturePairs: Array.from(creaturePairs.values()).sort((a, b) => b.frequency - a.frequency)
+    };
+  }
+
+  generateMapLearningInsights(currentBoard, similarSetups) {
+    const insights = [];
+    const currentCreatureCount = currentBoard.boardSetup.length;
+    
+    // Count different types of similar setups
+    const exactMatches = similarSetups.filter(s => s.isExactMatch).length;
+    const similarSetupsCount = similarSetups.filter(s => !s.isExactMatch && !s.isCrossMap).length;
+    const crossMapSetups = similarSetups.filter(s => s.isCrossMap).length;
+    
+    // Provide learning insights based on available data
+    if (crossMapSetups > 0) {
+      insights.push({
+        type: 'learning',
+        title: 'Cross-Map Learning Active',
+        message: `Learning from ${crossMapSetups} similar ${currentCreatureCount}-creature map configurations`,
+        suggestion: 'The Board Advisor is analyzing patterns from other maps with the same creature count to suggest optimal strategies',
+        priority: 'low'
+      });
+    }
+    
+    if (exactMatches === 0 && similarSetupsCount === 0 && crossMapSetups > 0) {
+      insights.push({
+        type: 'learning',
+        title: 'Learning from Similar Map Types',
+        message: `No exact matches found, but learning from ${crossMapSetups} other ${currentCreatureCount}-creature maps`,
+        suggestion: 'Try different creature combinations based on what works well in similar map configurations',
+        priority: 'medium'
+      });
+    }
+    
+    // Analyze creature count patterns across all runs
+    const allRuns = performanceTracker.runs;
+    const creatureCountStats = new Map();
+    
+    for (const run of allRuns) {
+      const count = run.boardSetup ? run.boardSetup.length : 0;
+      if (!creatureCountStats.has(count)) {
+        creatureCountStats.set(count, { total: 0, successful: 0, bestTime: Infinity });
+      }
+      
+      const stats = creatureCountStats.get(count);
+      stats.total++;
+      if (run.success) stats.successful++;
+      if (run.ticks && run.ticks < stats.bestTime) stats.bestTime = run.ticks;
+    }
+    
+    // Find the most successful creature count
+    let bestCreatureCount = null;
+    let bestSuccessRate = 0;
+    
+    for (const [count, stats] of creatureCountStats) {
+      const successRate = stats.successful / stats.total;
+      if (successRate > bestSuccessRate && stats.total >= 3) {
+        bestSuccessRate = successRate;
+        bestCreatureCount = count;
+      }
+    }
+    
+    if (bestCreatureCount && bestCreatureCount !== currentCreatureCount) {
+      const currentStats = creatureCountStats.get(currentCreatureCount);
+      const bestStats = creatureCountStats.get(bestCreatureCount);
+      
+      if (currentStats && bestStats) {
+        const currentSuccessRate = currentStats.successful / currentStats.total;
+        const improvement = bestSuccessRate - currentSuccessRate;
+        
+        if (improvement > 0.1) {
+          insights.push({
+            type: 'learning',
+            title: 'Map Configuration Insights',
+            message: `${bestCreatureCount}-creature maps have ${Math.round(bestSuccessRate * 100)}% success rate vs ${Math.round(currentSuccessRate * 100)}% for ${currentCreatureCount}-creature maps`,
+            suggestion: `Consider trying ${bestCreatureCount}-creature maps for better success rates based on your historical data`,
+            priority: 'medium'
+          });
+        }
+      }
+    }
+    
+    return insights;
   }
 
   // Generate recommendations based on Board Analyzer data
@@ -4555,7 +5120,7 @@ class AnalysisEngine {
       const setupWithNames = bestOverallRun.boardSetup ? bestOverallRun.boardSetup.map(piece => {
         // Strip INITIAL_ prefix if present for proper name resolution
         let monsterId = piece.monsterId;
-        if (monsterId && monsterId.startsWith('INITIAL_')) {
+        if (monsterId && typeof monsterId === 'string' && monsterId.startsWith('INITIAL_')) {
           monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters)
         }
         
@@ -4811,7 +5376,7 @@ class AnalysisEngine {
           suggestion = 'Focus on micro-optimizations: faster monster positioning, reduced idle time, and perfect timing.';
         } else {
           message = `Your best time (${roundedBestTime}) is ${gapToWR} ticks behind the world record (${worldRecordTime} by ${worldRecordHolder}).`;
-          suggestion = 'Study the world record holder\'s strategies and focus on major optimizations: better monster placement, equipment choices, and movement patterns.';
+          suggestion = 'Focus on major optimizations: better monster placement, equipment choices, and movement patterns. The Board Advisor will learn from your runs and suggest improvements based on similar map configurations.';
         }
       } else {
         message = isEqual
@@ -5325,6 +5890,11 @@ function closePanel() {
   
   // Stop state-based refresh when panel closes
   stopStateRefresh();
+  
+  // Clear tile highlights when panel is closed
+  if (window.boardAdvisorInstance) {
+    window.boardAdvisorInstance.clearTileHighlights();
+  }
   
   // Update icon status
   updateIconStatus();
@@ -5964,6 +6534,129 @@ function openSettingsModal() {
     gap: 16px;
   `;
   
+  // Board Advisor Settings Section
+  const boardAdvisorSection = document.createElement('div');
+  boardAdvisorSection.style.cssText = `
+    padding: 16px;
+    background: #1A202C;
+    border-radius: 6px;
+    border: 1px solid #4A5568;
+    margin-bottom: 16px;
+  `;
+  
+  const boardAdvisorTitle = document.createElement('h4');
+  boardAdvisorTitle.textContent = 'Board Advisor Settings';
+  boardAdvisorTitle.style.cssText = `
+    margin: 0 0 12px 0;
+    color: #E2E8F0;
+    font-size: 16px;
+    font-weight: 600;
+  `;
+  
+  // Create settings container
+  const settingsContainer = document.createElement('div');
+  settingsContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  `;
+  
+  // Show Predictions
+  const predictionsLabel = document.createElement('label');
+  predictionsLabel.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  
+  const showPredictionsCheckbox = document.createElement('input');
+  showPredictionsCheckbox.type = 'checkbox';
+  showPredictionsCheckbox.id = 'showPredictions';
+  showPredictionsCheckbox.checked = config.showPredictions;
+  
+  console.log('[Board Advisor] Creating showPredictions checkbox, config value:', config.showPredictions, 'checkbox checked:', showPredictionsCheckbox.checked);
+  
+  const showPredictionsText = document.createTextNode('Show Performance Predictions');
+  
+  predictionsLabel.appendChild(showPredictionsCheckbox);
+  predictionsLabel.appendChild(showPredictionsText);
+  
+  const showPredictionsDesc = document.createElement('div');
+  showPredictionsDesc.textContent = 'Displays predicted completion times, success rates, and performance metrics in the panel';
+  showPredictionsDesc.style.cssText = 'font-size: 11px; color: #ABB2BF; margin-top: -8px; margin-bottom: 8px;';
+  
+  // Enable Tile Recommendations
+  const tileRecommendationsLabel = document.createElement('label');
+  tileRecommendationsLabel.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  
+  const enableTileRecommendationsCheckbox = document.createElement('input');
+  enableTileRecommendationsCheckbox.type = 'checkbox';
+  enableTileRecommendationsCheckbox.id = 'enableTileRecommendations';
+  enableTileRecommendationsCheckbox.checked = config.enableTileRecommendations;
+  
+  console.log('[Board Advisor] Creating enableTileRecommendations checkbox, config value:', config.enableTileRecommendations, 'checkbox checked:', enableTileRecommendationsCheckbox.checked);
+  
+  // Add change listeners that save immediately
+  showPredictionsCheckbox.addEventListener('change', () => {
+    console.log('[Board Advisor] showPredictions checkbox changed to:', showPredictionsCheckbox.checked);
+    config.showPredictions = showPredictionsCheckbox.checked;
+    api.service.updateScriptConfig(context.hash, config);
+    console.log('[Board Advisor] showPredictions saved:', config.showPredictions);
+    
+    // Refresh the panel to show/hide predictions
+    console.log('[Board Advisor] Checking panel state:', {
+      isOpen: panelState.isOpen
+    });
+    
+    if (panelState.isOpen) {
+      console.log('[Board Advisor] Refreshing panel, showPredictions is now:', config.showPredictions);
+      refreshPanelData();
+    } else {
+      console.log('[Board Advisor] Panel not open, skipping refresh');
+    }
+  });
+  
+  enableTileRecommendationsCheckbox.addEventListener('change', () => {
+    console.log('[Board Advisor] enableTileRecommendations checkbox changed to:', enableTileRecommendationsCheckbox.checked);
+    config.enableTileRecommendations = enableTileRecommendationsCheckbox.checked;
+    api.service.updateScriptConfig(context.hash, config);
+    
+    // Clear tile highlights if disabled
+    if (!config.enableTileRecommendations) {
+      console.log('[Board Advisor] Clearing tile highlights because enableTileRecommendations is disabled');
+      boardAnalyzer.clearTileHighlights();
+    }
+    
+    console.log('[Board Advisor] enableTileRecommendations saved:', config.enableTileRecommendations);
+    
+    // Refresh the panel to update tile recommendations
+    console.log('[Board Advisor] Checking panel state for tile recommendations:', {
+      isOpen: panelState.isOpen
+    });
+    
+    if (panelState.isOpen) {
+      console.log('[Board Advisor] Refreshing panel, enableTileRecommendations is now:', config.enableTileRecommendations);
+      refreshPanelData();
+    } else {
+      console.log('[Board Advisor] Panel not open, skipping refresh for tile recommendations');
+    }
+  });
+  
+  const enableTileRecommendationsText = document.createTextNode('Enable Tile Recommendations');
+  
+  tileRecommendationsLabel.appendChild(enableTileRecommendationsCheckbox);
+  tileRecommendationsLabel.appendChild(enableTileRecommendationsText);
+  
+  const tileRecommendationsDesc = document.createElement('div');
+  tileRecommendationsDesc.textContent = 'Highlights optimal tile positions on the game board for monster placement';
+  tileRecommendationsDesc.style.cssText = 'font-size: 11px; color: #ABB2BF; margin-top: -8px; margin-bottom: 8px;';
+  
+  // Add all settings to container
+  settingsContainer.appendChild(predictionsLabel);
+  settingsContainer.appendChild(showPredictionsDesc);
+  settingsContainer.appendChild(tileRecommendationsLabel);
+  settingsContainer.appendChild(tileRecommendationsDesc);
+  
+  boardAdvisorSection.appendChild(boardAdvisorTitle);
+  boardAdvisorSection.appendChild(settingsContainer);
+  content.appendChild(boardAdvisorSection);
+  
   const resetSection = document.createElement('div');
   resetSection.style.cssText = `
     padding: 16px;
@@ -6026,8 +6719,10 @@ function openSettingsModal() {
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') closeModal();
   };
-  document.addEventListener('keydown', handleKeyDown);
+  addDocumentListener('keydown', handleKeyDown);
   modal.addEventListener('remove', () => {
+    // Remove from tracking array
+    documentListeners = documentListeners.filter(listener => listener.handler !== handleKeyDown);
     document.removeEventListener('keydown', handleKeyDown);
   });
   
@@ -6047,6 +6742,7 @@ function openSettingsModal() {
   
   document.body.appendChild(modal);
 }
+
 
 function showResetConfirmation(resetSection, resetButton) {
   // Hide the original button
@@ -6278,10 +6974,7 @@ async function resetIndexedDB() {
       };
       performanceCache = {
         lastRoomDetection: null,
-        lastRoomDetectionTime: 0,
-        roomDetectionCache: new Map(),
-        patternMatchingCache: new Map(),
-        dataLoadingCache: new Map()
+        lastRoomDetectionTime: 0
       };
       
       // Reload UI to show clean state
@@ -6348,7 +7041,7 @@ function makeDraggable(panel, header) {
     e.preventDefault();
   });
   
-  document.addEventListener('mousemove', (e) => {
+  const handleMouseMove = (e) => {
     if (!isDragging) return;
     
     const deltaX = e.clientX - startX;
@@ -6366,14 +7059,17 @@ function makeDraggable(panel, header) {
     
     panelState.position.x = newLeft;
     panelState.position.y = newTop;
-  });
+  };
   
-  document.addEventListener('mouseup', () => {
+  const handleMouseUp = () => {
     if (isDragging) {
       isDragging = false;
       document.body.style.userSelect = '';
     }
-  });
+  };
+  
+  addDocumentListener('mousemove', handleMouseMove);
+  addDocumentListener('mouseup', handleMouseUp);
 }
 
 function makeResizable(panel) {
@@ -6456,7 +7152,7 @@ function makeResizable(panel) {
   resizeHandles.bottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
   resizeHandles.corner.addEventListener('mousedown', (e) => startResize(e, 'corner'));
   
-  document.addEventListener('mousemove', (e) => {
+  const handleResizeMouseMove = (e) => {
     if (!isResizing) return;
     
     const deltaX = e.clientX - startX;
@@ -6482,16 +7178,19 @@ function makeResizable(panel) {
     // Update state
     panelState.size.width = newWidth;
     panelState.size.height = newHeight;
-  });
+  };
   
-  document.addEventListener('mouseup', () => {
+  const handleResizeMouseUp = () => {
     if (isResizing) {
       isResizing = false;
       resizeType = '';
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
     }
-  });
+  };
+  
+  addDocumentListener('mousemove', handleResizeMouseMove);
+  addDocumentListener('mouseup', handleResizeMouseUp);
   
   // Add handles to panel
   panel.appendChild(resizeHandles.right);
@@ -6562,6 +7261,15 @@ function createConfigContent() {
         Auto-analyze on Board Changes
       </label>
       
+      <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="enableTileRecommendations" ${config.enableTileRecommendations ? 'checked' : ''}>
+        Enable Tile Recommendations
+      </label>
+      
+      <div style="font-size: 11px; color: #ABB2BF; margin-top: -8px; margin-bottom: 8px;">
+        Highlights optimal tile positions on the game board for monster placement
+      </div>
+      
       <div style="border-top: 1px solid #4B5563; padding-top: 12px; margin-top: 8px;">
         <h4 style="margin: 0 0 8px 0; color: #61AFEF; font-size: 14px;">Auto-Refresh Settings</h4>
         
@@ -6584,6 +7292,7 @@ function saveConfig() {
   const learningEnabled = document.getElementById('learningEnabled').checked;
   const showPredictions = document.getElementById('showPredictions').checked;
   const autoAnalyze = document.getElementById('autoAnalyze').checked;
+  const enableTileRecommendations = document.getElementById('enableTileRecommendations').checked;
   const autoRefreshPanel = document.getElementById('autoRefreshPanel').checked;
 
   config.enabled = enabled;
@@ -6591,6 +7300,7 @@ function saveConfig() {
   config.learningEnabled = learningEnabled;
   config.showPredictions = showPredictions;
   config.autoAnalyze = autoAnalyze;
+  config.enableTileRecommendations = enableTileRecommendations;
   config.autoRefreshPanel = autoRefreshPanel;
 
   // Save to mod config
@@ -6603,6 +7313,11 @@ function saveConfig() {
     } else {
       stopStateRefresh();
     }
+  }
+  
+  // Clear tile highlights if tile recommendations are disabled
+  if (!config.enableTileRecommendations && window.boardAdvisorInstance) {
+    window.boardAdvisorInstance.clearTileHighlights();
   }
   
   // Update icon status
@@ -7080,13 +7795,12 @@ async function updatePanelWithAnalysis(analysis) {
       const wrData = await fetchLeaderboardWRData(currentBoard.roomId);
       const roomName = globalThis.state?.utils?.ROOM_NAME?.[currentBoard.roomId] || currentBoard.roomId;
       
-      let leaderboardContent = `<div><strong>Room:</strong> ${roomName}</div>`;
+      let leaderboardContent = '';
       
       // Show only relevant leaderboard info based on focus area
       if (config.focusArea === 'ticks' && wrData.tickData && wrData.tickData.length > 0) {
         const wr = wrData.tickData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span></div>`;
-        leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span> <span style="color: #61AFEF;">(${wr.userName})</span></div>`;
         
         // Show user's best if available
         const userScores = getUserBestScores();
@@ -7098,8 +7812,7 @@ async function updatePanelWithAnalysis(analysis) {
         }
       } else if (config.focusArea === 'ranks' && wrData.rankData && wrData.rankData.length > 0) {
         const wr = wrData.rankData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span></div>`;
-        leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span> <span style="color: #61AFEF;">(${wr.userName})</span></div>`;
         
         // Show user's best if available
         const userScores = getUserBestScores();
@@ -7138,7 +7851,7 @@ async function updatePanelWithAnalysis(analysis) {
           <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
         </div>
         <div style="font-size: 11px; color: #9CA3AF; line-height: 1.3;">
-          Room: ${roomName}
+          No leaderboard data available
         </div>
       </div>
     `;
@@ -7304,7 +8017,7 @@ async function updatePanelWithAnalysis(analysis) {
                   const tile = piece.tileIndex || piece.tile || '?';
                 // Strip INITIAL_ prefix if present for proper name resolution
                 let monsterId = piece.monsterId;
-                if (monsterId && monsterId.startsWith('INITIAL_')) {
+                if (monsterId && typeof monsterId === 'string' && monsterId.startsWith('INITIAL_')) {
                   monsterId = monsterId.substring(8); // Remove 'INITIAL_' (8 characters)
                 }
                 
@@ -7574,13 +8287,12 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     if (currentBoard && currentBoard.roomId) {
       const wrData = await fetchLeaderboardWRData(currentBoard.roomId);
       
-      let leaderboardContent = `<div><strong>Room:</strong> ${roomName}</div>`;
+      let leaderboardContent = '';
       
       // Show only relevant leaderboard info based on focus area
       if (config.focusArea === 'ticks' && wrData.tickData && wrData.tickData.length > 0) {
         const wr = wrData.tickData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span></div>`;
-        leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.ticks} ticks</span> <span style="color: #61AFEF;">(${wr.userName})</span></div>`;
         
         // Show user's best if available
         const userScores = getUserBestScores();
@@ -7592,8 +8304,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
         }
       } else if (config.focusArea === 'ranks' && wrData.rankData && wrData.rankData.length > 0) {
         const wr = wrData.rankData[0];
-        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span></div>`;
-        leaderboardContent += `<div><strong>Holder:</strong> <span style="color: #61AFEF;">${wr.userName}</span></div>`;
+        leaderboardContent += `<div><strong>World Record:</strong> <span style="color: #ffd700; font-weight: 600;">${wr.rank} points</span> <span style="color: #61AFEF;">(${wr.userName})</span></div>`;
         
         // Show user's best if available
         const userScores = getUserBestScores();
@@ -7642,7 +8353,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
           <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
         </div>
         <div style="font-size: 11px; color: #9CA3AF; line-height: 1.3;">
-          Room: ${roomName}
+          No leaderboard data available
         </div>
       </div>
     `;
@@ -8341,52 +9052,6 @@ if (!window.BoardAdvisorAPI) {
       }
     },
     
-    // Transform stored run data to $replay format
-    transformRunToReplay: (runData) => {
-      return transformRunToReplay(runData);
-    },
-    
-    // Generate $replay link from stored run data
-    generateReplayLink: (runData) => {
-      return generateReplayLink(runData);
-    },
-    
-    // Get best run for a room and generate replay link
-    getBestRunReplayLink: async (roomId) => {
-      try {
-        const runs = await getSandboxRunsForRoom(roomId, 1); // Get only the best run
-        if (runs.length === 0) {
-          return null;
-        }
-        
-        const bestRun = runs[0]; // Should be the best run
-        return generateReplayLink(bestRun);
-      } catch (error) {
-        console.error('[Board Advisor] Error getting best run replay link:', error);
-        return null;
-      }
-    },
-    
-    // Example: Get all runs for a room and show their replay links
-    getRoomReplayLinks: async (roomId, limit = 5) => {
-      try {
-        const runs = await getSandboxRunsForRoom(roomId, limit);
-        return runs.map(run => {
-          const replayLink = generateReplayLink(run);
-          return {
-            ticks: run.ticks,
-            rankPoints: run.rankPoints,
-            completed: run.completed,
-            replayLink: replayLink,
-            hasCompleteData: !!replayLink, // true if replay link was generated successfully
-            timestamp: run.timestamp
-          };
-        });
-      } catch (error) {
-        console.error('[Board Advisor] Error getting room replay links:', error);
-        return [];
-      }
-    },
     
     // Check if current board setup has complete data for replay generation
     validateCurrentBoardData: () => {
@@ -8452,9 +9117,7 @@ exports = {
     
   // CACHE FIX: Also clear all performance caches
   dataCollector.forceRefreshRoomDetection();
-  performanceCache.dataLoadingCache.clear();
-  // Don't clear pattern matching cache on refresh - it's expensive to rebuild
-  // performanceCache.patternMatchingCache.clear();
+  // Cache removed - no action needed
   analysisState.currentAnalysis = null;
   analysisState.lastBoardHash = null;
     
@@ -8480,9 +9143,7 @@ exports = {
       } else {
         // Invalidate all caches
         dataCollector.forceRefreshRoomDetection();
-        performanceCache.dataLoadingCache.clear();
-        // Only clear pattern matching cache when explicitly requested
-        performanceCache.patternMatchingCache.clear();
+        // Cache removed - no action needed
         analysisState.currentAnalysis = null;
         analysisState.lastBoardHash = null;
         
@@ -8520,7 +9181,47 @@ exports = {
   }
 };
 
+
+// Helper function to add document listeners with tracking
+function addDocumentListener(event, handler) {
+  document.addEventListener(event, handler);
+  documentListeners.push({ event, handler });
+}
+
+// Cleanup function for subscriptions
+function cleanupSubscriptions() {
+  activeSubscriptions.forEach(subscription => {
+    if (subscription && typeof subscription.unsubscribe === 'function') {
+      subscription.unsubscribe();
+    }
+  });
+  activeSubscriptions = [];
+  console.log('[Board Advisor] All subscriptions cleaned up');
+}
+
+// Cleanup function for document listeners
+function cleanupDocumentListeners() {
+  documentListeners.forEach(({ event, handler }) => {
+    document.removeEventListener(event, handler);
+  });
+  documentListeners = [];
+  console.log('[Board Advisor] All document listeners cleaned up');
+}
+
+// Cleanup function for database connection
+function cleanupDatabase() {
+  if (sandboxDB) {
+    sandboxDB.close();
+    sandboxDB = null;
+    isDBReady = false;
+    console.log('[Board Advisor] Database connection closed');
+  }
+}
+
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
+  cleanupSubscriptions();
+  cleanupDocumentListeners();
+  cleanupDatabase();
   stopStateRefresh();
 });

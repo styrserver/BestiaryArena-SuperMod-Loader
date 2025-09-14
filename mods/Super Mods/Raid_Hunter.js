@@ -1896,7 +1896,7 @@ function createAutoRaidSettings() {
     const delayInput = document.createElement('input');
     delayInput.type = 'number';
     delayInput.id = 'raidDelay';
-    delayInput.value = 2;
+    delayInput.value = 3;
     delayInput.min = 0;
     delayInput.max = 10;
     delayInput.className = 'pixel-font-16';

@@ -10609,7 +10609,7 @@ function renderCyclopediaPlayerInfo(profileData) {
   if ((loyaltyPoints === '-' || loyaltyPoints === undefined) && profileData.name === globalThis.state?.player?.getSnapshot?.()?.context?.name) {
     loyaltyPoints = globalThis.state?.player?.getSnapshot?.()?.context?.loyaltyPoints ?? '-';
   }
-  loyaltyValue.textContent = loyaltyPoints;
+  loyaltyValue.textContent = FormatUtils.number(loyaltyPoints);
   loyaltyDiv.appendChild(loyaltyLabel);
   loyaltyDiv.appendChild(loyaltyValue);
   loyaltyDiv.style.textAlign = 'center';

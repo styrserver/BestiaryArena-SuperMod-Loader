@@ -210,7 +210,7 @@
   // 3. DISENCHANTING CORE FUNCTIONS
   // ============================================================================
   
-  function updateDisenchantButtonState(button, state) {
+  function updateDisenchantButtonState(button, state, hasHighTier = false) {
     const states = {
       normal: {
         text: 'Disenchant',
@@ -218,9 +218,9 @@
         color: '#e6d7b0'
       },
       confirmation: {
-        text: 'Confirm Disenchant',
+        text: hasHighTier ? 'Confirm\nDisenchant' : 'Confirm Disenchant',
         borderColor: '#ff8800',
-        color: '#ffcc88'
+        color: hasHighTier ? '#ff4444' : '#ffcc88'
       },
       disenchanting: {
         text: 'Stop',
@@ -277,8 +277,10 @@
     const buttons = document.querySelectorAll('button');
     for (const button of buttons) {
       if (button.textContent === 'Confirm Disenchant' || 
+          button.textContent === 'Confirm\nDisenchant' ||
           button.style.borderColor === '#ff8800' ||
-          button.style.color === '#ffcc88') {
+          button.style.color === '#ffcc88' ||
+          button.style.color === '#ff4444') {
         updateDisenchantButtonState(button, 'normal');
         break;
       }
@@ -328,16 +330,79 @@
       return false;
     }
   }
+  
+  // Add warning symbol to equipment button for high-tier items
+  function addWarningSymbolToButton(button) {
+    try {
+      // Check if warning symbol already exists
+      if (button.querySelector('.warning-symbol')) {
+        return;
+      }
+      
+      // Create warning symbol element
+      const warningSymbol = document.createElement('div');
+      warningSymbol.className = 'warning-symbol';
+      warningSymbol.textContent = '⚠️';
+      warningSymbol.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 12px;
+        color: #ff4444;
+        text-shadow: -1px -1px 0 #ff0000, 1px -1px 0 #ff0000, -1px 1px 0 #ff0000, 1px 1px 0 #ff0000;
+        z-index: 10;
+        pointer-events: none;
+        line-height: 1;
+      `;
+      
+      // Ensure button has relative positioning for absolute positioning of warning
+      button.style.position = 'relative';
+      
+      // Add warning symbol to button
+      button.appendChild(warningSymbol);
+    } catch (error) {
+      console.error('[Better Forge] Error adding warning symbol:', error);
+    }
+  }
+  
+  // Refresh warning symbols on all equipment in disenchant box
+  function refreshWarningSymbols() {
+    try {
+      const col2 = document.getElementById('disenchant-col2');
+      if (!col2) return;
+      
+      const equipmentItems = col2.querySelectorAll('button[data-equipment-id]');
+      for (const btn of equipmentItems) {
+        const tier = parseInt(btn.getAttribute('data-tier')) || 1;
+        
+        // Remove existing warning symbol
+        const existingWarning = btn.querySelector('.warning-symbol');
+        if (existingWarning) {
+          existingWarning.remove();
+        }
+        
+        // Add warning symbol for T3, T4, T5 equipment
+        if (tier >= 3) {
+          addWarningSymbolToButton(btn);
+        }
+      }
+    } catch (error) {
+      console.error('[Better Forge] Error refreshing warning symbols:', error);
+    }
+  }
 
   function startDisenchanting(button) {
     try {
       if (!forgeState.isConfirmationMode) {
         forgeState.isConfirmationMode = true;
-        updateDisenchantButtonState(button, 'confirmation');
         
         // Check for high-tier items and show appropriate message
-        if (hasHighTierItems()) {
-          updateDisenchantStatus('⚠️ WARNING: High-tier items (T3/T4/T5) detected! Click "Confirm Disenchant" to proceed');
+        const hasHighTier = hasHighTierItems();
+        updateDisenchantButtonState(button, 'confirmation', hasHighTier);
+        
+        if (hasHighTier) {
+          updateDisenchantStatus('⚠️ WARNING: High-tier items (T3/T4/T5) detected! Click the warning button to proceed', true);
         } else {
           updateDisenchantStatus('Click "Confirm Disenchant" to start disenchanting process');
         }
@@ -566,7 +631,6 @@
 
       // Start forging process with faster interval
               forgeState.forgeInterval = setInterval(() => {
-          console.log(`[Better Forge] ⏰ Interval triggered, calling performForgeStep...`);
           performForgeStep();
         }, 500); // 500ms between steps for faster operation
 
@@ -617,9 +681,6 @@
 
   function performForgeStep() {
     try {
-      console.log(`[Better Forge] 🔍 performForgeStep called`);
-      console.log(`[Better Forge] 📊 Current state: isForging=${forgeState.isForging}, isForgingInProgress=${forgeState.isForgingInProgress}, isRefreshingInventory=${forgeState.isRefreshingInventory}, queueLength=${forgeState.forgeQueue.length}`);
-      
       // Check if we're refreshing inventory - if so, wait
       if (forgeState.isRefreshingInventory) {
         console.log(`[Better Forge] ⏳ Inventory refresh in progress, waiting...`);
@@ -627,7 +688,7 @@
       }
       
       if (forgeState.isForgingInProgress || forgeState.forgeQueue.length === 0) {
-        console.log(`[Better Forge] ⚠️ Early return: isForgingInProgress=${forgeState.isForgingInProgress}, queueLength=${forgeState.forgeQueue.length}`);
+        console.log(`[Better Forge] ⚠️ Early return: InProgress=${forgeState.isForgingInProgress}, Queue=${forgeState.forgeQueue.length}`);
         
         if (forgeState.forgeQueue.length === 0 && forgeState.isForging) {
           // Check if we have enough items to create more steps
@@ -767,6 +828,15 @@
               // Add to local inventory
               addEquipmentToLocalInventory(newEquipment);
               
+              // Now safely remove consumed items from intermediate results
+              const fromTier = step.fromTier;
+              if (forgeState.intermediateResults.has(fromTier)) {
+                const currentIntermediate = forgeState.intermediateResults.get(fromTier);
+                const updatedIntermediate = currentIntermediate.filter(id => id !== step.equipA && id !== step.equipB);
+                forgeState.intermediateResults.set(fromTier, updatedIntermediate);
+                console.log(`[Better Forge] 🗑️ Removed consumed items from intermediate results for T${fromTier}`);
+              }
+              
               // Update local equipment inventory state
               updateLocalEquipmentInventory([step.equipA, step.equipB], newEquipment);
               
@@ -784,12 +854,12 @@
                 forgeState.isFinalStep = true;
               }
               
-              // Update highlighting to reflect new state
+              // Update highlighting to reflect new state and remaining forge queue
               setTimeout(() => {
                 const { selectedEquipment, selectedTier, selectedStat } = getCurrentSelection();
                 if (selectedEquipment && selectedTier && selectedStat) {
                   highlightEquipmentForForging(selectedEquipment, selectedStat, selectedTier);
-                  console.log(`[Better Forge] 🎨 Updated equipment highlighting`);
+                  console.log(`[Better Forge] 🎨 Updated equipment highlighting with remaining queue items`);
                 }
               }, 100);
               
@@ -808,7 +878,7 @@
                   
                   // Verify inventory was updated
                   const freshInventory = getUserOwnedEquipment();
-                  console.log(`[Better Forge] 🔄 Fresh inventory check:`, freshInventory.length, 'items');
+                  console.log(`[Better Forge] 🔄 Inventory verified: ${freshInventory.length} items`);
                   
                   // Check if we need to create additional forging steps for the next tier
                   const nextTier = step.toTier;
@@ -1234,8 +1304,6 @@
           stat: existingBtn.getAttribute('data-stat') || ''
         };
         
-        console.log(`[Better Forge] 🔍 Comparing new T${equipment.tier} ${equipment.name} ${equipment.stat} with existing T${existingEquipment.tier} ${existingEquipment.name} ${existingEquipment.stat}`);
-        
         // Compare tiers first (higher tiers first)
         if (equipment.tier > existingEquipment.tier) {
           insertIndex = i;
@@ -1378,19 +1446,8 @@
       
       console.log(`[Better Forge] 🔍 Found items for T${fromTier}→T${fromTier + 1}: ${item1.id} + ${item2.id}`);
       
-      // Remove these items from their sources
-      if (intermediateItemIds.includes(item1.id)) {
-        const updatedIntermediate = intermediateItemIds.filter(id => id !== item1.id);
-        forgeState.intermediateResults.set(fromTier, updatedIntermediate);
-        console.log(`[Better Forge] 🗑️ Removed ${item1.id} from intermediate results for T${fromTier}`);
-      }
-      if (intermediateItemIds.includes(item2.id)) {
-        const updatedIntermediate = intermediateItemIds.filter(id => id !== item2.id);
-        forgeState.intermediateResults.set(fromTier, updatedIntermediate);
-        console.log(`[Better Forge] 🗑️ Removed ${item2.id} from intermediate results for T${fromTier}`);
-      }
-      
-      // Note: Items are consumed by the forge operation, no need to manually remove from local inventory
+      // Mark items for consumption but don't remove them yet - wait for API success
+      console.log(`[Better Forge] 🔄 Dynamic items assigned: ${item1.id} + ${item2.id}`);
       console.log(`[Better Forge] ✅ Items ${item1.id} and ${item2.id} will be consumed by forge operation`);
       
       return { item1, item2 };
@@ -1407,7 +1464,7 @@
       
       // Get available items at the current tier (including newly forged ones)
       const availableItems = forgeState.intermediateResults.get(currentTier) || [];
-      console.log(`[Better Forge] 📦 Available T${currentTier} items:`, availableItems);
+      console.log(`[Better Forge] 📦 Available T${currentTier} items: ${availableItems.length} items`);
       
       if (availableItems.length >= 2) {
         const pairsToForge = Math.floor(availableItems.length / 2);
@@ -1420,10 +1477,22 @@
         if (actualPairs > 0) {
           console.log(`[Better Forge] ➕ Creating ${actualPairs} new forging steps`);
           
+          // Validate that items actually exist before creating steps
+          const userInventory = getUserOwnedEquipment();
+          const validItems = availableItems.filter(id => 
+            userInventory.some(item => item.id === id) || 
+            forgeState.intermediateResults.get(currentTier)?.includes(id)
+          );
+          
+          if (validItems.length < 2) {
+            console.log(`[Better Forge] ⚠️ Insufficient valid T${currentTier} items (${validItems.length}) to create new steps`);
+            return;
+          }
+          
           // Create new forging steps for this tier
           for (let i = 0; i < actualPairs; i++) {
-            const item1Id = availableItems[i * 2];
-            const item2Id = availableItems[i * 2 + 1];
+            const item1Id = validItems[i * 2];
+            const item2Id = validItems[i * 2 + 1];
             
             const newStep = {
               type: 'forge',
@@ -1572,7 +1641,6 @@
             const dustGained = getDisenchantDust(equipment);
             console.log(`[Better Forge] 💰 Disenchant successful, dust gained:`, dustGained);
             updateLocalInventoryGoldDust(0, dustGained);
-            updateDustDisplayWithAnimation(dustGained);
           } else if (result.status === 404) {
             equipment.element.remove();
             removeEquipmentFromArsenal(equipment.id);
@@ -1747,7 +1815,7 @@
           }
         };
         
-        console.log(`[Better Forge] 📤 Sending payload:`, payload);
+        console.log(`[Better Forge] 📤 Sending forge request: ${equipA} + ${equipB}`);
         
         fetch('https://bestiaryarena.com/api/trpc/inventory.forgeEquips?batch=1', {
           method: 'POST',
@@ -2798,7 +2866,39 @@
       }
       
       // Calculate which items will be consumed (excludes target tier items)
-      const itemsToConsume = calculateItemsToConsume(equipment, stat, targetTier);
+      let itemsToConsume = calculateItemsToConsume(equipment, stat, targetTier);
+      
+      // If we're currently forging, also include equipment from remaining forge queue
+      if (forgeState.isForging && forgeState.forgeQueue.length > 0) {
+        const userInventory = getUserOwnedEquipment();
+        const queueItems = [];
+        
+        // Get all equipment IDs that will be used in remaining forge steps
+        forgeState.forgeQueue.forEach(step => {
+          if (step.equipA && step.equipB) {
+            const itemA = userInventory.find(item => item.id === step.equipA);
+            const itemB = userInventory.find(item => item.id === step.equipB);
+            if (itemA) queueItems.push(itemA);
+            if (itemB) queueItems.push(itemB);
+          }
+        });
+        
+        // Add intermediate results that will be used
+        for (let tier = 1; tier <= 4; tier++) {
+          const intermediateIds = forgeState.intermediateResults.get(tier) || [];
+          intermediateIds.forEach(id => {
+            const item = userInventory.find(item => item.id === id);
+            if (item) queueItems.push(item);
+          });
+        }
+        
+        // Combine with calculated items and remove duplicates
+        const allItems = [...itemsToConsume, ...queueItems];
+        const uniqueItems = allItems.filter((item, index, self) => 
+          index === self.findIndex(t => t.id === item.id)
+        );
+        itemsToConsume = uniqueItems;
+      }
       
       // Highlight the items that will be consumed and track their IDs
       itemsToConsume.forEach(item => {
@@ -3826,13 +3926,12 @@
            return [];
          }
          
-         const userEquips = playerContext.equips || [];
-         console.log(`[Better Forge] 📦 Raw player equips from state:`, userEquips.length, 'items');
-         
-         if (!userEquips || userEquips.length === 0) {
-           console.log('[Better Forge] 📦 No equipment found in player state');
-           return [];
-         }
+        const userEquips = playerContext.equips || [];
+        
+        if (!userEquips || userEquips.length === 0) {
+          console.log('[Better Forge] 📦 No equipment found in player state');
+          return [];
+        }
          
          const individualEquipment = userEquips
            .filter(equip => equip && equip.gameId)
@@ -3862,8 +3961,8 @@
            return a.stat.localeCompare(b.stat);
          });
          
-         console.log(`[Better Forge] 📦 Processed equipment:`, sortedEquipment.length, 'items');
-         return sortedEquipment;
+        console.log(`[Better Forge] 📦 Inventory: ${userEquips.length} raw → ${sortedEquipment.length} processed items`);
+        return sortedEquipment;
          
        } catch (error) {
          console.error('[Better Forge] 💥 Error getting user owned equipment:', error);
@@ -4261,10 +4360,11 @@
        
        const disenchantBtn = document.createElement('button');
        
-       disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6;';
+       disenchantBtn.style.cssText = 'background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border: 6px solid transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch; font-weight: 700; border-radius: 0; padding: 4px 12px; cursor: pointer; font-family: "Trebuchet MS", "Arial Black", Arial, sans-serif; font-size: 14px; outline: none; flex: 0.6; text-align: center; white-space: pre-line; line-height: 1.2;';
        
        if (forgeState.isConfirmationMode) {
-         updateDisenchantButtonState(disenchantBtn, 'confirmation');
+         const hasHighTier = hasHighTierItems();
+         updateDisenchantButtonState(disenchantBtn, 'confirmation', hasHighTier);
        } else if (forgeState.isDisenchanting) {
          updateDisenchantButtonState(disenchantBtn, 'disenchanting');
        } else {
@@ -4724,12 +4824,30 @@
          
          btn.innerHTML = '';
          btn.appendChild(itemPortrait);
+         
+         // Add warning symbol for T3, T4, T5 equipment
+         const tier = equipment.tier || 1;
+         if (tier >= 3) {
+           addWarningSymbolToButton(btn);
+         }
        } catch (e) {
          console.warn(`[Better Forge] Error creating item portrait for ${equipment.name}:`, e);
          createFallbackEquipmentSprite(btn, spriteId);
+         
+         // Add warning symbol for T3, T4, T5 equipment even for fallback
+         const tier = equipment.tier || 1;
+         if (tier >= 3) {
+           addWarningSymbolToButton(btn);
+         }
        }
      } else {
        createFallbackEquipmentSprite(btn, spriteId);
+       
+       // Add warning symbol for T3, T4, T5 equipment
+       const tier = equipment.tier || 1;
+       if (tier >= 3) {
+         addWarningSymbolToButton(btn);
+       }
      }
      
      btn.addEventListener('click', () => {
@@ -4739,7 +4857,7 @@
      return btn;
    }
    
-     function updateDisenchantStatus(customMessage = null) {
+     function updateDisenchantStatus(customMessage = null, isWarning = false) {
     try {
       const col2 = document.getElementById('disenchant-col2');
       const statusText = document.getElementById('disenchant-status');
@@ -4750,6 +4868,8 @@
         statusText.textContent = customMessage;
         if (customMessage.includes('Disenchanting completed')) {
           statusText.style.color = '#4ade80';
+        } else if (isWarning || customMessage.includes('WARNING')) {
+          statusText.style.color = '#ff4444';
         } else {
           statusText.style.color = '';
         }
@@ -4773,6 +4893,7 @@
       
       if (totalItems === 0) {
         statusText.textContent = 'No equipment selected';
+        statusText.style.color = '#e6d7b0'; // Reset to default color
       } else {
         // Calculate total dust preview
         let totalDust = 0;
@@ -4787,6 +4908,9 @@
         } else {
           statusText.textContent = `${totalItems} items selected - ${totalDust} dust`;
         }
+        
+        // Reset color to default white for normal status updates
+        statusText.style.color = '#e6d7b0';
       }
     } catch (error) {
       handleError(error, 'updateDisenchantStatus', false);
@@ -4823,6 +4947,9 @@
          resetConfirmationMode();
        }
        
+       // Refresh warning symbols for all equipment in disenchant box
+       refreshWarningSymbols();
+       
        updateDisenchantStatus();
        
      } catch (error) {
@@ -4854,6 +4981,9 @@
          if (forgeState.isConfirmationMode) {
            resetConfirmationMode();
          }
+         
+         // Refresh warning symbols for remaining equipment in disenchant box
+         refreshWarningSymbols();
          
          updateDisenchantStatus();
        }
