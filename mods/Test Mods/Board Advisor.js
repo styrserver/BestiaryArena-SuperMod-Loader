@@ -1519,6 +1519,18 @@ addDocumentListener('utility-api-ready', () => {
   console.log('[Board Advisor] Utility API is ready, equipment lookups should work better now');
 });
 
+// Handle visibility changes (user tabbing in/out)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && panelState.isOpen) {
+    // User tabbed back in and panel is open - clear any stuck pending requests
+    if (pendingAnalysisRequest) {
+      console.log('[Board Advisor] User tabbed back in - clearing pending analysis request');
+      pendingAnalysisRequest = null;
+      analysisState.isAnalyzing = false;
+    }
+  }
+});
+
 // Force-update all data sources when panel opens
 async function forceUpdateAllData() {
   try {
@@ -1763,6 +1775,9 @@ async function convertBoardAnalyzerData() {
     let convertedCount = 0;
     let skippedCount = 0;
     
+    // Serialize current board setup once for all runs (performance optimization)
+    const currentBoardSetup = currentBoard.boardSetup || [];
+    
     boardAnalyzerRunsForRoom.forEach((run, index) => {
       const convertedRun = {
         id: `sandbox_${run.timestamp}_${index}`,
@@ -1774,7 +1789,7 @@ async function convertBoardAnalyzerData() {
         rankPoints: run.rankPoints,
         completed: run.completed,
         winner: 'nonVillains',
-        boardSetup: run.boardSetup ? dataCollector.serializeBoardSetup(run.boardSetup) : (currentBoard.boardSetup || []),
+        boardSetup: run.boardSetup ? dataCollector.serializeBoardSetup(run.boardSetup) : currentBoardSetup,
         playerMonsters: run.playerMonsters,
         playerEquipment: run.playerEquipment,
         source: 'sandbox',
@@ -1844,6 +1859,9 @@ function convertBoardAnalyzerResults(boardAnalyzerResults) {
     
     console.log(`[Board Advisor] Converting Board Analyzer data for room: ${roomName} (${roomId})`);
 
+    // Serialize board setup once for all results (performance optimization)
+    const serializedBoardSetup = dataCollector.serializeBoardSetup(currentBoard.boardSetup);
+    
     // Process each result from Board Analyzer
     boardAnalyzerResults.results.forEach((result, index) => {
       if (!result || typeof result.ticks !== 'number') return;
@@ -1853,10 +1871,6 @@ function convertBoardAnalyzerResults(boardAnalyzerResults) {
         console.warn(`[Board Advisor] Skipping Board Analyzer result ${index + 1} - no seed data`);
         return;
       }
-      
-
-      // Serialize the board setup
-      const serializedBoardSetup = dataCollector.serializeBoardSetup(currentBoard.boardSetup);
 
       const runData = {
         id: `board_analyzer_${Date.now()}_${index}`,
@@ -2245,6 +2259,12 @@ class DataCollector {
           // Use captured board state instead of current board state
           const boardStateToUse = capturedBoardState || this.getCurrentBoardData();
           
+          // Serialize board setup once for all results (performance optimization)
+          const serializedBoardSetup = boardStateToUse?.boardSetup ? boardStateToUse.boardSetup.map(piece => ({
+            ...piece,
+            monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
+          })) : [];
+          
           // Process each result
           window.__boardAnalyzerResults.results.forEach((result, index) => {
             console.log(`[Board Advisor] Processing Board Analyzer result ${index + 1}:`, result);
@@ -2260,10 +2280,7 @@ class DataCollector {
               winner: result.completed ? 'nonVillains' : 'villains',
               ticks: result.ticks,
               rankPoints: result.rankPoints,
-              boardSetup: result.boardSetup || (boardStateToUse?.boardSetup ? boardStateToUse.boardSetup.map(piece => ({
-                ...piece,
-                monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
-              })) : []),
+              boardSetup: result.boardSetup || serializedBoardSetup,
               playerMonsters: result.playerMonsters || boardStateToUse?.playerMonsters || [],
               playerEquipment: result.playerEquipment || boardStateToUse?.playerEquipment || [],
               source: 'board_analyzer'
@@ -2290,8 +2307,8 @@ class DataCollector {
         }
       };
       
-      // Check for results every 500ms
-      setInterval(checkForBoardAnalyzerResults, 500);
+      // Check for results every 2000ms
+      setInterval(checkForBoardAnalyzerResults, 2000);
       console.log('[Board Advisor] Board Analyzer results listener set up');
     } catch (error) {
       console.error('[Board Advisor] Error setting up Board Analyzer listener:', error);
@@ -2674,17 +2691,12 @@ class DataCollector {
 
   serializeBoardSetup(boardConfig) {
     if (!boardConfig) return [];
+    if (boardConfig.length === 0) return [];
     
     // Filter for player pieces - be more flexible with the type check
     const playerPieces = boardConfig.filter(piece => {
       // Accept pieces with type 'player' or pieces without a type (assuming they're player pieces)
       const isPlayerPiece = piece.type === 'player' || !piece.type || piece.type === 'custom';
-      console.log('[Board Advisor] Piece type check:', {
-        type: piece.type,
-        isPlayerPiece: isPlayerPiece,
-        hasMonsterId: !!(piece.databaseId || piece.monsterId || piece.gameId),
-        hasEquipId: !!piece.equipId
-      });
       return isPlayerPiece;
     });
     
@@ -3884,7 +3896,16 @@ class AnalysisEngine {
     console.log(`[Board Advisor] Found patterns for creature counts:`, Array.from(creatureCountPatterns.keys()).sort());
     
     // First, find exact and similar matches from same room
+    // Limit processing to prevent performance issues
+    const maxPatternsToProcess = 1000;
+    let processedCount = 0;
+    
     for (const [hash, pattern] of relevantPatterns) {
+      if (processedCount >= maxPatternsToProcess) {
+        console.log(`[Board Advisor] Reached pattern processing limit (${maxPatternsToProcess}), stopping to prevent performance issues`);
+        break;
+      }
+      
       const similarity = this.calculateSimilarity(currentSetup, pattern.setup);
       
       // Check if this is an exact creature match
@@ -3904,11 +3925,21 @@ class AnalysisEngine {
           similar.push(setupData);
         }
       }
+      
+      processedCount++;
     }
     
     // Then, find patterns from other maps with same creature count for cross-map learning
     const sameCreatureCountPatterns = creatureCountPatterns.get(currentCreatureCount) || [];
+    let crossMapProcessedCount = 0;
+    const maxCrossMapPatterns = 500; // Lower limit for cross-map patterns
+    
     for (const { hash, pattern } of sameCreatureCountPatterns) {
+      if (crossMapProcessedCount >= maxCrossMapPatterns) {
+        console.log(`[Board Advisor] Reached cross-map pattern processing limit (${maxCrossMapPatterns}), stopping to prevent performance issues`);
+        break;
+      }
+      
       // Skip if already processed in relevantPatterns
       if (relevantPatterns.has(hash)) continue;
       
@@ -3926,6 +3957,8 @@ class AnalysisEngine {
         
         creatureCountMatches.push(setupData);
       }
+      
+      crossMapProcessedCount++;
     }
     
     // Prioritize exact matches first, then similar setups, then cross-map creature count matches
@@ -5010,16 +5043,8 @@ class AnalysisEngine {
     const similarSetupsCount = similarSetups.filter(s => !s.isExactMatch && !s.isCrossMap).length;
     const crossMapSetups = similarSetups.filter(s => s.isCrossMap).length;
     
-    // Provide learning insights based on available data
-    if (crossMapSetups > 0) {
-      insights.push({
-        type: 'learning',
-        title: 'Cross-Map Learning Active',
-        message: `Learning from ${crossMapSetups} similar ${currentCreatureCount}-creature map configurations`,
-        suggestion: 'The Board Advisor is analyzing patterns from other maps with the same creature count to suggest optimal strategies',
-        priority: 'low'
-      });
-    }
+    // Cross-map learning message is now handled by the actual recommendations
+    // No need to show a separate message here
     
     if (exactMatches === 0 && similarSetupsCount === 0 && crossMapSetups > 0) {
       insights.push({
@@ -5263,7 +5288,7 @@ class AnalysisEngine {
     console.log('[Board Advisor] generateTicksRecommendations - top10Runs ticks:', top10Runs.map(r => r.ticks));
     
     // Time consistency analysis - only for current setup
-    const currentSetupRuns = completedRuns.filter(run => {
+    const allCurrentSetupRuns = completedRuns.filter(run => {
       if (!run.boardSetup || run.boardSetup.length !== currentBoard.boardSetup.length) return false;
       
       // Check if all pieces match exactly (monster, equipment, tile)
@@ -5280,6 +5305,11 @@ class AnalysisEngine {
       return true;
     });
     
+    // Use top 50 best runs for consistency analysis (more meaningful than all runs)
+    const currentSetupRuns = allCurrentSetupRuns
+      .sort((a, b) => a.ticks - b.ticks)
+      .slice(0, Math.min(50, allCurrentSetupRuns.length));
+    
     // Only analyze consistency if we have multiple runs with the current setup
     if (currentSetupRuns.length >= 3) {
       const currentSetupAvgTime = currentSetupRuns.reduce((sum, r) => sum + r.ticks, 0) / currentSetupRuns.length;
@@ -5294,7 +5324,7 @@ class AnalysisEngine {
       recommendations.push({
         type: 'consistency',
         title: 'Improve Time Consistency',
-          message: `Your runs with this setup vary significantly (${Math.round(currentSetupConsistencyRatio * 100)}% variation). Best: ${currentSetupBestTime}, Worst: ${currentSetupWorstTime}`,
+          message: `Your top ${currentSetupRuns.length} runs with this setup vary significantly (${Math.round(currentSetupConsistencyRatio * 100)}% variation). Best: ${currentSetupBestTime}, Worst: ${currentSetupWorstTime}`,
           suggestion: 'Focus on consistent positioning and strategy to reduce time variance with this specific setup.',
         priority: 'medium',
         focusArea: 'ticks'
@@ -5376,7 +5406,37 @@ class AnalysisEngine {
           suggestion = 'Focus on micro-optimizations: faster monster positioning, reduced idle time, and perfect timing.';
         } else {
           message = `Your best time (${roundedBestTime}) is ${gapToWR} ticks behind the world record (${worldRecordTime} by ${worldRecordHolder}).`;
-          suggestion = 'Focus on major optimizations: better monster placement, equipment choices, and movement patterns. The Board Advisor will learn from your runs and suggest improvements based on similar map configurations.';
+          
+          // Generate more specific suggestions based on available data
+          let specificSuggestions = [];
+          
+          if (similarSetups && similarSetups.length > 0) {
+            const betterSetups = similarSetups.filter(s => s.ticks < bestTime).slice(0, 3);
+            if (betterSetups.length > 0) {
+              specificSuggestions.push(`Try the ${betterSetups.length} better setup${betterSetups.length > 1 ? 's' : ''} shown above (${betterSetups.map(s => s.ticks).join(', ')} ticks)`);
+            }
+          }
+          
+          if (currentBoard && currentBoard.boardSetup) {
+            const creatureCount = currentBoard.boardSetup.length;
+            if (creatureCount < 6) {
+              specificSuggestions.push(`Consider adding more creatures (you have ${creatureCount}/6)`);
+            } else if (creatureCount === 6) {
+              specificSuggestions.push('Try different creature combinations or equipment');
+            }
+          }
+          
+          if (gapToWR > 20) {
+            specificSuggestions.push('Focus on fundamental strategy changes');
+          } else if (gapToWR > 10) {
+            specificSuggestions.push('Optimize creature placement and movement patterns');
+          } else {
+            specificSuggestions.push('Fine-tune timing and reduce idle periods');
+          }
+          
+          suggestion = specificSuggestions.length > 0 
+            ? specificSuggestions.join('. ') + '.'
+            : 'Focus on major optimizations: better monster placement, equipment choices, and movement patterns.';
         }
       } else {
         message = isEqual
@@ -5832,6 +5892,13 @@ async function togglePanel() {
 
 async function openPanel() {
   if (panelState.isOpen) return;
+  
+  // Clear any pending analysis requests when panel opens (user tabbed back in)
+  if (pendingAnalysisRequest) {
+    console.log('[Board Advisor] Clearing pending analysis request on panel open');
+    pendingAnalysisRequest = null;
+    analysisState.isAnalyzing = false;
+  }
   
   // Show the panel (it was created during initialization)
   const panel = document.getElementById(PANEL_ID);
@@ -7423,7 +7490,18 @@ function debouncedAnalyzeCurrentBoard() {
   
   // Proceed with analysis
   pendingAnalysisRequest = currentBoardHash;
+  
+  // Add timeout to prevent analysis from getting stuck
+  const timeoutId = setTimeout(() => {
+    if (pendingAnalysisRequest === currentBoardHash) {
+      console.warn('[Board Advisor] Analysis timeout - clearing pending request');
+      pendingAnalysisRequest = null;
+      analysisState.isAnalyzing = false;
+    }
+  }, 5000); // 5 second timeout for better responsiveness
+  
   analyzeCurrentBoard().finally(() => {
+    clearTimeout(timeoutId);
     pendingAnalysisRequest = null;
   });
 }
@@ -9171,13 +9249,96 @@ exports = {
     }
   },
   cleanup: () => {
-    // Cleanup function for when mod is disabled
+    console.log('[Board Advisor] Starting comprehensive cleanup...');
+    
+    // 1. Stop state refresh system
     stopStateRefresh();
     
-    // Clear all caches and timeouts
-    analysisTimeout = null;
+    // 2. Clear all timeouts and intervals
+    if (analysisTimeout) {
+      clearTimeout(analysisTimeout);
+      analysisTimeout = null;
+    }
     
-    console.log('[Board Advisor] Cleanup completed');
+    // Clear any other timeouts that might be running
+    // Note: We can't track all setTimeout calls, but we clear the main ones
+    
+    // 3. Clean up all subscriptions
+    cleanupSubscriptions();
+    
+    // 4. Clean up all document event listeners
+    cleanupDocumentListeners();
+    
+    // 5. Clean up database connection
+    cleanupDatabase();
+    
+    // 6. Clean up tile highlights and overlays
+    cleanupTileHighlights();
+    
+    // 7. Close panel if open
+    if (panelState.isOpen) {
+      closePanel();
+    }
+    
+    // 8. Clean up data collector subscriptions
+    if (dataCollector && dataCollector.boardSubscription) {
+      try {
+        dataCollector.boardSubscription.unsubscribe();
+        dataCollector.boardSubscription = null;
+      } catch (e) {
+        console.warn('[Board Advisor] Error cleaning up data collector subscription:', e);
+      }
+    }
+    
+    // 9. Clean up board analyzer interval
+    const boardAnalyzerInterval = document.querySelector('[data-board-advisor-interval]');
+    if (boardAnalyzerInterval) {
+      clearInterval(boardAnalyzerInterval);
+    }
+    
+    // 10. Reset all state variables
+    analysisState = {
+      isAnalyzing: false,
+      isDataLoading: false,
+      currentAnalysis: null,
+      historicalData: [],
+      patterns: {},
+      recommendations: null,
+      lastBoardHash: null,
+      lastDataLoadTime: 0,
+      isUILoading: false,
+      pendingBoardChange: null,
+      lastBoardChangeTime: 0
+    };
+    
+    // 11. Clear performance tracker data
+    performanceTracker.runs = [];
+    performanceTracker.patterns.clear();
+    performanceTracker.optimalSetups.clear();
+    performanceTracker.roomStats.clear();
+    
+    // 12. Reset other state variables
+    currentRecommendedSetup = null;
+    placedRecommendedPieces.clear();
+    previousRoomId = null;
+    previousBoardPieceCount = 0;
+    runTrackerData = null;
+    isDBReady = false;
+    
+    // 13. Clear performance cache
+    performanceCache = {
+      lastRoomDetection: null,
+      lastRoomDetectionTime: 0
+    };
+    
+    // 14. Reset panel state
+    panelState = {
+      isOpen: false,
+      position: { x: 10, y: 70 },
+      size: { width: 350, height: 820 }
+    };
+    
+    console.log('[Board Advisor] Comprehensive cleanup completed');
   }
 };
 
@@ -9224,4 +9385,19 @@ window.addEventListener('beforeunload', () => {
   cleanupDocumentListeners();
   cleanupDatabase();
   stopStateRefresh();
+});
+
+// Listen for mod disable events
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
+    const modName = event.data.message.name;
+    const enabled = event.data.message.enabled;
+    
+    if (modName === 'Test Mods/Board Advisor.js' && !enabled) {
+      console.log('[Board Advisor] Mod disabled, running cleanup...');
+      if (exports && exports.cleanup) {
+        exports.cleanup();
+      }
+    }
+  }
 });

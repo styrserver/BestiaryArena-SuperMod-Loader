@@ -38,6 +38,10 @@ let sessionStartTime = 0;
 let updateIntervalId = null;
 let lastSeed = null;
 
+// Cleanup references
+let boardSubscription = null;
+let gameTimerSubscription = null;
+
 // Global variable for autoplay state - Declared once at the top
 let autoplayLogText = ""; 
 
@@ -2010,7 +2014,7 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
     });
 
     if (globalThis.state.board.subscribe) {
-        globalThis.state.board.subscribe(({ context }) => {
+        boardSubscription = globalThis.state.board.subscribe(({ context }) => {
             const serverResults = context.serverResults;
             if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') return;
             
@@ -2032,7 +2036,7 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
 
 // Add game end detection using gameTimer.
 if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.gameTimer && globalThis.state.gameTimer.subscribe) {
-    globalThis.state.gameTimer.subscribe((data) => {
+    gameTimerSubscription = globalThis.state.gameTimer.subscribe((data) => {
         // Skip processing if in sandbox mode
         if (isSandboxMode()) {
             return;
@@ -2073,6 +2077,7 @@ if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
     testButton.style.borderRadius = "5px";
     testButton.style.zIndex = "10000";
     testButton.style.cursor = "pointer";
+    testButton.setAttribute('data-hunt-analyzer-test', 'true');
     testButton.addEventListener("click", createAutoplayAnalyzerPanel);
     document.body.appendChild(testButton);
     console.log("[Hunt Analyzer] Fallback test button added.");
@@ -2401,3 +2406,90 @@ document.addEventListener('mouseup', function(e) {
         panelState.resetResizeState();
     }
 });
+
+// =======================
+// 6. Cleanup System
+// =======================
+
+// Simplified cleanup function
+function cleanupHuntAnalyzer() {
+    console.log('[Hunt Analyzer] Starting cleanup...');
+    
+    try {
+        // 1. Clear intervals
+        if (updateIntervalId) {
+            clearInterval(updateIntervalId);
+            updateIntervalId = null;
+        }
+        
+        // 2. Unsubscribe from subscriptions
+        if (boardSubscription) {
+            try {
+                boardSubscription.unsubscribe();
+                boardSubscription = null;
+            } catch (error) {
+                console.warn('[Hunt Analyzer] Error unsubscribing board:', error);
+            }
+        }
+        
+        if (gameTimerSubscription) {
+            try {
+                gameTimerSubscription.unsubscribe();
+                gameTimerSubscription = null;
+            } catch (error) {
+                console.warn('[Hunt Analyzer] Error unsubscribing gameTimer:', error);
+            }
+        }
+        
+        // 3. Remove panel and test button
+        const panel = document.getElementById(PANEL_ID);
+        if (panel && panel.parentNode) {
+            panel.parentNode.removeChild(panel);
+        }
+        
+        const testButton = document.querySelector('[data-hunt-analyzer-test]');
+        if (testButton && testButton.parentNode) {
+            testButton.parentNode.removeChild(testButton);
+        }
+        
+        // 4. Reset critical state only
+        autoplayCount = 0;
+        isGameActive = false;
+        allGameSessionsData = [];
+        globalAggregatedLootData.clear();
+        globalAggregatedCreatureData.clear();
+        itemVisualCache.clear();
+        
+        console.log('[Hunt Analyzer] Cleanup completed');
+        
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error during cleanup:', error);
+    }
+}
+
+// Listen for mod disable events
+window.addEventListener('message', (event) => {
+    if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
+        const modName = event.data.message.name;
+        const enabled = event.data.message.enabled;
+        
+        if (modName === 'Super Mods/Hunt Analyzer.js' && !enabled) {
+            console.log('[Hunt Analyzer] Mod disabled, running cleanup...');
+            cleanupHuntAnalyzer();
+        }
+    }
+});
+
+// Export functionality
+exports = {
+    cleanup: cleanupHuntAnalyzer,
+    getVersion: () => HUNT_ANALYZER_VERSION,
+    getStats: () => ({
+        autoplayCount,
+        totalGoldQuantity,
+        totalCreatureDrops,
+        totalEquipmentDrops,
+        totalDustQuantity,
+        totalStaminaSpent
+    })
+};

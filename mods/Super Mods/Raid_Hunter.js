@@ -7,6 +7,19 @@ console.log('[Raid Hunter] initializing...');
 
 const MOD_ID = 'raid-hunter';
 const RAID_CLOCK_ID = `${MOD_ID}-raid-clock`;
+
+// Default settings constants
+const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
+
+// Automation state constants
+const AUTOMATION_ENABLED = true;
+const AUTOMATION_DISABLED = false;
+
+// Helper function for automation state checks
+function isAutomationActive() {
+    return isAutomationEnabled === AUTOMATION_ENABLED;
+}
+
 const EVENT_TEXTS = [
     'Rat Plague',
     'Buzzing Madness', 
@@ -62,7 +75,7 @@ let questLogObserverTimeout = null;
 let lastRaidList = [];
 let isRaidActive = false;
 let raidEndCheckInterval = null;
-let isAutomationEnabled = false; // Default to disabled
+let isAutomationEnabled = AUTOMATION_DISABLED; // Default to disabled
 
 // Raid queue system for handling multiple raids
 let raidQueue = [];
@@ -138,7 +151,7 @@ function isFightToast(element) {
 
 // Handle fight toast detection
 function handleFightToast() {
-    if (!isAutomationEnabled) {
+    if (!isAutomationActive()) {
         console.log('[Raid Hunter] Fight toast detected but automation is disabled');
         return;
     }
@@ -150,7 +163,27 @@ function handleFightToast() {
         updateRaidState();
         if (raidQueue.length > 0 && !isCurrentlyRaiding) {
             console.log('[Raid Hunter] Fight toast detected - processing next raid');
-            processNextRaid();
+            
+            // Apply raid start delay if configured
+            const settings = loadSettings();
+            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
+            
+            if (raidStartDelay > 0) {
+                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
+                
+                setTimeout(() => {
+                    // Check if automation is still enabled after delay
+                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0 && !isCurrentlyRaiding) {
+                        console.log('[Raid Hunter] Raid start delay completed - processing raid');
+                        processNextRaid();
+                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
+                        console.log('[Raid Hunter] Automation disabled during fight toast delay');
+                    }
+                }, raidStartDelay * 1000);
+            } else {
+                // No delay, process immediately
+                processNextRaid();
+            }
         } else if (isCurrentlyRaiding) {
             console.log('[Raid Hunter] Fight toast detected but already raiding');
         } else {
@@ -234,7 +267,6 @@ function updateRaidState() {
         } else {
             statusText = 'No raids available';
         }
-        updateRaidClockStatus(statusText);
     } catch (error) {
         console.error('[Raid Hunter] Error updating raid state:', error);
     }
@@ -313,6 +345,12 @@ function processNextRaid() {
         return;
     }
     
+    // Check if automation is still enabled before starting
+    if (!isAutomationActive()) {
+        console.log('[Raid Hunter] Automation disabled - stopping raid processing');
+        return;
+    }
+    
     // Get next raid from queue
     const nextRaid = raidQueue.shift();
     if (!nextRaid) {
@@ -326,6 +364,13 @@ function processNextRaid() {
     
     // Close any open modals first, then start the raid
     closeOpenModals().then(() => {
+        // Double-check automation is still enabled before proceeding
+        if (isAutomationEnabled === AUTOMATION_DISABLED) {
+            console.log('[Raid Hunter] Automation disabled during modal close - stopping raid');
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            return;
+        }
         handleEventOrRaid(nextRaid.roomId);
     });
 }
@@ -621,8 +666,8 @@ function updateRaidClock() {
             const minutes = Math.floor((msRemaining % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((msRemaining % (1000 * 60)) / 1000);
             
-            // Format to match quest log timers: HH:MM:SS (no 'h' suffix like other timers)
-            const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            // Format as MM:SSm since raids typically update every 5-15 minutes
+            const timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}m`;
             timerElement.textContent = timeString;
             
             // Color coding to match quest log timer behavior
@@ -710,7 +755,7 @@ function handleInsufficientStamina() {
     startStaminaMonitoring();
     
     // Update status
-    updateRaidClockStatus('Waiting for stamina (checking every 3m)');
+    // Status messages removed - only countdown clock shown
 }
 
 // Start continuous stamina monitoring every 3 minutes
@@ -743,11 +788,9 @@ function startStaminaMonitoring() {
                     checkForExistingRaids();
                 } else {
                     console.log('[Raid Hunter] No active raids - waiting for new raids');
-                    updateRaidClockStatus('No raids available');
                 }
             } else {
                 console.log('[Raid Hunter] Still waiting for stamina');
-                updateRaidClockStatus('Waiting for stamina...');
             }
         } catch (error) {
             console.error('[Raid Hunter] Error during stamina monitoring:', error);
@@ -926,7 +969,7 @@ function loadAutomationState() {
             console.log('[Raid Hunter] Loaded automation state from localStorage:', isAutomationEnabled);
         } catch (error) {
             console.error('[Raid Hunter] Error parsing automation state:', error);
-            isAutomationEnabled = false;
+            isAutomationEnabled = AUTOMATION_DISABLED;
         }
     } else {
         console.log('[Raid Hunter] No saved automation state, using default (disabled)');
@@ -941,16 +984,39 @@ function saveAutomationState() {
 
 // Toggles automation on/off
 function toggleAutomation() {
-    isAutomationEnabled = !isAutomationEnabled;
+    isAutomationEnabled = isAutomationEnabled === AUTOMATION_DISABLED ? AUTOMATION_ENABLED : AUTOMATION_DISABLED;
     saveAutomationState(); // Save to localStorage
     updateToggleButton();
     
-    if (isAutomationEnabled) {
+    if (isAutomationActive()) {
         console.log('[Raid Hunter] Automation enabled');
+        
+        // Get raid start delay from settings
+        const settings = loadSettings();
+        const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
+        
+        console.log(`[Raid Hunter] Raid start delay: ${raidStartDelay} seconds`);
         
         // Re-enable monitoring
         setupRaidMonitoring();
-        checkForExistingRaids();
+        
+        // Wait for the specified delay before checking for raids
+        if (raidStartDelay > 0) {
+            console.log(`[Raid Hunter] Waiting ${raidStartDelay} seconds before checking for raids...`);
+            
+            setTimeout(() => {
+                // Check if automation is still enabled after delay
+                if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                    console.log('[Raid Hunter] Raid start delay completed - checking for raids');
+                    checkForExistingRaids();
+                } else {
+                    console.log('[Raid Hunter] Automation disabled during start delay');
+                }
+            }, raidStartDelay * 1000);
+        } else {
+            // No delay, check immediately
+            checkForExistingRaids();
+        }
     } else {
         console.log('[Raid Hunter] Automation disabled');
         
@@ -994,7 +1060,7 @@ function updateToggleButton() {
     const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
     if (!toggleButton) return;
     
-    if (isAutomationEnabled) {
+    if (isAutomationEnabled === AUTOMATION_ENABLED) {
         toggleButton.textContent = 'Enabled';
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     } else {
@@ -1038,11 +1104,15 @@ function stopAutoplayOnRaidEnd() {
         if (raidQueue.length > 0) {
             console.log(`[Raid Hunter] ${raidQueue.length} raids remaining in queue`);
             setTimeout(() => {
-                processNextRaid();
+                // Check if automation is still enabled before processing next raid
+                if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                    processNextRaid();
+                } else {
+                    console.log('[Raid Hunter] Automation disabled during raid end processing');
+                }
             }, 2000); // Small delay before starting next raid
         } else {
             console.log('[Raid Hunter] No more raids in queue');
-            updateRaidClockStatus('All raids completed');
         }
         
     } catch (error) {
@@ -1050,13 +1120,10 @@ function stopAutoplayOnRaidEnd() {
     }
 }
 
-// Updates raid clock status display
+// Updates raid clock status display (disabled - only shows countdown clock)
 function updateRaidClockStatus(status) {
-    const timerElement = document.querySelector(`#${RAID_CLOCK_ID} .raid-timer`);
-    if (timerElement) {
-        timerElement.textContent = status;
-        timerElement.style.color = '#ff6b6b'; // Red for ended status
-    }
+    // Status messages removed - only countdown clock is shown
+    // This function is kept to prevent errors but does nothing
 }
 
 // Monitors raid list changes to detect when raids end
@@ -1089,7 +1156,7 @@ function setupRaidListMonitoring() {
                     }
                     
                     // If new raids were added and we're not currently raiding, process next raid
-                    if (currentList.length > lastRaidList.length && !isCurrentlyRaiding) {
+                    if (currentList.length > lastRaidList.length && !isCurrentlyRaiding && isAutomationEnabled === AUTOMATION_ENABLED) {
                         console.log('[Raid Hunter] New raids detected - processing next raid');
                         processNextRaid();
                     }
@@ -1177,12 +1244,28 @@ async function handleEventOrRaid(roomId) {
         return;
     }
 
+    // Check if automation is still enabled before starting
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        console.log('[Raid Hunter] Automation disabled - stopping raid automation');
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        return;
+    }
+
     console.log(`[Raid Hunter] Starting raid automation for room ID: ${roomId}`);
 
     try {
         // Sleep for 1000ms before navigating to the raid map
         console.log('[Raid Hunter] Waiting 1000ms before navigation...');
         await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Check automation status after initial delay
+        if (isAutomationEnabled === AUTOMATION_DISABLED) {
+            console.log('[Raid Hunter] Automation disabled during navigation delay - stopping raid');
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            return;
+        }
         
         // Navigate to the raid map
         console.log('[Raid Hunter] Navigating to raid map...');
@@ -1192,6 +1275,14 @@ async function handleEventOrRaid(roomId) {
         });
         await new Promise(resolve => setTimeout(resolve, 1000));
         console.log('[Raid Hunter] Navigation completed');
+        
+        // Check automation status after navigation
+        if (isAutomationEnabled === AUTOMATION_DISABLED) {
+            console.log('[Raid Hunter] Automation disabled after navigation - stopping raid');
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            return;
+        }
     } catch (error) {
         console.error('[Raid Hunter] Error navigating to map via API:', error);
         handleRaidFailure('Failed to navigate to map');
@@ -1210,11 +1301,27 @@ async function handleEventOrRaid(roomId) {
     console.log('[Raid Hunter] Clicking Auto-setup button...');
     autoSetupButton.click();
     await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Check automation status after auto-setup
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        console.log('[Raid Hunter] Automation disabled after auto-setup - stopping raid');
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        return;
+    }
 
     // Enable autoplay mode
     console.log('[Raid Hunter] Enabling autoplay mode...');
     ensureAutoplayMode();
     await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Check automation status after enabling autoplay
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        console.log('[Raid Hunter] Automation disabled after enabling autoplay - stopping raid');
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        return;
+    }
     
     // Calculate and display sleep duration based on raid expiration
     try {
@@ -1270,6 +1377,14 @@ async function handleEventOrRaid(roomId) {
         return;
     }
     console.log('[Raid Hunter] Stamina check passed');
+    
+    // Check automation status before clicking Start button
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        console.log('[Raid Hunter] Automation disabled before starting raid - stopping raid');
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        return;
+    }
 
     // Find and click Start button
     console.log('[Raid Hunter] Looking for Start button...');
@@ -1283,6 +1398,14 @@ async function handleEventOrRaid(roomId) {
     console.log('[Raid Hunter] Clicking Start button...');
     startButton.click();
     await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Final check after clicking Start button
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        console.log('[Raid Hunter] Automation disabled after clicking Start - stopping raid');
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        return;
+    }
     
     console.log('[Raid Hunter] Raid automation sequence completed');
     
@@ -1389,7 +1512,6 @@ function handleRaidFailure(reason) {
     
     if (raidRetryCount < maxRetryAttempts) {
         console.log(`[Raid Hunter] Retrying raid (attempt ${raidRetryCount}/${maxRetryAttempts}) in 5 seconds...`);
-        updateRaidClockStatus(`Raid failed - retrying in 5s (${raidRetryCount}/${maxRetryAttempts})`);
         
         // Put the raid back in the queue for retry
         if (currentRaidInfo) {
@@ -1401,14 +1523,16 @@ function handleRaidFailure(reason) {
         currentRaidInfo = null;
         
         retryTimeout = setTimeout(() => {
-            if (raidQueue.length > 0) {
+            // Check if automation is still enabled before retrying
+            if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
                 console.log('[Raid Hunter] Retrying raid after failure...');
                 processNextRaid();
+            } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
+                console.log('[Raid Hunter] Automation disabled during retry - cancelling retry');
             }
         }, 5000);
     } else {
         console.log('[Raid Hunter] Max retry attempts reached - giving up on this raid');
-        updateRaidClockStatus(`Raid failed after ${maxRetryAttempts} attempts`);
         
         // Reset state and move to next raid
         isCurrentlyRaiding = false;
@@ -1418,7 +1542,12 @@ function handleRaidFailure(reason) {
         // Process next raid if available
         if (raidQueue.length > 0) {
             setTimeout(() => {
-                processNextRaid();
+                // Check if automation is still enabled before processing next raid
+                if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                    processNextRaid();
+                } else {
+                    console.log('[Raid Hunter] Automation disabled during next raid processing');
+                }
             }, 2000);
         }
     }
@@ -1439,7 +1568,7 @@ function ensureAutoplayMode() {
 async function checkForExistingRaids() {
     try {
         // Check if automation is enabled
-        if (!isAutomationEnabled) {
+        if (isAutomationEnabled === AUTOMATION_DISABLED) {
             console.log('[Raid Hunter] Automation is disabled - skipping existing raid check');
             return;
         }
@@ -1463,7 +1592,6 @@ async function checkForExistingRaids() {
             isCurrentlyRaiding = true;
             currentRaidInfo = { name: 'Unknown', roomId: null };
             startRaidEndChecking(); // Start monitoring for raid end
-            updateRaidClockStatus('Raid in progress...');
             return;
         }
         
@@ -1471,7 +1599,27 @@ async function checkForExistingRaids() {
         updateRaidState();
         if (raidQueue.length > 0) {
             console.log(`[Raid Hunter] Found ${raidQueue.length} raids available - processing next raid`);
-            processNextRaid();
+            
+            // Apply raid start delay if configured
+            const settings = loadSettings();
+            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
+            
+            if (raidStartDelay > 0) {
+                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
+                
+                setTimeout(() => {
+                    // Check if automation is still enabled after delay
+                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0 && !isCurrentlyRaiding) {
+                        console.log('[Raid Hunter] Raid start delay completed - processing raid');
+                        processNextRaid();
+                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
+                        console.log('[Raid Hunter] Automation disabled during existing raid delay');
+                    }
+                }, raidStartDelay * 1000);
+            } else {
+                // No delay, process immediately
+                processNextRaid();
+            }
         } else {
             const settings = loadSettings();
             const enabledMaps = settings.enabledRaidMaps || [];
@@ -1557,7 +1705,7 @@ function setupFightToastMonitoring() {
 // Handles new raid detection.
 async function handleNewRaid(raid) {
     // Check if automation is enabled
-    if (!isAutomationEnabled) {
+    if (isAutomationEnabled === AUTOMATION_DISABLED) {
         console.log('[Raid Hunter] New raid detected but automation is disabled');
         return;
     }
@@ -1587,7 +1735,26 @@ async function handleNewRaid(raid) {
         updateRaidState();
         if (raidQueue.length > 0 && !isCurrentlyRaiding) {
             console.log(`[Raid Hunter] New raids detected - processing next raid`);
-            processNextRaid();
+            
+            // Apply raid start delay if configured
+            const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
+            
+            if (raidStartDelay > 0) {
+                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
+                
+                setTimeout(() => {
+                    // Check if automation is still enabled after delay
+                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0 && !isCurrentlyRaiding) {
+                        console.log('[Raid Hunter] Raid start delay completed - processing raid');
+                        processNextRaid();
+                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
+                        console.log('[Raid Hunter] Automation disabled during new raid delay');
+                    }
+                }, raidStartDelay * 1000);
+            } else {
+                // No delay, process immediately
+                processNextRaid();
+            }
         }
     } catch (error) {
         console.error("[Raid Hunter] Error handling raid:", error);
@@ -2326,7 +2493,7 @@ function init() {
     setupRaidMonitoring();
     
     // Check for existing raids immediately and after a delay (only if automation is enabled)
-    if (isAutomationEnabled) {
+    if (isAutomationEnabled === AUTOMATION_ENABLED) {
         checkForExistingRaids();
         setTimeout(checkForExistingRaids, 1000);
     } else {

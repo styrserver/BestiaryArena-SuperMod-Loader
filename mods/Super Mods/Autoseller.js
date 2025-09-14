@@ -95,6 +95,11 @@
         DUST_PER_CREATURE: 10
     };
     
+    // Cleanup references
+    let boardSubscription1 = null;
+    let boardSubscription2 = null;
+    let debounceTimer = null;
+
     // Default Settings
     const DEFAULT_SETTINGS = {
         autoplantChecked: false,
@@ -2594,7 +2599,7 @@
     function setupAutosellerWidgetObserver() {
         // Listen for autoplay mode changes
         if (globalThis.state && globalThis.state.board) {
-            globalThis.state.board.subscribe((state) => {
+            boardSubscription1 = globalThis.state.board.subscribe((state) => {
                 const mode = state.context.mode;
                 const shouldShowWidget = shouldShowAutosellerWidget();
                 
@@ -3062,7 +3067,7 @@
         let lastProcessedBattleKey = null;
         if (globalThis.state.board && globalThis.state.board.subscribe) {
             console.log('[Autoseller] Setting up board subscription for battle completion...');
-            globalThis.state.board.subscribe(async ({ context }) => {
+            boardSubscription2 = globalThis.state.board.subscribe(async ({ context }) => {
                 const serverResults = context.serverResults;
                 if (!serverResults || !serverResults.rewardScreen || typeof serverResults.rewardScreen.gameTicks !== 'number') return;
                 
@@ -3107,6 +3112,21 @@
         initAutoseller();
     }
     
+    // Listen for mod disable events
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
+            const modName = event.data.message.name;
+            const enabled = event.data.message.enabled;
+            
+            if (modName === 'Super Mods/Autoseller.js' && !enabled) {
+                console.log('[Autoseller] Mod disabled, running cleanup...');
+                if (typeof exports !== 'undefined' && exports.cleanup) {
+                    exports.cleanup();
+                }
+            }
+        }
+    });
+    
     if (typeof exports !== 'undefined') {
         exports = {
             openSettings: openAutosellerModal,
@@ -3120,20 +3140,57 @@
                 clearSettingsCache();
             },
             cleanup: function() {
-                const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
-                const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
-                const style = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
+                console.log('[Autoseller] Starting cleanup...');
                 
-                if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
-                if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
-                if (style && style.parentNode) style.parentNode.removeChild(style);
-                
-                stopDragonPlantObserver();
-                stopAutoplantClickObserver();
-                
-                serverMonsterCache.clear();
-                daycareCache.clear();
-                stateManager.resetSession();
+                try {
+                    // 1. Unsubscribe from board subscriptions
+                    if (boardSubscription1) {
+                        try {
+                            boardSubscription1.unsubscribe();
+                            boardSubscription1 = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing board1:', error);
+                        }
+                    }
+                    
+                    if (boardSubscription2) {
+                        try {
+                            boardSubscription2.unsubscribe();
+                            boardSubscription2 = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing board2:', error);
+                        }
+                    }
+                    
+                    // 2. Clear timers
+                    if (debounceTimer) {
+                        clearTimeout(debounceTimer);
+                        debounceTimer = null;
+                    }
+                    
+                    // 3. Remove DOM elements
+                    const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
+                    const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
+                    const style = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
+                    
+                    if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
+                    if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
+                    if (style && style.parentNode) style.parentNode.removeChild(style);
+                    
+                    // 4. Stop observers
+                    stopDragonPlantObserver();
+                    stopAutoplantClickObserver();
+                    
+                    // 5. Clear caches and reset state
+                    serverMonsterCache.clear();
+                    daycareCache.clear();
+                    stateManager.resetSession();
+                    
+                    console.log('[Autoseller] Cleanup completed');
+                    
+                } catch (error) {
+                    console.error('[Autoseller] Error during cleanup:', error);
+                }
             }
         };
     }

@@ -10,6 +10,15 @@
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
+  // Event listener tracking for cleanup
+  const trackedEventListeners = [];
+  
+  // Helper function to track event listeners
+  function addTrackedEventListener(element, event, handler) {
+    element.addEventListener(event, handler);
+    trackedEventListeners.push({ element, event, handler });
+  }
+  
   const DICE_CONFIG = {
     MIN_DICE: 1,
     MAX_DICE: 5,
@@ -941,7 +950,7 @@
     }
     
     scrollArea.addEventListener('scroll', updateThumb);
-    window.addEventListener('resize', updateThumb);
+    addTrackedEventListener(window, 'resize', updateThumb);
     
     const resizeObserver = new ResizeObserver(updateThumb);
     resizeObserver.observe(scrollArea);
@@ -959,7 +968,7 @@
       e.preventDefault();
     });
     
-    document.addEventListener('mousemove', e => {
+    addTrackedEventListener(document, 'mousemove', e => {
       if (!isDragging) return;
       const contentHeight = scrollArea.scrollHeight;
       const visibleHeight = scrollArea.clientHeight;
@@ -972,7 +981,7 @@
       scrollArea.scrollTop = dragStartScroll + scrollDelta;
     });
     
-    document.addEventListener('mouseup', () => {
+    addTrackedEventListener(document, 'mouseup', () => {
       isDragging = false;
       document.body.style.userSelect = '';
     });
@@ -4533,6 +4542,20 @@
         }
       }
       
+      // Remove tracked event listeners
+      try {
+        trackedEventListeners.forEach(({ element, event, handler }) => {
+          try {
+            element.removeEventListener(event, handler);
+          } catch (e) {
+            console.warn('[Dice Roller] Error removing event listener:', e);
+          }
+        });
+        trackedEventListeners.length = 0; // Clear the array
+      } catch (e) {
+        console.warn('[Dice Roller] Error cleaning event listeners:', e);
+      }
+      
       // Clear module-scoped state (but preserve persistent config)
       diceRulesConfig = null;
       lastApiCall = 0;
@@ -4554,6 +4577,20 @@
   if (config.enabled) {
     observeInventory();
   }
+  
+  // Listen for mod disable events
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
+      const modName = event.data.message.name;
+      const enabled = event.data.message.enabled;
+      
+      if (modName === 'Super Mods/Dice_Roller.js' && !enabled) {
+        console.log('[Dice Roller] Mod disabled, running cleanup...');
+        cleanup();
+      }
+    }
+  });
+  
   if (typeof exports !== 'undefined') {
     exports.cleanup = cleanup;
   }
