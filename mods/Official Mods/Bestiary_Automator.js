@@ -12,6 +12,7 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   autoFinishTasks: false,
+  superAutoplay: false,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -50,6 +51,17 @@ const BUTTON_ID = `${MOD_ID}-button`;
 const CONFIG_BUTTON_ID = `${MOD_ID}-config-button`;
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
+// Super Autoplay timing constants
+const SUPER_AUTOPLAY_TIMING = {
+  INITIAL_DELAY: 100,       // Wait for game server API data processing (reduced for faster response)
+  SERVER_RESULTS_RETRY_DELAY: 200, // Delay between server results retry attempts
+  MAX_SERVER_RESULTS_RETRIES: 10,  // Maximum retry attempts for server results
+  NAVIGATION_DELAY: 150,     // Delay before/after navigation (reduced for faster response)
+  BUTTON_CLICK_DELAY: 150,   // Delay after button clicks (reduced for faster response)
+  DEFEAT_PROCESSING_DELAY: 300, // Delay before processing defeat toast
+  STATE_RESET_DELAY: 1000    // Delay before resetting state
+};
+
 // Only track states that prevent conflicts
 const AUTOMATION_STATES = {
   PROCESSING_DEFEAT: 'processing_defeat',  // Handling defeat toast
@@ -73,6 +85,7 @@ const TRANSLATIONS = {
     autoDayCare: 'Autohandle Daycare',
     autoPlayAfterDefeat: 'Autoplay after Defeat and Network Issues',
     autoFinishTasks: 'Autofinish Tasks',
+    superAutoplay: 'Super Autoplay',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -98,6 +111,7 @@ const TRANSLATIONS = {
     autoDayCare: 'Cuidar Automaticamente da Creche',
     autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
     autoFinishTasks: 'Finalizar Tarefas Automaticamente',
+    superAutoplay: 'Super Autoplay',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -372,6 +386,28 @@ let staminaRefillRetryCount = 0;
 let staminaRefillRetryTimeout = null;
 let lastStaminaRefillAttempt = 0;
 
+// Check if game is in sandbox mode
+const isSandboxMode = () => {
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    return boardContext?.mode === 'sandbox';
+  } catch (error) {
+    console.warn('[Bestiary Automator] Error checking sandbox mode:', error);
+    return false;
+  }
+};
+
+// Check if game is in autoplay mode
+const isAutoplayMode = () => {
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    return boardContext?.mode === 'autoplay';
+  } catch (error) {
+    console.warn('[Bestiary Automator] Error checking autoplay mode:', error);
+    return false;
+  }
+};
+
 // Check if game is in a state where automation should run
 const isGameActive = () => {
   try {
@@ -504,6 +540,9 @@ let rewardsCollectedThisSession = false;
 
 // Track if we've already processed quest log for current board state
 let questLogProcessedThisBoardState = false;
+
+// Track if Super Autoplay has been executed for this game session
+let superAutoplayExecutedThisSession = false;
 
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
@@ -1075,9 +1114,11 @@ const subscribeToGameState = () => {
         }
         lastGameStateChange = now;
         
-        console.log('[Bestiary Automator] New game detected, resetting rewards collection flag');
+        console.log('[Bestiary Automator] New game detected via game state API, resetting session flags');
+        console.log('[Bestiary Automator] New game event details:', event);
         rewardsCollectedThisSession = false;
         questLogProcessedThisBoardState = false;
+        superAutoplayExecutedThisSession = false;
         
         // Reset sleep state when new game starts (new hunting task might be available)
         if (isTaskCheckingSleeping) {
@@ -1107,6 +1148,12 @@ const subscribeToGameState = () => {
           }
         } catch (error) {
           console.error('[Bestiary Automator] Error logging task status on new game:', error);
+        }
+        
+        // Reset Super Autoplay session flag when a new game starts
+        if (config.superAutoplay) {
+          console.log('[Bestiary Automator] New game detected via game server API, resetting Super Autoplay session flag...');
+          superAutoplayExecutedThisSession = false;
         }
         
         // Cancel any ongoing countdown when new game starts
@@ -1297,6 +1344,26 @@ const processDefeatToast = async () => {
   
   // Check and finish tasks immediately when defeat is detected
   handleTaskFinishing();
+  
+  // Check if Super Autoplay is enabled and not already executed this session
+  if (config.superAutoplay && !superAutoplayExecutedThisSession) {
+    console.log('[Bestiary Automator] Defeat detected - triggering Super Autoplay...');
+    await sleep(SUPER_AUTOPLAY_TIMING.DEFEAT_PROCESSING_DELAY);
+    
+    // Click the defeat toast to dismiss it naturally
+    dismissDefeatToast();
+    
+    // Trigger Super Autoplay
+    await handleSuperAutoplay();
+    
+    // Reset state after delay
+    setTimeout(() => {
+      setState(null);
+      console.log('[Bestiary Automator] Defeat processing complete');
+    }, SUPER_AUTOPLAY_TIMING.STATE_RESET_DELAY);
+    
+    return true;
+  }
   
   console.log('[Bestiary Automator] Defeat toast detected, waiting 1s then restarting...');
   await sleep(1000);
@@ -1634,6 +1701,396 @@ const logTaskProgress = (context) => {
   }
 };
 
+// Super Autoplay Functions
+
+// Wait for server results to be available with retry logic
+const waitForServerResults = async () => {
+  for (let attempt = 1; attempt <= SUPER_AUTOPLAY_TIMING.MAX_SERVER_RESULTS_RETRIES; attempt++) {
+    try {
+      // Check if Game State API is available
+      if (!globalThis.state || !globalThis.state.board) {
+        console.log(`[Bestiary Automator] Game State API not available (attempt ${attempt})`);
+        await sleep(SUPER_AUTOPLAY_TIMING.SERVER_RESULTS_RETRY_DELAY);
+        continue;
+      }
+      
+      const boardContext = globalThis.state.board.getSnapshot().context;
+      const serverResults = boardContext.serverResults;
+      
+      if (serverResults && serverResults.rewardScreen) {
+        console.log(`[Bestiary Automator] Server results available after ${attempt} attempt(s)`);
+        return true;
+      }
+      
+      console.log(`[Bestiary Automator] Server results not ready yet (attempt ${attempt}/${SUPER_AUTOPLAY_TIMING.MAX_SERVER_RESULTS_RETRIES})`);
+      await sleep(SUPER_AUTOPLAY_TIMING.SERVER_RESULTS_RETRY_DELAY);
+    } catch (error) {
+      console.error(`[Bestiary Automator] Error checking server results (attempt ${attempt}):`, error);
+      await sleep(SUPER_AUTOPLAY_TIMING.SERVER_RESULTS_RETRY_DELAY);
+    }
+  }
+  
+  console.log('[Bestiary Automator] Server results never became available after all retries');
+  return false;
+};
+
+// Extract game time in ticks from server results (like RunTracker)
+const extractGameTimeFromServerResults = () => {
+  try {
+    // Check if Game State API is available
+    if (!globalThis.state || !globalThis.state.board) {
+      console.log('[Bestiary Automator] Game State API not available for game time extraction');
+      return null;
+    }
+    
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const serverResults = boardContext.serverResults;
+    
+    if (!serverResults || !serverResults.rewardScreen) {
+      console.log('[Bestiary Automator] No server results available yet');
+      return null;
+    }
+    
+    // Extract game time from server results (like RunTracker)
+    const gameTime = serverResults.rewardScreen.gameTicks;
+    
+    console.log(`[Bestiary Automator] Extracted game time: ${gameTime} ticks`);
+    return gameTime;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error extracting game time:', error);
+    return null;
+  }
+};
+
+// Extract map information from server results (like RunTracker)
+const extractMapFromServerResults = () => {
+  try {
+    // Check if Game State API is available
+    if (!globalThis.state || !globalThis.state.board) {
+      console.log('[Bestiary Automator] Game State API not available for map extraction');
+      return null;
+    }
+    
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const serverResults = boardContext.serverResults;
+    
+    if (!serverResults || !serverResults.rewardScreen) {
+      console.log('[Bestiary Automator] No server results available yet');
+      return null;
+    }
+    
+    // Extract map from server results (like RunTracker)
+    const mapId = serverResults.rewardScreen.roomId;
+    
+    if (!mapId) {
+      console.log('[Bestiary Automator] No map ID in server results');
+      return null;
+    }
+    
+    console.log(`[Bestiary Automator] Extracted map: ${mapId}`);
+    return mapId;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error extracting map:', error);
+    return null;
+  }
+};
+
+// Navigate to a specific map using Game State API (like Raid Hunter)
+const navigateToMap = async (mapId) => {
+  try {
+    if (!mapId) {
+      console.log('[Bestiary Automator] No map ID provided for navigation');
+      return false;
+    }
+    
+    // Check if Game State API is available
+    if (!globalThis.state || !globalThis.state.board) {
+      console.log('[Bestiary Automator] Game State API not available for map navigation');
+      return false;
+    }
+    
+    console.log(`[Bestiary Automator] Navigating to map: ${mapId}`);
+    
+    // Sleep before navigating to the map
+    console.log(`[Bestiary Automator] Waiting ${SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY}ms before navigation...`);
+    await sleep(SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY);
+    
+    // Use the Game State API to select the room by ID (like Raid Hunter)
+    globalThis.state.board.send({
+      type: 'selectRoomById',
+      roomId: mapId
+    });
+    
+    // Wait after navigation
+    await sleep(SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY);
+    console.log(`[Bestiary Automator] Navigation completed`);
+    
+    return true;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error navigating to map:', error);
+    return false;
+  }
+};
+
+// Click Auto-Setup button (like Raid Hunter)
+const clickAutoSetup = async () => {
+  try {
+    console.log('[Bestiary Automator] Looking for Auto-setup button...');
+    
+    // Use the same approach as Raid Hunter - find button by text
+    const autoSetupButton = findButtonByText('Auto-setup');
+    if (!autoSetupButton) {
+      console.log('[Bestiary Automator] Auto-setup button not found');
+      return false;
+    }
+    
+    console.log('[Bestiary Automator] Clicking Auto-setup button...');
+    autoSetupButton.click();
+    
+    // Wait after clicking
+    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
+    console.log('[Bestiary Automator] Auto-setup button clicked successfully');
+    return true;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error clicking Auto-setup button:', error);
+    return false;
+  }
+};
+
+// Helper function to find button by text (like Raid Hunter) - supports both English and Portuguese
+function findButtonByText(text) {
+  const buttons = Array.from(document.querySelectorAll('button'));
+  
+  // Define text mappings for different languages
+  const textMappings = {
+    'Auto-setup': ['Auto-setup', 'Autoconfigurar'],
+    'Start': ['Start', 'Iniciar']
+  };
+  
+  // Get the list of possible texts for the given text key
+  const possibleTexts = textMappings[text] || [text];
+  
+  return buttons.find(button => {
+    const buttonText = button.textContent.trim();
+    return possibleTexts.includes(buttonText) && isElementVisible(button);
+  }) || null;
+}
+
+// Helper function to check element visibility (like Raid Hunter)
+function isElementVisible(el) {
+  if (!el || el.disabled) return false;
+  return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+}
+
+// Helper function to check if Stop button is pressed
+function isStopButtonPressed() {
+  try {
+    const stopButton = document.querySelector('button.surface-red[data-state="closed"]');
+    return stopButton && stopButton.textContent.includes('Stop');
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking Stop button:', error);
+    return false;
+  }
+}
+
+// Click Start button (like Raid Hunter)
+const clickAutoplay = async () => {
+  try {
+    console.log('[Bestiary Automator] Looking for Start button...');
+    
+    // Use the same approach as Raid Hunter - find button by text
+    const startButton = findButtonByText('Start');
+    if (!startButton) {
+      console.log('[Bestiary Automator] Start button not found');
+      return false;
+    }
+    
+    console.log('[Bestiary Automator] Clicking Start button...');
+    startButton.click();
+    
+    // Wait after clicking
+    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
+    console.log('[Bestiary Automator] Start button clicked successfully');
+    return true;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error clicking Start button:', error);
+    return false;
+  }
+};
+
+// Main Super Autoplay function
+const handleSuperAutoplay = async () => {
+  if (!config.superAutoplay) {
+    return;
+  }
+  
+  // Only execute once per game session
+  if (superAutoplayExecutedThisSession) {
+    return;
+  }
+  
+  try {
+    console.log('[Bestiary Automator] === Starting Super Autoplay ===');
+    
+    // Check if game is actually running (not just initialized)
+    if (!isGameActive()) {
+      console.log('[Bestiary Automator] Game not active, skipping Super Autoplay');
+      return;
+    }
+    
+    // Check if game is in autoplay mode (not manual or sandbox)
+    if (!isAutoplayMode()) {
+      console.log('[Bestiary Automator] Game not in autoplay mode, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Check if game is in sandbox mode (should not run Super Autoplay)
+    if (isSandboxMode()) {
+      console.log('[Bestiary Automator] Game in sandbox mode, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Wait for the game server API data to be fully processed
+    await sleep(SUPER_AUTOPLAY_TIMING.INITIAL_DELAY);
+    
+    // Check for Stop button before starting
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected before starting - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Step 1: Wait for server results to be available
+    console.log('[Bestiary Automator] Step 1: Waiting for server results to be available...');
+    const serverResultsReady = await waitForServerResults();
+    if (!serverResultsReady) {
+      console.log('[Bestiary Automator] Server results never became available, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Check for Stop button after waiting for server results
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected after waiting for server results - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Step 2: Extract the game time in ticks (for logging purposes)
+    console.log('[Bestiary Automator] Step 2: Extracting game time from server results...');
+    const gameTime = extractGameTimeFromServerResults();
+    console.log('[Bestiary Automator] Game time extracted:', gameTime, 'ticks');
+    
+    // Check for Stop button after step 2
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected after step 2 - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // For Super Autoplay, we don't need to validate game time since we're restarting the same game
+    // The game time will be 0 or low since we're starting fresh
+    
+    // Step 3: Extract the map from server results
+    console.log('[Bestiary Automator] Step 3: Extracting map from server results...');
+    const mapId = extractMapFromServerResults();
+    if (!mapId) {
+      console.log('[Bestiary Automator] Could not extract map, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Check for Stop button after step 3
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected after step 3 - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Step 4: Sleep and then use API to send the user to the map
+    console.log(`[Bestiary Automator] Step 4: Sleeping ${SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY}ms then navigating to map...`);
+    await sleep(SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY);
+    
+    // Check for Stop button before navigation
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected before navigation - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    const navigationSuccess = await navigateToMap(mapId);
+    if (!navigationSuccess) {
+      console.log('[Bestiary Automator] Failed to navigate to map, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Check for Stop button after navigation
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected after navigation - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Step 5: Sleep and click on Auto-Setup
+    console.log(`[Bestiary Automator] Step 5: Sleeping ${SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY}ms then clicking Auto-Setup...`);
+    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
+    
+    // Check for Stop button before Auto-Setup
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected before Auto-Setup - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    const autoSetupSuccess = await clickAutoSetup();
+    if (!autoSetupSuccess) {
+      console.log('[Bestiary Automator] Failed to click Auto-Setup, skipping Super Autoplay');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Check for Stop button after Auto-Setup
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected after Auto-Setup - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Step 6: Sleep and look for Start button
+    console.log(`[Bestiary Automator] Step 6: Sleeping ${SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY}ms then looking for Start button...`);
+    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
+    
+    // Check for Stop button before final step
+    if (isStopButtonPressed()) {
+      console.log('[Bestiary Automator] Stop button detected before final step - user stopped the game, skipping Super Autoplay');
+      return;
+    }
+    
+    // Now look for the Start button
+    const startButton = findButtonByText('Start');
+    if (!startButton) {
+      console.log('[Bestiary Automator] Start button not available after setup, Super Autoplay incomplete');
+      // Mark as executed to prevent endless retries
+      superAutoplayExecutedThisSession = true;
+      return;
+    }
+    
+    // Click the Start button
+    console.log('[Bestiary Automator] Clicking Start button...');
+    startButton.click();
+    console.log('[Bestiary Automator] Start button clicked successfully');
+    
+    console.log('[Bestiary Automator] === Super Autoplay completed successfully ===');
+    
+    // Mark as executed for this session
+    superAutoplayExecutedThisSession = true;
+    
+  } catch (error) {
+    console.error('[Bestiary Automator] Error in Super Autoplay:', error);
+  }
+};
+
 // Simplified countdown function
 const startCountdown = async (duration) => {
   const countdownTask = { cancelled: false };
@@ -1667,8 +2124,9 @@ const startAutomation = () => {
   
   console.log('[Bestiary Automator] Starting automation loop');
   
-  // Reset rewards collection flag when starting automation
+  // Reset session flags when starting automation
   rewardsCollectedThisSession = false;
+  superAutoplayExecutedThisSession = false;
   
   
   // Run immediately once
@@ -1728,6 +2186,11 @@ const runAutomationTasks = async () => {
     await runTaskChecking(); // Add task checking to run continuously like daycare
     updateRequiredStamina();
     await refillStaminaIfNeeded();
+    
+    // Run Super Autoplay if enabled (only once per session, after server results are available)
+    if (config.superAutoplay && !superAutoplayExecutedThisSession) {
+      await handleSuperAutoplay();
+    }
     
     // Toast detection is now handled by MutationObserver - no need for interval checking
   } catch (error) {
@@ -1811,6 +2274,13 @@ const createConfigPanel = () => {
   // Auto play after defeat checkbox
   const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
+  // Super autoplay checkbox with warning
+  const superAutoplayWarningText = config.currentLocale === 'pt' 
+    ? '⚠️ Funcionalidade altamente experimental e instável. Força um pulo no tempo de espera de 3 segundos entre batalhas, reiniciando automaticamente os jogos. Pode causar comportamento inesperado ou conflitos com outros mods. Use por sua conta e risco.'
+    : '⚠️ Highly experimental and unstable feature. Forces a skip on the 3-second wait time between battles by automatically restarting games. May cause unexpected behavior or conflicts with other mods. Use at your own risk.';
+  
+  const superAutoplayContainer = createCheckboxContainerWithWarning('super-autoplay-checkbox', t('superAutoplay'), config.superAutoplay, superAutoplayWarningText);
+  
   // Add all elements to content
   content.appendChild(refillContainer);
   content.appendChild(staminaContainer);
@@ -1818,6 +2288,7 @@ const createConfigPanel = () => {
   content.appendChild(dayCareContainer);
   content.appendChild(autoFinishTasksContainer);
   content.appendChild(autoPlayContainer);
+  content.appendChild(superAutoplayContainer);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
@@ -1826,6 +2297,7 @@ const createConfigPanel = () => {
     const dayCareCheckbox = document.getElementById('auto-daycare-checkbox');
     const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
     const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox');
+    const superAutoplayCheckbox = document.getElementById('super-autoplay-checkbox');
     const staminaInput = document.getElementById('min-stamina-input');
     
     if (refillCheckbox) refillCheckbox.checked = config.autoRefillStamina;
@@ -1833,6 +2305,7 @@ const createConfigPanel = () => {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
+    if (superAutoplayCheckbox) superAutoplayCheckbox.checked = config.superAutoplay;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
   }, 100);
   
@@ -1869,6 +2342,7 @@ const createConfigPanel = () => {
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           config.autoFinishTasks = document.getElementById('auto-finish-tasks-checkbox').checked;
+          config.superAutoplay = document.getElementById('super-autoplay-checkbox').checked;
           
           // Save configuration
           const configToSave = {
@@ -1877,7 +2351,8 @@ const createConfigPanel = () => {
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
-            autoFinishTasks: config.autoFinishTasks
+            autoFinishTasks: config.autoFinishTasks,
+            superAutoplay: config.superAutoplay
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);
@@ -1972,6 +2447,35 @@ const createConfigPanel = () => {
     
     return container;
   }
+  
+  // Helper to create a checkbox container with warning symbol and tooltip
+  function createCheckboxContainerWithWarning(id, label, checked, warningText) {
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0;';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = id;
+    checkbox.checked = checked;
+    checkbox.style.cssText = 'width: 16px; height: 16px; margin-right: 10px;';
+    
+    // Create warning symbol with tooltip
+    const warningSymbol = document.createElement('span');
+    warningSymbol.textContent = '⚠️';
+    warningSymbol.style.cssText = 'margin-right: 8px; cursor: help; font-size: 16px; color: #ffaa00;';
+    warningSymbol.title = warningText;
+    
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = id;
+    labelElement.textContent = label;
+    labelElement.style.cssText = 'flex: 1; color: #ff4444; font-weight: bold;';
+    
+    container.appendChild(checkbox);
+    container.appendChild(warningSymbol);
+    container.appendChild(labelElement);
+    
+    return container;
+  }
 };
 
 // Create buttons
@@ -2028,6 +2532,7 @@ const applyButtonStyling = (btn) => {
     console.log('  - autoDayCare:', config.autoDayCare);
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
     console.log('  - autoFinishTasks:', config.autoFinishTasks);
+    console.log('  - superAutoplay:', config.superAutoplay);
   }
   
   if (config.autoRefillStamina) {
@@ -2035,8 +2540,8 @@ const applyButtonStyling = (btn) => {
     btn.style.background = `url('${greenBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
-  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
-    // Priority 2: Blue background for other auto features
+  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks || config.superAutoplay) {
+    // Priority 2: Blue background for other auto features including Super Autoplay
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
@@ -2056,8 +2561,9 @@ function init() {
   // Preload background images
   preloadBackgroundImages();
   
-  // Reset rewards collection flag on initialization
+  // Reset session flags on initialization
   rewardsCollectedThisSession = false;
+  superAutoplayExecutedThisSession = false;
   
   // Create the buttons
   createButtons();
@@ -2091,6 +2597,7 @@ let lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
+  superAutoplay: config.superAutoplay,
   boardAnalyzerRunning: false
 };
 
@@ -2101,6 +2608,7 @@ lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
+  superAutoplay: config.superAutoplay,
   boardAnalyzerRunning: false
 };
 
@@ -2113,6 +2621,7 @@ function updateAutomatorButton() {
     autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     autoFinishTasks: config.autoFinishTasks,
+    superAutoplay: config.superAutoplay,
     boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
   };
   
@@ -2178,6 +2687,9 @@ function updateSettingsModalUI() {
     const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox') || 
                                    document.querySelector('input[type="checkbox"][id*="finish"]');
     
+    const superAutoplayCheckbox = document.getElementById('super-autoplay-checkbox') || 
+                                 document.querySelector('input[type="checkbox"][id*="super"]');
+    
     const staminaInput = document.getElementById('min-stamina-input') || 
                         document.querySelector('input[type="number"][id*="stamina"]');
     
@@ -2187,6 +2699,7 @@ function updateSettingsModalUI() {
     console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
     console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
     console.log('  - autoFinishTasksCheckbox:', !!autoFinishTasksCheckbox);
+    console.log('  - superAutoplayCheckbox:', !!superAutoplayCheckbox);
     console.log('  - staminaInput:', !!staminaInput);
     
     if (refillCheckbox) {
@@ -2201,6 +2714,7 @@ function updateSettingsModalUI() {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
+    if (superAutoplayCheckbox) superAutoplayCheckbox.checked = config.superAutoplay;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
     
   } catch (error) {
@@ -2244,3 +2758,4 @@ context.exports = {
 
 // Also expose globally for other mods to access
 window.bestiaryAutomator = context.exports; 
+

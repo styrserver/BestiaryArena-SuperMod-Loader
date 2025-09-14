@@ -950,10 +950,24 @@ function getEventNameForRoomId(roomId) {
     return `Unknown (${roomId})`;
 }
 
-// Finds button by text content.
+// Finds button by text content - supports both English and Portuguese
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.find(button => button.textContent.trim() === text && isElementVisible(button)) || null;
+    
+    // Define text mappings for different languages
+    const textMappings = {
+        'Auto-setup': ['Auto-setup', 'Autoconfigurar'],
+        'Start': ['Start', 'Iniciar'],
+        'Close': ['Close', 'Fechar']
+    };
+    
+    // Get the list of possible texts for the given text key
+    const possibleTexts = textMappings[text] || [text];
+    
+    return buttons.find(button => {
+        const buttonText = button.textContent.trim();
+        return possibleTexts.includes(buttonText) && isElementVisible(button);
+    }) || null;
 }
 
 // ============================================================================
