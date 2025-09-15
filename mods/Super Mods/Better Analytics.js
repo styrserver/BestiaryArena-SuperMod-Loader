@@ -52,24 +52,7 @@
     };
     
     // =======================
-    // 2. Logging & Debugging
-    // =======================
-    
-    const logger = {
-        error: (functionName, message, error = null) => {
-            if (error) {
-                console.error(`[${modName}][ERROR][${functionName}] ${message}`, error);
-            } else {
-                console.error(`[${modName}][ERROR][${functionName}] ${message}`);
-            }
-        },
-        warn: (functionName, message) => {
-            console.warn(`[${modName}][WARN][${functionName}] ${message}`);
-        }
-    };
-    
-    // =======================
-    // 3. Global Variables
+    // 2. Global Variables
     // =======================
     let damageTrackingData = new Map();
     let gameStartTick = null;
@@ -95,7 +78,7 @@
     const CACHE_DURATION = 1000; // 1 second cache
     
     // =======================
-    // 4. Conflict Prevention Functions
+    // 3. Conflict Prevention Functions
     // =======================
     
     function startProcessing() {
@@ -113,7 +96,7 @@
     }
     
     // =======================
-    // 5. Core Functions
+    // 4. Core Functions
     // =======================
     
     // Helper function to validate if an element should receive DPS
@@ -219,7 +202,7 @@
             
             const analyzerPanel = document.querySelector(ANALYZER_PANEL_SELECTOR);
             if (!analyzerPanel) {
-                logger.warn('updateFinalDPSWithGameTicks', 'No analyzer panel found for final DPS update');
+                console.log(`[${modName}][DEBUG][updateFinalDPSWithGameTicks] No analyzer panel found for final DPS update`);
                 return;
             }
             
@@ -290,7 +273,7 @@
             
             return null;
         } catch (error) {
-            logger.error('getCurrentGameTicks', 'Error getting current game ticks', error);
+            console.log(`[${modName}][DEBUG][getCurrentGameTicks] Error getting current game ticks`, error);
             return null;
         }
     }
@@ -770,7 +753,7 @@
                     window._betterAnalyticsWarningCount++;
                     
                     if (window._betterAnalyticsWarningCount % 5 === 0) {
-                        logger.warn('restoreFrozenDPSDisplays', `${gameMode} mode: Server results still not available after ${maxRetries} retries (warning ${window._betterAnalyticsWarningCount})`);
+                        console.log(`[${modName}][DEBUG][restoreFrozenDPSDisplays] ${gameMode} mode: Server results still not available after ${maxRetries} retries (warning ${window._betterAnalyticsWarningCount})`);
                     }
                 }
             };
@@ -786,7 +769,7 @@
         const timerState = globalThis.state.gameTimer.getSnapshot();
         
         if (!boardState.context.gameStarted) {
-            logger.warn('startDamageTracking', 'Game not started yet, skipping tracking');
+            console.log(`[${modName}][DEBUG][startDamageTracking] Game not started yet, skipping tracking`);
             return;
         }
         
@@ -807,10 +790,10 @@
                 resetTracking();
             } else if (boardState.context.mode === 'manual') {
                 // Manual mode relies on server results, don't auto-set gameStartTick
-                logger.info('startDamageTracking', 'Manual mode detected, waiting for server results');
+                console.log(`[${modName}][INFO][startDamageTracking] Manual mode detected, waiting for server results`);
                 return;
             } else {
-                logger.warn('startDamageTracking', 'Game start tick not set, this should not happen');
+                console.log(`[${modName}][DEBUG][startDamageTracking] Game start tick not set, this should not happen`);
                 return;
             }
         }
@@ -1110,7 +1093,7 @@
             
 
         } catch (error) {
-            logger.error('cleanupAllDPSDisplays', 'Error cleaning up DPS displays', error);
+            console.log(`[${modName}][DEBUG][cleanupAllDPSDisplays] Error cleaning up DPS displays`, error);
         }
     }
     

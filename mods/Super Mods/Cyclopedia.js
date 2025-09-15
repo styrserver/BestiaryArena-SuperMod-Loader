@@ -11,7 +11,7 @@ const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
 
 // RunTracker integration
 let runTrackerAPI = null;
-const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '247px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
+const LAYOUT_CONSTANTS = { COLUMN_WIDTH: '247px', LEFT_COLUMN_WIDTH: '200px', MODAL_WIDTH: 900, MODAL_HEIGHT: 600, CHROME_HEIGHT: 70, COLORS: { PRIMARY: '#ffe066', SECONDARY: '#e6d7b0', BACKGROUND: '#232323', TEXT: '#fff', ERROR: '#ff6b6b', WARNING: '#888', PERFECT: '#FFD700', UNOWNED: '#666', HOVER: '#888' }, FONTS: { PRIMARY: 'pixel-font', SMALL: 'pixel-font-14', MEDIUM: 'pixel-font-16', LARGE: 'pixel-font-16', SIZES: { TITLE: 'pixel-font-16', BODY: 'pixel-font-16', SMALL: 'pixel-font-14', TINY: 'pixel-font-14' } } };
 
 // Maps Tab DOM Optimization System
 const MapsTabDOMOptimizer = {
@@ -553,10 +553,30 @@ const DOMUtils = {
     return scrollContainer;
   },
   
-  createListItem: function(text, className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY) {
+  createListItem: function(text, className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false) {
     const item = document.createElement('div');
     item.textContent = text; item.className = className;
-    Object.assign(item.style, { color: LAYOUT_CONSTANTS.COLORS.TEXT, cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' });
+    
+    // Apply styling based on item status
+    const baseStyle = { cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' };
+    if (isPerfect) {
+      // Gold color for perfect creatures - clean and distinct
+      Object.assign(item.style, { 
+        ...baseStyle, 
+        color: LAYOUT_CONSTANTS.COLORS.PERFECT
+      });
+    } else if (isT5) {
+      // Gold color for T5 equipment - same as perfect creatures
+      Object.assign(item.style, { 
+        ...baseStyle, 
+        color: LAYOUT_CONSTANTS.COLORS.PERFECT
+      });
+    } else if (isOwned) {
+      Object.assign(item.style, { ...baseStyle, color: LAYOUT_CONSTANTS.COLORS.TEXT });
+    } else {
+      Object.assign(item.style, { ...baseStyle, color: LAYOUT_CONSTANTS.COLORS.UNOWNED, filter: 'grayscale(0.7)' });
+    }
+    
     return item;
   }
 };
@@ -564,6 +584,200 @@ const DOMUtils = {
 // =======================
 // 4. Utility Functions
 // =======================
+
+// Function to check if user owns a creature
+function isCreatureOwned(creatureName) {
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const ownedMonsters = playerContext.monsters || [];
+    
+    // Get the gameId for this creature name
+    let creatureGameId = null;
+    
+    // Try to get gameId from monsterNameMap first
+    if (cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
+      if (entry) {
+        creatureGameId = entry.index;
+      }
+    }
+    
+    // Fallback to BestiaryModAPI utility
+    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
+    }
+    
+    // Check if any owned monster has this gameId
+    return ownedMonsters.some(monster => monster.gameId === creatureGameId);
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking creature ownership:', error);
+    return false;
+  }
+}
+
+// Function to check if user has a perfect creature (level 50 with 100 total genes)
+function isCreaturePerfect(creatureName) {
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const ownedMonsters = playerContext.monsters || [];
+    
+    // Get the gameId for this creature name
+    let creatureGameId = null;
+    
+    // Try to get gameId from monsterNameMap first
+    if (cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
+      if (entry) {
+        creatureGameId = entry.index;
+      }
+    }
+    
+    // Fallback to BestiaryModAPI utility
+    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
+    }
+    
+    // Check if any owned monster with this gameId is perfect (level 50 with 100 total genes)
+    return ownedMonsters.some(monster => {
+      if (monster.gameId === creatureGameId) {
+        const totalGenes = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
+        
+        // Calculate level from experience using the game's utility function
+        let level = 1;
+        if (globalThis.state?.utils?.expToCurrentLevel && monster.exp) {
+          level = globalThis.state.utils.expToCurrentLevel(monster.exp);
+        }
+        
+        // Debug logging for troubleshooting
+        if (totalGenes >= 90) { // Log creatures close to perfect for debugging
+          console.log(`[Cyclopedia] ${creatureName} (gameId: ${monster.gameId}): level=${level}, genes=${totalGenes}, exp=${monster.exp}`);
+        }
+        
+        return level >= 50 && totalGenes >= 100;
+      }
+      return false;
+    });
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking if creature is perfect:', error);
+    return false;
+  }
+}
+
+// Function to check if user owns equipment
+function isEquipmentOwned(equipmentName) {
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const ownedEquips = playerContext.equips || [];
+    
+    // Get the gameId for this equipment name
+    let equipmentGameId = null;
+    
+    // Try to get gameId from BestiaryModAPI utility
+    if (window.BestiaryModAPI?.utility?.maps) {
+      equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
+    }
+    
+    // Fallback to global state utils
+    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
+      const utils = globalThis.state.utils;
+      for (let i = 1; i < 1000; i++) {
+        try {
+          const eq = utils.getEquipment(i);
+          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
+            equipmentGameId = i;
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+    
+    // Check if any owned equipment has this gameId
+    return ownedEquips.some(equip => equip.gameId === equipmentGameId);
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking equipment ownership:', error);
+    return false;
+  }
+}
+
+// Function to check if user has T5 equipment (ALL 3 stats: hp, ad, ap at tier 5)
+function isEquipmentT5(equipmentName) {
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const ownedEquips = playerContext.equips || [];
+    
+    // Get the gameId for this equipment name
+    let equipmentGameId = null;
+    
+    // Try to get gameId from BestiaryModAPI utility
+    if (window.BestiaryModAPI?.utility?.maps) {
+      equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
+    }
+    
+    // Fallback to global state utils
+    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
+      const utils = globalThis.state.utils;
+      for (let i = 1; i < 1000; i++) {
+        try {
+          const eq = utils.getEquipment(i);
+          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
+            equipmentGameId = i;
+            break;
+          }
+        } catch (e) {}
+      }
+    }
+    
+    // Check if user has equipment with ALL 3 stats at tier 5
+    return ownedEquips.some(equip => {
+      if (equip.gameId === equipmentGameId) {
+        // Count how many stats are at tier 5
+        let t5Stats = 0;
+        const totalStats = 3; // hp, ad, ap
+        
+        // Check each stat type for tier 5 equipment
+        const statTypes = ['hp', 'ad', 'ap'];
+        statTypes.forEach(statType => {
+          const statEquips = ownedEquips.filter(e => 
+            e.gameId === equipmentGameId && 
+            e.stat === statType && 
+            e.tier >= 5
+          );
+          if (statEquips.length > 0) {
+            t5Stats++;
+          }
+        });
+        
+        // Debug logging for troubleshooting
+        if (t5Stats >= 2) { // Log equipment close to T5 for debugging
+          console.log(`[Cyclopedia] ${equipmentName} (gameId: ${equipmentGameId}): T5 stats=${t5Stats}/${totalStats}`);
+        }
+        
+        // Return true only if ALL 3 stats are at tier 5
+        return t5Stats >= totalStats;
+      }
+      return false;
+    });
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking if equipment is T5:', error);
+    return false;
+  }
+}
 
 // Function to get creature roles from monster data
 function getCreatureRoles(creatureName) {
@@ -1710,7 +1924,24 @@ function createBox({
   }
   
     items.forEach(name => {
-      const item = DOMUtils.createListItem(name);
+      // Check item status based on type
+      let isOwned = true;
+      let isPerfect = false;
+      let isT5 = false;
+      
+      if (type === 'creature') {
+        // Check if this is an unobtainable creature - if so, keep default styling
+        const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
+        if (!isUnobtainable) {
+          isOwned = isCreatureOwned(name);
+          isPerfect = isCreaturePerfect(name);
+        }
+      } else if (type === 'equipment') {
+        isOwned = isEquipmentOwned(name);
+        isT5 = isEquipmentT5(name);
+      }
+      
+      const item = DOMUtils.createListItem(name, LAYOUT_CONSTANTS.FONTS.SIZES.BODY, isOwned, isPerfect, isT5);
       
       const clickHandler = () => {
         if (clearAllSelections) {
@@ -1721,13 +1952,62 @@ function createBox({
           box.querySelectorAll('.cyclopedia-selected').forEach(el => {
             el.classList.remove('cyclopedia-selected');
             el.style.background = 'none';
-            el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            // Check item status and restore appropriate styling
+            const itemName = el.textContent;
+            if (type === 'creature') {
+              const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === itemName.toLowerCase());
+              if (!isUnobtainable) {
+                const isPerfect = isCreaturePerfect(itemName);
+                const isOwned = isCreatureOwned(itemName);
+                if (isPerfect) {
+                  el.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+                  el.style.filter = 'none';
+                } else if (!isOwned) {
+                  el.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+                  el.style.filter = 'grayscale(0.7)';
+                } else {
+                  el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                  el.style.filter = 'none';
+                }
+              } else {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                el.style.filter = 'none';
+              }
+            } else if (type === 'equipment') {
+              const isOwned = isEquipmentOwned(itemName);
+              const isT5 = isEquipmentT5(itemName);
+              if (isT5) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+                el.style.filter = 'none';
+              } else if (!isOwned) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+                el.style.filter = 'grayscale(0.7)';
+              } else {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                el.style.filter = 'none';
+              }
+            } else {
+              el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+              el.style.filter = 'none';
+            }
           });
         }
         
         item.classList.add('cyclopedia-selected');
         item.style.background = 'rgba(255,255,255,0.18)';
-        item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+        if (isPerfect) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isT5) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isOwned) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
+          item.style.filter = 'none';
+        } else {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.HOVER;
+          item.style.filter = 'grayscale(0.7)';
+        }
         
           if (type === 'creature') {
             setSelectedCreature(name);
@@ -1747,13 +2027,61 @@ function createBox({
         }
       };
       
-      const mouseEnterHandler = () => { item.style.background = 'rgba(255,255,255,0.08)'; };
+      const mouseEnterHandler = () => { 
+        item.style.background = 'rgba(255,255,255,0.08)';
+        // Maintain styling based on item status on hover
+        if (isPerfect) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isT5) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (!isOwned) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.HOVER;
+          item.style.filter = 'grayscale(0.7)';
+        }
+      };
       const mouseLeaveHandler = () => {
         if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'none';
+        // Restore original styling based on item status
+        if (isPerfect) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isT5) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (!isOwned) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+          item.style.filter = 'grayscale(0.7)';
+        }
       };
-      const mouseDownHandler = () => { item.style.background = 'rgba(255,255,255,0.18)'; };
+      const mouseDownHandler = () => { 
+        item.style.background = 'rgba(255,255,255,0.18)';
+        // Maintain styling based on item status on click
+        if (isPerfect) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isT5) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (!isOwned) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.HOVER;
+          item.style.filter = 'grayscale(0.7)';
+        }
+      };
       const mouseUpHandler = () => {
         if (!item.classList.contains('cyclopedia-selected')) item.style.background = 'rgba(255,255,255,0.08)';
+        // Restore original styling based on item status
+        if (isPerfect) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (isT5) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+          item.style.filter = 'none';
+        } else if (!isOwned) {
+          item.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+          item.style.filter = 'grayscale(0.7)';
+        }
       };
       
       EventHandlerManager.addHandler(item, 'click', clickHandler);
@@ -2448,13 +2776,41 @@ function openCyclopediaModal(options) {
       const creaturesBox = createCreatureBox('Creatures', GAME_DATA.ALL_CREATURES);
       const unobtainableBox = createCreatureBox('Unobtainable', GAME_DATA.UNOBTAINABLE_CREATURES);
       
+      // Set custom flex values for height proportions: Creatures 60%, Unobtainable 40%
+      creaturesBox.style.flex = '3 1 0';      // 3/5 = 60%
+      unobtainableBox.style.flex = '2 1 0';   // 2/5 = 40%
+      
       // Shared selection clearing
       const clearAllBestiarySelections = () => {
         [creaturesBox, unobtainableBox].forEach(box => {
           box.querySelectorAll('.cyclopedia-selected').forEach(el => {
           el.classList.remove('cyclopedia-selected');
           el.style.background = 'none';
-          el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+          // Check creature status and restore appropriate styling
+          const creatureName = el.textContent;
+          if (box === creaturesBox) {
+            const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+            if (!isUnobtainable) {
+              const isPerfect = isCreaturePerfect(creatureName);
+              const isOwned = isCreatureOwned(creatureName);
+              if (isPerfect) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.PERFECT;
+                el.style.filter = 'none';
+              } else if (!isOwned) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+                el.style.filter = 'grayscale(0.7)';
+              } else {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                el.style.filter = 'none';
+              }
+            } else {
+              el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+              el.style.filter = 'none';
+            }
+          } else {
+            el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+            el.style.filter = 'none';
+          }
         });
         });
       };
@@ -2515,11 +2871,35 @@ function openCyclopediaModal(options) {
       Object.assign(equipDetailsCol.style, EQUIPMENT_STYLES.column);
       equipDetailsCol.classList.add('text-whiteHighlight');
 
+      // Create top section for equipment details
+      const equipDetailsTop = document.createElement('div');
+      Object.assign(equipDetailsTop.style, {
+        flex: '0 0 30%', minHeight: '0', width: '100%', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start'
+      });
+
       const updateEquipDetailsTitle = (titleP) => {
         titleP.textContent = 'Equipment Details';
       };
       const { title: equipDetailsTitle, titleP: equipDetailsTitleP } = createTitleElement('Equipment Details', updateEquipDetailsTitle);
-      equipDetailsCol.appendChild(equipDetailsTitle);
+      equipDetailsTop.appendChild(equipDetailsTitle);
+
+      // Create bottom section for creature usage info
+      const equipDetailsBottom = document.createElement('div');
+      Object.assign(equipDetailsBottom.style, {
+        flex: '0 0 65%', minHeight: '0', width: '100%', display: 'flex',
+        flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
+        borderTop: '2px solid #444', marginTop: '5px', paddingTop: '5px'
+      });
+
+      const updateCreatureUsageTitle = (titleP) => {
+        titleP.textContent = 'Creature Usage';
+      };
+      const { title: creatureUsageTitle, titleP: creatureUsageTitleP } = createTitleElement('Creature Usage', updateCreatureUsageTitle);
+      equipDetailsBottom.appendChild(creatureUsageTitle);
+
+      equipDetailsCol.appendChild(equipDetailsTop);
+      equipDetailsCol.appendChild(equipDetailsBottom);
 
       const ownedEquipCol = document.createElement('div');
       Object.assign(ownedEquipCol.style, EQUIPMENT_STYLES.column);
@@ -2531,9 +2911,174 @@ function openCyclopediaModal(options) {
       const { title: ownedEquipTitle, titleP: ownedEquipTitleP } = createTitleElement('Owned Equipment', updateOwnedEquipTitle);
       ownedEquipCol.appendChild(ownedEquipTitle);
 
+      // Equipment-to-creature mapping cache for faster lookups
+      let equipmentCreatureCache = null;
+      
+      function buildEquipmentCreatureCache() {
+        if (equipmentCreatureCache) return equipmentCreatureCache;
+        
+        const cache = new Map(); // Map<equipId, Map<roomName, Set<creatureName>>>
+        const rooms = globalThis.state?.utils?.ROOMS;
+        const roomNames = globalThis.state?.utils?.ROOM_NAME;
+        
+        if (!rooms || !roomNames) {
+          console.warn('[Cyclopedia] Missing room data for cache');
+          return cache;
+        }
+        
+        console.log('[Cyclopedia] Building equipment creature cache...');
+        let totalActors = 0;
+        let actorsWithEquipment = 0;
+        
+        // Use the working approach: iterate through all rooms
+        Object.entries(rooms).forEach(([roomIndex, room]) => {
+          try {
+            const actors = room.file?.data?.actors;
+            if (!actors || !Array.isArray(actors)) return;
+            
+            const roomCode = room.id;
+            const roomName = roomNames[roomCode] || roomCode;
+            
+            actors.forEach(actor => {
+              totalActors++;
+              if (actor?.equip?.gameId) {
+                actorsWithEquipment++;
+                const equipId = actor.equip.gameId;
+                const creatureId = actor.id;
+                
+                // Get creature name
+                let creatureName = 'Unknown Creature';
+                try {
+                  if (globalThis.state?.utils?.getMonster) {
+                    const monsterData = globalThis.state.utils.getMonster(creatureId);
+                    creatureName = monsterData?.metadata?.name || creatureName;
+                  }
+                } catch (error) {
+                  // Skip if can't get creature name
+                }
+                
+                if (!cache.has(equipId)) {
+                  cache.set(equipId, new Map());
+                }
+                
+                const equipData = cache.get(equipId);
+                if (!equipData.has(roomCode)) {
+                  equipData.set(roomCode, new Set());
+                }
+                equipData.get(roomCode).add(creatureName);
+              }
+            });
+          } catch (error) {
+            console.warn('[Cyclopedia] Error building cache for room:', roomIndex, error);
+          }
+        });
+        
+        equipmentCreatureCache = cache;
+        return cache;
+      }
+
+      // Helper function to navigate to a map by name
+      function navigateToMap(mapName) {
+        const regions = globalThis.state?.utils?.REGIONS;
+        
+        if (!regions) return false;
+        
+        // Find the room code that matches this map name using region data
+        for (const region of regions) {
+          if (!region.rooms) continue;
+          
+          for (const room of region.rooms) {
+            const roomName = room.name || room.id;
+            if (roomName === mapName) {
+              globalThis.state.board.send({
+                type: 'selectRoomById',
+                roomId: room.id
+              });
+              // Try to close the modal if present
+              const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
+                btn => btn.textContent.trim() === 'Close'
+              );
+              if (closeBtn) {
+                closeBtn.click();
+              }
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+
+      // Function to get creature usage data for equipment (optimized with cache)
+      function getCreatureUsageForEquipment(equipId) {
+        const usageData = [];
+        
+        try {
+          // Use cached data for instant lookup
+          const cache = buildEquipmentCreatureCache();
+          const equipData = cache.get(equipId);
+          
+          if (!equipData) {
+            return usageData; // No creatures found using this equipment
+          }
+          
+          // Get region data for proper ordering
+          const regions = globalThis.state?.utils?.REGIONS;
+          if (!regions) {
+            // Fallback: just return all rooms in cache order
+            const roomNames = globalThis.state?.utils?.ROOM_NAME;
+            equipData.forEach((creatures, roomCode) => {
+              const displayName = roomNames?.[roomCode] || roomCode;
+              usageData.push({
+                mapName: displayName,
+                creatures: Array.from(creatures).sort(),
+                regionName: 'Other Maps'
+              });
+            });
+            return usageData;
+          }
+          
+          // Build ordered list using region room order
+          const orderedUsage = [];
+          regions.forEach(region => {
+            if (!region.rooms) return;
+            
+            const regionName = region.id ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+            let regionHasMaps = false;
+            
+            region.rooms.forEach(room => {
+              const roomCode = room.id;
+              
+              if (equipData.has(roomCode)) {
+                const creatures = Array.from(equipData.get(roomCode)).sort();
+                if (creatures.length > 0) {
+                  // Use the room name from ROOM_NAME mapping, fallback to room code if no name
+                  const roomNames = globalThis.state?.utils?.ROOM_NAME;
+                  const displayName = roomNames?.[roomCode] || roomCode;
+                  orderedUsage.push({
+                    mapName: displayName,
+                    creatures: creatures,
+                    regionName: regionName
+                  });
+                  regionHasMaps = true;
+                }
+              }
+            });
+          });
+          
+          return orderedUsage;
+          
+        } catch (error) {
+          console.warn('[Cyclopedia] Error getting creature usage data:', error);
+        }
+        
+        return usageData;
+      }
+
       function updateRightCol() {
-        equipDetailsCol.innerHTML = '';
-        equipDetailsCol.appendChild(equipDetailsTitle);
+        equipDetailsTop.innerHTML = '';
+        equipDetailsTop.appendChild(equipDetailsTitle);
+        equipDetailsBottom.innerHTML = '';
+        equipDetailsBottom.appendChild(creatureUsageTitle);
 
         // Get the current selectedEquipment value from the outer scope
         // We need to access the updated value, not the captured one
@@ -2554,32 +3099,45 @@ function openCyclopediaModal(options) {
         
         if (!currentSelectedEquipment) {
           equipDetailsTitleP.textContent = 'Equipment Details';
-          equipDetailsCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view details</div>';
+          equipDetailsTop.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view details</div>';
+          creatureUsageTitleP.textContent = 'Creature Usage';
+          equipDetailsBottom.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Select equipment to view creature usage</div>';
         } else {
           equipDetailsTitleP.textContent = currentSelectedEquipment;
+          creatureUsageTitleP.textContent = `Creatures using ${currentSelectedEquipment}`;
+          
+          // Find equipment ID by name
           let equipId = null;
-
+          
+          // Try BestiaryModAPI first (faster)
           if (window.BestiaryModAPI?.utility?.maps) {
             equipId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds.get(currentSelectedEquipment.toLowerCase());
           }
-
+          
+          // Fallback to brute force search
           if (equipId == null && globalThis.state?.utils?.getEquipment) {
             const utils = globalThis.state.utils;
+            const searchName = currentSelectedEquipment.toLowerCase();
             for (let i = 1; i < 1000; i++) {
               try {
                 const eq = utils.getEquipment(i);
-                if (eq?.metadata?.name?.toLowerCase() === currentSelectedEquipment.toLowerCase()) {
+                if (eq?.metadata?.name?.toLowerCase() === searchName) {
                   equipId = i;
                   break;
                 }
-              } catch (e) {}
+              } catch (e) {
+                // Equipment ID doesn't exist, continue
+              }
             }
           }
 
           if (equipId == null) {
-            equipDetailsCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Equipment not found</div>';
+            equipDetailsTop.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Equipment not found</div>';
+            equipDetailsBottom.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">Equipment not found</div>';
           } else {
             const equipData = globalThis.state.utils.getEquipment(equipId);
+            
+            // Equipment details section
             const wrap = document.createElement('div');
             wrap.style.display = 'flex';
             wrap.style.flexDirection = 'column';
@@ -2624,7 +3182,129 @@ function openCyclopediaModal(options) {
 
             wrap.appendChild(portrait);
             wrap.appendChild(tooltipDiv);
-            equipDetailsCol.appendChild(wrap);
+            equipDetailsTop.appendChild(wrap);
+
+            // Creature usage section
+            const creatureUsageContainer = document.createElement('div');
+            creatureUsageContainer.style.cssText = `
+              width: 100%; height: 100%; overflow-y: auto; padding: 6px; box-sizing: border-box;
+              display: flex; flex-direction: column; gap: 4px;
+            `;
+
+            // Get creature usage data
+            const creatureUsageData = getCreatureUsageForEquipment(equipId);
+            
+            if (creatureUsageData.length === 0) {
+              const noUsageDiv = document.createElement('div');
+              noUsageDiv.className = LAYOUT_CONSTANTS.FONTS.SIZES.SMALL;
+              noUsageDiv.style.textAlign = 'center';
+              noUsageDiv.style.color = '#888';
+              noUsageDiv.style.padding = '20px';
+              noUsageDiv.style.fontStyle = 'italic';
+              noUsageDiv.textContent = 'No creatures found using this equipment';
+              creatureUsageContainer.appendChild(noUsageDiv);
+            } else {
+              
+              // Group maps by region
+              const mapsByRegion = {};
+              creatureUsageData.forEach(usage => {
+                const regionName = usage.regionName || 'Other Maps';
+                if (!mapsByRegion[regionName]) {
+                  mapsByRegion[regionName] = [];
+                }
+                mapsByRegion[regionName].push(usage);
+              });
+              
+              // Display maps grouped by region
+              Object.entries(mapsByRegion).forEach(([regionName, maps]) => {
+                // Add region header (styled like Bestiary Tab)
+                const regionHeader = document.createElement('div');
+                regionHeader.className = 'pixel-font-16';
+                regionHeader.style.cssText = `
+                  font-weight: 700; color: var(--theme-text, #e6d7b0);
+                  background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png");
+                  border-width: 6px; border-style: solid; border-color: rgb(255, 224, 102);
+                  border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill;
+                  border-radius: 0px; box-sizing: border-box; text-align: center;
+                  padding: 1px 4px; margin: 1px 0px 0px; display: block;
+                `;
+                regionHeader.textContent = regionName;
+                creatureUsageContainer.appendChild(regionHeader);
+                
+                // Add maps for this region
+                maps.forEach(usage => {
+                  const usageDiv = document.createElement('div');
+                  usageDiv.style.cssText = `
+                    padding: 4px 6px; display: flex; flex-direction: column; gap: 3px;
+                    margin-top: 2px; margin-bottom: 2px; line-height: 1;
+                    letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
+                    color: rgb(255, 255, 255);
+                  `;
+                  usageDiv.className = 'pixel-font-16';
+                  
+                  // Map name with click functionality
+                  const mapNameDiv = document.createElement('div');
+                  mapNameDiv.className = 'pixel-font-14';
+                  mapNameDiv.style.cssText = `
+                    font-weight: bold; line-height: 1; letter-spacing: 0.0625rem;
+                    word-spacing: -0.1875rem; margin: 0px; padding: 2px 6px;
+                    border-radius: 4px; display: flex; justify-content: space-between;
+                    align-items: center; text-align: left; cursor: pointer;
+                    text-decoration: underline; background: transparent;
+                    color: rgb(255, 255, 255);
+                  `;
+                  mapNameDiv.title = 'Click to go to this map';
+                  
+                  const mapNameSpan = document.createElement('span');
+                  mapNameSpan.style.cssText = `
+                    flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap;
+                  `;
+                  mapNameSpan.textContent = usage.mapName;
+                  
+                  // Add click handler for map navigation
+                  mapNameDiv.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    navigateToMap(usage.mapName);
+                  });
+                  
+                  // Add hover effect like Bestiary Tab
+                  mapNameDiv.addEventListener('mouseenter', () => {
+                    mapNameDiv.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
+                    mapNameDiv.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
+                  });
+                  mapNameDiv.addEventListener('mouseleave', () => {
+                    mapNameDiv.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
+                    mapNameDiv.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
+                  });
+                  
+                  mapNameDiv.appendChild(mapNameSpan);
+                  usageDiv.appendChild(mapNameDiv);
+                  
+                  // Creature info
+                  const creatureInfoDiv = document.createElement('div');
+                  creatureInfoDiv.className = 'pixel-font-14';
+                  creatureInfoDiv.style.cssText = `
+                    color: rgb(170, 170, 170); line-height: 1;
+                    letter-spacing: 0.0625rem; word-spacing: -0.1875rem;
+                    margin-left: 6px; margin-top: 0px; font-style: italic;
+                  `;
+                  creatureInfoDiv.textContent = `${usage.creatures.join(', ')}`;
+                  usageDiv.appendChild(creatureInfoDiv);
+                  
+                  // Add separator
+                  const separator = document.createElement('div');
+                  separator.className = 'separator my-2.5';
+                  separator.setAttribute('role', 'none');
+                  separator.style.cssText = 'margin: 3px 0px;';
+                  usageDiv.appendChild(separator);
+                  
+                  creatureUsageContainer.appendChild(usageDiv);
+                });
+              });
+            }
+
+            equipDetailsBottom.appendChild(creatureUsageContainer);
           }
         }
 
@@ -2666,7 +3346,17 @@ function openCyclopediaModal(options) {
           ownedEquipTitleP.textContent = `Owned ${currentSelectedEquipment} (${owned.length})`;
 
           if (owned.length === 0) {
-            ownedEquipCol.innerHTML += '<div class="' + LAYOUT_CONSTANTS.FONTS.SIZES.BODY + '" style="text-align:center;">You do not own this equipment.</div>';
+            const noEquipmentDiv = document.createElement('div');
+            noEquipmentDiv.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
+            noEquipmentDiv.textContent = 'You do not own this equipment.';
+            // Center the text both horizontally and vertically
+            noEquipmentDiv.style.textAlign = 'center';
+            noEquipmentDiv.style.padding = '20px';
+            noEquipmentDiv.style.display = 'flex';
+            noEquipmentDiv.style.alignItems = 'center';
+            noEquipmentDiv.style.justifyContent = 'center';
+            noEquipmentDiv.style.height = '100%';
+            ownedEquipCol.appendChild(noEquipmentDiv);
           } else {
             const statTypes = ['hp', 'ad', 'ap'];
             const statIcons = {
@@ -4261,7 +4951,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           return GAME_DATA.REGION_NAME_MAP[regionId];
         }
         
-        return region.id ? region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()) : 'Unknown Region';
+        return region.id ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
       }
 
       function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
@@ -7314,7 +8004,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
-                        regionName = regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
                         console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
                       }
                     }
@@ -7902,7 +8592,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
                         regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
                         // Capitalize region name
-                        regionName = regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
                         console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
                       }
                     }
@@ -10293,6 +10983,13 @@ function renderCreatureTemplate(name) {
     } else {
       col3Content.className = LAYOUT_CONSTANTS.FONTS.SIZES.BODY;
       col3Content.textContent = 'You do not own this creature.';
+      // Center the text both horizontally and vertically
+      col3Content.style.textAlign = 'center';
+      col3Content.style.padding = '20px';
+      col3Content.style.display = 'flex';
+      col3Content.style.alignItems = 'center';
+      col3Content.style.justifyContent = 'center';
+      col3Content.style.height = '100%';
     }
   }
   col3.appendChild(col3Title);
@@ -11264,3 +11961,5 @@ if (typeof window !== 'undefined') {
 if (typeof context !== 'undefined' && context.api) {
   exports.init();
 }
+
+

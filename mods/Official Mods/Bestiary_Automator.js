@@ -544,6 +544,74 @@ let questLogProcessedThisBoardState = false;
 // Track if Super Autoplay has been executed for this game session
 let superAutoplayExecutedThisSession = false;
 
+// Track if Super Autoplay is currently running
+let superAutoplayRunning = false;
+
+// Rate limiting for Super Autoplay
+let lastSuperAutoplayTime = 0;
+const SUPER_AUTOPLAY_RATE_LIMIT = 1000; // Minimum 1 second between Super Autoplay executions
+let pendingSuperAutoplayTimeout = null; // Track pending timeout for cleanup
+
+// Retry configuration for Super Autoplay
+const SUPER_AUTOPLAY_RETRY_CONFIG = {
+  MAX_RETRIES: 3,
+  RETRY_DELAY: 1000,
+  EXPONENTIAL_BACKOFF: true
+};
+
+// Retry wrapper for Super Autoplay operations
+const retrySuperAutoplayOperation = async (operation, operationName, maxRetries = SUPER_AUTOPLAY_RETRY_CONFIG.MAX_RETRIES) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation();
+      if (result) {
+        console.log(`[Bestiary Automator] ${operationName} succeeded on attempt ${attempt}`);
+        return result;
+      }
+    } catch (error) {
+      console.error(`[Bestiary Automator] ${operationName} failed on attempt ${attempt}:`, error);
+    }
+    
+    if (attempt < maxRetries) {
+      const delay = SUPER_AUTOPLAY_RETRY_CONFIG.EXPONENTIAL_BACKOFF 
+        ? SUPER_AUTOPLAY_RETRY_CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1)
+        : SUPER_AUTOPLAY_RETRY_CONFIG.RETRY_DELAY;
+      
+      console.log(`[Bestiary Automator] Retrying ${operationName} in ${delay}ms...`);
+      await sleep(delay);
+    }
+  }
+  
+  console.error(`[Bestiary Automator] ${operationName} failed after ${maxRetries} attempts`);
+  return false;
+};
+
+// Simplified rate-limited Super Autoplay execution
+const executeSuperAutoplayWithRateLimit = async () => {
+  const now = Date.now();
+  const timeSinceLastExecution = now - lastSuperAutoplayTime;
+  
+  if (timeSinceLastExecution >= SUPER_AUTOPLAY_RATE_LIMIT) {
+    // Execute immediately
+    await handleSuperAutoplay();
+  } else {
+    // Schedule for later
+    const remainingDelay = SUPER_AUTOPLAY_RATE_LIMIT - timeSinceLastExecution;
+    console.log(`[Bestiary Automator] Super Autoplay rate limited, scheduling in ${remainingDelay}ms...`);
+    
+    // Clear any existing timeout
+    if (pendingSuperAutoplayTimeout) {
+      clearTimeout(pendingSuperAutoplayTimeout);
+    }
+    
+    // Schedule execution
+    pendingSuperAutoplayTimeout = setTimeout(async () => {
+      pendingSuperAutoplayTimeout = null;
+      await handleSuperAutoplay();
+    }, remainingDelay);
+  }
+};
+
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
   if (!config.autoCollectRewards || rewardsCollectedThisSession) return;
@@ -1119,6 +1187,11 @@ const subscribeToGameState = () => {
         rewardsCollectedThisSession = false;
         questLogProcessedThisBoardState = false;
         superAutoplayExecutedThisSession = false;
+        superAutoplayRunning = false;
+        if (pendingSuperAutoplayTimeout) {
+          clearTimeout(pendingSuperAutoplayTimeout);
+          pendingSuperAutoplayTimeout = null;
+        }
         
         // Reset sleep state when new game starts (new hunting task might be available)
         if (isTaskCheckingSleeping) {
@@ -1154,6 +1227,11 @@ const subscribeToGameState = () => {
         if (config.superAutoplay) {
           console.log('[Bestiary Automator] New game detected via game server API, resetting Super Autoplay session flag...');
           superAutoplayExecutedThisSession = false;
+          superAutoplayRunning = false;
+          if (pendingSuperAutoplayTimeout) {
+            clearTimeout(pendingSuperAutoplayTimeout);
+            pendingSuperAutoplayTimeout = null;
+          }
         }
         
         // Cancel any ongoing countdown when new game starts
@@ -1353,8 +1431,8 @@ const processDefeatToast = async () => {
     // Click the defeat toast to dismiss it naturally
     dismissDefeatToast();
     
-    // Trigger Super Autoplay
-    await handleSuperAutoplay();
+    // Trigger Super Autoplay with rate limiting
+    await executeSuperAutoplayWithRateLimit();
     
     // Reset state after delay
     setTimeout(() => {
@@ -1932,6 +2010,13 @@ const handleSuperAutoplay = async () => {
   try {
     console.log('[Bestiary Automator] === Starting Super Autoplay ===');
     
+    // Update rate limiting timestamp
+    lastSuperAutoplayTime = Date.now();
+    
+    // Set running state and update button
+    superAutoplayRunning = true;
+    updateAutomatorButton();
+    
     // Check if game is actually running (not just initialized)
     if (!isGameActive()) {
       console.log('[Bestiary Automator] Game not active, skipping Super Autoplay');
@@ -1963,9 +2048,12 @@ const handleSuperAutoplay = async () => {
       return;
     }
     
-    // Step 1: Wait for server results to be available
+    // Step 1: Wait for server results to be available (with retry)
     console.log('[Bestiary Automator] Step 1: Waiting for server results to be available...');
-    const serverResultsReady = await waitForServerResults();
+    const serverResultsReady = await retrySuperAutoplayOperation(
+      () => waitForServerResults(),
+      'Server Results Wait'
+    );
     if (!serverResultsReady) {
       console.log('[Bestiary Automator] Server results never became available, skipping Super Autoplay');
       // Mark as executed to prevent endless retries
@@ -2019,7 +2107,10 @@ const handleSuperAutoplay = async () => {
       return;
     }
     
-    const navigationSuccess = await navigateToMap(mapId);
+    const navigationSuccess = await retrySuperAutoplayOperation(
+      () => navigateToMap(mapId),
+      'Map Navigation'
+    );
     if (!navigationSuccess) {
       console.log('[Bestiary Automator] Failed to navigate to map, skipping Super Autoplay');
       // Mark as executed to prevent endless retries
@@ -2043,7 +2134,10 @@ const handleSuperAutoplay = async () => {
       return;
     }
     
-    const autoSetupSuccess = await clickAutoSetup();
+    const autoSetupSuccess = await retrySuperAutoplayOperation(
+      () => clickAutoSetup(),
+      'Auto-Setup Click'
+    );
     if (!autoSetupSuccess) {
       console.log('[Bestiary Automator] Failed to click Auto-Setup, skipping Super Autoplay');
       // Mark as executed to prevent endless retries
@@ -2088,6 +2182,10 @@ const handleSuperAutoplay = async () => {
     
   } catch (error) {
     console.error('[Bestiary Automator] Error in Super Autoplay:', error);
+  } finally {
+    // Always reset running state and update button
+    superAutoplayRunning = false;
+    updateAutomatorButton();
   }
 };
 
@@ -2127,6 +2225,11 @@ const startAutomation = () => {
   // Reset session flags when starting automation
   rewardsCollectedThisSession = false;
   superAutoplayExecutedThisSession = false;
+  superAutoplayRunning = false;
+  if (pendingSuperAutoplayTimeout) {
+    clearTimeout(pendingSuperAutoplayTimeout);
+    pendingSuperAutoplayTimeout = null;
+  }
   
   
   // Run immediately once
@@ -2189,7 +2292,7 @@ const runAutomationTasks = async () => {
     
     // Run Super Autoplay if enabled (only once per session, after server results are available)
     if (config.superAutoplay && !superAutoplayExecutedThisSession) {
-      await handleSuperAutoplay();
+      await executeSuperAutoplayWithRateLimit();
     }
     
     // Toast detection is now handled by MutationObserver - no need for interval checking
@@ -2533,15 +2636,33 @@ const applyButtonStyling = (btn) => {
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
     console.log('  - autoFinishTasks:', config.autoFinishTasks);
     console.log('  - superAutoplay:', config.superAutoplay);
+    console.log('  - superAutoplayRunning:', superAutoplayRunning);
   }
   
-  if (config.autoRefillStamina) {
+  // Update button text to show warning when Super Autoplay is enabled or running
+  if (config.superAutoplay) {
+    btn.textContent = '⚠️ Automator';
+  } else {
+    btn.textContent = 'Automator';
+  }
+  
+  if (superAutoplayRunning) {
+    // Priority 0: Special styling when Super Autoplay is actively running (danger state)
+    btn.style.background = `url('${blueBgUrl}') repeat`;
+    btn.style.backgroundSize = "auto";
+    btn.style.color = "#ff6b6b"; // Red text for danger state
+  } else if (config.superAutoplay) {
+    // Priority 0.5: Warning styling when Super Autoplay is enabled but not running
+    btn.style.background = `url('${blueBgUrl}') repeat`;
+    btn.style.backgroundSize = "auto";
+    btn.style.color = "#ffa500"; // Orange text for warning state
+  } else if (config.autoRefillStamina) {
     // Priority 1: Green background for auto refill stamina
     btn.style.background = `url('${greenBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
-  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks || config.superAutoplay) {
-    // Priority 2: Blue background for other auto features including Super Autoplay
+  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
+    // Priority 2: Blue background for other auto features (excluding Super Autoplay)
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
@@ -2551,7 +2672,14 @@ const applyButtonStyling = (btn) => {
     btn.style.color = "#ffe066";
   }
   
-  btn.title = t('configButtonTooltip');
+  // Update tooltip to show Super Autoplay status
+  if (superAutoplayRunning) {
+    btn.title = t('configButtonTooltip') + ' - Super Autoplay Running';
+  } else if (config.superAutoplay) {
+    btn.title = t('configButtonTooltip') + ' - Super Autoplay Enabled';
+  } else {
+    btn.title = t('configButtonTooltip');
+  }
 };
 
 // Initialize the mod
@@ -2564,6 +2692,11 @@ function init() {
   // Reset session flags on initialization
   rewardsCollectedThisSession = false;
   superAutoplayExecutedThisSession = false;
+  superAutoplayRunning = false;
+  if (pendingSuperAutoplayTimeout) {
+    clearTimeout(pendingSuperAutoplayTimeout);
+    pendingSuperAutoplayTimeout = null;
+  }
   
   // Create the buttons
   createButtons();
@@ -2598,6 +2731,7 @@ let lastButtonState = {
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
   superAutoplay: config.superAutoplay,
+  superAutoplayRunning: false,
   boardAnalyzerRunning: false
 };
 
@@ -2609,6 +2743,7 @@ lastButtonState = {
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
   superAutoplay: config.superAutoplay,
+  superAutoplayRunning: false,
   boardAnalyzerRunning: false
 };
 
@@ -2622,6 +2757,7 @@ function updateAutomatorButton() {
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     autoFinishTasks: config.autoFinishTasks,
     superAutoplay: config.superAutoplay,
+    superAutoplayRunning: superAutoplayRunning,
     boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
   };
   
