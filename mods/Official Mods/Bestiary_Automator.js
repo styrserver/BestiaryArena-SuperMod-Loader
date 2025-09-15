@@ -13,8 +13,7 @@ const defaultConfig = {
   autoPlayAfterDefeat: false,
   autoFinishTasks: false,
   fasterAutoplay: false,
-  fasterAutoplaySpeed: 25, // Speed increase percentage (25% = 1.25x speed)
-  fasterAutoplaySpeedInput: 25, // Saved input value that persists across reloads
+  fasterAutoplaySpeed: 15, // Speed increase percentage (15% = 1.15x speed)
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -35,10 +34,6 @@ const loadConfig = () => {
       const savedConfig = JSON.parse(savedData);
       const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
       
-      // Ensure fasterAutoplaySpeed is set from fasterAutoplaySpeedInput when loading
-      if (loadedConfig.fasterAutoplaySpeedInput !== undefined) {
-        loadedConfig.fasterAutoplaySpeed = loadedConfig.fasterAutoplaySpeedInput;
-      }
       
       return loadedConfig;
     }
@@ -49,16 +44,12 @@ const loadConfig = () => {
   // Fallback to context or defaults
   const fallbackConfig = Object.assign({}, defaultConfig, context.config || {});
   
-  // Ensure fasterAutoplaySpeed is set from fasterAutoplaySpeedInput in fallback too
-  if (fallbackConfig.fasterAutoplaySpeedInput !== undefined) {
-    fallbackConfig.fasterAutoplaySpeed = fallbackConfig.fasterAutoplaySpeedInput;
-  }
   
   return fallbackConfig;
 };
 
 config = loadConfig();
-// Always force autoRefillStamina to false for safety
+// Always force autoRefillStamina to false on every page load for safety
 config.autoRefillStamina = false;
 
 // Constants
@@ -1945,7 +1936,7 @@ const clickAutoplay = async () => {
 
 // Main Faster Autoplay function
 const handleFasterAutoplay = async () => {
-  if (!config.fasterAutoplay || fasterAutoplayExecutedThisSession) {
+  if (!config.fasterAutoplay || config.fasterAutoplaySpeed === 0 || fasterAutoplayExecutedThisSession) {
     return;
   }
   
@@ -2186,7 +2177,7 @@ const createConfigPanel = () => {
   const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   
   // Speed increase input (separate container like stamina section)
-  const fasterAutoplaySpeedContainer = createNumberInputContainer('faster-autoplay-speed-input', t('fasterAutoplaySpeed'), config.fasterAutoplaySpeedInput, 10, 200, 5);
+  const fasterAutoplaySpeedContainer = createNumberInputContainer('faster-autoplay-speed-input', t('fasterAutoplaySpeed'), config.fasterAutoplaySpeed, 5, 50, 5);
   
   // Add all elements to content
   content.appendChild(refillContainer);
@@ -2208,14 +2199,21 @@ const createConfigPanel = () => {
     const fasterAutoplayCheckbox = document.getElementById('faster-autoplay-checkbox');
     const staminaInput = document.getElementById('min-stamina-input');
     
-    if (refillCheckbox) refillCheckbox.checked = config.autoRefillStamina;
+    if (refillCheckbox) {
+      refillCheckbox.checked = config.autoRefillStamina; // Show current state
+      // Add event listener to update config when checkbox changes (button styling only updates on save)
+      refillCheckbox.addEventListener('change', () => {
+        config.autoRefillStamina = refillCheckbox.checked;
+        console.log('[Bestiary Automator] Checkbox manually changed to:', refillCheckbox.checked);
+      });
+    }
     if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
     const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
-    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeedInput;
+    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeed;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
   }, 100);
   
@@ -2236,7 +2234,8 @@ const createConfigPanel = () => {
         primary: true,
         onClick: () => {
           // Update configuration from form values
-          config.autoRefillStamina = document.getElementById('auto-refill-checkbox').checked;
+          const refillCheckbox = document.getElementById('auto-refill-checkbox');
+          config.autoRefillStamina = refillCheckbox ? refillCheckbox.checked : false;
           
           // Validate stamina input
           const staminaInput = document.getElementById('min-stamina-input');
@@ -2253,16 +2252,9 @@ const createConfigPanel = () => {
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           config.autoFinishTasks = document.getElementById('auto-finish-tasks-checkbox').checked;
           config.fasterAutoplay = document.getElementById('faster-autoplay-checkbox').checked;
-          // Always save the input value for persistence
-          const speedInputValue = parseInt(document.getElementById('faster-autoplay-speed-input').value, 10) || 25;
-          config.fasterAutoplaySpeedInput = speedInputValue;
-          
-          // Reset speed to 0 if Faster Autoplay is disabled, otherwise use input value
-          if (config.fasterAutoplay) {
-            config.fasterAutoplaySpeed = speedInputValue;
-          } else {
-            config.fasterAutoplaySpeed = 0;
-          }
+          // Save the input value for persistence (clamp to 5-50% range)
+          const speedInputValue = Math.max(5, Math.min(50, parseInt(document.getElementById('faster-autoplay-speed-input').value, 10) || 15));
+          config.fasterAutoplaySpeed = speedInputValue;
           
           // Reset autoplay delay based on Faster Autoplay setting
           try {
@@ -2319,7 +2311,7 @@ const createConfigPanel = () => {
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
             autoFinishTasks: config.autoFinishTasks,
             fasterAutoplay: config.fasterAutoplay,
-            fasterAutoplaySpeedInput: config.fasterAutoplaySpeedInput
+            fasterAutoplaySpeed: config.fasterAutoplaySpeed
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);
@@ -2403,10 +2395,26 @@ const createConfigPanel = () => {
       const numValue = parseInt(input.value, 10);
       if (isNaN(numValue) || numValue < min || numValue > max) {
         input.style.borderColor = '#ff4444';
-        input.title = `Value must be between ${min} and ${max}`;
+        input.title = `Value must be between ${min} and ${max}%`;
       } else {
         input.style.borderColor = '#444';
         input.title = '';
+      }
+    });
+    
+    // Add validation to reset to min/max values when exceeding limits
+    input.addEventListener('blur', () => {
+      const numValue = parseInt(input.value, 10);
+      if (!isNaN(numValue)) {
+        if (numValue > max) {
+          input.value = max;
+          input.style.borderColor = '#444';
+          input.title = '';
+        } else if (numValue < min) {
+          input.value = min;
+          input.style.borderColor = '#444';
+          input.title = '';
+        }
       }
     });
     
@@ -2461,8 +2469,13 @@ const createButtons = () => {
   // Apply custom styling based on priority
   setTimeout(() => {
     const btn = document.getElementById(CONFIG_BUTTON_ID);
+    console.log('[Bestiary Automator] Button creation timeout - looking for button:', CONFIG_BUTTON_ID);
+    console.log('[Bestiary Automator] Button found:', !!btn);
     if (btn) {
+      console.log('[Bestiary Automator] Applying initial button styling...');
       applyButtonStyling(btn);
+    } else {
+      console.log('[Bestiary Automator] Button not found during initial styling');
     }
   }, 100);
 };
@@ -2511,30 +2524,25 @@ const applyButtonStyling = (btn) => {
     btn.textContent = 'Automator';
   }
   
-  if (fasterAutoplayRunning) {
-    // Priority 0: Special styling when Faster Autoplay is actively running (danger state)
-    btn.style.background = `url('${blueBgUrl}') repeat`;
-    btn.style.backgroundSize = "auto";
-    btn.style.color = "#ff6b6b"; // Red text for danger state
-  } else if (config.fasterAutoplay) {
-    // Priority 0.5: Warning styling when Faster Autoplay is enabled but not running
-    btn.style.background = `url('${blueBgUrl}') repeat`;
-    btn.style.backgroundSize = "auto";
-    btn.style.color = "#ffa500"; // Orange text for warning state
-  } else if (config.autoRefillStamina) {
-    // Priority 1: Green background for auto refill stamina
+  if (config.autoRefillStamina) {
+    // Priority 1: Green background for auto refill stamina (highest priority - most critical)
+    console.log('[Bestiary Automator] Applying GREEN background for autoRefillStamina');
     btn.style.background = `url('${greenBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
-    btn.style.color = "#ffffff";
-  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
-    // Priority 2: Blue background for other auto features (excluding Faster Autoplay)
+  } else if (fasterAutoplayRunning) {
+    // Priority 2: Special styling when Faster Autoplay is actively running (danger state)
+    console.log('[Bestiary Automator] Applying BLUE background for fasterAutoplayRunning');
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
-    btn.style.color = "#ffffff";
+  } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
+    // Priority 3: Blue background for other auto features
+    console.log('[Bestiary Automator] Applying BLUE background for other features');
+    btn.style.background = `url('${blueBgUrl}') repeat`;
+    btn.style.backgroundSize = "auto";
   } else {
     // Default: No features enabled
+    console.log('[Bestiary Automator] Applying DEFAULT background');
     btn.style.background = `url('${regularBgUrl}') repeat`;
-    btn.style.color = "#ffe066";
   }
   
   // Update tooltip to show Faster Autoplay status
@@ -2625,14 +2633,24 @@ function updateAutomatorButton() {
   // Only update button styling if state has changed
   const stateChanged = JSON.stringify(currentButtonState) !== JSON.stringify(lastButtonState);
   
+  console.log('[Bestiary Automator] updateAutomatorButton called:');
+  console.log('  - Current state:', currentButtonState);
+  console.log('  - Last state:', lastButtonState);
+  console.log('  - State changed:', stateChanged);
+  
   if (stateChanged) {
     const btn = document.getElementById(CONFIG_BUTTON_ID);
     if (btn) {
+      console.log('[Bestiary Automator] Updating button styling...');
       applyButtonStyling(btn);
+    } else {
+      console.log('[Bestiary Automator] Button not found for styling update');
     }
     
     // Update last known state
     lastButtonState = currentButtonState;
+  } else {
+    console.log('[Bestiary Automator] No state change detected, skipping button update');
   }
 }
 
@@ -2701,8 +2719,17 @@ function updateSettingsModalUI() {
     
     if (refillCheckbox) {
       const oldValue = refillCheckbox.checked;
-      refillCheckbox.checked = config.autoRefillStamina;
+      refillCheckbox.checked = config.autoRefillStamina; // Show current state (can be true when set by Raid Hunter)
       console.log('[Bestiary Automator] Updated autorefill stamina checkbox from', oldValue, 'to', config.autoRefillStamina);
+      
+      // Add event listener to update config when checkbox changes (if not already added) - button styling only updates on save
+      if (!refillCheckbox.hasAttribute('data-listener-added')) {
+        refillCheckbox.addEventListener('change', () => {
+          config.autoRefillStamina = refillCheckbox.checked;
+          console.log('[Bestiary Automator] Checkbox manually changed to:', refillCheckbox.checked);
+        });
+        refillCheckbox.setAttribute('data-listener-added', 'true');
+      }
     } else {
       console.log('[Bestiary Automator] Autorefill stamina checkbox not found!');
     }
@@ -2713,7 +2740,7 @@ function updateSettingsModalUI() {
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
     const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
-    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeedInput;
+    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeed;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
     
   } catch (error) {
@@ -2725,8 +2752,13 @@ function updateSettingsModalUI() {
 context.exports = {
   toggleAutomation,
   updateConfig: (newConfig) => {
+    console.log('[Bestiary Automator] updateConfig called with:', newConfig);
+    console.log('[Bestiary Automator] Current config before update:', config);
+    
     const oldEnabled = config.enabled;
     Object.assign(config, newConfig);
+    
+    console.log('[Bestiary Automator] Config after update:', config);
     
     // Only start or stop automation if the enabled state actually changed
     if (newConfig.hasOwnProperty('enabled') && newConfig.enabled !== oldEnabled) {
@@ -2737,8 +2769,20 @@ context.exports = {
       }
     }
     
-    // Update button styling
-    updateAutomatorButton();
+    // Force button update if autoRefillStamina was explicitly set to true
+    if (newConfig.hasOwnProperty('autoRefillStamina') && newConfig.autoRefillStamina === true) {
+      console.log('[Bestiary Automator] autoRefillStamina set to true - forcing button update');
+      const btn = document.getElementById(CONFIG_BUTTON_ID);
+      if (btn) {
+        applyButtonStyling(btn);
+        // Update lastButtonState to reflect the change
+        lastButtonState.autoRefillStamina = true;
+      }
+    } else {
+      // Update button styling normally
+      console.log('[Bestiary Automator] Calling updateAutomatorButton...');
+      updateAutomatorButton();
+    }
     
     // Update UI elements in the settings modal if it's open
     updateSettingsModalUI();

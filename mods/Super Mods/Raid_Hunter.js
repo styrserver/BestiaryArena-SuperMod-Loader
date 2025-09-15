@@ -929,6 +929,128 @@ function disableBestiaryAutomatorStaminaRefill() {
     }
 }
 
+// Enable Bestiary Automator's faster autoplay setting
+function enableBestiaryAutomatorFasterAutoplay() {
+    try {
+        // Try multiple ways to access Bestiary Automator
+        let bestiaryAutomator = null;
+        
+        // Method 1: Check if Bestiary Automator is available in global scope
+        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+            bestiaryAutomator = window.bestiaryAutomator;
+            console.log('[Raid Hunter] Found Bestiary Automator via global window object');
+        }
+        // Method 2: Check if it's available in context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+            bestiaryAutomator = context.exports;
+            console.log('[Raid Hunter] Found Bestiary Automator via context exports');
+        }
+        // Method 3: Try to find it in the mod loader's context
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const automatorContext = window.modLoader.getModContext('bestiary-automator');
+            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                bestiaryAutomator = automatorContext.exports;
+                console.log('[Raid Hunter] Found Bestiary Automator via mod loader');
+            }
+        }
+        
+        if (bestiaryAutomator) {
+            console.log('[Raid Hunter] Enabling Bestiary Automator faster autoplay...');
+            bestiaryAutomator.updateConfig({
+                fasterAutoplay: true
+            });
+            console.log('[Raid Hunter] Bestiary Automator faster autoplay enabled');
+            
+            // Additional verification for Chrome - check if the setting actually took effect
+            setTimeout(() => {
+                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                    console.log('[Raid Hunter] Verifying faster autoplay setting:', window.bestiaryAutomator.config.fasterAutoplay);
+                }
+            }, 1000);
+            
+            return true;
+        } else {
+            console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
+            // Try again in 2 seconds
+            setTimeout(() => {
+                // Retry the same methods
+                let retryAutomator = null;
+                
+                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+                    retryAutomator = window.bestiaryAutomator;
+                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+                    retryAutomator = context.exports;
+                } else if (window.modLoader && window.modLoader.getModContext) {
+                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
+                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                        retryAutomator = automatorContext.exports;
+                    }
+                }
+                
+                if (retryAutomator) {
+                    console.log('[Raid Hunter] Retrying Bestiary Automator faster autoplay...');
+                    retryAutomator.updateConfig({
+                        fasterAutoplay: true
+                    });
+                    console.log('[Raid Hunter] Bestiary Automator faster autoplay enabled (retry)');
+                    
+                    // Additional verification for Chrome - check if the setting actually took effect
+                    setTimeout(() => {
+                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                            console.log('[Raid Hunter] Verifying faster autoplay setting (retry):', window.bestiaryAutomator.config.fasterAutoplay);
+                        }
+                    }, 1000);
+                } else {
+                    console.log('[Raid Hunter] Bestiary Automator still not available - you may need to enable faster autoplay manually');
+                }
+            }, 2000);
+            return false;
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error enabling Bestiary Automator faster autoplay:', error);
+        return false;
+    }
+}
+
+// Disable Bestiary Automator's faster autoplay setting
+function disableBestiaryAutomatorFasterAutoplay() {
+    try {
+        // Try multiple ways to access Bestiary Automator
+        let bestiaryAutomator = null;
+        
+        // Method 1: Check if Bestiary Automator is available in global scope
+        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+            bestiaryAutomator = window.bestiaryAutomator;
+        }
+        // Method 2: Check if it's available in context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+            bestiaryAutomator = context.exports;
+        }
+        // Method 3: Try to find it in the mod loader's context
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const automatorContext = window.modLoader.getModContext('bestiary-automator');
+            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+                bestiaryAutomator = automatorContext.exports;
+            }
+        }
+        
+        if (bestiaryAutomator) {
+            console.log('[Raid Hunter] Disabling Bestiary Automator faster autoplay...');
+            bestiaryAutomator.updateConfig({
+                fasterAutoplay: false
+            });
+            console.log('[Raid Hunter] Bestiary Automator faster autoplay disabled');
+            return true;
+        } else {
+            console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
+            return false;
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error disabling Bestiary Automator faster autoplay:', error);
+        return false;
+    }
+}
+
 // Checks element visibility.
 function isElementVisible(el) {
     if (!el || el.disabled) return false;
@@ -1040,6 +1162,10 @@ function toggleAutomation() {
             console.log('[Raid Hunter] Automation disabled - disabling Bestiary Automator autorefill stamina...');
             disableBestiaryAutomatorStaminaRefill();
         }
+        if (settings.fasterAutoplay) {
+            console.log('[Raid Hunter] Automation disabled - disabling Bestiary Automator faster autoplay...');
+            disableBestiaryAutomatorFasterAutoplay();
+        }
         
         // Stop any ongoing raid monitoring
         if (raidEndCheckInterval) {
@@ -1097,6 +1223,10 @@ function stopAutoplayOnRaidEnd() {
         if (settings.autoRefillStamina) {
             console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
             disableBestiaryAutomatorStaminaRefill();
+        }
+        if (settings.fasterAutoplay) {
+            console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
+            disableBestiaryAutomatorFasterAutoplay();
         }
         
         // Check if we're in autoplay mode
@@ -1376,6 +1506,20 @@ async function handleEventOrRaid(roomId) {
                 console.log('[Raid Hunter] First attempt failed, retrying with longer delay for Chrome...');
                 setTimeout(() => {
                     enableBestiaryAutomatorStaminaRefill();
+                }, 2000);
+            }
+        }, 500);
+    }
+    if (settings.fasterAutoplay) {
+        console.log('[Raid Hunter] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
+        // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
+        setTimeout(() => {
+            const success = enableBestiaryAutomatorFasterAutoplay();
+            if (!success) {
+                // If first attempt failed, try again with longer delay for Chrome
+                console.log('[Raid Hunter] First attempt failed, retrying with longer delay for Chrome...');
+                setTimeout(() => {
+                    enableBestiaryAutomatorFasterAutoplay();
                 }, 2000);
             }
         }, 500);
@@ -2029,7 +2173,7 @@ function createAutoRaidSettings() {
         flex-direction: column;
         width: 100%;
         height: 100%;
-        padding: 15px;
+        padding: 10px;
         box-sizing: border-box;
         justify-content: space-between;
     `;
@@ -2038,7 +2182,7 @@ function createAutoRaidSettings() {
     title.textContent = 'Auto-Raid Settings';
     title.className = 'pixel-font-16';
     title.style.cssText = `
-        margin: 0 0 15px 0;
+        margin: 0 0 10px 0;
         color: #ffe066;
         font-size: 16px;
         font-weight: bold;
@@ -2052,16 +2196,16 @@ function createAutoRaidSettings() {
     settingsWrapper.style.cssText = `
         display: flex;
         flex-direction: column;
-        gap: 20px;
+        gap: 12px;
     `;
     
     // Raid Delay setting
     const delayDiv = document.createElement('div');
     delayDiv.style.cssText = `
-        margin-bottom: 20px;
+        margin-bottom: 8px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
     `;
     
     const delayLabel = document.createElement('label');
@@ -2070,7 +2214,7 @@ function createAutoRaidSettings() {
     delayLabel.style.cssText = `
         font-weight: bold;
         color: #fff;
-        margin-bottom: 8px;
+        margin-bottom: 4px;
     `;
     delayDiv.appendChild(delayLabel);
     
@@ -2083,7 +2227,7 @@ function createAutoRaidSettings() {
     delayInput.className = 'pixel-font-16';
     delayInput.style.cssText = `
         width: 100%;
-        padding: 8px;
+        padding: 6px;
         background: #333;
         border: 1px solid #ffe066;
         color: #fff;
@@ -2097,10 +2241,10 @@ function createAutoRaidSettings() {
     delayDesc.textContent = 'Delay before starting a raid after detection';
     delayDesc.className = 'pixel-font-16';
     delayDesc.style.cssText = `
-        font-size: 12px;
+        font-size: 11px;
         color: #888;
         font-style: italic;
-        margin-top: 4px;
+        margin-top: 2px;
     `;
     delayDiv.appendChild(delayDesc);
     settingsWrapper.appendChild(delayDiv);
@@ -2108,10 +2252,10 @@ function createAutoRaidSettings() {
     // Auto-refill Stamina setting
     const staminaRefillDiv = document.createElement('div');
     staminaRefillDiv.style.cssText = `
-        margin-bottom: 20px;
+        margin-bottom: 8px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
     `;
     
     // Container for checkbox and label on same line
@@ -2119,8 +2263,8 @@ function createAutoRaidSettings() {
     checkboxLabelContainer.style.cssText = `
         display: flex;
         align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
+        gap: 6px;
+        margin-bottom: 4px;
     `;
     
     const staminaRefillCheckbox = document.createElement('input');
@@ -2153,13 +2297,69 @@ function createAutoRaidSettings() {
     staminaRefillDesc.textContent = 'Automatically refill stamina when starting a raid';
     staminaRefillDesc.className = 'pixel-font-16';
     staminaRefillDesc.style.cssText = `
-        font-size: 12px;
+        font-size: 11px;
         color: #888;
         font-style: italic;
-        margin-top: 4px;
+        margin-top: 2px;
     `;
     staminaRefillDiv.appendChild(staminaRefillDesc);
     settingsWrapper.appendChild(staminaRefillDiv);
+    
+    // Faster Autoplay setting
+    const fasterAutoplayDiv = document.createElement('div');
+    fasterAutoplayDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    // Container for checkbox and label on same line
+    const fasterAutoplayCheckboxLabelContainer = document.createElement('div');
+    fasterAutoplayCheckboxLabelContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+    `;
+    
+    const fasterAutoplayCheckbox = document.createElement('input');
+    fasterAutoplayCheckbox.type = 'checkbox';
+    fasterAutoplayCheckbox.id = 'fasterAutoplay';
+    fasterAutoplayCheckbox.checked = false;
+    fasterAutoplayCheckbox.style.cssText = `
+        width: 16px;
+        height: 16px;
+        accent-color: #ffe066;
+    `;
+    // Add auto-save listener immediately
+    fasterAutoplayCheckbox.addEventListener('change', autoSaveSettings);
+    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayCheckbox);
+    
+    const fasterAutoplayLabel = document.createElement('label');
+    fasterAutoplayLabel.textContent = 'Faster Autoplay';
+    fasterAutoplayLabel.className = 'pixel-font-16';
+    fasterAutoplayLabel.style.cssText = `
+        font-weight: bold;
+        color: #fff;
+        cursor: pointer;
+    `;
+    fasterAutoplayLabel.setAttribute('for', 'fasterAutoplay');
+    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayLabel);
+    
+    fasterAutoplayDiv.appendChild(fasterAutoplayCheckboxLabelContainer);
+    
+    const fasterAutoplayDesc = document.createElement('div');
+    fasterAutoplayDesc.textContent = 'Enable faster autoplay speed during raids (removes delays and increases game speed)';
+    fasterAutoplayDesc.className = 'pixel-font-16';
+    fasterAutoplayDesc.style.cssText = `
+        font-size: 11px;
+        color: #888;
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    fasterAutoplayDiv.appendChild(fasterAutoplayDesc);
+    settingsWrapper.appendChild(fasterAutoplayDiv);
     
     // Add settings wrapper to container
     container.appendChild(settingsWrapper);
@@ -2413,7 +2613,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id.startsWith('raid-')) {
+            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id.startsWith('raid-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -2465,6 +2665,15 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('autoRefillStamina');
             if (checkbox) {
                 checkbox.checked = settings.autoRefillStamina;
+                // Add auto-save listener
+                checkbox.addEventListener('change', autoSaveSettings);
+            }
+        }
+        
+        if (settings.fasterAutoplay !== undefined) {
+            const checkbox = document.getElementById('fasterAutoplay');
+            if (checkbox) {
+                checkbox.checked = settings.fasterAutoplay;
                 // Add auto-save listener
                 checkbox.addEventListener('change', autoSaveSettings);
             }
