@@ -649,6 +649,20 @@ globalThis.state.clientConfig.trigger.setState({
 globalThis.state.clientConfig.trigger.setState({
   fn: (prev) => ({ ...prev, plantMonsterFilter: undefined }),
 });
+
+### Customizing Autoplay Delay
+
+You can customize the delay between autoplay actions:
+
+```javascript
+// Set autoplay delay to 0ms (instant)
+globalThis.state.clientConfig.trigger.setState({
+  fn: (prev) => ({
+    ...prev,
+    autoplayDelayMs: 0
+  }),
+});
+```
 ```
 
 ## Advanced Use Cases

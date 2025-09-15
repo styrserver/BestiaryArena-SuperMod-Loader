@@ -12,7 +12,9 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   autoFinishTasks: false,
-  superAutoplay: false,
+  fasterAutoplay: false,
+  fasterAutoplaySpeed: 25, // Speed increase percentage (25% = 1.25x speed)
+  fasterAutoplaySpeedInput: 25, // Saved input value that persists across reloads
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -31,14 +33,28 @@ const loadConfig = () => {
     const savedData = localStorage.getItem(STORAGE_KEY);
     if (savedData) {
       const savedConfig = JSON.parse(savedData);
-      return Object.assign({}, defaultConfig, savedConfig);
+      const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
+      
+      // Ensure fasterAutoplaySpeed is set from fasterAutoplaySpeedInput when loading
+      if (loadedConfig.fasterAutoplaySpeedInput !== undefined) {
+        loadedConfig.fasterAutoplaySpeed = loadedConfig.fasterAutoplaySpeedInput;
+      }
+      
+      return loadedConfig;
     }
   } catch (error) {
     console.error('[Bestiary Automator] Error loading config:', error);
   }
   
   // Fallback to context or defaults
-  return Object.assign({}, defaultConfig, context.config || {});
+  const fallbackConfig = Object.assign({}, defaultConfig, context.config || {});
+  
+  // Ensure fasterAutoplaySpeed is set from fasterAutoplaySpeedInput in fallback too
+  if (fallbackConfig.fasterAutoplaySpeedInput !== undefined) {
+    fallbackConfig.fasterAutoplaySpeed = fallbackConfig.fasterAutoplaySpeedInput;
+  }
+  
+  return fallbackConfig;
 };
 
 config = loadConfig();
@@ -51,7 +67,7 @@ const BUTTON_ID = `${MOD_ID}-button`;
 const CONFIG_BUTTON_ID = `${MOD_ID}-config-button`;
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
-// Super Autoplay timing constants
+// Faster Autoplay timing constants
 const SUPER_AUTOPLAY_TIMING = {
   INITIAL_DELAY: 100,       // Wait for game server API data processing (reduced for faster response)
   SERVER_RESULTS_RETRY_DELAY: 200, // Delay between server results retry attempts
@@ -85,7 +101,8 @@ const TRANSLATIONS = {
     autoDayCare: 'Autohandle Daycare',
     autoPlayAfterDefeat: 'Autoplay after Defeat and Network Issues',
     autoFinishTasks: 'Autofinish Tasks',
-    superAutoplay: 'Super Autoplay',
+    fasterAutoplay: 'Faster Autoplay',
+    fasterAutoplaySpeed: 'Speed Increase (%)',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -111,7 +128,8 @@ const TRANSLATIONS = {
     autoDayCare: 'Cuidar Automaticamente da Creche',
     autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
     autoFinishTasks: 'Finalizar Tarefas Automaticamente',
-    superAutoplay: 'Super Autoplay',
+    fasterAutoplay: 'Faster Autoplay',
+    fasterAutoplaySpeed: 'Aumento de Velocidade (%)',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -541,76 +559,13 @@ let rewardsCollectedThisSession = false;
 // Track if we've already processed quest log for current board state
 let questLogProcessedThisBoardState = false;
 
-// Track if Super Autoplay has been executed for this game session
-let superAutoplayExecutedThisSession = false;
+// Track if Faster Autoplay has been executed for this game session
+let fasterAutoplayExecutedThisSession = false;
 
-// Track if Super Autoplay is currently running
-let superAutoplayRunning = false;
+// Track if Faster Autoplay is currently running
+let fasterAutoplayRunning = false;
 
-// Rate limiting for Super Autoplay
-let lastSuperAutoplayTime = 0;
-const SUPER_AUTOPLAY_RATE_LIMIT = 1000; // Minimum 1 second between Super Autoplay executions
-let pendingSuperAutoplayTimeout = null; // Track pending timeout for cleanup
 
-// Retry configuration for Super Autoplay
-const SUPER_AUTOPLAY_RETRY_CONFIG = {
-  MAX_RETRIES: 3,
-  RETRY_DELAY: 1000,
-  EXPONENTIAL_BACKOFF: true
-};
-
-// Retry wrapper for Super Autoplay operations
-const retrySuperAutoplayOperation = async (operation, operationName, maxRetries = SUPER_AUTOPLAY_RETRY_CONFIG.MAX_RETRIES) => {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const result = await operation();
-      if (result) {
-        console.log(`[Bestiary Automator] ${operationName} succeeded on attempt ${attempt}`);
-        return result;
-      }
-    } catch (error) {
-      console.error(`[Bestiary Automator] ${operationName} failed on attempt ${attempt}:`, error);
-    }
-    
-    if (attempt < maxRetries) {
-      const delay = SUPER_AUTOPLAY_RETRY_CONFIG.EXPONENTIAL_BACKOFF 
-        ? SUPER_AUTOPLAY_RETRY_CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1)
-        : SUPER_AUTOPLAY_RETRY_CONFIG.RETRY_DELAY;
-      
-      console.log(`[Bestiary Automator] Retrying ${operationName} in ${delay}ms...`);
-      await sleep(delay);
-    }
-  }
-  
-  console.error(`[Bestiary Automator] ${operationName} failed after ${maxRetries} attempts`);
-  return false;
-};
-
-// Simplified rate-limited Super Autoplay execution
-const executeSuperAutoplayWithRateLimit = async () => {
-  const now = Date.now();
-  const timeSinceLastExecution = now - lastSuperAutoplayTime;
-  
-  if (timeSinceLastExecution >= SUPER_AUTOPLAY_RATE_LIMIT) {
-    // Execute immediately
-    await handleSuperAutoplay();
-  } else {
-    // Schedule for later
-    const remainingDelay = SUPER_AUTOPLAY_RATE_LIMIT - timeSinceLastExecution;
-    console.log(`[Bestiary Automator] Super Autoplay rate limited, scheduling in ${remainingDelay}ms...`);
-    
-    // Clear any existing timeout
-    if (pendingSuperAutoplayTimeout) {
-      clearTimeout(pendingSuperAutoplayTimeout);
-    }
-    
-    // Schedule execution
-    pendingSuperAutoplayTimeout = setTimeout(async () => {
-      pendingSuperAutoplayTimeout = null;
-      await handleSuperAutoplay();
-    }, remainingDelay);
-  }
-};
 
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
@@ -1186,12 +1141,8 @@ const subscribeToGameState = () => {
         console.log('[Bestiary Automator] New game event details:', event);
         rewardsCollectedThisSession = false;
         questLogProcessedThisBoardState = false;
-        superAutoplayExecutedThisSession = false;
-        superAutoplayRunning = false;
-        if (pendingSuperAutoplayTimeout) {
-          clearTimeout(pendingSuperAutoplayTimeout);
-          pendingSuperAutoplayTimeout = null;
-        }
+        fasterAutoplayExecutedThisSession = false;
+        fasterAutoplayRunning = false;
         
         // Reset sleep state when new game starts (new hunting task might be available)
         if (isTaskCheckingSleeping) {
@@ -1223,15 +1174,11 @@ const subscribeToGameState = () => {
           console.error('[Bestiary Automator] Error logging task status on new game:', error);
         }
         
-        // Reset Super Autoplay session flag when a new game starts
-        if (config.superAutoplay) {
-          console.log('[Bestiary Automator] New game detected via game server API, resetting Super Autoplay session flag...');
-          superAutoplayExecutedThisSession = false;
-          superAutoplayRunning = false;
-          if (pendingSuperAutoplayTimeout) {
-            clearTimeout(pendingSuperAutoplayTimeout);
-            pendingSuperAutoplayTimeout = null;
-          }
+        // Reset Faster Autoplay session flag when a new game starts
+        if (config.fasterAutoplay) {
+          console.log('[Bestiary Automator] New game detected via game server API, resetting Faster Autoplay session flag...');
+          fasterAutoplayExecutedThisSession = false;
+          fasterAutoplayRunning = false;
         }
         
         // Cancel any ongoing countdown when new game starts
@@ -1423,16 +1370,16 @@ const processDefeatToast = async () => {
   // Check and finish tasks immediately when defeat is detected
   handleTaskFinishing();
   
-  // Check if Super Autoplay is enabled and not already executed this session
-  if (config.superAutoplay && !superAutoplayExecutedThisSession) {
-    console.log('[Bestiary Automator] Defeat detected - triggering Super Autoplay...');
+  // Check if Faster Autoplay is enabled and not already executed this session
+  if (config.fasterAutoplay && !fasterAutoplayExecutedThisSession) {
+    console.log('[Bestiary Automator] Defeat detected - triggering Faster Autoplay...');
     await sleep(SUPER_AUTOPLAY_TIMING.DEFEAT_PROCESSING_DELAY);
     
     // Click the defeat toast to dismiss it naturally
     dismissDefeatToast();
     
-    // Trigger Super Autoplay with rate limiting
-    await executeSuperAutoplayWithRateLimit();
+    // Trigger Faster Autoplay
+    await handleFasterAutoplay();
     
     // Reset state after delay
     setTimeout(() => {
@@ -1779,7 +1726,7 @@ const logTaskProgress = (context) => {
   }
 };
 
-// Super Autoplay Functions
+// Faster Autoplay Functions
 
 // Wait for server results to be available with retry logic
 const waitForServerResults = async () => {
@@ -1996,196 +1943,54 @@ const clickAutoplay = async () => {
   }
 };
 
-// Main Super Autoplay function
-const handleSuperAutoplay = async () => {
-  if (!config.superAutoplay) {
-    return;
-  }
-  
-  // Only execute once per game session
-  if (superAutoplayExecutedThisSession) {
+// Main Faster Autoplay function
+const handleFasterAutoplay = async () => {
+  if (!config.fasterAutoplay || fasterAutoplayExecutedThisSession) {
     return;
   }
   
   try {
-    console.log('[Bestiary Automator] === Starting Super Autoplay ===');
+    console.log(`[Bestiary Automator] Setting autoplay delay to 0ms and increasing game speed by ${config.fasterAutoplaySpeed}%...`);
     
-    // Update rate limiting timestamp
-    lastSuperAutoplayTime = Date.now();
+    // Set autoplay delay to 0 for instant execution
+    globalThis.state.clientConfig.trigger.setState({
+      fn: (prev) => ({
+        ...prev,
+        autoplayDelayMs: 0
+      }),
+    });
     
-    // Set running state and update button
-    superAutoplayRunning = true;
-    updateAutomatorButton();
-    
-    // Check if game is actually running (not just initialized)
-    if (!isGameActive()) {
-      console.log('[Bestiary Automator] Game not active, skipping Super Autoplay');
-      return;
+    // Increase game speed by configured percentage
+    try {
+      const DEFAULT_TICK_INTERVAL_MS = 62.5;
+      const speedupFactor = 1 + (config.fasterAutoplaySpeed / 100); // Convert percentage to multiplier
+      const newInterval = Math.max(DEFAULT_TICK_INTERVAL_MS / speedupFactor, 16); // Minimum 16ms for performance
+      
+      // Set up subscription for new games to maintain speed
+      if (window.__fasterAutoplaySubscription) {
+        window.__fasterAutoplaySubscription.unsubscribe();
+      }
+      
+      window.__fasterAutoplaySubscription = globalThis.state.board.on('newGame', (event) => {
+        if (event.world && event.world.tickEngine) {
+          event.world.tickEngine.setTickInterval(newInterval);
+        }
+      });
+      
+      // Apply to current game if it exists
+      const boardContext = globalThis.state.board.getSnapshot().context;
+      if (boardContext && boardContext.world && boardContext.world.tickEngine) {
+        boardContext.world.tickEngine.setTickInterval(newInterval);
+        console.log(`[Bestiary Automator] Game speed increased: ${DEFAULT_TICK_INTERVAL_MS}ms → ${newInterval.toFixed(2)}ms (${speedupFactor.toFixed(2)}x speed)`);
+      }
+    } catch (speedError) {
+      console.warn('[Bestiary Automator] Could not increase game speed:', speedError);
     }
     
-    // Check if game is in autoplay mode (not manual or sandbox)
-    if (!isAutoplayMode()) {
-      console.log('[Bestiary Automator] Game not in autoplay mode, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Check if game is in sandbox mode (should not run Super Autoplay)
-    if (isSandboxMode()) {
-      console.log('[Bestiary Automator] Game in sandbox mode, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Wait for the game server API data to be fully processed
-    await sleep(SUPER_AUTOPLAY_TIMING.INITIAL_DELAY);
-    
-    // Check for Stop button before starting
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected before starting - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Step 1: Wait for server results to be available (with retry)
-    console.log('[Bestiary Automator] Step 1: Waiting for server results to be available...');
-    const serverResultsReady = await retrySuperAutoplayOperation(
-      () => waitForServerResults(),
-      'Server Results Wait'
-    );
-    if (!serverResultsReady) {
-      console.log('[Bestiary Automator] Server results never became available, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Check for Stop button after waiting for server results
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected after waiting for server results - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Step 2: Extract the game time in ticks (for logging purposes)
-    console.log('[Bestiary Automator] Step 2: Extracting game time from server results...');
-    const gameTime = extractGameTimeFromServerResults();
-    console.log('[Bestiary Automator] Game time extracted:', gameTime, 'ticks');
-    
-    // Check for Stop button after step 2
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected after step 2 - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // For Super Autoplay, we don't need to validate game time since we're restarting the same game
-    // The game time will be 0 or low since we're starting fresh
-    
-    // Step 3: Extract the map from server results
-    console.log('[Bestiary Automator] Step 3: Extracting map from server results...');
-    const mapId = extractMapFromServerResults();
-    if (!mapId) {
-      console.log('[Bestiary Automator] Could not extract map, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Check for Stop button after step 3
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected after step 3 - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Step 4: Sleep and then use API to send the user to the map
-    console.log(`[Bestiary Automator] Step 4: Sleeping ${SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY}ms then navigating to map...`);
-    await sleep(SUPER_AUTOPLAY_TIMING.NAVIGATION_DELAY);
-    
-    // Check for Stop button before navigation
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected before navigation - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    const navigationSuccess = await retrySuperAutoplayOperation(
-      () => navigateToMap(mapId),
-      'Map Navigation'
-    );
-    if (!navigationSuccess) {
-      console.log('[Bestiary Automator] Failed to navigate to map, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Check for Stop button after navigation
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected after navigation - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Step 5: Sleep and click on Auto-Setup
-    console.log(`[Bestiary Automator] Step 5: Sleeping ${SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY}ms then clicking Auto-Setup...`);
-    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
-    
-    // Check for Stop button before Auto-Setup
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected before Auto-Setup - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    const autoSetupSuccess = await retrySuperAutoplayOperation(
-      () => clickAutoSetup(),
-      'Auto-Setup Click'
-    );
-    if (!autoSetupSuccess) {
-      console.log('[Bestiary Automator] Failed to click Auto-Setup, skipping Super Autoplay');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Check for Stop button after Auto-Setup
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected after Auto-Setup - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Step 6: Sleep and look for Start button
-    console.log(`[Bestiary Automator] Step 6: Sleeping ${SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY}ms then looking for Start button...`);
-    await sleep(SUPER_AUTOPLAY_TIMING.BUTTON_CLICK_DELAY);
-    
-    // Check for Stop button before final step
-    if (isStopButtonPressed()) {
-      console.log('[Bestiary Automator] Stop button detected before final step - user stopped the game, skipping Super Autoplay');
-      return;
-    }
-    
-    // Now look for the Start button
-    const startButton = findButtonByText('Start');
-    if (!startButton) {
-      console.log('[Bestiary Automator] Start button not available after setup, Super Autoplay incomplete');
-      // Mark as executed to prevent endless retries
-      superAutoplayExecutedThisSession = true;
-      return;
-    }
-    
-    // Click the Start button
-    console.log('[Bestiary Automator] Clicking Start button...');
-    startButton.click();
-    console.log('[Bestiary Automator] Start button clicked successfully');
-    
-    console.log('[Bestiary Automator] === Super Autoplay completed successfully ===');
-    
-    // Mark as executed for this session
-    superAutoplayExecutedThisSession = true;
-    
+    fasterAutoplayExecutedThisSession = true;
+    console.log(`[Bestiary Automator] Faster Autoplay enabled with ${config.fasterAutoplaySpeed}% speed increase`);
   } catch (error) {
-    console.error('[Bestiary Automator] Error in Super Autoplay:', error);
-  } finally {
-    // Always reset running state and update button
-    superAutoplayRunning = false;
-    updateAutomatorButton();
+    console.warn('[Bestiary Automator] Could not set autoplay delay:', error);
   }
 };
 
@@ -2224,12 +2029,8 @@ const startAutomation = () => {
   
   // Reset session flags when starting automation
   rewardsCollectedThisSession = false;
-  superAutoplayExecutedThisSession = false;
-  superAutoplayRunning = false;
-  if (pendingSuperAutoplayTimeout) {
-    clearTimeout(pendingSuperAutoplayTimeout);
-    pendingSuperAutoplayTimeout = null;
-  }
+  fasterAutoplayExecutedThisSession = false;
+  fasterAutoplayRunning = false;
   
   
   // Run immediately once
@@ -2290,9 +2091,9 @@ const runAutomationTasks = async () => {
     updateRequiredStamina();
     await refillStaminaIfNeeded();
     
-    // Run Super Autoplay if enabled (only once per session, after server results are available)
-    if (config.superAutoplay && !superAutoplayExecutedThisSession) {
-      await executeSuperAutoplayWithRateLimit();
+    // Run Faster Autoplay if enabled (only once per session, after server results are available)
+    if (config.fasterAutoplay && !fasterAutoplayExecutedThisSession) {
+      await handleFasterAutoplay();
     }
     
     // Toast detection is now handled by MutationObserver - no need for interval checking
@@ -2377,12 +2178,15 @@ const createConfigPanel = () => {
   // Auto play after defeat checkbox
   const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
-  // Super autoplay checkbox with warning
-  const superAutoplayWarningText = config.currentLocale === 'pt' 
-    ? '⚠️ Funcionalidade altamente experimental e instável. Força um pulo no tempo de espera de 3 segundos entre batalhas, reiniciando automaticamente os jogos. Pode causar comportamento inesperado ou conflitos com outros mods. Use por sua conta e risco.'
-    : '⚠️ Highly experimental and unstable feature. Forces a skip on the 3-second wait time between battles by automatically restarting games. May cause unexpected behavior or conflicts with other mods. Use at your own risk.';
+  // Faster autoplay checkbox with warning
+  const fasterAutoplayWarningText = config.currentLocale === 'pt' 
+    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay e aumenta a velocidade do jogo (configurável), tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
+    : '⚠️ Removes the 3-second delay between autoplay actions and increases game speed (configurable), making the game run faster. May cause unexpected behavior or conflicts with other mods.';
   
-  const superAutoplayContainer = createCheckboxContainerWithWarning('super-autoplay-checkbox', t('superAutoplay'), config.superAutoplay, superAutoplayWarningText);
+  const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
+  
+  // Speed increase input (separate container like stamina section)
+  const fasterAutoplaySpeedContainer = createNumberInputContainer('faster-autoplay-speed-input', t('fasterAutoplaySpeed'), config.fasterAutoplaySpeedInput, 10, 200, 5);
   
   // Add all elements to content
   content.appendChild(refillContainer);
@@ -2391,7 +2195,8 @@ const createConfigPanel = () => {
   content.appendChild(dayCareContainer);
   content.appendChild(autoFinishTasksContainer);
   content.appendChild(autoPlayContainer);
-  content.appendChild(superAutoplayContainer);
+  content.appendChild(fasterAutoplayContainer);
+  content.appendChild(fasterAutoplaySpeedContainer);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
@@ -2400,7 +2205,7 @@ const createConfigPanel = () => {
     const dayCareCheckbox = document.getElementById('auto-daycare-checkbox');
     const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
     const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox');
-    const superAutoplayCheckbox = document.getElementById('super-autoplay-checkbox');
+    const fasterAutoplayCheckbox = document.getElementById('faster-autoplay-checkbox');
     const staminaInput = document.getElementById('min-stamina-input');
     
     if (refillCheckbox) refillCheckbox.checked = config.autoRefillStamina;
@@ -2408,7 +2213,9 @@ const createConfigPanel = () => {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
-    if (superAutoplayCheckbox) superAutoplayCheckbox.checked = config.superAutoplay;
+    if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
+    const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
+    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeedInput;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
   }, 100);
   
@@ -2445,17 +2252,74 @@ const createConfigPanel = () => {
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           config.autoFinishTasks = document.getElementById('auto-finish-tasks-checkbox').checked;
-          config.superAutoplay = document.getElementById('super-autoplay-checkbox').checked;
+          config.fasterAutoplay = document.getElementById('faster-autoplay-checkbox').checked;
+          // Always save the input value for persistence
+          const speedInputValue = parseInt(document.getElementById('faster-autoplay-speed-input').value, 10) || 25;
+          config.fasterAutoplaySpeedInput = speedInputValue;
+          
+          // Reset speed to 0 if Faster Autoplay is disabled, otherwise use input value
+          if (config.fasterAutoplay) {
+            config.fasterAutoplaySpeed = speedInputValue;
+          } else {
+            config.fasterAutoplaySpeed = 0;
+          }
+          
+          // Reset autoplay delay based on Faster Autoplay setting
+          try {
+            if (config.fasterAutoplay) {
+              // Set autoplay delay to 0 for instant execution
+              globalThis.state.clientConfig.trigger.setState({
+                fn: (prev) => ({
+                  ...prev,
+                  autoplayDelayMs: 0
+                }),
+              });
+              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms and increased game speed by ${config.fasterAutoplaySpeed}%`);
+            } else {
+              // Reset autoplay delay to default 3 seconds
+              globalThis.state.clientConfig.trigger.setState({
+                fn: (prev) => ({
+                  ...prev,
+                  autoplayDelayMs: 3000
+                }),
+              });
+              // Reset game speed to default
+              try {
+                const DEFAULT_TICK_INTERVAL_MS = 62.5;
+                
+                // Clean up subscription
+                if (window.__fasterAutoplaySubscription) {
+                  window.__fasterAutoplaySubscription.unsubscribe();
+                  window.__fasterAutoplaySubscription = null;
+                }
+                
+                // Reset current game speed
+                const boardContext = globalThis.state.board.getSnapshot().context;
+                if (boardContext && boardContext.world && boardContext.world.tickEngine) {
+                  boardContext.world.tickEngine.setTickInterval(DEFAULT_TICK_INTERVAL_MS);
+                  console.log(`[Bestiary Automator] Game speed reset to default: ${DEFAULT_TICK_INTERVAL_MS}ms`);
+                }
+              } catch (speedError) {
+                console.warn('[Bestiary Automator] Could not reset game speed:', speedError);
+              }
+              
+              console.log('[Bestiary Automator] Faster Autoplay disabled - reset autoplay delay to 3000ms and game speed to default');
+            }
+          } catch (error) {
+            console.warn('[Bestiary Automator] Could not update autoplay delay:', error);
+          }
           
           // Save configuration
           const configToSave = {
+            enabled: config.enabled,
             autoRefillStamina: config.autoRefillStamina,
             minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill,
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
             autoFinishTasks: config.autoFinishTasks,
-            superAutoplay: config.superAutoplay
+            fasterAutoplay: config.fasterAutoplay,
+            fasterAutoplaySpeedInput: config.fasterAutoplaySpeedInput
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);
@@ -2516,7 +2380,7 @@ const createConfigPanel = () => {
   }
   
   // Helper to create a number input container
-  function createNumberInputContainer(id, label, value, min, max) {
+  function createNumberInputContainer(id, label, value, min, max, step = null) {
     const container = document.createElement('div');
     container.style.cssText = 'margin: 5px 0;';
     
@@ -2530,6 +2394,7 @@ const createConfigPanel = () => {
     input.id = id;
     input.min = min;
     input.max = max;
+    if (step !== null) input.step = step;
     input.value = Math.max(min, Math.min(max, value)); // Clamp value to valid range
     input.style.cssText = 'width: 100%; padding: 5px; background-color: #222; color: #fff; border: 1px solid #444;';
     
@@ -2635,24 +2500,24 @@ const applyButtonStyling = (btn) => {
     console.log('  - autoDayCare:', config.autoDayCare);
     console.log('  - autoPlayAfterDefeat:', config.autoPlayAfterDefeat);
     console.log('  - autoFinishTasks:', config.autoFinishTasks);
-    console.log('  - superAutoplay:', config.superAutoplay);
-    console.log('  - superAutoplayRunning:', superAutoplayRunning);
+    console.log('  - fasterAutoplay:', config.fasterAutoplay);
+    console.log('  - fasterAutoplayRunning:', fasterAutoplayRunning);
   }
   
-  // Update button text to show warning when Super Autoplay is enabled or running
-  if (config.superAutoplay) {
+  // Update button text to show warning when Faster Autoplay is enabled or running
+  if (config.fasterAutoplay) {
     btn.textContent = '⚠️ Automator';
   } else {
     btn.textContent = 'Automator';
   }
   
-  if (superAutoplayRunning) {
-    // Priority 0: Special styling when Super Autoplay is actively running (danger state)
+  if (fasterAutoplayRunning) {
+    // Priority 0: Special styling when Faster Autoplay is actively running (danger state)
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ff6b6b"; // Red text for danger state
-  } else if (config.superAutoplay) {
-    // Priority 0.5: Warning styling when Super Autoplay is enabled but not running
+  } else if (config.fasterAutoplay) {
+    // Priority 0.5: Warning styling when Faster Autoplay is enabled but not running
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffa500"; // Orange text for warning state
@@ -2662,7 +2527,7 @@ const applyButtonStyling = (btn) => {
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
   } else if (config.autoCollectRewards || config.autoDayCare || config.autoPlayAfterDefeat || config.autoFinishTasks) {
-    // Priority 2: Blue background for other auto features (excluding Super Autoplay)
+    // Priority 2: Blue background for other auto features (excluding Faster Autoplay)
     btn.style.background = `url('${blueBgUrl}') repeat`;
     btn.style.backgroundSize = "auto";
     btn.style.color = "#ffffff";
@@ -2672,11 +2537,11 @@ const applyButtonStyling = (btn) => {
     btn.style.color = "#ffe066";
   }
   
-  // Update tooltip to show Super Autoplay status
-  if (superAutoplayRunning) {
-    btn.title = t('configButtonTooltip') + ' - Super Autoplay Running';
-  } else if (config.superAutoplay) {
-    btn.title = t('configButtonTooltip') + ' - Super Autoplay Enabled';
+  // Update tooltip to show Faster Autoplay status
+  if (fasterAutoplayRunning) {
+    btn.title = t('configButtonTooltip') + ' - Faster Autoplay Running';
+  } else if (config.fasterAutoplay) {
+    btn.title = t('configButtonTooltip') + ' - Faster Autoplay Enabled';
   } else {
     btn.title = t('configButtonTooltip');
   }
@@ -2691,12 +2556,8 @@ function init() {
   
   // Reset session flags on initialization
   rewardsCollectedThisSession = false;
-  superAutoplayExecutedThisSession = false;
-  superAutoplayRunning = false;
-  if (pendingSuperAutoplayTimeout) {
-    clearTimeout(pendingSuperAutoplayTimeout);
-    pendingSuperAutoplayTimeout = null;
-  }
+  fasterAutoplayExecutedThisSession = false;
+  fasterAutoplayRunning = false;
   
   // Create the buttons
   createButtons();
@@ -2730,8 +2591,8 @@ let lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
-  superAutoplay: config.superAutoplay,
-  superAutoplayRunning: false,
+  fasterAutoplay: config.fasterAutoplay,
+  fasterAutoplayRunning: false,
   boardAnalyzerRunning: false
 };
 
@@ -2742,8 +2603,8 @@ lastButtonState = {
   autoDayCare: config.autoDayCare,
   autoPlayAfterDefeat: config.autoPlayAfterDefeat,
   autoFinishTasks: config.autoFinishTasks,
-  superAutoplay: config.superAutoplay,
-  superAutoplayRunning: false,
+  fasterAutoplay: config.fasterAutoplay,
+  fasterAutoplayRunning: false,
   boardAnalyzerRunning: false
 };
 
@@ -2756,8 +2617,8 @@ function updateAutomatorButton() {
     autoDayCare: config.autoDayCare,
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     autoFinishTasks: config.autoFinishTasks,
-    superAutoplay: config.superAutoplay,
-    superAutoplayRunning: superAutoplayRunning,
+    fasterAutoplay: config.fasterAutoplay,
+    fasterAutoplayRunning: fasterAutoplayRunning,
     boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
   };
   
@@ -2823,7 +2684,7 @@ function updateSettingsModalUI() {
     const autoFinishTasksCheckbox = document.getElementById('auto-finish-tasks-checkbox') || 
                                    document.querySelector('input[type="checkbox"][id*="finish"]');
     
-    const superAutoplayCheckbox = document.getElementById('super-autoplay-checkbox') || 
+    const fasterAutoplayCheckbox = document.getElementById('faster-autoplay-checkbox') || 
                                  document.querySelector('input[type="checkbox"][id*="super"]');
     
     const staminaInput = document.getElementById('min-stamina-input') || 
@@ -2835,7 +2696,7 @@ function updateSettingsModalUI() {
     console.log('  - dayCareCheckbox:', !!dayCareCheckbox);
     console.log('  - autoPlayCheckbox:', !!autoPlayCheckbox);
     console.log('  - autoFinishTasksCheckbox:', !!autoFinishTasksCheckbox);
-    console.log('  - superAutoplayCheckbox:', !!superAutoplayCheckbox);
+    console.log('  - fasterAutoplayCheckbox:', !!fasterAutoplayCheckbox);
     console.log('  - staminaInput:', !!staminaInput);
     
     if (refillCheckbox) {
@@ -2850,7 +2711,9 @@ function updateSettingsModalUI() {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (autoFinishTasksCheckbox) autoFinishTasksCheckbox.checked = config.autoFinishTasks;
-    if (superAutoplayCheckbox) superAutoplayCheckbox.checked = config.superAutoplay;
+    if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
+    const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
+    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeedInput;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
     
   } catch (error) {

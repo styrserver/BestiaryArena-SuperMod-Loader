@@ -19,6 +19,116 @@ const BOARD_CHANGE_DEBOUNCE_TIME = 2000; // Increased debounce for board changes
 const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
 const ROOM_METADATA_STORE = 'roomMetadata';
 const MAX_RUNS_PER_ROOM = 500;
+
+// Anti-cheating constants
+const MIN_STAT_VALUE = 1;
+const MAX_STAT_VALUE = 20;
+
+// =======================
+// ANTI-CHEATING SYSTEM
+// =======================
+
+// Global anti-cheat flag
+let antiCheatDetected = false;
+
+/**
+ * Checks if current board has invalid monster stats and sets the anti-cheat flag
+ * @param {Object} currentBoard - The current board data containing player monsters
+ */
+function checkForCheating(currentBoard) {
+  try {
+    if (!currentBoard || !currentBoard.boardSetup) {
+      antiCheatDetected = false;
+      return;
+    }
+
+    // Check board configuration for modified monster stats (Hero Editor changes)
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    if (boardContext?.boardConfig) {
+      console.log('[Board Advisor] Checking boardConfig:', boardContext.boardConfig);
+      
+      for (const piece of boardContext.boardConfig) {
+        console.log('[Board Advisor] Checking boardConfig piece:', piece);
+        
+        // Check both player pieces and custom pieces (Hero Editor creates custom pieces)
+        if (!piece || (piece.type !== 'player' && piece.type !== 'custom')) {
+          console.log('[Board Advisor] Skipping piece - not player or custom:', { type: piece?.type });
+          continue;
+        }
+
+        // Check monster stats - custom pieces store stats in piece.genes
+        const stats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+        let hasStats = false;
+        
+        for (const stat of stats) {
+          let value;
+          
+          if (piece.type === 'custom' && piece.genes) {
+            // Custom pieces (Hero Editor) store stats in piece.genes
+            value = piece.genes[stat];
+            console.log(`[Board Advisor] Checking custom piece genes.${stat}: ${value}`);
+          } else if (piece.type === 'player') {
+            // Player pieces might have stats directly on the piece
+            value = piece[stat];
+            console.log(`[Board Advisor] Checking player piece ${stat}: ${value}`);
+          }
+          
+          if (value !== undefined && value !== null) {
+            hasStats = true;
+            if (value < MIN_STAT_VALUE || value > MAX_STAT_VALUE) {
+              console.warn(`[Board Advisor] Anti-cheat: Board piece has invalid ${stat} value: ${value} (must be ${MIN_STAT_VALUE}-${MAX_STAT_VALUE})`);
+              antiCheatDetected = true;
+              return;
+            }
+          }
+        }
+        
+        if (!hasStats) {
+          console.log('[Board Advisor] Piece has no stats to check');
+        }
+      }
+    } else {
+      console.log('[Board Advisor] No boardConfig found');
+    }
+
+    // Also check board setup for any other modified stats
+    for (const piece of currentBoard.boardSetup) {
+      if (!piece) {
+        continue;
+      }
+      
+      // Check if piece has monster stats directly (for other sandbox modifications)
+      if (piece.monsterStats) {
+        const stats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+        
+        for (const stat of stats) {
+          const value = piece.monsterStats[stat];
+          if (value !== undefined && value !== null) {
+            if (value < MIN_STAT_VALUE || value > MAX_STAT_VALUE) {
+              console.warn(`[Board Advisor] Anti-cheat: Board piece has invalid ${stat} value: ${value} (must be ${MIN_STAT_VALUE}-${MAX_STAT_VALUE})`);
+              antiCheatDetected = true;
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    antiCheatDetected = false; // All stats are valid
+  } catch (error) {
+    console.error('[Board Advisor] Error checking for cheating:', error);
+    antiCheatDetected = true; // Fail safe - assume cheating if check fails
+  }
+}
+
+/**
+ * Checks if cheating has been detected
+ * @returns {boolean} - true if cheating detected, false if clean
+ */
+function isCheatingDetected() {
+  return antiCheatDetected;
+}
+
 const TILE_HIGHLIGHT_OVERLAY_ID = 'board-advisor-tile-highlight';
 const TILE_HIGHLIGHT_STYLE_ID = 'board-advisor-highlight-styles';
 const PANEL_ID = "board-advisor-panel";
@@ -174,6 +284,12 @@ function isBoardChangeInProgress() {
 }
 
 function addRunIfNotExists(newRun) {
+  // Check anti-cheat flag
+  if (isCheatingDetected()) {
+    console.warn('[Board Advisor] Anti-cheat: Cheating detected, preventing run addition');
+    return false;
+  }
+  
   const exists = performanceTracker.runs.some(r => 
     r.roomId === newRun.roomId && 
     r.ticks === newRun.ticks && 
@@ -461,6 +577,12 @@ async function addSandboxRunToDB(runData) {
   return safeDBOperation(async () => {
     // Validate data before processing
     validateRunData(runData);
+    
+    // Check anti-cheat flag
+    if (isCheatingDetected()) {
+      console.warn('[Board Advisor] Anti-cheat: Cheating detected, preventing data save');
+      throw new Error('Anti-cheat: Cheating detected - data save prevented');
+    }
     
     if (!isDBReady) {
       await initSandboxDB();
@@ -1692,6 +1814,12 @@ async function addBoardAnalyzerRun(runData) {
       return false;
     }
     
+    // Check anti-cheat flag
+    if (isCheatingDetected()) {
+      console.warn('[Board Advisor] Anti-cheat: Cheating detected, preventing Board Analyzer run save');
+      return false;
+    }
+    
     // ONLY accept Board Analyzer runs
     if (runData.source !== 'board_analyzer') {
       console.log('[Board Advisor] Skipping non-Board Analyzer run - only Board Analyzer runs are saved to IndexedDB');
@@ -1888,6 +2016,12 @@ function convertBoardAnalyzerResults(boardAnalyzerResults) {
         source: 'board_analyzer'
       };
 
+      // Check anti-cheat flag
+      if (isCheatingDetected()) {
+        console.warn('[Board Advisor] Anti-cheat: Cheating detected, skipping Board Analyzer run');
+        return;
+      }
+      
       // Add to performance tracker
       performanceTracker.runs.push(runData);
 
@@ -2476,6 +2610,16 @@ class DataCollector {
       // Get current board data
       const currentBoard = this.getCurrentBoardData();
       
+      // Check for cheating immediately when board changes
+      checkForCheating(currentBoard);
+      
+      // Only reset anti-cheat flag if no cheating is detected
+      if (!antiCheatDetected) {
+        console.log('[Board Advisor] Anti-cheat flag reset due to board change (no cheating detected)');
+      } else {
+        console.log('[Board Advisor] Anti-cheat: Cheating detected during board change');
+      }
+      
       console.log('[Board Advisor] Board change detected:', {
         previousRoomId: previousRoomId,
         currentRoomId: currentBoard?.roomId,
@@ -2874,6 +3018,12 @@ class DataCollector {
   }
 
   storeRunData(runData) {
+    // Check anti-cheat flag
+    if (isCheatingDetected()) {
+      console.warn('[Board Advisor] Anti-cheat: Cheating detected, preventing run data storage');
+      return; // Exit early without storing the data
+    }
+    
     // Ensure monster names are preserved in board setup
     if (runData.boardSetup) {
       runData.boardSetup = runData.boardSetup.map(piece => ({
@@ -3371,6 +3521,16 @@ class AnalysisEngine {
 
     try {
       const currentBoard = this.dataCollector.getCurrentBoardData();
+      
+      // Check for cheating and set flag
+      checkForCheating(currentBoard);
+      
+      // Check anti-cheat flag
+      if (isCheatingDetected()) {
+        console.warn('[Board Advisor] Anti-cheat: Cheating detected, stopping analysis and data saving');
+        updatePanelStatus('Analysis stopped: Invalid monster stats detected (cheating detected)', 'error');
+        return null;
+      }
       
       // Initialize previous board piece count if not set
       if (previousBoardPieceCount === 0 && currentBoard && currentBoard.boardSetup) {
@@ -5160,7 +5320,7 @@ class AnalysisEngine {
         });
         
         // If no monster name or it's the same as monster ID, try to resolve it
-        if (!monsterName || monsterName === piece.monsterId || monsterName.startsWith('INITIAL_') || monsterName === null) {
+        if (!monsterName || monsterName === piece.monsterId || (typeof monsterName === 'string' && monsterName.startsWith('INITIAL_')) || monsterName === null) {
           // Try to get from player context first (same as IndexedDB data)
           const playerContext = globalThis.state?.player?.getSnapshot()?.context;
           if (playerContext?.monsters) {
@@ -8108,7 +8268,7 @@ async function updatePanelWithAnalysis(analysis) {
                   equipId: piece.equipId
                 });
                 
-                if (!monster || monster === piece.monsterId || monster.startsWith('INITIAL_')) {
+                if (!monster || monster === piece.monsterId || (typeof monster === 'string' && monster.startsWith('INITIAL_'))) {
                   monster = piece.monster?.name || piece.name || 
                            (monsterId ? getMonsterName(monsterId) : null) ||
                            'Unknown';
