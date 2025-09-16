@@ -53,6 +53,13 @@ let isInitializing = false;
 let hasInitialized = false;
 let initializationPromise = null;
 
+// Cleanup tracking for memory leak prevention
+let boardUnsubscribe = null;
+let gameTimerUnsubscribe = null;
+let originalFetch = null;
+let originalConsoleLog = null;
+let retryInterval = null;
+
 // =======================
 // 3. Utility Functions
 // =======================
@@ -1167,7 +1174,7 @@ function setupResultsListener() {
     function setupListeners() {
       // Listen for game board subscription (like Hunt Analyzer)
       if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
-        globalThis.state.board.subscribe(({ context }) => {
+        boardUnsubscribe = globalThis.state.board.subscribe(({ context }) => {
           const serverResults = context.serverResults;
           if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') return;
           
@@ -1195,7 +1202,7 @@ function setupResultsListener() {
       
       // Alternative: Listen for game timer subscription
       if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.gameTimer && globalThis.state.gameTimer.subscribe) {
-        globalThis.state.gameTimer.subscribe((data) => {
+        gameTimerUnsubscribe = globalThis.state.gameTimer.subscribe((data) => {
           const { readableGrade, rankPoints } = data.context;
           if ((readableGrade !== undefined && readableGrade !== null) || (rankPoints !== undefined && rankPoints !== null)) {
             // This might be a game end event, but we need server results for full data
@@ -1211,7 +1218,7 @@ function setupResultsListener() {
     if (!setupListeners()) {
       let attempts = 0;
       const maxAttempts = 10;
-      const retryInterval = setInterval(() => {
+      retryInterval = setInterval(() => {
         attempts++;
         if (setupListeners() || attempts >= maxAttempts) {
           clearInterval(retryInterval);
@@ -1230,7 +1237,7 @@ function setupResultsListener() {
 function setupNetworkListener() {
   try {
     // Monitor fetch requests for server results
-    const originalFetch = window.fetch;
+    originalFetch = window.fetch;
     window.fetch = async function(...args) {
       const response = await originalFetch.apply(this, args);
       
@@ -1277,7 +1284,7 @@ function setupNetworkListener() {
     };
     
     // Monitor console.log calls for replay data
-    const originalConsoleLog = console.log;
+    originalConsoleLog = console.log;
     console.log = function(...args) {
       // Call original console.log
       originalConsoleLog.apply(console, args);
@@ -1560,5 +1567,62 @@ exports = {
   version: '1.0',
   author: 'Bestiary Arena Mod Loader',
   enabled: true,
-  hidden: true // This prevents it from showing in the UI
+  hidden: true, // This prevents it from showing in the UI
+  
+  // Cleanup function to prevent memory leaks
+  cleanup: () => {
+    try {
+      console.log('[RunTracker] Cleaning up mod resources...');
+      
+      // Unsubscribe from game state listeners
+      if (boardUnsubscribe && typeof boardUnsubscribe === 'function') {
+        boardUnsubscribe();
+        boardUnsubscribe = null;
+        console.log('[RunTracker] Unsubscribed from board state');
+      }
+      
+      if (gameTimerUnsubscribe && typeof gameTimerUnsubscribe === 'function') {
+        gameTimerUnsubscribe();
+        gameTimerUnsubscribe = null;
+        console.log('[RunTracker] Unsubscribed from game timer state');
+      }
+      
+      // Clear retry interval
+      if (retryInterval) {
+        clearInterval(retryInterval);
+        retryInterval = null;
+        console.log('[RunTracker] Cleared retry interval');
+      }
+      
+      // Restore original global functions
+      if (originalFetch) {
+        window.fetch = originalFetch;
+        originalFetch = null;
+        console.log('[RunTracker] Restored original fetch function');
+      }
+      
+      if (originalConsoleLog) {
+        console.log = originalConsoleLog;
+        originalConsoleLog = null;
+        console.log('[RunTracker] Restored original console.log function');
+      }
+      
+      // Clear all pending debouncer timers
+      if (Utils && Utils.debouncer && Utils.debouncer.timers) {
+        Utils.debouncer.timers.forEach(timer => clearTimeout(timer));
+        Utils.debouncer.timers.clear();
+        console.log('[RunTracker] Cleared all debouncer timers');
+      }
+      
+      // Flush any pending storage operations
+      if (StorageManager) {
+        StorageManager.flushSaves();
+        console.log('[RunTracker] Flushed pending storage operations');
+      }
+      
+      console.log('[RunTracker] Cleanup completed successfully');
+    } catch (error) {
+      console.error('[RunTracker] Error during cleanup:', error);
+    }
+  }
 };

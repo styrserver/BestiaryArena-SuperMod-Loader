@@ -123,6 +123,9 @@
     leaderboardCache: new Map(),
     cacheTimeout: 30000, // 30 seconds
     
+    // Subscription management for cleanup
+    subscriptions: [],
+    
     // State validation
     validateState() {
       const errors = [];
@@ -176,6 +179,7 @@
       this.lastErrorTime = 0;
       this.totalErrors = 0;
       this.leaderboardCache.clear();
+      this.subscriptions = [];
     },
     
     // State update with validation
@@ -971,7 +975,7 @@
         
                  // Set up observer for map changes using board state
          const boardState = globalThis.state.board;
-         boardState.subscribe((state) => {
+         const boardUnsubscribe = boardState.subscribe((state) => {
            // Skip updates during board analysis to prevent spam
            if (isBoardAnalyzing()) {
              return;
@@ -1046,10 +1050,13 @@
              updateLeaderboards();
            }
          });
+         
+         // Store subscription for cleanup
+         BetterHighscoresState.subscriptions.push(boardUnsubscribe);
         
                 // Also listen for game state changes as backup
         if (globalThis.state.game) {
-          globalThis.state.game.subscribe((state) => {
+          const gameUnsubscribe = globalThis.state.game.subscribe((state) => {
             // Skip updates during board analysis to prevent spam
             if (isBoardAnalyzing()) {
               return;
@@ -1103,13 +1110,16 @@
               updateLeaderboards();
             }
           });
+          
+          // Store subscription for cleanup
+          BetterHighscoresState.subscriptions.push(gameUnsubscribe);
         }
         
                  // Listen for game timer changes to detect battle completion
          if (globalThis.state.gameTimer) {
            let previousState = 'initial';
            
-           globalThis.state.gameTimer.subscribe((state) => {
+           const gameTimerUnsubscribe = globalThis.state.gameTimer.subscribe((state) => {
              const { currentTick, gameState } = state.context;
              const currentState = state.context.state;
              
@@ -1231,6 +1241,9 @@
              
              previousState = currentState;
            });
+           
+           // Store subscription for cleanup
+           BetterHighscoresState.subscriptions.push(gameTimerUnsubscribe);
          }
         
         // NEW: Set up periodic check for autoplay mode to ensure leaderboard stays visible
@@ -1297,6 +1310,17 @@
       }
     }
     
+    // Clean up state subscriptions
+    BetterHighscoresState.subscriptions.forEach(unsubscribe => {
+      try {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      } catch (error) {
+        console.warn('[Better Highscores] Error unsubscribing:', error);
+      }
+    });
+    
     // Reset state
     BetterHighscoresState.reset();
     
@@ -1304,7 +1328,7 @@
     DOMCache.clear();
     BetterHighscoresState.leaderboardCache.clear();
     
-    // NEW: Clean up observers and intervals
+    // Clean up observers and intervals
     if (window.betterHighscoresInterval) {
       clearInterval(window.betterHighscoresInterval);
       window.betterHighscoresInterval = null;
@@ -1313,6 +1337,11 @@
     if (window.betterHighscoresObserver) {
       window.betterHighscoresObserver.disconnect();
       window.betterHighscoresObserver = null;
+    }
+    
+    // Clean up global window object
+    if (window.BetterHighscores) {
+      delete window.BetterHighscores;
     }
     
     log('[Better Highscores] Cleanup complete');

@@ -609,6 +609,12 @@ const handleDayCare = async () => {
     return;
   }
   
+  // Check if Board Analyzer is running - if so, skip daycare detection
+  if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+    console.log('[Bestiary Automator] Board Analyzer is running, skipping daycare detection');
+    return;
+  }
+  
   try {
     console.log('[Bestiary Automator] === Starting daycare detection ===');
     
@@ -1109,6 +1115,7 @@ let automationInterval = null;
 let gameStateObserver = null;
 let focusEventListeners = null;
 let currentCountdownTask = null;
+let gameStateUnsubscribers = [];
 
 // Add debouncing for game state events
 let lastGameStateChange = 0;
@@ -1179,18 +1186,18 @@ const subscribeToGameState = () => {
       };
       
       // Subscribe to newGame event (primary handler)
-      globalThis.state.board.on('newGame', handleNewGame);
+      gameStateUnsubscribers.push(globalThis.state.board.on('newGame', handleNewGame));
       
       // Subscribe to emitNewGame event (secondary handler for countdown cancellation only)
-      globalThis.state.board.on('emitNewGame', (event) => {
+      gameStateUnsubscribers.push(globalThis.state.board.on('emitNewGame', (event) => {
         if (currentCountdownTask) {
           console.log('[Bestiary Automator] Game started during countdown, cancelling...');
           cancelCurrentCountdown();
         }
-      });
+      }));
       
       // Monitor for other board state changes that should cancel countdowns
-      globalThis.state.board.on('stateChange', (event) => {
+      gameStateUnsubscribers.push(globalThis.state.board.on('stateChange', (event) => {
         const boardContext = event.context;
         
         // Cancel countdown if map picker opens (user changing maps)
@@ -1202,7 +1209,7 @@ const subscribeToGameState = () => {
         if (boardContext.gameStarted !== boardContext.gameStarted) {
           cancelCurrentCountdown();
         }
-      });
+      }));
       
       // Consolidated end game handler with debouncing
       const handleEndGame = (event) => {
@@ -1247,7 +1254,7 @@ const subscribeToGameState = () => {
       };
       
       // Subscribe to emitEndGame event
-      globalThis.state.board.on('emitEndGame', handleEndGame);
+      gameStateUnsubscribers.push(globalThis.state.board.on('emitEndGame', handleEndGame));
     }
     
     // Set up MutationObserver for real-time toast detection
@@ -1940,6 +1947,12 @@ const handleFasterAutoplay = async () => {
     return;
   }
   
+  // Check if we're in autoplay mode - only apply speed increase in autoplay mode
+  if (!isAutoplayMode()) {
+    console.log('[Bestiary Automator] Not in autoplay mode, skipping speed increase (Faster Autoplay only works in autoplay mode)');
+    return;
+  }
+  
   try {
     console.log(`[Bestiary Automator] Setting autoplay delay to 0ms and increasing game speed by ${config.fasterAutoplaySpeed}%...`);
     
@@ -1963,14 +1976,15 @@ const handleFasterAutoplay = async () => {
       }
       
       window.__fasterAutoplaySubscription = globalThis.state.board.on('newGame', (event) => {
-        if (event.world && event.world.tickEngine) {
+        // Only apply speed increase if we're in autoplay mode
+        if (event.world && event.world.tickEngine && isAutoplayMode()) {
           event.world.tickEngine.setTickInterval(newInterval);
         }
       });
       
-      // Apply to current game if it exists
+      // Apply to current game if it exists and we're in autoplay mode
       const boardContext = globalThis.state.board.getSnapshot().context;
-      if (boardContext && boardContext.world && boardContext.world.tickEngine) {
+      if (boardContext && boardContext.world && boardContext.world.tickEngine && isAutoplayMode()) {
         boardContext.world.tickEngine.setTickInterval(newInterval);
         console.log(`[Bestiary Automator] Game speed increased: ${DEFAULT_TICK_INTERVAL_MS}ms → ${newInterval.toFixed(2)}ms (${speedupFactor.toFixed(2)}x speed)`);
       }
@@ -1979,7 +1993,13 @@ const handleFasterAutoplay = async () => {
     }
     
     fasterAutoplayExecutedThisSession = true;
-    console.log(`[Bestiary Automator] Faster Autoplay enabled with ${config.fasterAutoplaySpeed}% speed increase`);
+    
+    // Log appropriate message based on whether speed was actually applied
+    if (isAutoplayMode()) {
+      console.log(`[Bestiary Automator] Faster Autoplay enabled with ${config.fasterAutoplaySpeed}% speed increase`);
+    } else {
+      console.log(`[Bestiary Automator] Faster Autoplay enabled (autoplay delay set to 0ms, speed increase will apply when in autoplay mode)`);
+    }
   } catch (error) {
     console.warn('[Bestiary Automator] Could not set autoplay delay:', error);
   }
@@ -2071,10 +2091,20 @@ const stopAutomation = () => {
   
   // Unsubscribe from game state changes
   unsubscribeFromGameState();
+  
+  // Clean up game state API subscriptions
+  gameStateUnsubscribers.forEach(unsub => unsub());
+  gameStateUnsubscribers = [];
 };
 
 const runAutomationTasks = async () => {
   try {
+    // Check if Board Analyzer is running - if so, skip all automation tasks
+    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+      console.log('[Bestiary Automator] Board Analyzer is running, skipping all automation tasks');
+      return;
+    }
+    
     // Core automation tasks that should always run
     await takeRewardsIfAvailable();
     await handleDayCare();
@@ -2171,8 +2201,8 @@ const createConfigPanel = () => {
   
   // Faster autoplay checkbox with warning
   const fasterAutoplayWarningText = config.currentLocale === 'pt' 
-    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay e aumenta a velocidade do jogo (configurável), tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
-    : '⚠️ Removes the 3-second delay between autoplay actions and increases game speed (configurable), making the game run faster. May cause unexpected behavior or conflicts with other mods.';
+    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay e aumenta a velocidade do jogo (configurável) APENAS no modo autoplay, tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
+    : '⚠️ Removes the 3-second delay between autoplay actions and increases game speed (configurable) ONLY in autoplay mode, making the game run faster. May cause unexpected behavior or conflicts with other mods.';
   
   const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   
@@ -2266,7 +2296,13 @@ const createConfigPanel = () => {
                   autoplayDelayMs: 0
                 }),
               });
-              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms and increased game speed by ${config.fasterAutoplaySpeed}%`);
+              
+              // Only apply speed increase if we're in autoplay mode
+              if (isAutoplayMode()) {
+                console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms and increased game speed by ${config.fasterAutoplaySpeed}%`);
+              } else {
+                console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms (speed increase will apply when in autoplay mode)`);
+              }
             } else {
               // Reset autoplay delay to default 3 seconds
               globalThis.state.clientConfig.trigger.setState({
@@ -2794,6 +2830,21 @@ context.exports = {
     // Clear all caches and timeouts
     elementCache.clear();
     cancelAllTimeouts();
+    
+    // Clean up Faster Autoplay subscription
+    if (window.__fasterAutoplaySubscription) {
+      window.__fasterAutoplaySubscription.unsubscribe();
+      window.__fasterAutoplaySubscription = null;
+    }
+    
+    // Reset session flags
+    fasterAutoplayExecutedThisSession = false;
+    fasterAutoplayRunning = false;
+    rewardsCollectedThisSession = false;
+    questLogProcessedThisBoardState = false;
+    isTaskCheckingSleeping = false;
+    sleepStartTime = 0;
+    sleepDuration = 0;
     
     console.log('[Bestiary Automator] Cleanup completed');
   }

@@ -98,8 +98,11 @@ let stateManager = {
     isProcessing: false
 };
 
-// Toast detection for fight icon
-let fightToastObserver = null;
+// Board Analyzer coordination
+let boardAnalyzerCoordinationInterval = null;
+let isBoardAnalyzerRunning = false;
+
+// Toast detection for fight icon (now consolidated with quest log observer)
 
 // Safe execution wrapper to prevent race conditions
 function safeExecute(fn) {
@@ -151,6 +154,12 @@ function isFightToast(element) {
 
 // Handle fight toast detection
 function handleFightToast() {
+    // Check if Board Analyzer is running - if so, skip processing
+    if (isBoardAnalyzerRunning) {
+        console.log('[Raid Hunter] Fight toast detected but Board Analyzer is running - skipping');
+        return;
+    }
+    
     if (!isAutomationActive()) {
         console.log('[Raid Hunter] Fight toast detected but automation is disabled');
         return;
@@ -172,12 +181,14 @@ function handleFightToast() {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
-                    // Check if automation is still enabled after delay
-                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0 && !isCurrentlyRaiding) {
+                    // Check if automation is still enabled after delay and Board Analyzer is not running
+                    if (isAutomationEnabled === AUTOMATION_ENABLED && !isBoardAnalyzerRunning && raidQueue.length > 0 && !isCurrentlyRaiding) {
                         console.log('[Raid Hunter] Raid start delay completed - processing raid');
                         processNextRaid();
                     } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
                         console.log('[Raid Hunter] Automation disabled during fight toast delay');
+                    } else if (isBoardAnalyzerRunning) {
+                        console.log('[Raid Hunter] Board Analyzer running during fight toast delay - skipping');
                     }
                 }, raidStartDelay * 1000);
             } else {
@@ -190,6 +201,82 @@ function handleFightToast() {
             console.log('[Raid Hunter] Fight toast detected but no raids in queue');
         }
     });
+}
+
+// Board Analyzer coordination - pause Raid Hunter monitoring during Board Analyzer runs
+function handleBoardAnalyzerCoordination() {
+    try {
+        if (!window.__modCoordination) return;
+        
+        const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
+        
+        if (boardAnalyzerRunning && !isBoardAnalyzerRunning) {
+            // Board Analyzer started - pause Raid Hunter monitoring
+            console.log('[Raid Hunter] Board Analyzer started - pausing monitoring');
+            isBoardAnalyzerRunning = true;
+            pauseRaidHunterMonitoring();
+        } else if (!boardAnalyzerRunning && isBoardAnalyzerRunning) {
+            // Board Analyzer finished - resume Raid Hunter monitoring
+            console.log('[Raid Hunter] Board Analyzer finished - resuming monitoring');
+            isBoardAnalyzerRunning = false;
+            resumeRaidHunterMonitoring();
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error in Board Analyzer coordination:', error);
+    }
+}
+
+// Pause Raid Hunter monitoring to prevent interference
+function pauseRaidHunterMonitoring() {
+    try {
+        // Only pause the monitoring that could interfere with Board Analyzer
+        // Keep the UI widget visible - no need to remove it
+        
+        // Pause quest log monitoring interval (but keep observer for UI)
+        if (questLogMonitorInterval) {
+            clearInterval(questLogMonitorInterval);
+            questLogMonitorInterval = null;
+        }
+        
+        // Don't disconnect the quest log observer - keep it for UI detection
+        // The observer won't interfere with Board Analyzer
+        
+        // Keep the Raid Monitor widget visible - don't remove it
+        // Board Analyzer only hides the game board, not the Quest Log
+        console.log('[Raid Hunter] Monitoring paused for Board Analyzer (widget remains visible)');
+    } catch (error) {
+        console.error('[Raid Hunter] Error pausing monitoring:', error);
+    }
+}
+
+// Resume Raid Hunter monitoring after Board Analyzer finishes
+function resumeRaidHunterMonitoring() {
+    try {
+        // Only resume if automation is enabled
+        if (isAutomationEnabled === AUTOMATION_ENABLED) {
+            // Resume ALL monitoring
+            setupRaidMonitoring(); // This restores raid monitoring
+            
+            // Restore quest log monitoring interval (observer was never disconnected)
+            if (!questLogMonitorInterval) {
+                questLogMonitorInterval = setInterval(() => {
+                    safeExecute(() => {
+                        // Try immediate detection (like Better Yasir)
+                        if (tryImmediateRaidClockCreation()) {
+                            console.log('[Raid Hunter] Quest log monitoring: Raid clock created, continuing monitoring for future reopenings');
+                            // Don't stop monitoring - keep it running for future quest log reopenings
+                        }
+                    });
+                }, 2000); // Reduced frequency since we have MutationObserver
+            }
+            
+            console.log('[Raid Hunter] All monitoring resumed after Board Analyzer');
+        } else {
+            console.log('[Raid Hunter] Automation disabled - skipping resume');
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error resuming monitoring:', error);
+    }
 }
 
 // Unified cleanup function to fix memory leaks
@@ -226,9 +313,10 @@ function cleanupAll() {
         clearTimeout(retryTimeout);
         retryTimeout = null;
     }
-    if (fightToastObserver) {
-        fightToastObserver.disconnect();
-        fightToastObserver = null;
+    // fightToastObserver is now consolidated with questLogObserver
+    if (boardAnalyzerCoordinationInterval) {
+        clearInterval(boardAnalyzerCoordinationInterval);
+        boardAnalyzerCoordinationInterval = null;
     }
 }
 
@@ -342,6 +430,12 @@ function closeOpenModals() {
 // Process next raid in queue
 function processNextRaid() {
     if (isCurrentlyRaiding || raidQueue.length === 0) {
+        return;
+    }
+    
+    // Check if Board Analyzer is running - if so, skip processing
+    if (isBoardAnalyzerRunning) {
+        console.log('[Raid Hunter] Board Analyzer is running - skipping raid processing');
         return;
     }
     
@@ -525,63 +619,77 @@ function createRaidClock() {
     console.log('[Raid Hunter] createRaidClock: Raid clock created successfully!');
 }
 
-// Optimized quest log mutation processing with immediate detection (inspired by Better Yasir)
-function debouncedProcessQuestLogMutations(mutations) {
+// Consolidated mutation processing for both quest log and fight toast detection
+function debouncedProcessAllMutations(mutations) {
     safeExecute(() => {
-        // Skip if raid clock already exists
-        if (document.getElementById(RAID_CLOCK_ID)) {
-            return;
-        }
+        let hasQuestLogContent = false;
+        let hasFightToast = false;
         
-        // Quick check: if no quest log-related content, skip processing entirely
-        const hasQuestLogContent = mutations.some(mutation => 
-            mutation.addedNodes.length > 0 && 
-            Array.from(mutation.addedNodes).some(node => 
-                node.nodeType === Node.ELEMENT_NODE && 
-                (node.textContent?.includes('Quest Log') || 
-                 node.querySelector?.('*') && 
-                 Array.from(node.querySelectorAll('*')).some(el => 
-                   el.textContent?.includes('Quest Log')
-                 ) ||
-                 // Also check for quest log container structure
-                 node.classList?.contains('grid') && 
-                 node.classList?.contains('items-start') && 
-                 node.classList?.contains('gap-1') ||
-                 // Check for widget-bottom that might contain quest log
-                 node.classList?.contains('widget-bottom') ||
-                 // Check for any element with quest log related classes
-                 (node.querySelector && node.querySelector('.grid.h-\\[260px\\].items-start.gap-1'))
-                )
-            )
-        );
-        
-        if (!hasQuestLogContent) {
-            return;
-        }
-        
-        console.log('[Raid Hunter] debouncedProcessQuestLogMutations: Quest log content detected!');
-        
-        // Clear any existing timeout
-        if (questLogObserverTimeout) {
-            clearTimeout(questLogObserverTimeout);
-        }
-        
-        // Try immediate detection first (like Better Yasir)
-        if (tryImmediateRaidClockCreation()) {
-            // Don't stop monitoring - keep it running for future quest log reopenings
-            console.log('[Raid Hunter] Raid clock created successfully! Continuing to monitor for future Quest Log openings...');
-            return;
-        }
-        
-        // Fallback with minimal delay (like Better Yasir's 50ms debounce)
-        questLogObserverTimeout = setTimeout(() => {
-            // Double-check that raid clock doesn't exist before trying to create
-            if (!document.getElementById(RAID_CLOCK_ID) && tryImmediateRaidClockCreation()) {
-                // Don't stop monitoring - keep it running for future quest log reopenings
-                console.log('[Raid Hunter] Raid clock created via delayed detection! Continuing to monitor for future Quest Log openings...');
+        // Process all mutations in one pass
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        // Check for quest log content
+                        if (!hasQuestLogContent && !document.getElementById(RAID_CLOCK_ID)) {
+                            hasQuestLogContent = checkForQuestLogContent(node);
+                        }
+                        
+                        // Check for fight toast
+                        if (!hasFightToast && isAutomationActive()) {
+                            hasFightToast = isFightToast(node);
+                        }
+                    }
+                }
             }
-        }, 50);
+        }
+        
+        // Handle quest log detection
+        if (hasQuestLogContent) {
+            console.log('[Raid Hunter] Quest log content detected!');
+            
+            // Clear any existing timeout
+            if (questLogObserverTimeout) {
+                clearTimeout(questLogObserverTimeout);
+            }
+            
+            // Try immediate detection first
+            if (tryImmediateRaidClockCreation()) {
+                console.log('[Raid Hunter] Raid clock created successfully!');
+                return;
+            }
+            
+            // Fallback with minimal delay
+            questLogObserverTimeout = setTimeout(() => {
+                if (!document.getElementById(RAID_CLOCK_ID) && tryImmediateRaidClockCreation()) {
+                    console.log('[Raid Hunter] Raid clock created via delayed detection!');
+                }
+            }, 50);
+        }
+        
+        // Handle fight toast detection
+        if (hasFightToast) {
+            console.log('[Raid Hunter] Fight toast detected!');
+            handleFightToast();
+        }
     });
+}
+
+// Helper function to check for quest log content
+function checkForQuestLogContent(node) {
+    return node.textContent?.includes('Quest Log') || 
+           (node.querySelector?.('*') && 
+            Array.from(node.querySelectorAll('*')).some(el => 
+              el.textContent?.includes('Quest Log')
+            )) ||
+           // Check for quest log container structure
+           (node.classList?.contains('grid') && 
+            node.classList?.contains('items-start') && 
+            node.classList?.contains('gap-1')) ||
+           // Check for widget-bottom that might contain quest log
+           node.classList?.contains('widget-bottom') ||
+           // Check for any element with quest log related classes
+           (node.querySelector && node.querySelector('.grid.h-\\[260px\\].items-start.gap-1'));
 }
 
 // Monitors quest log visibility (simplified like Better Yasir)
@@ -592,15 +700,15 @@ function monitorQuestLogVisibility() {
         return;
     }
     
-    // MutationObserver for quest log detection (like Better Yasir)
-    questLogObserver = new MutationObserver(debouncedProcessQuestLogMutations);
+    // Consolidated MutationObserver for both quest log and fight toast detection
+    questLogObserver = new MutationObserver(debouncedProcessAllMutations);
     
     questLogObserver.observe(document.body, {
         childList: true,
         subtree: true
     });
     
-    console.log('[Raid Hunter] MutationObserver set up for quest log detection');
+    console.log('[Raid Hunter] Consolidated MutationObserver set up for quest log and fight toast detection');
 }
 
 // Starts quest log monitoring (simplified like Better Yasir)
@@ -1793,6 +1901,16 @@ async function checkForExistingRaids() {
     }
 }
 
+// Sets up Board Analyzer coordination
+function setupBoardAnalyzerCoordination() {
+    // Poll for Board Analyzer state changes every 500ms (same as Board Advisor)
+    boardAnalyzerCoordinationInterval = setInterval(() => {
+        handleBoardAnalyzerCoordination();
+    }, 500);
+    
+    console.log('[Raid Hunter] Board Analyzer coordination set up');
+}
+
 // Sets up raid monitoring.
 function setupRaidMonitoring() {
     if (raidUnsubscribe && typeof raidUnsubscribe === 'function') {
@@ -1817,47 +1935,11 @@ function setupRaidMonitoring() {
     setupFightToastMonitoring();
 }
 
-// Set up fight toast monitoring
+// Set up fight toast monitoring (now consolidated with quest log monitoring)
 function setupFightToastMonitoring() {
-    if (fightToastObserver) {
-        fightToastObserver.disconnect();
-        fightToastObserver = null;
-    }
-    
-    // Create MutationObserver to watch for fight toasts
-    fightToastObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            if (mutation.type === 'childList') {
-                // Check each added node for fight toasts
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        // Check if the added element is a fight toast
-                        if (isFightToast(node)) {
-                            console.log('[Raid Hunter] Fight toast detected via MutationObserver!');
-                            handleFightToast();
-                            return; // Exit early since we found a fight toast
-                        }
-                        
-                        // Also check child elements for fight toasts
-                        const fightToast = node.querySelector && node.querySelector('img[src*="fight.png"]');
-                        if (fightToast) {
-                            console.log('[Raid Hunter] Fight toast found in child elements via MutationObserver!');
-                            handleFightToast();
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    
-    // Start observing the document body for added nodes
-    fightToastObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    console.log('[Raid Hunter] Fight toast monitoring set up');
+    // Fight toast monitoring is now handled by the consolidated observer
+    // No separate observer needed - handled in debouncedProcessAllMutations
+    console.log('[Raid Hunter] Fight toast monitoring consolidated with quest log monitoring');
 }
 
 // Handles new raid detection.
@@ -2714,6 +2796,9 @@ function init() {
     loadAutomationState();
     
     setupRaidMonitoring();
+    
+    // Set up Board Analyzer coordination
+    setupBoardAnalyzerCoordination();
     
     // Check for existing raids immediately and after a delay (only if automation is enabled)
     if (isAutomationEnabled === AUTOMATION_ENABLED) {

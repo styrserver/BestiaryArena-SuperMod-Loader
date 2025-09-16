@@ -1,29 +1,13 @@
-'''Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the original mod loader. You can find it here: https://github.com/TheMegafuji/bestiary-arena-mod-loader'''
-
-________________________
-
-[https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ Firefox] installation: 
-
-[https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation: 
+'''<big>Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the [https://github.com/TheMegafuji/bestiary-arena-mod-loader original mod loader].</big>'''
 
 = BestiaryArena SuperMod Loader =
 
 A browser extension that allows loading and managing custom mods for the Bestiary Arena game. This extension is a clone of the original Bestiary Arena Mod Loader with reworked mod loading, including advanced Super Mods like Cyclopedia and Hunt Analyzer. It provides a framework for creating, loading, and managing mods that can extend the game's functionality.
 
-== Features ==
-* '''Mod Management''': Load mods from local files or GitHub Gists
-* '''Configuration System''': Save and manage mod configurations between sessions, with improved support for advanced mod settings
-* '''Standardized UI Components''': Game-styled UI elements for consistency across mods
-* '''Session Widget''': Real-time session stats for mods like Autoseller (e.g., sold/squeezed counts, gold/dust earned)
-* '''Internationalization''': Built-in translation support for mods
-* '''Game API Access''': Safe access to game state and functions
-* '''Developer-Friendly''': Comprehensive documentation and examples
-* '''Super Mods''': Advanced mods with comprehensive game enhancement features
-
 == Installation ==
-[https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ Firefox] installation:
+[https://addons.mozilla.org/en-US/firefox/addon/bestiaryarena-supermod-loader/ Firefox] installation.
 
-[https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation: 
+[https://chromewebstore.google.com/detail/bestiaryarena-supermod-lo/hloidpjbdbbhhkihgeeddnofmpgbffjd Chromium] installation.
 
 == Alternative Installation ==
 
@@ -42,6 +26,16 @@ A browser extension that allows loading and managing custom mods for the Bestiar
 # Enable "Developer mode" using the toggle in the top-right corner
 # Click "Load unpacked" and select the folder containing the extension files
 # The extension icon should now appear in your browser toolbar
+
+== Features ==
+* '''Mod Management''': Load mods from local files or GitHub Gists
+* '''Configuration System''': Save and manage mod configurations between sessions, with improved support for advanced mod settings
+* '''Standardized UI Components''': Game-styled UI elements for consistency across mods
+* '''Session Widget''': Real-time session stats for mods like Autoseller (e.g., sold/squeezed counts, gold/dust earned)
+* '''Internationalization''': Built-in translation support for mods
+* '''Game API Access''': Safe access to game state and functions
+* '''Developer-Friendly''': Comprehensive documentation and examples
+* '''Super Mods''': Advanced mods with comprehensive game enhancement features
 
 == Using the Mod Loader ==
 After installing the extension, navigate to [https://bestiaryarena.com/ Bestiary Arena]. The extension will automatically inject its code into the game page.

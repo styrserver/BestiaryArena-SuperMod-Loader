@@ -1,5 +1,6 @@
 // Welcome Mod for Bestiary Arena
 // Shows a welcome page on initialization with mod description
+// Also shows a loading modal while mods are loading
 console.log('Welcome mod initializing...');
 
 // Configuration
@@ -182,6 +183,144 @@ async function getModCounts() {
   }
 }
 
+// Loading modal state
+let loadingModal = null;
+let loadingCompleted = false;
+let modLoadingObserver = null;
+
+// Common function to handle welcome modal after completion modal closes
+async function handleCompletionModalClose(context = '') {
+  const shouldShow = await shouldShowWelcome();
+  if (shouldShow && config.showWelcome) {
+    console.log(`[Welcome] Showing welcome modal after completion modal ${context}`);
+    showWelcomeModal();
+  } else {
+    console.log('[Welcome] Welcome modal skipped (user preference or config)');
+  }
+}
+
+// Show loading modal
+function showLoadingModal() {
+  console.log('[Welcome] showLoadingModal called');
+  if (!api || !api.ui || !api.ui.components) {
+    console.error('[Welcome] API not available for loading modal');
+    return;
+  }
+
+  try {
+    loadingModal = api.ui.components.createModal({
+      title: 'Loading Mods...',
+      width: 300,
+      height: 80,
+      content: `
+        <div style="padding: 15px; text-align: center;">
+          <div style="margin-bottom: 10px;">
+            <div style="width: 25px; height: 25px; border: 3px solid #a6adc8; border-top: 3px solid #7c3aed; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+          </div>
+          <p style="color: #a6adc8; font-size: 15px; margin: 0;">Loading mods...</p>
+        </div>
+        <style>
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        </style>
+      `,
+      buttons: [] // No buttons during loading
+    });
+
+    console.log('[Welcome] Loading modal created:', !!loadingModal);
+    console.log('[Welcome] Loading modal type:', typeof loadingModal);
+  } catch (error) {
+    console.error('[Welcome] Error creating loading modal:', error);
+  }
+}
+
+// Update loading modal to show completion
+function updateLoadingToComplete() {
+  console.log('[Welcome] updateLoadingToComplete called');
+  console.log('[Welcome] loadingModal exists:', !!loadingModal);
+  
+  // Mark loading as completed
+  loadingCompleted = true;
+  
+  if (!loadingModal) {
+    console.warn('[Welcome] No loading modal to update - showing welcome modal directly');
+    setTimeout(() => handleCompletionModalClose('(no loading modal)'), 100);
+    return;
+  }
+
+  try {
+    // Close the loading modal and show completion modal
+    loadingModal?.close?.();
+    loadingModal = null;
+
+    // Create a simple completion modal
+    const completionModal = api.ui.components.createModal({
+      title: 'Mods Loaded!',
+      width: 300,
+      height: 150,
+      content: `
+        <div style="padding: 20px; text-align: center;">
+          <div style="margin-bottom: 15px;">
+            <div style="width: 30px; height: 30px; border: 3px solid #4CAF50; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+              <span style="color: #4CAF50; font-size: 18px; font-weight: bold;">✓</span>
+            </div>
+          </div>
+          <p style="color: #a6adc8; font-size: 15px; margin: 0 0 10px 0;">Loading complete!</p>
+          <p style="color: #a6adc8; font-size: 15px; margin: 0; opacity: 0.7;">All mods loaded successfully.</p>
+        </div>
+      `,
+      buttons: [
+        {
+          text: 'Got it!',
+          primary: true,
+          onClick: async (e, modalObj) => {
+            modalObj?.close?.();
+            handleCompletionModalClose('(completion modal button)');
+          }
+        }
+      ]
+    });
+
+    // Add ESC key support for closing modal
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        completionModal?.close?.();
+        handleCompletionModalClose('(ESC key)');
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    console.log('[Welcome] Completion modal created successfully');
+  } catch (error) {
+    console.error('[Welcome] Error creating completion modal:', error);
+    // Fallback: show welcome modal directly
+    setTimeout(() => handleCompletionModalClose('(error fallback)'), 100);
+  }
+}
+
+// Hide loading modal
+function hideLoadingModal() {
+  console.log('[Welcome] hideLoadingModal called');
+  console.log('[Welcome] loadingModal exists:', !!loadingModal);
+  console.log('[Welcome] loadingCompleted:', loadingCompleted);
+  
+  if (loadingModal && typeof loadingModal.close === 'function') {
+    loadingModal.close();
+    loadingModal = null;
+    console.log('[Welcome] Loading modal hidden successfully');
+  } else {
+    console.warn('[Welcome] Could not hide loading modal - invalid modal object');
+  }
+  
+  // If loading was completed but modal was closed, show welcome modal as fallback
+  if (loadingCompleted) {
+    setTimeout(() => handleCompletionModalClose('(loading completed but modal was closed)'), 100);
+  }
+}
+
 // Show the welcome modal
 async function showWelcomeModal() {
   if (!api || !api.ui || !api.ui.components) {
@@ -249,22 +388,27 @@ async function showWelcomeModal() {
           primary: false,
           onClick: (e, modalObj) => {
             setNeverShowAgain();
-            if (modalObj && typeof modalObj.close === 'function') {
-              modalObj.close();
-            }
+            modalObj?.close?.();
           }
         },
         {
           text: 'Got It!',
           primary: true,
           onClick: (e, modalObj) => {
-            if (modalObj && typeof modalObj.close === 'function') {
-              modalObj.close();
-            }
+            modalObj?.close?.();
           }
         }
       ]
     });
+
+    // Add ESC key support for closing modal
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        modal?.close?.();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
 
     // Force the modal size to match Cyclopedia dimensions
     setTimeout(() => {
@@ -290,22 +434,72 @@ async function showWelcomeModal() {
   }
 }
 
+// Listen for mod loading completion via direct message from local_mods.js
+function setupModLoadingObserver() {
+  console.log('[Welcome] Setting up mod loading completion listener');
+  
+  // Listen for completion message from local_mods.js
+  const messageHandler = (event) => {
+    if (event.source !== window) return;
+    
+    // Listen for mod loading completion message
+    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
+      console.log('[Welcome] Received mod loading completion signal from local_mods.js');
+      updateLoadingToComplete();
+      modsLoaded = true;
+    }
+  };
+  
+  window.addEventListener('message', messageHandler);
+  
+  // Store the handler for cleanup
+  modLoadingObserver = {
+    disconnect: () => {
+      window.removeEventListener('message', messageHandler);
+      console.log('[Welcome] Mod loading completion listener removed');
+    }
+  };
+  
+  // Fallback timer in case the message never comes
+  setTimeout(() => {
+    if (modLoadingObserver) {
+      console.log('[Welcome] Mod loading completion timeout, using fallback');
+      modLoadingObserver.disconnect();
+      modLoadingObserver = null;
+      updateLoadingToComplete();
+      modsLoaded = true;
+    }
+  }, 3000); // Reduced to 3 second timeout
+}
+
 // Initialize welcome modal if conditions are met
 async function initializeWelcome() {
+  console.log('[Welcome] initializeWelcome called');
+  
+  // Set up mod loading completion listener immediately (before API check)
+  console.log('[Welcome] Setting up mod loading completion listener...');
+  setupModLoadingObserver();
+  
   // Check if API is available and show welcome immediately
   if (api && api.ui && api.ui.components) {
-    const shouldShow = await shouldShowWelcome();
-    if (shouldShow && config.showWelcome) {
-      console.log('[Welcome] Showing welcome modal');
-      showWelcomeModal();
-    } else {
-      console.log('[Welcome] Welcome modal skipped (user preference or config)');
+    console.log('[Welcome] API available, starting loading process');
+    
+    // Simulate ESC key presses to prevent DOM errors before showing modal
+    for (let i = 0; i < 3; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
     }
+    
+    // Small delay to ensure ESC presses are processed
+    setTimeout(() => {
+      showLoadingModal();
+    }, 50);
   } else {
+    console.log('[Welcome] API not ready, retrying in 100ms');
     // API not ready yet, wait a short time and try again
     setTimeout(initializeWelcome, 100);
   }
 }
+
 
 // Check popup toggle status first, then start the welcome process
 checkPopupToggleStatus();
@@ -346,6 +540,10 @@ exports = {
   showWelcome: showWelcomeModal,
   setNeverShowAgain,
   shouldShowWelcome,
+  showLoading: showLoadingModal,
+  hideLoading: hideLoadingModal,
+  updateLoadingToComplete: updateLoadingToComplete,
+  isModsLoaded: () => modsLoaded,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
   }

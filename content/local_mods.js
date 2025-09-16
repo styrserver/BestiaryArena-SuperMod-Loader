@@ -220,6 +220,7 @@ async function listAllModFiles() {
       'Official Mods/Turbo Mode.js'
     ];
     const superMods = [
+      'Super Mods/Welcome.js',  // Load Welcome mod first to set up completion listener
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
       'Super Mods/Better Analytics.js',
@@ -235,8 +236,7 @@ async function listAllModFiles() {
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
       'Super Mods/Raid_Hunter.js',
-      'Super Mods/RunTracker.js',
-      'Super Mods/Welcome.js'
+      'Super Mods/RunTracker.js'
     ];
     const testMods = [
       'Test Mods/Board Advisor.js'
@@ -259,6 +259,7 @@ async function listAllModFiles() {
       'Official Mods/Team_Copier.js',
       'Official Mods/Tick_Tracker.js',
       'Official Mods/Turbo Mode.js',
+      'Super Mods/Welcome.js',  // Load Welcome mod first to set up completion listener
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
       'Super Mods/Better Analytics.js',
@@ -275,7 +276,6 @@ async function listAllModFiles() {
       'Super Mods/Outfiter.js',
       'Super Mods/Raid_Hunter.js',
       'Super Mods/RunTracker.js',
-      'Super Mods/Welcome.js',
       'Test Mods/Board Advisor.js'
     ];
   }
@@ -654,6 +654,8 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
             };
             
             console.log(`Local mod ${modName} executed successfully`, scriptResult);
+            console.log(`=== EXECUTE LOCAL MOD END: ${modName} ===`);
+            
             resolve(executedMods[modName]);
           } catch (error) {
             console.error(`Error executing mod ${modName}:`, error);
@@ -701,6 +703,7 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
       
       console.log(`Local mod ${modName} executed successfully`, scriptResult);
       console.log(`=== EXECUTE LOCAL MOD END: ${modName} ===`);
+      
       return executedMods[modName];
     }
   } catch (error) {
@@ -712,6 +715,7 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
 
 // Optimized batch execution function
 async function executeModsInOrder(mods, forceExecution = false) {
+  console.log(`[Local Mods] executeModsInOrder called with ${mods.length} mods, forceExecution: ${forceExecution}`);
   if (isBatchExecuting) {
     console.log('Batch execution already in progress, skipping duplicate call');
     return [];
@@ -736,6 +740,14 @@ async function executeModsInOrder(mods, forceExecution = false) {
     }
     
     console.log(`Batch execution completed. Results:`, results);
+    
+    // Send completion signal to Welcome mod after a delay to ensure all mods are fully loaded and listeners are set up
+    console.log('[Local Mods] About to send completion signal...');
+    setTimeout(() => {
+      console.log('[Local Mods] Sending completion signal now...');
+      sendCompletionSignal();
+    }, 500); // Increased delay to ensure Welcome mod is ready
+    
     return results;
   } finally {
     isBatchExecuting = false;
@@ -748,11 +760,39 @@ function generateMessageId() {
   return `mod_msg_${Date.now()}_${messageIdCounter++}`;
 }
 
+// Simple completion signal - send once when all mods are done
+let completionSignalSent = false;
+
+function sendCompletionSignal() {
+  console.log('[Local Mods] sendCompletionSignal called, completionSignalSent:', completionSignalSent);
+  if (completionSignalSent) {
+    console.log('[Local Mods] Completion signal already sent, skipping');
+    return; // Only send once
+  }
+  
+  console.log('[Local Mods] All mods completed - sending signal');
+  completionSignalSent = true;
+  
+  window.postMessage({
+    from: 'LOCAL_MODS_LOADER',
+    action: 'allModsLoaded'
+  }, '*');
+  
+  console.log('[Local Mods] Completion signal sent successfully');
+}
+
+// Reset completion signal flag (for testing/reloading)
+function resetCompletionSignal() {
+  completionSignalSent = false;
+  console.log('[Local Mods] Completion signal flag reset');
+}
+
 document.addEventListener('reloadLocalMods', () => {
   console.log('Received reloadLocalMods event, reinitializing...');
   window.localMods = [];
   executedMods = {};
   initializationPromise = null; // Reset initialization promise
+  resetCompletionSignal(); // Reset completion signal flag
   initLocalMods();
 });
 
@@ -831,6 +871,7 @@ window.addEventListener('message', function(event) {
         
         // Execute all enabled mods from stored states in correct order
         const enabledMods = window.localMods.filter(mod => mod.enabled);
+        console.log(`[Local Mods] Found ${enabledMods.length} enabled mods, isBatchExecuting: ${isBatchExecuting}`);
         if (enabledMods.length > 0 && !isBatchExecuting) {
           console.log(`Executing ${enabledMods.length} enabled mods in correct order:`);
           console.log('Loading order: Database -> Official -> Super -> Test -> User');
@@ -842,6 +883,7 @@ window.addEventListener('message', function(event) {
                            mod.name.startsWith('User Mods/') ? 'User' : 'Unknown';
             console.log(`  ${index + 1}. [${category}] ${mod.name}`);
           });
+          console.log('[Local Mods] Calling executeModsInOrder...');
           executeModsInOrder(enabledMods);
         } else if (isBatchExecuting) {
           console.log('Skipping execution - batch execution already in progress');

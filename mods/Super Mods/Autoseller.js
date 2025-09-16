@@ -99,6 +99,10 @@
     let boardSubscription1 = null;
     let boardSubscription2 = null;
     let debounceTimer = null;
+    
+    // Global references for cleanup
+    let originalFetch = null;
+    let messageListener = null;
 
     // Default Settings
     const DEFAULT_SETTINGS = {
@@ -1810,7 +1814,7 @@
     function setupDragonPlantAPIMonitor() {
         if (!window.fetch) return;
         
-        const originalFetch = window.fetch;
+        originalFetch = window.fetch;
         window.fetch = function(...args) {
             const [url, options] = args;
             
@@ -3113,7 +3117,7 @@
     }
     
     // Listen for mod disable events
-    window.addEventListener('message', (event) => {
+    messageListener = (event) => {
         if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
             const modName = event.data.message.name;
             const enabled = event.data.message.enabled;
@@ -3125,7 +3129,8 @@
                 }
             }
         }
-    });
+    };
+    window.addEventListener('message', messageListener);
     
     if (typeof exports !== 'undefined') {
         exports = {
@@ -3185,6 +3190,18 @@
                     serverMonsterCache.clear();
                     daycareCache.clear();
                     stateManager.resetSession();
+                    
+                    // 6. Restore global state
+                    if (originalFetch) {
+                        window.fetch = originalFetch;
+                        originalFetch = null;
+                    }
+                    if (messageListener) {
+                        window.removeEventListener('message', messageListener);
+                        messageListener = null;
+                    }
+                    delete window.autoplantCheckbox;
+                    delete window.autosellCheckbox;
                     
                     console.log('[Autoseller] Cleanup completed');
                     

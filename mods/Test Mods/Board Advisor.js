@@ -24,6 +24,9 @@ const MAX_RUNS_PER_ROOM = 500;
 const MIN_STAT_VALUE = 1;
 const MAX_STAT_VALUE = 20;
 
+// Board Analyzer results processing debounce
+let boardAnalyzerResultsProcessing = false;
+
 // =======================
 // ANTI-CHEATING SYSTEM
 // =======================
@@ -154,7 +157,6 @@ let config = Object.assign({}, defaultConfig, context.config);
 // Runtime State
 let analysisTimeout = null;
 let lastAnalysisTime = 0;
-let pendingAnalysisRequest = null;
 let runTrackerData = null;
 let sandboxDB = null;
 let isDBReady = false;
@@ -171,11 +173,11 @@ let analysisState = {
   historicalData: [],
   patterns: {},
   recommendations: null,
-  lastBoardHash: null,
   lastDataLoadTime: 0,
   isUILoading: false,
   pendingBoardChange: null,
-  lastBoardChangeTime: 0
+  lastBoardChangeTime: 0,
+  isInitializing: true  // Add initialization flag
 };
 
 // Performance Cache
@@ -193,6 +195,9 @@ let stateRefreshSystem = {
 
 // Track active subscriptions for cleanup
 let activeSubscriptions = [];
+
+// Track board change subscription separately for Board Analyzer coordination
+let boardChangeSubscription = null;
 
 // Track document event listeners for cleanup
 let documentListeners = [];
@@ -212,13 +217,34 @@ let panelState = {
 };
 
 // Utility Functions
-function generateBoardHash(boardSetup) {
-  if (!boardSetup || boardSetup.length === 0) return 'empty';
-  
-  return boardSetup
-    .map(piece => `${piece.tileIndex}-${piece.monsterName || 'empty'}-${piece.equipmentName || 'empty'}`)
-    .sort()
-    .join('|');
+
+// Board Analyzer coordination - unsubscribe from board changes during analysis
+function handleBoardAnalyzerCoordination() {
+  try {
+    if (!window.__modCoordination) return;
+    
+    const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
+    
+    if (boardAnalyzerRunning && boardChangeSubscription) {
+      // Board Analyzer started - unsubscribe from board changes
+      console.log('[Board Advisor] Board Analyzer started - unsubscribing from board changes');
+      boardChangeSubscription.unsubscribe();
+      boardChangeSubscription = null;
+    } else if (!boardAnalyzerRunning && !boardChangeSubscription) {
+      // Board Analyzer finished - resubscribe to board changes
+      console.log('[Board Advisor] Board Analyzer finished - resubscribing to board changes');
+      if (globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+        boardChangeSubscription = globalThis.state.board.subscribe(({ context }) => {
+          dataCollector.onBoardChange(context);
+        });
+        activeSubscriptions.push(boardChangeSubscription);
+      } else {
+        console.warn('[Board Advisor] Cannot resubscribe - board state not available');
+      }
+    }
+  } catch (error) {
+    console.error('[Board Advisor] Error in Board Analyzer coordination:', error);
+  }
 }
 
 // Loading State Management
@@ -1271,8 +1297,8 @@ function smartCleanupTileHighlights() {
       currentRecommendedSetup = null;
       placedRecommendedPieces.clear();
       
-      // Clear any pending analysis request to allow new analysis
-      pendingAnalysisRequest = null;
+      // Clear analysis flag to allow new analysis
+      analysisState.isAnalyzing = false;
       lastAnalysisTime = 0; // Reset debounce timer
       
       // Trigger new analysis to generate updated recommendations
@@ -1524,117 +1550,15 @@ function getEquipmentStats(equipId, runData) {
   }
 }
 
-// Function to copy replay link (called from onclick handlers)
-async function loadRecommendedSetup(setup) {
-  console.log('[Board Advisor] loadRecommendedSetup called with:', setup);
-  try {
-    // Check if autosetup is enabled (required for loading setups)
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const playerFlags = playerContext.flags;
-    
-    // Create Flags object to check autosetup mode
-    const flags = new globalThis.state.utils.Flags(playerFlags);
-    if (!flags.isSet("autosetup")) {
-      alert('Autosetup mode is required to load setups. Please enable Autosetup in your game settings.');
-      return;
-    }
-    
-    if (!setup || !Array.isArray(setup) || setup.length === 0) {
-      console.warn('[Board Advisor] Invalid setup data provided:', setup);
-      alert('Invalid setup data provided');
-      return;
-    }
-    
-    // Setup is already in Setup_Manager.js format (monsterId, equipId, tileIndex)
-    // Filter out any pieces without monsterId OR equipId (invalid pieces)
-    const boardSetup = setup.filter(piece => piece.monsterId || piece.equipId);
-    
-    if (boardSetup.length === 0) {
-      console.warn('[Board Advisor] No valid player pieces in setup');
-      alert('No valid player pieces found in this setup');
-      return;
-    }
-    
-    console.log('[Board Advisor] Loading recommended setup:', boardSetup);
-    
-    // Load the setup using the same method as Setup Manager
-    globalThis.state.board.send({
-      type: "autoSetupBoard",
-      setup: boardSetup
-    });
-    
-    // Update button text to show success
-    // Note: Button reference will be handled by the calling click handler
-    console.log('[Board Advisor] Setup loaded successfully - button feedback will be handled by click handler');
-    
-    console.log('[Board Advisor] Setup loaded successfully');
-  } catch (error) {
-    console.error('[Board Advisor] Error loading setup:', error);
-    alert('Error loading setup: ' + error.message);
-  }
-}
 
 
 // Make lookup functions available globally for button onclick handlers
 window.getMonsterName = getMonsterName;
 window.getEquipmentName = getEquipmentName;
-window.loadRecommendedSetup = loadRecommendedSetup;
 window.getMonsterStats = getMonsterStats;
 window.formatMonsterStats = formatMonsterStats;
 window.getEquipmentStats = getEquipmentStats;
 
-window.testLoadSetupButton = function() {
-  console.log('[Board Advisor] === TESTING LOAD SETUP BUTTON ===');
-  
-  // Check if recommendations display exists
-  const recommendationsDisplay = document.getElementById('recommendations-display');
-  console.log('[Board Advisor] Recommendations display found:', !!recommendationsDisplay);
-  
-  if (recommendationsDisplay) {
-    console.log('[Board Advisor] Recommendations display innerHTML length:', recommendationsDisplay.innerHTML.length);
-    console.log('[Board Advisor] Recommendations display innerHTML preview:', recommendationsDisplay.innerHTML.substring(0, 200));
-  }
-  
-  // Find all load setup buttons
-  const buttons = document.querySelectorAll('.copy-replay-btn');
-  console.log('[Board Advisor] Found', buttons.length, 'buttons with class copy-replay-btn');
-  
-  buttons.forEach((button, index) => {
-    console.log(`[Board Advisor] Button ${index}:`, button);
-    console.log(`[Board Advisor] Button ${index} textContent:`, button.textContent);
-    console.log(`[Board Advisor] Button ${index} data-setup-index:`, button.getAttribute('data-setup-index'));
-    console.log(`[Board Advisor] Button ${index} classes:`, button.classList.toString());
-  });
-  
-  // Check global setups
-  console.log('[Board Advisor] window.boardAdvisorSetups:', window.boardAdvisorSetups);
-  console.log('[Board Advisor] window.boardAdvisorSetups length:', window.boardAdvisorSetups ? window.boardAdvisorSetups.length : 'undefined');
-  
-  return {
-    recommendationsDisplay: !!recommendationsDisplay,
-    buttonCount: buttons.length,
-    setupsAvailable: window.boardAdvisorSetups ? window.boardAdvisorSetups.length : 0
-  };
-};
-
-window.testLoadSetupManually = function() {
-  console.log('[Board Advisor] === MANUAL SETUP LOAD TEST ===');
-  
-  if (!window.boardAdvisorSetups || window.boardAdvisorSetups.length === 0) {
-    console.log('[Board Advisor] No setup data available');
-    return false;
-  }
-  
-  const setupData = window.boardAdvisorSetups[0];
-  console.log('[Board Advisor] Testing with setup data:', setupData);
-  
-  if (setupData) {
-    console.log('[Board Advisor] Calling loadRecommendedSetup directly...');
-    return window.loadRecommendedSetup(setupData);
-  }
-  
-  return false;
-};
 
 // Wait for utility API to be ready for better equipment name lookups
 addDocumentListener('utility-api-ready', () => {
@@ -1644,10 +1568,10 @@ addDocumentListener('utility-api-ready', () => {
 // Handle visibility changes (user tabbing in/out)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && panelState.isOpen) {
-    // User tabbed back in and panel is open - clear any stuck pending requests
-    if (pendingAnalysisRequest) {
-      console.log('[Board Advisor] User tabbed back in - clearing pending analysis request');
-      pendingAnalysisRequest = null;
+    // User tabbed back in and panel is open - clear any stuck analysis
+    if (analysisState.isAnalyzing) {
+      console.log('[Board Advisor] User tabbed back in - clearing analysis flag');
+      analysisState.isAnalyzing = false;
       analysisState.isAnalyzing = false;
     }
   }
@@ -1805,6 +1729,149 @@ function loadRunTrackerData(triggerAnalysis = true) {
 // =======================
 
 
+// Add multiple Board Analyzer runs to storage (IndexedDB) in a single transaction - ONLY Board Analyzer runs are saved
+async function addBoardAnalyzerRunsBatch(runsData) {
+  try {
+    console.log(`[Board Advisor] addBoardAnalyzerRunsBatch called with ${runsData.length} runs`);
+    
+    if (!runsData || !Array.isArray(runsData) || runsData.length === 0) {
+      console.warn('[Board Advisor] Invalid batch run data:', runsData);
+      return { saved: 0, failed: 0, errors: [] };
+    }
+    
+    // Check anti-cheat flag
+    if (isCheatingDetected()) {
+      console.warn('[Board Advisor] Anti-cheat: Cheating detected, preventing Board Analyzer runs save');
+      return { saved: 0, failed: runsData.length, errors: ['Anti-cheat: Cheating detected'] };
+    }
+    
+    // Filter valid runs
+    const validRuns = [];
+    const errors = [];
+    
+    for (let i = 0; i < runsData.length; i++) {
+      const runData = runsData[i];
+      
+      if (!runData || !runData.roomId) {
+        errors.push(`Run ${i + 1}: Invalid run data`);
+        continue;
+      }
+      
+      // ONLY accept Board Analyzer runs
+      if (runData.source !== 'board_analyzer') {
+        errors.push(`Run ${i + 1}: Not a Board Analyzer run`);
+        continue;
+      }
+      
+      // Validate that we have basic required data
+      if (!runData.ticks && !runData.rankPoints) {
+        errors.push(`Run ${i + 1}: No performance data`);
+        continue;
+      }
+      
+      // Validate that we have a seed
+      if (!runData.seed) {
+        errors.push(`Run ${i + 1}: No seed data`);
+        continue;
+      }
+      
+      // Only save completed runs
+      if (!runData.completed) {
+        errors.push(`Run ${i + 1}: Run not completed`);
+        continue;
+      }
+      
+      // Prepare the Board Analyzer run data
+      const boardAnalyzerRun = {
+        timestamp: runData.timestamp || Date.now(),
+        seed: runData.seed,
+        roomId: runData.roomId,
+        ticks: runData.ticks,
+        rankPoints: runData.rankPoints,
+        completed: runData.completed,
+        playerMonsters: runData.playerMonsters || [],
+        playerEquipment: runData.playerEquipment || [],
+        boardSetup: runData.boardSetup ? runData.boardSetup.map(piece => ({
+          ...piece,
+          monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
+        })) : [],
+        date: new Date().toISOString().split('T')[0],
+        source: 'board_analyzer',
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${i}`
+      };
+      
+      validRuns.push(boardAnalyzerRun);
+    }
+    
+    if (validRuns.length === 0) {
+      console.warn('[Board Advisor] No valid runs to save in batch');
+      return { saved: 0, failed: runsData.length, errors };
+    }
+    
+    // Group runs by roomId for efficient storage
+    const runsByRoom = {};
+    validRuns.forEach(run => {
+      if (!runsByRoom[run.roomId]) {
+        runsByRoom[run.roomId] = [];
+      }
+      runsByRoom[run.roomId].push(run);
+    });
+    
+    // Update timestamp to track when Board Analyzer runs are being saved
+    window.__boardAdvisorLastRunSave = Date.now();
+    
+    // Save all runs in batch using single transaction per room
+    const savePromises = Object.entries(runsByRoom).map(async ([roomId, runs]) => {
+      return safeDBOperation(async () => {
+        if (!isDBReady) {
+          await initSandboxDB();
+        }
+        
+        // Get room store name
+        const storeName = await ensureRoomStoreExists(roomId);
+        
+        if (!storeName) {
+          throw new Error(`Room store for ${roomId} not found`);
+        }
+        
+        return new Promise((resolve, reject) => {
+          const transaction = sandboxDB.transaction([storeName], 'readwrite');
+          const store = transaction.objectStore(storeName);
+          
+          // Add all runs in this transaction
+          const addPromises = runs.map(run => {
+            return new Promise((resolveAdd, rejectAdd) => {
+              const request = store.add(run);
+              request.onsuccess = () => resolveAdd(run);
+              request.onerror = () => rejectAdd(new Error(`Failed to add run ${run.id}`));
+            });
+          });
+          
+          Promise.all(addPromises).then(() => {
+            console.log(`[Board Advisor] Batch saved ${runs.length} runs to ${roomId}`);
+            resolve(runs.length);
+          }).catch(reject);
+        });
+      });
+    });
+    
+    const results = await Promise.all(savePromises);
+    const totalSaved = results.reduce((sum, count) => sum + count, 0);
+    
+    console.log(`[Board Advisor] Batch save completed: ${totalSaved}/${validRuns.length} runs saved successfully`);
+    
+    return {
+      saved: totalSaved,
+      failed: runsData.length - totalSaved,
+      errors: errors
+    };
+    
+  } catch (error) {
+    console.error('[Board Advisor] Error in batch save:', error);
+    return { saved: 0, failed: runsData.length, errors: [error.message] };
+  }
+}
+
 // Add a Board Analyzer run to storage (IndexedDB) - ONLY Board Analyzer runs are saved
 async function addBoardAnalyzerRun(runData) {
   try {
@@ -1839,6 +1906,16 @@ async function addBoardAnalyzerRun(runData) {
       console.warn('[Board Advisor] Skipping Board Analyzer run - no seed data');
       return false;
     }
+    
+    // Only save completed runs (skip failed runs)
+    if (!runData.completed) {
+      console.log('[Board Advisor] Skipping Board Analyzer run - run was not completed (failed)');
+      return false;
+    }
+    
+    // Update timestamp to track when Board Analyzer runs are being saved
+    // This helps prevent cache invalidation during Board Analyzer sessions
+    window.__boardAdvisorLastRunSave = Date.now();
     
     // Prepare the Board Analyzer run data
     const boardAnalyzerRun = {
@@ -1878,6 +1955,7 @@ async function addBoardAnalyzerRun(runData) {
 // Convert Board Analyzer data to performance tracker format (IndexedDB)
 async function convertBoardAnalyzerData() {
   try {
+    
     const currentBoard = dataCollector.getCurrentBoardData();
     if (!currentBoard) {
       console.log('[Board Advisor] No current board data available, skipping Board Analyzer conversion');
@@ -2030,7 +2108,7 @@ function convertBoardAnalyzerResults(boardAnalyzerResults) {
       if (boardAnalyzerSaved) {
         console.log(`[Board Advisor] Board Analyzer run ${index + 1} saved to IndexedDB`);
       } else {
-        console.warn(`[Board Advisor] Failed to save Board Analyzer run ${index + 1} to IndexedDB`);
+        console.log(`[Board Advisor] Board Analyzer run ${index + 1} skipped (failed run)`);
       }
       }).catch(error => {
         console.error(`[Board Advisor] Error saving Board Analyzer run ${index + 1} to IndexedDB:`, error);
@@ -2244,7 +2322,9 @@ function convertRunTrackerSetup(setup) {
   return setup.pieces.map(piece => ({
     tileIndex: piece.tile,
     monsterId: piece.monsterId,
+    monsterName: piece.monsterId ? getMonsterName(piece.monsterId) : null, // Resolve monster name
     equipId: piece.equipId,
+    equipmentName: piece.equipId ? getEquipmentName(piece.equipId) : null, // Resolve equipment name
     gameId: piece.monsterId, // Use monsterId as gameId
     tier: piece.tier,
     level: piece.level,
@@ -2291,19 +2371,34 @@ class DataCollector {
     
     // Listen for new games
     globalThis.state.board.on('newGame', (event) => {
-      this.onGameStart(event);
+      dataCollector.onGameStart(event);
     });
 
     // Listen for board changes to trigger automatic analysis
-    const boardSubscription = globalThis.state.board.subscribe(({ context }) => {
+    boardChangeSubscription = globalThis.state.board.subscribe(({ context }) => {
       // Always trigger board change detection, not just when boardConfig has length > 0
       // This ensures we detect when auto-setup places/removes creatures
-      this.onBoardChange(context);
+      dataCollector.onBoardChange(context);
     });
-    activeSubscriptions.push(boardSubscription);
+    activeSubscriptions.push(boardChangeSubscription);
 
     // Listen for server results like RunTracker does
     this.setupServerResultsListener();
+    
+    // Set up Board Analyzer coordination polling
+    this.setupBoardAnalyzerCoordination();
+  }
+
+  setupBoardAnalyzerCoordination() {
+    // Poll for Board Analyzer state changes every 500ms (reduced from 100ms to prevent conflicts)
+    const coordinationInterval = setInterval(() => {
+      handleBoardAnalyzerCoordination();
+    }, 500);
+    
+    // Store interval for cleanup
+    activeSubscriptions.push({
+      unsubscribe: () => clearInterval(coordinationInterval)
+    });
   }
 
   setupServerResultsListener() {
@@ -2387,8 +2482,12 @@ class DataCollector {
       
       // Poll for Board Analyzer results (since Board Analyzer stores them globally)
       const checkForBoardAnalyzerResults = () => {
-        if (window.__boardAnalyzerResults && window.__boardAnalyzerResults.results) {
+        
+        if (window.__boardAnalyzerResults && window.__boardAnalyzerResults.results && !boardAnalyzerResultsProcessing) {
           console.log('[Board Advisor] Found Board Analyzer results:', window.__boardAnalyzerResults);
+          
+          // Set processing flag to prevent duplicate processing
+          boardAnalyzerResultsProcessing = true;
           
           // Use captured board state instead of current board state
           const boardStateToUse = capturedBoardState || this.getCurrentBoardData();
@@ -2399,38 +2498,61 @@ class DataCollector {
             monsterName: piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null)
           })) : [];
           
-          // Process each result
-          window.__boardAnalyzerResults.results.forEach((result, index) => {
-            console.log(`[Board Advisor] Processing Board Analyzer result ${index + 1}:`, result);
+          // Process all results in a batch to avoid overwhelming the database
+          console.log(`[Board Advisor] Processing ${window.__boardAnalyzerResults.results.length} Board Analyzer results in batch`);
+          
+          // Convert all results to Board Advisor format
+          const batchRunData = window.__boardAnalyzerResults.results.map((result, index) => ({
+            id: Date.now() + index,
+            timestamp: Date.now(),
+            seed: result.seed,
+            roomId: result.roomId || boardStateToUse?.roomId || 'unknown',
+            mapName: result.mapName || boardStateToUse?.mapName || 'Unknown Map',
+            completed: result.completed,
+            winner: result.completed ? 'nonVillains' : 'villains',
+            ticks: result.ticks,
+            rankPoints: result.rankPoints,
+            boardSetup: result.boardSetup || serializedBoardSetup,
+            playerMonsters: result.playerMonsters || boardStateToUse?.playerMonsters || [],
+            playerEquipment: result.playerEquipment || boardStateToUse?.playerEquipment || [],
+            source: 'board_analyzer'
+          }));
+          
+          // Save all runs in batch using single transaction
+          console.log(`[Board Advisor] Saving ${batchRunData.length} Board Analyzer runs to IndexedDB in batch`);
+          addBoardAnalyzerRunsBatch(batchRunData).then(result => {
+            console.log(`[Board Advisor] Batch save completed: ${result.saved}/${batchRunData.length} runs saved successfully`);
+            if (result.errors.length > 0) {
+              console.warn('[Board Advisor] Batch save errors:', result.errors);
+            }
             
-            // Convert Board Analyzer result to Board Advisor format
-            const runData = {
-              id: Date.now() + index,
-              timestamp: Date.now(),
-              seed: result.seed,
-              roomId: result.roomId || boardStateToUse?.roomId || 'unknown',
-              mapName: result.mapName || boardStateToUse?.mapName || 'Unknown Map',
-              completed: result.completed,
-              winner: result.completed ? 'nonVillains' : 'villains',
-              ticks: result.ticks,
-              rankPoints: result.rankPoints,
-              boardSetup: result.boardSetup || serializedBoardSetup,
-              playerMonsters: result.playerMonsters || boardStateToUse?.playerMonsters || [],
-              playerEquipment: result.playerEquipment || boardStateToUse?.playerEquipment || [],
-              source: 'board_analyzer'
-            };
+            // Reset processing flag after completion
+            boardAnalyzerResultsProcessing = false;
             
-            // Save to IndexedDB
-            console.log(`[Board Advisor] About to call addBoardAnalyzerRun for run ${index + 1} with data:`, runData);
-            addBoardAnalyzerRun(runData).then(saved => {
-              if (saved) {
-                console.log(`[Board Advisor] Board Analyzer run ${index + 1} saved to IndexedDB: ${runData.ticks} ticks, ${runData.rankPoints} points`);
-              } else {
-                console.warn(`[Board Advisor] Failed to save Board Analyzer run ${index + 1} to IndexedDB`);
-              }
-            }).catch(error => {
-              console.error(`[Board Advisor] Error saving Board Analyzer run ${index + 1} to IndexedDB:`, error);
-            });
+            // Trigger analysis after Board Analyzer results are saved
+            if (result.saved > 0) {
+              console.log('[Board Advisor] Triggering analysis after Board Analyzer results saved...');
+              
+              // Clear analysis flag to allow fresh analysis with new data
+              analysisState.isAnalyzing = false;
+              lastAnalysisTime = 0; // Reset debounce timer
+              
+              // Wait longer to ensure all data is fully processed and loaded
+              setTimeout(async () => {
+                console.log('[Board Advisor] Loading fresh data before analysis...');
+                // Ensure all data sources are loaded before analysis
+                await loadAllDataSources(false); // Don't trigger analysis yet
+                
+                // Additional delay to ensure UI is ready
+                setTimeout(() => {
+                  console.log('[Board Advisor] Triggering analysis with fresh data...');
+                  debouncedAnalyzeCurrentBoard();
+                }, 200); // Additional delay for UI stability
+              }, 300); // Increased delay to ensure data is fully processed
+            }
+          }).catch(error => {
+            console.error('[Board Advisor] Error in batch save:', error);
+            boardAnalyzerResultsProcessing = false;
           });
           
           // Clear the results to avoid reprocessing
@@ -3234,7 +3356,6 @@ class DataCollector {
     
     // Clear any cached analysis data
     analysisState.currentAnalysis = null;
-    analysisState.lastBoardHash = null;
     
     // Force a fresh room detection
     const currentBoard = this.getCurrentBoardData();
@@ -3252,27 +3373,37 @@ class DataCollector {
   // Clear pattern matching cache when board changes significantly
   clearPatternMatchingCache() {
     console.log('[Board Advisor] Pattern matching cache cleared due to board changes...');
-    // Cache removed - no action needed
   }
 }
 
 // CACHE FIX: Invalidate caches and refresh data after sandbox run saves
 async function invalidateCachesAndRefreshData(roomId) {
   try {
+    const now = Date.now();
+    
+    // Additional protection: Track when Board Analyzer runs are being saved
+    // and skip cache invalidation if we're in the middle of a Board Analyzer session
+    if (!window.__boardAdvisorLastRunSave) {
+      window.__boardAdvisorLastRunSave = 0;
+    }
+    
+    const timeSinceLastRunSave = now - window.__boardAdvisorLastRunSave;
+    if (timeSinceLastRunSave < 2000) {
+      console.log('[Board Advisor] Board Analyzer run recently saved, skipping cache invalidation to prevent lag');
+      return;
+    }
+    
     console.log(`[Board Advisor] Invalidating caches for room ${roomId} after sandbox run save...`);
     
     // 1. Clear all performance caches
     dataCollector.forceRefreshRoomDetection();
     
     // 2. Clear data loading cache specifically for this room
-    // Cache removed - no action needed
     
     // 3. Clear pattern matching cache for current setup
-    // Cache removed - no action needed
     
     // 4. Clear analysis state to force fresh analysis
     analysisState.currentAnalysis = null;
-    analysisState.lastBoardHash = null;
     
     // 5. Force refresh the data for the current room
     console.log('[Board Advisor] Force-refreshing data for current room...');
@@ -3507,10 +3638,7 @@ class AnalysisEngine {
   }
 
   async analyzeCurrentBoard() {
-    if (analysisState.isAnalyzing) {
-      console.log('[Board Advisor] Analysis already in progress');
-      return null;
-    }
+    // Note: analysisState.isAnalyzing is managed by the calling function
     
     if (analysisState.isDataLoading) {
       console.log('[Board Advisor] Data is still loading, skipping analysis');
@@ -3637,22 +3765,14 @@ class AnalysisEngine {
         recommendations,
         prediction,
         leaderboard: leaderboardComparison,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        hasData: true // Ensure hasData is set for successful analysis
       };
       
-      // Update board hash to prevent duplicate analysis
-      analysisState.lastBoardHash = generateBoardHash(currentBoard.boardSetup);
+      // Update analysis timestamp
       analysisState.lastAnalysisTime = Date.now();
 
-      console.log('[Board Advisor] Analysis completed');
-      console.log('[Board Advisor] Analysis result structure:', {
-        hasRecommendations: !!recommendations,
-        recommendationsCount: recommendations?.length || 0,
-        hasSimilarSetups: !!similarSetups,
-        similarSetupsCount: similarSetups?.length || 0,
-        hasCurrentAnalysis: !!currentAnalysis,
-        hasPrediction: !!prediction
-      });
+      console.log(`[Board Advisor] Analysis completed - ${recommendations?.length || 0} recommendations, ${similarSetups?.length || 0} similar setups`);
       return analysisState.currentAnalysis;
 
     } catch (error) {
@@ -3960,40 +4080,13 @@ class AnalysisEngine {
     }
     
     try {
-      // Get runs from RunTracker (localStorage) - ONLY for current room
+      // Get runs from RunTracker (use already-converted data)
       console.log('[Board Advisor] Getting runs from RunTracker...');
-      if (window.RunTrackerAPI && window.RunTrackerAPI.getAllRuns) {
-        const runTrackerData = window.RunTrackerAPI.getAllRuns();
-        if (runTrackerData.runs) {
-          let runTrackerCount = 0;
-          
-          // Find runs for the current room only
-          const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
-          const currentRoomName = roomNames[currentRoomId] || currentRoomId;
-          
-          // Look for map keys that match the current room
-          for (const [mapKey, mapData] of Object.entries(runTrackerData.runs)) {
-            const mapName = mapKey.replace('map_', '').replace(/_/g, ' ');
-            
-            // Check if this map key corresponds to our current room
-            if (mapName.toLowerCase().includes(currentRoomName.toLowerCase()) || 
-                mapKey.includes(currentRoomId)) {
-              console.log(`[Board Advisor] Found RunTracker data for current room: ${mapKey}`);
-              
-              if (mapData.speedrun) {
-                allRuns.push(...mapData.speedrun);
-                runTrackerCount += mapData.speedrun.length;
-              }
-              if (mapData.rank) {
-                allRuns.push(...mapData.rank);
-                runTrackerCount += mapData.rank.length;
-              }
-            }
-          }
-          
-          console.log(`[Board Advisor] Got ${runTrackerCount} runs from RunTracker for room ${currentRoomId}`);
-        }
-      }
+      const runTrackerRuns = performanceTracker.runs.filter(run => 
+        run.roomId === currentRoomId && run.source === 'run_tracker'
+      );
+      allRuns.push(...runTrackerRuns);
+      console.log(`[Board Advisor] Got ${runTrackerRuns.length} runs from RunTracker for room ${currentRoomId}`);
     } catch (error) {
       console.warn('[Board Advisor] Could not get RunTracker data:', error);
     }
@@ -4053,7 +4146,7 @@ class AnalysisEngine {
     }
     
     console.log(`[Board Advisor] Filtered to ${relevantPatterns.size} relevant patterns (from ${roomPatterns.size} total) based on monster/equipment combinations`);
-    console.log(`[Board Advisor] Found patterns for creature counts:`, Array.from(creatureCountPatterns.keys()).sort());
+    // Found patterns for creature counts: ${Array.from(creatureCountPatterns.keys()).sort()}
     
     // First, find exact and similar matches from same room
     // Limit processing to prevent performance issues
@@ -4128,7 +4221,7 @@ class AnalysisEngine {
       ...creatureCountMatches.sort((a, b) => b.similarity - a.similarity)
     ];
     
-    console.log(`[Board Advisor] Found ${exactMatches.length} exact matches, ${similar.length} similar setups, ${creatureCountMatches.length} cross-map creature count matches`);
+    // Found ${exactMatches.length} exact matches, ${similar.length} similar setups, ${creatureCountMatches.length} cross-map matches
     
     // Cache removed - no caching needed
     
@@ -5441,11 +5534,7 @@ class AnalysisEngine {
     
     const worstTime = Math.max(...completedRuns.map(r => r.ticks));
     
-    console.log('[Board Advisor] generateTicksRecommendations - completedRuns length:', completedRuns.length);
-    console.log('[Board Advisor] generateTicksRecommendations - top10Runs length:', top10Runs.length);
-    console.log('[Board Advisor] generateTicksRecommendations - avgTime (top 10):', Math.round(avgTime));
-    console.log('[Board Advisor] generateTicksRecommendations - bestTime:', bestTime);
-    console.log('[Board Advisor] generateTicksRecommendations - top10Runs ticks:', top10Runs.map(r => r.ticks));
+    // Ticks analysis: ${completedRuns.length} completed runs, ${top10Runs.length} top runs, avg: ${Math.round(avgTime)}, best: ${bestTime}
     
     // Time consistency analysis - only for current setup
     const allCurrentSetupRuns = completedRuns.filter(run => {
@@ -6053,10 +6142,10 @@ async function togglePanel() {
 async function openPanel() {
   if (panelState.isOpen) return;
   
-  // Clear any pending analysis requests when panel opens (user tabbed back in)
-  if (pendingAnalysisRequest) {
-    console.log('[Board Advisor] Clearing pending analysis request on panel open');
-    pendingAnalysisRequest = null;
+  // Clear analysis flag when panel opens (user tabbed back in)
+  if (analysisState.isAnalyzing) {
+    console.log('[Board Advisor] Clearing analysis flag on panel open');
+    analysisState.isAnalyzing = false;
     analysisState.isAnalyzing = false;
   }
   
@@ -7196,7 +7285,6 @@ async function resetIndexedDB() {
         historicalData: [],
         patterns: {},
         recommendations: null,
-        lastBoardHash: null,
         lastDataLoadTime: 0
       };
       performanceCache = {
@@ -7611,17 +7699,16 @@ function showBasicAnalysis(currentBoard) {
 function debouncedAnalyzeCurrentBoard() {
   const now = Date.now();
   
+  // Always reset analysis state before starting - prevents stuck states
+  analysisState.isAnalyzing = false;
+  
   // Clear any existing timeout
   if (analysisTimeout) {
     clearTimeout(analysisTimeout);
     analysisTimeout = null;
   }
   
-  // Check if we're already analyzing or if it's too soon since last analysis
-  if (analysisState.isAnalyzing) {
-    console.log('[Board Advisor] Analysis already in progress, skipping duplicate request');
-    return;
-  }
+  // Note: analysisState.isAnalyzing is always reset to false at the start of this function
   
   // Don't start analysis if UI is loading
   if (analysisState.isUILoading) {
@@ -7629,63 +7716,51 @@ function debouncedAnalyzeCurrentBoard() {
     return;
   }
   
-  // Check if we have a pending analysis request for the same board state
-  const currentBoard = dataCollector.getCurrentBoardData();
-  const currentBoardHash = currentBoard ? generateBoardHash(currentBoard.boardSetup) : null;
-  
-  if (pendingAnalysisRequest === currentBoardHash) {
-    console.log('[Board Advisor] Analysis already pending for this board state, skipping');
-    return;
-  }
+  // Note: analysisState.isAnalyzing is always reset to false at the start of this function
   
   if (now - lastAnalysisTime < ANALYSIS_DEBOUNCE_TIME) {
     console.log('[Board Advisor] Analysis too soon, debouncing request');
-    pendingAnalysisRequest = currentBoardHash;
     analysisTimeout = setTimeout(() => {
-      pendingAnalysisRequest = null;
       debouncedAnalyzeCurrentBoard();
     }, ANALYSIS_DEBOUNCE_TIME - (now - lastAnalysisTime));
     return;
   }
   
   // Proceed with analysis
-  pendingAnalysisRequest = currentBoardHash;
+  analysisState.isAnalyzing = true;
   
   // Add timeout to prevent analysis from getting stuck
   const timeoutId = setTimeout(() => {
-    if (pendingAnalysisRequest === currentBoardHash) {
-      console.warn('[Board Advisor] Analysis timeout - clearing pending request');
-      pendingAnalysisRequest = null;
+    if (analysisState.isAnalyzing) {
+      console.warn('[Board Advisor] Analysis timeout - clearing analysis flag');
       analysisState.isAnalyzing = false;
     }
   }, 5000); // 5 second timeout for better responsiveness
   
   analyzeCurrentBoard().finally(() => {
     clearTimeout(timeoutId);
-    pendingAnalysisRequest = null;
+    analysisState.isAnalyzing = false;
   });
 }
 
 async function analyzeCurrentBoard() {
   if (!config.enabled) {
     updatePanelStatus('Board Advisor is disabled. Enable it in the config panel.', 'error');
+    analysisState.isAnalyzing = false;
     return Promise.resolve(null);
   }
 
-  if (analysisState.isAnalyzing) {
-    console.log('[Board Advisor] Analysis already in progress, skipping');
-    return Promise.resolve(null);
-  }
+  // Note: analysisState.isAnalyzing is always reset to false at the start of debouncedAnalyzeCurrentBoard()
 
   // Don't start analysis if UI is loading
   if (analysisState.isUILoading) {
     console.log('[Board Advisor] Analysis skipped - UI loading in progress');
+    analysisState.isAnalyzing = false;
     return Promise.resolve(null);
   }
 
-  // Check if we're analyzing the same board state
+  // Get current board data
   const currentBoard = dataCollector.getCurrentBoardData();
-  const currentBoardHash = currentBoard ? generateBoardHash(currentBoard.boardSetup) : null;
   
   // Check if RunTracker data has been updated since last analysis
   let shouldForceAnalysis = false;
@@ -7700,13 +7775,10 @@ async function analyzeCurrentBoard() {
     }
   }
   
-  if (currentBoardHash && currentBoardHash === analysisState.lastBoardHash && !shouldForceAnalysis) {
-    console.log('[Board Advisor] Board state unchanged, skipping duplicate analysis');
-    return Promise.resolve(analysisState.currentAnalysis);
-  }
+  // Always proceed with analysis - the simple flag prevents duplicates
 
   // If we're forcing analysis due to RunTracker data update, refresh the data first
-  if (shouldForceAnalysis) {
+  if (shouldForceAnalysis && !analysisState.isInitializing) {
     console.log('[Board Advisor] Refreshing RunTracker data before analysis...');
     await loadRunTrackerData(false); // Don't trigger analysis yet
   }
@@ -7840,7 +7912,6 @@ function clearRecommendationsInstantly() {
   // Clear any existing analysis state to prevent stale data
   if (window.analysisState) {
     window.analysisState.currentAnalysis = null;
-    window.analysisState.lastBoardHash = null;
   }
 }
 
@@ -7954,6 +8025,18 @@ async function updatePanelWithBasicAnalysis(currentBoard) {
 async function updatePanelWithAnalysis(analysis) {
   console.log('[Board Advisor] updatePanelWithAnalysis called with:', analysis);
   console.log('[Board Advisor] Recommendations in analysis:', analysis.recommendations?.length || 0);
+  
+  // Check if data is still loading
+  if (analysisState.isDataLoading) {
+    console.log('[Board Advisor] Data is still loading, skipping UI update');
+    return;
+  }
+  
+  // Check if analysis has valid data structure
+  if (!analysis || (!analysis.hasData && !analysis.currentAnalysis?.hasHistoricalData)) {
+    console.log('[Board Advisor] Analysis has no valid data, skipping UI update');
+    return;
+  }
   
   const analysisDisplay = document.getElementById('analysis-display');
   const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -8102,7 +8185,7 @@ async function updatePanelWithAnalysis(analysis) {
     hasHistoricalData: analysis.currentAnalysis?.hasHistoricalData
   });
   
-  if (analysis.currentAnalysis?.hasHistoricalData || analysis.hasData) {
+  if (analysis.currentAnalysis?.hasHistoricalData || analysis.hasData === true) {
     // Use data from currentAnalysis if available, otherwise fall back to top-level data
     const historicalData = analysis.currentAnalysis?.hasHistoricalData ? analysis.currentAnalysis : {
       bestTime: analysis.summary?.bestTime || 'Unknown',
@@ -8185,14 +8268,6 @@ async function updatePanelWithAnalysis(analysis) {
       return rec.focusArea === config.focusArea || rec.focusArea === 'both' || !rec.focusArea;
     });
     
-    // Store setup data in global variable for button access
-    window.boardAdvisorSetups = [];
-    filteredRecommendations.forEach((rec, index) => {
-      if (rec.setup) {
-        window.boardAdvisorSetups[index] = rec.setup;
-        rec.setupIndex = index; // Add index to recommendation object
-      }
-    });
     
     // Group recommendations by type for better organization
     const groupedRecs = {
@@ -8747,109 +8822,6 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     recommendationsDisplay.innerHTML = '<div style="color: #E06C75;">Error displaying recommendations</div>';
   }
   
-  // Add event listeners for load setup buttons
-  console.log('[Board Advisor] HTML content set, looking for buttons...');
-  console.log('[Board Advisor] HTML content:', recommendationsDisplay.innerHTML.substring(0, 500));
-  
-  // Use setTimeout to ensure DOM is fully updated before attaching event handlers
-  setTimeout(() => {
-    const copyButtons = recommendationsDisplay.querySelectorAll('.copy-replay-btn');
-    console.log('[Board Advisor] Found', copyButtons.length, 'load setup buttons');
-    console.log('[Board Advisor] Available setups in window.boardAdvisorSetups:', window.boardAdvisorSetups);
-    
-    if (copyButtons.length === 0) {
-      console.warn('[Board Advisor] No load setup buttons found in DOM');
-      return;
-    }
-    
-    copyButtons.forEach((button, index) => {
-      console.log(`[Board Advisor] Attaching event handler to button ${index}`);
-      console.log(`[Board Advisor] Button ${index} data-setup-index:`, button.getAttribute('data-setup-index'));
-      
-      button.addEventListener('click', (e) => {
-        console.log('[Board Advisor] TEST: Button clicked!', e.target);
-      });
-      
-      button.addEventListener('click', async (event) => {
-        console.log('[Board Advisor] Load setup button clicked');
-        try {
-          // Get setup data from global variable using index
-          const setupIndex = parseInt(button.getAttribute('data-setup-index'));
-          console.log('[Board Advisor] Setup index:', setupIndex);
-          const setupData = window.boardAdvisorSetups[setupIndex];
-          console.log('[Board Advisor] Setup data:', setupData);
-          
-          if (!setupData) {
-            throw new Error('Setup data not found for index: ' + setupIndex);
-          }
-          
-          await window.loadRecommendedSetup(setupData);
-          
-          // Update button text to show success
-          const originalText = button.textContent;
-          button.textContent = 'Loaded!';
-          button.style.backgroundColor = '#10B981';
-          setTimeout(() => {
-            button.textContent = originalText;
-            button.style.backgroundColor = '#10B981';
-          }, 2000);
-        } catch (error) {
-          console.error('[Board Advisor] Error parsing setup data:', error);
-          alert('Error loading setup: ' + error.message);
-        }
-      });
-    });
-  }, 0);
-  
-  // Also add event delegation as a fallback
-  console.log('[Board Advisor] Adding click event listener to recommendations display');
-  recommendationsDisplay.addEventListener('click', async (event) => {
-    console.log('[Board Advisor] *** ANY CLICK DETECTED ***');
-    console.log('[Board Advisor] Click detected on:', event.target);
-    console.log('[Board Advisor] Click target classes:', event.target.classList.toString());
-    console.log('[Board Advisor] Click target tagName:', event.target.tagName);
-    console.log('[Board Advisor] Click target textContent:', event.target.textContent);
-    
-    if (event.target.classList.contains('copy-replay-btn')) {
-      console.log('[Board Advisor] Load setup button clicked via delegation');
-      try {
-        // Get setup data from global variable using index
-        const setupIndex = parseInt(event.target.getAttribute('data-setup-index'));
-        console.log('[Board Advisor] Setup index (delegation):', setupIndex);
-        const setupData = window.boardAdvisorSetups[setupIndex];
-        console.log('[Board Advisor] Setup data (delegation):', setupData);
-        
-        if (!setupData) {
-          throw new Error('Setup data not found for index: ' + setupIndex);
-        }
-        
-        await window.loadRecommendedSetup(setupData);
-        
-        // Update button text to show success
-        const originalText = event.target.textContent;
-        event.target.textContent = 'Loaded!';
-        event.target.style.backgroundColor = '#10B981';
-        setTimeout(() => {
-          event.target.textContent = originalText;
-          event.target.style.backgroundColor = '#10B981';
-        }, 2000);
-      } catch (error) {
-        console.error('[Board Advisor] Error parsing setup data (delegation):', error);
-        alert('Error loading setup: ' + error.message);
-      }
-    }
-  });
-  
-  setTimeout(() => {
-    const testButtons = recommendationsDisplay.querySelectorAll('.copy-replay-btn');
-    console.log('[Board Advisor] Test: Found', testButtons.length, 'buttons after timeout');
-    testButtons.forEach((button, index) => {
-      console.log('[Board Advisor] Test: Button', index, 'has data-setup:', button.getAttribute('data-setup'));
-      button.addEventListener('click', () => {
-        console.log('[Board Advisor] Test: Button clicked!');
-      });
-    });
-  }, 100);
   
 }
 
@@ -8958,6 +8930,7 @@ function handleStateChange(source, state) {
     return;
   }
   
+  
   stateRefreshSystem.lastRefreshTime = now;
   
   console.log(`[Board Advisor] State change detected from ${source}, refreshing panel`);
@@ -8967,6 +8940,7 @@ function handleStateChange(source, state) {
 // Refresh panel data
 async function refreshPanelData() {
   if (!panelState.isOpen) return;
+  
   
   // Don't refresh if UI is already loading
   if (analysisState.isUILoading) {
@@ -9093,6 +9067,7 @@ if (config.enabled) {
   setTimeout(async () => {
     console.log('[Board Advisor] Starting initialization data loading...');
     await loadAllDataSources(true); // Trigger analysis after loading
+    analysisState.isInitializing = false; // Clear initialization flag
   }, 2000); // Wait 2 seconds for RunTracker to initialize
 }
 
@@ -9106,6 +9081,11 @@ if (!window.BoardAdvisorAPI) {
     addBoardAnalyzerRun: async (runData) => {
       console.log('[Board Advisor] Manually adding Board Analyzer run:', runData);
       return await addBoardAnalyzerRun(runData);
+    },
+    
+    addBoardAnalyzerRunsBatch: async (runsData) => {
+      console.log('[Board Advisor] Manually adding Board Analyzer runs batch:', runsData);
+      return await addBoardAnalyzerRunsBatch(runsData);
     },
     
     // Get sandbox run statistics
@@ -9355,9 +9335,7 @@ exports = {
     
   // CACHE FIX: Also clear all performance caches
   dataCollector.forceRefreshRoomDetection();
-  // Cache removed - no action needed
   analysisState.currentAnalysis = null;
-  analysisState.lastBoardHash = null;
     
     await loadAllDataSources(false); // Don't trigger analysis automatically
     console.log('[Board Advisor] Data refreshed from all sources with cache invalidation');
@@ -9381,9 +9359,7 @@ exports = {
       } else {
         // Invalidate all caches
         dataCollector.forceRefreshRoomDetection();
-        // Cache removed - no action needed
         analysisState.currentAnalysis = null;
-        analysisState.lastBoardHash = null;
         
         // Refresh data from all sources
         await loadAllDataSources(false);
@@ -9464,7 +9440,6 @@ exports = {
       historicalData: [],
       patterns: {},
       recommendations: null,
-      lastBoardHash: null,
       lastDataLoadTime: 0,
       isUILoading: false,
       pendingBoardChange: null,
