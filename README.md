@@ -114,7 +114,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
-  - `Unused Mods/` - Mods that are not currently active or are for development/testing purposes.
+  - `Test Mods/` - Mods for development/testing purposes.
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
 - `manifest.json` - Extension manifest
@@ -133,15 +133,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 18 Super Mods listed below are included by default in this loader:
-
-### Autoseller
-Automatically sells or squeezes creatures based on gene thresholds and user settings:
-- Configurable gene thresholds for selling and squeezing
-- Minimum count triggers for batch actions
-- Session widget displaying sold/squeezed counts and rewards
-- Integrated with the mod loader's configuration system
-- Real-time tracking of gold and dust earnings
+These are advanced mods that provide comprehensive game enhancement features. All 16 Super Mods listed below are included by default in this loader:
 
 ### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -150,6 +142,14 @@ Automates summon scroll usage to collect specific creatures:
 - Set stopping conditions (total creatures or tier-based targets)
 - Configurable autoscroll speed with rate-limit protection
 - Real-time tracking of found creatures and scroll usage
+
+### Autoseller
+Automatically sells or squeezes creatures based on gene thresholds and user settings:
+- Configurable gene thresholds for selling and squeezing
+- Minimum count triggers for batch actions
+- Session widget displaying sold/squeezed counts and rewards
+- Integrated with the mod loader's configuration system
+- Real-time tracking of gold and dust earnings
 
 ### Better Analytics
 Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
@@ -239,14 +239,6 @@ Advanced autoplay and loot tracking system:
 - View session summaries and performance metrics
 - Export data for further analysis
 
-### Board Advisor
-Advanced board analysis and recommendations system:
-- Room-based data storage and pattern analysis
-- Performance predictions and optimization suggestions
-- Learning from successful runs to improve recommendations
-- Automatic analysis when board changes
-- Configurable analysis depth and recommendation thresholds
-
 ### Outfiter
 Comprehensive outfit management system:
 - Browse and preview all available outfits
@@ -272,13 +264,6 @@ Local run data tracking and storage system:
 - Replay data management and storage
 - Integration with other mods for comprehensive tracking
 - Hidden mod that works behind the scenes
-
-### Welcome
-User onboarding and introduction system:
-- Shows welcome page on first mod loader initialization
-- Introduces users to available mods and features
-- Configurable welcome display preferences
-- User-friendly introduction to the mod ecosystem
 
 ### Official Mods
 
@@ -372,8 +357,16 @@ Speed up gameplay for faster testing and grinding:
 - Perfect for testing strategies quickly
 - Great for farming and grinding sessions
 
-### Example Mods
-Some mods in the `Unused Mods/` folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+### Experimental Mods
+Some mods in the `Test Mods/` folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+
+### Board Advisor
+Advanced board analysis and recommendations system:
+- Room-based data storage and pattern analysis
+- Performance predictions and optimization suggestions
+- Learning from successful runs to improve recommendations
+- Automatic analysis when board changes
+- Configurable analysis depth and recommendation thresholds
 
 ## Contributing
 

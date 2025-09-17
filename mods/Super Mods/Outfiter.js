@@ -352,6 +352,10 @@ exports = {
   init: function() {
     try {
       executeOutfiter();
+      
+      // Add event listener for outfiter toggle changes
+      window.addEventListener('message', handleOutfiterToggle);
+      
       return true;
     } catch (error) {
       console.error('[Outfiter] Initialization error:', error);
@@ -361,13 +365,16 @@ exports = {
   
   cleanup: function() {
     try {
-      // Remove event listener to prevent memory leaks
-      window.removeEventListener('message', handleOutfiterToggle);
-      
-      // Restore original fetch if it was modified
-      if (originalFetch) {
-        window.fetch = originalFetch;
-        originalFetch = null;
+      // Check if window exists before cleanup
+      if (typeof window !== 'undefined') {
+        // Remove event listener to prevent memory leaks
+        window.removeEventListener('message', handleOutfiterToggle);
+        
+        // Restore original fetch if it was modified
+        if (originalFetch) {
+          window.fetch = originalFetch;
+          originalFetch = null;
+        }
       }
       
       console.log('[Outfiter] Cleaned up successfully');
@@ -404,8 +411,7 @@ function handleOutfiterToggle(event) {
   }
 }
 
-// Listen for outfiter toggle changes
-window.addEventListener('message', handleOutfiterToggle);
+// Event listener is now added in init() function
 
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {

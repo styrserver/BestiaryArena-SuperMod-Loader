@@ -56,8 +56,6 @@ You can enable, disable, and configure mods from the mod loader interface. Each 
 == Mod Development ==
 Mods can be written in JavaScript and have access to the game's state and a powerful API for interacting with the game. See the Mod Development Guide for detailed information on creating mods.
 
-
-
 === Standardized UI Components ===
 The extension provides a set of UI components that match the game's style. These components ensure a consistent look and feel across all mods:
 * '''Modals''': Game-styled dialog windows
@@ -93,19 +91,34 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>icons/</code> - Icons used by the extension and mods
 ** <code>js/</code> - JavaScript libraries, including UI components
 ** <code>locales/</code> - Internationalization files
+** <code>originalassets/</code> - Original game assets for UI components
 * <code>content/</code> - Content scripts that are injected into the game page
 ** <code>client.js</code> - Main client-side API and functionality
 ** <code>injector.js</code> - Injects the client code into the game page
 ** <code>local_mods.js</code> - Manages local mods
+** <code>dashboard_bridge.js</code> - Bridge for dashboard communication
+** <code>ba-sandbox-utils.mjs</code> - Sandbox utility functions
+** <code>utility_injector.js</code> - Utility injection system
+* <code>dashboard/</code> - Dashboard interface for mod management
+** <code>dashboard.html</code> - Dashboard HTML interface
+** <code>dashboard.css</code> - Dashboard styling
+** <code>dashboard.js</code> - Dashboard functionality
 * <code>docs/</code> - Documentation for mod developers
-* <code>database/</code> - Stores persistent data and tooltips used by mods (e.g., <code>media.txt</code>, <code>inventory-tooltips.js</code>)
+* <code>database/</code> - Stores persistent data and tooltips used by mods
+** <code>media.txt</code> - Media asset definitions
+** <code>inventory-tooltips.js</code> - Inventory tooltip data
+** <code>creature-database.js</code> - Creature database
+** <code>equipment-database.js</code> - Equipment database
+** <code>Welcome.js</code> - Welcome screen data
 * <code>mods/</code> - Local mod files, organized as follows:
 ** <code>Official Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.
 ** <code>Super Mods/</code> - Advanced mods with comprehensive features, included by default (see below for details).
-** <code>Unused Mods/</code> - Mods that are not currently active or are for development/testing purposes.
+** <code>Test Mods/</code> - Mods for development/testing purposes.
 * <code>popup/</code> - Extension popup UI
+* <code>backups/</code> - Automatic backup storage for extension files
 * <code>background.js</code> - Background script for the extension
 * <code>manifest.json</code> - Extension manifest
+* <code>manifest_chromium.json</code> - Chromium-specific manifest
 
 == Documentation ==
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/mod_development_guide.md Mod Development Guide] - Comprehensive guide for mod developers
@@ -115,18 +128,10 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/game_state_api.md Game State API Documentation] - Complete reference for accessing and modifying game state
 
 == Mods ==
-The extension comes with several powerful example mods that demonstrate different features:
+The extension comes with several powerful mods that demonstrate different features:
 
 === Super Mods ===
-These are advanced mods that provide comprehensive game enhancement features. All 18 Super Mods listed below are included by default in this loader:
-
-=== Autoseller ===
-Automatically sells or squeezes creatures based on gene thresholds and user settings:
-* Configurable gene thresholds for selling and squeezing
-* Minimum count triggers for batch actions
-* Session widget displaying sold/squeezed counts and rewards
-* Integrated with the mod loader's configuration system
-* Real-time tracking of gold and dust earnings
+These are advanced mods that provide comprehensive game enhancement features. All 16 Super Mods listed below are included by default in this loader:
 
 === Autoscroller ===
 Automates summon scroll usage to collect specific creatures:
@@ -135,6 +140,14 @@ Automates summon scroll usage to collect specific creatures:
 * Set stopping conditions (total creatures or tier-based targets)
 * Configurable autoscroll speed with rate-limit protection
 * Real-time tracking of found creatures and scroll usage
+
+=== Autoseller ===
+Automatically sells or squeezes creatures based on gene thresholds and user settings:
+* Configurable gene thresholds for selling and squeezing
+* Minimum count triggers for batch actions
+* Session widget displaying sold/squeezed counts and rewards
+* Integrated with the mod loader's configuration system
+* Real-time tracking of gold and dust earnings
 
 === Better Analytics ===
 Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
@@ -224,14 +237,6 @@ Advanced autoplay and loot tracking system:
 * View session summaries and performance metrics
 * Export data for further analysis
 
-=== Board Advisor ===
-Advanced board analysis and recommendations system:
-* Room-based data storage and pattern analysis
-* Performance predictions and optimization suggestions
-* Learning from successful runs to improve recommendations
-* Automatic analysis when board changes
-* Configurable analysis depth and recommendation thresholds
-
 === Outfiter ===
 Comprehensive outfit management system:
 * Browse and preview all available outfits
@@ -257,13 +262,6 @@ Local run data tracking and storage system:
 * Replay data management and storage
 * Integration with other mods for comprehensive tracking
 * Hidden mod that works behind the scenes
-
-=== Welcome ===
-User onboarding and introduction system:
-* Shows welcome page on first mod loader initialization
-* Introduces users to available mods and features
-* Configurable welcome display preferences
-* User-friendly introduction to the mod ecosystem
 
 === Official Mods ===
 These are the core mods that provide essential gameplay enhancements. All 11 Official Mods listed below are included by default:
@@ -356,8 +354,16 @@ Speed up gameplay for faster testing and grinding:
 * Perfect for testing strategies quickly
 * Great for farming and grinding sessions
 
-=== Example Mods ===
-Some mods in the <code>Unused Mods/</code> folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+=== Experimental Mods ===
+Some mods in the <code>Test Mods/</code> folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
+
+=== Board Advisor ===
+Advanced board analysis and recommendations system:
+* Room-based data storage and pattern analysis
+* Performance predictions and optimization suggestions
+* Learning from successful runs to improve recommendations
+* Automatic analysis when board changes
+* Configurable analysis depth and recommendation thresholds
 
 == Contributing ==
 Contributions are welcome! If you have a mod you'd like to share or improvements to the extension, please read our [https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/CONTRIBUTING.md Contribution Guidelines].

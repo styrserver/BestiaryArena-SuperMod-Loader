@@ -161,6 +161,7 @@ let runTrackerData = null;
 let sandboxDB = null;
 let isDBReady = false;
 let currentRecommendedSetup = null;
+let originalSpecificSetup = null; // Store the original specific setup data from best run
 let placedRecommendedPieces = new Set();
 let previousRoomId = null;
 let previousBoardPieceCount = 0;
@@ -202,11 +203,15 @@ let boardChangeSubscription = null;
 // Track document event listeners for cleanup
 let documentListeners = [];
 
+// Track window event listeners for cleanup
+let windowListeners = [];
+
 let performanceTracker = {
   runs: [],
   patterns: new Map(),
   optimalSetups: new Map(),
-  roomStats: new Map()
+  roomStats: new Map(),
+  runLookup: new Map() // O(1) duplicate detection
 };
 
 // UI State
@@ -217,6 +222,20 @@ let panelState = {
 };
 
 // Utility Functions
+
+// Create a hash for board setup comparison
+function createBoardSetupHash(boardSetup) {
+  if (!boardSetup || !Array.isArray(boardSetup)) return 'empty';
+  return JSON.stringify(boardSetup.sort((a, b) => {
+    // Sort by tileIndex for consistent hashing
+    return (a.tileIndex || 0) - (b.tileIndex || 0);
+  }));
+}
+
+// Create a composite key for run lookup
+function createRunKey(roomId, ticks, timestamp, source, boardSetupHash) {
+  return `${roomId}-${ticks}-${timestamp}-${source}-${boardSetupHash}`;
+}
 
 // Board Analyzer coordination - unsubscribe from board changes during analysis
 function handleBoardAnalyzerCoordination() {
@@ -277,18 +296,28 @@ function addRunIfNotExists(newRun) {
     return false;
   }
   
-  const exists = performanceTracker.runs.some(r => 
-    r.roomId === newRun.roomId && 
-    r.ticks === newRun.ticks && 
-    r.timestamp === newRun.timestamp &&
-    r.source === newRun.source
-  );
-  if (!exists) {
-    performanceTracker.runs.push(newRun);
-    dataCollector.updatePatterns(newRun);
-    return true;
+  // Validate required run data
+  if (!newRun.roomId || !newRun.ticks || !newRun.timestamp || !newRun.source) {
+    console.warn('[Board Advisor] Invalid run data - missing required fields');
+    return false;
   }
-  return false;
+  
+  // Create board setup hash for comparison
+  const boardSetupHash = createBoardSetupHash(newRun.boardSetup);
+  
+  // Create composite key for O(1) lookup
+  const runKey = createRunKey(newRun.roomId, newRun.ticks, newRun.timestamp, newRun.source, boardSetupHash);
+  
+  // Check for duplicate using Map lookup (O(1) performance)
+  if (performanceTracker.runLookup.has(runKey)) {
+    return false;
+  }
+  
+  // Add to both array and lookup map
+  performanceTracker.runs.push(newRun);
+  performanceTracker.runLookup.set(runKey, newRun);
+  dataCollector.updatePatterns(newRun);
+  return true;
 }
 
 const getRoomStoreName = (roomId) => `room_${roomId}`;
@@ -989,7 +1018,9 @@ function highlightRecommendedTiles(recommendedSetup) {
     );
   
   if (isSameFullSetup) {
-    console.log('[Board Advisor] Same full setup already highlighted, skipping cleanup');
+    console.log('[Board Advisor] Same full setup already highlighted, checking if pieces are placed');
+    // Even if it's the same setup, check if pieces are actually placed and clean up accordingly
+    smartCleanupTileHighlights();
     return;
   }
   
@@ -1210,7 +1241,14 @@ function createTileHighlightOverlay(recommendedSetup) {
 
 // Smart cleanup function that checks if all recommended pieces are placed
 function smartCleanupTileHighlights() {
-  if (!currentRecommendedSetup || currentRecommendedSetup.length === 0) {
+  console.log('[Board Advisor] smartCleanupTileHighlights called');
+  console.log('[Board Advisor] currentRecommendedSetup:', currentRecommendedSetup);
+  
+  // Use original specific setup data if available, otherwise use current recommended setup
+  const setupToUse = originalSpecificSetup || currentRecommendedSetup;
+  
+  if (!setupToUse || setupToUse.length === 0) {
+    console.log('[Board Advisor] No setup data available, cleaning up highlights');
     cleanupTileHighlights();
     return;
   }
@@ -1218,9 +1256,24 @@ function smartCleanupTileHighlights() {
   // Get current board state
   const currentBoard = dataCollector.getCurrentBoardData();
   if (!currentBoard || !currentBoard.boardSetup) {
+    console.log('[Board Advisor] No current board data or boardSetup, cleaning up highlights');
     cleanupTileHighlights();
     return;
   }
+  
+  console.log('[Board Advisor] Smart cleanup - current board state:', {
+    boardSetupLength: currentBoard.boardSetup.length,
+    boardSetup: currentBoard.boardSetup,
+    recommendedSetupLength: setupToUse.length,
+    recommendedSetup: setupToUse,
+    usingOriginalSpecificSetup: !!originalSpecificSetup
+  });
+  
+  // Log the tile indices for debugging
+  const currentTileIndices = currentBoard.boardSetup.map(piece => piece.tileIndex);
+  const recommendedTileIndices = setupToUse.map(rec => rec.tileIndex);
+  console.log('[Board Advisor] Current tile indices:', currentTileIndices);
+  console.log('[Board Advisor] Recommended tile indices:', recommendedTileIndices);
   
   // Check which recommended pieces have been placed
   const currentPieces = new Set();
@@ -1231,7 +1284,7 @@ function smartCleanupTileHighlights() {
   });
   
   // Check if all recommended pieces are placed
-  const allRecommendedPlaced = currentRecommendedSetup.every(rec => 
+  const allRecommendedPlaced = setupToUse.every(rec => 
     currentPieces.has(rec.tileIndex)
   );
   
@@ -1252,41 +1305,62 @@ function smartCleanupTileHighlights() {
     });
     
     if (hasRemovedPieces) {
-      console.log('[Board Advisor] Pieces removed, regenerating recommendations for available tiles');
-      // Clear current recommendations and trigger new analysis
-      cleanupTileHighlights();
-      currentRecommendedSetup = null;
-      placedRecommendedPieces.clear();
+      console.log('[Board Advisor] Pieces removed, checking if highlights should be restored');
       
-      // Set analysis flag to show loading state immediately
-      analysisState.isAnalyzing = true;
-      lastAnalysisTime = 0; // Reset debounce timer
+      // Check if any recommended tiles are now empty and should be re-highlighted
+      const emptyRecommendedTiles = setupToUse.filter(rec => 
+        !currentPieces.has(rec.tileIndex)
+      );
       
-      // Update footer status to show loading
-      if (window.updateFooterStatus) {
-        window.updateFooterStatus();
+      if (emptyRecommendedTiles.length > 0) {
+        console.log('[Board Advisor] Re-highlighting empty recommended tiles:', emptyRecommendedTiles);
+        // Clean up existing highlights first
+        cleanupTileHighlights();
+        // Re-highlight the empty recommended tiles
+        createTileHighlightOverlay(emptyRecommendedTiles);
+      } else {
+        console.log('[Board Advisor] All recommended tiles still occupied, no highlights to restore');
       }
       
-      // Trigger new analysis to generate updated recommendations
-      if (dataCollector && typeof dataCollector.triggerAutomaticAnalysis === 'function') {
-        setTimeout(() => {
-          dataCollector.triggerAutomaticAnalysis();
-        }, 100); // Small delay to ensure board state is stable
-      }
+      // Don't trigger new analysis here - it overwrites specific setup data with generic positioning data
+      // The original specific setup data should be preserved for re-highlighting
       return;
     }
     
-    // Re-highlight missing recommended pieces
-    const missingPieces = currentRecommendedSetup.filter(rec => 
-      !currentPieces.has(rec.tileIndex)
+    // Check if any recommended pieces are now placed (even if piece count didn't change - could be moved)
+    const newlyPlacedPieces = setupToUse.filter(rec => 
+      currentPieces.has(rec.tileIndex)
     );
     
-    if (missingPieces.length > 0) {
-      console.log('[Board Advisor] Re-highlighting missing pieces:', missingPieces);
+    if (newlyPlacedPieces.length > 0) {
+      console.log('[Board Advisor] Some recommended pieces are now placed:', newlyPlacedPieces);
+      
+      // Re-highlight only the missing pieces
+      const missingPieces = setupToUse.filter(rec => 
+        !currentPieces.has(rec.tileIndex)
+      );
+      
+      if (missingPieces.length > 0) {
+        console.log('[Board Advisor] Re-highlighting remaining missing pieces:', missingPieces);
+        // Clean up existing highlights first
+        cleanupTileHighlights();
+        // Re-highlight only the missing pieces with their original specific data
+        createTileHighlightOverlay(missingPieces);
+      } else {
+        // All pieces are placed, clean up highlights
+        console.log('[Board Advisor] All recommended pieces are now placed, cleaning up highlights');
+        cleanupTileHighlights();
+        currentRecommendedSetup = null;
+        originalSpecificSetup = null; // Clear original setup when all pieces are placed
+        placedRecommendedPieces.clear();
+      }
+    } else {
+      // No recommended pieces are placed, re-highlight all with original specific data
+      console.log('[Board Advisor] No recommended pieces placed, re-highlighting all:', setupToUse);
       // Clean up existing highlights first
       cleanupTileHighlights();
-      // Re-highlight only the missing pieces
-      createTileHighlightOverlay(missingPieces);
+      // Re-highlight all recommended pieces with their original specific data
+      createTileHighlightOverlay(setupToUse);
     }
   }
   
@@ -1532,7 +1606,7 @@ addDocumentListener('utility-api-ready', () => {
 });
 
 // Handle visibility changes (user tabbing in/out)
-document.addEventListener('visibilitychange', () => {
+addDocumentListener('visibilitychange', () => {
   if (!document.hidden && panelState.isOpen) {
     // User tabbed back in and panel is open - clear any stuck analysis
     if (analysisState.isAnalyzing) {
@@ -2068,6 +2142,11 @@ function convertBoardAnalyzerResults(boardAnalyzerResults) {
       
       // Add to performance tracker
       performanceTracker.runs.push(runData);
+      
+      // Also add to lookup map for O(1) duplicate detection
+      const boardSetupHash = createBoardSetupHash(runData.boardSetup);
+      const runKey = createRunKey(runData.roomId, runData.ticks, runData.timestamp, runData.source, boardSetupHash);
+      performanceTracker.runLookup.set(runKey, runData);
 
       // Also save as Board Analyzer run to IndexedDB
       addBoardAnalyzerRun(runData).then(boardAnalyzerSaved => {
@@ -2304,6 +2383,8 @@ class DataCollector {
   constructor() {
     this.currentRun = null;
     this.isTracking = false;
+    this.debouncedKeys = new Set();
+    this.setupPeriodicCleanup();
   }
 
   // Resolve map ID to map name (same logic as RunTracker)
@@ -2367,6 +2448,55 @@ class DataCollector {
     });
   }
 
+  setupPeriodicCleanup() {
+    // Clean up old debounce keys and stale data every 10 minutes
+    const cleanupInterval = setInterval(() => {
+      this.cleanupOldData();
+    }, 600000); // 10 minutes
+    
+    // Store interval for cleanup
+    activeSubscriptions.push({
+      unsubscribe: () => clearInterval(cleanupInterval)
+    });
+  }
+
+  cleanupOldData() {
+    try {
+      const now = Date.now();
+      const maxAge = 10 * 60 * 1000; // 10 minutes
+      
+      // Clean up old debounce keys (they should auto-clean after 2s, but this is a safety net)
+      if (this.debouncedKeys) {
+        const initialSize = this.debouncedKeys.size;
+        // Debounce keys are automatically cleaned after 2s, so this is just a safety net
+        if (this.debouncedKeys.size > 100) {
+          this.debouncedKeys.clear();
+          console.log(`[Board Advisor] Cleaned up ${initialSize} old debounce keys`);
+        }
+      }
+      
+      // Clean up old run lookup entries if performance tracker gets too large
+      if (performanceTracker.runLookup && performanceTracker.runLookup.size > 2000) {
+        const initialSize = performanceTracker.runLookup.size;
+        // Keep only the most recent 1000 runs in lookup
+        const recentRuns = performanceTracker.runs.slice(-1000);
+        performanceTracker.runLookup.clear();
+        
+        // Rebuild lookup map with recent runs
+        recentRuns.forEach(run => {
+          const boardSetupHash = createBoardSetupHash(run.boardSetup);
+          const runKey = createRunKey(run.roomId, run.ticks, run.timestamp, run.source, boardSetupHash);
+          performanceTracker.runLookup.set(runKey, run);
+        });
+        
+        console.log(`[Board Advisor] Cleaned up run lookup: ${initialSize} -> ${performanceTracker.runLookup.size} entries`);
+      }
+      
+    } catch (error) {
+      console.error('[Board Advisor] Error during periodic cleanup:', error);
+    }
+  }
+
   setupServerResultsListener() {
     try {
       // Listen for Board Analyzer results (primary method for sandbox mode)
@@ -2390,7 +2520,6 @@ class DataCollector {
           }
           
           // Debounce this board update
-          if (!this.debouncedKeys) this.debouncedKeys = new Set();
           this.debouncedKeys.add(boardKey);
           setTimeout(() => this.debouncedKeys.delete(boardKey), 2000);
           
@@ -2698,16 +2827,7 @@ class DataCollector {
       // Get current board data
       const currentBoard = this.getCurrentBoardData();
       
-      // Skip if this is just a map picker open (same room, no actual board change)
-      // Compare with current board's room ID instead of board context room ID
-      const currentBoardRoomId = currentBoard?.roomId;
-      if (previousRoomId && currentBoardRoomId && previousRoomId === currentBoardRoomId && 
-          currentBoard?.boardSetup && currentBoard.boardSetup.length > 0) {
-        console.log('[Board Advisor] Map picker open detected (same room), skipping analysis');
-        // Update previous room ID for next comparison
-        previousRoomId = currentBoardRoomId;
-        return;
-      }
+      // Process all board changes - no map picker detection
       
       // Check for cheating immediately when board changes
       checkForCheating(currentBoard);
@@ -2764,8 +2884,12 @@ class DataCollector {
         // Only clear highlights on actual map/board changes, not run starts or auto-setup
         console.log(`[Board Advisor] Board/map change detected, clearing highlights immediately`);
         clearRecommendationsInstantly();
+        originalSpecificSetup = null; // Clear original setup on map changes
       } else if (isAutoSetupChange) {
         console.log(`[Board Advisor] Auto-setup change detected, updating analysis`);
+        // Check if highlighted tiles should be updated when pieces are moved
+        console.log(`[Board Advisor] Calling smartCleanupTileHighlights immediately`);
+        smartCleanupTileHighlights();
       } else {
         console.log(`[Board Advisor] Run start detected (same room/board), keeping UI stable`);
       }
@@ -2788,13 +2912,25 @@ class DataCollector {
           clearTimeout(this.boardChangeTimeout);
         }
         
-        // Immediately check if highlighted tiles should be removed when pieces are placed
-        smartCleanupTileHighlights();
+        // Check if highlighted tiles should be removed when pieces are placed (with small delay to ensure board state is updated)
+        // Only call smartCleanupTileHighlights if we have specific setup recommendations to preserve
+        if (currentRecommendedSetup && currentRecommendedSetup.length > 0) {
+          setTimeout(() => {
+            smartCleanupTileHighlights();
+          }, 100);
+        }
         
-        this.boardChangeTimeout = setTimeout(() => {
-          this.triggerAutomaticAnalysis();
+        // Only trigger new analysis if we don't have specific setup recommendations to preserve
+        if (!currentRecommendedSetup || currentRecommendedSetup.length === 0) {
+          this.boardChangeTimeout = setTimeout(() => {
+            this.triggerAutomaticAnalysis();
+            this.refreshDataForCurrentMap();
+          }, isAutoSetupChange ? 500 : BOARD_CHANGE_DEBOUNCE_TIME); // Faster response for auto-setup
+        } else {
+          console.log('[Board Advisor] Skipping analysis trigger to preserve specific setup recommendations');
+          // Still refresh data for current map but don't run analysis
           this.refreshDataForCurrentMap();
-        }, isAutoSetupChange ? 500 : BOARD_CHANGE_DEBOUNCE_TIME); // Faster response for auto-setup
+        }
       }
       // For run starts (same room, same board), do nothing - keep UI stable
       
@@ -2877,6 +3013,12 @@ class DataCollector {
       
       const currentBoard = this.getCurrentBoardData();
       if (!currentBoard || !currentBoard.boardSetup.length) return;
+
+      // Skip analysis if we have specific setup data to preserve
+      if (currentRecommendedSetup && currentRecommendedSetup.length > 0) {
+        console.log('[Board Advisor] Skipping analysis to preserve specific setup data:', currentRecommendedSetup);
+        return;
+      }
 
       // Check if we have data for this room
       const roomId = currentBoard.roomId;
@@ -3151,6 +3293,11 @@ class DataCollector {
     
     performanceTracker.runs.push(runData);
     
+    // Also add to lookup map for O(1) duplicate detection
+    const boardSetupHash = createBoardSetupHash(runData.boardSetup);
+    const runKey = createRunKey(runData.roomId, runData.ticks, runData.timestamp, runData.source, boardSetupHash);
+    performanceTracker.runLookup.set(runKey, runData);
+    
     // Smart cleanup: prioritize keeping best runs when we exceed 1000 runs
     if (performanceTracker.runs.length > 1000) {
       this.cleanupRuns();
@@ -3190,6 +3337,14 @@ class DataCollector {
     const runsToRemove = currentRuns - maxRuns;
     
     performanceTracker.runs = runsToKeep;
+    
+    // Rebuild lookup map with kept runs
+    performanceTracker.runLookup.clear();
+    runsToKeep.forEach(run => {
+      const boardSetupHash = createBoardSetupHash(run.boardSetup);
+      const runKey = createRunKey(run.roomId, run.ticks, run.timestamp, run.source, boardSetupHash);
+      performanceTracker.runLookup.set(runKey, run);
+    });
     
     console.log(`[Board Advisor] Cleanup complete: removed ${runsToRemove} runs (${runsToKeep.filter(r => !r.completed).length} failed, ${runsToKeep.filter(r => r.completed).length} completed)`);
   }
@@ -3994,6 +4149,9 @@ class AnalysisEngine {
       
       console.log('[Board Advisor] Converted setup format:', setupManagerFormat);
       
+      // Store the original specific setup data for restoration
+      originalSpecificSetup = setupManagerFormat;
+      
       // Highlight recommended tiles on the board
       if (setupManagerFormat.length > 0) {
         setTimeout(() => {
@@ -4512,13 +4670,7 @@ class AnalysisEngine {
     const mapLearningTips = this.generateMapLearningInsights(currentBoard, similarSetups);
     recommendations.push(...mapLearningTips);
 
-    // Add tile highlighting for positioning recommendations (if enabled)
-    if (config.enableTileRecommendations) {
-      const tileRecommendations = recommendations.filter(r => r.type === 'positioning' && r.tile);
-      if (tileRecommendations.length > 0) {
-        highlightRecommendedTiles(tileRecommendations);
-      }
-    }
+    // Tile highlighting is now handled by specific setup data from best run only
 
     return recommendations;
   }
@@ -4539,37 +4691,7 @@ class AnalysisEngine {
       // Get performance data for tile recommendations
       const tilePerformance = this.analyzeTilePerformance(successfulSetups);
       
-      // Find optimal tiles that aren't currently used
-      const optimalTiles = this.findOptimalTiles(tileUsage, tilePerformance, currentTileUsage);
-      
-      for (const tileData of optimalTiles) {
-        tips.push({
-          type: 'positioning',
-          title: `Optimal Tile: ${tileData.tile}`,
-          message: `${Math.round(tileData.frequency * 100)}% of successful setups use this tile (avg: ${tileData.avgTime} ticks)`,
-          suggestion: `Try placing a monster on tile ${tileData.tile} - it's frequently used in faster runs`,
-          priority: tileData.priority,
-          tileIndex: tileData.tile,
-          avgTime: tileData.avgTime,
-          frequency: tileData.frequency,
-          isOptimal: true
-        });
-      }
-      
-      // Also suggest avoiding poorly performing tiles
-      const poorTiles = this.findPoorTiles(tileUsage, tilePerformance, currentTileUsage);
-      for (const tileData of poorTiles) {
-        tips.push({
-          type: 'positioning',
-          title: `Avoid Tile: ${tileData.tile}`,
-          message: `This tile appears in slower runs (avg: ${tileData.avgTime} ticks)`,
-          suggestion: `Consider moving monsters away from tile ${tileData.tile} for better performance`,
-          priority: 'low',
-          tileIndex: tileData.tile,
-          avgTime: tileData.avgTime,
-          isAvoid: true
-        });
-      }
+      // Positioning recommendations removed - only use specific setup data from best run
     }
 
     return tips;
@@ -6176,7 +6298,20 @@ function autoFitPanelHeight() {
   // Apply constraints (min/max heights from resize functionality)
   const minHeight = 200;
   const maxHeight = 900;
-  const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, contentHeight + 10)); // +10 for padding
+  
+  // Calculate proper height by measuring each section individually
+  const header = panel.querySelector('div:first-child');
+  const content = panel.querySelector('#advisor-content');
+  const footer = panel.querySelector('div:last-child');
+  
+  let totalHeight = 0;
+  if (header) totalHeight += header.offsetHeight;
+  if (content) totalHeight += content.offsetHeight;
+  if (footer) totalHeight += footer.offsetHeight;
+  
+  // Use the more accurate measurement, with a small buffer
+  const measuredHeight = totalHeight > 0 ? totalHeight + 10 : contentHeight + 10;
+  const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, measuredHeight));
   
   // Set the new height with smooth transition
   panel.style.transition = 'height 0.3s ease';
@@ -6187,7 +6322,7 @@ function autoFitPanelHeight() {
     panel.style.transition = '';
   }, 300);
   
-  console.log(`[Board Advisor] Auto-fitted height: ${constrainedHeight}px (content: ${contentHeight}px)`);
+  console.log(`[Board Advisor] Auto-fitted height: ${constrainedHeight}px (measured: ${measuredHeight}px, content: ${contentHeight}px)`);
 }
 
 // Auto-fit panel height when content changes significantly
@@ -6269,7 +6404,7 @@ function addResizeAndDragFunctionality(panel, header) {
     e.preventDefault();
   });
 
-  document.addEventListener('mousemove', function(e) {
+  addDocumentListener('mousemove', function(e) {
     if (!isResizing) return;
     let dx = e.clientX - resizeStartX;
     let dy = e.clientY - resizeStartY;
@@ -6306,11 +6441,14 @@ function addResizeAndDragFunctionality(panel, header) {
     panel.style.transition = 'none';
   });
 
-  document.addEventListener('mouseup', function() {
+  addDocumentListener('mouseup', function() {
     if (isResizing) {
       isResizing = false;
       document.body.style.userSelect = '';
       panel.style.transition = '';
+      
+      // Auto-resize height after manual resizing
+      setTimeout(() => autoFitPanelHeight(), 100);
     }
   });
 
@@ -6332,7 +6470,7 @@ function addResizeAndDragFunctionality(panel, header) {
     });
   }
 
-  document.addEventListener('mousemove', function(e) {
+  addDocumentListener('mousemove', function(e) {
     if (!isDragging) return;
     let newLeft = e.clientX - dragOffsetX;
     let newTop = e.clientY - dragOffsetY;
@@ -6344,7 +6482,7 @@ function addResizeAndDragFunctionality(panel, header) {
     panel.style.transition = 'none';
   });
 
-  document.addEventListener('mouseup', function() {
+  addDocumentListener('mouseup', function() {
     if (isDragging) {
       isDragging = false;
       document.body.style.userSelect = '';
@@ -6727,6 +6865,8 @@ function createAnalysisSection() {
     const isCollapsed = analysis.style.display === 'none';
     analysis.style.display = isCollapsed ? 'block' : 'none';
     collapseIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+    // Auto-resize panel after collapse/expand
+    setTimeout(() => autoFitPanelHeight(), 50);
   });
   
   section.appendChild(title);
@@ -6981,6 +7121,8 @@ function createFocusAreasSection() {
     const isCollapsed = contentWrapper.style.display === 'none';
     contentWrapper.style.display = isCollapsed ? 'block' : 'none';
     collapseIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+    // Auto-resize panel after collapse/expand
+    setTimeout(() => autoFitPanelHeight(), 50);
   });
   
   section.appendChild(title);
@@ -7048,6 +7190,8 @@ function createRecommendationsSection() {
     const isCollapsed = contentWrapper.style.display === 'none';
     contentWrapper.style.display = isCollapsed ? 'block' : 'none';
     collapseIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+    // Auto-resize panel after collapse/expand
+    setTimeout(() => autoFitPanelHeight(), 50);
   });
   
   section.appendChild(title);
@@ -7772,133 +7916,6 @@ function makeDraggable(panel, header) {
   addDocumentListener('mouseup', handleMouseUp);
 }
 
-function makeResizable(panel) {
-  // Create resize handles for Windows-like resizing
-  const resizeHandles = {
-    right: createResizeHandle('right'),
-    bottom: createResizeHandle('bottom'),
-    corner: createResizeHandle('corner')
-  };
-  
-  function createResizeHandle(type) {
-    const handle = document.createElement('div');
-    const isCorner = type === 'corner';
-    
-    handle.style.cssText = `
-      position: absolute;
-      background: transparent;
-      z-index: 10002;
-      ${isCorner ? `
-        bottom: 0;
-        right: 0;
-        width: 12px;
-        height: 12px;
-        cursor: se-resize;
-      ` : type === 'right' ? `
-        top: 0;
-        right: 0;
-        width: 4px;
-        height: 100%;
-        cursor: e-resize;
-      ` : `
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 4px;
-        cursor: s-resize;
-      `}
-    `;
-    
-    // Add hover effect
-    handle.addEventListener('mouseenter', () => {
-      handle.style.background = isCorner ? '#61AFEF' : '#4B5563';
-    });
-    
-    handle.addEventListener('mouseleave', () => {
-      handle.style.background = 'transparent';
-    });
-    
-    return handle;
-  }
-  
-  let isResizing = false;
-  let resizeType = '';
-  let startX, startY, startWidth, startHeight;
-  
-  function startResize(e, type) {
-    isResizing = true;
-    resizeType = type;
-    startX = e.clientX;
-    startY = e.clientY;
-    startWidth = panel.offsetWidth;
-    startHeight = panel.offsetHeight;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = getCursorForType(type);
-    e.preventDefault();
-    e.stopPropagation();
-  }
-  
-  function getCursorForType(type) {
-    switch(type) {
-      case 'right': return 'e-resize';
-      case 'bottom': return 's-resize';
-      case 'corner': return 'se-resize';
-      default: return 'default';
-    }
-  }
-  
-  // Add event listeners to handles
-  resizeHandles.right.addEventListener('mousedown', (e) => startResize(e, 'right'));
-  resizeHandles.bottom.addEventListener('mousedown', (e) => startResize(e, 'bottom'));
-  resizeHandles.corner.addEventListener('mousedown', (e) => startResize(e, 'corner'));
-  
-  const handleResizeMouseMove = (e) => {
-    if (!isResizing) return;
-    
-    const deltaX = e.clientX - startX;
-    const deltaY = e.clientY - startY;
-    
-    let newWidth = startWidth;
-    let newHeight = startHeight;
-    
-    // Allow width resizing
-    if (resizeType === 'right' || resizeType === 'corner') {
-      newWidth = Math.max(300, Math.min(600, startWidth + deltaX));
-    }
-    
-    // Allow height resizing
-    if (resizeType === 'bottom' || resizeType === 'corner') {
-      newHeight = Math.max(200, Math.min(1200, startHeight + deltaY));
-    }
-    
-    // Update panel size
-    panel.style.width = newWidth + 'px';
-    panel.style.height = newHeight + 'px';
-    
-    // Update state
-    panelState.size.width = newWidth;
-    panelState.size.height = newHeight;
-  };
-  
-  const handleResizeMouseUp = () => {
-    if (isResizing) {
-      isResizing = false;
-      resizeType = '';
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-    }
-  };
-  
-  addDocumentListener('mousemove', handleResizeMouseMove);
-  addDocumentListener('mouseup', handleResizeMouseUp);
-  
-  // Add handles to panel
-  panel.appendChild(resizeHandles.right);
-  panel.appendChild(resizeHandles.bottom);
-  panel.appendChild(resizeHandles.corner);
-}
-
-
 function loadPanelData() {
   const analysisDisplay = document.getElementById('analysis-display');
   const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -8189,6 +8206,9 @@ async function analyzeCurrentBoard() {
       console.log('[Board Advisor] Regular analysis, updating panel with recommendations:', analysis.recommendations?.length || 0);
       await updatePanelWithAnalysis(analysis);
     }
+    
+    // After analysis and panel update, highlights are already created by updatePanelWithAnalysis
+    console.log('[Board Advisor] Analysis complete, highlights already created');
     
     // Update footer status after UI has been updated
     if (window.updateFooterStatus) {
@@ -9134,17 +9154,7 @@ function handleStateChange(source, state) {
     return;
   }
   
-  // Skip if this is a board state change that's just a map picker open
-  if (source === 'board' && state?.context) {
-    const currentBoard = dataCollector?.getCurrentBoardData?.();
-    const currentBoardRoomId = currentBoard?.roomId;
-    
-    if (previousRoomId && currentBoardRoomId && previousRoomId === currentBoardRoomId && 
-        currentBoard?.boardSetup && currentBoard.boardSetup.length > 0) {
-      console.log('[Board Advisor] State refresh: Map picker open detected (same room), skipping panel refresh');
-      return;
-    }
-  }
+  // Process all board state changes - no map picker detection
   
   const now = Date.now();
   const timeSinceLastRefresh = now - stateRefreshSystem.lastRefreshTime;
@@ -9627,18 +9637,28 @@ exports = {
     // 4. Clean up all document event listeners
     cleanupDocumentListeners();
     
-    // 5. Clean up database connection
+    // 5. Clean up all window event listeners
+    cleanupWindowListeners();
+    
+    // 6. Clean up global window functions
+    delete window.getMonsterName;
+    delete window.getEquipmentName;
+    delete window.getMonsterStats;
+    delete window.formatMonsterStats;
+    delete window.getEquipmentStats;
+    
+    // 7. Clean up database connection
     cleanupDatabase();
     
-    // 6. Clean up tile highlights and overlays
+    // 8. Clean up tile highlights and overlays
     cleanupTileHighlights();
     
-    // 7. Close panel if open
+    // 9. Close panel if open
     if (panelState.isOpen) {
       closePanel();
     }
     
-    // 8. Clean up data collector subscriptions
+    // 10. Clean up data collector subscriptions
     if (dataCollector && dataCollector.boardSubscription) {
       try {
         dataCollector.boardSubscription.unsubscribe();
@@ -9706,6 +9726,12 @@ function addDocumentListener(event, handler) {
   documentListeners.push({ event, handler });
 }
 
+// Helper function to add window listeners with tracking
+function addWindowListener(event, handler) {
+  window.addEventListener(event, handler);
+  windowListeners.push({ event, handler });
+}
+
 // Cleanup function for subscriptions
 function cleanupSubscriptions() {
   activeSubscriptions.forEach(subscription => {
@@ -9726,6 +9752,15 @@ function cleanupDocumentListeners() {
   console.log('[Board Advisor] All document listeners cleaned up');
 }
 
+// Cleanup function for window listeners
+function cleanupWindowListeners() {
+  windowListeners.forEach(({ event, handler }) => {
+    window.removeEventListener(event, handler);
+  });
+  windowListeners = [];
+  console.log('[Board Advisor] All window listeners cleaned up');
+}
+
 // Cleanup function for database connection
 function cleanupDatabase() {
   if (sandboxDB) {
@@ -9737,15 +9772,16 @@ function cleanupDatabase() {
 }
 
 // Cleanup on page unload
-window.addEventListener('beforeunload', () => {
+addWindowListener('beforeunload', () => {
   cleanupSubscriptions();
   cleanupDocumentListeners();
+  cleanupWindowListeners();
   cleanupDatabase();
   stopStateRefresh();
 });
 
 // Listen for mod disable events
-window.addEventListener('message', (event) => {
+addWindowListener('message', (event) => {
   if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
     const modName = event.data.message.name;
     const enabled = event.data.message.enabled;

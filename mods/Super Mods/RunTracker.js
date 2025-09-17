@@ -1651,7 +1651,20 @@ exports = {
       if (StorageManager) {
         StorageManager.flushSaves();
         console.log('[RunTracker] Flushed pending storage operations');
+        
+        // Clear StorageManager state
+        StorageManager.pendingSaves.clear();
+        if (StorageManager.saveTimeout) {
+          clearTimeout(StorageManager.saveTimeout);
+          StorageManager.saveTimeout = null;
+        }
       }
+      
+      // Reset initialization state for clean reinitialization
+      hasInitialized = false;
+      isInitializing = false;
+      window.RunTrackerAPI._initialized = false;
+      console.log('[RunTracker] Reset initialization state');
       
       console.log('[RunTracker] Cleanup completed successfully');
     } catch (error) {
