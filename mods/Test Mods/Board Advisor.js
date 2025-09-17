@@ -2698,6 +2698,17 @@ class DataCollector {
       // Get current board data
       const currentBoard = this.getCurrentBoardData();
       
+      // Skip if this is just a map picker open (same room, no actual board change)
+      // Compare with current board's room ID instead of board context room ID
+      const currentBoardRoomId = currentBoard?.roomId;
+      if (previousRoomId && currentBoardRoomId && previousRoomId === currentBoardRoomId && 
+          currentBoard?.boardSetup && currentBoard.boardSetup.length > 0) {
+        console.log('[Board Advisor] Map picker open detected (same room), skipping analysis');
+        // Update previous room ID for next comparison
+        previousRoomId = currentBoardRoomId;
+        return;
+      }
+      
       // Check for cheating immediately when board changes
       checkForCheating(currentBoard);
       
@@ -3895,7 +3906,7 @@ class AnalysisEngine {
         console.log('[Board Advisor] Sorting by points (highest first = best)');
         bestRuns.sort((a, b) => {
           // Primary sort: rank points (highest first)
-          const pointsDiff = (b.points || 0) - (a.points || 0);
+          const pointsDiff = (b.rankPoints || 0) - (a.rankPoints || 0);
           if (pointsDiff !== 0) return pointsDiff;
           
           // Secondary sort: ticks (lowest first) as tiebreaker
@@ -3907,7 +3918,7 @@ class AnalysisEngine {
       console.log('[Board Advisor] Best run found:', {
         roomId: bestRun.roomId,
         ticks: bestRun.ticks,
-        points: bestRun.points,
+        rankPoints: bestRun.rankPoints,
         source: bestRun.source,
         setupPieces: bestRun.boardSetup?.length || 0
       });
@@ -4365,8 +4376,14 @@ class AnalysisEngine {
       
       const completedRuns = allRuns.filter(r => r.completed);
       
-      // Sort by ticks (best first) and limit to top 50 runs
-      const sortedRuns = completedRuns.sort((a, b) => a.ticks - b.ticks);
+      // Sort by focus area (best first) and limit to top 50 runs
+      const sortedRuns = completedRuns.sort((a, b) => {
+        if (config.focusArea === 'ticks') {
+          return a.ticks - b.ticks;
+        } else {
+          return b.rankPoints - a.rankPoints;
+        }
+      });
       const top50Runs = sortedRuns.slice(0, 50);
       
       const averageTime = top50Runs.length > 0 ? 
@@ -5362,7 +5379,13 @@ class AnalysisEngine {
     const currentRoomRuns = boardAnalyzerRuns.length > 0 
       ? boardAnalyzerRuns.filter(r => r.roomId === currentBoard.roomId)
       : allRuns.filter(r => r.roomId === currentBoard.roomId);
-    const sortedRuns = currentRoomRuns.sort((a, b) => a.ticks - b.ticks);
+    const sortedRuns = currentRoomRuns.sort((a, b) => {
+      if (config.focusArea === 'ticks') {
+        return a.ticks - b.ticks;
+      } else {
+        return b.rankPoints - a.rankPoints;
+      }
+    });
     const bestOverallRun = sortedRuns[0];
     const currentPredictedTime = currentAnalysis?.prediction?.predictedTime || currentAnalysis?.currentAnalysis?.predictedTime;
     
@@ -5506,7 +5529,13 @@ class AnalysisEngine {
     if (completedRuns.length === 0) return recommendations;
     
     // Calculate average from top 10 best runs instead of all runs
-    const sortedRuns = [...completedRuns].sort((a, b) => a.ticks - b.ticks);
+    const sortedRuns = [...completedRuns].sort((a, b) => {
+      if (config.focusArea === 'ticks') {
+        return a.ticks - b.ticks;
+      } else {
+        return b.rankPoints - a.rankPoints;
+      }
+    });
     const top10Runs = sortedRuns.slice(0, Math.min(10, sortedRuns.length));
     const avgTime = top10Runs.reduce((sum, r) => sum + r.ticks, 0) / top10Runs.length;
     
@@ -5905,7 +5934,13 @@ class AnalysisEngine {
       
       // Check if there are better runs available
       const currentRoomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
-      const sortedRuns = currentRoomRuns.sort((a, b) => a.ticks - b.ticks);
+      const sortedRuns = currentRoomRuns.sort((a, b) => {
+        if (config.focusArea === 'ticks') {
+          return a.ticks - b.ticks;
+        } else {
+          return b.rankPoints - a.rankPoints;
+        }
+      });
       const bestOverallRun = sortedRuns[0];
       
       if (bestOverallRun && bestOverallRun.ticks < bestRun.ticks) {
@@ -6515,7 +6550,9 @@ function createPanel() {
     left: ${panelState.position.x}px;
     width: ${panelState.size.width}px;
     height: ${panelState.size.height}px;
-    background: #282C34;
+    background-image: url(/_next/static/media/background-darker.2679c837.png);
+    background-repeat: repeat;
+    background-color: #323234;
     border: 1px solid #3A404A;
     border-radius: 7px;
     box-shadow: 0 0 15px rgba(0,0,0,0.7);
@@ -6651,6 +6688,7 @@ function createAnalysisSection() {
     border: 1px solid #3A404A;
     border-radius: 4px;
     flex: 1 1 auto;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   `;
   
   const title = document.createElement('h4');
@@ -6708,6 +6746,7 @@ function createFocusAreasSection() {
     border: 1px solid #3A404A;
     border-radius: 4px;
     flex: 0 0 auto;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   `;
   
   const title = document.createElement('h4');
@@ -6717,7 +6756,21 @@ function createFocusAreasSection() {
     color: #FF9800;
     font-size: 14px;
     font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   `;
+  
+  // Add collapse/expand indicator
+  const collapseIcon = document.createElement('span');
+  collapseIcon.textContent = '▲';
+  collapseIcon.style.cssText = `
+    font-size: 11px;
+    transition: transform 0.2s ease;
+  `;
+  title.appendChild(collapseIcon);
   
   const toggleContainer = document.createElement('div');
   toggleContainer.style.cssText = `
@@ -6915,8 +6968,23 @@ function createFocusAreasSection() {
   toggleContainer.appendChild(toggleSwitchContainer);
   toggleContainer.appendChild(ranksLabel);
   
+  // Create collapsible content wrapper
+  const contentWrapper = document.createElement('div');
+  contentWrapper.id = 'focus-areas-content';
+  contentWrapper.style.cssText = `
+    display: block;
+  `;
+  contentWrapper.appendChild(toggleContainer);
+  
+  // Add click handler for collapse/expand
+  title.addEventListener('click', () => {
+    const isCollapsed = contentWrapper.style.display === 'none';
+    contentWrapper.style.display = isCollapsed ? 'block' : 'none';
+    collapseIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+  });
+  
   section.appendChild(title);
-  section.appendChild(toggleContainer);
+  section.appendChild(contentWrapper);
   
   return section;
 }
@@ -6934,6 +7002,7 @@ function createRecommendationsSection() {
     border: 1px solid #3A404A;
     border-radius: 4px;
     flex: 0 0 auto;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   `;
   
   const title = document.createElement('h4');
@@ -6943,7 +7012,21 @@ function createRecommendationsSection() {
     color: #E5C07B;
     font-size: 14px;
     font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   `;
+  
+  // Add collapse/expand indicator
+  const collapseIcon = document.createElement('span');
+  collapseIcon.textContent = '▲';
+  collapseIcon.style.cssText = `
+    font-size: 11px;
+    transition: transform 0.2s ease;
+  `;
+  title.appendChild(collapseIcon);
   
   const recommendations = document.createElement('div');
   recommendations.id = 'recommendations-display';
@@ -6952,8 +7035,23 @@ function createRecommendationsSection() {
     line-height: 1.3;
   `;
   
+  // Create collapsible content wrapper
+  const contentWrapper = document.createElement('div');
+  contentWrapper.id = 'recommendations-content';
+  contentWrapper.style.cssText = `
+    display: block;
+  `;
+  contentWrapper.appendChild(recommendations);
+  
+  // Add click handler for collapse/expand
+  title.addEventListener('click', () => {
+    const isCollapsed = contentWrapper.style.display === 'none';
+    contentWrapper.style.display = isCollapsed ? 'block' : 'none';
+    collapseIcon.style.transform = isCollapsed ? 'rotate(0deg)' : 'rotate(180deg)';
+  });
+  
   section.appendChild(title);
-  section.appendChild(recommendations);
+  section.appendChild(contentWrapper);
   
   return section;
 }
@@ -8121,13 +8219,7 @@ function clearRecommendationsInstantly() {
     recommendationsDisplay.innerHTML = '';
   }
   
-  if (analysisDisplay) {
-    analysisDisplay.innerHTML = `
-      <div style="text-align: center; color: #777; font-style: italic; padding: 20px;">
-        Analyzing new map...
-      </div>
-    `;
-  }
+  // Analysis status is now shown in footer only
   
   // Clear any existing analysis state to prevent stale data
   if (window.analysisState) {
@@ -8480,7 +8572,13 @@ async function updatePanelWithAnalysis(analysis) {
       
       // Use IndexedDB data instead of performanceTracker.runs for consistent monster names
       const currentRoomRuns = analysis.runs || [];
-      const top10Runs = currentRoomRuns.sort((a, b) => a.ticks - b.ticks).slice(0, 10);
+      const top10Runs = currentRoomRuns.sort((a, b) => {
+        if (config.focusArea === 'ticks') {
+          return a.ticks - b.ticks;
+        } else {
+          return b.rankPoints - a.rankPoints;
+        }
+      }).slice(0, 10);
       
       if (top10Runs.length > 0) {
         // Analyze equipment patterns in top 10 runs
@@ -8811,9 +8909,9 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     } else if (isBoardEmpty) {
       // Show empty board message
       analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
-          <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>🎯</span>
+        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
+          <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+            <span>📋</span>
             <span>Empty Board</span>
           </div>
           <div style="font-size: 11px; color: #ABB2BF;">
@@ -9034,6 +9132,18 @@ function handleStateChange(source, state) {
     console.warn('[Board Advisor] Global state not available, stopping state refresh');
     stopStateRefresh();
     return;
+  }
+  
+  // Skip if this is a board state change that's just a map picker open
+  if (source === 'board' && state?.context) {
+    const currentBoard = dataCollector?.getCurrentBoardData?.();
+    const currentBoardRoomId = currentBoard?.roomId;
+    
+    if (previousRoomId && currentBoardRoomId && previousRoomId === currentBoardRoomId && 
+        currentBoard?.boardSetup && currentBoard.boardSetup.length > 0) {
+      console.log('[Board Advisor] State refresh: Map picker open detected (same room), skipping panel refresh');
+      return;
+    }
   }
   
   const now = Date.now();
