@@ -272,12 +272,12 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
   ];
 
   const hiddenMods = [
+    'Welcome.js',
     'inventory-tooltips.js',
     'creature-database.js',
     'equipment-database.js',
     'DashboardButton.js',
     'RunTracker.js',
-    'Welcome.js',
     'Outfiter.js'
   ];
 

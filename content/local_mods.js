@@ -202,6 +202,7 @@ async function listAllModFiles() {
   try {
     // If you have a dynamic index, update this logic accordingly
     const databaseMods = [
+      'database/Welcome.js',  // Load Welcome mod first to set up completion listener
       'database/inventory-tooltips.js',
       'database/creature-database.js',
       'database/equipment-database.js'
@@ -220,7 +221,6 @@ async function listAllModFiles() {
       'Official Mods/Turbo Mode.js'
     ];
     const superMods = [
-      'Super Mods/Welcome.js',  // Load Welcome mod first to set up completion listener
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
       'Super Mods/Better Analytics.js',
@@ -245,6 +245,7 @@ async function listAllModFiles() {
   } catch (e) {
     // fallback: hardcoded list
     return [
+      'database/Welcome.js',  // Load Welcome mod first to set up completion listener
       'database/inventory-tooltips.js',
       'database/creature-database.js',
       'database/equipment-database.js',
@@ -259,7 +260,6 @@ async function listAllModFiles() {
       'Official Mods/Team_Copier.js',
       'Official Mods/Tick_Tracker.js',
       'Official Mods/Turbo Mode.js',
-      'Super Mods/Welcome.js',  // Load Welcome mod first to set up completion listener
       'Super Mods/Autoseller.js',
       'Super Mods/Autoscroller.js',
       'Super Mods/Better Analytics.js',
@@ -283,6 +283,7 @@ async function listAllModFiles() {
 
 // List of mods to enable by default
 const defaultEnabledMods = [
+  'database/Welcome.js',
   'database/inventory-tooltips.js',
   'database/creature-database.js',
   'database/equipment-database.js',

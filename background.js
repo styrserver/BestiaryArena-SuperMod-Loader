@@ -871,10 +871,20 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       // Count mods in each directory
       const modCounts = {
+        database: 0,
         official: 0,
         super: 0,
         test: 0
       };
+      
+      // Count Database Mods
+      const databaseMods = [
+        'Welcome.js',
+        'inventory-tooltips.js',
+        'creature-database.js',
+        'equipment-database.js'
+      ];
+      modCounts.database = databaseMods.length;
       
       // Count Official Mods
       const officialMods = [
@@ -909,8 +919,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'Hunt Analyzer.js',
         'Outfiter.js',
         'Raid_Hunter.js',
-        'RunTracker.js',
-        'Welcome.js'
+        'RunTracker.js'
       ];
       modCounts.super = superMods.length;
       
