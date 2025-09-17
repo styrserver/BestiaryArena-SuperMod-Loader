@@ -258,50 +258,11 @@ function setUILoadingState(isLoading, reason = '') {
   analysisState.isUILoading = isLoading;
   if (isLoading) {
     console.log(`[Board Advisor] UI loading started: ${reason}`);
-    // Show loading indicator in panel if open
-    if (panelState.isOpen) {
-      showLoadingIndicator();
-    }
   } else {
     console.log(`[Board Advisor] UI loading completed: ${reason}`);
-    // Hide loading indicator
-    if (panelState.isOpen) {
-      hideLoadingIndicator();
-    }
   }
 }
 
-function showLoadingIndicator() {
-  const recommendationsDisplay = document.getElementById('recommendations-display');
-  if (recommendationsDisplay && !recommendationsDisplay.querySelector('.loading-indicator')) {
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = 'loading-indicator';
-    loadingDiv.style.cssText = `
-      margin: 8px 0; 
-      padding: 12px; 
-      background: #1F2937; 
-      border-radius: 6px; 
-      border-left: 4px solid #3B82F6;
-      text-align: center;
-    `;
-    loadingDiv.innerHTML = `
-      <div style="font-weight: 600; color: #3B82F6; font-size: 12px; margin-bottom: 6px;">
-        🔄 Loading Analysis...
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        Please wait while we analyze the current board
-      </div>
-    `;
-    recommendationsDisplay.appendChild(loadingDiv);
-  }
-}
-
-function hideLoadingIndicator() {
-  const loadingIndicator = document.querySelector('.loading-indicator');
-  if (loadingIndicator) {
-    loadingIndicator.remove();
-  }
-}
 
 function isBoardChangeInProgress() {
   const now = Date.now();
@@ -1297,9 +1258,14 @@ function smartCleanupTileHighlights() {
       currentRecommendedSetup = null;
       placedRecommendedPieces.clear();
       
-      // Clear analysis flag to allow new analysis
-      analysisState.isAnalyzing = false;
+      // Set analysis flag to show loading state immediately
+      analysisState.isAnalyzing = true;
       lastAnalysisTime = 0; // Reset debounce timer
+      
+      // Update footer status to show loading
+      if (window.updateFooterStatus) {
+        window.updateFooterStatus();
+      }
       
       // Trigger new analysis to generate updated recommendations
       if (dataCollector && typeof dataCollector.triggerAutomaticAnalysis === 'function') {
@@ -2752,6 +2718,25 @@ class DataCollector {
         boardContext: boardContext
       });
       
+      // Check if pieces were removed (board has fewer pieces than before)
+      if (currentBoard?.boardSetup && previousBoardPieceCount > 0) {
+        const hasRemovedPieces = currentBoard.boardSetup.length < previousBoardPieceCount;
+        
+        if (hasRemovedPieces) {
+          console.log('[Board Advisor] Pieces removed, setting loading state');
+          // Set analysis flag to show loading state immediately
+          analysisState.isAnalyzing = true;
+          
+          // Update footer status to show loading
+          if (window.updateFooterStatus) {
+            window.updateFooterStatus();
+          }
+        }
+      }
+      
+      // Update previous board piece count for next comparison
+      previousBoardPieceCount = currentBoard?.boardSetup?.length || 0;
+      
       // Check if this is just a run start (same room, same board setup) vs actual map/board change
       const isRunStart = previousRoomId === newRoomId && 
                         currentBoard?.boardSetup && 
@@ -2866,8 +2851,7 @@ class DataCollector {
         // Clear loading state on error
         setUILoadingState(false, 'Error loading data');
         analysisState.pendingBoardChange = null;
-        // Show error state in panel
-        updatePanelStatus('Error loading data. Please try again.', 'error');
+        // Error loading data - footer will show loading state
       });
     } catch (error) {
       console.error('[Board Advisor] Error refreshing data for current map:', error);
@@ -3656,7 +3640,7 @@ class AnalysisEngine {
       // Check anti-cheat flag
       if (isCheatingDetected()) {
         console.warn('[Board Advisor] Anti-cheat: Cheating detected, stopping analysis and data saving');
-        updatePanelStatus('Analysis stopped: Invalid monster stats detected (cheating detected)', 'error');
+        // Analysis stopped due to cheating detection
         return null;
       }
       
@@ -6039,6 +6023,301 @@ if (panel) {
   console.warn('[Board Advisor] Failed to create panel during initialization');
 }
 
+// Helper function for consistent box styling
+function createStyledBox(content, options = {}) {
+  const {
+    marginBottom = '8px',
+    padding = '8px',
+    borderColor = '#3A404A',
+    borderRadius = '4px'
+  } = options;
+  
+  return `
+    <div style="
+      margin-bottom: ${marginBottom};
+      padding: ${padding};
+      background-image: url(/_next/static/media/background-dark.95edca67.png);
+      background-repeat: repeat;
+      background-color: #323234;
+      border: 1px solid ${borderColor};
+      border-radius: ${borderRadius};
+    ">
+      ${content}
+    </div>
+  `;
+}
+
+// Button styling functions from Hunt Analyzer
+function createStyledButton(text) {
+  const button = document.createElement("button");
+  button.textContent = text;
+  button.style.padding = "6px 12px";
+  button.style.border = "1px solid #3A404A";
+  button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
+  button.style.color = "#ABB2BF";
+  button.style.fontSize = "9px";
+  button.style.cursor = "pointer";
+  button.style.borderRadius = "5px";
+  button.style.transition = "all 0.2s ease";
+  button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
+  button.style.flexGrow = '1';
+
+  button.onmouseover = () => {
+    button.style.background = "linear-gradient(to bottom, #6B7280, #4B5563)";
+    button.style.boxShadow = '0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2)';
+    button.style.transform = 'translateY(-1px)';
+  };
+  button.onmouseout = () => {
+    button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
+    button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
+    button.style.transform = 'translateY(0)';
+  };
+  button.onmousedown = () => {
+    button.style.boxShadow = 'inset 0 2px 5px rgba(0,0,0,0.5)';
+    button.style.transform = 'translateY(1px)';
+  };
+  button.onmouseup = () => {
+    button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
+    button.style.transform = 'translateY(0)';
+  };
+
+  return button;
+}
+
+function createStyledIconButton(iconText) {
+  const button = document.createElement("button");
+  button.textContent = iconText;
+  button.style.backgroundColor = "transparent";
+  button.style.border = "1px solid #3A404A";
+  button.style.color = "#ABB2BF";
+  button.style.padding = "2px 6px";
+  button.style.margin = "0";
+  button.style.cursor = "pointer";
+  button.style.fontSize = "12px";
+  button.style.lineHeight = "1";
+  button.style.minWidth = "20px";
+  button.style.minHeight = "20px";
+  button.style.display = "flex";
+  button.style.alignItems = "center";
+  button.style.justifyContent = "center";
+  button.style.borderRadius = "3px";
+  button.style.transition = "all 0.2s ease";
+
+  // Hover effect
+  button.onmouseover = () => {
+    button.style.backgroundColor = "#3A404A";
+    button.style.color = "#FFFFFF";
+  };
+  button.onmouseout = () => {
+    button.style.backgroundColor = "transparent";
+    button.style.color = "#ABB2BF";
+  };
+
+  // Active effect
+  button.onmousedown = () => {
+    button.style.transform = "translateY(1px)";
+    button.style.backgroundColor = "#2C313A";
+  };
+  button.onmouseup = () => {
+    button.style.transform = "translateY(0)";
+    button.style.backgroundColor = "#3A404A";
+  };
+
+  return button;
+}
+
+// Auto-fit panel height to content
+function autoFitPanelHeight() {
+  const panel = document.getElementById(PANEL_ID);
+  if (!panel) return;
+  
+  // Temporarily set height to auto to measure content
+  const originalHeight = panel.style.height;
+  panel.style.height = 'auto';
+  
+  // Get the natural height of the content
+  const contentHeight = panel.scrollHeight;
+  
+  // Apply constraints (min/max heights from resize functionality)
+  const minHeight = 200;
+  const maxHeight = 900;
+  const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, contentHeight + 10)); // +10 for padding
+  
+  // Set the new height with smooth transition
+  panel.style.transition = 'height 0.3s ease';
+  panel.style.height = constrainedHeight + 'px';
+  
+  // Reset transition after animation completes
+  setTimeout(() => {
+    panel.style.transition = '';
+  }, 300);
+  
+  console.log(`[Board Advisor] Auto-fitted height: ${constrainedHeight}px (content: ${contentHeight}px)`);
+}
+
+// Auto-fit panel height when content changes significantly
+function scheduleAutoFit() {
+  // Debounce auto-fit to avoid excessive calls
+  if (window.autoFitTimeout) {
+    clearTimeout(window.autoFitTimeout);
+  }
+  
+  window.autoFitTimeout = setTimeout(() => {
+    if (panelState.isOpen) {
+      autoFitPanelHeight();
+    }
+  }, 150);
+}
+
+// Hunt Analyzer-style resizing and dragging functionality
+function addResizeAndDragFunctionality(panel, header) {
+  // --- NATIVE-LIKE RESIZABLE PANEL LOGIC ---
+  const edgeSize = 8; // px, area near edge/corner to trigger resize
+  let isResizing = false;
+  let resizeDir = '';
+  let resizeStartX = 0;
+  let resizeStartY = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  // Helper to get which edge/corner is hovered
+  function getResizeDirection(e, panel) {
+    const rect = panel.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    let dir = '';
+    
+    if (y < edgeSize) dir += 'n';
+    else if (y > rect.height - edgeSize) dir += 's';
+    if (x < edgeSize) dir += 'w';
+    else if (x > rect.width - edgeSize) dir += 'e';
+    
+    return dir;
+  }
+
+  // Change cursor on hover
+  panel.addEventListener('mousemove', function(e) {
+    if (isResizing) return;
+    const dir = getResizeDirection(e, panel);
+    let cursor = '';
+    switch (dir) {
+      case 'n': cursor = 'ns-resize'; break;
+      case 's': cursor = 'ns-resize'; break;
+      case 'e': cursor = 'ew-resize'; break;
+      case 'w': cursor = 'ew-resize'; break;
+      case 'ne': cursor = 'nesw-resize'; break;
+      case 'nw': cursor = 'nwse-resize'; break;
+      case 'se': cursor = 'nwse-resize'; break;
+      case 'sw': cursor = 'nesw-resize'; break;
+      default: cursor = '';
+    }
+    panel.style.cursor = cursor || '';
+  });
+
+  // Start resizing on mousedown near edge/corner
+  panel.addEventListener('mousedown', function(e) {
+    if (e.target.tagName === 'BUTTON' || e.target.closest('[style*="cursor: move"]')) return;
+    const dir = getResizeDirection(e, panel);
+    if (!dir) return;
+    isResizing = true;
+    resizeDir = dir;
+    resizeStartX = e.clientX;
+    resizeStartY = e.clientY;
+    const rect = panel.getBoundingClientRect();
+    startWidth = rect.width;
+    startHeight = rect.height;
+    startLeft = rect.left;
+    startTop = rect.top;
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    let dx = e.clientX - resizeStartX;
+    let dy = e.clientY - resizeStartY;
+    let newWidth = startWidth;
+    let newHeight = startHeight;
+    let newLeft = startLeft;
+    let newTop = startTop;
+    
+    // Minimum and maximum sizes
+    const minWidth = 300;
+    const maxWidth = 1000;
+    const minHeight = 200;
+    const maxHeight = 900;
+    
+    if (resizeDir.includes('e')) {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + dx));
+    }
+    if (resizeDir.includes('w')) {
+      newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth - dx));
+      newLeft = startLeft + dx;
+    }
+    if (resizeDir.includes('s')) {
+      newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + dy));
+    }
+    if (resizeDir.includes('n')) {
+      newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight - dy));
+      newTop = startTop + dy;
+    }
+    
+    panel.style.width = newWidth + 'px';
+    panel.style.height = newHeight + 'px';
+    panel.style.left = newLeft + 'px';
+    panel.style.top = newTop + 'px';
+    panel.style.transition = 'none';
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.userSelect = '';
+      panel.style.transition = '';
+    }
+  });
+
+  // --- DRAGGABLE PANEL LOGIC ---
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+
+  const titleRow = header.querySelector('[style*="cursor: move"]');
+  if (titleRow) {
+    titleRow.addEventListener('mousedown', function(e) {
+      if (e.target.tagName === 'BUTTON') return;
+      isDragging = true;
+      const rect = panel.getBoundingClientRect();
+      dragOffsetX = e.clientX - rect.left;
+      dragOffsetY = e.clientY - rect.top;
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    let newLeft = e.clientX - dragOffsetX;
+    let newTop = e.clientY - dragOffsetY;
+    // Clamp to viewport
+    newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, newLeft));
+    newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, newTop));
+    panel.style.left = newLeft + 'px';
+    panel.style.top = newTop + 'px';
+    panel.style.transition = 'none';
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (isDragging) {
+      isDragging = false;
+      document.body.style.userSelect = '';
+      panel.style.transition = '';
+    }
+  });
+}
+
 function createUI() {
   // Create clickable icon in bottom left corner
   createClickableIcon();
@@ -6170,6 +6449,11 @@ async function openPanel() {
   console.log('[Board Advisor] Force-updating all data sources on panel open...');
   await forceUpdateAllData();
 
+  // Auto-fit height after 200ms to accommodate content
+  setTimeout(() => {
+    autoFitPanelHeight();
+  }, 200);
+
   // Trigger automatic analysis when panel opens
   if (config.autoAnalyzeOnPanelOpen) {
     setTimeout(() => {
@@ -6233,13 +6517,14 @@ function createPanel() {
     height: ${panelState.size.height}px;
     background: #282C34;
     border: 1px solid #3A404A;
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    border-radius: 7px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.7);
     z-index: 10001;
     display: flex;
     flex-direction: column;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    font-family: Inter, sans-serif;
     color: #ABB2BF;
+    padding: 0;
     overflow: hidden;
   `;
   
@@ -6255,11 +6540,8 @@ function createPanel() {
   const footer = createPanelFooter();
   panel.appendChild(footer);
   
-  // Make draggable
-  makeDraggable(panel, header);
-  
-  // Make resizable
-  makeResizable(panel);
+  // Add Hunt Analyzer-style resizing and dragging functionality
+  addResizeAndDragFunctionality(panel, header);
   
   document.body.appendChild(panel);
   
@@ -6268,60 +6550,63 @@ function createPanel() {
 }
 
 function createPanelHeader() {
-  const header = document.createElement('div');
-  header.style.cssText = `
+  // Top Header Container
+  const topHeaderContainer = document.createElement("div");
+  topHeaderContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    background-image: url(/_next/static/media/background-dark.95edca67.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    border-bottom: 1px solid #3A404A;
+    padding: 4px;
+    flex: 0 0 auto;
+  `;
+
+  // Title and Controls Row
+  const titleAndControlsRow = document.createElement("div");
+  titleAndControlsRow.style.cssText = `
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+    width: 100%;
+    margin-bottom: 2px;
     cursor: move;
-    user-select: none;
-    flex-shrink: 0;
   `;
-  
-  const title = document.createElement('h3');
-  title.textContent = '🤖 Board Advisor';
-  title.style.cssText = `
+
+  // Title Display
+  const titleDisplay = document.createElement("h3");
+  titleDisplay.textContent = "🤖 Board Advisor";
+  titleDisplay.style.cssText = `
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 14px;
+    color: #E06C75;
+    font-weight: bold;
+    text-shadow: 0 0 5px rgba(224, 108, 117, 0.7);
   `;
-  
-  const controls = document.createElement('div');
-  controls.style.cssText = `
+
+  // Header Controls
+  const headerControls = document.createElement("div");
+  headerControls.style.cssText = `
     display: flex;
-    gap: 8px;
+    gap: 5px;
   `;
-  
-  // Close button
-  const closeBtn = document.createElement('button');
-  closeBtn.textContent = '×';
-  closeBtn.style.cssText = `
-    width: 24px;
-    height: 24px;
-    border: none;
-    background: rgba(255,255,255,0.2);
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  `;
-  closeBtn.addEventListener('click', (e) => {
+
+  // Close Button
+  const closeButton = createStyledIconButton("✕");
+  closeButton.title = "Close Board Advisor";
+  closeButton.addEventListener("click", (e) => {
     e.stopPropagation();
     closePanel();
   });
-  
-  controls.appendChild(closeBtn);
-  
-  header.appendChild(title);
-  header.appendChild(controls);
-  
-  return header;
+
+  headerControls.appendChild(closeButton);
+  titleAndControlsRow.appendChild(titleDisplay);
+  titleAndControlsRow.appendChild(headerControls);
+  topHeaderContainer.appendChild(titleAndControlsRow);
+
+  return topHeaderContainer;
 }
 
 function createPanelContent() {
@@ -6329,9 +6614,13 @@ function createPanelContent() {
   content.id = 'advisor-content';
   content.style.cssText = `
     flex: 1;
-    padding: 16px;
+    padding: 8px;
     overflow-y: auto;
-    background: #282C34;
+    background-image: url(/_next/static/media/background-regular.b0337118.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    width: 100%;
+    box-sizing: border-box;
   `;
   
   // Focus areas section
@@ -6354,11 +6643,14 @@ function createPanelContent() {
 function createAnalysisSection() {
   const section = document.createElement('div');
   section.style.cssText = `
-    margin-bottom: 12px;
-    padding: 8px 10px;
-    background: #3A404A;
+    margin-bottom: 8px;
+    padding: 4px;
+    background-image: url(/_next/static/media/background-dark.95edca67.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    border: 1px solid #3A404A;
     border-radius: 4px;
-    border-left: 3px solid #98C379;
+    flex: 1 1 auto;
   `;
   
   const title = document.createElement('h4');
@@ -6408,11 +6700,14 @@ function createAnalysisSection() {
 function createFocusAreasSection() {
   const section = document.createElement('div');
   section.style.cssText = `
-    margin-bottom: 12px;
-    padding: 8px 10px;
-    background: #3A404A;
+    margin-bottom: 8px;
+    padding: 4px;
+    background-image: url(/_next/static/media/background-dark.95edca67.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    border: 1px solid #3A404A;
     border-radius: 4px;
-    border-left: 3px solid #FF9800;
+    flex: 0 0 auto;
   `;
   
   const title = document.createElement('h4');
@@ -6544,11 +6839,6 @@ function createFocusAreasSection() {
     if (panelState.isOpen) {
       if (analysisState.currentAnalysis) {
         await updatePanelWithAnalysis(analysisState.currentAnalysis);
-      } else {
-        const currentBoard = dataCollector.getCurrentBoardData();
-        if (currentBoard) {
-          await updatePanelWithBasicAnalysis(currentBoard);
-        }
       }
       // Update recommendation sections based on focus area
       
@@ -6578,10 +6868,6 @@ function createFocusAreasSection() {
       if (analysisState.currentAnalysis) {
         updatePanelWithAnalysis(analysisState.currentAnalysis);
       } else {
-        const currentBoard = dataCollector.getCurrentBoardData();
-        if (currentBoard) {
-          updatePanelWithBasicAnalysis(currentBoard);
-        }
       }
       // Update recommendation sections based on focus area
       
@@ -6609,10 +6895,6 @@ function createFocusAreasSection() {
       if (analysisState.currentAnalysis) {
         updatePanelWithAnalysis(analysisState.currentAnalysis);
       } else {
-        const currentBoard = dataCollector.getCurrentBoardData();
-        if (currentBoard) {
-          updatePanelWithBasicAnalysis(currentBoard);
-        }
       }
       // Update recommendation sections based on focus area
       
@@ -6644,11 +6926,14 @@ function createRecommendationsSection() {
   const section = document.createElement('div');
   section.id = 'recommendations-section';
   section.style.cssText = `
-    margin-bottom: 12px;
-    padding: 8px 10px;
-    background: #3A404A;
+    margin-bottom: 8px;
+    padding: 4px;
+    background-image: url(/_next/static/media/background-dark.95edca67.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    border: 1px solid #3A404A;
     border-radius: 4px;
-    border-left: 3px solid #E5C07B;
+    flex: 0 0 auto;
   `;
   
   const title = document.createElement('h4');
@@ -6684,14 +6969,26 @@ function setRecommendationsSectionVisibility(visible) {
 function createPanelFooter() {
   const footer = document.createElement('div');
   footer.style.cssText = `
-    padding: 8px 16px;
-    background: #3A404A;
-    border-top: 1px solid #4B5563;
+    padding: 4px;
+    background-image: url(/_next/static/media/background-dark.95edca67.png);
+    background-repeat: repeat;
+    background-color: #323234;
+    border-top: 1px solid #3A404A;
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
-    flex-shrink: 0;
+    flex: 0 0 auto;
   `;
+  
+  // Add CSS animation for spinning icon
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
   
   // Auto-refresh status indicator
   const statusIndicator = document.createElement('div');
@@ -6704,12 +7001,20 @@ function createPanelFooter() {
     gap: 6px;
   `;
   
-  // Update status based on config
+  // Update status based on config and loading states
   const updateStatus = () => {
-    if (config.autoRefreshPanel && config.autoAnalyze) {
+    // Check if any loading is in progress
+    const isLoading = analysisState.isDataLoading || analysisState.isUILoading || analysisState.isAnalyzing;
+    
+    if (isLoading) {
+      statusIndicator.innerHTML = `
+        <span style="animation: spin 1s linear infinite;">⟳</span>
+        <span>Auto-refreshing...</span>
+      `;
+    } else if (config.autoRefreshPanel && config.autoAnalyze) {
       statusIndicator.innerHTML = `
         <span>🔄</span>
-        <span>Auto-refresh & analysis active</span>
+        <span>Auto-refreshed & analysis active</span>
       `;
     } else if (config.autoRefreshPanel) {
       statusIndicator.innerHTML = `
@@ -6733,28 +7038,8 @@ function createPanelFooter() {
   footer.appendChild(statusIndicator);
   
   // Settings button
-  const settingsButton = document.createElement('button');
-  settingsButton.innerHTML = '⚙️';
+  const settingsButton = createStyledIconButton('⚙️');
   settingsButton.title = 'Open Settings';
-  settingsButton.style.cssText = `
-    background: #4B5563;
-    border: 1px solid #6B7280;
-    color: #E5E7EB;
-    padding: 4px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    margin-left: 8px;
-    transition: background-color 0.2s;
-  `;
-  
-  // Hover effects
-  settingsButton.addEventListener('mouseenter', () => {
-    settingsButton.style.background = '#6B7280';
-  });
-  settingsButton.addEventListener('mouseleave', () => {
-    settingsButton.style.background = '#4B5563';
-  });
   
   // Click handler to open settings
   settingsButton.addEventListener('click', () => {
@@ -6769,6 +7054,9 @@ function createPanelFooter() {
     originalSaveConfig.apply(this, arguments);
     updateStatus();
   };
+  
+  // Store updateStatus function globally so it can be called from other parts of the code
+  window.updateFooterStatus = updateStatus;
   
   return footer;
 }
@@ -7313,8 +7601,7 @@ function reloadUI() {
   // Reset panel content to show clean state
   const panel = document.getElementById(PANEL_ID);
   if (panel) {
-    // Update the analysis display to show no data
-    updatePanelStatus('Database cleared. Start playing to build new analysis data.', 'info');
+    // Database cleared - footer will show status
     
     // Clear recommendations section
     const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -7535,7 +7822,7 @@ function loadPanelData() {
   // Load recommendations
   if (analysisState.currentAnalysis?.recommendations?.length > 0) {
     const recs = analysisState.currentAnalysis.recommendations.map(rec => 
-      `<div style="margin: 4px 0; padding: 4px; background: #4B5563; border-radius: 4px;">
+      `<div style="margin: 4px 0; padding: 4px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px;">
         <strong>${rec.type}:</strong> ${rec.description}
         <div style="font-size: 10px; color: #ABB2BF;">Impact: ${rec.impact}</div>
       </div>`
@@ -7745,7 +8032,6 @@ function debouncedAnalyzeCurrentBoard() {
 
 async function analyzeCurrentBoard() {
   if (!config.enabled) {
-    updatePanelStatus('Board Advisor is disabled. Enable it in the config panel.', 'error');
     analysisState.isAnalyzing = false;
     return Promise.resolve(null);
   }
@@ -7785,8 +8071,7 @@ async function analyzeCurrentBoard() {
 
   lastAnalysisTime = Date.now();
   
-  // Update panel with loading state
-  updatePanelStatus('Analyzing board setup automatically...', 'loading');
+  // Analysis starting - footer will show loading state
   
   // Run analysis and return the promise
   return boardAnalyzer.analyzeCurrentBoard().then(async (analysis) => {
@@ -7794,13 +8079,7 @@ async function analyzeCurrentBoard() {
     
     if (!analysis) {
       console.log('[Board Advisor] No analysis result, showing basic analysis');
-      // Show basic analysis even without historical data
-      const currentBoard = dataCollector.getCurrentBoardData();
-      if (currentBoard) {
-        await updatePanelWithBasicAnalysis(currentBoard);
-      } else {
-        updatePanelStatus('Analysis failed. Make sure you have a board setup and some historical data.', 'error');
-      }
+      // Analysis failed - footer will show status
       return null;
     }
 
@@ -7813,74 +8092,19 @@ async function analyzeCurrentBoard() {
       await updatePanelWithAnalysis(analysis);
     }
     
+    // Update footer status after UI has been updated
+    if (window.updateFooterStatus) {
+      window.updateFooterStatus();
+    }
+    
     return analysis;
   }).catch(error => {
     console.error('[Board Advisor] Analysis error:', error);
-    updatePanelStatus('Analysis failed: ' + error.message, 'error');
+    // Analysis failed - footer will show status
     return null;
   });
 }
 
-function updatePanelStatus(message, type = 'info') {
-  const analysisDisplay = document.getElementById('analysis-display');
-  if (!analysisDisplay) return;
-  
-  // Get current map information if available
-  let mapInfo = '';
-  try {
-    const currentBoard = dataCollector.getCurrentBoardData();
-    if (currentBoard && currentBoard.roomId) {
-      const roomName = globalThis.state?.utils?.ROOM_NAME?.[currentBoard.roomId] || currentBoard.roomId;
-      mapInfo = ` (${roomName})`;
-    }
-  } catch (e) {
-    // Ignore errors getting current board data
-  }
-  
-  const color = type === 'error' ? '#E06C75' : type === 'loading' ? '#FF9800' : '#61AFEF';
-  
-  // For temporary status messages, add them as overlays instead of replacing content
-  if (type === 'loading' || type === 'error') {
-    // Create a temporary status overlay
-    const statusOverlay = document.createElement('div');
-    statusOverlay.id = 'temp-status-overlay';
-    statusOverlay.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      background: rgba(40, 44, 52, 0.95);
-      color: ${color};
-      padding: 8px 12px;
-      font-size: 13px;
-      z-index: 1000;
-      border-bottom: 1px solid #4B5563;
-    `;
-    statusOverlay.innerHTML = `${message}${mapInfo}`;
-    
-    // Remove any existing overlay
-    const existingOverlay = document.getElementById('temp-status-overlay');
-    if (existingOverlay) {
-      existingOverlay.remove();
-    }
-    
-    // Add the new overlay
-    analysisDisplay.style.position = 'relative';
-    analysisDisplay.appendChild(statusOverlay);
-    
-    // Auto-remove loading messages after a short delay
-    if (type === 'loading') {
-      setTimeout(() => {
-        if (statusOverlay.parentNode) {
-          statusOverlay.remove();
-        }
-      }, 2000);
-    }
-  } else {
-    // For info messages, still replace content but preserve footer
-    analysisDisplay.innerHTML = `<div style="color: ${color};">${message}${mapInfo}</div>`;
-  }
-}
 
 function clearRecommendationsInstantly() {
   const recommendationsDisplay = document.getElementById('recommendations-display');
@@ -7894,11 +8118,7 @@ function clearRecommendationsInstantly() {
   placedRecommendedPieces.clear();
   
   if (recommendationsDisplay) {
-    recommendationsDisplay.innerHTML = `
-      <div style="text-align: center; color: #777; font-style: italic; padding: 20px;">
-        Loading recommendations for new map...
-      </div>
-    `;
+    recommendationsDisplay.innerHTML = '';
   }
   
   if (analysisDisplay) {
@@ -7915,112 +8135,6 @@ function clearRecommendationsInstantly() {
   }
 }
 
-async function updatePanelWithBasicAnalysis(currentBoard) {
-  const analysisDisplay = document.getElementById('analysis-display');
-  const recommendationsDisplay = document.getElementById('recommendations-display');
-  
-  if (!analysisDisplay || !recommendationsDisplay) return;
-  
-  // Get room name for display
-  const roomName = globalThis.state?.utils?.ROOM_NAME?.[currentBoard.roomId] || currentBoard.roomId;
-  
-  // Check if board is empty
-  const isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
-  
-  // Check if we have historical data for this room
-  const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
-  const hasHistoricalData = roomRuns.length > 0;
-  
-  // Update analysis section with comprehensive basic info
-  analysisDisplay.innerHTML = `
-    <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
-      <div style="font-weight: 600; color: #98C379; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-        <span>🗺️</span>
-        <span>Current Map: ${roomName}</span>
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        Pieces: ${currentBoard.boardSetup.length} | Monsters: ${currentBoard.playerMonsters.length} | Equipment: ${currentBoard.playerEquipment.length}
-      </div>
-    </div>
-    
-    ${hasHistoricalData ? `
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
-      <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>📊</span>
-        <span>Historical Data Available</span>
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        Found ${roomRuns.length} runs for this map. Analysis and recommendations are being processed.
-      </div>
-    </div>
-    ` : `
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
-      <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>⚠️</span>
-        <span>No Historical Data</span>
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        Play some games to build data for analysis and personalized recommendations.
-      </div>
-    </div>
-    `}
-    
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #61AFEF;">
-      <div style="font-weight: 600; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>🎯</span>
-        <span>Analysis Status</span>
-      </div>
-      <div style="font-size: 11px; color: #ABB2BF;">
-        <div>• Data Collection: <span style="color: #98C379;">Active</span></div>
-        <div>• Pattern Learning: <span style="color: #98C379;">Enabled</span></div>
-        <div>• Leaderboard Integration: <span style="color: #98C379;">Ready</span></div>
-        <div>• Recommendations: <span style="color: #FF9800;">Pending Data</span></div>
-      </div>
-    </div>
-  `;
-  
-  // Update recommendations section with comprehensive tips
-  recommendationsDisplay.innerHTML = `
-    <div style="margin-bottom: 12px;">
-      <div style="font-weight: 600; color: #2196F3; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>🚀</span>
-        <span>Getting Started</span>
-      </div>
-      
-      <div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #2196F3;">
-        <div style="font-weight: 600; color: #2196F3; font-size: 11px;">Play Some Games</div>
-        <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Complete 3-5 games with this setup to start building data for analysis</div>
-      </div>
-      
-      <div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #4CAF50;">
-        <div style="font-weight: 600; color: #4CAF50; font-size: 11px;">Try Different Setups</div>
-        <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Experiment with different monster and equipment combinations for better data</div>
-      </div>
-    </div>
-    
-    <div style="margin-bottom: 12px;">
-      <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>💡</span>
-        <span>Advanced Features Coming Soon</span>
-      </div>
-      
-      <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Performance Predictions</div>
-        <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Will predict your expected time and success rate</div>
-      </div>
-      
-      <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Optimization Tips</div>
-        <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Personalized recommendations for monster positioning and equipment</div>
-      </div>
-      
-      <div style="margin: 6px 0; padding: 8px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E5C07B;">
-        <div style="font-weight: 600; color: #E5C07B; font-size: 11px;">Leaderboard Analysis</div>
-        <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">Compare your performance against world records and rankings</div>
-      </div>
-    </div>
-  `;
-}
 
 async function updatePanelWithAnalysis(analysis) {
   console.log('[Board Advisor] updatePanelWithAnalysis called with:', analysis);
@@ -8062,7 +8176,7 @@ async function updatePanelWithAnalysis(analysis) {
   const patternsText = similarSetupsCount === 1 ? 'setup' : 'setups';
   
   let analysisHTML = `
-    <div style="margin-bottom: 8px; padding: 8px 10px; background: #1F2937; border-radius: 4px; border-left: 3px solid #98C379;">
+    <div style="margin-bottom: 8px; padding: 8px 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #98C379; border-radius: 4px;">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <span style="font-weight: 600; color: #98C379; font-size: 13px;">🗺️ ${roomName}</span>
         <span style="font-size: 11px; color: #61AFEF; font-weight: 500;">${similarSetupsCount} ${patternsText}</span>
@@ -8099,7 +8213,7 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     analysisHTML += `
-      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3B82F6; border-radius: 4px;">
         <div style="font-weight: 600; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>🎯</span>
           <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8148,7 +8262,7 @@ async function updatePanelWithAnalysis(analysis) {
       }
       
       analysisHTML += `
-        <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #3B82F6;">
+        <div style="margin-bottom: 8px; padding: 6px 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3B82F6; border-radius: 4px;">
           <div style="font-weight: 600; color: #3B82F6; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; font-size: 12px;">
             <span>🏆</span>
             <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8166,7 +8280,7 @@ async function updatePanelWithAnalysis(analysis) {
     const roomName = currentBoard ? (globalThis.state?.utils?.ROOM_NAME?.[currentBoard.roomId] || currentBoard.roomId) : 'Unknown';
     
     analysisHTML += `
-      <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #E5C07B;">
+      <div style="margin-bottom: 8px; padding: 6px 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
         <div style="font-weight: 600; color: #E5C07B; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; font-size: 12px;">
           <span>🏆</span>
           <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8231,7 +8345,7 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     analysisHTML += `
-      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
         <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>📊</span>
           <span>Historical Performance (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8242,7 +8356,7 @@ async function updatePanelWithAnalysis(analysis) {
   } else {
     // Only show empty board message if there's no historical data at all
     analysisHTML += `
-      <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
         <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>⚠️</span>
           <span>No Historical Data</span>
@@ -8304,7 +8418,7 @@ async function updatePanelWithAnalysis(analysis) {
       recsHTML += '<span>🏆</span><span>Leaderboard Insights</span></div>';
       
       groupedRecs.leaderboard.forEach(rec => {
-        recsHTML += `<div style="margin: 6px 0; padding: 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #3B82F6;">
+        recsHTML += `<div style="margin: 6px 0; padding: 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3B82F6; border-radius: 4px;">
           <div style="font-weight: 600; color: #3B82F6; font-size: 11px;">${rec.title}</div>
           <div style="font-size: 10px; margin-top: 4px; color: #ABB2BF;">${rec.description || rec.message}</div>
           ${rec.suggestion ? `<div style="font-size: 9px; color: #98C379; margin-top: 3px; font-style: italic;">💡 ${rec.suggestion}</div>` : ''}
@@ -8323,7 +8437,7 @@ async function updatePanelWithAnalysis(analysis) {
       if (groupedRecs.improvement.length > 0) {
       groupedRecs.improvement.forEach(rec => {
           if (rec.title.includes('Best Available Setup') && rec.setup) {
-            recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #E06C75;">
+            recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E06C75; border-radius: 4px;">
           <div style="font-weight: 600; color: #E06C75; font-size: 11px;">${rec.title}</div>
               <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message || 'Use this setup to achieve better performance'}</div>
               <div style="font-size: 9px; color: #98C379; margin-top: 2px;">💡 ${rec.setup.map(piece => {
@@ -8457,7 +8571,7 @@ async function updatePanelWithAnalysis(analysis) {
       }
       
       if (equipmentSuggestions.length > 0 || creatureSuggestions.length > 0) {
-        recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #61AFEF;">
+        recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px; border: 1px solid #61AFEF;">
           <div style="font-weight: 600; color: #61AFEF; font-size: 11px;">⚔️ Popular Choices</div>
           ${equipmentSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Equipment: ${equipmentSuggestions.join(', ')}</div>` : ''}
           ${creatureSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Creatures: ${creatureSuggestions.join(', ')}</div>` : ''}
@@ -8468,7 +8582,7 @@ async function updatePanelWithAnalysis(analysis) {
       const otherRecs = [...groupedRecs.improvement.filter(r => !r.title.includes('Best Available Setup')), ...groupedRecs.other];
       if (otherRecs.length > 0) {
         otherRecs.forEach(rec => {
-          recsHTML += `<div style="margin: 3px 0; padding: 6px; background: #4B5563; border-radius: 4px; border-left: 3px solid #98C379;">
+          recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px; border: 1px solid #98C379;">
             <div style="font-weight: 600; color: #98C379; font-size: 11px;">${rec.title}</div>
             <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message}</div>
             ${rec.suggestion ? `<div style="font-size: 9px; color: #61AFEF; margin-top: 2px;">💡 ${rec.suggestion}</div>` : ''}
@@ -8490,7 +8604,7 @@ async function updatePanelWithAnalysis(analysis) {
     }
   } else {
     recommendationsDisplay.innerHTML = `
-      <div style="padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+      <div style="padding: 12px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
         <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
           <span>⚠️</span>
           <span>No Tips Available</span>
@@ -8501,6 +8615,9 @@ async function updatePanelWithAnalysis(analysis) {
       </div>
     `;
   }
+  
+  // Schedule auto-fit after content update
+  scheduleAutoFit();
 }
 
 async function updatePanelWithNoDataAnalysis(analysis) {
@@ -8516,7 +8633,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   
   // Update analysis section with no-data information (consistent with data UI)
   let analysisHTML = `
-    <div style="margin-bottom: 12px; padding: 8px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
+    <div style="margin-bottom: 12px; padding: 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #98C379; border-radius: 4px;">
       <div style="font-weight: 600; color: #98C379; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
         <span>🗺️</span>
         <span>Current Map: ${roomName}</span>
@@ -8529,7 +8646,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   
   // Add no-data information (consistent with data UI structure)
   analysisHTML += `
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #FF9800;">
+    <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
       <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>⚠️</span>
         <span>No Historical Data</span>
@@ -8539,7 +8656,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       </div>
     </div>
     
-    <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #61AFEF;">
+    <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #61AFEF; border-radius: 4px;">
       <div style="font-weight: 600; color: #61AFEF; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
         <span>🎯</span>
         <span>Analysis Status</span>
@@ -8583,7 +8700,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       }
       
       analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #3B82F6;">
+        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3B82F6; border-radius: 4px;">
           <div style="font-weight: 600; color: #3B82F6; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>🎯</span>
             <span>Performance Prediction (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8632,7 +8749,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       }
       
       analysisHTML += `
-        <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #3B82F6;">
+        <div style="margin-bottom: 8px; padding: 6px 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3B82F6; border-radius: 4px;">
           <div style="font-weight: 600; color: #3B82F6; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; font-size: 12px;">
             <span>🏆</span>
             <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8645,7 +8762,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     } else {
       // Fallback for no board data
       analysisHTML += `
-        <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #E5C07B;">
+        <div style="margin-bottom: 8px; padding: 6px 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
           <div style="font-weight: 600; color: #E5C07B; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; font-size: 12px;">
             <span>🏆</span>
             <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8660,7 +8777,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     console.warn('[Board Advisor] Error fetching leaderboard data in basic analysis:', error);
     // Fallback to basic room info
     analysisHTML += `
-      <div style="margin-bottom: 8px; padding: 6px 8px; background: #1F2937; border-radius: 4px; border-left: 3px solid #E5C07B;">
+      <div style="margin-bottom: 8px; padding: 6px 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
         <div style="font-weight: 600; color: #E5C07B; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; font-size: 12px;">
           <span>🏆</span>
           <span>Leaderboard Comparison (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
@@ -8681,7 +8798,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     if (roomRuns.length > 0) {
       // Show data available message instead of no data warning
       analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #98C379;">
+        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #98C379; border-radius: 4px;">
           <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>📊</span>
             <span>Historical Data Available</span>
@@ -8694,7 +8811,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     } else if (isBoardEmpty) {
       // Show empty board message
       analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
           <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>🎯</span>
             <span>Empty Board</span>
@@ -8707,7 +8824,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     } else {
       // Show no data warning only when there's actually no data
       analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background: #1F2937; border-radius: 6px; border-left: 4px solid #E5C07B;">
+        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
           <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
             <span>⚠️</span>
             <span>No Historical Data</span>
@@ -8734,7 +8851,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       // Special handling for setup recommendations and improvement recommendations with setup
       if ((rec.type === 'setup' && rec.setup) || (rec.type === 'improvement' && rec.setup)) {
         recsHTML += `
-          <div style="margin: 8px 0; padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid ${priorityColor};">
+          <div style="margin: 8px 0; padding: 12px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid ${priorityColor}; border-radius: 4px;">
             <div style="font-weight: 600; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
               ${rec.title}
             </div>
@@ -8742,7 +8859,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
               ${rec.description || rec.message || 'Recommended setup from your best performing run'}
             </div>
             ${rec.bestRun ? `
-              <div style="margin: 8px 0; padding: 8px; background: #2D3748; border-radius: 4px;">
+              <div style="margin: 8px 0; padding: 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 10px;">
                   <div><strong style="color: #98C379;">Best Time:</strong> <span style="color: #ffd700;">${rec.bestRun.ticks} ticks</span></div>
                   <div><strong style="color: #98C379;">Room:</strong> <span style="color: #61AFEF;">${rec.bestRun.roomId}</span></div>
@@ -8751,7 +8868,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
                 </div>
               </div>
             ` : rec.setup.bestTime ? `
-              <div style="margin: 8px 0; padding: 8px; background: #2D3748; border-radius: 4px;">
+              <div style="margin: 8px 0; padding: 8px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 10px;">
                   <div><strong style="color: #98C379;">Best Time:</strong> <span style="color: #ffd700;">${rec.setup.bestTime} ticks</span></div>
                   <div><strong style="color: #98C379;">Average Time:</strong> <span style="color: #61AFEF;">${rec.setup.averageTime} ticks</span></div>
@@ -8761,7 +8878,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
               </div>
             ` : ''}
             ${rec.setup && Array.isArray(rec.setup) ? `
-              <div style="margin: 8px 0; padding: 6px; background: #2D3748; border-radius: 4px;">
+              <div style="margin: 8px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px;">
                 <div style="font-size: 11px; color: #61AFEF; margin-bottom: 4px; font-weight: 600;">📋 Recommended Setup:</div>
                 <div style="font-size: 10px; color: #ABB2BF; line-height: 1.3; margin-bottom: 6px;">
                   ${rec.setup.map((piece, index) => {
@@ -8783,7 +8900,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
                       ? `Tile ${tile}: ${monster} ${statsDisplay}${equipment ? ` + ${equipment}${stat ? ` (${stat})` : ''}` : ''}`
                       : `Tile ${tile}: ${equipment}${stat ? ` (${stat})` : ''}`;
                     
-                    return `<div style="margin: 2px 0; padding: 2px 4px; background: #1F2937; border-radius: 2px; display: inline-block; margin-right: 4px;">
+                    return `<div style="margin: 2px 0; padding: 2px 4px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 2px; display: inline-block; margin-right: 4px;">
                       ${displayText}
                     </div>`;
                   }).join('')}
@@ -8795,7 +8912,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
       } else {
         // Standard recommendation display
         recsHTML += `
-          <div style="margin: 8px 0; padding: 12px; background: #1F2937; border-radius: 6px; border-left: 4px solid ${priorityColor};">
+          <div style="margin: 8px 0; padding: 12px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid ${priorityColor}; border-radius: 4px;">
             <div style="font-weight: 600; color: ${priorityColor}; font-size: 12px; margin-bottom: 6px;">
               ${rec.title}
             </div>
@@ -8822,7 +8939,8 @@ async function updatePanelWithNoDataAnalysis(analysis) {
     recommendationsDisplay.innerHTML = '<div style="color: #E06C75;">Error displaying recommendations</div>';
   }
   
-  
+  // Schedule auto-fit after content update
+  scheduleAutoFit();
 }
 
 
@@ -8951,12 +9069,6 @@ async function refreshPanelData() {
   // If we have current analysis, refresh it
   if (analysisState.currentAnalysis) {
     await updatePanelWithAnalysis(analysisState.currentAnalysis);
-  } else {
-    // Try to get fresh analysis if panel is open
-    const currentBoard = dataCollector.getCurrentBoardData();
-    if (currentBoard && currentBoard.boardSetup.length > 0) {
-      await updatePanelWithBasicAnalysis(currentBoard);
-    }
   }
   
   console.log('[Board Advisor] Panel data refreshed automatically');

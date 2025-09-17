@@ -457,6 +457,39 @@ function getCurrentBoardSetup() {
           };
         }
         
+        // FIXED: Get actual monster stats and level from player inventory
+        if (piece.databaseId) {
+          try {
+            const playerSnapshot = globalThis.state.player.getSnapshot();
+            if (playerSnapshot && playerSnapshot.context && playerSnapshot.context.monsters) {
+              const monster = playerSnapshot.context.monsters.find(m => m.id === piece.databaseId);
+              if (monster) {
+                // Get actual level from experience
+                const actualLevel = globalThis.state.utils.expToCurrentLevel(monster.exp);
+                boardPiece.level = actualLevel;
+                
+                // Get actual stats from monster data
+                boardPiece.monsterStats = {
+                  hp: monster.hp,
+                  ad: monster.ad,
+                  ap: monster.ap,
+                  armor: monster.armor,
+                  magicResist: monster.magicResist
+                };
+                
+                // Get genes if available
+                if (monster.genes) {
+                  boardPiece.genes = monster.genes;
+                }
+                
+                console.log(`[RunTracker] Got actual stats for ${boardPiece.monsterName}: Level ${actualLevel}, HP ${monster.hp}, AD ${monster.ad}, AP ${monster.ap}, Armor ${monster.armor}, MR ${monster.magicResist}`);
+              }
+            }
+          } catch (error) {
+            console.warn('[RunTracker] Error getting actual monster stats:', error);
+          }
+        }
+        
         // Get equipment information - try multiple possible locations
         if (piece.equip) {
           boardPiece.equipId = piece.equip.gameId;

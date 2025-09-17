@@ -2979,20 +2979,15 @@ function openCyclopediaModal(options) {
 
       // Helper function to navigate to a map by name
       function navigateToMap(mapName) {
-        const regions = globalThis.state?.utils?.REGIONS;
-        
-        if (!regions) return false;
-        
-        // Find the room code that matches this map name using region data
-        for (const region of regions) {
-          if (!region.rooms) continue;
-          
-          for (const room of region.rooms) {
-            const roomName = room.name || room.id;
-            if (roomName === mapName) {
+        // Find the room ID by matching display names (same as Bestiary tab)
+        const roomNames = globalThis.state?.utils?.ROOM_NAME;
+        if (roomNames) {
+          for (const [roomId, displayName] of Object.entries(roomNames)) {
+            if (displayName === mapName) {
+              // Use roomId directly like Bestiary tab does
               globalThis.state.board.send({
                 type: 'selectRoomById',
-                roomId: room.id
+                roomId: roomId
               });
               // Try to close the modal if present
               const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
