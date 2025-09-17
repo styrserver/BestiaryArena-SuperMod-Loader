@@ -8023,6 +8023,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       tile: piece.tile,
                       monster: {
                         name: piece.monsterName || piece.monsterId || 'unknown monster',
+                        level: piece.level || 1,
                         hp: piece.monsterStats?.hp || 20,
                         ad: piece.monsterStats?.ad || 20,
                         ap: piece.monsterStats?.ap || 20,
@@ -8611,6 +8612,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       tile: piece.tile,
                       monster: {
                         name: piece.monsterName || piece.monsterId || 'unknown monster',
+                        level: piece.level || 1,
                         hp: piece.monsterStats?.hp || 20,
                         ad: piece.monsterStats?.ad || 20,
                         ap: piece.monsterStats?.ap || 20,

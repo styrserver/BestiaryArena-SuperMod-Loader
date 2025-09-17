@@ -490,10 +490,6 @@
 						magicResist: monster.magicResist,
 					}
 				};
-				// Only include `level` if it's different from the default of `50`.
-				if (monsterLevel === 50) {
-					delete serialized.monster.level;
-				}
 				
 				// Only try to add equipment if it exists
 				if (equipId && equips && equips.length > 0) {
