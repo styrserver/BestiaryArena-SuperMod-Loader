@@ -1903,7 +1903,7 @@ window.cyclopediaMenuObserver = cyclopediaMenuObserver;
 // =======================
 function createBox({
   title, items, extraBoxStyles = {}, type = 'creature', selectedCreature, selectedEquipment, selectedInventory,
-  setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, clearAllSelections = null
+  setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, clearAllSelections = null, mapIds = null, regionIds = null
 }) {
   if (!Array.isArray(items)) items = [];
   
@@ -1939,6 +1939,28 @@ function createBox({
       } else if (type === 'equipment') {
         isOwned = isEquipmentOwned(name);
         isT5 = isEquipmentT5(name);
+      } else if (type === 'map') {
+        // Check if map is explored using game state
+        const mapIndex = items.indexOf(name);
+        const mapId = mapIds?.[mapIndex];
+        isOwned = mapId ? globalThis.state?.player?.getSnapshot()?.context?.rooms?.[mapId] !== undefined : false;
+      } else if (type === 'region') {
+        // Check if region has any explored maps
+        const regionIndex = items.indexOf(name);
+        const regionId = regionIds?.[regionIndex];
+        if (regionId && globalThis.state?.utils?.REGIONS) {
+          const region = globalThis.state.utils.REGIONS.find(r => r.id === regionId);
+          if (region && region.rooms) {
+            // Check if any map in this region is explored
+            isOwned = region.rooms.some(room => 
+              globalThis.state?.player?.getSnapshot()?.context?.rooms?.[room.id] !== undefined
+            );
+          } else {
+            isOwned = false;
+          }
+        } else {
+          isOwned = false;
+        }
       }
       
       const item = DOMUtils.createListItem(name, LAYOUT_CONSTANTS.FONTS.SIZES.BODY, isOwned, isPerfect, isT5);
@@ -1986,6 +2008,38 @@ function createBox({
                 el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
                 el.style.filter = 'none';
               }
+            } else if (type === 'map') {
+              // Check if map is explored using game state
+              const mapIndex = items.indexOf(itemName);
+              const mapId = mapIds?.[mapIndex];
+              const isOwned = mapId ? globalThis.state?.player?.getSnapshot()?.context?.rooms?.[mapId] !== undefined : false;
+              if (!isOwned) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+                el.style.filter = 'grayscale(0.7)';
+              } else {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                el.style.filter = 'none';
+              }
+            } else if (type === 'region') {
+              // Check if region has any explored maps
+              const regionIndex = items.indexOf(itemName);
+              const regionId = regionIds?.[regionIndex];
+              let isOwned = false;
+              if (regionId && globalThis.state?.utils?.REGIONS) {
+                const region = globalThis.state.utils.REGIONS.find(r => r.id === regionId);
+                if (region && region.rooms) {
+                  isOwned = region.rooms.some(room => 
+                    globalThis.state?.player?.getSnapshot()?.context?.rooms?.[room.id] !== undefined
+                  );
+                }
+              }
+              if (!isOwned) {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.UNOWNED;
+                el.style.filter = 'grayscale(0.7)';
+              } else {
+                el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
+                el.style.filter = 'none';
+              }
             } else {
               el.style.color = LAYOUT_CONSTANTS.COLORS.TEXT;
               el.style.filter = 'none';
@@ -2019,7 +2073,7 @@ function createBox({
             setSelectedEquipment(name);
             setSelectedInventory(null);
             updateRightCol();
-          } else if (type === 'inventory') {
+          } else if (type === 'inventory' || type === 'map' || type === 'region') {
             setSelectedCreature(null);
             setSelectedEquipment(null);
             setSelectedInventory(name);
@@ -2096,7 +2150,7 @@ function createBox({
         item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
       }
       
-      if (type === 'inventory' && selectedInventory && name === selectedInventory) {
+      if ((type === 'inventory' || type === 'map' || type === 'region') && selectedInventory && name === selectedInventory) {
         item.classList.add('cyclopedia-selected');
         item.style.background = 'rgba(255,255,255,0.18)';
         item.style.color = LAYOUT_CONSTANTS.COLORS.PRIMARY;
@@ -9319,7 +9373,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const box = createBox({
             title: 'Maps',
             items: mapsInRegion.map(map => map.name),
-            type: 'inventory',
+            mapIds: mapsInRegion.map(map => map.id),
+            type: 'map',
             selectedCreature: null,
             selectedEquipment: null,
             selectedInventory: selectedMap,
@@ -9376,7 +9431,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const topBox = createBox({
         title: 'Regions',
         items: regions.map(regionId => GAME_DATA.REGION_NAME_MAP[regionId] || regionId),
-        type: 'inventory',
+        regionIds: regions,
+        type: 'region',
         selectedCreature: null,
         selectedEquipment: null,
         selectedInventory: selectedCategory ? (GAME_DATA.REGION_NAME_MAP[selectedCategory] || selectedCategory) : null,
