@@ -8,10 +8,700 @@
 console.log('Board Advisor Mod initializing...');
 
 // =======================
+// INLINE DELETE CONFIRMATION
+// =======================
+
+  function showInlineDeleteConfirmation(deleteBtn, roomId, runId) {
+    // Find the parent recommendation box - try multiple selectors
+    let recommendationBox = deleteBtn.closest('div[style*="background-image"]');
+    if (!recommendationBox) {
+      // Fallback: look for parent with board-advisor styling
+      recommendationBox = deleteBtn.closest('div[style*="background-color: #323234"]');
+    }
+    if (!recommendationBox) {
+      // Last fallback: look for any parent div with padding
+      recommendationBox = deleteBtn.closest('div[style*="padding"]');
+    }
+    if (!recommendationBox) {
+      console.error('[Board Advisor] Could not find recommendation box for inline confirmation');
+      return;
+    }
+    
+    // Store original content
+    const originalContent = recommendationBox.innerHTML;
+    
+    // Create confirmation UI
+    const confirmationHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="font-weight: 600; color: #f44336; font-size: 11px;">⚠️ Delete this run?</div>
+      </div>
+      <div style="font-size: 10px; margin-bottom: 8px; color: #ABB2BF;">This will permanently remove this run from your database.</div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="board-advisor-cancel-delete" style="
+          background: #555; 
+          color: white; 
+          border: none; 
+          padding: 4px 8px; 
+          border-radius: 3px; 
+          font-size: 10px; 
+          cursor: pointer;
+          transition: background 0.2s ease;
+        ">Cancel</button>
+        <button class="board-advisor-confirm-delete" style="
+          background: #f44336; 
+          color: white; 
+          border: none; 
+          padding: 4px 8px; 
+          border-radius: 3px; 
+          font-size: 10px; 
+          cursor: pointer;
+          transition: background 0.2s ease;
+        ">Delete</button>
+      </div>
+    `;
+    
+    // Replace content with confirmation
+    recommendationBox.innerHTML = confirmationHTML;
+    
+    // Add event listeners for confirmation buttons
+    const cancelBtn = recommendationBox.querySelector('.board-advisor-cancel-delete');
+    const confirmBtn = recommendationBox.querySelector('.board-advisor-confirm-delete');
+    
+    // Cancel button - restore original content
+    cancelBtn.addEventListener('click', () => {
+      recommendationBox.innerHTML = originalContent;
+    });
+    
+    // Confirm button - proceed with deletion
+    confirmBtn.addEventListener('click', () => {
+      // Show loading state
+      recommendationBox.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="font-weight: 600; color: #98C379; font-size: 11px;">🔄 Deleting...</div>
+        </div>
+        <div style="font-size: 10px; color: #ABB2BF;">Removing run from database...</div>
+      `;
+      
+      // Set up failsafe timeout to prevent stuck UI
+      const failsafeTimeout = setTimeout(async () => {
+        console.log('[Board Advisor] Deletion timeout - forcing UI refresh');
+        showSuccessMessage('Deletion completed (timeout recovery)');
+        setTimeout(async () => {
+          console.log('[Board Advisor] Refreshing all data sources after timeout...');
+          try {
+            // Force refresh all data sources to get updated data
+            await loadAllDataSources(false);
+            console.log('[Board Advisor] Data refresh completed after timeout, triggering analysis...');
+            debouncedAnalyzeCurrentBoard();
+          } catch (error) {
+            console.error('[Board Advisor] Error refreshing data after timeout:', error);
+            // Still trigger analysis even if data refresh fails
+            debouncedAnalyzeCurrentBoard();
+          }
+        }, 500);
+      }, 3000); // 3 second timeout
+      
+      // Proceed with deletion
+      console.log('[Board Advisor] Confirmation button clicked, calling deleteBoardAdvisorRun with roomId:', roomId, 'runId:', runId);
+      console.log('[Board Advisor] About to call deleteBoardAdvisorRun...');
+      
+      // Show deletion in progress feedback
+      showDeletionFeedback('Deleting run...', 'info');
+      
+      deleteBoardAdvisorRun(roomId, runId).then((success) => {
+        // Clear the failsafe timeout since deletion completed
+        clearTimeout(failsafeTimeout);
+        
+        console.log('[Board Advisor] deleteBoardAdvisorRun completed with success:', success);
+        if (success) {
+          console.log('[Board Advisor] Deletion completed successfully');
+          showDeletionFeedback('Run deleted successfully! Refreshing...', 'success');
+        } else {
+          console.log('[Board Advisor] Deletion failed, but UI will refresh anyway');
+          showDeletionFeedback('Deletion may have failed, refreshing data...', 'warning');
+        }
+        
+        // Always refresh data and analysis after deletion attempt
+        setTimeout(async () => {
+          console.log('[Board Advisor] Refreshing all data sources after deletion...');
+          try {
+            // Force refresh all data sources to get updated data
+            await loadAllDataSources(false);
+            console.log('[Board Advisor] Data refresh completed, triggering analysis...');
+            debouncedAnalyzeCurrentBoard();
+          } catch (error) {
+            console.error('[Board Advisor] Error refreshing data after deletion:', error);
+            // Still trigger analysis even if data refresh fails
+            debouncedAnalyzeCurrentBoard();
+          }
+        }, 500);
+      }).catch((error) => {
+        // Clear the failsafe timeout
+        clearTimeout(failsafeTimeout);
+        console.error('[Board Advisor] Deletion error:', error);
+        showDeletionFeedback('Deletion error, refreshing data...', 'error');
+        setTimeout(async () => {
+          console.log('[Board Advisor] Refreshing all data sources after deletion error...');
+          try {
+            // Force refresh all data sources to get updated data
+            await loadAllDataSources(false);
+            console.log('[Board Advisor] Data refresh completed after error, triggering analysis...');
+            debouncedAnalyzeCurrentBoard();
+          } catch (error) {
+            console.error('[Board Advisor] Error refreshing data after deletion error:', error);
+            // Still trigger analysis even if data refresh fails
+            debouncedAnalyzeCurrentBoard();
+          }
+        }, 500);
+      });
+    });
+    
+    // Add hover effects
+    cancelBtn.addEventListener('mouseenter', () => {
+      cancelBtn.style.background = '#666';
+    });
+    cancelBtn.addEventListener('mouseleave', () => {
+      cancelBtn.style.background = '#555';
+    });
+    
+    confirmBtn.addEventListener('mouseenter', () => {
+      confirmBtn.style.background = '#d32f2f';
+    });
+    confirmBtn.addEventListener('mouseleave', () => {
+      confirmBtn.style.background = '#f44336';
+    });
+  }
+  
+
+
+// =======================
+// DELETE RUN FUNCTION
+// =======================
+
+  async function deleteBoardAdvisorRun(roomId, runId) {
+    console.log(`[Board Advisor] deleteBoardAdvisorRun function called with roomId: ${roomId}, runId: ${runId}`);
+    
+    // Pause analysis during deletion
+    pauseAnalysisForDeletion();
+    
+    try {
+      console.log(`[Board Advisor] Starting deletion - roomId: ${roomId}, runId: ${runId}`);
+      
+      // First try to get the run from IndexedDB
+      console.log(`[Board Advisor] Attempting to get run from IndexedDB...`);
+      let targetRun = await getRunById(roomId, runId);
+      console.log(`[Board Advisor] Target run from IndexedDB:`, targetRun);
+      
+      // If not found in IndexedDB, try to get it from RunTracker
+      if (!targetRun || !targetRun.boardSetup) {
+        console.log(`[Board Advisor] Run not found in IndexedDB, trying RunTracker`);
+        
+        if (window.RunTrackerAPI && window.RunTrackerAPI.getRuns) {
+          // First, let's see what map keys are available in RunTracker
+          const allRuns = window.RunTrackerAPI.getAllRuns();
+          console.log(`[Board Advisor] Available map keys in RunTracker:`, Object.keys(allRuns.runs || {}));
+          
+          // Try to find the correct map key by looking for runs with matching room ID
+          let correctMapKey = null;
+          for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+            if (mapData.speedrun && mapData.speedrun.length > 0) {
+              const firstRun = mapData.speedrun[0];
+              if (firstRun.setup && firstRun.setup.mapId === roomId) {
+                correctMapKey = mapKey;
+                console.log(`[Board Advisor] Found matching map key: ${mapKey} for roomId: ${roomId}`);
+                break;
+              }
+            }
+            if (mapData.rank && mapData.rank.length > 0) {
+              const firstRun = mapData.rank[0];
+              if (firstRun.setup && firstRun.setup.mapId === roomId) {
+                correctMapKey = mapKey;
+                console.log(`[Board Advisor] Found matching map key: ${mapKey} for roomId: ${roomId}`);
+                break;
+              }
+            }
+          }
+          
+          if (!correctMapKey) {
+            console.log(`[Board Advisor] No matching map key found for roomId: ${roomId}`);
+            // Fallback: try the direct conversion
+            correctMapKey = `map_${roomId.toLowerCase()}`;
+            console.log(`[Board Advisor] Using fallback mapKey: ${correctMapKey}`);
+          }
+          
+          const speedrunRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'speedrun') || [];
+          const rankRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'rank') || [];
+          const allRunTrackerRuns = [...speedrunRuns, ...rankRuns];
+          
+          console.log(`[Board Advisor] Found ${allRunTrackerRuns.length} runs in RunTracker for ${correctMapKey}`);
+          
+          // Find the run by ID or timestamp
+          targetRun = allRunTrackerRuns.find(run => 
+            run.timestamp === runId || 
+            run.timestamp === parseInt(runId) ||
+            run.id === runId ||
+            run.id === parseInt(runId)
+          );
+          
+          if (targetRun && targetRun.setup && targetRun.setup.pieces) {
+            // Convert RunTracker format to Board Advisor format
+            targetRun = {
+              id: targetRun.timestamp || targetRun.id,
+              timestamp: targetRun.timestamp,
+              roomId: roomId,
+              boardSetup: convertRunTrackerSetup(targetRun.setup),
+              source: 'run_tracker'
+            };
+            console.log(`[Board Advisor] Found run in RunTracker, converted:`, targetRun);
+          } else {
+            console.log(`[Board Advisor] Run not found in RunTracker either`);
+          }
+        }
+      }
+      
+        // Always proceed with two-step deletion: IndexedDB first, then RunTracker
+        console.log(`[Board Advisor] Starting two-step deletion process for room ${roomId}`);
+        
+        let deletedCount = 0;
+        let targetSetupHash = null;
+        
+        // If we have a target run, create hash for specific deletion
+        if (targetRun && targetRun.boardSetup) {
+          console.log(`[Board Advisor] Target run found, creating setup hash for specific deletion`);
+          targetSetupHash = createBoardSetupHash(targetRun.boardSetup);
+          console.log(`[Board Advisor] Target setup hash: ${targetSetupHash}`);
+        } else {
+          console.log(`[Board Advisor] No target run found, will delete all runs for room ${roomId}`);
+        }
+        
+        // Step 1: Delete from IndexedDB
+        console.log(`[Board Advisor] Step 1: Deleting from IndexedDB...`);
+        if (sandboxDB) {
+          const storeName = getRoomStoreName(roomId);
+          console.log(`[Board Advisor] Store name: ${storeName}`);
+          
+          if (sandboxDB.objectStoreNames.contains(storeName)) {
+            const allRuns = await getSandboxRunsForRoom(roomId, 1000);
+            console.log(`[Board Advisor] Found ${allRuns.length} runs in IndexedDB`);
+            
+            const runsToDelete = allRuns.filter(run => {
+              if (!run.boardSetup) return false;
+              if (targetSetupHash) {
+                // Delete specific setup if we have a target
+                const runHash = createBoardSetupHash(run.boardSetup);
+                return runHash === targetSetupHash;
+              } else {
+                // Delete all runs for this room if no specific target
+                return true;
+              }
+            });
+            
+            console.log(`[Board Advisor] Found ${runsToDelete.length} runs to delete from IndexedDB`);
+            
+            if (runsToDelete.length > 0) {
+              const transaction = sandboxDB.transaction([storeName], 'readwrite');
+              const store = transaction.objectStore(storeName);
+              
+              const deleteResults = await Promise.all(runsToDelete.map(run => 
+                new Promise((resolve) => {
+                  const deleteRequest = store.delete(run.id || run.timestamp);
+                  deleteRequest.onsuccess = () => {
+                    deletedCount++;
+                    console.log(`[Board Advisor] Deleted IndexedDB run: ${run.id || run.timestamp}`);
+                    resolve(true);
+                  };
+                  deleteRequest.onerror = () => {
+                    console.log(`[Board Advisor] Failed to delete IndexedDB run: ${run.id || run.timestamp}`);
+                    resolve(false);
+                  };
+                })
+              ));
+              
+              console.log(`[Board Advisor] IndexedDB deletion results:`, deleteResults);
+            }
+          } else {
+            console.log(`[Board Advisor] Store ${storeName} does not exist`);
+          }
+        } else {
+          console.log(`[Board Advisor] sandboxDB not available`);
+        }
+        
+        // Brief delay to ensure IndexedDB operations complete
+        console.log(`[Board Advisor] Waiting 200ms for IndexedDB operations to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Step 2: Delete from RunTracker
+        console.log(`[Board Advisor] Step 2: Deleting from RunTracker...`);
+        console.log(`[Board Advisor] Checking RunTracker API availability:`, {
+          hasRunTrackerAPI: !!window.RunTrackerAPI,
+          hasGetRuns: !!(window.RunTrackerAPI && window.RunTrackerAPI.getRuns),
+          hasDeleteRun: !!(window.RunTrackerAPI && window.RunTrackerAPI.deleteRun)
+        });
+        
+        let runTrackerDeleted = 0;
+        if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+          console.log(`[Board Advisor] RunTracker API available, starting deletion`);
+          
+          // Find the correct map key
+          const allRuns = window.RunTrackerAPI.getAllRuns();
+          let correctMapKey = null;
+          for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+            if (mapData.speedrun && mapData.speedrun.length > 0) {
+              const firstRun = mapData.speedrun[0];
+              if (firstRun.setup && firstRun.setup.mapId === roomId) {
+                correctMapKey = mapKey;
+                console.log(`[Board Advisor] Found correct map key for speedrun: ${mapKey}`);
+                break;
+              }
+            }
+            if (mapData.rank && mapData.rank.length > 0) {
+              const firstRun = mapData.rank[0];
+              if (firstRun.setup && firstRun.setup.mapId === roomId) {
+                correctMapKey = mapKey;
+                console.log(`[Board Advisor] Found correct map key for rank: ${mapKey}`);
+                break;
+              }
+            }
+          }
+          
+          if (!correctMapKey) {
+            correctMapKey = `map_${roomId.toLowerCase()}`;
+            console.log(`[Board Advisor] Using fallback map key: ${correctMapKey}`);
+          }
+          
+          console.log(`[Board Advisor] Calling deleteMatchingRunTrackerRuns with mapKey: ${correctMapKey}, targetSetupHash: ${targetSetupHash || 'all runs'}`);
+          
+          // Log current RunTracker state before deletion
+          const beforeRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'speedrun') || [];
+          const beforeRankRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'rank') || [];
+          console.log(`[Board Advisor] Before deletion - Speedrun runs: ${beforeRuns.length}, Rank runs: ${beforeRankRuns.length}`);
+          
+          runTrackerDeleted = await deleteMatchingRunTrackerRuns(correctMapKey, targetSetupHash);
+          
+          // Log current RunTracker state after deletion
+          const afterRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'speedrun') || [];
+          const afterRankRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'rank') || [];
+          console.log(`[Board Advisor] After deletion - Speedrun runs: ${afterRuns.length}, Rank runs: ${afterRankRuns.length}`);
+          console.log(`[Board Advisor] RunTracker deleted ${runTrackerDeleted} runs from ${correctMapKey}`);
+        } else {
+          console.log(`[Board Advisor] RunTracker API not available - hasRunTrackerAPI: ${!!window.RunTrackerAPI}, hasDeleteRun: ${!!(window.RunTrackerAPI && window.RunTrackerAPI.deleteRun)}`);
+        }
+        
+        // Brief delay to ensure RunTracker operations complete
+        console.log(`[Board Advisor] Waiting 200ms for RunTracker operations to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Step 3: Validation - Verify deletion consistency
+        console.log(`[Board Advisor] Step 3: Validating deletion consistency...`);
+        const totalDeleted = deletedCount + runTrackerDeleted;
+        console.log(`[Board Advisor] Deletion summary: IndexedDB=${deletedCount}, RunTracker=${runTrackerDeleted}, Total=${totalDeleted}`);
+        
+        if (totalDeleted === 0) {
+          console.warn(`[Board Advisor] No runs were deleted from either source - this may indicate an issue`);
+        } else if (deletedCount > 0 && runTrackerDeleted === 0) {
+          console.warn(`[Board Advisor] Only IndexedDB runs were deleted - RunTracker deletion may have failed`);
+        } else if (deletedCount === 0 && runTrackerDeleted > 0) {
+          console.warn(`[Board Advisor] Only RunTracker runs were deleted - IndexedDB deletion may have failed`);
+        } else {
+          console.log(`[Board Advisor] Deletion completed successfully across both sources`);
+        }
+        
+        // Clear current state
+        cleanupTileHighlights();
+        currentRecommendedSetup = null;
+        originalSpecificSetup = null;
+        placedRecommendedPieces.clear();
+        
+        // Clear performance tracker lookup map to prevent stale duplicate detection
+        performanceTracker.runLookup.clear();
+        console.log(`[Board Advisor] Cleared performance tracker lookup map after deletion`);
+        
+        // Note: Performance tracker runs array will be refreshed automatically after deletion
+        // No need to manually clear it as it gets repopulated from IndexedDB and RunTracker
+        
+        // Clear all caches to prevent conflicts after deletion
+        console.log(`[Board Advisor] Clearing all caches after deletion...`);
+        
+        // Clear RunTracker data cache
+        if (runTrackerData) {
+          runTrackerData = null;
+          console.log(`[Board Advisor] Cleared RunTracker data cache`);
+        }
+        
+        // Clear analysis state
+        analysisState.isAnalyzing = false;
+        analysisState.isDataLoading = false;
+        analysisState.currentAnalysis = null;
+        console.log(`[Board Advisor] Cleared analysis state`);
+        
+        // Clear performance tracker patterns for this room
+        if (performanceTracker && performanceTracker.patterns && performanceTracker.patterns.has(roomId)) {
+          performanceTracker.patterns.delete(roomId);
+          console.log(`[Board Advisor] Cleared performance tracker patterns for room ${roomId}`);
+        }
+        
+        // Clear board analyzer cache if it exists
+        if (boardAnalyzer && typeof boardAnalyzer.clearCache === 'function') {
+          boardAnalyzer.clearCache();
+          console.log(`[Board Advisor] Cleared board analyzer cache`);
+        }
+        
+        // Reset analysis timing to force fresh analysis
+        lastAnalysisTime = 0;
+        console.log(`[Board Advisor] Reset analysis timing`);
+        
+        // Clear any pending analysis timeouts
+        if (analysisTimeout) {
+          clearTimeout(analysisTimeout);
+          analysisTimeout = null;
+          console.log(`[Board Advisor] Cleared pending analysis timeout`);
+        }
+        
+        console.log(`[Board Advisor] Two-step deletion completed - IndexedDB: ${deletedCount}, RunTracker: processed`);
+        
+        // Resume analysis after successful deletion
+        resumeAnalysisAfterDeletion();
+        
+        // Force refresh all data sources to get fresh data after deletion
+        console.log(`[Board Advisor] Forcing comprehensive data refresh after deletion...`);
+        setTimeout(async () => {
+          try {
+            // Clear all cached data first
+            console.log(`[Board Advisor] Clearing all cached data...`);
+            runTrackerData = null;
+            analysisState.currentAnalysis = null;
+            analysisState.isAnalyzing = false;
+            analysisState.isDataLoading = false;
+            
+            // Clear performance tracker data for this room
+            if (performanceTracker && performanceTracker.runs) {
+              performanceTracker.runs = performanceTracker.runs.filter(run => run.roomId !== roomId);
+              console.log(`[Board Advisor] Cleared performance tracker runs for room ${roomId}`);
+            }
+            
+            // Force reload all data sources
+            console.log(`[Board Advisor] Reloading all data sources...`);
+            await loadAllDataSources(false, true); // Don't trigger analysis yet, force refresh
+            console.log(`[Board Advisor] Data refresh completed after deletion`);
+            
+            // Trigger immediate UI refresh and analysis
+            console.log(`[Board Advisor] Triggering immediate UI refresh after deletion...`);
+            await refreshUIAfterDeletion();
+          } catch (error) {
+            console.error(`[Board Advisor] Error refreshing data after deletion:`, error);
+          }
+        }, 200); // Slightly longer delay to ensure all operations complete
+        
+        console.log(`[Board Advisor] deleteBoardAdvisorRun function returning true`);
+        return true;
+
+    } catch (error) {
+      console.error('[Board Advisor] Error deleting run:', error);
+      console.error('[Board Advisor] Error stack:', error.stack);
+      
+      // Clear caches even if deletion failed to prevent conflicts
+      console.log(`[Board Advisor] Clearing caches after deletion error...`);
+      
+      // Clear current state
+      cleanupTileHighlights();
+      currentRecommendedSetup = null;
+      originalSpecificSetup = null;
+      placedRecommendedPieces.clear();
+      
+      // Clear RunTracker data cache
+      if (runTrackerData) {
+        runTrackerData = null;
+      }
+      
+      // Clear analysis state
+      analysisState.isAnalyzing = false;
+      analysisState.isDataLoading = false;
+      analysisState.currentAnalysis = null;
+      
+      // Reset analysis timing
+      lastAnalysisTime = 0;
+      
+      // Clear any pending analysis timeouts
+      if (analysisTimeout) {
+        clearTimeout(analysisTimeout);
+        analysisTimeout = null;
+      }
+      
+      // Resume analysis even if deletion failed
+      resumeAnalysisAfterDeletion();
+      
+      // Try to refresh UI even if deletion failed
+      setTimeout(async () => {
+        try {
+          await refreshUIAfterDeletion();
+        } catch (error) {
+          console.error('[Board Advisor] Error refreshing UI after deletion error:', error);
+        }
+      }, 200);
+      
+      console.log(`[Board Advisor] deleteBoardAdvisorRun function returning false due to error`);
+      return false;
+    }
+  }
+
+
+  // Helper function to get a run by ID
+  async function getRunById(roomId, runId) {
+    try {
+      const storeName = getRoomStoreName(roomId);
+      console.log(`[Board Advisor] getRunById - storeName: ${storeName}, runId: ${runId}`);
+      
+      const transaction = sandboxDB.transaction([storeName], 'readonly');
+      const store = transaction.objectStore(storeName);
+      
+      // First, let's see what runs are actually in the database
+      const allRuns = await getSandboxRunsForRoom(roomId, 1000);
+      console.log(`[Board Advisor] All runs in database:`, allRuns.map(run => ({ id: run.id, timestamp: run.timestamp, source: run.source })));
+      
+      // Try to find the run by ID or timestamp
+      const targetRun = allRuns.find(run => 
+        run.id === runId || 
+        run.timestamp === runId || 
+        run.id === parseInt(runId) || 
+        run.timestamp === parseInt(runId)
+      );
+      
+      console.log(`[Board Advisor] Found target run:`, targetRun);
+      return targetRun || null;
+      
+    } catch (error) {
+      console.log('[Board Advisor] Error getting run by ID:', error);
+      return null;
+    }
+  }
+
+  // Helper function to delete matching RunTracker runs with improved error handling and verification
+  async function deleteMatchingRunTrackerRuns(mapKey, targetSetupHash) {
+    try {
+      console.log(`[Board Advisor] deleteMatchingRunTrackerRuns called with mapKey: ${mapKey}, targetSetupHash: ${targetSetupHash}`);
+      
+      if (!window.RunTrackerAPI || !window.RunTrackerAPI.getRuns || !window.RunTrackerAPI.deleteRun) {
+        console.log(`[Board Advisor] RunTracker API not available or missing methods`);
+        return 0;
+      }
+
+      let deletedCount = 0;
+      const maxRetries = 3;
+      
+      // Get all RunTracker runs for this map
+      const speedrunRuns = window.RunTrackerAPI.getRuns(mapKey, 'speedrun') || [];
+      const rankRuns = window.RunTrackerAPI.getRuns(mapKey, 'rank') || [];
+      
+      console.log(`[Board Advisor] Found ${speedrunRuns.length} speedrun runs and ${rankRuns.length} rank runs for ${mapKey}`);
+      
+      // Find matching speedrun runs (delete in reverse order to maintain indices)
+      const matchingSpeedrunIndices = [];
+      for (let i = speedrunRuns.length - 1; i >= 0; i--) {
+        const run = speedrunRuns[i];
+        if (run.setup && run.setup.pieces) {
+          console.log(`[Board Advisor] Speedrun run ${i} setup:`, run.setup);
+          const convertedSetup = convertRunTrackerSetup(run.setup);
+          console.log(`[Board Advisor] Speedrun run ${i} converted setup:`, convertedSetup);
+          
+          if (targetSetupHash) {
+            // Delete specific setup if target hash provided
+            const runSetupHash = createBoardSetupHash(convertedSetup);
+            console.log(`[Board Advisor] Speedrun run ${i} setup hash: ${runSetupHash}, target hash: ${targetSetupHash}, matches: ${runSetupHash === targetSetupHash}`);
+            if (runSetupHash === targetSetupHash) {
+              matchingSpeedrunIndices.push(i);
+            }
+          } else {
+            // Delete all runs if no target hash provided
+            console.log(`[Board Advisor] Speedrun run ${i} - deleting all runs (no target hash)`);
+            matchingSpeedrunIndices.push(i);
+          }
+        }
+      }
+      
+      // Find matching rank runs (delete in reverse order to maintain indices)
+      const matchingRankIndices = [];
+      for (let i = rankRuns.length - 1; i >= 0; i--) {
+        const run = rankRuns[i];
+        if (run.setup && run.setup.pieces) {
+          console.log(`[Board Advisor] Rank run ${i} setup:`, run.setup);
+          const convertedSetup = convertRunTrackerSetup(run.setup);
+          console.log(`[Board Advisor] Rank run ${i} converted setup:`, convertedSetup);
+          
+          if (targetSetupHash) {
+            // Delete specific setup if target hash provided
+            const runSetupHash = createBoardSetupHash(convertedSetup);
+            console.log(`[Board Advisor] Rank run ${i} setup hash: ${runSetupHash}, target hash: ${targetSetupHash}, matches: ${runSetupHash === targetSetupHash}`);
+            if (runSetupHash === targetSetupHash) {
+              matchingRankIndices.push(i);
+            }
+          } else {
+            // Delete all runs if no target hash provided
+            console.log(`[Board Advisor] Rank run ${i} - deleting all runs (no target hash)`);
+            matchingRankIndices.push(i);
+          }
+        }
+      }
+      
+      console.log(`[Board Advisor] Found ${matchingSpeedrunIndices.length} matching speedrun indices and ${matchingRankIndices.length} matching rank indices`);
+      
+      // Helper function to delete with retry logic
+      const deleteWithRetry = async (mapKey, type, index, maxRetries) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            console.log(`[Board Advisor] Attempting to delete ${type} run at index ${index} (attempt ${attempt}/${maxRetries})`);
+            const success = await window.RunTrackerAPI.deleteRun(mapKey, type, index);
+            console.log(`[Board Advisor] ${type} deletion result: ${success}`);
+            
+            if (success) {
+              // Simple verification - if API reports success, trust it
+              // The complex verification was causing issues with multiple deletions
+              console.log(`[Board Advisor] ${type} run at index ${index} deletion reported success`);
+              return true;
+            }
+            
+            if (attempt < maxRetries) {
+              console.log(`[Board Advisor] ${type} deletion failed, retrying...`);
+              await new Promise(resolve => setTimeout(resolve, 100 * attempt)); // Progressive delay
+            }
+          } catch (error) {
+            console.error(`[Board Advisor] Error deleting ${type} run at index ${index} (attempt ${attempt}):`, error);
+            if (attempt < maxRetries) {
+              console.log(`[Board Advisor] Retrying ${type} deletion after error...`);
+              await new Promise(resolve => setTimeout(resolve, 100 * attempt)); // Progressive delay
+            }
+          }
+        }
+        return false;
+      };
+      
+      // Delete matching speedrun runs (process in reverse order to maintain indices)
+      for (let i = matchingSpeedrunIndices.length - 1; i >= 0; i--) {
+        const index = matchingSpeedrunIndices[i];
+        const success = await deleteWithRetry(mapKey, 'speedrun', index, maxRetries);
+        if (success) deletedCount++;
+      }
+      
+      // Delete matching rank runs (process in reverse order to maintain indices)
+      for (let i = matchingRankIndices.length - 1; i >= 0; i--) {
+        const index = matchingRankIndices[i];
+        const success = await deleteWithRetry(mapKey, 'rank', index, maxRetries);
+        if (success) deletedCount++;
+      }
+      
+      console.log(`[Board Advisor] deleteMatchingRunTrackerRuns completed, deleted ${deletedCount} runs`);
+      return deletedCount;
+      
+    } catch (error) {
+      console.error(`[Board Advisor] Critical error in deleteMatchingRunTrackerRuns:`, error);
+      return 0;
+    }
+  }
+
+
+// =======================
 // 0. CONFIGURATION
 // =======================
 
-// Constants
 const MOD_ID = 'board-advisor';
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const ANALYSIS_DEBOUNCE_TIME = 1000;
@@ -20,7 +710,6 @@ const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
 const ROOM_METADATA_STORE = 'roomMetadata';
 const MAX_RUNS_PER_ROOM = 500;
 
-// Anti-cheating constants
 const MIN_STAT_VALUE = 1;
 const MAX_STAT_VALUE = 20;
 
@@ -154,7 +843,6 @@ const defaultConfig = {
 
 let config = Object.assign({}, defaultConfig, context.config);
 
-// Runtime State
 let analysisTimeout = null;
 let lastAnalysisTime = 0;
 let runTrackerData = null;
@@ -165,8 +853,9 @@ let originalSpecificSetup = null; // Store the original specific setup data from
 let placedRecommendedPieces = new Set();
 let previousRoomId = null;
 let previousBoardPieceCount = 0;
+let isDeleting = false;
+let deletionAnalysisTimeout = null;
 
-// Analysis State
 let analysisState = {
   isAnalyzing: false,
   isDataLoading: false,
@@ -187,24 +876,30 @@ let performanceCache = {
   lastRoomDetectionTime: 0
 };
 
-// State Management
 let stateRefreshSystem = {
   lastRefreshTime: 0,
   subscriptions: [],
   isEnabled: false
 };
 
-// Track active subscriptions for cleanup
 let activeSubscriptions = [];
 
-// Track board change subscription separately for Board Analyzer coordination
 let boardChangeSubscription = null;
 
-// Track document event listeners for cleanup
+let gameStateHighlightSubscription = null;
+let storedRecommendedSetup = null;
+
+let isGameRunning = false;
+let gameEndCooldownTimeout = null;
+const GAME_END_COOLDOWN_MS = 2000; // 2 second cooldown after game ends
+
 let documentListeners = [];
 
-// Track window event listeners for cleanup
 let windowListeners = [];
+
+let activeTimeouts = [];
+
+let boardAnalyzerIntervalId = null;
 
 let performanceTracker = {
   runs: [],
@@ -214,22 +909,51 @@ let performanceTracker = {
   runLookup: new Map() // O(1) duplicate detection
 };
 
-// UI State
+// Clear lookup map on page load to prevent stale duplicate detection
+performanceTracker.runLookup.clear();
+
 let panelState = {
   isOpen: false,
   position: { x: 10, y: 70 },
     size: { width: 350, height: 820 }
 };
 
-// Utility Functions
 
-// Create a hash for board setup comparison
+// Create a hash for board setup comparison with improved normalization
 function createBoardSetupHash(boardSetup) {
   if (!boardSetup || !Array.isArray(boardSetup)) return 'empty';
-  return JSON.stringify(boardSetup.sort((a, b) => {
-    // Sort by tileIndex for consistent hashing
-    return (a.tileIndex || 0) - (b.tileIndex || 0);
-  }));
+  
+  // Normalize and sort the board setup for consistent hashing
+  const normalizedSetup = boardSetup
+    .filter(piece => piece && piece.tileIndex !== undefined) // Filter out invalid pieces
+    .map(piece => ({
+      tileIndex: piece.tileIndex || 0,
+      monsterId: piece.monsterId || null,
+      monsterName: (piece.monsterName || '').toLowerCase().trim(),
+      equipId: piece.equipId || null,
+      equipmentName: (piece.equipmentName || '').toLowerCase().trim(),
+      equipmentTier: piece.equipmentTier || null,
+      tier: piece.tier || null,
+      level: piece.level || null,
+      villain: Boolean(piece.villain),
+      // Include monster stats for more accurate matching
+      monsterStats: piece.monsterStats ? {
+        hp: piece.monsterStats.hp || 0,
+        ad: piece.monsterStats.ad || 0,
+        ap: piece.monsterStats.ap || 0,
+        armor: piece.monsterStats.armor || 0,
+        magicResist: piece.monsterStats.magicResist || 0
+      } : null
+    }))
+    .sort((a, b) => {
+      // Primary sort by tileIndex, secondary by monsterId for consistency
+      if (a.tileIndex !== b.tileIndex) {
+        return a.tileIndex - b.tileIndex;
+      }
+      return (a.monsterId || 0) - (b.monsterId || 0);
+    });
+  
+  return JSON.stringify(normalizedSetup);
 }
 
 // Create a composite key for run lookup
@@ -266,7 +990,6 @@ function handleBoardAnalyzerCoordination() {
   }
 }
 
-// Loading State Management
 function setUILoadingState(isLoading, reason = '') {
   // Prevent setting loading to false if there are pending operations
   if (!isLoading && analysisState.pendingBoardChange) {
@@ -866,10 +1589,6 @@ async function getAllRoomMetadata() {
   }
 }
 
-
-
-
-
 function getRegionNameFromRoomId(roomId) {
   try {
     const rooms = globalThis.state?.utils?.ROOMS;
@@ -1001,6 +1720,12 @@ function getEquipmentName(equipId) {
 
 // Highlight recommended tiles on empty board
 function highlightRecommendedTiles(recommendedSetup) {
+  // Check if game is running or in cooldown
+  if (isGameRunning || gameEndCooldownTimeout) {
+    console.log('[Board Advisor] Skipping highlight - game running or in cooldown');
+    return;
+  }
+  
   if (!recommendedSetup || !Array.isArray(recommendedSetup) || recommendedSetup.length === 0) {
     return;
   }
@@ -1016,6 +1741,12 @@ function highlightRecommendedTiles(recommendedSetup) {
       rec.monsterName === recommendedSetup[index]?.monsterName &&
       rec.equipmentName === recommendedSetup[index]?.equipmentName
     );
+  
+  console.log('[Board Advisor] Setup comparison:', {
+    currentRecommendedSetup: currentRecommendedSetup?.map(r => ({ tileIndex: r.tileIndex, monsterName: r.monsterName, equipmentName: r.equipmentName })),
+    newRecommendedSetup: recommendedSetup?.map(r => ({ tileIndex: r.tileIndex, monsterName: r.monsterName, equipmentName: r.equipmentName })),
+    isSameFullSetup
+  });
   
   if (isSameFullSetup) {
     console.log('[Board Advisor] Same full setup already highlighted, checking if pieces are placed');
@@ -1064,7 +1795,9 @@ function createTileHighlightOverlay(recommendedSetup) {
     styleElement.textContent = `
       .board-advisor-tile-highlight {
         position: absolute;
-        width: calc(32px * var(--zoomFactor));
+        min-width: calc(32px * var(--zoomFactor));
+        max-width: calc(80px * var(--zoomFactor));
+        width: auto;
         height: calc(32px * var(--zoomFactor));
         border: 3px solid #ff6b35;
         background-color: rgba(255, 107, 53, 0.4);
@@ -1077,6 +1810,8 @@ function createTileHighlightOverlay(recommendedSetup) {
         align-items: center;
         justify-content: center;
         overflow: hidden;
+        padding: 4px 6px;
+        box-sizing: border-box;
       }
       
       .board-advisor-tile-info {
@@ -1106,6 +1841,7 @@ function createTileHighlightOverlay(recommendedSetup) {
         font-weight: 600;
         font-size: 13px;
         text-shadow: 0 0 4px rgba(76, 175, 80, 0.8);
+        padding: 2px;
       }
       
       .board-advisor-tile-info .equipment-name {
@@ -1113,6 +1849,7 @@ function createTileHighlightOverlay(recommendedSetup) {
         font-size: 13px;
         text-shadow: 0 0 4px rgba(33, 150, 243, 0.8);
         margin-top: 2px;
+        padding: 2px;
       }
       
       /* Tile number CSS removed - no longer needed */
@@ -1183,21 +1920,122 @@ function createTileHighlightOverlay(recommendedSetup) {
       const infoBox = document.createElement('div');
       infoBox.classList.add('board-advisor-tile-info');
       
-      // Add monster name
+      // Add monster name with tier and maxed status
       const monsterSpan = document.createElement('div');
       monsterSpan.classList.add('monster-name');
-      monsterSpan.textContent = monsterName;
+      let monsterDisplayText = monsterName;
+      
+      // Add tier information if available and not null
+      if (piece.tier !== undefined && piece.tier !== null) {
+        monsterDisplayText += ` (T${piece.tier})`;
+      }
+      
+      // Add modification indicator if creature is not maxed
+      if (!isCreatureMaxed(piece)) {
+        const modifications = getCreatureModifications(piece);
+        monsterDisplayText += ` (modified) ${modifications}`;
+      }
+      
+      // Add maxed status if monster stats are available
+      if (piece.monsterStats) {
+        const statsDisplay = formatMonsterStats(piece.monsterStats);
+        if (statsDisplay) {
+          monsterDisplayText += ` ${statsDisplay}`;
+        }
+      }
+      
+      monsterSpan.textContent = monsterDisplayText;
       infoBox.appendChild(monsterSpan);
       
-      // Add equipment name if available
+      // Add equipment name with tier if available
       if (equipmentName) {
         const equipSpan = document.createElement('div');
         equipSpan.classList.add('equipment-name');
-        equipSpan.textContent = equipmentName;
+        let equipmentDisplayText = equipmentName;
+        
+        // Add equipment tier if available
+        if (piece.equipmentTier !== undefined) {
+          equipmentDisplayText += ` (T${piece.equipmentTier})`;
+        }
+        
+        equipSpan.textContent = equipmentDisplayText;
         infoBox.appendChild(equipSpan);
       }
       
       // Tile number removed - redundant since tile is already highlighted
+      
+      // Get equipment tier color
+      const getEquipmentTierColor = (tier) => {
+        switch (tier) {
+          case 1: return '#9E9E9E'; // Grey
+          case 2: return '#4CAF50'; // Green
+          case 3: return '#2196F3'; // Blue
+          case 4: return '#9C27B0'; // Purple
+          case 5: return '#FFEB3B'; // Yellow
+          default: return '#2196F3'; // Default blue for unknown tiers
+        }
+      };
+
+      // Character-based font sizing with line breaking for multi-word names
+      const getFontSizeAndFormatText = (text, isMonster = true) => {
+        const baseFontSize = 12; // Same sizing for both monster and equipment
+        const maxCharsPerLine = 8;
+        
+        // If text is short enough, return as-is with appropriate font size
+        if (text.length <= maxCharsPerLine) {
+          return {
+            fontSize: baseFontSize,
+            formattedText: text
+          };
+        }
+        
+        // Split by spaces and check if we can break into lines
+        const words = text.split(' ');
+        if (words.length > 1) {
+          // Try to break into lines where each line is <= maxCharsPerLine
+          const lines = [];
+          let currentLine = '';
+          
+          for (const word of words) {
+            // If adding this word would exceed the limit, start a new line
+            if (currentLine && (currentLine + ' ' + word).length > maxCharsPerLine) {
+              lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = currentLine ? currentLine + ' ' + word : word;
+            }
+          }
+          
+          // Add the last line
+          if (currentLine) {
+            lines.push(currentLine);
+          }
+          
+          // If we have multiple lines, use smaller font size
+          if (lines.length > 1) {
+            const fontSize = Math.max(9, baseFontSize - 2); // 10px/9px for multi-line (increased by 1px)
+            return {
+              fontSize: fontSize,
+              formattedText: lines.join('<br>')
+            };
+          }
+        }
+        
+        // Fallback: single line with reduced font size
+        const charCount = text.length;
+        let fontSize;
+        if (charCount <= 9) fontSize = baseFontSize - 1;  // 11px/10px for 9 chars (increased by 1px)
+        else if (charCount <= 10) fontSize = baseFontSize - 2; // 10px/9px for 10 chars (increased by 1px)
+        else if (charCount <= 11) fontSize = baseFontSize - 3; // 9px/8px for 11 chars (increased by 1px)
+        else fontSize = Math.max(9, baseFontSize - 3); // Minimum 9px for both monster and equipment
+        
+        return {
+          fontSize: fontSize,
+          formattedText: text
+        };
+      };
+      
+      // Info box styling applied directly - no overflow handling needed
       
       highlightOverlay.appendChild(infoBox);
       
@@ -1215,12 +2053,49 @@ function createTileHighlightOverlay(recommendedSetup) {
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
         pointer-events: none;
         z-index: 10;
-        line-height: 1.1;
+        line-height: 1.0;
+        margin: 0;
+        padding: 0;
       `;
+      // Prepare monster display text with tier and maxed status
+      let tileMonsterDisplayText = monsterName;
+      if (piece.tier !== undefined && piece.tier !== null) {
+        tileMonsterDisplayText += ` (T${piece.tier})`;
+      }
+      
+      // Add modification indicator if creature is not maxed
+      let hasModified = false;
+      if (!isCreatureMaxed(piece)) {
+        tileMonsterDisplayText += ' (modified)';
+        hasModified = true;
+      }
+      
+      // Note: Tile overlay should only show (modified), not specific details
+      // Specific details are shown in the info box and recommendation text
+      
+      // Prepare equipment display text without tier (tier will be shown via color)
+      let tileEquipmentDisplayText = equipmentName;
+      let equipmentTier = piece.equipmentTier;
+      
+      // Calculate font sizes and format text with line breaking
+      const monsterFormat = getFontSizeAndFormatText(tileMonsterDisplayText, true);
+      const equipFormat = getFontSizeAndFormatText(tileEquipmentDisplayText, false);
+      
+      // Format monster text with color styling for (modified)
+      let monsterTextHTML = monsterFormat.formattedText;
+      if (hasModified) {
+        // Replace (modified) with colored version
+        monsterTextHTML = monsterTextHTML.replace('(modified)', '<span style="color: #f44336;">(modified)</span>');
+      }
+      
+      // Get equipment tier color
+      const equipmentColor = getEquipmentTierColor(equipmentTier);
+      
       tileText.innerHTML = `
-        <div style="color: #4CAF50; font-weight: 600; font-size: 11px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95;">${monsterName}</div>
-        <div style="color: #2196F3; font-size: 10px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95;">${equipmentName}</div>
+        <div class="tile-monster-name" style="color: #4CAF50; font-weight: 600; font-size: ${monsterFormat.fontSize}px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95; padding: 1px; margin: 0; word-wrap: break-word; white-space: normal; text-align: center; line-height: 1.0;">${monsterTextHTML}</div>
+        <div class="tile-equipment-name" style="color: ${equipmentColor}; font-size: ${equipFormat.fontSize}px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), -1px -1px 2px rgba(0, 0, 0, 0.9), 1px -1px 2px rgba(0, 0, 0, 0.9), -1px 1px 2px rgba(0, 0, 0, 0.9); opacity: 0.95; padding: 1px; margin: 0; word-wrap: break-word; white-space: normal; text-align: center; line-height: 1.0;">${equipFormat.formattedText}</div>
       `;
+      
       highlightOverlay.appendChild(tileText);
       
       // Add tooltip as backup
@@ -1239,8 +2114,13 @@ function createTileHighlightOverlay(recommendedSetup) {
   }
 }
 
-// Smart cleanup function that checks if all recommended pieces are placed
 function smartCleanupTileHighlights() {
+  // Check if game is running or in cooldown
+  if (isGameRunning || gameEndCooldownTimeout) {
+    console.log('[Board Advisor] Skipping smart cleanup - game running or in cooldown');
+    return;
+  }
+  
   console.log('[Board Advisor] smartCleanupTileHighlights called');
   console.log('[Board Advisor] currentRecommendedSetup:', currentRecommendedSetup);
   
@@ -1268,6 +2148,19 @@ function smartCleanupTileHighlights() {
     recommendedSetup: setupToUse,
     usingOriginalSpecificSetup: !!originalSpecificSetup
   });
+  
+  // Debug equipment tier information in current board setup
+  if (currentBoard.boardSetup && currentBoard.boardSetup.length > 0) {
+    console.log('[Board Advisor] Current board setup equipment data:');
+    currentBoard.boardSetup.forEach((piece, index) => {
+      console.log(`  Piece ${index}:`, {
+        equipId: piece.equipId,
+        equipmentName: piece.equipmentName,
+        equipmentTier: piece.equipmentTier,
+        tier: piece.tier
+      });
+    });
+  }
   
   // Log the tile indices for debugging
   const currentTileIndices = currentBoard.boardSetup.map(piece => piece.tileIndex);
@@ -1368,6 +2261,60 @@ function smartCleanupTileHighlights() {
   previousBoardPieceCount = currentBoard.boardSetup.length;
 }
 
+function setupGameStateHighlightManager() {
+  if (gameStateHighlightSubscription) {
+    console.log('[Board Advisor] Game state highlight manager already set up');
+    return;
+  }
+
+  console.log('[Board Advisor] Setting up game state highlight manager');
+  
+  gameStateHighlightSubscription = globalThis.state.board.subscribe(({ context }) => {
+    const gameStarted = context.gameStarted;
+    const currentMode = context.mode; // "manual", "autoplay", "sandbox"
+    
+    console.log('[Board Advisor] Game state changed:', { gameStarted, mode: currentMode, isGameRunning });
+    
+    if (gameStarted && !isGameRunning) {
+      // Game started - set flag and clean up highlights
+      isGameRunning = true;
+      console.log('[Board Advisor] Game started, cleaning up highlights');
+      cleanupTileHighlights();
+      
+      // Store current recommended setup for later restoration
+      if (currentRecommendedSetup && currentRecommendedSetup.length > 0) {
+        storedRecommendedSetup = [...currentRecommendedSetup];
+        console.log('[Board Advisor] Stored recommended setup for restoration:', storedRecommendedSetup.length, 'pieces');
+      }
+    } else if (!gameStarted && isGameRunning) {
+      // Game ended - set cooldown period
+      isGameRunning = false;
+      console.log('[Board Advisor] Game ended, starting cooldown period');
+      
+      // Clear any existing cooldown
+      if (gameEndCooldownTimeout) {
+        clearTimeout(gameEndCooldownTimeout);
+      }
+      
+      // Set cooldown before allowing highlight restoration
+      gameEndCooldownTimeout = setTimeout(() => {
+        console.log('[Board Advisor] Cooldown period ended, allowing highlight restoration');
+        gameEndCooldownTimeout = null;
+        
+        // Restore highlights if we have stored recommendations
+        if (storedRecommendedSetup && storedRecommendedSetup.length > 0) {
+          console.log('[Board Advisor] Restoring highlights with stored setup:', storedRecommendedSetup.length, 'pieces');
+          highlightRecommendedTiles(storedRecommendedSetup);
+          storedRecommendedSetup = null; // Clear stored data
+        }
+      }, GAME_END_COOLDOWN_MS);
+    }
+  });
+  
+  activeSubscriptions.push(gameStateHighlightSubscription);
+  console.log('[Board Advisor] Game state highlight manager set up successfully');
+}
+
 // Clean up tile highlights
 function cleanupTileHighlights() {
   // Remove the overlay container
@@ -1406,9 +2353,9 @@ function formatMonsterStats(monsterStats) {
   
   const { hp, ad, ap, armor, magicResist } = monsterStats;
   
-  // Check if all stats are 20 (maxed)
+  // Check if all stats are 20 (maxed) - don't show anything for maxed stats
   if (hp === 20 && ad === 20 && ap === 20 && armor === 20 && magicResist === 20) {
-    return '(maxed)';
+    return '';
   }
   
   // Show only stats that are below 20
@@ -1420,6 +2367,52 @@ function formatMonsterStats(monsterStats) {
   if (magicResist < 20) lowStats.push(`MR: ${magicResist}`);
   
   return lowStats.length > 0 ? `(${lowStats.join(', ')})` : '';
+}
+
+// Check if a creature in the recommended setup is maxed (level 50, 20 genes each)
+function isCreatureMaxed(piece) {
+  if (!piece) return true; // Assume maxed if no data
+  
+  // Check level (should be 50)
+  const level = piece.level;
+  if (level !== undefined && level < 50) {
+    return false;
+  }
+  
+  // Check genes (should all be 20)
+  if (piece.monsterStats) {
+    const { hp, ad, ap, armor, magicResist } = piece.monsterStats;
+    if (hp < 20 || ad < 20 || ap < 20 || armor < 20 || magicResist < 20) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Get modification details for a creature in the recommended setup
+function getCreatureModifications(piece) {
+  if (!piece) return '';
+  
+  const modifications = [];
+  
+  // Check level
+  const level = piece.level;
+  if (level !== undefined && level < 50) {
+    modifications.push(`level ${level}`);
+  }
+  
+  // Check genes
+  if (piece.monsterStats) {
+    const { hp, ad, ap, armor, magicResist } = piece.monsterStats;
+    if (hp < 20) modifications.push(`${hp}hp`);
+    if (ad < 20) modifications.push(`${ad}ad`);
+    if (ap < 20) modifications.push(`${ap}ap`);
+    if (armor < 20) modifications.push(`${armor}armor`);
+    if (magicResist < 20) modifications.push(`${magicResist}mr`);
+  }
+  
+  return modifications.length > 0 ? `(${modifications.join(', ')})` : '';
 }
 
 function getMonsterName(monsterId) {
@@ -1592,7 +2585,6 @@ function getEquipmentStats(equipId, runData) {
 
 
 
-// Make lookup functions available globally for button onclick handlers
 window.getMonsterName = getMonsterName;
 window.getEquipmentName = getEquipmentName;
 window.getMonsterStats = getMonsterStats;
@@ -1670,11 +2662,11 @@ async function forceUpdateAllData() {
 }
 
 // Data loading coordinator to ensure proper order of operations
-async function loadAllDataSources(triggerAnalysis = true) {
-  console.log('[Board Advisor] Starting coordinated data loading...');
+async function loadAllDataSources(triggerAnalysis = true, forceRefresh = false) {
+  console.log('[Board Advisor] Starting coordinated data loading...', forceRefresh ? '(forced refresh)' : '');
   
-  // Prevent duplicate data loading
-  if (analysisState.isDataLoading) {
+  // Prevent duplicate data loading (unless forced)
+  if (analysisState.isDataLoading && !forceRefresh) {
     console.log('[Board Advisor] Data loading already in progress, skipping...');
     return false;
   }
@@ -1689,12 +2681,16 @@ async function loadAllDataSources(triggerAnalysis = true) {
       await initSandboxDB();
     }
     
+    // Clear lookup map before loading data to prevent stale duplicate detection
+    performanceTracker.runLookup.clear();
+    console.log('[Board Advisor] Cleared lookup map before data loading');
+    
     // Load all data sources in parallel but wait for completion
     const loadPromises = [];
     
     // Load RunTracker data
     if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
-      loadPromises.push(loadRunTrackerData(false));
+      loadPromises.push(loadRunTrackerData(false, forceRefresh));
     } else {
       console.log('[Board Advisor] RunTracker not available yet');
     }
@@ -1731,9 +2727,18 @@ async function loadAllDataSources(triggerAnalysis = true) {
 }
 
 // Load RunTracker data
-function loadRunTrackerData(triggerAnalysis = true) {
+function loadRunTrackerData(triggerAnalysis = true, forceRefresh = false) {
   try {
     if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
+      // Clear existing data if force refresh
+      if (forceRefresh) {
+        console.log('[Board Advisor] Force refreshing RunTracker data...');
+        runTrackerData = null;
+        if (performanceTracker && performanceTracker.runs) {
+          performanceTracker.runs = [];
+        }
+      }
+      
       runTrackerData = window.RunTrackerAPI.getAllRuns();
       console.log('[Board Advisor] Loaded RunTracker data:', {
         totalRuns: runTrackerData.metadata?.totalRuns || 0,
@@ -2360,21 +3365,59 @@ function convertRunTrackerData() {
   }
 }
 
-// Convert RunTracker setup format to our format
+// Convert RunTracker setup format to our format with improved data consistency
 function convertRunTrackerSetup(setup) {
   if (!setup || !setup.pieces) return [];
   
-  return setup.pieces.map(piece => ({
-    tileIndex: piece.tile,
-    monsterId: piece.monsterId,
-    monsterName: piece.monsterId ? getMonsterName(piece.monsterId) : null, // Resolve monster name
-    equipId: piece.equipId,
-    equipmentName: piece.equipId ? getEquipmentName(piece.equipId) : null, // Resolve equipment name
-    gameId: piece.monsterId, // Use monsterId as gameId
-    tier: piece.tier,
-    level: piece.level,
-    villain: false // RunTracker only tracks player pieces
-  }));
+  return setup.pieces
+    .filter(piece => piece && piece.tile !== undefined) // Filter out invalid pieces
+    .map(piece => {
+      // Extract monster stats from the RunTracker data structure
+      let monsterStats = null;
+      
+      // RunTracker stores monster stats directly in the piece object
+      if (piece.monsterStats && typeof piece.monsterStats === 'object') {
+        monsterStats = {
+          hp: Number(piece.monsterStats.hp) || 0,
+          ad: Number(piece.monsterStats.ad) || 0,
+          ap: Number(piece.monsterStats.ap) || 0,
+          armor: Number(piece.monsterStats.armor) || 0,
+          magicResist: Number(piece.monsterStats.magicResist) || 0
+        };
+        console.log(`[Board Advisor] Extracted monster stats from RunTracker for ${piece.monsterName}:`, monsterStats);
+      }
+      // Fallback: try to get from monster object if available
+      else if (piece.monster && typeof piece.monster === 'object') {
+        monsterStats = {
+          hp: Number(piece.monster.hp) || 0,
+          ad: Number(piece.monster.ad) || 0,
+          ap: Number(piece.monster.ap) || 0,
+          armor: Number(piece.monster.armor) || 0,
+          magicResist: Number(piece.monster.magicResist) || 0
+        };
+        console.log(`[Board Advisor] Extracted monster stats from piece.monster for ${piece.monster.name}:`, monsterStats);
+      }
+      
+      // Helper function to properly capitalize names
+      const capitalizeName = (name) => {
+        if (!name) return '';
+        return String(name).trim().replace(/\b\w/g, l => l.toUpperCase());
+      };
+      
+      return {
+        tileIndex: Number(piece.tile) || 0,
+        monsterId: piece.monsterId || null,
+        monsterName: capitalizeName(piece.monsterName || (piece.monster?.name) || (piece.monsterId ? getMonsterName(piece.monsterId) : null)),
+        equipId: piece.equipId || null,
+        equipmentName: capitalizeName(piece.equipmentName || (piece.equipment?.name) || (piece.equipId ? getEquipmentName(piece.equipId) : null)),
+        equipmentTier: Number(piece.equipmentTier || piece.equipment?.tier) || 0,
+        gameId: piece.monsterId, // Use monsterId as gameId
+        tier: null, // Monsters don't have tiers, only equipment does
+        level: Number(piece.level) || 0,
+        monsterStats: monsterStats,
+        villain: false // RunTracker only tracks player pieces
+      };
+    });
 }
 
 // Update patterns from converted data
@@ -2531,12 +3574,18 @@ class DataCollector {
               console.error('[Board Advisor] Error saving Board Analyzer run:', error);
             });
             
-            // Trigger automatic analysis if panel is open
-            if (config.autoAnalyzeAfterRun && panelState.isOpen) {
+            // Check if this is a new best run and update highlights immediately
+            if (runData.completed && runData.ticks > 0) {
+              checkForNewBestRunAndUpdateHighlights(runData);
+            }
+            
+            // Always trigger automatic analysis after run completion for real-time updates
+            if (config.autoAnalyzeAfterRun) {
               setTimeout(() => {
                 console.log('[Board Advisor] Auto-analyzing board after server results...');
-                debouncedAnalyzeCurrentBoard();
-              }, 500);
+                // Use immediate analysis for better responsiveness after run completion
+                debouncedAnalyzeCurrentBoardImmediate();
+              }, 200); // Reduced delay for faster response
             }
             
             // Trigger immediate panel refresh after run completion
@@ -2659,7 +3708,7 @@ class DataCollector {
       };
       
       // Check for results every 2000ms
-      setInterval(checkForBoardAnalyzerResults, 2000);
+      boardAnalyzerIntervalId = setInterval(checkForBoardAnalyzerResults, 2000);
       console.log('[Board Advisor] Board Analyzer results listener set up');
     } catch (error) {
       console.error('[Board Advisor] Error setting up Board Analyzer listener:', error);
@@ -2820,6 +3869,12 @@ class DataCollector {
   onBoardChange(boardContext) {
     try {
       const now = Date.now();
+      
+      // Skip highlight operations if game is running or in cooldown
+      if (isGameRunning || gameEndCooldownTimeout) {
+        console.log('[Board Advisor] Skipping board change highlight operations - game running or in cooldown');
+        return;
+      }
       
       // Get fresh room ID from context first
       const newRoomId = this.extractRoomIdFromContext(boardContext);
@@ -3179,8 +4234,9 @@ class DataCollector {
         }
       }
       
-      // Get equipment name if equipment exists
+      // Get equipment name and tier if equipment exists
       let equipmentName = null;
+      let equipmentTier = null;
       if (piece.equipId) {
         // Try to get equipment name from player's inventory
         const playerContext = globalThis.state?.player?.getSnapshot()?.context;
@@ -3188,14 +4244,19 @@ class DataCollector {
         if (playerContext?.equips) {
           const equipment = playerContext.equips.find(e => e.id === piece.equipId);
           
-          if (equipment && equipment.gameId && globalThis.state?.utils?.getEquipment) {
-            try {
-              const equipmentData = globalThis.state.utils.getEquipment(equipment.gameId);
-              if (equipmentData?.metadata?.name) {
-                equipmentName = equipmentData.metadata.name;
+          if (equipment) {
+            // Extract equipment tier
+            equipmentTier = equipment.tier;
+            
+            if (equipment.gameId && globalThis.state?.utils?.getEquipment) {
+              try {
+                const equipmentData = globalThis.state.utils.getEquipment(equipment.gameId);
+                if (equipmentData?.metadata?.name) {
+                  equipmentName = equipmentData.metadata.name;
+                }
+              } catch (e) {
+                // getEquipment might fail, continue without name
               }
-            } catch (e) {
-              // getEquipment might fail, continue without name
             }
           }
         }
@@ -3206,6 +4267,7 @@ class DataCollector {
         tileIndex: piece.tileIndex,
         monsterName: monsterName, // Primary identifier
         equipmentName: equipmentName, // Primary identifier
+        equipmentTier: equipmentTier, // Equipment tier information
         villain: piece.villain || false,
         monsterStats: monsterStats,
         // Keep IDs as fallback for compatibility
@@ -3526,6 +4588,117 @@ class DataCollector {
   }
 }
 
+// Check if a new run is better than current best and update highlights immediately
+async function checkForNewBestRunAndUpdateHighlights(newRun) {
+  try {
+    console.log('[Board Advisor] Checking if new run is better than current best...', {
+      roomId: newRun.roomId,
+      ticks: newRun.ticks,
+      completed: newRun.completed
+    });
+    
+    if (!newRun.completed || !newRun.ticks || !newRun.roomId) {
+      return;
+    }
+    
+    // Get current best run for this room from both performance tracker and IndexedDB
+    const currentRoomRuns = performanceTracker.runs.filter(r => 
+      r.roomId === newRun.roomId && r.completed && r.ticks > 0
+    );
+    
+    // Also check IndexedDB for more complete data
+    let indexedDBRuns = [];
+    try {
+      indexedDBRuns = await getSandboxRunsForRoom(newRun.roomId, 100);
+      indexedDBRuns = indexedDBRuns.filter(r => r.completed && r.ticks > 0);
+    } catch (error) {
+      console.warn('[Board Advisor] Could not get IndexedDB runs for best run check:', error);
+    }
+    
+    // Combine both sources and remove duplicates
+    const allRuns = [...currentRoomRuns, ...indexedDBRuns];
+    const uniqueRuns = allRuns.filter((run, index, self) => 
+      index === self.findIndex(r => r.id === run.id || (r.ticks === run.ticks && r.timestamp === run.timestamp))
+    );
+    
+    if (uniqueRuns.length === 0) {
+      console.log('[Board Advisor] No previous runs for this room, this is the first best run');
+      return;
+    }
+    
+    // Find current best time
+    const currentBestTime = Math.min(...uniqueRuns.map(r => r.ticks));
+    
+    console.log('[Board Advisor] Current best time:', currentBestTime, 'New run time:', newRun.ticks);
+    
+    // Check if this is a new best run
+    if (newRun.ticks < currentBestTime) {
+      console.log('[Board Advisor] 🎉 New best run detected! Updating highlights immediately...');
+      
+      // Update highlights immediately with the new best setup
+      if (newRun.boardSetup && newRun.boardSetup.length > 0) {
+        console.log('[Board Advisor] Highlighting tiles for new best run setup...');
+        highlightRecommendedTiles(newRun.boardSetup);
+        
+        // Show a brief notification
+        showTemporaryNotification(`🎉 New best time: ${newRun.ticks} ticks!`, 'success');
+      }
+    } else {
+      console.log('[Board Advisor] New run is not better than current best');
+    }
+  } catch (error) {
+    console.error('[Board Advisor] Error checking for new best run:', error);
+  }
+}
+
+// Show temporary notification
+function showTemporaryNotification(message, type = 'info') {
+  try {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+      color: white;
+      padding: 12px 20px;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    
+    // Add animation styles
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.parentNode.removeChild(notification);
+      }
+      if (style.parentNode) {
+        style.parentNode.removeChild(style);
+      }
+    }, 3000);
+  } catch (error) {
+    console.error('[Board Advisor] Error showing notification:', error);
+  }
+}
+
 // CACHE FIX: Invalidate caches and refresh data after sandbox run saves
 async function invalidateCachesAndRefreshData(roomId) {
   try {
@@ -3581,7 +4754,7 @@ async function invalidateCachesAndRefreshData(roomId) {
 }
 
 // =======================
-// 3. LEADERBOARD ANALYZER
+// 6. LEADERBOARD ANALYZER
 // =======================
 
 class LeaderboardAnalyzer {
@@ -3814,6 +4987,13 @@ class AnalysisEngine {
       if (previousBoardPieceCount === 0 && currentBoard && currentBoard.boardSetup) {
         previousBoardPieceCount = currentBoard.boardSetup.length;
       }
+      
+      console.log('[Board Advisor] Board detection check:', {
+        hasCurrentBoard: !!currentBoard,
+        boardSetupLength: currentBoard?.boardSetup?.length || 0,
+        boardSetup: currentBoard?.boardSetup,
+        boardConfigLength: globalThis.state?.board?.getSnapshot()?.context?.boardConfig?.length || 0
+      });
       
       if (!currentBoard || !currentBoard.boardSetup.length) {
         // Board is empty - recommend best run from available data
@@ -4110,6 +5290,23 @@ class AnalysisEngine {
       
       // Convert setup to Setup_Manager.js format
       console.log('[Board Advisor] Original setup data:', bestRun.boardSetup);
+      console.log('[Board Advisor] Best run playerEquipment data:', bestRun.playerEquipment);
+      
+      // Debug: Check if this is Board Analyzer data
+      if (bestRun.source === 'board_analyzer' || bestRun.source === 'sandbox') {
+        console.log('[Board Advisor] Processing Board Analyzer/Sandbox data');
+        if (bestRun.boardSetup && bestRun.boardSetup.length > 0) {
+          console.log('[Board Advisor] First piece from Board Analyzer:', bestRun.boardSetup[0]);
+          if (bestRun.boardSetup[0].equipment) {
+            console.log('[Board Advisor] Equipment data from Board Analyzer:', bestRun.boardSetup[0].equipment);
+          }
+        }
+      }
+      console.log('[Board Advisor] Best run boardSetup structure:', bestRun.boardSetup);
+      if (bestRun.boardSetup && bestRun.boardSetup.length > 0) {
+        console.log('[Board Advisor] First piece structure:', bestRun.boardSetup[0]);
+        console.log('[Board Advisor] First piece keys:', Object.keys(bestRun.boardSetup[0]));
+      }
       const setupManagerFormat = bestRun.boardSetup ? bestRun.boardSetup.map(piece => {
         console.log('[Board Advisor] Processing piece:', piece);
         console.log('[Board Advisor] Piece monster data:', {
@@ -4119,12 +5316,111 @@ class AnalysisEngine {
           monsterName: piece.monster?.name,
           monsterIdFromMonster: piece.monster?.id
         });
+        console.log('[Board Advisor] Full piece object keys:', Object.keys(piece));
+        console.log('[Board Advisor] Piece has monster object:', !!piece.monster);
+        if (piece.monster) {
+          console.log('[Board Advisor] Monster object keys:', Object.keys(piece.monster));
+        }
+        console.log('[Board Advisor] Piece equipment data:', {
+          equipId: piece.equipId,
+          equipment: piece.equipment,
+          equipmentName: piece.equipmentName,
+          equipmentTier: piece.equipmentTier,
+          equipmentStat: piece.equipmentStat,
+          tier: piece.tier,
+          level: piece.level
+        });
+        
+        // Debug: Check if this piece has Board Analyzer equipment data
+        if (piece.equipment && typeof piece.equipment === 'object') {
+          console.log('[Board Advisor] Board Analyzer equipment object:', piece.equipment);
+          console.log('[Board Advisor] Equipment tier from Board Analyzer:', piece.equipment.tier);
+        }
         
         // Try multiple ways to get monster ID
         const monsterId = piece.monsterId || 
                          piece.gameId || 
                          piece.monster?.id || 
                          piece.monster?.name;
+        
+        // Try multiple ways to get equipment tier
+        let equipmentTier = piece.equipmentTier || 
+                           piece.equipment?.tier || 
+                           piece.equipment?.level ||
+                           piece.tier; // fallback to piece tier if equipment tier not available
+        
+        // If no tier found, try to get it from the stored playerEquipment data
+        if (!equipmentTier && piece.equipId && bestRun.playerEquipment) {
+          const storedEquipment = bestRun.playerEquipment.find(e => String(e.id) === String(piece.equipId));
+          if (storedEquipment) {
+            equipmentTier = storedEquipment.tier;
+            console.log(`[Board Advisor] Found equipment tier ${equipmentTier} from stored playerEquipment for ${piece.equipId}`);
+          }
+        }
+        
+        // If no tier found, try to parse it from equipment name (e.g., "Boots of Haste (T5)")
+        if (!equipmentTier && piece.equipmentName) {
+          const tierMatch = piece.equipmentName.match(/\(T(\d+)\)/);
+          if (tierMatch) {
+            equipmentTier = parseInt(tierMatch[1]);
+            console.log(`[Board Advisor] Parsed tier ${equipmentTier} from equipment name: ${piece.equipmentName}`);
+          }
+        }
+        
+        // Try to get equipment name from stored playerEquipment data if not available
+        let equipmentName = piece.equipmentName;
+        if (!equipmentName && piece.equipId && bestRun.playerEquipment) {
+          const storedEquipment = bestRun.playerEquipment.find(e => String(e.id) === String(piece.equipId));
+          if (storedEquipment && storedEquipment.gameId && globalThis.state?.utils?.getEquipment) {
+            try {
+              const equipmentData = globalThis.state.utils.getEquipment(storedEquipment.gameId);
+              if (equipmentData?.metadata?.name) {
+                equipmentName = equipmentData.metadata.name;
+                console.log(`[Board Advisor] Found equipment name "${equipmentName}" from stored playerEquipment for ${piece.equipId}`);
+              }
+            } catch (e) {
+              console.log(`[Board Advisor] Failed to get equipment name from stored data for ${piece.equipId}:`, e);
+            }
+          }
+        }
+        
+        // Fallback to getEquipmentName if still no name
+        if (!equipmentName && piece.equipId) {
+          equipmentName = getEquipmentName(piece.equipId);
+        }
+        
+        // Clean equipment name by removing tier information if it was parsed from the name
+        let cleanEquipmentName = equipmentName;
+        if (equipmentTier && equipmentName && equipmentName.includes(`(T${equipmentTier})`)) {
+          cleanEquipmentName = equipmentName.replace(` (T${equipmentTier})`, '');
+          console.log(`[Board Advisor] Cleaned equipment name: "${equipmentName}" -> "${cleanEquipmentName}"`);
+        }
+        
+        // Extract monster stats from the run data
+        let monsterStats = piece.monsterStats;
+        if (!monsterStats && piece.monster) {
+          // Try to get stats from the monster object in the piece
+          monsterStats = {
+            hp: piece.monster.hp,
+            ad: piece.monster.ad,
+            ap: piece.monster.ap,
+            armor: piece.monster.armor,
+            magicResist: piece.monster.magicResist
+          };
+          console.log(`[Board Advisor] Found monster stats from piece.monster for ${monsterId}:`, monsterStats);
+        }
+        
+        if (!monsterStats) {
+          // If no gene data in run, assume maxed genes (20 each) for the check
+          monsterStats = {
+            hp: 20,
+            ad: 20,
+            ap: 20,
+            armor: 20,
+            magicResist: 20
+          };
+          console.log(`[Board Advisor] No gene data in run for ${monsterId}, assuming maxed genes for modification check`);
+        }
         
         const convertedPiece = {
           monsterId: monsterId,
@@ -4133,8 +5429,9 @@ class AnalysisEngine {
           tier: piece.tier,
           level: piece.level,
           monsterName: piece.monsterName,
-          equipmentName: piece.equipmentName,
-          monsterStats: piece.monsterStats
+          equipmentName: cleanEquipmentName,
+          equipmentTier: equipmentTier,
+          monsterStats: monsterStats
         };
         console.log('[Board Advisor] Converted piece:', convertedPiece);
         return convertedPiece;
@@ -4220,11 +5517,16 @@ class AnalysisEngine {
       // Get runs from IndexedDB (sandbox data) - ONLY for current room
       console.log('[Board Advisor] Getting runs from IndexedDB...');
       const roomRuns = await getSandboxRunsForRoom(currentRoomId, 50); // Get top 50 runs for current room only
-      console.log(`[Board Advisor] Got ${roomRuns.length} runs from current room ${currentRoomId}`);
+      console.log(`[Board Advisor] Got ${roomRuns.length} runs from IndexedDB for room ${currentRoomId}`);
       
       if (roomRuns.length > 0) {
         const ticks = roomRuns.map(run => run.ticks).filter(t => t > 0).sort((a, b) => a - b);
         console.log(`[Board Advisor] Room ${currentRoomId} ticks range: ${ticks[0]} - ${ticks[ticks.length - 1]} (best: ${ticks[0]})`);
+        
+        // Log the first few runs to see their sources and timestamps
+        roomRuns.slice(0, 3).forEach((run, index) => {
+          console.log(`[Board Advisor] IndexedDB run ${index + 1}: timestamp=${run.timestamp}, source=${run.source}, ticks=${run.ticks}`);
+        });
       }
       
       allRuns.push(...roomRuns);
@@ -4240,6 +5542,11 @@ class AnalysisEngine {
       );
       allRuns.push(...runTrackerRuns);
       console.log(`[Board Advisor] Got ${runTrackerRuns.length} runs from RunTracker for room ${currentRoomId}`);
+      
+      // Log the RunTracker runs to see their sources and timestamps
+      runTrackerRuns.forEach((run, index) => {
+        console.log(`[Board Advisor] RunTracker run ${index + 1}: timestamp=${run.timestamp}, source=${run.source}, ticks=${run.ticks}`);
+      });
     } catch (error) {
       console.warn('[Board Advisor] Could not get RunTracker data:', error);
     }
@@ -4534,8 +5841,29 @@ class AnalysisEngine {
       
       const completedRuns = allRuns.filter(r => r.completed);
       
+      // For rank points analysis, only consider runs below maxTeamSize
+      let filteredRuns = completedRuns;
+      if (config.focusArea === 'ranks') {
+        const roomId = setup.roomId;
+        const rooms = globalThis.state?.utils?.ROOMS;
+        const roomData = rooms?.find(room => room.id === roomId);
+        const maxTeamSize = roomData?.maxTeamSize;
+        
+        if (maxTeamSize) {
+          filteredRuns = completedRuns.filter(run => {
+            const creatureCount = run.boardSetup ? run.boardSetup.length : 0;
+            return creatureCount < maxTeamSize;
+          });
+          console.log('[Board Advisor] Filtered runs for rank points analysis:', {
+            totalRuns: completedRuns.length,
+            filteredRuns: filteredRuns.length,
+            maxTeamSize: maxTeamSize
+          });
+        }
+      }
+      
       // Sort by focus area (best first) and limit to top 50 runs
-      const sortedRuns = completedRuns.sort((a, b) => {
+      const sortedRuns = filteredRuns.sort((a, b) => {
         if (config.focusArea === 'ticks') {
           return a.ticks - b.ticks;
         } else {
@@ -4546,14 +5874,31 @@ class AnalysisEngine {
       
       const averageTime = top50Runs.length > 0 ? 
         top50Runs.reduce((sum, r) => sum + r.ticks, 0) / top50Runs.length : 0;
-      const successRate = completedRuns.length / allRuns.length;
+      const successRate = filteredRuns.length / allRuns.length;
+      
+      // For rank points analysis, find best time among runs that achieved best points
+      let bestTimeForRankPoints = bestTime;
+      if (config.focusArea === 'ranks' && top50Runs.length > 0) {
+        const bestPoints = Math.max(...top50Runs.map(r => r.rankPoints || 0));
+        const bestPointsRuns = top50Runs.filter(r => r.rankPoints === bestPoints);
+        if (bestPointsRuns.length > 0) {
+          bestTimeForRankPoints = Math.min(...bestPointsRuns.map(r => r.ticks));
+          console.log('[Board Advisor] Best time for rank points analysis:', {
+            bestPoints: bestPoints,
+            bestPointsRuns: bestPointsRuns.length,
+            bestTimeForRankPoints: bestTimeForRankPoints
+          });
+        }
+      }
       
       return {
         hasHistoricalData: true,
-        bestTime: bestTime === Infinity ? null : bestTime,
+        bestTime: bestTimeForRankPoints === Infinity ? null : bestTimeForRankPoints,
         averageTime: averageTime,
         successRate: successRate,
-        totalRuns: Math.min(50, totalRuns)
+        totalRuns: Math.min(50, filteredRuns.length),
+        bestPoints: config.focusArea === 'ranks' && top50Runs.length > 0 ? 
+          Math.max(...top50Runs.map(r => r.rankPoints || 0)) : undefined
       };
     }
     
@@ -4640,14 +5985,33 @@ class AnalysisEngine {
 
     if (bestSimilar && currentAnalysis.bestTime && 
         bestSimilar.pattern.bestTime < currentAnalysis.bestTime) {
-      recommendations.push({
-        type: 'improvement',
-        title: 'Better Setup Available',
-        message: `Found a similar setup that performed ${Math.round(currentAnalysis.bestTime - bestSimilar.pattern.bestTime)} ticks faster`,
-        priority: 'high',
-        expectedImprovement: currentAnalysis.bestTime - bestSimilar.pattern.bestTime,
-        setup: bestSimilar.pattern.setup
-      });
+      
+      if (config.focusArea === 'ranks') {
+        // For rank points analysis, focus on rank points improvement, not time
+        const currentPoints = currentAnalysis.bestPoints || 0;
+        const similarPoints = bestSimilar.pattern.bestPoints || 0;
+        
+        if (similarPoints > currentPoints) {
+          recommendations.push({
+            type: 'improvement',
+            title: 'Better Setup Available (Rank Points)',
+            message: `Found a similar setup that achieved ${similarPoints} rank points (vs your current ${currentPoints})`,
+            priority: 'high',
+            expectedImprovement: similarPoints - currentPoints,
+            setup: bestSimilar.pattern.setup
+          });
+        }
+      } else {
+        // For ticks analysis, focus on time improvement
+        recommendations.push({
+          type: 'improvement',
+          title: 'Better Setup Available',
+          message: `Found a similar setup that performed ${Math.round(currentAnalysis.bestTime - bestSimilar.pattern.bestTime)} ticks faster`,
+          priority: 'high',
+          expectedImprovement: currentAnalysis.bestTime - bestSimilar.pattern.bestTime,
+          setup: bestSimilar.pattern.setup
+        });
+      }
     }
 
     // Analyze monster positioning
@@ -5617,11 +6981,24 @@ class AnalysisEngine {
     const failedRuns = boardAnalyzerRuns.filter(r => !r.completed);
     
     // Generate recommendations based on selected focus area
+    console.log('[Board Advisor] About to generate recommendations:', {
+      focusArea: config.focusArea,
+      completedRunsLength: completedRuns.length,
+      allRunsLength: allRuns.length,
+      sampleCompletedRuns: completedRuns.slice(0, 2).map(r => ({ 
+        completed: r.completed, 
+        rankPoints: r.rankPoints, 
+        ticks: r.ticks 
+      }))
+    });
+    
     if (config.focusArea === 'ticks') {
       const ticksRecommendations = await this.generateTicksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison);
       recommendations.push(...ticksRecommendations);
     } else if (config.focusArea === 'ranks') {
+      console.log('[Board Advisor] Calling generateRanksRecommendations...');
       const ranksRecommendations = await this.generateRanksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison);
+      console.log('[Board Advisor] generateRanksRecommendations returned:', ranksRecommendations.length, 'recommendations');
       recommendations.push(...ranksRecommendations);
     }
     
@@ -5803,10 +7180,34 @@ class AnalysisEngine {
           
           if (currentBoard && currentBoard.boardSetup) {
             const creatureCount = currentBoard.boardSetup.length;
-            if (creatureCount < 6) {
-              specificSuggestions.push(`Consider adding more creatures (you have ${creatureCount}/6)`);
-            } else if (creatureCount === 6) {
-              specificSuggestions.push('Try different creature combinations or equipment');
+            // Get the room's actual max team size instead of hardcoding 6
+            const roomId = currentBoard.roomId;
+            // Get max team size from room data (ROOMS is an array, not an object)
+            const rooms = globalThis.state?.utils?.ROOMS;
+            const roomData = rooms?.find(room => room.id === roomId);
+            const maxTeamSize = roomData?.maxTeamSize;
+            console.log('[Board Advisor] Room data for', roomId, ':', roomData);
+            console.log('[Board Advisor] maxTeamSize from room data:', maxTeamSize);
+            
+            if (creatureCount < maxTeamSize) {
+              // Below max team size = rank points run
+              if (config.focusArea === 'ranks') {
+                specificSuggestions.push(`You're running a rank points strategy (${creatureCount}/${maxTeamSize} creatures) - this is optimal for maximizing points`);
+              } else {
+                specificSuggestions.push(`Consider adding more creatures for speedrun (you have ${creatureCount}/${maxTeamSize}) - current setup is optimized for rank points`);
+              }
+            } else if (creatureCount === maxTeamSize) {
+              // At max team size = speedrun (ticks run)
+              if (config.focusArea === 'ticks') {
+                specificSuggestions.push(`You're running a speedrun strategy (${creatureCount}/${maxTeamSize} creatures) - this is optimal for minimizing ticks`);
+              } else {
+                // For rank points focus, recommend reducing team size (minimum 1 creature)
+                if (creatureCount > 1) {
+                  specificSuggestions.push(`Consider reducing team size for rank points (you have ${creatureCount}/${maxTeamSize}) - fewer creatures = higher rank points`);
+                } else {
+                  specificSuggestions.push(`You're at minimum team size (${creatureCount}/${maxTeamSize}) - current setup is optimal for rank points`);
+                }
+              }
             }
           }
           
@@ -5868,7 +7269,16 @@ class AnalysisEngine {
   generateRanksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison = null) {
     const recommendations = [];
     
-    if (completedRuns.length === 0) return recommendations;
+    console.log('[Board Advisor] generateRanksRecommendations called with:', {
+      completedRunsLength: completedRuns.length,
+      similarSetupsLength: similarSetups?.length || 0,
+      currentBoard: !!currentBoard
+    });
+    
+    if (completedRuns.length === 0) {
+      console.log('[Board Advisor] No completed runs, returning empty recommendations');
+      return recommendations;
+    }
     
     // Rank points analysis - adjust thresholds based on actual data
     const maxPoints = Math.max(...completedRuns.map(r => r.rankPoints));
@@ -5876,21 +7286,28 @@ class AnalysisEngine {
     const highPointRuns = completedRuns.filter(r => r.rankPoints >= highPointThreshold);
     const highPointRate = highPointRuns.length / completedRuns.length;
     
-    if (highPointRate < 0.5 && maxPoints > 1) {
-      recommendations.push({
-        type: 'points',
-        title: 'Improve High Point Rate',
-        message: `Only ${Math.round(highPointRate * 100)}% of your runs achieve ${highPointThreshold}+ points.`,
-        suggestion: 'Optimize monster stats and positioning to increase high point success rate.',
-        priority: 'high',
-        focusArea: 'ranks'
-      });
-    }
+    console.log('[Board Advisor] Rank points analysis:', {
+      maxPoints,
+      highPointThreshold,
+      highPointRuns: highPointRuns.length,
+      highPointRate,
+      sampleRankPoints: completedRuns.slice(0, 3).map(r => r.rankPoints)
+    });
+    
+    // Removed "Improve High Point Rate" - rank points are about achieving best score once, not farming
     
     // Rank points analysis
     const avgPoints = completedRuns.reduce((sum, r) => sum + r.rankPoints, 0) / completedRuns.length;
     
-    if (avgPoints < maxPoints * 0.8) {
+    // Only show this recommendation if current setup is below maxTeamSize
+    // (if at maxTeamSize, the setup is already optimized for speed, not rank points)
+    const roomId = currentBoard.roomId;
+    const rooms = globalThis.state?.utils?.ROOMS;
+    const roomData = rooms?.find(room => room.id === roomId);
+    const maxTeamSize = roomData?.maxTeamSize;
+    const currentCreatureCount = currentBoard.boardSetup.length;
+    
+    if (avgPoints < maxPoints * 0.8 && currentCreatureCount < maxTeamSize) {
       recommendations.push({
         type: 'points',
         title: 'Maximize Rank Points',
@@ -5901,19 +7318,69 @@ class AnalysisEngine {
       });
     }
     
-    // High rank points consistency
-    const highRankRuns = completedRuns.filter(r => r.rankPoints >= maxPoints * 0.9);
-    const highRankRate = highRankRuns.length / completedRuns.length;
+    // Removed "Improve High Rank Consistency" - rank points are about achieving best score once, not consistency
     
-    if (highRankRate < 0.3) {
-      recommendations.push({
-        type: 'consistency',
-        title: 'Improve High Rank Consistency',
-        message: `Only ${Math.round(highRankRate * 100)}% of runs achieve 90%+ of your best rank points.`,
-        suggestion: 'Focus on consistent high-damage strategies and optimal monster positioning.',
-        priority: 'medium',
-        focusArea: 'ranks'
+    // Team size optimization for rank points
+    if (currentBoard && currentBoard.boardSetup) {
+      const creatureCount = currentBoard.boardSetup.length;
+      const roomId = currentBoard.roomId;
+      
+      // Get max team size from room data (ROOMS is an array, not an object)
+      const rooms = globalThis.state?.utils?.ROOMS;
+      const roomData = rooms?.find(room => room.id === roomId);
+      const maxTeamSize = roomData?.maxTeamSize;
+      console.log('[Board Advisor] Room data for', roomId, ':', roomData);
+      console.log('[Board Advisor] maxTeamSize from room data:', maxTeamSize);
+      
+      console.log('[Board Advisor] Team size optimization check:', {
+        creatureCount,
+        maxTeamSize,
+        roomId,
+        isMaxTeamSize: creatureCount === maxTeamSize,
+        isGreaterThanOne: creatureCount > 1
       });
+      
+      // Find the best rank points run (regardless of current team size)
+      const allRankRuns = completedRuns.filter(r => 
+        r.boardSetup && r.boardSetup.length > 0 && r.rankPoints > 0
+      );
+      
+      if (allRankRuns.length > 0) {
+        // Sort by rank points (highest first)
+        const bestRankRun = allRankRuns.sort((a, b) => b.rankPoints - a.rankPoints)[0];
+        
+        // Only show recommendation if the best run is different from current setup
+        const currentSetupHash = currentBoard.boardSetup ? 
+          currentBoard.boardSetup.map(p => `${p.tileIndex}-${p.monsterId || p.gameId}`).sort().join(',') : '';
+        const bestSetupHash = bestRankRun.boardSetup ? 
+          bestRankRun.boardSetup.map(p => `${p.tileIndex}-${p.monsterId || p.gameId}`).sort().join(',') : '';
+        
+        if (currentSetupHash !== bestSetupHash) {
+          recommendations.push({
+            type: 'improvement',
+            title: 'Best Available Setup (Rank Points)',
+            message: `Found a ${bestRankRun.boardSetup.length}-creature setup that achieved ${bestRankRun.rankPoints} rank points (vs your current ${creatureCount}-creature setup)`,
+            suggestion: 'Use the recommended setup below to achieve the best rank points.',
+            priority: 'high',
+            focusArea: 'ranks',
+            setup: bestRankRun.boardSetup,
+            predictedPoints: bestRankRun.rankPoints,
+            predictedTime: bestRankRun.ticks
+          });
+        }
+      }
+      
+      // Also show team size optimization for maxTeamSize setups
+      if (creatureCount === maxTeamSize && creatureCount > 1) {
+        recommendations.push({
+          type: 'improvement',
+          title: 'Optimize Team Size for Rank Points',
+          message: `You have ${creatureCount}/${maxTeamSize} creatures - this is optimized for speed, not rank points`,
+          suggestion: `Consider reducing to ${Math.max(1, creatureCount - 1)} creatures for higher rank points. Fewer creatures = higher rank points.`,
+          priority: 'high',
+          focusArea: 'ranks'
+        });
+      }
     }
     
     // Setup optimization for ranks
@@ -5935,6 +7402,11 @@ class AnalysisEngine {
         });
       }
     }
+    
+    console.log('[Board Advisor] generateRanksRecommendations returning:', {
+      recommendationCount: recommendations.length,
+      recommendationTypes: recommendations.map(r => ({ type: r.type, focusArea: r.focusArea, title: r.title }))
+    });
     
     return recommendations;
   }
@@ -6180,67 +7652,6 @@ if (panel) {
   console.warn('[Board Advisor] Failed to create panel during initialization');
 }
 
-// Helper function for consistent box styling
-function createStyledBox(content, options = {}) {
-  const {
-    marginBottom = '8px',
-    padding = '8px',
-    borderColor = '#3A404A',
-    borderRadius = '4px'
-  } = options;
-  
-  return `
-    <div style="
-      margin-bottom: ${marginBottom};
-      padding: ${padding};
-      background-image: url(/_next/static/media/background-dark.95edca67.png);
-      background-repeat: repeat;
-      background-color: #323234;
-      border: 1px solid ${borderColor};
-      border-radius: ${borderRadius};
-    ">
-      ${content}
-    </div>
-  `;
-}
-
-// Button styling functions from Hunt Analyzer
-function createStyledButton(text) {
-  const button = document.createElement("button");
-  button.textContent = text;
-  button.style.padding = "6px 12px";
-  button.style.border = "1px solid #3A404A";
-  button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
-  button.style.color = "#ABB2BF";
-  button.style.fontSize = "9px";
-  button.style.cursor = "pointer";
-  button.style.borderRadius = "5px";
-  button.style.transition = "all 0.2s ease";
-  button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-  button.style.flexGrow = '1';
-
-  button.onmouseover = () => {
-    button.style.background = "linear-gradient(to bottom, #6B7280, #4B5563)";
-    button.style.boxShadow = '0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2)';
-    button.style.transform = 'translateY(-1px)';
-  };
-  button.onmouseout = () => {
-    button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
-    button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-    button.style.transform = 'translateY(0)';
-  };
-  button.onmousedown = () => {
-    button.style.boxShadow = 'inset 0 2px 5px rgba(0,0,0,0.5)';
-    button.style.transform = 'translateY(1px)';
-  };
-  button.onmouseup = () => {
-    button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-    button.style.transform = 'translateY(0)';
-  };
-
-  return button;
-}
-
 function createStyledIconButton(iconText) {
   const button = document.createElement("button");
   button.textContent = iconText;
@@ -6339,7 +7750,6 @@ function scheduleAutoFit() {
   }, 150);
 }
 
-// Hunt Analyzer-style resizing and dragging functionality
 function addResizeAndDragFunctionality(panel, header) {
   // --- NATIVE-LIKE RESIZABLE PANEL LOGIC ---
   const edgeSize = 8; // px, area near edge/corner to trigger resize
@@ -7024,8 +8434,19 @@ function createFocusAreasSection() {
   
   // Add event listener for toggle changes
   toggleInput.addEventListener('change', async (e) => {
-    config.focusArea = e.target.checked ? 'ranks' : 'ticks';
+    const newFocusArea = e.target.checked ? 'ranks' : 'ticks';
+    const oldFocusArea = config.focusArea;
+    config.focusArea = newFocusArea;
     updateToggleLabels();
+    
+    // Clear old highlighting when focus area changes
+    if (oldFocusArea !== newFocusArea) {
+      console.log('[Board Advisor] Focus area changed, clearing old highlighting');
+      cleanupTileHighlights();
+      currentRecommendedSetup = null;
+      originalSpecificSetup = null; // Clear original setup to prevent old highlighting from being restored
+      placedRecommendedPieces.clear();
+    }
     
     
     // Update panel display immediately if panel is open
@@ -7200,7 +8621,6 @@ function createRecommendationsSection() {
   return section;
 }
 
-// Function to show/hide recommendations section
 function setRecommendationsSectionVisibility(visible) {
   const recommendationsSection = document.getElementById('recommendations-section');
   if (recommendationsSection) {
@@ -8098,6 +9518,166 @@ function showBasicAnalysis(currentBoard) {
   });
 }
 
+// Function to pause analysis during deletion
+function pauseAnalysisForDeletion() {
+  console.log('[Board Advisor] Pausing analysis for deletion');
+  isDeleting = true;
+  
+  // Clear any pending analysis
+  if (analysisTimeout) {
+    clearTimeout(analysisTimeout);
+    analysisTimeout = null;
+  }
+  
+  // Set a timeout to resume analysis after deletion
+  deletionAnalysisTimeout = setTimeout(() => {
+    console.log('[Board Advisor] Resuming analysis after deletion pause');
+    isDeleting = false;
+    deletionAnalysisTimeout = null;
+  }, 3000); // 3 second pause
+}
+
+// Function to resume analysis immediately
+function resumeAnalysisAfterDeletion() {
+  console.log('[Board Advisor] Resuming analysis immediately after deletion');
+  isDeleting = false;
+  
+  if (deletionAnalysisTimeout) {
+    clearTimeout(deletionAnalysisTimeout);
+    deletionAnalysisTimeout = null;
+  }
+}
+
+// Function to show deletion feedback to user
+function showDeletionFeedback(message, type = 'info') {
+  try {
+    // Remove any existing feedback
+    const existingFeedback = document.querySelector('.board-advisor-deletion-feedback');
+    if (existingFeedback) {
+      existingFeedback.remove();
+    }
+    
+    // Create feedback element
+    const feedback = document.createElement('div');
+    feedback.className = 'board-advisor-deletion-feedback';
+    feedback.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 10000;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      transition: all 0.3s ease;
+      max-width: 300px;
+      word-wrap: break-word;
+    `;
+    
+    // Set colors based on type
+    switch (type) {
+      case 'success':
+        feedback.style.backgroundColor = '#10B981';
+        feedback.style.color = 'white';
+        feedback.style.border = '1px solid #059669';
+        break;
+      case 'warning':
+        feedback.style.backgroundColor = '#F59E0B';
+        feedback.style.color = 'white';
+        feedback.style.border = '1px solid #D97706';
+        break;
+      case 'error':
+        feedback.style.backgroundColor = '#EF4444';
+        feedback.style.color = 'white';
+        feedback.style.border = '1px solid #DC2626';
+        break;
+      default: // info
+        feedback.style.backgroundColor = '#3B82F6';
+        feedback.style.color = 'white';
+        feedback.style.border = '1px solid #2563EB';
+    }
+    
+    feedback.textContent = message;
+    document.body.appendChild(feedback);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+      if (feedback.parentNode) {
+        feedback.style.opacity = '0';
+        feedback.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (feedback.parentNode) {
+            feedback.remove();
+          }
+        }, 300);
+      }
+    }, 3000);
+    
+  } catch (error) {
+    console.error('[Board Advisor] Error showing deletion feedback:', error);
+  }
+}
+
+// Function to refresh UI after deletion
+async function refreshUIAfterDeletion() {
+  try {
+    console.log('[Board Advisor] Starting comprehensive UI refresh after deletion...');
+    
+    // Clear all UI state
+    cleanupTileHighlights();
+    currentRecommendedSetup = null;
+    originalSpecificSetup = null;
+    placedRecommendedPieces.clear();
+    
+    // Clear analysis state
+    analysisState.isAnalyzing = false;
+    analysisState.isDataLoading = false;
+    analysisState.currentAnalysis = null;
+    
+    // Reset analysis timing to force fresh analysis
+    lastAnalysisTime = 0;
+    
+    // Clear any pending timeouts
+    if (analysisTimeout) {
+      clearTimeout(analysisTimeout);
+      analysisTimeout = null;
+    }
+    
+    // Clear all cached data more aggressively
+    runTrackerData = null;
+    if (performanceTracker && performanceTracker.patterns) {
+      performanceTracker.patterns.clear();
+    }
+    
+    // Force refresh all data sources
+    console.log('[Board Advisor] Refreshing all data sources for UI update...');
+    await loadAllDataSources(false, true); // Force refresh
+    
+    // Update the panel with fresh data
+    if (panelState.isOpen) {
+      console.log('[Board Advisor] Updating panel with fresh data...');
+      await refreshPanelData(true); // Force refresh to clear cached data
+    }
+    
+    // Trigger fresh analysis with updated data
+    console.log('[Board Advisor] Triggering fresh analysis after UI refresh...');
+    setTimeout(() => {
+      debouncedAnalyzeCurrentBoard();
+    }, 300); // Slightly longer delay to ensure all data is refreshed
+    
+    console.log('[Board Advisor] UI refresh completed successfully');
+  } catch (error) {
+    console.error('[Board Advisor] Error during UI refresh after deletion:', error);
+    
+    // Fallback: just trigger analysis even if refresh fails
+    setTimeout(() => {
+      debouncedAnalyzeCurrentBoard();
+    }, 500);
+  }
+}
+
 function debouncedAnalyzeCurrentBoard() {
   const now = Date.now();
   
@@ -8112,9 +9692,14 @@ function debouncedAnalyzeCurrentBoard() {
   
   // Note: analysisState.isAnalyzing is always reset to false at the start of this function
   
-  // Don't start analysis if UI is loading
+  // Don't start analysis if UI is loading or if deletion is in progress
   if (analysisState.isUILoading) {
     console.log('[Board Advisor] Analysis skipped - UI loading in progress');
+    return;
+  }
+  
+  if (isDeleting) {
+    console.log('[Board Advisor] Analysis skipped - deletion in progress');
     return;
   }
   
@@ -8138,6 +9723,57 @@ function debouncedAnalyzeCurrentBoard() {
       analysisState.isAnalyzing = false;
     }
   }, 5000); // 5 second timeout for better responsiveness
+  
+  analyzeCurrentBoard().finally(() => {
+    clearTimeout(timeoutId);
+    analysisState.isAnalyzing = false;
+  });
+}
+
+// Immediate analysis with shorter debounce for better responsiveness after run completion
+function debouncedAnalyzeCurrentBoardImmediate() {
+  const now = Date.now();
+  const IMMEDIATE_DEBOUNCE_TIME = 100; // Much shorter debounce for immediate response
+  
+  // Always reset analysis state before starting - prevents stuck states
+  analysisState.isAnalyzing = false;
+  
+  // Clear any existing timeout
+  if (analysisTimeout) {
+    clearTimeout(analysisTimeout);
+    analysisTimeout = null;
+  }
+  
+  // Don't start analysis if UI is loading or if deletion is in progress
+  if (analysisState.isUILoading) {
+    console.log('[Board Advisor] Immediate analysis skipped - UI loading in progress');
+    return;
+  }
+  
+  if (isDeleting) {
+    console.log('[Board Advisor] Immediate analysis skipped - deletion in progress');
+    return;
+  }
+  
+  if (now - lastAnalysisTime < IMMEDIATE_DEBOUNCE_TIME) {
+    console.log('[Board Advisor] Immediate analysis too soon, debouncing request');
+    analysisTimeout = setTimeout(() => {
+      debouncedAnalyzeCurrentBoardImmediate();
+    }, IMMEDIATE_DEBOUNCE_TIME - (now - lastAnalysisTime));
+    return;
+  }
+  
+  // Proceed with analysis
+  analysisState.isAnalyzing = true;
+  lastAnalysisTime = now;
+  
+  // Add timeout to prevent analysis from getting stuck
+  const timeoutId = setTimeout(() => {
+    if (analysisState.isAnalyzing) {
+      console.warn('[Board Advisor] Immediate analysis timeout - clearing analysis flag');
+      analysisState.isAnalyzing = false;
+    }
+  }, 3000); // Shorter timeout for immediate analysis
   
   analyzeCurrentBoard().finally(() => {
     clearTimeout(timeoutId);
@@ -8258,8 +9894,8 @@ async function updatePanelWithAnalysis(analysis) {
     return;
   }
   
-  // Check if analysis has valid data structure
-  if (!analysis || (!analysis.hasData && !analysis.currentAnalysis?.hasHistoricalData)) {
+  // Check if analysis has valid data structure (allow basic analysis for post-deletion refresh)
+  if (!analysis || (!analysis.hasData && !analysis.currentAnalysis?.hasHistoricalData && !analysis.roomRuns)) {
     console.log('[Board Advisor] Analysis has no valid data, skipping UI update');
     return;
   }
@@ -8318,7 +9954,6 @@ async function updatePanelWithAnalysis(analysis) {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
           <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'}</span></div>
           <div><strong>Predicted Points:</strong> <span style="color: #98C379;">${analysis.prediction.predictedPoints || 'Unknown'}</span></div>
-          <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
           <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">${analysis.similarSetups?.length || 0} found</span></div>
         </div>
       `;
@@ -8449,7 +10084,6 @@ async function updatePanelWithAnalysis(analysis) {
       historicalContent = `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
           <div><strong>Best Time:</strong> <span style="color: #98C379;">${historicalData.bestTime || 'Unknown'}</span></div>
-          <div><strong>Success Rate:</strong> <span style="color: ${successColor};">${successRate}%</span></div>
           <div><strong>Best Points:</strong> <span style="color: #61AFEF;">${historicalData.bestPoints || 'Unknown'}</span></div>
           <div><strong>Total Runs:</strong> <span style="color: #61AFEF;">${historicalData.totalRuns}</span></div>
         </div>
@@ -8486,12 +10120,23 @@ async function updatePanelWithAnalysis(analysis) {
   
   // Update recommendations section with enhanced display (filtered by focus area)
   if (analysis.recommendations && analysis.recommendations.length > 0) {
+    console.log('[Board Advisor] Filtering recommendations:', {
+      totalRecommendations: analysis.recommendations.length,
+      currentFocusArea: config.focusArea,
+      recommendationTypes: analysis.recommendations.map(r => ({ type: r.type, focusArea: r.focusArea }))
+    });
+    
     // Filter recommendations by focus area
     const filteredRecommendations = analysis.recommendations.filter(rec => {
       // Always show leaderboard recommendations
       if (rec.type === 'leaderboard') return true;
       // Show recommendations that match the current focus area or are for both
       return rec.focusArea === config.focusArea || rec.focusArea === 'both' || !rec.focusArea;
+    });
+    
+    console.log('[Board Advisor] Filtered recommendations:', {
+      filteredCount: filteredRecommendations.length,
+      filteredTypes: filteredRecommendations.map(r => ({ type: r.type, focusArea: r.focusArea }))
     });
     
     
@@ -8540,7 +10185,18 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Compact Tips & Strategies section
-    const hasRecommendations = groupedRecs.improvement.length > 0 || groupedRecs.equipment.length > 0 || groupedRecs.creature.length > 0 || groupedRecs.other.length > 0;
+    console.log('[Board Advisor] Grouped recommendations:', {
+      leaderboard: groupedRecs.leaderboard.length,
+      improvement: groupedRecs.improvement.length,
+      positioning: groupedRecs.positioning.length,
+      equipment: groupedRecs.equipment.length,
+      creature: groupedRecs.creature.length,
+      other: groupedRecs.other.length
+    });
+    
+    const hasRecommendations = groupedRecs.leaderboard.length > 0 || groupedRecs.improvement.length > 0 || groupedRecs.equipment.length > 0 || groupedRecs.creature.length > 0 || groupedRecs.other.length > 0;
+    
+    console.log('[Board Advisor] Has recommendations check:', hasRecommendations);
     
     if (hasRecommendations) {
       recsHTML += '<div style="margin-bottom: 8px;">';
@@ -8549,10 +10205,22 @@ async function updatePanelWithAnalysis(analysis) {
       if (groupedRecs.improvement.length > 0) {
       groupedRecs.improvement.forEach(rec => {
           if (rec.title.includes('Best Available Setup') && rec.setup) {
-            recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E06C75; border-radius: 4px;">
-          <div style="font-weight: 600; color: #E06C75; font-size: 11px;">${rec.title}</div>
+            // Set up highlighting for the best setup
+            console.log('[Board Advisor] Setting up highlighting for best setup:', rec.setup);
+            setTimeout(() => {
+              highlightRecommendedTiles(rec.setup);
+            }, 100);
+            
+            recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E06C75; border-radius: 4px; position: relative;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 600; color: #E06C75; font-size: 11px;">${rec.title}</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div class="board-advisor-delete-confirm" style="font-size: 10px; color: #f44336; display: none; font-weight: 600;">Confirm?</div>
+              <div class="board-advisor-delete-btn" style="cursor: pointer; color: #f44336; font-size: 14px; padding: 2px 4px; border-radius: 3px; transition: all 0.2s ease;" title="Deletes all runs with this setup, regardless of ticks" data-run-id="${rec.bestRun?.id || rec.bestRun?.timestamp || 'unknown'}" data-run-timestamp="${rec.bestRun?.timestamp || 'unknown'}" data-confirmed="false">🗑️</div>
+            </div>
+          </div>
               <div style="font-size: 10px; margin-top: 2px; color: #ABB2BF;">${rec.description || rec.message || 'Use this setup to achieve better performance'}</div>
-              <div style="font-size: 9px; color: #98C379; margin-top: 2px;">💡 ${rec.setup.map(piece => {
+              <div style="font-size: 9px; color: #98C379; margin-top: 2px;">${rec.setup.sort((a, b) => (a.tileIndex || a.tile || 0) - (b.tileIndex || b.tile || 0)).map(piece => {
                   const tile = piece.tileIndex || piece.tile || '?';
                 // Strip INITIAL_ prefix if present for proper name resolution
                 let monsterId = piece.monsterId;
@@ -8575,8 +10243,27 @@ async function updatePanelWithAnalysis(analysis) {
                            'Unknown';
                 }
                 const equipment = piece.equipmentName || (piece.equipId ? getEquipmentName(piece.equipId) : 'No Equipment');
-                return `Tile ${tile}: ${monster} + ${equipment}`;
-              }).join(' | ')}</div>
+                
+                // Add tier information to monster if available and not null
+                let monsterDisplay = monster;
+                if (piece.tier !== undefined && piece.tier !== null) {
+                  monsterDisplay += ` (T${piece.tier})`;
+                }
+                
+                // Add modification indicator if creature is not maxed
+                if (!isCreatureMaxed(piece)) {
+                  const modifications = getCreatureModifications(piece);
+                  monsterDisplay += ` (modified) ${modifications}`;
+                }
+                
+                // Add tier information to equipment if available
+                let equipmentDisplay = equipment;
+                if (piece.equipmentTier !== undefined) {
+                  equipmentDisplay += ` (T${piece.equipmentTier})`;
+                }
+                
+                return `Tile ${tile}: ${monsterDisplay} + ${equipmentDisplay}`;
+              }).join('<br>')}</div>
             </div>`;
           }
         });
@@ -8715,6 +10402,132 @@ async function updatePanelWithAnalysis(analysis) {
     try {
       recommendationsDisplay.innerHTML = recsHTML;
       console.log('[Board Advisor] Recommendations HTML set successfully');
+      
+      // Add event listeners for delete buttons
+      const deleteButtons = recommendationsDisplay.querySelectorAll('.board-advisor-delete-btn');
+      console.log(`[Board Advisor] Found ${deleteButtons.length} delete buttons to attach listeners to`);
+      
+      // Attach listeners directly to each delete button
+      const roomId = analysis.roomId || analysis.currentBoard?.roomId || (window.analysis?.currentBoard?.roomId);
+      console.log('[Board Advisor] Room ID for delete buttons:', roomId);
+      deleteButtons.forEach(deleteBtn => {
+        // Remove any existing listeners first
+        deleteBtn.removeEventListener('click', deleteBtn._boardAdvisorClickHandler);
+        
+        // Find the associated confirmation text
+        const confirmText = deleteBtn.parentElement.querySelector('.board-advisor-delete-confirm');
+        
+        // Create the handler function
+        deleteBtn._boardAdvisorClickHandler = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          
+          // Check if this is the first click (show confirmation) or second click (proceed with deletion)
+          const isConfirmed = deleteBtn.getAttribute('data-confirmed') === 'true';
+          
+          if (!isConfirmed) {
+            // First click - show confirmation
+            console.log('[Board Advisor] First click - showing confirmation');
+            deleteBtn.setAttribute('data-confirmed', 'true');
+            if (confirmText) {
+              confirmText.style.display = 'block';
+            }
+            
+            // Auto-reset after 5 seconds if no second click
+            setTimeout(() => {
+              if (deleteBtn.getAttribute('data-confirmed') === 'true') {
+                console.log('[Board Advisor] Confirmation timeout - resetting');
+                deleteBtn.setAttribute('data-confirmed', 'false');
+                if (confirmText) {
+                  confirmText.style.display = 'none';
+                }
+              }
+            }, 5000);
+            return;
+          }
+          
+          // Second click - proceed with deletion
+          console.log('[Board Advisor] Second click - proceeding with deletion');
+          
+          // Show loading state
+          deleteBtn.innerHTML = '🔄 Deleting...';
+          deleteBtn.style.pointerEvents = 'none';
+          
+          // Get run data
+          const runId = deleteBtn.getAttribute('data-run-id');
+          const runTimestamp = deleteBtn.getAttribute('data-run-timestamp');
+          const currentRoomId = roomId || (window.analysis?.currentBoard?.roomId) || 'unknown';
+          
+          if ((runId && runId !== 'unknown') || (runTimestamp && runTimestamp !== 'unknown')) {
+            const deleteId = runId !== 'unknown' ? runId : runTimestamp;
+            
+            // Call the actual deletion function
+            deleteBoardAdvisorRun(currentRoomId, deleteId).then((success) => {
+              if (success) {
+                deleteBtn.innerHTML = '✅ Deleted';
+                deleteBtn.style.color = '#98C379';
+                
+                // Reset confirmation state immediately on success
+                deleteBtn.setAttribute('data-confirmed', 'false');
+                if (confirmText) {
+                  confirmText.style.display = 'none';
+                }
+                
+                // Refresh the panel after a short delay
+                setTimeout(() => {
+                  debouncedAnalyzeCurrentBoard();
+                }, 1000);
+              } else {
+                deleteBtn.innerHTML = '❌ Failed';
+                deleteBtn.style.color = '#E06C75';
+                
+                // Reset button and confirmation state after 2 seconds
+                setTimeout(() => {
+                  deleteBtn.innerHTML = '🗑️';
+                  deleteBtn.style.color = '#f44336';
+                  deleteBtn.style.pointerEvents = 'auto';
+                  deleteBtn.setAttribute('data-confirmed', 'false');
+                  if (confirmText) {
+                    confirmText.style.display = 'none';
+                  }
+                }, 2000);
+              }
+            }).catch((error) => {
+              console.error('[Board Advisor] Deletion error:', error);
+              deleteBtn.innerHTML = '❌ Error';
+              deleteBtn.style.color = '#E06C75';
+              
+              // Reset button and confirmation state after 2 seconds
+              setTimeout(() => {
+                deleteBtn.innerHTML = '🗑️';
+                deleteBtn.style.color = '#f44336';
+                deleteBtn.style.pointerEvents = 'auto';
+                deleteBtn.setAttribute('data-confirmed', 'false');
+                if (confirmText) {
+                  confirmText.style.display = 'none';
+                }
+              }, 2000);
+            });
+          } else {
+            deleteBtn.innerHTML = '❌ Invalid';
+            deleteBtn.style.color = '#E06C75';
+            
+            // Reset button and confirmation state after 2 seconds
+            setTimeout(() => {
+              deleteBtn.innerHTML = '🗑️';
+              deleteBtn.style.color = '#f44336';
+              deleteBtn.style.pointerEvents = 'auto';
+              deleteBtn.setAttribute('data-confirmed', 'false');
+              if (confirmText) {
+                confirmText.style.display = 'none';
+              }
+            }, 2000);
+          }
+        };
+        
+        // Attach the named handler
+        deleteBtn.addEventListener('click', deleteBtn._boardAdvisorClickHandler);
+      });
     } catch (error) {
       console.error('[Board Advisor] Error setting recommendations HTML:', error);
       console.error('[Board Advisor] HTML content that caused error:', recsHTML);
@@ -8811,7 +10624,6 @@ async function updatePanelWithNoDataAnalysis(analysis) {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px;">
             <div><strong>Predicted Time:</strong> <span style="color: #98C379;">${analysis.prediction.predictedTime || 'Unknown'}</span></div>
             <div><strong>Predicted Points:</strong> <span style="color: #98C379;">${analysis.prediction.predictedPoints || 'Unknown'}</span></div>
-            <div><strong>Success Rate:</strong> <span style="color: #98C379;">${analysis.prediction.successRate || 'Unknown'}%</span></div>
             <div><strong>Similar Setups:</strong> <span style="color: #61AFEF;">0 found</span></div>
           </div>
         `;
@@ -8908,51 +10720,66 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   }
   
   // Check if we actually have historical data before showing warning
-  const currentBoard = dataCollector.getCurrentBoardData();
-  if (currentBoard) {
-    const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
-    const isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
-    
-    if (roomRuns.length > 0) {
-      // Show data available message instead of no data warning
-      analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #98C379; border-radius: 4px;">
-          <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>📊</span>
-            <span>Historical Data Available</span>
-          </div>
-          <div style="font-size: 11px; color: #ABB2BF;">
-            Found ${roomRuns.length} runs for this map. Analysis and recommendations are being processed.
-          </div>
-        </div>
-      `;
-    } else if (isBoardEmpty) {
-      // Show empty board message
-      analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
-          <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>📋</span>
-            <span>Empty Board</span>
-          </div>
-          <div style="font-size: 11px; color: #ABB2BF;">
-            Place creatures on the board to get analysis and recommendations for your setup.
-          </div>
-        </div>
-      `;
+  // Use basic analysis data if available (for post-deletion refresh), otherwise get fresh data
+  let roomRuns, isBoardEmpty;
+  
+  if (analysis.roomRuns !== undefined) {
+    // Use basic analysis data (post-deletion refresh)
+    roomRuns = analysis.roomRuns;
+    isBoardEmpty = analysis.isBoardEmpty;
+    console.log(`[Board Advisor] Using basic analysis data - Room runs: ${roomRuns}, Board empty: ${isBoardEmpty}`);
+  } else {
+    // Get fresh data from current state
+    const currentBoard = dataCollector.getCurrentBoardData();
+    if (currentBoard) {
+      roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
+      isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
+      console.log(`[Board Advisor] Using fresh data - Room runs: ${roomRuns.length}, Board empty: ${isBoardEmpty}`);
     } else {
-      // Show no data warning only when there's actually no data
-      analysisHTML += `
-        <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
-          <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-            <span>⚠️</span>
-            <span>No Historical Data</span>
-          </div>
-          <div style="font-size: 11px; color: #ABB2BF;">
-            Play some games with this setup to build data for better analysis and recommendations.
-          </div>
-        </div>
-      `;
+      roomRuns = 0;
+      isBoardEmpty = true;
     }
+  }
+  
+  if (roomRuns > 0) {
+    // Show data available message instead of no data warning
+    analysisHTML += `
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #98C379; border-radius: 4px;">
+        <div style="font-weight: 600; color: #98C379; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>📊</span>
+          <span>Historical Data Available</span>
+        </div>
+        <div style="font-size: 11px; color: #ABB2BF;">
+          Found ${roomRuns} runs for this map. Analysis and recommendations are being processed.
+        </div>
+      </div>
+    `;
+  } else if (isBoardEmpty) {
+    // Show empty board message
+    analysisHTML += `
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #FF9800; border-radius: 4px;">
+        <div style="font-weight: 600; color: #FF9800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>📋</span>
+          <span>Empty Board</span>
+        </div>
+        <div style="font-size: 11px; color: #ABB2BF;">
+          Place creatures on the board to get analysis and recommendations for your setup.
+        </div>
+      </div>
+    `;
+  } else {
+    // Show no data warning only when there's actually no data
+    analysisHTML += `
+      <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
+        <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>⚠️</span>
+          <span>No Historical Data</span>
+        </div>
+        <div style="font-size: 11px; color: #ABB2BF;">
+          Play some games with this setup to build data for better analysis and recommendations.
+        </div>
+      </div>
+    `;
   }
   
   analysisDisplay.innerHTML = analysisHTML;
@@ -8999,7 +10826,7 @@ async function updatePanelWithNoDataAnalysis(analysis) {
               <div style="margin: 8px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px;">
                 <div style="font-size: 11px; color: #61AFEF; margin-bottom: 4px; font-weight: 600;">📋 Recommended Setup:</div>
                 <div style="font-size: 10px; color: #ABB2BF; line-height: 1.3; margin-bottom: 6px;">
-                  ${rec.setup.map((piece, index) => {
+                  ${rec.setup.sort((a, b) => (a.tileIndex || a.tile || 0) - (b.tileIndex || b.tile || 0)).map((piece, index) => {
                     const tile = piece.tileIndex || piece.tile || '?';
                     const monsterId = piece.monsterId || piece.monster?.id || piece.monster?.name;
                     
@@ -9072,10 +10899,9 @@ function getPriorityColor(priority) {
 }
 
 // =======================
-// 6. AUTO-REFRESH SYSTEM
+// 7. AUTO-REFRESH SYSTEM
 // =======================
 
-// Start state-based panel refresh
 function startStateRefresh() {
   if (stateRefreshSystem.isEnabled) {
     stopStateRefresh();
@@ -9131,7 +10957,6 @@ function startStateRefresh() {
   }
 }
 
-// Stop state-based panel refresh
 function stopStateRefresh() {
   stateRefreshSystem.subscriptions.forEach(subscription => {
     if (subscription && typeof subscription.unsubscribe === 'function') {
@@ -9143,7 +10968,6 @@ function stopStateRefresh() {
   console.log('[Board Advisor] State-based refresh stopped');
 }
 
-// Handle state changes with rate limiting
 function handleStateChange(source, state) {
   if (!stateRefreshSystem.isEnabled || !panelState.isOpen) return;
   
@@ -9176,22 +11000,69 @@ function handleStateChange(source, state) {
 }
 
 // Refresh panel data
-async function refreshPanelData() {
+async function refreshPanelData(forceRefresh = false) {
   if (!panelState.isOpen) return;
   
-  
-  // Don't refresh if UI is already loading
-  if (analysisState.isUILoading) {
+  // Don't refresh if UI is already loading (unless forced)
+  if (analysisState.isUILoading && !forceRefresh) {
     console.log('[Board Advisor] Skipping panel refresh - UI loading in progress');
     return;
+  }
+  
+  console.log('[Board Advisor] Refreshing panel data...', forceRefresh ? '(forced)' : '');
+  
+  // Force refresh all data sources if this is a forced refresh
+  if (forceRefresh) {
+    console.log('[Board Advisor] Force refreshing all data sources for panel update...');
+    await loadAllDataSources(false);
   }
   
   // If we have current analysis, refresh it
   if (analysisState.currentAnalysis) {
     await updatePanelWithAnalysis(analysisState.currentAnalysis);
+  } else if (forceRefresh) {
+    // If no current analysis but this is a forced refresh, create a basic panel
+    console.log('[Board Advisor] No current analysis, creating basic panel after forced refresh...');
+    await createBasicPanel();
   }
   
-  console.log('[Board Advisor] Panel data refreshed automatically');
+  console.log('[Board Advisor] Panel data refreshed', forceRefresh ? '(forced)' : 'automatically');
+}
+
+// Create a basic panel with fresh data after deletion
+async function createBasicPanel() {
+  console.log('[Board Advisor] Creating basic panel with fresh data...');
+  
+  // Get the current board data to check for runs
+  const currentBoard = dataCollector.getCurrentBoardData();
+  if (!currentBoard) {
+    console.log('[Board Advisor] No current board data available for basic panel');
+    return;
+  }
+  
+  // Check how many runs we have for this room
+  const roomRuns = performanceTracker.runs.filter(r => r.roomId === currentBoard.roomId);
+  const isBoardEmpty = !currentBoard.boardSetup || currentBoard.boardSetup.length === 0;
+  
+  console.log(`[Board Advisor] Basic panel - Room runs: ${roomRuns.length}, Board empty: ${isBoardEmpty}`);
+  
+  // Create a basic analysis object to show the correct status
+  const basicAnalysis = {
+    prediction: {
+      estimatedTime: 'N/A',
+      predictedPoints: 'N/A',
+      successRate: 'N/A',
+      similarSetups: 0
+    },
+    recommendations: [],
+    roomRuns: roomRuns.length,
+    isBoardEmpty: isBoardEmpty
+  };
+  
+  // Update the panel with this basic analysis
+  await updatePanelWithAnalysis(basicAnalysis);
+  
+  console.log('[Board Advisor] Basic panel created successfully');
 }
 
 
@@ -9222,7 +11093,6 @@ async function fetchTRPC(method) {
   }
 }
 
-// Function to fetch leaderboard WR data for a specific map
 async function fetchLeaderboardWRData(mapCode) {
   try {
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
@@ -9241,7 +11111,6 @@ async function fetchLeaderboardWRData(mapCode) {
   }
 }
 
-// Function to get user's best scores for current map
 function getUserBestScores() {
   try {
     const currentBoard = dataCollector.getCurrentBoardData();
@@ -9294,6 +11163,9 @@ createUI();
 // Start data collection
 if (config.enabled) {
   dataCollector.startTracking();
+  
+  // Setup game state highlight manager
+  setupGameStateHighlightManager();
   
   // Try to load all data sources on initialization with proper coordination
   setTimeout(async () => {
@@ -9549,7 +11421,6 @@ if (!window.BoardAdvisorAPI) {
   };
 }
 
-// Export functionality
 exports = {
   analyzeBoard: () => boardAnalyzer.analyzeCurrentBoard(),
   getRecommendations: () => analysisState.currentAnalysis?.recommendations || [],
@@ -9628,8 +11499,15 @@ exports = {
       analysisTimeout = null;
     }
     
-    // Clear any other timeouts that might be running
-    // Note: We can't track all setTimeout calls, but we clear the main ones
+    // Clear all tracked timeouts
+    activeTimeouts.forEach(id => clearTimeout(id));
+    activeTimeouts = [];
+    
+    // Clear board analyzer interval
+    if (boardAnalyzerIntervalId) {
+      clearInterval(boardAnalyzerIntervalId);
+      boardAnalyzerIntervalId = null;
+    }
     
     // 3. Clean up all subscriptions
     cleanupSubscriptions();
@@ -9646,6 +11524,15 @@ exports = {
     delete window.getMonsterStats;
     delete window.formatMonsterStats;
     delete window.getEquipmentStats;
+    delete window.onGameStart;
+    delete window.updateFooterStatus;
+    delete window.BoardAdvisorAPI;
+    
+    // Clear window timeout
+    if (window.autoFitTimeout) {
+      clearTimeout(window.autoFitTimeout);
+      delete window.autoFitTimeout;
+    }
     
     // 7. Clean up database connection
     cleanupDatabase();
@@ -9668,11 +11555,6 @@ exports = {
       }
     }
     
-    // 9. Clean up board analyzer interval
-    const boardAnalyzerInterval = document.querySelector('[data-board-advisor-interval]');
-    if (boardAnalyzerInterval) {
-      clearInterval(boardAnalyzerInterval);
-    }
     
     // 10. Reset all state variables
     analysisState = {
@@ -9720,7 +11602,6 @@ exports = {
 };
 
 
-// Helper function to add document listeners with tracking
 function addDocumentListener(event, handler) {
   document.addEventListener(event, handler);
   documentListeners.push({ event, handler });
@@ -9732,6 +11613,16 @@ function addWindowListener(event, handler) {
   windowListeners.push({ event, handler });
 }
 
+// Helper function for tracked timeouts
+function addTimeout(callback, delay) {
+  const id = setTimeout(() => {
+    activeTimeouts = activeTimeouts.filter(t => t !== id);
+    callback();
+  }, delay);
+  activeTimeouts.push(id);
+  return id;
+}
+
 // Cleanup function for subscriptions
 function cleanupSubscriptions() {
   activeSubscriptions.forEach(subscription => {
@@ -9740,6 +11631,21 @@ function cleanupSubscriptions() {
     }
   });
   activeSubscriptions = [];
+  
+  // Clean up game state highlight subscription
+  if (gameStateHighlightSubscription) {
+    gameStateHighlightSubscription.unsubscribe();
+    gameStateHighlightSubscription = null;
+  }
+  
+  // Clear game running state
+  isGameRunning = false;
+  if (gameEndCooldownTimeout) {
+    clearTimeout(gameEndCooldownTimeout);
+    gameEndCooldownTimeout = null;
+  }
+  storedRecommendedSetup = null;
+  
   console.log('[Board Advisor] All subscriptions cleaned up');
 }
 
@@ -9771,11 +11677,19 @@ function cleanupDatabase() {
   }
 }
 
+// Cleanup function for timeouts
+function cleanupTimeouts() {
+  activeTimeouts.forEach(id => clearTimeout(id));
+  activeTimeouts = [];
+  console.log('[Board Advisor] All timeouts cleaned up');
+}
+
 // Cleanup on page unload
 addWindowListener('beforeunload', () => {
   cleanupSubscriptions();
   cleanupDocumentListeners();
   cleanupWindowListeners();
+  cleanupTimeouts();
   cleanupDatabase();
   stopStateRefresh();
 });
