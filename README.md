@@ -159,6 +159,15 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
 
+### Better Tasker
+Advanced quest automation system that streamlines task completion and management:
+- Automatically opens quest log and accepts new tasks when available
+- Navigates to recommended maps for task completion
+- Coordinates with other mods to prevent conflicts during automation
+- Pauses all automations when tasks are ready to be claimed
+- Smart quest button management with visual tasking indicators
+- Integration with Raid Hunter for seamless automation switching
+
 ### Better Cauldron
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron

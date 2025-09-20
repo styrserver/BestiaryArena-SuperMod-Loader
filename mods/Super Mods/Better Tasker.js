@@ -2025,8 +2025,31 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         // Use provided element or look for the suggested map link
         let suggestedMapLink = suggestedMapElement;
         if (!suggestedMapLink) {
-            // Look for the suggested map link (contains map-pin icon)
-            suggestedMapLink = document.querySelector('span.action-link');
+            // Look for the suggested map link only within Paw and Fur Society section
+            console.log('[Better Tasker] No specific element provided, searching within Paw and Fur Society section...');
+            const pawAndFurSection = findPawAndFurSection();
+            if (pawAndFurSection) {
+                console.log('[Better Tasker] Paw and Fur Society section found, looking for suggested map...');
+                // Look for suggested map text within this section
+                const allParagraphs = pawAndFurSection.querySelectorAll('p.pixel-font-14');
+                for (const p of allParagraphs) {
+                    if (p.textContent && p.textContent.includes('Suggested map:')) {
+                        suggestedMapLink = p.querySelector('span.action-link');
+                        console.log('[Better Tasker] Suggested map found within Paw and Fur Society section');
+                        break;
+                    }
+                }
+            } else {
+                console.log('[Better Tasker] Paw and Fur Society section not found');
+            }
+            
+            // If still no link found in Paw and Fur Society section, don't proceed
+            if (!suggestedMapLink) {
+                console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
+                return;
+            }
+        } else {
+            console.log('[Better Tasker] Using provided suggested map element (already validated)');
         }
         if (suggestedMapLink) {
             console.log('[Better Tasker] Suggested map link found, extracting map info...');
@@ -2857,8 +2880,15 @@ async function handleTaskFinishing() {
         return;
     }
     
-    // Don't run task finishing if task hunting is ongoing
-    if (taskHuntingOngoing) {
+    // Check if quest blip is available (indicates task is completed)
+    const isQuestBlipReady = isQuestBlipAvailable();
+    
+    // If quest blip is available, task is completed - reset task hunting flag
+    if (isQuestBlipReady && taskHuntingOngoing) {
+        console.log('[Better Tasker] Quest blip detected - task completed, resetting task hunting flag');
+        resetState('taskComplete');
+        // Continue with task completion below
+    } else if (taskHuntingOngoing) {
         console.log('[Better Tasker] Task hunting ongoing, skipping task completion');
         return;
     }
@@ -2912,9 +2942,6 @@ async function handleTaskFinishing() {
             if (!task.gameId) {
                 console.log('[Better Tasker] No active task (no gameId), checking for quest blip...');
                 
-                // Check if quest blip exists to open quest log and start a new task
-                const isQuestBlipReady = isQuestBlipAvailable();
-                
                 if (isQuestBlipReady) {
                     console.log('[Better Tasker] Quest blip found - opening quest log to start new task...');
                     // Continue with quest log opening logic below
@@ -2953,15 +2980,14 @@ async function handleTaskFinishing() {
                 }
             }
             
-            // First, check if quest blip exists to open quest log
-            const isQuestBlipReady = isQuestBlipAvailable();
+            // Quest blip already checked at the beginning of the function
             
             // Check if task is ready OR if autoplay is active OR if quest blip is available
             const isTaskReady = task.gameId ? task.ready : false; // Only check task.ready if there's an active task
             let isAutoplayActive = checkIfAutoplayIsActive();
             
             // If autoplay shows "Auto" state, wait for it to transition to "Autoplay" state
-            if (!isTaskReady && !isAutoplayActive) {
+            if (!isTaskReady && !isAutoplayActive && !isQuestBlipReady) {
                 const autoButton = document.querySelector('button[data-full="true"][data-state="closed"]');
                 if (autoButton && autoButton.textContent.includes('Auto') && autoButton.hasAttribute('disabled')) {
                     console.log('[Better Tasker] Waiting for autoplay button to transition from "Auto" to "Autoplay" state...');
@@ -2992,6 +3018,8 @@ async function handleTaskFinishing() {
             // Try to open quest log when there's an active task or quest blip is available
             if (task.gameId) {
                 console.log('[Better Tasker] Attempting to open quest log for active task...');
+            } else if (isQuestBlipReady) {
+                console.log('[Better Tasker] Quest blip detected - opening quest log to complete task...');
             } else {
                 console.log('[Better Tasker] Attempting to open quest log to start new task...');
             }
@@ -3012,11 +3040,7 @@ async function handleTaskFinishing() {
                     return; // Exit and wait for game to finish
                 }
             } else if (isQuestBlipReady) {
-                if (task.gameId) {
-                    console.log('[Better Tasker] Quest blip detected - task is ready to activate, finishing...');
-                } else {
-                    console.log('[Better Tasker] Quest blip detected - opening quest log to start new task...');
-                }
+                console.log('[Better Tasker] Quest blip detected - task is ready to complete, finishing...');
                 
                 // Stop ALL automations when task is ready
                 await stopAllAutomationsForTaskCompletion();
@@ -3053,12 +3077,9 @@ async function handleTaskFinishing() {
             }
             
             // 1. Open quest log
-            console.log('[Better Tasker] Looking for quest blip...');
-            // Check for quest blip (pending task indicator)
-            const questBlip = document.querySelector('img[src*="quest-blip.png"]');
-            console.log('[Better Tasker] Quest blip found:', questBlip);
+            console.log('[Better Tasker] Quest blip already detected, opening quest log...');
             
-            if (questBlip) {
+            if (isQuestBlipReady) {
                 // Set task completion in progress flag to prevent duplicate operations
                 taskCompletionInProgress = true;
                 updateExposedState(); // Update exposed state for other mods
@@ -3092,7 +3113,14 @@ async function handleTaskFinishing() {
                 await sleep(200);
                 console.log('[Better Tasker] Modal clearing completed');
                 
-                questBlip.click();
+                // Find and click the quest blip
+                const questBlip = document.querySelector('img[src*="quest-blip.png"]');
+                if (questBlip) {
+                    questBlip.click();
+                } else {
+                    console.log('[Better Tasker] Quest blip not found when trying to click');
+                    return;
+                }
                 await sleep(200);
                 console.log('[Better Tasker] Quest log opened via quest blip');
                 
@@ -3124,16 +3152,8 @@ async function handleTaskFinishing() {
                 } else {
                     console.log('[Better Tasker] New Task button not found, checking for suggested map...');
                     
-                    // Look for suggested map
-                    const suggestedMapElement = document.querySelector('span.action-link');
-                    if (suggestedMapElement) {
-                        console.log('[Better Tasker] Suggested map found, attempting to navigate via API...');
-                        
-                        // Try to navigate to suggested map using API
-                        await navigateToSuggestedMapAndStartAutoplay();
-                    } else {
-                        console.log('[Better Tasker] No suggested map found');
-                    }
+                    // Try to navigate to suggested map using API (will validate Paw and Fur Society section internally)
+                    await navigateToSuggestedMapAndStartAutoplay();
                 }
                 
                 // 4. Wait up to 2 minutes for Finish button with mutation observer
@@ -3302,11 +3322,21 @@ async function handleTaskFinishing() {
                         // Wait for quest log to fully load
                         await sleep(300);
                         
-                        // Check if the task creature is allowed before proceeding
-                        console.log('[Better Tasker] Checking creature filtering in handleTaskFinishing fallback...');
-                        const creatureName = extractCreatureFromTask();
+                        // 1. Find Paw and Fur Society section first (section-first approach)
+                        console.log('[Better Tasker] Using section-first approach - finding Paw and Fur Society section...');
+                        const pawAndFurSection = findPawAndFurSection();
+                        if (!pawAndFurSection) {
+                            console.log('[Better Tasker] Paw and Fur Society section not found');
+                            taskCompletionInProgress = false;
+                            taskInProgress = false;
+                            return;
+                        }
+                        
+                        // 2. Extract & validate creature from that specific section
+                        console.log('[Better Tasker] Extracting creature from Paw and Fur Society section...');
+                        const creatureName = extractCreatureFromSection(pawAndFurSection);
                         console.log('[Better Tasker] Extracted creature name:', creatureName);
-                        if (creatureName && !isCreatureAllowed(creatureName)) {
+                        if (!creatureName || !isCreatureAllowed(creatureName)) {
                             console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
                             
                             // Remove the task directly while quest log is open
@@ -3324,31 +3354,9 @@ async function handleTaskFinishing() {
                             return;
                         }
                         
-                        // Look for suggested map within Paw and Fur Society section only
-                        let suggestedMapElement = null;
-                        
-                        // Find the Paw and Fur Society section by looking for the title text
-                        const allDivs = document.querySelectorAll('div');
-                        let pawAndFurSection = null;
-                        
-                        for (const div of allDivs) {
-                            const titleElement = div.querySelector('p.text-whiteHighlight');
-                            if (titleElement && titleElement.textContent && titleElement.textContent.includes('Paw and Fur Society')) {
-                                pawAndFurSection = div;
-                                break;
-                            }
-                        }
-                        
-                        if (pawAndFurSection) {
-                            // Look for suggested map text within this section
-                            const allParagraphs = pawAndFurSection.querySelectorAll('p.pixel-font-14');
-                            for (const p of allParagraphs) {
-                                if (p.textContent && p.textContent.includes('Suggested map:')) {
-                                    suggestedMapElement = p.querySelector('span.action-link');
-                                    break;
-                                }
-                            }
-                        }
+                        // 3. Extract suggested map from that same section
+                        console.log('[Better Tasker] Extracting suggested map from Paw and Fur Society section...');
+                        const suggestedMapElement = extractSuggestedMapFromSection(pawAndFurSection);
                         
                         if (suggestedMapElement) {
                             console.log('[Better Tasker] Suggested map found, navigating...');
@@ -3684,7 +3692,7 @@ function runAutomationTasks() {
 // 8.1. CREATURE FILTERING FUNCTIONS
 // ============================================================================
 
-// Extract creature name from task HTML
+// Extract creature name from task HTML (global search - kept for backward compatibility)
 function extractCreatureFromTask() {
     try {
         console.log('[Better Tasker] Extracting creature from task...');
@@ -3742,6 +3750,93 @@ function extractCreatureFromTask() {
         return null;
     } catch (error) {
         console.error('[Better Tasker] Error extracting creature from task:', error);
+        return null;
+    }
+}
+
+// Extract creature name from a specific section (new section-based approach)
+function extractCreatureFromSection(section) {
+    try {
+        console.log('[Better Tasker] Extracting creature from section...');
+        
+        // Look for creature sprite with ID within the specific section
+        const creatureSprite = section.querySelector('.sprite.outfit[class*="id-"]');
+        if (creatureSprite) {
+            const classList = Array.from(creatureSprite.classList);
+            const idClass = classList.find(cls => cls.startsWith('id-'));
+            if (idClass) {
+                const creatureId = idClass.replace('id-', '');
+                console.log('[Better Tasker] Found creature sprite with ID:', creatureId);
+                
+                // Try to get creature name from creature database
+                if (window.creatureDatabase?.CREATURE_ID_MAP) {
+                    const creatureName = window.creatureDatabase.CREATURE_ID_MAP[creatureId];
+                    if (creatureName) {
+                        console.log('[Better Tasker] Mapped creature ID to name:', creatureName);
+                        return creatureName;
+                    }
+                }
+                
+                // Fallback: try to extract from task description within the section
+                const taskDescription = section.querySelector('.pixel-font-14');
+                if (taskDescription && taskDescription.textContent) {
+                    const text = taskDescription.textContent;
+                    console.log('[Better Tasker] Task description:', text);
+                    
+                    // Look for "kill count" pattern to extract creature name
+                    const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                    if (killCountMatch) {
+                        const creatureName = killCountMatch[1].trim();
+                        console.log('[Better Tasker] Extracted creature from description:', creatureName);
+                        return creatureName;
+                    }
+                }
+            }
+        }
+        
+        // Alternative: Look for creature name in task description text within the section
+        const taskDescriptions = section.querySelectorAll('.pixel-font-14');
+        for (const desc of taskDescriptions) {
+            if (desc.textContent && desc.textContent.includes('kill count')) {
+                const text = desc.textContent;
+                const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                if (killCountMatch) {
+                    const creatureName = killCountMatch[1].trim();
+                    console.log('[Better Tasker] Extracted creature from description:', creatureName);
+                    return creatureName;
+                }
+            }
+        }
+        
+        console.log('[Better Tasker] Could not extract creature name from section');
+        return null;
+    } catch (error) {
+        console.error('[Better Tasker] Error extracting creature from section:', error);
+        return null;
+    }
+}
+
+// Extract suggested map from a specific section
+function extractSuggestedMapFromSection(section) {
+    try {
+        console.log('[Better Tasker] Extracting suggested map from section...');
+        
+        // Look for suggested map text within this section
+        const allParagraphs = section.querySelectorAll('p.pixel-font-14');
+        for (const p of allParagraphs) {
+            if (p.textContent && p.textContent.includes('Suggested map:')) {
+                const suggestedMapElement = p.querySelector('span.action-link');
+                if (suggestedMapElement) {
+                    console.log('[Better Tasker] Suggested map element found in section:', suggestedMapElement.textContent.trim());
+                    return suggestedMapElement;
+                }
+            }
+        }
+        
+        console.log('[Better Tasker] No suggested map found in section');
+        return null;
+    } catch (error) {
+        console.error('[Better Tasker] Error extracting suggested map from section:', error);
         return null;
     }
 }
@@ -4107,11 +4202,21 @@ async function openQuestLogAndAcceptTask() {
                     // Wait for quest log to fully load
                     await sleep(300);
                     
-                    // Check if the task creature is allowed before proceeding
-                    console.log('[Better Tasker] Checking creature filtering in openQuestLogAndAcceptTask fallback...');
-                    const creatureName = extractCreatureFromTask();
+                    // 1. Find Paw and Fur Society section first (section-first approach)
+                    console.log('[Better Tasker] Using section-first approach - finding Paw and Fur Society section...');
+                    const pawAndFurSection = findPawAndFurSection();
+                    if (!pawAndFurSection) {
+                        console.log('[Better Tasker] Paw and Fur Society section not found');
+                        taskCompletionInProgress = false;
+                        taskInProgress = false;
+                        return;
+                    }
+                    
+                    // 2. Extract & validate creature from that specific section
+                    console.log('[Better Tasker] Extracting creature from Paw and Fur Society section...');
+                    const creatureName = extractCreatureFromSection(pawAndFurSection);
                     console.log('[Better Tasker] Extracted creature name:', creatureName);
-                    if (creatureName && !isCreatureAllowed(creatureName)) {
+                    if (!creatureName || !isCreatureAllowed(creatureName)) {
                         console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
                         
                         // Remove the task directly while quest log is open
@@ -4127,6 +4232,17 @@ async function openQuestLogAndAcceptTask() {
                         taskCompletionInProgress = false;
                         taskInProgress = false;
                         return;
+                    }
+                    
+                    // 3. Extract suggested map from that same section and navigate
+                    console.log('[Better Tasker] Extracting suggested map from Paw and Fur Society section...');
+                    const suggestedMapElement = extractSuggestedMapFromSection(pawAndFurSection);
+                    
+                    if (suggestedMapElement) {
+                        console.log('[Better Tasker] Suggested map found, navigating...');
+                        await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement);
+                    } else {
+                        console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
                     }
                 }
             } else {

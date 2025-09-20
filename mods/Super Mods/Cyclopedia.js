@@ -10180,7 +10180,7 @@ function renderCreatureTemplate(name) {
   col1.style.marginRight = '0';
   col1.style.paddingRight = '0';
   col1.style.overflowX = 'hidden';
-  col1.style.overflowY = 'auto';
+  col1.style.overflowY = 'hidden';
   const col1Title = document.createElement('h2');
   col1Title.className = 'widget-top widget-top-text ' + LAYOUT_CONSTANTS.FONTS.SIZES.TITLE;
   col1Title.style.margin = '0';
@@ -10443,6 +10443,12 @@ function renderCreatureTemplate(name) {
   abilityTitle.appendChild(abilityTitleP);
   abilitySection.appendChild(abilityTitle);
 
+  // Create scrollable container for ability content
+  const abilityScrollContainer = document.createElement('div');
+  abilityScrollContainer.style.height = '250px';
+  abilityScrollContainer.style.overflowY = 'auto';
+  abilityScrollContainer.style.overflowX = 'hidden';
+
   const abilityList = document.createElement('ul');
   abilityList.style.listStyle = 'none';
   abilityList.style.padding = '0';
@@ -10509,7 +10515,8 @@ function renderCreatureTemplate(name) {
   }
   
   abilityList.appendChild(abilityContainer);
-  abilitySection.appendChild(abilityList);
+  abilityScrollContainer.appendChild(abilityList);
+  abilitySection.appendChild(abilityScrollContainer);
   
   if (tooltipComponent) {
     abilitySection._tooltipComponent = tooltipComponent;
