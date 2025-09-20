@@ -159,15 +159,6 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
 
-### Better Tasker
-Advanced quest automation system that streamlines task completion and management:
-- Automatically opens quest log and accepts new tasks when available
-- Navigates to recommended maps for task completion
-- Coordinates with other mods to prevent conflicts during automation
-- Pauses all automations when tasks are ready to be claimed
-- Smart quest button management with visual tasking indicators
-- Integration with Raid Hunter for seamless automation switching
-
 ### Better Cauldron
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron
@@ -199,6 +190,15 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 - Provides confirmation prompts and error feedback inside the tooltip
 - Automatically refreshes inventory counts and UI after fusion
 - Smart fusion ratio calculations for optimal resource usage
+
+### Better Tasker
+Advanced quest automation system that streamlines task completion and management:
+- Automatically opens quest log and accepts new tasks when available
+- Navigates to recommended maps for task completion
+- Coordinates with other mods to prevent conflicts during automation
+- Pauses all automations when tasks are ready to be claimed
+- Smart quest button management with visual tasking indicators
+- Integration with Raid Hunter for seamless automation switching
 
 ### Better Yasir
 Enhances the Yasir shop interface with advanced features and improved usability:
