@@ -105,8 +105,6 @@ console.log('Board Advisor Mod initializing...');
       console.log('[Board Advisor] Confirmation button clicked, calling deleteBoardAdvisorRun with roomId:', roomId, 'runId:', runId);
       console.log('[Board Advisor] About to call deleteBoardAdvisorRun...');
       
-      // Show deletion in progress feedback
-      showDeletionFeedback('Deleting run...', 'info');
       
       deleteBoardAdvisorRun(roomId, runId).then((success) => {
         // Clear the failsafe timeout since deletion completed
@@ -115,10 +113,8 @@ console.log('Board Advisor Mod initializing...');
         console.log('[Board Advisor] deleteBoardAdvisorRun completed with success:', success);
         if (success) {
           console.log('[Board Advisor] Deletion completed successfully');
-          showDeletionFeedback('Run deleted successfully! Refreshing...', 'success');
         } else {
           console.log('[Board Advisor] Deletion failed, but UI will refresh anyway');
-          showDeletionFeedback('Deletion may have failed, refreshing data...', 'warning');
         }
         
         // Always refresh data and analysis after deletion attempt
@@ -139,7 +135,6 @@ console.log('Board Advisor Mod initializing...');
         // Clear the failsafe timeout
         clearTimeout(failsafeTimeout);
         console.error('[Board Advisor] Deletion error:', error);
-        showDeletionFeedback('Deletion error, refreshing data...', 'error');
         setTimeout(async () => {
           console.log('[Board Advisor] Refreshing all data sources after deletion error...');
           try {
@@ -710,6 +705,11 @@ const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
 const ROOM_METADATA_STORE = 'roomMetadata';
 const MAX_RUNS_PER_ROOM = 500;
 
+// Cleanup state management
+let isCleanupInProgress = false;
+let lastCleanupTime = 0;
+const CLEANUP_COOLDOWN = 5000; // 5 seconds between cleanups
+
 const MIN_STAT_VALUE = 1;
 const MAX_STAT_VALUE = 20;
 
@@ -1012,6 +1012,20 @@ function isBoardChangeInProgress() {
          (now - analysisState.lastBoardChangeTime) < BOARD_CHANGE_DEBOUNCE_TIME;
 }
 
+// Check if the current room is a boosted map
+function isCurrentRoomBoosted(roomId) {
+  try {
+    const dailyState = globalThis.state?.daily?.getSnapshot()?.context;
+    if (dailyState?.boostedMap?.roomId === roomId) {
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.warn('[Board Advisor] Error checking boosted map status:', error);
+    return false;
+  }
+}
+
 function addRunIfNotExists(newRun) {
   // Check anti-cheat flag
   if (isCheatingDetected()) {
@@ -1019,6 +1033,17 @@ function addRunIfNotExists(newRun) {
     return false;
   }
   
+  // Check if this is a boosted map run and filter it out (only for new runs)
+  if (isCurrentRoomBoosted(newRun.roomId)) {
+    console.log(`[Board Advisor] Filtering out boosted map run from room: ${newRun.roomId}`);
+    return false;
+  }
+  
+  return addRunToTracker(newRun);
+}
+
+// Add run to tracker without boosted map filtering (for loading existing data)
+function addRunToTracker(newRun) {
   // Validate required run data
   if (!newRun.roomId || !newRun.ticks || !newRun.timestamp || !newRun.source) {
     console.warn('[Board Advisor] Invalid run data - missing required fields');
@@ -1394,6 +1419,12 @@ async function addSandboxRunToDB(runData) {
 
 // Update room metadata after adding a new run
 async function updateRoomMetadataAfterRun(roomId, runData) {
+  // Check if database is still available before proceeding
+  if (!sandboxDB) {
+    console.log('[Board Advisor] Database not available, skipping room metadata update');
+    return;
+  }
+  
   return new Promise((resolve, reject) => {
     const transaction = sandboxDB.transaction([ROOM_METADATA_STORE], 'readwrite');
     const store = transaction.objectStore(ROOM_METADATA_STORE);
@@ -1425,7 +1456,7 @@ async function updateRoomMetadataAfterRun(roomId, runData) {
   });
 }
 
-// Cleanup room runs if they exceed the limit, keeping the best runs
+// Optimized room cleanup - only removes excess runs instead of full rebuild
 async function cleanupRoomRunsIfNeeded(roomId) {
   try {
     // Get current run count for this room
@@ -1453,34 +1484,31 @@ async function cleanupRoomRunsIfNeeded(roomId) {
       return b.timestamp - a.timestamp;
     });
     
-    // Keep only the best runs
+    // Identify runs to remove (more efficient than full rebuild)
     const runsToKeep = sortedRuns.slice(0, MAX_RUNS_PER_ROOM);
-    const runsToRemove = currentRuns.length - MAX_RUNS_PER_ROOM;
+    const runsToRemove = sortedRuns.slice(MAX_RUNS_PER_ROOM);
     
-    // Clear the room store and re-add only the best runs
+    if (runsToRemove.length === 0) {
+      return; // Nothing to remove
+    }
+    
+    // Remove only the excess runs (more efficient than clearing and rebuilding)
     const storeName = await ensureRoomStoreExists(roomId);
     if (!storeName) return;
     
     const transaction = sandboxDB.transaction([storeName], 'readwrite');
     const store = transaction.objectStore(storeName);
     
-    // Clear all runs for this room
-    await new Promise((resolve, reject) => {
-      const clearRequest = store.clear();
-      clearRequest.onsuccess = () => resolve();
-      clearRequest.onerror = () => reject(clearRequest.error);
-    });
-    
-    // Add back only the best runs
-    for (const run of runsToKeep) {
+    // Remove only the excess runs by their keys
+    for (const run of runsToRemove) {
       await new Promise((resolve, reject) => {
-        const addRequest = store.add(run);
-        addRequest.onsuccess = () => resolve();
-        addRequest.onerror = () => reject(addRequest.error);
+        const deleteRequest = store.delete(run.id);
+        deleteRequest.onsuccess = () => resolve();
+        deleteRequest.onerror = () => reject(deleteRequest.error);
       });
     }
     
-    console.log(`[Board Advisor] Room cleanup complete: removed ${runsToRemove} runs (kept ${runsToKeep.filter(r => r.completed).length} completed, ${runsToKeep.filter(r => !r.completed).length} failed)`);
+    console.log(`[Board Advisor] Room cleanup complete: removed ${runsToRemove.length} runs (kept ${runsToKeep.filter(r => r.completed).length} completed, ${runsToKeep.filter(r => !r.completed).length} failed)`);
     
   } catch (error) {
     console.error('[Board Advisor] Error during room cleanup:', error);
@@ -2317,21 +2345,27 @@ function setupGameStateHighlightManager() {
 
 // Clean up tile highlights
 function cleanupTileHighlights() {
-  // Remove the overlay container
-  const overlayContainer = document.getElementById(TILE_HIGHLIGHT_OVERLAY_ID);
-  if (overlayContainer) {
-    overlayContainer.remove();
+  try {
+    // Remove the overlay container
+    const overlayContainer = document.getElementById(TILE_HIGHLIGHT_OVERLAY_ID);
+    if (overlayContainer) {
+      overlayContainer.remove();
+    }
+    
+    // Remove the style element
+    const styleElement = document.getElementById(TILE_HIGHLIGHT_STYLE_ID);
+    if (styleElement) {
+      styleElement.remove();
+    }
+    
+    // Remove any stray highlight elements
+    const highlightElements = document.querySelectorAll('.board-advisor-tile-highlight');
+    highlightElements.forEach(el => el.remove());
+    
+    console.log('[Board Advisor] Tile highlights cleaned up');
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up tile highlights:', error);
   }
-  
-  // Remove the style element
-  const styleElement = document.getElementById(TILE_HIGHLIGHT_STYLE_ID);
-  if (styleElement) {
-    styleElement.remove();
-  }
-  
-  // Remove any stray highlight elements
-  const highlightElements = document.querySelectorAll('.board-advisor-tile-highlight');
-  highlightElements.forEach(el => el.remove());
 }
 
 // =======================
@@ -3047,8 +3081,8 @@ async function convertBoardAnalyzerData() {
         isSandbox: true
       };
       
-      // Use deduplication function
-      if (addRunIfNotExists(convertedRun)) {
+      // Use deduplication function (no boosted map filtering for existing data)
+      if (addRunToTracker(convertedRun)) {
         convertedCount++;
       } else {
         skippedCount++;
@@ -3297,19 +3331,22 @@ function convertRunTrackerData() {
       if (mapData.speedrun && Array.isArray(mapData.speedrun)) {
         mapData.speedrun.forEach(run => {
           if (run.time && run.setup) {
+            const convertedSetup = convertRunTrackerSetup(run.setup);
+            console.log(`[Board Advisor] Converted RunTracker speedrun setup:`, convertedSetup);
+            
             const convertedRun = {
               id: run.timestamp || Date.now(),
               roomId: currentRoomId,
               ticks: run.time,
               rankPoints: run.points,
               completed: true,
-              boardSetup: convertRunTrackerSetup(run.setup),
+              boardSetup: convertedSetup,
               seed: run.seed,
               timestamp: run.timestamp || Date.now(),
               source: 'run_tracker'
             };
             
-            addRunIfNotExists(convertedRun);
+            addRunToTracker(convertedRun);
           }
         });
       }
@@ -3318,19 +3355,22 @@ function convertRunTrackerData() {
       if (mapData.rank && Array.isArray(mapData.rank)) {
         mapData.rank.forEach(run => {
           if (run.points > 0 && run.setup) {
+            const convertedSetup = convertRunTrackerSetup(run.setup);
+            console.log(`[Board Advisor] Converted RunTracker rank setup:`, convertedSetup);
+            
             const convertedRun = {
               id: run.timestamp || Date.now(),
               roomId: currentRoomId,
               ticks: run.time,
               rankPoints: run.points,
               completed: true,
-              boardSetup: convertRunTrackerSetup(run.setup),
+              boardSetup: convertedSetup,
               seed: run.seed,
               timestamp: run.timestamp || Date.now(),
               source: 'run_tracker'
             };
             
-            addRunIfNotExists(convertedRun);
+            addRunToTracker(convertedRun);
           }
         });
       }
@@ -3404,16 +3444,31 @@ function convertRunTrackerSetup(setup) {
         return String(name).trim().replace(/\b\w/g, l => l.toUpperCase());
       };
       
+      // Extract equipment data - RunTracker stores it in piece.equip object
+      let equipId = null;
+      let equipmentName = '';
+      let equipmentTier = 0;
+      
+      if (piece.equip && piece.equip.gameId) {
+        equipId = piece.equip.gameId;
+        equipmentName = capitalizeName(piece.equip.name || '');
+        equipmentTier = Number(piece.equip.tier) || 0;
+      } else if (piece.equipId) {
+        equipId = piece.equipId;
+        equipmentName = capitalizeName(piece.equipmentName || '');
+        equipmentTier = Number(piece.equipmentTier) || 0;
+      }
+      
       return {
         tileIndex: Number(piece.tile) || 0,
         monsterId: piece.monsterId || null,
         monsterName: capitalizeName(piece.monsterName || (piece.monster?.name) || (piece.monsterId ? getMonsterName(piece.monsterId) : null)),
-        equipId: piece.equipId || null,
-        equipmentName: capitalizeName(piece.equipmentName || (piece.equipment?.name) || (piece.equipId ? getEquipmentName(piece.equipId) : null)),
-        equipmentTier: Number(piece.equipmentTier || piece.equipment?.tier) || 0,
+        equipId: equipId,
+        equipmentName: equipmentName,
+        equipmentTier: equipmentTier,
         gameId: piece.monsterId, // Use monsterId as gameId
         tier: null, // Monsters don't have tiers, only equipment does
-        level: Number(piece.level) || 0,
+        level: (piece.level && piece.level !== 1) ? Number(piece.level) : 50, // Default to level 50 if not specified or if level is 1 (unknown)
         monsterStats: monsterStats,
         villain: false // RunTracker only tracks player pieces
       };
@@ -4345,6 +4400,12 @@ class DataCollector {
       return; // Exit early without storing the data
     }
     
+    // Check if this is a boosted map run and filter it out (for new runs)
+    if (isCurrentRoomBoosted(runData.roomId)) {
+      console.log(`[Board Advisor] Filtering out boosted map run from room: ${runData.roomId}`);
+      return; // Exit early without storing the data
+    }
+    
     // Ensure monster names are preserved in board setup
     if (runData.boardSetup) {
       runData.boardSetup = runData.boardSetup.map(piece => ({
@@ -4640,8 +4701,6 @@ async function checkForNewBestRunAndUpdateHighlights(newRun) {
         console.log('[Board Advisor] Highlighting tiles for new best run setup...');
         highlightRecommendedTiles(newRun.boardSetup);
         
-        // Show a brief notification
-        showTemporaryNotification(`🎉 New best time: ${newRun.ticks} ticks!`, 'success');
       }
     } else {
       console.log('[Board Advisor] New run is not better than current best');
@@ -4651,53 +4710,6 @@ async function checkForNewBestRunAndUpdateHighlights(newRun) {
   }
 }
 
-// Show temporary notification
-function showTemporaryNotification(message, type = 'info') {
-  try {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
-      color: white;
-      padding: 12px 20px;
-      border-radius: 4px;
-      font-size: 14px;
-      font-weight: 600;
-      z-index: 10000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      animation: slideIn 0.3s ease-out;
-    `;
-    notification.textContent = message;
-    
-    // Add animation styles
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-      }
-    `;
-    document.head.appendChild(style);
-    
-    // Add to page
-    document.body.appendChild(notification);
-    
-    // Remove after 3 seconds
-    setTimeout(() => {
-      if (notification.parentNode) {
-        notification.parentNode.removeChild(notification);
-      }
-      if (style.parentNode) {
-        style.parentNode.removeChild(style);
-      }
-    }, 3000);
-  } catch (error) {
-    console.error('[Board Advisor] Error showing notification:', error);
-  }
-}
 
 // CACHE FIX: Invalidate caches and refresh data after sandbox run saves
 async function invalidateCachesAndRefreshData(roomId) {
@@ -6880,6 +6892,12 @@ class AnalysisEngine {
       currentAnalysis: currentAnalysis?.currentAnalysis?.predictedTime,
       final: currentPredictedTime,
       bestRun: bestOverallRun?.ticks
+    });
+    
+    console.log(`[Board Advisor] Best overall run data:`, {
+      ticks: bestOverallRun?.ticks,
+      source: bestOverallRun?.source,
+      boardSetup: bestOverallRun?.boardSetup
     });
     
     if (bestOverallRun && currentPredictedTime && bestOverallRun.ticks < currentPredictedTime) {
@@ -9260,33 +9278,12 @@ function reloadUI() {
   // Clear any existing tile highlights
   cleanupTileHighlights();
   
-  // Reset panel content to show clean state
-  const panel = document.getElementById(PANEL_ID);
-  if (panel) {
-    // Database cleared - footer will show status
-    
-    // Clear recommendations section
-    const recommendationsDisplay = document.getElementById('recommendations-display');
-    if (recommendationsDisplay) {
-      recommendationsDisplay.innerHTML = '<div style="color: #A0AEC0; font-style: italic;">No recommendations available. Play some games to build data.</div>';
-    }
-    
-    // Clear any analysis results
-    const analysisDisplay = document.getElementById('analysis-display');
-    if (analysisDisplay) {
-      analysisDisplay.innerHTML = '<div style="color: #A0AEC0; text-align: center; padding: 20px;">No analysis data available. Play some games to start building recommendations.</div>';
-    }
-    
-    // Reset historical data display
-    const historicalSection = panel.querySelector('.historical-data');
-    if (historicalSection) {
-      historicalSection.style.display = 'none';
-    }
-  }
-  
   // Clear any cached recommendations
   currentRecommendedSetup = null;
   placedRecommendedPieces.clear();
+  
+  // Use basic layout after database reset
+  createBasicPanel();
   
   console.log('[Board Advisor] UI reloaded successfully');
 }
@@ -9548,77 +9545,6 @@ function resumeAnalysisAfterDeletion() {
   }
 }
 
-// Function to show deletion feedback to user
-function showDeletionFeedback(message, type = 'info') {
-  try {
-    // Remove any existing feedback
-    const existingFeedback = document.querySelector('.board-advisor-deletion-feedback');
-    if (existingFeedback) {
-      existingFeedback.remove();
-    }
-    
-    // Create feedback element
-    const feedback = document.createElement('div');
-    feedback.className = 'board-advisor-deletion-feedback';
-    feedback.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 10000;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      transition: all 0.3s ease;
-      max-width: 300px;
-      word-wrap: break-word;
-    `;
-    
-    // Set colors based on type
-    switch (type) {
-      case 'success':
-        feedback.style.backgroundColor = '#10B981';
-        feedback.style.color = 'white';
-        feedback.style.border = '1px solid #059669';
-        break;
-      case 'warning':
-        feedback.style.backgroundColor = '#F59E0B';
-        feedback.style.color = 'white';
-        feedback.style.border = '1px solid #D97706';
-        break;
-      case 'error':
-        feedback.style.backgroundColor = '#EF4444';
-        feedback.style.color = 'white';
-        feedback.style.border = '1px solid #DC2626';
-        break;
-      default: // info
-        feedback.style.backgroundColor = '#3B82F6';
-        feedback.style.color = 'white';
-        feedback.style.border = '1px solid #2563EB';
-    }
-    
-    feedback.textContent = message;
-    document.body.appendChild(feedback);
-    
-    // Auto-remove after 3 seconds
-    setTimeout(() => {
-      if (feedback.parentNode) {
-        feedback.style.opacity = '0';
-        feedback.style.transform = 'translateX(100%)';
-        setTimeout(() => {
-          if (feedback.parentNode) {
-            feedback.remove();
-          }
-        }, 300);
-      }
-    }, 3000);
-    
-  } catch (error) {
-    console.error('[Board Advisor] Error showing deletion feedback:', error);
-  }
-}
 
 // Function to refresh UI after deletion
 async function refreshUIAfterDeletion() {
@@ -10256,9 +10182,9 @@ async function updatePanelWithAnalysis(analysis) {
                   monsterDisplay += ` (modified) ${modifications}`;
                 }
                 
-                // Add tier information to equipment if available
+                // Add tier information to equipment if available and not "No Equipment"
                 let equipmentDisplay = equipment;
-                if (piece.equipmentTier !== undefined) {
+                if (piece.equipmentTier !== undefined && equipment !== 'No Equipment') {
                   equipmentDisplay += ` (T${piece.equipmentTier})`;
                 }
                 
@@ -11625,73 +11551,178 @@ function addTimeout(callback, delay) {
 
 // Cleanup function for subscriptions
 function cleanupSubscriptions() {
-  activeSubscriptions.forEach(subscription => {
-    if (subscription && typeof subscription.unsubscribe === 'function') {
-      subscription.unsubscribe();
+  try {
+    activeSubscriptions.forEach(subscription => {
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
+    });
+    activeSubscriptions = [];
+    
+    // Clean up game state highlight subscription
+    if (gameStateHighlightSubscription) {
+      gameStateHighlightSubscription.unsubscribe();
+      gameStateHighlightSubscription = null;
     }
-  });
-  activeSubscriptions = [];
-  
-  // Clean up game state highlight subscription
-  if (gameStateHighlightSubscription) {
-    gameStateHighlightSubscription.unsubscribe();
-    gameStateHighlightSubscription = null;
+    
+    // Clear game running state
+    isGameRunning = false;
+    if (gameEndCooldownTimeout) {
+      clearTimeout(gameEndCooldownTimeout);
+      gameEndCooldownTimeout = null;
+    }
+    storedRecommendedSetup = null;
+    
+    console.log('[Board Advisor] All subscriptions cleaned up');
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up subscriptions:', error);
   }
-  
-  // Clear game running state
-  isGameRunning = false;
-  if (gameEndCooldownTimeout) {
-    clearTimeout(gameEndCooldownTimeout);
-    gameEndCooldownTimeout = null;
-  }
-  storedRecommendedSetup = null;
-  
-  console.log('[Board Advisor] All subscriptions cleaned up');
 }
 
 // Cleanup function for document listeners
 function cleanupDocumentListeners() {
-  documentListeners.forEach(({ event, handler }) => {
-    document.removeEventListener(event, handler);
-  });
-  documentListeners = [];
-  console.log('[Board Advisor] All document listeners cleaned up');
+  try {
+    documentListeners.forEach(({ event, handler }) => {
+      document.removeEventListener(event, handler);
+    });
+    documentListeners = [];
+    console.log('[Board Advisor] All document listeners cleaned up');
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up document listeners:', error);
+  }
 }
 
 // Cleanup function for window listeners
 function cleanupWindowListeners() {
-  windowListeners.forEach(({ event, handler }) => {
-    window.removeEventListener(event, handler);
-  });
-  windowListeners = [];
-  console.log('[Board Advisor] All window listeners cleaned up');
+  try {
+    windowListeners.forEach(({ event, handler }) => {
+      window.removeEventListener(event, handler);
+    });
+    windowListeners = [];
+    console.log('[Board Advisor] All window listeners cleaned up');
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up window listeners:', error);
+  }
 }
 
 // Cleanup function for database connection
 function cleanupDatabase() {
-  if (sandboxDB) {
-    sandboxDB.close();
-    sandboxDB = null;
-    isDBReady = false;
-    console.log('[Board Advisor] Database connection closed');
+  try {
+    if (sandboxDB) {
+      sandboxDB.close();
+      sandboxDB = null;
+      isDBReady = false;
+      console.log('[Board Advisor] Database connection closed');
+    }
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up database:', error);
   }
 }
 
 // Cleanup function for timeouts
 function cleanupTimeouts() {
-  activeTimeouts.forEach(id => clearTimeout(id));
-  activeTimeouts = [];
-  console.log('[Board Advisor] All timeouts cleaned up');
+  try {
+    activeTimeouts.forEach(id => clearTimeout(id));
+    activeTimeouts = [];
+    console.log('[Board Advisor] All timeouts cleaned up');
+  } catch (error) {
+    console.error('[Board Advisor] Error cleaning up timeouts:', error);
+  }
+}
+
+// Verify cleanup operations succeeded
+function verifyCleanup() {
+  const issues = [];
+  
+  // Check if any subscriptions are still active
+  if (activeSubscriptions.length > 0) {
+    issues.push(`Active subscriptions: ${activeSubscriptions.length}`);
+  }
+  
+  // Check if any listeners are still registered
+  if (documentListeners.length > 0) {
+    issues.push(`Document listeners: ${documentListeners.length}`);
+  }
+  
+  if (windowListeners.length > 0) {
+    issues.push(`Window listeners: ${windowListeners.length}`);
+  }
+  
+  // Check if any timeouts are still active
+  if (activeTimeouts.length > 0) {
+    issues.push(`Active timeouts: ${activeTimeouts.length}`);
+  }
+  
+  // Check if tile highlights are still present
+  const highlightElements = document.querySelectorAll('.board-advisor-tile-highlight');
+  if (highlightElements.length > 0) {
+    issues.push(`Tile highlights: ${highlightElements.length}`);
+  }
+  
+  if (issues.length > 0) {
+    console.warn('[Board Advisor] Cleanup verification found issues:', issues);
+    return false;
+  }
+  
+  console.log('[Board Advisor] Cleanup verification passed');
+  return true;
+}
+
+// Centralized cleanup manager with state tracking
+function performCleanup(force = false) {
+  const now = Date.now();
+  
+  // Check if cleanup is already in progress or too recent
+  if (isCleanupInProgress && !force) {
+    console.log('[Board Advisor] Cleanup already in progress, skipping');
+    return false;
+  }
+  
+  if (!force && (now - lastCleanupTime) < CLEANUP_COOLDOWN) {
+    console.log('[Board Advisor] Cleanup too recent, skipping');
+    return false;
+  }
+  
+  isCleanupInProgress = true;
+  lastCleanupTime = now;
+  
+  try {
+    console.log('[Board Advisor] Starting comprehensive cleanup...');
+    
+    // Perform all cleanup operations
+    cleanupSubscriptions();
+    cleanupDocumentListeners();
+    cleanupWindowListeners();
+    cleanupTimeouts();
+    cleanupTileHighlights();
+    
+    // Only cleanup database on page unload or forced cleanup
+    if (force) {
+      cleanupDatabase();
+      stopStateRefresh();
+    }
+    
+    // Verify cleanup succeeded
+    const cleanupSuccess = verifyCleanup();
+    
+    if (cleanupSuccess) {
+      console.log('[Board Advisor] Cleanup completed successfully');
+    } else {
+      console.warn('[Board Advisor] Cleanup completed with issues');
+    }
+    
+    return cleanupSuccess;
+  } catch (error) {
+    console.error('[Board Advisor] Error during cleanup:', error);
+    return false;
+  } finally {
+    isCleanupInProgress = false;
+  }
 }
 
 // Cleanup on page unload
 addWindowListener('beforeunload', () => {
-  cleanupSubscriptions();
-  cleanupDocumentListeners();
-  cleanupWindowListeners();
-  cleanupTimeouts();
-  cleanupDatabase();
-  stopStateRefresh();
+  performCleanup(true); // Force cleanup on page unload
 });
 
 // Listen for mod disable events

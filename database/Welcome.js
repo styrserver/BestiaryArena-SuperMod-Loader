@@ -1,6 +1,6 @@
 // Welcome Mod for Bestiary Arena
 // Shows a welcome page on initialization with mod description
-// Also shows a loading modal while mods are loading
+// Also shows a loading toast while mods are loading
 console.log('Welcome mod initializing...');
 
 // Configuration
@@ -33,7 +33,7 @@ function getModalState(body) {
   }
 }
 
-// Try to close other modals with ESC presses and check if we can proceed
+// Check if other modals are open (simplified for welcome modal only)
 async function tryCloseModalsAndCheck() {
   try {
     const body = document.body;
@@ -47,44 +47,30 @@ async function tryCloseModalsAndCheck() {
       return false;
     }
     
-    // If there are modals, try to close them
+    // If there are modals, try a single ESC press
     if (initialState.hasModals) {
-      console.log('[Welcome] Attempting to close modals with ESC presses');
+      console.log('[Welcome] Attempting to close modals with single ESC press');
       
-      // Try multiple ESC presses to close any open modals
-      for (let i = 0; i < 3; i++) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { 
-          key: 'Escape', 
-          keyCode: 27, 
-          which: 27, 
-          bubbles: true 
-        }));
-      }
+      // Single ESC press to close any open modals
+      document.dispatchEvent(new KeyboardEvent('keydown', { 
+        key: 'Escape', 
+        keyCode: 27, 
+        which: 27, 
+        bubbles: true 
+      }));
       
-      // Wait for ESC presses to take effect
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Wait for ESC press to take effect
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Re-check after ESC presses
+      // Re-check after ESC press
       const afterEscState = getModalState(body);
       
       if (afterEscState.isClean) {
-        console.log('[Welcome] Modal successfully closed with ESC presses');
+        console.log('[Welcome] Modal successfully closed with ESC press');
         return false; // No modals open now
       } else {
-        console.log('[Welcome] Modal still open after ESC presses - waiting longer for DOM update');
-        // Wait a bit more for DOM to fully update
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Final check after additional wait
-        const finalState = getModalState(body);
-        
-        if (finalState.isClean) {
-          console.log('[Welcome] Modal successfully closed after extended wait');
-          return false; // No modals open now
-        } else {
-          console.log('[Welcome] Modal still open after extended wait');
-          return true; // Still has modals open
-        }
+        console.log('[Welcome] Modal still open after ESC press');
+        return true; // Still has modals open
       }
     }
     
@@ -266,11 +252,51 @@ async function getModCounts() {
   }
 }
 
-// Loading modal state
-let loadingModal = null;
+// Loading toast state
+let loadingToast = null;
 let loadingCompleted = false;
+let modsLoaded = false;
 let modLoadingObserver = null;
 let modalAborted = false; // Track if modal was aborted due to other modals
+
+// Cleanup tracking
+let activeTimeouts = new Set();
+let activeEventListeners = new Map();
+let currentModal = null;
+
+// Helper functions for cleanup tracking
+function trackTimeout(timeoutId) {
+  activeTimeouts.add(timeoutId);
+  return timeoutId;
+}
+
+function clearTrackedTimeout(timeoutId) {
+  clearTimeout(timeoutId);
+  activeTimeouts.delete(timeoutId);
+}
+
+function trackEventListener(element, event, handler) {
+  const key = `${element === window ? 'window' : element.constructor.name}_${event}`;
+  if (!activeEventListeners.has(key)) {
+    activeEventListeners.set(key, []);
+  }
+  activeEventListeners.get(key).push({ element, event, handler });
+}
+
+function removeTrackedEventListener(element, event, handler) {
+  const key = `${element === window ? 'window' : element.constructor.name}_${event}`;
+  const listeners = activeEventListeners.get(key);
+  if (listeners) {
+    const index = listeners.findIndex(l => l.handler === handler);
+    if (index !== -1) {
+      listeners.splice(index, 1);
+      element.removeEventListener(event, handler);
+      if (listeners.length === 0) {
+        activeEventListeners.delete(key);
+      }
+    }
+  }
+}
 
 // Common function to handle welcome modal after completion modal closes
 async function handleCompletionModalClose(context = '') {
@@ -289,148 +315,220 @@ async function handleCompletionModalClose(context = '') {
   }
 }
 
-// Show loading modal
-async function showLoadingModal() {
-  console.log('[Welcome] showLoadingModal called');
-  
-  // Try to close other modals and check if we can proceed
-  const stillHasModals = await tryCloseModalsAndCheck();
-  if (stillHasModals) {
-    console.log('[Welcome] Aborting loading modal - other modal is still open after ESC attempts');
-    modalAborted = true; // Mark as aborted to prevent future attempts
-    return;
+// Toast implementation for Welcome mod with proper stacking
+function createToast({ message, type = 'info', duration = 3000, icon = null }) {
+  // Get or create the main toast container
+  let mainContainer = document.getElementById('welcome-toast-container');
+  if (!mainContainer) {
+    mainContainer = document.createElement('div');
+    mainContainer.id = 'welcome-toast-container';
+    mainContainer.style.cssText = `
+      position: fixed;
+      z-index: 9999;
+      inset: 16px 16px 64px;
+      pointer-events: none;
+    `;
+    mainContainer.setAttribute('data-aria-hidden', 'true');
+    mainContainer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(mainContainer);
   }
   
-  if (!api || !api.ui || !api.ui.components) {
-    console.error('[Welcome] API not available for loading modal');
-    return;
+  // Count existing toasts to calculate stacking position
+  const existingToasts = mainContainer.querySelectorAll('.toast-item');
+  const stackOffset = existingToasts.length * 46; // 46px per toast
+  
+  // Create the flex container for this specific toast
+  const flexContainer = document.createElement('div');
+  flexContainer.className = 'toast-item';
+  flexContainer.style.cssText = `
+    left: 0px;
+    right: 0px;
+    display: flex;
+    position: absolute;
+    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+    transform: translateY(-${stackOffset}px);
+    bottom: 0px;
+    justify-content: flex-end;
+  `;
+  
+  // Create toast button with proper animation classes
+  const toast = document.createElement('button');
+  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+  
+  // Create widget structure to match game's toast style
+  const widgetTop = document.createElement('div');
+  widgetTop.className = 'widget-top h-2.5';
+  
+  const widgetBottom = document.createElement('div');
+  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+  
+  // Add icon if provided
+  if (icon) {
+    const iconImg = document.createElement('img');
+    iconImg.alt = type;
+    iconImg.src = icon;
+    iconImg.className = 'pixelated';
+    // Use appropriate sizing for the Bestiary Arena logo
+    if (type === 'loading') {
+      iconImg.style.cssText = 'width: 20px; height: 20px;'; // Slightly larger for loading
+    } else {
+      iconImg.style.cssText = 'width: 24px; height: 24px;'; // Larger for completion
+    }
+    widgetBottom.appendChild(iconImg);
   }
+  
+  // Add message
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'text-left';
+  messageDiv.innerHTML = message; // Use innerHTML to support HTML content like spans
+  widgetBottom.appendChild(messageDiv);
+  
+  // Assemble toast
+  toast.appendChild(widgetTop);
+  toast.appendChild(widgetBottom);
+  flexContainer.appendChild(toast);
+  mainContainer.appendChild(flexContainer);
+  
+  // Debug: Log toast creation
+  console.log('[Welcome] Toast created and added to DOM:', {
+    container: !!mainContainer,
+    stackOffset: stackOffset,
+    duration: duration,
+    totalToasts: existingToasts.length + 1
+  });
+  
+  // Auto-remove after duration
+  const timeoutId = trackTimeout(setTimeout(() => {
+    if (flexContainer && flexContainer.parentNode) {
+      console.log('[Welcome] Auto-removing toast after', duration, 'ms');
+      flexContainer.parentNode.removeChild(flexContainer);
+      
+      // Update positions of remaining toasts
+      updateToastPositions(mainContainer);
+    }
+    activeTimeouts.delete(timeoutId);
+  }, duration));
+  
+  return {
+    element: flexContainer,
+    remove: () => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateToastPositions(mainContainer);
+      }
+    }
+  };
+}
 
+// Update positions of remaining toasts when one is removed
+function updateToastPositions(container) {
+  const toasts = container.querySelectorAll('.toast-item');
+  toasts.forEach((toast, index) => {
+    const offset = index * 46;
+    toast.style.transform = `translateY(-${offset}px)`;
+  });
+}
+
+// Show loading toast
+function showLoadingToast() {
+  console.log('[Welcome] showLoadingToast called');
+  
   try {
-    loadingModal = api.ui.components.createModal({
-      title: 'Loading Mods...',
-      width: 300,
-      height: 80,
-      content: `
-        <div style="padding: 15px; text-align: center;">
-          <div style="margin-bottom: 10px;">
-            <div style="width: 25px; height: 25px; border: 3px solid #a6adc8; border-top: 3px solid #7c3aed; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
-          </div>
-          <p style="color: #a6adc8; font-size: 15px; margin: 0;">Loading mods...</p>
-        </div>
-        <style>
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        </style>
-      `,
-      buttons: [] // No buttons during loading
+    loadingToast = createToast({
+      message: '<span class="text-monster">Loading mods</span>...',
+      type: 'loading',
+      duration: 10000, // Show for 10 seconds
+      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
     });
 
-    console.log('[Welcome] Loading modal created:', !!loadingModal);
-    console.log('[Welcome] Loading modal type:', typeof loadingModal);
+    console.log('[Welcome] Loading toast created:', !!loadingToast);
   } catch (error) {
-    console.error('[Welcome] Error creating loading modal:', error);
+    console.error('[Welcome] Error creating loading toast:', error);
   }
 }
 
-// Update loading modal to show completion
+// Show error toast for mod loading failures
+function showModErrorToast(error) {
+  console.log('[Welcome] showModErrorToast called with error:', error);
+  
+  try {
+    const errorToast = createToast({
+      message: `<span class="text-red-400">Mod loading error:</span> ${error}`,
+      type: 'error',
+      duration: 8000, // Show for 8 seconds
+      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
+    });
+
+    console.log('[Welcome] Error toast created:', !!errorToast);
+  } catch (toastError) {
+    console.error('[Welcome] Error creating error toast:', toastError);
+  }
+}
+
+// Update loading toast to show completion
 async function updateLoadingToComplete() {
   console.log('[Welcome] updateLoadingToComplete called');
-  console.log('[Welcome] loadingModal exists:', !!loadingModal);
+  console.log('[Welcome] loadingToast exists:', !!loadingToast);
+  console.log('[Welcome] loadingCompleted:', loadingCompleted);
+  
+  // Prevent duplicate processing
+  if (loadingCompleted) {
+    console.log('[Welcome] Loading already completed, skipping duplicate call');
+    return;
+  }
   
   // Mark loading as completed
   loadingCompleted = true;
+  modsLoaded = true;
   
-  if (!loadingModal) {
-    console.warn('[Welcome] No loading modal to update - showing welcome modal directly');
-    setTimeout(() => handleCompletionModalClose('(no loading modal)'), 100);
+  if (!loadingToast) {
+    console.warn('[Welcome] No loading toast to update - showing welcome modal directly');
+    handleCompletionModalClose('(no loading toast)');
     return;
   }
 
   try {
-    // Close the loading modal and show completion modal
-    loadingModal?.close?.();
-    loadingModal = null;
+    // Remove the loading toast
+    loadingToast?.remove?.();
+    loadingToast = null;
 
-    // Try to close other modals and check if we can proceed
-    const stillHasModals = await tryCloseModalsAndCheck();
-    if (stillHasModals) {
-      console.log('[Welcome] Aborting completion modal - other modal is still open after ESC attempts');
-      modalAborted = true; // Mark as aborted to prevent future attempts
-      return;
-    }
-    
-    // If we successfully closed modals, reset the abort flag
-    if (modalAborted) {
-      console.log('[Welcome] Modals were closed successfully, resetting abort flag');
-      modalAborted = false;
-    }
-
-    // Create a simple completion modal
-    const completionModal = api.ui.components.createModal({
-      title: 'Mods Loaded!',
-      width: 300,
-      height: 150,
-      content: `
-        <div style="padding: 20px; text-align: center;">
-          <div style="margin-bottom: 15px;">
-            <div style="width: 30px; height: 30px; border: 3px solid #4CAF50; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-              <span style="color: #4CAF50; font-size: 18px; font-weight: bold;">✓</span>
-            </div>
-          </div>
-          <p style="color: #a6adc8; font-size: 15px; margin: 0 0 10px 0;">Loading complete!</p>
-          <p style="color: #a6adc8; font-size: 15px; margin: 0; opacity: 0.7;">All mods loaded successfully.</p>
-        </div>
-      `,
-      buttons: [
-        {
-          text: 'Got it!',
-          primary: true,
-          onClick: async (e, modalObj) => {
-            modalObj?.close?.();
-            handleCompletionModalClose('(completion modal button)');
-          }
-        }
-      ]
+    // Create a completion toast
+    const completionToast = createToast({
+      message: '<span class="text-monster">Mods</span> loaded successfully!',
+      type: 'success',
+      duration: 10000, // Show for 10 seconds
+      icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
     });
 
-    // Add ESC key support for closing modal
-    const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        completionModal?.close?.();
-        handleCompletionModalClose('(ESC key)');
-        document.removeEventListener('keydown', escHandler);
-      }
-    };
-    document.addEventListener('keydown', escHandler);
-
-    console.log('[Welcome] Completion modal created successfully');
+    console.log('[Welcome] Completion toast created successfully');
+    
+    // Show welcome modal immediately if enabled (don't wait for toast)
+    handleCompletionModalClose('(completion toast)');
+    
   } catch (error) {
-    console.error('[Welcome] Error creating completion modal:', error);
+    console.error('[Welcome] Error creating completion toast:', error);
     // Fallback: show welcome modal directly
-    setTimeout(() => handleCompletionModalClose('(error fallback)'), 100);
+    handleCompletionModalClose('(error fallback)');
   }
 }
 
-// Hide loading modal
-function hideLoadingModal() {
-  console.log('[Welcome] hideLoadingModal called');
-  console.log('[Welcome] loadingModal exists:', !!loadingModal);
+// Hide loading toast
+function hideLoadingToast() {
+  console.log('[Welcome] hideLoadingToast called');
+  console.log('[Welcome] loadingToast exists:', !!loadingToast);
   console.log('[Welcome] loadingCompleted:', loadingCompleted);
   
-  if (loadingModal && typeof loadingModal.close === 'function') {
-    loadingModal.close();
-    loadingModal = null;
-    console.log('[Welcome] Loading modal hidden successfully');
+  if (loadingToast && typeof loadingToast.remove === 'function') {
+    loadingToast.remove();
+    loadingToast = null;
+    console.log('[Welcome] Loading toast hidden successfully');
   } else {
-    console.warn('[Welcome] Could not hide loading modal - invalid modal object');
+    console.warn('[Welcome] Could not hide loading toast - invalid toast object');
   }
   
-  // If loading was completed but modal was closed, show welcome modal as fallback
+  // If loading was completed but toast was closed, show welcome modal as fallback
   if (loadingCompleted) {
-    setTimeout(() => handleCompletionModalClose('(loading completed but modal was closed)'), 100);
+    trackTimeout(setTimeout(() => handleCompletionModalClose('(loading completed but toast was closed)'), 100));
   }
 }
 
@@ -532,13 +630,13 @@ async function showWelcomeModal() {
     const escHandler = (e) => {
       if (e.key === 'Escape') {
         modal?.close?.();
-        document.removeEventListener('keydown', escHandler);
+        removeTrackedEventListener(document, 'keydown', escHandler);
       }
     };
-    document.addEventListener('keydown', escHandler);
+    trackEventListener(document, 'keydown', escHandler);
 
     // Force the modal size to match Cyclopedia dimensions
-    setTimeout(() => {
+    trackTimeout(setTimeout(() => {
       const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
       if (dialog) {
         dialog.style.width = '900px';
@@ -555,50 +653,56 @@ async function showWelcomeModal() {
           contentElem.style.flexDirection = 'column';
         }
       }
-    }, 100);
+    }, 100));
+
+    // Store modal reference for cleanup
+    currentModal = modal;
   } catch (error) {
     console.error('[Welcome] Error creating welcome modal:', error);
   }
 }
 
-// Listen for mod loading completion via direct message from local_mods.js
+// Listen for mod loading completion and errors via direct message from local_mods.js
 function setupModLoadingObserver() {
   console.log('[Welcome] Setting up mod loading completion listener');
   
-  // Listen for completion message from local_mods.js
+  // Listen for completion and error messages from local_mods.js
   const messageHandler = (event) => {
     if (event.source !== window) return;
+    
     
     // Listen for mod loading completion message
     if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
       console.log('[Welcome] Received mod loading completion signal from local_mods.js');
-      updateLoadingToComplete().then(() => {
-        modsLoaded = true;
-      });
+      updateLoadingToComplete();
+    }
+    
+    // Listen for mod loading error message
+    if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'modLoadError') {
+      console.log('[Welcome] Received mod loading error signal:', event.data.error);
+      showModErrorToast(event.data.error);
     }
   };
   
-  window.addEventListener('message', messageHandler);
+  trackEventListener(window, 'message', messageHandler);
   
   // Store the handler for cleanup
   modLoadingObserver = {
     disconnect: () => {
-      window.removeEventListener('message', messageHandler);
+      removeTrackedEventListener(window, 'message', messageHandler);
       console.log('[Welcome] Mod loading completion listener removed');
     }
   };
   
   // Fallback timer in case the message never comes
-  setTimeout(() => {
-    if (modLoadingObserver) {
+  trackTimeout(setTimeout(() => {
+    if (modLoadingObserver && !loadingCompleted) {
       console.log('[Welcome] Mod loading completion timeout, using fallback');
       modLoadingObserver.disconnect();
       modLoadingObserver = null;
-      updateLoadingToComplete().then(() => {
-        modsLoaded = true;
-      });
+      updateLoadingToComplete();
     }
-  }, 3000); // Reduced to 3 second timeout
+  }, 3000)); // Reduced to 3 second timeout for faster response
 }
 
 // Initialize welcome modal if conditions are met
@@ -609,24 +713,9 @@ async function initializeWelcome() {
   console.log('[Welcome] Setting up mod loading completion listener...');
   setupModLoadingObserver();
   
-  // Check if API is available and show welcome immediately
-  if (api && api.ui && api.ui.components) {
-    console.log('[Welcome] API available, starting loading process');
-    
-    // Simulate ESC key presses to prevent DOM errors before showing modal
-    for (let i = 0; i < 3; i++) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
-    }
-    
-    // Small delay to ensure ESC presses are processed
-    setTimeout(async () => {
-      await showLoadingModal();
-    }, 50);
-  } else {
-    console.log('[Welcome] API not ready, retrying in 100ms');
-    // API not ready yet, wait a short time and try again
-    setTimeout(initializeWelcome, 100);
-  }
+  // Show loading toast immediately (no API dependency needed)
+  console.log('[Welcome] Starting loading process');
+  showLoadingToast();
 }
 
 
@@ -662,14 +751,25 @@ function checkPopupToggleStatus() {
 }
 
 // Listen for welcome toggle changes
-window.addEventListener('message', handleWelcomeToggle);
+trackEventListener(window, 'message', handleWelcomeToggle);
 
 // Cleanup function
 function cleanup() {
   console.log('[Welcome] Cleaning up...');
   
-  // Remove event listeners
-  window.removeEventListener('message', handleWelcomeToggle);
+  // Clear all tracked timeouts
+  activeTimeouts.forEach(timeoutId => {
+    clearTimeout(timeoutId);
+  });
+  activeTimeouts.clear();
+  
+  // Remove all tracked event listeners
+  activeEventListeners.forEach((listeners, key) => {
+    listeners.forEach(({ element, event, handler }) => {
+      element.removeEventListener(event, handler);
+    });
+  });
+  activeEventListeners.clear();
   
   // Disconnect observer
   if (modLoadingObserver) {
@@ -677,10 +777,22 @@ function cleanup() {
     modLoadingObserver = null;
   }
   
-  // Close any open modals
-  if (loadingModal && typeof loadingModal.close === 'function') {
-    loadingModal.close();
-    loadingModal = null;
+  // Close any open modal
+  if (currentModal && typeof currentModal.close === 'function') {
+    currentModal.close();
+    currentModal = null;
+  }
+  
+  // Close any open toasts
+  if (loadingToast && typeof loadingToast.remove === 'function') {
+    loadingToast.remove();
+    loadingToast = null;
+  }
+  
+  // Clean up toast container
+  const toastContainer = document.getElementById('welcome-toast-container');
+  if (toastContainer && toastContainer.parentNode) {
+    toastContainer.parentNode.removeChild(toastContainer);
   }
   
   // Reset state variables
@@ -694,8 +806,8 @@ exports = {
   showWelcome: showWelcomeModal,
   setNeverShowAgain,
   shouldShowWelcome,
-  showLoading: showLoadingModal,
-  hideLoading: hideLoadingModal,
+  showLoading: showLoadingToast,
+  hideLoading: hideLoadingToast,
   updateLoadingToComplete: updateLoadingToComplete,
   isModsLoaded: () => modsLoaded,
   updateConfig: (newConfig) => {

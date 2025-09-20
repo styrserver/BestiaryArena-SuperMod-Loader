@@ -769,6 +769,90 @@ const DEBUG = false; // Set to true for development
     return container;
   }
 
+  // Create a toast notification that matches the game's style
+  function createToast({ message, type = 'info', duration = 3000, icon = null }) {
+    ensureStyles();
+    
+    // Create the main container (matches the game's structure)
+    const container = document.createElement('div');
+    container.style.cssText = `
+      position: fixed;
+      z-index: 9999;
+      inset: 16px 16px 64px;
+      pointer-events: none;
+    `;
+    container.setAttribute('data-aria-hidden', 'true');
+    container.setAttribute('aria-hidden', 'true');
+    
+    // Create the flex container for positioning
+    const flexContainer = document.createElement('div');
+    flexContainer.className = '';
+    flexContainer.style.cssText = `
+      left: 0px;
+      right: 0px;
+      display: flex;
+      position: absolute;
+      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+      transform: translateY(0px);
+      bottom: 0px;
+      justify-content: flex-end;
+    `;
+    
+    // Create toast button
+    const toast = document.createElement('button');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-out fade-out zoom-out-95 fill-mode-forwards';
+    
+    // Create widget structure to match game's toast style
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    
+    // Add icon if provided
+    if (icon) {
+      const iconImg = document.createElement('img');
+      iconImg.alt = type;
+      iconImg.src = icon;
+      iconImg.className = 'pixelated';
+      iconImg.style.cssText = 'width: 12px; height: 9px;'; // Match game's dimensions
+      widgetBottom.appendChild(iconImg);
+    }
+    
+    // Add message
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.innerHTML = message; // Use innerHTML to support HTML content like spans
+    widgetBottom.appendChild(messageDiv);
+    
+    // Assemble toast
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    
+    // Assemble container
+    flexContainer.appendChild(toast);
+    container.appendChild(flexContainer);
+    
+    // Add to document
+    document.body.appendChild(container);
+    
+    // Auto-remove after duration
+    setTimeout(() => {
+      if (container && container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    }, duration);
+    
+    return {
+      element: container,
+      remove: () => {
+        if (container && container.parentNode) {
+          container.parentNode.removeChild(container);
+        }
+      }
+    };
+  }
+
   // Export UI components to global
   window.BestiaryUIComponents = {
     createModal,
@@ -776,6 +860,7 @@ const DEBUG = false; // Set to true for development
     createMonsterPortrait,
     createItemPortrait,
     createRoomListItem,
-    createNavBreadcrumb
+    createNavBreadcrumb,
+    createToast
   };
 })(); 

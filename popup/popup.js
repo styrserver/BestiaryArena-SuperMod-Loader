@@ -480,6 +480,7 @@ function renderLocalMods(mods) {
     'Better Forge.js',
     'Better Highscores.js',
     'Better Hy\'genie.js',
+    'Better Tasker.js',
     'Better Yasir.js',
     'Configurator.js',
     'Cyclopedia.js',

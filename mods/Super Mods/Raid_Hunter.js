@@ -63,6 +63,80 @@ const EVENT_TO_ROOM_MAPPING = {
 // 2. STATE MANAGEMENT
 // ============================================================================
 
+// Quest Button Manager (shared with Better Tasker)
+window.QuestButtonManager = window.QuestButtonManager || {
+    currentOwner: null,
+    originalState: null,
+    validationInterval: null,
+    
+    // Request control of quest button (returns true if successful)
+    requestControl(modName) {
+        if (this.currentOwner === null || this.currentOwner === modName) {
+            this.currentOwner = modName;
+            console.log(`[Quest Button Manager] Control granted to ${modName}`);
+            return true;
+        }
+        console.log(`[Quest Button Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
+        return false;
+    },
+    
+    // Release control of quest button
+    releaseControl(modName) {
+        if (this.currentOwner === modName) {
+            this.currentOwner = null;
+            console.log(`[Quest Button Manager] Control released by ${modName}`);
+            return true;
+        }
+        return false;
+    },
+    
+    // Check if mod has control
+    hasControl(modName) {
+        return this.currentOwner === modName;
+    },
+    
+    // Get current owner
+    getCurrentOwner() {
+        return this.currentOwner;
+    }
+};
+
+// Bestiary Automator Settings Manager (shared with Better Tasker)
+window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || {
+    currentOwner: null,
+    
+    // Request control of Bestiary Automator settings (returns true if successful)
+    requestControl(modName) {
+        if (this.currentOwner === null || this.currentOwner === modName) {
+            this.currentOwner = modName;
+            console.log(`[Bestiary Automator Settings Manager] Control granted to ${modName}`);
+            return true;
+        }
+        console.log(`[Bestiary Automator Settings Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
+        return false;
+    },
+    
+    // Release control of Bestiary Automator settings
+    releaseControl(modName) {
+        if (this.currentOwner === modName) {
+            this.currentOwner = null;
+            console.log(`[Bestiary Automator Settings Manager] Control released by ${modName}`);
+            return true;
+        }
+        return false;
+    },
+    
+    // Check if mod has control
+    hasControl(modName) {
+        return this.currentOwner === modName;
+    },
+    
+    // Get current owner
+    getCurrentOwner() {
+        return this.currentOwner;
+    }
+};
+
 let raidUnsubscribe = null;
 let raidListMonitor = null;
 let lastRaidTime = 0;
@@ -91,12 +165,18 @@ let retryTimeout = null;
 let activeRaidHunterModal = null;
 let raidHunterModalInProgress = false;
 let lastModalCall = 0;
+let modalCleanupObserver = null;
 
 // State manager to prevent race conditions
 let stateManager = {
     isInitializing: false,
     isProcessing: false
 };
+
+// Debug function to check state manager status
+function debugStateManager() {
+    console.log(`[Raid Hunter] State Manager - isInitializing: ${stateManager.isInitializing}, isProcessing: ${stateManager.isProcessing}`);
+}
 
 // Board Analyzer coordination
 let boardAnalyzerCoordinationInterval = null;
@@ -106,54 +186,110 @@ let isBoardAnalyzerRunning = false;
 
 // Safe execution wrapper to prevent race conditions
 function safeExecute(fn) {
-    if (stateManager.isProcessing) return;
+    if (stateManager.isProcessing) {
+        return;
+    }
     stateManager.isProcessing = true;
     try {
         fn();
+    } catch (error) {
+        console.error('[Raid Hunter] safeExecute() - error during execution:', error);
     } finally {
         stateManager.isProcessing = false;
     }
 }
 
-// Check if an element is a fight toast
-function isFightToast(element) {
+// Alternative execution method that doesn't use the state manager
+function executeImmediately(fn) {
+    console.log('[Raid Hunter] executeImmediately() - executing without state manager');
     try {
-        // First, check if the element is a toast
-        if (!element.classList || !element.classList.contains('widget-bottom')) {
+        fn();
+        console.log('[Raid Hunter] executeImmediately() - execution completed');
+    } catch (error) {
+        console.error('[Raid Hunter] executeImmediately() - error during execution:', error);
+    }
+}
+
+// Check if an element is a raid toast (looks for fight icon like Bestiary Automator's defeat toast detection)
+function isRaidToast(element) {
+    try {
+        // Check if the element is a toast (either root toast element or child widget-bottom)
+        const isToastElement = element.classList && (
+            element.classList.contains('non-dismissable-dialogs') || 
+            element.classList.contains('widget-bottom')
+        );
+        
+        if (!isToastElement) {
             return false;
         }
         
-        // Look for fight icon within the toast
-        const fightIcon = element.querySelector('img[src*="fight.png"]') || 
-                         element.querySelector('img[alt*="fight"]') ||
-                         element.querySelector('img[src*="assets/icons/fight.png"]');
+        // Find the widget-bottom element (either the element itself or a child)
+        const widgetBottom = element.classList.contains('widget-bottom') 
+            ? element 
+            : element.querySelector('.widget-bottom');
         
-        if (fightIcon) {
-            console.log('[Raid Hunter] Fight icon detected in toast');
-            return true;
+        if (!widgetBottom) {
+            return false;
         }
         
-        // Also check for fight-related content in the toast
-        const textContent = element.textContent || element.innerText || '';
-        const fightKeywords = ['raid', 'fight', 'battle', 'combat', 'attack'];
-        const hasFightKeyword = fightKeywords.some(keyword => 
-            textContent.toLowerCase().includes(keyword)
-        );
+        // Look specifically for the fight icon that indicates a raid toast
+        const fightIcon = widgetBottom.querySelector('img[src*="fight.png"]') || 
+                         widgetBottom.querySelector('img[alt*="fight"]') ||
+                         widgetBottom.querySelector('img[src*="assets/icons/fight.png"]');
         
-        if (hasFightKeyword) {
-            console.log('[Raid Hunter] Fight-related toast detected:', textContent);
+        // Additional check: make sure this is not a quest log (which also has widget-bottom)
+        const isQuestLog = widgetBottom.textContent && widgetBottom.textContent.includes('Quest Log');
+        
+        if (fightIcon && !isQuestLog) {
+            console.log('[Raid Hunter] Fight icon detected in toast - this is a raid toast');
             return true;
         }
         
         return false;
     } catch (error) {
-        console.error('[Raid Hunter] Error checking if element is fight toast:', error);
+        console.error('[Raid Hunter] Error checking if element is raid toast:', error);
+        return false;
+    }
+}
+
+// Keep the old function name for backward compatibility but redirect to new function
+function isFightToast(element) {
+    return isRaidToast(element);
+}
+
+// Check if Better Tasker is currently processing task completion
+function isBetterTaskerProcessingTask() {
+    try {
+        // Check if Better Tasker is currently processing a task
+        // We need to check the global scope for Better Tasker's state variables
+        if (typeof window !== 'undefined' && window.betterTaskerState) {
+            const taskerState = window.betterTaskerState;
+            return taskerState.taskInProgress || taskerState.taskHuntingOngoing || taskerState.pendingTaskCompletion;
+        }
+        
+        // Fallback: Check if Better Tasker mod is loaded and has task processing flags
+        // This is a more defensive approach that doesn't rely on exposed state
+        const taskerMod = document.querySelector(`#${'better-tasker'}-settings-button`)?.closest('.frame-1');
+        if (taskerMod) {
+            // Check if the toggle button shows "Tasking" state (indicates task processing)
+            const toggleButton = taskerMod.querySelector('button');
+            if (toggleButton && toggleButton.textContent.includes('Tasking')) {
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking Better Tasker state:', error);
         return false;
     }
 }
 
 // Handle fight toast detection
 function handleFightToast() {
+    console.log('[Raid Hunter] handleFightToast() called');
+    debugStateManager();
+    
     // Check if Board Analyzer is running - if so, skip processing
     if (isBoardAnalyzerRunning) {
         console.log('[Raid Hunter] Fight toast detected but Board Analyzer is running - skipping');
@@ -167,9 +303,13 @@ function handleFightToast() {
     
     console.log('[Raid Hunter] Fight toast detected - checking for raids...');
     
-    // Check for existing raids and process them
-    safeExecute(() => {
+    // Check for existing raids and process them (use immediate execution to avoid state manager conflicts)
+    executeImmediately(() => {
+        console.log('[Raid Hunter] Inside executeImmediately - Calling updateRaidState()...');
         updateRaidState();
+        
+        console.log(`[Raid Hunter] After updateRaidState - raidQueue.length: ${raidQueue.length}, isCurrentlyRaiding: ${isCurrentlyRaiding}`);
+        
         if (raidQueue.length > 0 && !isCurrentlyRaiding) {
             console.log('[Raid Hunter] Fight toast detected - processing next raid');
             
@@ -189,16 +329,26 @@ function handleFightToast() {
                         console.log('[Raid Hunter] Automation disabled during fight toast delay');
                     } else if (isBoardAnalyzerRunning) {
                         console.log('[Raid Hunter] Board Analyzer running during fight toast delay - skipping');
+                    } else {
+                        console.log(`[Raid Hunter] Raid start delay completed but conditions not met - raidQueue.length: ${raidQueue.length}, isCurrentlyRaiding: ${isCurrentlyRaiding}`);
                     }
                 }, raidStartDelay * 1000);
             } else {
                 // No delay, process immediately
+                console.log('[Raid Hunter] No delay - processing raid immediately');
                 processNextRaid();
             }
         } else if (isCurrentlyRaiding) {
             console.log('[Raid Hunter] Fight toast detected but already raiding');
         } else {
             console.log('[Raid Hunter] Fight toast detected but no raids in queue');
+            
+            // If no raids are available, check if Better Tasker is processing a task
+            // If so, don't interfere with task completion
+            if (isBetterTaskerProcessingTask()) {
+                console.log('[Raid Hunter] No raids available but Better Tasker is processing task - not interfering');
+                return;
+            }
         }
     });
 }
@@ -238,6 +388,12 @@ function pauseRaidHunterMonitoring() {
             questLogMonitorInterval = null;
         }
         
+        // Pause body observer for fight toast detection to prevent interference
+        if (bodyObserver) {
+            bodyObserver.disconnect();
+            bodyObserver = null;
+        }
+        
         // Don't disconnect the quest log observer - keep it for UI detection
         // The observer won't interfere with Board Analyzer
         
@@ -256,6 +412,9 @@ function resumeRaidHunterMonitoring() {
         if (isAutomationEnabled === AUTOMATION_ENABLED) {
             // Resume ALL monitoring
             setupRaidMonitoring(); // This restores raid monitoring
+            
+            // Restore fight toast monitoring
+            setupFightToastMonitoring();
             
             // Restore quest log monitoring interval (observer was never disconnected)
             if (!questLogMonitorInterval) {
@@ -281,42 +440,52 @@ function resumeRaidHunterMonitoring() {
 
 // Unified cleanup function to fix memory leaks
 function cleanupAll() {
-    if (raidClockInterval) {
-        clearInterval(raidClockInterval);
-        raidClockInterval = null;
-    }
-    if (questLogMonitorInterval) {
-        clearInterval(questLogMonitorInterval);
-        questLogMonitorInterval = null;
-    }
-    if (raidEndCheckInterval) {
-        clearInterval(raidEndCheckInterval);
-        raidEndCheckInterval = null;
-    }
-    if (questLogObserver) {
-        questLogObserver.disconnect();
-        questLogObserver = null;
-    }
-    if (bodyObserver) {
-        bodyObserver.disconnect();
-        bodyObserver = null;
-    }
-    if (raidListMonitor) {
-        raidListMonitor.unsubscribe();
-        raidListMonitor = null;
-    }
-    if (questLogObserverTimeout) {
-        clearTimeout(questLogObserverTimeout);
-        questLogObserverTimeout = null;
-    }
-    if (retryTimeout) {
-        clearTimeout(retryTimeout);
-        retryTimeout = null;
-    }
-    // fightToastObserver is now consolidated with questLogObserver
-    if (boardAnalyzerCoordinationInterval) {
-        clearInterval(boardAnalyzerCoordinationInterval);
-        boardAnalyzerCoordinationInterval = null;
+    try {
+        // Clear all intervals
+        if (raidClockInterval) {
+            clearInterval(raidClockInterval);
+            raidClockInterval = null;
+        }
+        if (questLogMonitorInterval) {
+            clearInterval(questLogMonitorInterval);
+            questLogMonitorInterval = null;
+        }
+        if (raidEndCheckInterval) {
+            clearInterval(raidEndCheckInterval);
+            raidEndCheckInterval = null;
+        }
+        if (boardAnalyzerCoordinationInterval) {
+            clearInterval(boardAnalyzerCoordinationInterval);
+            boardAnalyzerCoordinationInterval = null;
+        }
+        
+        // Disconnect all observers
+        if (questLogObserver) {
+            questLogObserver.disconnect();
+            questLogObserver = null;
+        }
+        if (bodyObserver) {
+            bodyObserver.disconnect();
+            bodyObserver = null;
+        }
+        if (raidListMonitor) {
+            raidListMonitor.unsubscribe();
+            raidListMonitor = null;
+        }
+        
+        // Clear all timeouts
+        if (questLogObserverTimeout) {
+            clearTimeout(questLogObserverTimeout);
+            questLogObserverTimeout = null;
+        }
+        if (retryTimeout) {
+            clearTimeout(retryTimeout);
+            retryTimeout = null;
+        }
+        
+        console.log('[Raid Hunter] cleanupAll() completed successfully');
+    } catch (error) {
+        console.error('[Raid Hunter] Error in cleanupAll():', error);
     }
 }
 
@@ -366,6 +535,7 @@ function updateRaidQueue() {
         const settings = loadSettings();
         const enabledMaps = settings.enabledRaidMaps || [];
         
+        console.log(`[Raid Hunter] updateRaidQueue() - enabledMaps.length: ${enabledMaps.length}`);
         
         // Clear existing queue
         raidQueue = [];
@@ -380,10 +550,16 @@ function updateRaidQueue() {
         const raidState = globalThis.state.raids.getSnapshot();
         const currentRaidList = raidState.context.list || [];
         
+        console.log(`[Raid Hunter] updateRaidQueue() - currentRaidList.length: ${currentRaidList.length}`);
+        console.log('[Raid Hunter] updateRaidQueue() - currentRaidList:', currentRaidList);
+        
         if (currentRaidList.length > 0) {
             // Add available raids to queue using API data
             currentRaidList.forEach(raid => {
                 const raidName = getEventNameForRoomId(raid.roomId);
+                console.log(`[Raid Hunter] Checking raid: ${raidName} (roomId: ${raid.roomId})`);
+                console.log(`[Raid Hunter] Is ${raidName} in enabledMaps? ${enabledMaps.includes(raidName)}`);
+                
                 if (enabledMaps.includes(raidName)) {
                     raidQueue.push({
                         name: raidName,
@@ -394,8 +570,12 @@ function updateRaidQueue() {
                     if (!isCurrentlyRaiding || currentRaidInfo?.roomId !== raid.roomId) {
                         console.log(`[Raid Hunter] Added ${raidName} to queue via API`);
                     }
+                } else {
+                    console.log(`[Raid Hunter] Skipped ${raidName} - not in enabled maps`);
                 }
             });
+        } else {
+            console.log('[Raid Hunter] No raids available in currentRaidList');
         }
         
         console.log(`[Raid Hunter] Raid queue updated: ${raidQueue.length} raids available`);
@@ -451,10 +631,24 @@ function processNextRaid() {
         return;
     }
     
+    // Double-check that this raid is still enabled (safety check)
+    const settings = loadSettings();
+    const enabledMaps = settings.enabledRaidMaps || [];
+    if (!enabledMaps.includes(nextRaid.name)) {
+        console.log(`[Raid Hunter] Safety check failed - ${nextRaid.name} is no longer enabled, skipping`);
+        return;
+    }
+    
     console.log(`[Raid Hunter] Starting next raid: ${nextRaid.name}`);
     currentRaidInfo = nextRaid;
     isCurrentlyRaiding = true;
     raidRetryCount = 0; // Reset retry count for new raid
+    
+    // Modify quest button appearance to show raiding state
+    modifyQuestButtonForRaiding();
+    
+    // Start monitoring quest button validation
+    startQuestButtonValidation();
     
     // Close any open modals first, then start the raid
     closeOpenModals().then(() => {
@@ -463,6 +657,8 @@ function processNextRaid() {
             console.log('[Raid Hunter] Automation disabled during modal close - stopping raid');
             isCurrentlyRaiding = false;
             currentRaidInfo = null;
+            restoreQuestButtonAppearance();
+            stopQuestButtonValidation();
             return;
         }
         handleEventOrRaid(nextRaid.roomId);
@@ -635,9 +831,9 @@ function debouncedProcessAllMutations(mutations) {
                             hasQuestLogContent = checkForQuestLogContent(node);
                         }
                         
-                        // Check for fight toast
+                        // Check for raid toast
                         if (!hasFightToast && isAutomationActive()) {
-                            hasFightToast = isFightToast(node);
+                            hasFightToast = isRaidToast(node);
                         }
                     }
                 }
@@ -667,9 +863,9 @@ function debouncedProcessAllMutations(mutations) {
             }, 50);
         }
         
-        // Handle fight toast detection
+        // Handle raid toast detection
         if (hasFightToast) {
-            console.log('[Raid Hunter] Fight toast detected!');
+            console.log('[Raid Hunter] Raid toast detected!');
             handleFightToast();
         }
     });
@@ -708,7 +904,7 @@ function monitorQuestLogVisibility() {
         subtree: true
     });
     
-    console.log('[Raid Hunter] Consolidated MutationObserver set up for quest log and fight toast detection');
+    console.log('[Raid Hunter] Consolidated MutationObserver set up for quest log and raid toast detection');
 }
 
 // Starts quest log monitoring (simplified like Better Yasir)
@@ -740,7 +936,7 @@ function startQuestLogMonitoring() {
                 // Don't stop monitoring - keep it running for future quest log reopenings
             }
         });
-    }, 2000); // Reduced frequency since we have MutationObserver
+    }, 5000); // Reduced from 2s to 5s - MutationObserver handles real-time detection
 }
 
 // Stops quest log monitoring.
@@ -918,6 +1114,12 @@ function stopStaminaMonitoring() {
 // Enable Bestiary Automator's autorefill stamina setting
 function enableBestiaryAutomatorStaminaRefill() {
     try {
+        // Request control of Bestiary Automator settings
+        if (!window.BestiaryAutomatorSettingsManager.requestControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot control Bestiary Automator settings - controlled by another mod');
+            return false;
+        }
+        
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
         
@@ -994,6 +1196,7 @@ function enableBestiaryAutomatorStaminaRefill() {
         }
     } catch (error) {
         console.error('[Raid Hunter] Error enabling Bestiary Automator autorefill stamina:', error);
+        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
         return false;
     }
 }
@@ -1001,6 +1204,12 @@ function enableBestiaryAutomatorStaminaRefill() {
 // Disable Bestiary Automator's autorefill stamina setting
 function disableBestiaryAutomatorStaminaRefill() {
     try {
+        // Only disable if we have control
+        if (!window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot disable Bestiary Automator settings - not controlled by Raid Hunter');
+            return false;
+        }
+        
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
         
@@ -1026,13 +1235,17 @@ function disableBestiaryAutomatorStaminaRefill() {
                 autoRefillStamina: false
             });
             console.log('[Raid Hunter] Bestiary Automator autorefill stamina disabled');
+            // Release control after disabling
+            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for autorefill stamina');
+            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return false;
         }
     } catch (error) {
         console.error('[Raid Hunter] Error disabling Bestiary Automator autorefill stamina:', error);
+        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
         return false;
     }
 }
@@ -1040,6 +1253,12 @@ function disableBestiaryAutomatorStaminaRefill() {
 // Enable Bestiary Automator's faster autoplay setting
 function enableBestiaryAutomatorFasterAutoplay() {
     try {
+        // Request control of Bestiary Automator settings
+        if (!window.BestiaryAutomatorSettingsManager.requestControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot control Bestiary Automator settings - controlled by another mod');
+            return false;
+        }
+        
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
         
@@ -1116,6 +1335,7 @@ function enableBestiaryAutomatorFasterAutoplay() {
         }
     } catch (error) {
         console.error('[Raid Hunter] Error enabling Bestiary Automator faster autoplay:', error);
+        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
         return false;
     }
 }
@@ -1123,6 +1343,12 @@ function enableBestiaryAutomatorFasterAutoplay() {
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
     try {
+        // Only disable if we have control
+        if (!window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot disable Bestiary Automator settings - not controlled by Raid Hunter');
+            return false;
+        }
+        
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
         
@@ -1148,13 +1374,17 @@ function disableBestiaryAutomatorFasterAutoplay() {
                 fasterAutoplay: false
             });
             console.log('[Raid Hunter] Bestiary Automator faster autoplay disabled');
+            // Release control after disabling
+            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
+            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return false;
         }
     } catch (error) {
         console.error('[Raid Hunter] Error disabling Bestiary Automator faster autoplay:', error);
+        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
         return false;
     }
 }
@@ -1300,6 +1530,12 @@ function toggleAutomation() {
             clearTimeout(retryTimeout);
             retryTimeout = null;
         }
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
     }
 }
 
@@ -1348,6 +1584,12 @@ function stopAutoplayOnRaidEnd() {
         // Update raid status
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         
         // Update state and check for next raid
         updateRaidState();
@@ -1473,7 +1715,7 @@ function startRaidEndChecking() {
                 console.error('[Raid Hunter] Error in raid end checking:', error);
             }
         });
-    }, 10000); // Check every 10 seconds (less frequent when active)
+    }, 30000); // Reduced from 10s to 30s - raids last hours, so less frequent checking is fine
 }
 
 // Stops the periodic raid end checking
@@ -1779,9 +2021,16 @@ function handleRaidFailure(reason) {
     if (raidRetryCount < maxRetryAttempts) {
         console.log(`[Raid Hunter] Retrying raid (attempt ${raidRetryCount}/${maxRetryAttempts}) in 5 seconds...`);
         
-        // Put the raid back in the queue for retry
+        // Put the raid back in the queue for retry (only if still enabled)
         if (currentRaidInfo) {
-            raidQueue.unshift(currentRaidInfo); // Put back at front of queue
+            const settings = loadSettings();
+            const enabledMaps = settings.enabledRaidMaps || [];
+            if (enabledMaps.includes(currentRaidInfo.name)) {
+                raidQueue.unshift(currentRaidInfo); // Put back at front of queue
+                console.log(`[Raid Hunter] Retry: ${currentRaidInfo.name} is still enabled, adding back to queue`);
+            } else {
+                console.log(`[Raid Hunter] Retry: ${currentRaidInfo.name} is no longer enabled, not retrying`);
+            }
         }
         
         // Reset state and retry after delay
@@ -1903,10 +2152,10 @@ async function checkForExistingRaids() {
 
 // Sets up Board Analyzer coordination
 function setupBoardAnalyzerCoordination() {
-    // Poll for Board Analyzer state changes every 500ms (same as Board Advisor)
+    // Poll for Board Analyzer state changes every 2 seconds (reduced from 500ms)
     boardAnalyzerCoordinationInterval = setInterval(() => {
         handleBoardAnalyzerCoordination();
-    }, 500);
+    }, 2000);
     
     console.log('[Raid Hunter] Board Analyzer coordination set up');
 }
@@ -1931,15 +2180,59 @@ function setupRaidMonitoring() {
         startRaidEndChecking();
     }
     
-    // Set up fight toast monitoring
-    setupFightToastMonitoring();
+    // Fight toast monitoring is set up in init() and runs independently
 }
 
 // Set up fight toast monitoring (now consolidated with quest log monitoring)
 function setupFightToastMonitoring() {
-    // Fight toast monitoring is now handled by the consolidated observer
-    // No separate observer needed - handled in debouncedProcessAllMutations
-    console.log('[Raid Hunter] Fight toast monitoring consolidated with quest log monitoring');
+    // Set up a dedicated body observer for fight toast detection
+    // This runs independently of quest log monitoring
+    if (bodyObserver) {
+        bodyObserver.disconnect();
+        bodyObserver = null;
+    }
+    
+    bodyObserver = new MutationObserver((mutations) => {
+        safeExecute(() => {
+            // Only check for raid toasts if automation is enabled
+            if (!isAutomationActive()) return;
+            
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // Skip quest log elements to prevent false positives
+                            if (node.textContent && node.textContent.includes('Quest Log')) {
+                                continue; // Skip quest log elements
+                            }
+                            
+                            // Check if the added element is a raid toast (like Bestiary Automator)
+                            if (isRaidToast(node)) {
+                                console.log('[Raid Hunter] Raid toast detected via MutationObserver!');
+                                handleFightToast();
+                                return; // Exit early since we found a raid toast
+                            }
+                            
+                            // Also check child elements for raid toasts (like Bestiary Automator)
+                            const raidToast = node.querySelector && node.querySelector('.widget-bottom');
+                            if (raidToast && isRaidToast(raidToast)) {
+                                console.log('[Raid Hunter] Raid toast found in child elements via MutationObserver!');
+                                handleFightToast();
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    });
+    
+    bodyObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Raid Hunter] Body observer set up for raid toast detection');
 }
 
 // Handles new raid detection.
@@ -2013,9 +2306,26 @@ function cleanupRaidHunterModal() {
             activeRaidHunterModal = null;
         }
         
+        // Clean up modal cleanup observer
+        if (modalCleanupObserver) {
+            modalCleanupObserver.disconnect();
+            modalCleanupObserver = null;
+        }
+        
         // Reset modal state
         raidHunterModalInProgress = false;
         lastModalCall = 0;
+        
+        // Additional defensive cleanup - check if modal is still in DOM
+        const existingModal = document.querySelector('div[role="dialog"][data-state="open"]');
+        if (existingModal && existingModal.querySelector('#raid-hunter-settings-btn')) {
+            console.log('[Raid Hunter] Found lingering modal in DOM, attempting cleanup');
+            try {
+                existingModal.remove();
+            } catch (removeError) {
+                console.error('[Raid Hunter] Error removing lingering modal:', removeError);
+            }
+        }
         
         console.log('[Raid Hunter] Modal cleanup completed');
     } catch (error) {
@@ -2108,17 +2418,18 @@ function openRaidHunterSettingsModal() {
                                 const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
                                 if (modalElement) {
                                     // Watch for modal removal
-                                    const cleanupObserver = new MutationObserver((mutations) => {
+                                    modalCleanupObserver = new MutationObserver((mutations) => {
                                         mutations.forEach((mutation) => {
                                             mutation.removedNodes.forEach((node) => {
                                                 if (node === modalElement || node.contains?.(modalElement)) {
-                                                    cleanupObserver.disconnect();
+                                                    modalCleanupObserver.disconnect();
+                                                    modalCleanupObserver = null;
                                                     cleanupRaidHunterModal();
                                                 }
                                             });
                                         });
                                     });
-                                    cleanupObserver.observe(document.body, { childList: true, subtree: true });
+                                    modalCleanupObserver.observe(document.body, { childList: true, subtree: true });
                                 }
                             }, 100);
                             
@@ -2795,6 +3106,9 @@ function init() {
     // Load automation state from localStorage first
     loadAutomationState();
     
+    // Set up fight toast monitoring immediately (independent of automation state)
+    setupFightToastMonitoring();
+    
     setupRaidMonitoring();
     
     // Set up Board Analyzer coordination
@@ -2820,6 +3134,334 @@ function init() {
 init();
 
 // ============================================================================
+// 9. QUEST BUTTON VISUAL MODIFICATIONS
+// ============================================================================
+
+// Store original quest button state
+let originalQuestButtonState = null;
+let questButtonValidationInterval = null;
+
+// Function to get current room ID
+function getCurrentRoomId() {
+    try {
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        if (boardContext && boardContext.selectedMap && boardContext.selectedMap.selectedRoom) {
+            return boardContext.selectedMap.selectedRoom.id;
+        }
+        return null;
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting current room ID:', error);
+        return null;
+    }
+}
+
+// Function to find quest button with multiple fallback selectors
+function findQuestButton() {
+    // First, try to find by quest icon (normal state) - check both selected and unselected
+    const questIconButton = document.querySelector('button img[src*="quest.png"]')?.closest('button');
+    if (questIconButton) {
+        return questIconButton;
+    }
+    
+    // Then, look for any button with "Raiding" text - check both selected and unselected
+    const allButtons = document.querySelectorAll('button');
+    for (const button of allButtons) {
+        const span = button.querySelector('span');
+        if (span && span.textContent === 'Raiding') {
+            return button;
+        }
+    }
+    
+    // Look for any button with "Quest Log" text - check both selected and unselected
+    for (const button of allButtons) {
+        const span = button.querySelector('span');
+        if (span && span.textContent === 'Quest Log') {
+            return button;
+        }
+    }
+    
+    // Fallback: look for any button with quest-related alt text - check both selected and unselected
+    const questAltButton = document.querySelector('button img[alt="Quests"]')?.closest('button');
+    if (questAltButton) {
+        return questAltButton;
+    }
+    
+    // Additional fallback: look for any button with "Quests" text
+    for (const button of allButtons) {
+        const span = button.querySelector('span');
+        if (span && span.textContent === 'Quests') {
+            return button;
+        }
+    }
+    
+    return null;
+}
+
+// Function to check if user is on the correct raid map
+function isOnCorrectRaidMap() {
+    if (!isCurrentlyRaiding || !currentRaidInfo) {
+        return false;
+    }
+    
+    const currentRoomId = getCurrentRoomId();
+    if (!currentRoomId) {
+        console.log('[Raid Hunter] Could not determine current room ID');
+        return false;
+    }
+    
+    const isCorrectMap = currentRoomId === currentRaidInfo.roomId;
+    console.log(`[Raid Hunter] Map validation: current=${currentRoomId}, expected=${currentRaidInfo.roomId}, correct=${isCorrectMap}`);
+    return isCorrectMap;
+}
+
+// Function to modify quest button appearance when raiding is active
+function modifyQuestButtonForRaiding() {
+    try {
+        // Only check map if we're currently raiding and have raid info
+        if (isCurrentlyRaiding && currentRaidInfo && !isOnCorrectRaidMap()) {
+            console.log('[Raid Hunter] User not on correct raid map - not modifying quest button');
+            return false;
+        }
+        
+        // Request control of quest button
+        if (!window.QuestButtonManager.requestControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot modify quest button - controlled by another mod');
+            return false;
+        }
+        
+        // Find the quest button in the header navigation
+        const questButton = findQuestButton();
+        
+        if (!questButton) {
+            console.log('[Raid Hunter] Quest button not found for modification');
+            window.QuestButtonManager.releaseControl('Raid Hunter');
+            return false;
+        }
+        
+        // Store original state if not already stored
+        if (!window.QuestButtonManager.originalState) {
+            const img = questButton.querySelector('img');
+            const span = questButton.querySelector('span');
+            
+            window.QuestButtonManager.originalState = {
+                imgSrc: img ? img.src : null,
+                imgAlt: img ? img.alt : null,
+                imgWidth: img ? img.width : null,
+                imgHeight: img ? img.height : null,
+                imgStyle: img ? img.style.cssText : null,
+                imgClassList: img ? img.className : null,
+                spanText: span ? span.textContent : null,
+                buttonColor: questButton.style.color || ''
+            };
+        }
+        
+        // Modify the button appearance - replace icon and change text
+        const img = questButton.querySelector('img');
+        const span = questButton.querySelector('span');
+        
+        // Replace the icon with enemy icon
+        if (img) {
+            img.src = 'https://bestiaryarena.com/assets/icons/enemy.png';
+            img.alt = 'Enemy';
+            img.style.display = ''; // Make sure it's visible
+        }
+        
+        // Change text to "Raiding"
+        if (span) {
+            span.textContent = 'Raiding';
+            // Add shimmer effect to the text
+            span.style.background = 'linear-gradient(45deg, #22c55e, #16a34a, #22c55e, #16a34a)';
+            span.style.backgroundSize = '400% 400%';
+            span.style.backgroundClip = 'text';
+            span.style.webkitBackgroundClip = 'text';
+            span.style.webkitTextFillColor = 'transparent';
+            span.style.animation = 'raidShimmer 2s ease-in-out infinite';
+        }
+        
+        // Add CSS keyframes for shimmer animation if not already added
+        if (!document.getElementById('raidShimmerCSS')) {
+            const style = document.createElement('style');
+            style.id = 'raidShimmerCSS';
+            style.textContent = `
+                @keyframes raidShimmer {
+                    0% { background-position: 0% 50%; }
+                    50% { background-position: 100% 50%; }
+                    100% { background-position: 0% 50%; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        // Set green color for the button
+        questButton.style.color = '#22c55e'; // Green color
+        
+        console.log('[Raid Hunter] Quest button modified for raiding state');
+        return true;
+    } catch (error) {
+        console.error('[Raid Hunter] Error modifying quest button for raiding:', error);
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+        return false;
+    }
+}
+
+// Function to restore quest button to original appearance
+function restoreQuestButtonAppearance() {
+    try {
+        // Only restore if we have control
+        if (!window.QuestButtonManager.hasControl('Raid Hunter')) {
+            console.log('[Raid Hunter] Cannot restore quest button - not controlled by Raid Hunter');
+            return false;
+        }
+        
+        // Find the quest button - try multiple selectors to find it regardless of current state
+        const questButton = findQuestButton();
+        
+        if (!questButton) {
+            console.log('[Raid Hunter] Quest button not found for restoration');
+            window.QuestButtonManager.releaseControl('Raid Hunter');
+            return false;
+        }
+        
+        if (!window.QuestButtonManager.originalState) {
+            console.log('[Raid Hunter] Original quest button state not found for restoration');
+            window.QuestButtonManager.releaseControl('Raid Hunter');
+            return false;
+        }
+        
+        // Restore original appearance
+        const img = questButton.querySelector('img');
+        const span = questButton.querySelector('span');
+        
+        // Show the icon again
+        if (img) {
+            img.style.display = '';
+            // Restore original source and properties
+            if (window.QuestButtonManager.originalState.imgSrc) {
+                img.src = window.QuestButtonManager.originalState.imgSrc;
+                img.alt = window.QuestButtonManager.originalState.imgAlt;
+            }
+            // Restore original dimensions
+            if (window.QuestButtonManager.originalState.imgWidth) {
+                img.width = window.QuestButtonManager.originalState.imgWidth;
+            }
+            if (window.QuestButtonManager.originalState.imgHeight) {
+                img.height = window.QuestButtonManager.originalState.imgHeight;
+            }
+            // Restore original CSS styles
+            if (window.QuestButtonManager.originalState.imgStyle) {
+                img.style.cssText = window.QuestButtonManager.originalState.imgStyle;
+            }
+            // Restore original class list
+            if (window.QuestButtonManager.originalState.imgClassList) {
+                img.className = window.QuestButtonManager.originalState.imgClassList;
+            }
+        }
+        
+        // Restore original text and clear shimmer effect
+        if (span) {
+            if (window.QuestButtonManager.originalState.spanText) {
+                span.textContent = window.QuestButtonManager.originalState.spanText;
+            }
+            // Clear shimmer effect
+            span.style.background = '';
+            span.style.backgroundSize = '';
+            span.style.backgroundClip = '';
+            span.style.webkitBackgroundClip = '';
+            span.style.webkitTextFillColor = '';
+            span.style.animation = '';
+        }
+        
+        // Restore original color
+        questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
+        
+        // Release control after restoration
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+        
+        console.log('[Raid Hunter] Quest button appearance restored');
+        return true;
+    } catch (error) {
+        console.error('[Raid Hunter] Error restoring quest button appearance:', error);
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+        return false;
+    }
+}
+
+// Function to start monitoring quest button validation
+function startQuestButtonValidation() {
+    // Clear any existing interval
+    if (questButtonValidationInterval) {
+        clearInterval(questButtonValidationInterval);
+        questButtonValidationInterval = null;
+    }
+    
+    // Only start monitoring if we're currently raiding
+    if (!isCurrentlyRaiding) {
+        return;
+    }
+    
+    console.log('[Raid Hunter] Starting quest button validation monitoring');
+    
+    questButtonValidationInterval = setInterval(() => {
+        try {
+            // Check if we're still raiding
+            if (!isCurrentlyRaiding) {
+                console.log('[Raid Hunter] No longer raiding - stopping quest button validation');
+                stopQuestButtonValidation();
+                return;
+            }
+            
+            // Check if we're on the correct map
+            if (!isOnCorrectRaidMap()) {
+                console.log('[Raid Hunter] User navigated away from raid map - restoring quest button');
+                restoreQuestButtonAppearance();
+                // Don't stop the interval - keep monitoring in case they come back
+            } else {
+                // We're on the correct map, ensure quest button shows raiding state (only if we have control)
+                if (window.QuestButtonManager.hasControl('Raid Hunter')) {
+                    const questButton = findQuestButton();
+                    
+                    if (questButton) {
+                        // Check if quest button is already in raiding state
+                        const img = questButton.querySelector('img');
+                        const span = questButton.querySelector('span');
+                        const isInRaidingState = img && img.src.includes('enemy.png') && span && span.textContent === 'Raiding';
+                        
+                        if (!isInRaidingState) {
+                            // Quest button is not in raiding state, try to modify it
+                            modifyQuestButtonForRaiding();
+                        }
+                    } else {
+                        // Quest button not found, try to modify it
+                        modifyQuestButtonForRaiding();
+                    }
+                } else {
+                    // We don't have control - check if Better Tasker has control
+                    const currentOwner = window.QuestButtonManager.getCurrentOwner();
+                    if (currentOwner === 'Better Tasker') {
+                        // Better Tasker has control, don't interfere
+                        console.log('[Raid Hunter] Better Tasker has quest button control - not interfering');
+                    } else {
+                        // No one has control or it's available, try to get it
+                        modifyQuestButtonForRaiding();
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Raid Hunter] Error in quest button validation:', error);
+        }
+    }, 2000); // Check every 2 seconds
+}
+
+// Function to stop monitoring quest button validation
+function stopQuestButtonValidation() {
+    if (questButtonValidationInterval) {
+        clearInterval(questButtonValidationInterval);
+        questButtonValidationInterval = null;
+        console.log('[Raid Hunter] Quest button validation monitoring stopped');
+    }
+}
+
+// ============================================================================
 // 10. CLEANUP & EXPORTS
 // ============================================================================
 
@@ -2831,27 +3473,74 @@ function cleanupRaidHunter() {
             cleanupRaidHunterModal();
         }
         
-        // Clean up raid clock
+        // Clean up raid clock (this calls cleanupAll() internally)
         stopRaidClock();
         
-        // Clean up raid monitoring
-        if (raidUnsubscribe && typeof raidUnsubscribe === 'function') {
-            raidUnsubscribe();
-            raidUnsubscribe = null;
+        // Clean up additional items not covered by cleanupAll()
+        
+        // Clean up window.staminaMonitorInterval
+        if (window.staminaMonitorInterval) {
+            clearInterval(window.staminaMonitorInterval);
+            window.staminaMonitorInterval = null;
         }
         
-        // Reset state (but keep automation preference)
+        // Clean up CSS styles
+        const raidShimmerCSS = document.getElementById('raidShimmerCSS');
+        if (raidShimmerCSS) {
+            raidShimmerCSS.remove();
+        }
+        
+        // Clean up event listeners from raid clock buttons
+        const settingsButton = document.querySelector('#raid-hunter-settings-btn');
+        const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
+        if (settingsButton) {
+            settingsButton.replaceWith(settingsButton.cloneNode(true)); // Remove all event listeners
+        }
+        if (toggleButton) {
+            toggleButton.replaceWith(toggleButton.cloneNode(true)); // Remove all event listeners
+        }
+        
+        // Clean up modal cleanup observer
+        if (modalCleanupObserver) {
+            modalCleanupObserver.disconnect();
+            modalCleanupObserver = null;
+        }
+        
+        // Clean up global state managers
+        try {
+            // Release control of Quest Button Manager
+            if (window.QuestButtonManager && window.QuestButtonManager.hasControl('Raid Hunter')) {
+                window.QuestButtonManager.releaseControl('Raid Hunter');
+            }
+            
+            // Release control of Bestiary Automator Settings Manager
+            if (window.BestiaryAutomatorSettingsManager && window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
+                window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
+            }
+        } catch (error) {
+            console.error('[Raid Hunter] Error cleaning up global state managers:', error);
+        }
+        
+        // Reset additional state variables
         isRaidActive = false;
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
         raidQueue = [];
         raidRetryCount = 0;
         lastRaidList = [];
-        if (retryTimeout) {
-            clearTimeout(retryTimeout);
-            retryTimeout = null;
-        }
-        // Don't reset isAutomationEnabled - let it persist
+        originalQuestButtonState = null;
+        stateManager.isInitializing = false;
+        stateManager.isProcessing = false;
+        isBoardAnalyzerRunning = false;
+        
+        // Reset automation state to default (disabled)
+        isAutomationEnabled = AUTOMATION_DISABLED;
+        
+        // Restore quest button appearance
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         
         console.log('[Raid Hunter] Mod cleanup completed');
     } catch (error) {
@@ -2859,7 +3548,11 @@ function cleanupRaidHunter() {
     }
 }
 
-// Make cleanup function available globally for mod loader
-window.cleanupRaidHunter = cleanupRaidHunter;
-
-context.exports = {};
+// Export functionality for mod loader (following mod development guide)
+context.exports = {
+    cleanup: cleanupRaidHunter,
+    updateConfig: (newConfig) => {
+        // Handle config updates if needed
+        console.log('[Raid Hunter] Config update received:', newConfig);
+    }
+};

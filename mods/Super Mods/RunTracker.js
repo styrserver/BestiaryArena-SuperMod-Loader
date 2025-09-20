@@ -415,7 +415,7 @@ function getCurrentBoardSetup() {
         const boardPiece = {
           tile: piece.tileIndex,
           monsterId: piece.monsterId || piece.gameId || piece.databaseId,
-          level: piece.level || 1,
+          level: piece.level || 50, // Default to level 50 if not specified
           genes: piece.genes || {}
         };
         
