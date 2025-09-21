@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bestiary Arena Mod Loader Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="dashboard-bg"></div>
+  <nav class="topnav">
+    <ul>
+      <li class="active unified-btn" data-section="about">About</li>
+      <li class="unified-btn" data-section="mods">Mods</li>
+      <li class="unified-btn" data-section="settings">Settings</li>
+    </ul>
+  </nav>
+  <div class="dashboard-modal">
+    <div class="dashboard-container">
+      <main class="main-content">
+        <section id="about-section" class="section active">
+          <h3>About</h3>
+          <p>
+            <strong>Bestiary Arena SuperMod Loader</strong> is a powerful extension and enhancement of the original Bestiary Arena Mod Loader. This SuperMod builds on the foundation of the original loader, adding new features, improved mod support, and a modernized dashboard experience.<br><br>
+            <strong>What is this?</strong><br>
+            This project is a community-driven SuperMod that extends the capabilities of the Bestiary Arena Mod Loader, making it easier to manage, customize, and enjoy mods for Bestiary Arena. It is designed for modders and players who want more control and a richer experience.<br><br>
+            <strong>Credits</strong><br>
+            Huge thanks and full credit to the original creators of Bestiary Arena Mod Loader:<br>
+            <a href="https://github.com/TheMegafuji" target="_blank">Megafuji</a> (In-game: megafuji)<br>
+            <a href="https://github.com/mathiasbynens" target="_blank">MathiasBynens</a> (In-game: mathiasbynens)<br>
+            Without their work, this SuperMod would not exist.<br><br>
+            <a href="https://github.com/TheMegafuji/bestiary-arena-mod-loader" target="_blank">Original GitHub Project</a><br>
+            <a href="https://github.com/styrserver/BestiaryArena-SuperMod-Loader" target="_blank">SuperMod Loader GitHub Project</a>
+          </p>
+        </section>
+        <section id="mods-section" class="section">
+          <h3>Mods</h3>
+          <nav class="mods-subnav">
+            <button class="mods-subnav-btn unified-btn active" type="button" data-mods-subsection="all">All Mods</button>
+            <button class="mods-subnav-btn unified-btn" type="button" data-mods-subsection="add">Add Script</button>
+          </nav>
+          <div id="mods-all-section" class="mods-subsection active">
+            <nav class="mods-group-subnav" style="margin-bottom: 18px;">
+              <button class="mods-group-subnav-btn unified-btn active" type="button" data-mods-group="official">Official Mods</button>
+              <button class="mods-group-subnav-btn unified-btn" type="button" data-mods-group="super">Super Mods</button>
+              <button class="mods-group-subnav-btn unified-btn" type="button" data-mods-group="user">User-generated Mods</button>
+            </nav>
+            <div id="official-mods-group" class="mods-group active">
+              <div id="official-mods-section">
+                <h4>Official Mods</h4>
+                <div id="official-mods-list"></div>
+              </div>
+            </div>
+            <div id="super-mods-group" class="mods-group" style="display:none;">
+              <div id="super-mods-section" style="margin-top:32px;">
+                <h4>Super Mods</h4>
+                <div id="super-mods-list"></div>
+              </div>
+            </div>
+            <div id="user-mods-group" class="mods-group" style="display:none;">
+              <div id="user-mods-section" style="margin-top:32px;">
+                <h4>User-generated Mods</h4>
+                <div id="user-mods-list"></div>
+              </div>
+            </div>
+          </div>
+          <div id="mods-add-section" class="mods-subsection">
+            <nav class="add-subnav">
+              <button class="add-subnav-btn unified-btn active" type="button" data-add-subsection="gist">Import Gist/URL</button>
+              <button class="add-subnav-btn unified-btn" type="button" data-add-subsection="manual">Manual Import</button>
+            </nav>
+            <div id="add-gist-section" class="add-subsection active">
+              <div id="add-script" class="ublock-card">
+                <h4>Import Script (Gist, URL, GitHub, base64)</h4>
+                <form id="hash-form">
+                  <div class="form-group">
+                    <label for="hash-input">Gist hash or Gist URL</label>
+                    <input type="text" id="hash-input" placeholder="Enter Gist hash or Gist URL" required>
+                  </div>
+                  <div class="help-text">
+                    Supports: GitHub Gist hash (e.g. <code>abcdef1234567890</code>) or Gist URL (e.g. <code>https://gist.github.com/user/abcdef1234567890</code>)
+                  </div>
+                  <div class="form-group">
+                    <label for="name-input">Script Name (optional)</label>
+                    <input type="text" id="name-input" placeholder="Name for identification">
+                  </div>
+                  <button type="submit" class="unified-btn"><span>Add</span></button>
+                </form>
+              </div>
+            </div>
+            <div id="add-manual-section" class="add-subsection">
+              <div class="ublock-card">
+                <h4>Manual Script Import</h4>
+                <form id="manual-script-form">
+                  <div class="form-group">
+                    <label for="manual-script-name">Script Name</label>
+                    <input type="text" id="manual-script-name" placeholder="Name for identification" required>
+                  </div>
+                  <div class="form-group">
+                    <label for="manual-script-content">Script Content</label>
+                    <textarea id="manual-script-content" rows="10" placeholder="Paste or write your script here..." required style="width:100%;font-family:monospace;"></textarea>
+                  </div>
+                  <button type="submit" class="unified-btn"><span>Save Script</span></button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="settings-section" class="section">
+          <h3>Settings</h3>
+          <nav class="settings-subnav">
+            <button class="settings-subnav-btn unified-btn active" type="button" data-settings-subsection="general">General</button>
+            <!--button class="settings-subnav-btn unified-btn" type="button" data-settings-subsection="themes" style="display:none;">Themes</button-->
+          </nav>
+          <div id="settings-general-section" class="settings-subsection active">
+            <div class="ublock-card">
+              <h4>General Settings</h4>
+              <p>Manage your mod loader configuration and settings. For export/import functionality, use the popup (click the extension icon).</p>
+              <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 18px;">
+
+                <hr style="border: none; border-top: 1px solid #3a3f4b; margin: 16px 0;">
+                <div style="display: flex; align-items: center;">
+                  <button id="reload-mods-btn" class="unified-btn" type="button"><span>Reset Local Mods</span></button>
+                  <span style="margin-left: 16px; color: #bfc6d1; font-size: 13px;">Removes all official and super mods from storage and reloads them from disk. User-generated mods are not affected.</span>
+                </div>
+                <div style="display: flex; align-items: center;">
+                  <button id="reset-all-btn" class="unified-btn" type="button"><span>Reset Entire Mod Loader</span></button>
+                  <span style="margin-left: 16px; color: #bfc6d1; font-size: 13px;">Removes ALL settings, mods, and data. This cannot be undone.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="settings-themes-section" class="settings-subsection">
+            <div class="ublock-card">
+              <h4>Theme Selection</h4>
+              <p>Choose your preferred theme for the mod loader interface.</p>
+              <div class="themes-grid">
+                <div class="theme-card" data-theme="default">
+                  <div class="theme-preview default-theme">
+                    <div class="theme-header"></div>
+                    <div class="theme-content"></div>
+                  </div>
+                  <h5>Default</h5>
+                </div>
+                <div class="theme-card" data-theme="tibia-multiip">
+                  <div class="theme-preview tibia-multiip-theme">
+                    <div class="theme-header"></div>
+                    <div class="theme-content"></div>
+                  </div>
+                  <h5>Tibia MULTI-ip changer</h5>
+                </div>
+                <div class="theme-card" data-theme="tibiabot-ng">
+                  <div class="theme-preview tibiabot-ng-theme">
+                    <div class="theme-header"></div>
+                    <div class="theme-content"></div>
+                  </div>
+                  <h5>TibiaBot NG</h5>
+                </div>
+                <div class="theme-card" data-theme="elfbot-ng">
+                  <div class="theme-preview elfbot-ng-theme">
+                    <div class="theme-header"></div>
+                    <div class="theme-content"></div>
+                  </div>
+                  <h5>elfbot NG</h5>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+      <section id="editor-section" class="section">
+        <aside id="code-editor-panel" class="code-editor-panel">
+          <div class="editor-header">
+            <span>Code Editor</span>
+            <button id="editor-save-btn" class="unified-btn" type="button" style="display:none;"><span>Save</span></button>
+          </div>
+          <div class="editor-flex">
+            <div id="editor-line-numbers" class="editor-line-numbers"></div>
+            <textarea id="code-editor-textarea" class="editor-textarea" placeholder="Select a mod and click Edit to view or edit code..." readonly></textarea>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </div>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html> 

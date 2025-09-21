@@ -923,11 +923,6 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ];
       modCounts.super = superMods.length;
       
-      // Count Test Mods
-      const testMods = [
-        'Board Advisor.js'
-      ];
-      modCounts.test = testMods.length;
       
       sendResponse({ success: true, counts: modCounts });
     } catch (error) {

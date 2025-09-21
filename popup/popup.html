@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BestiaryArena SuperMod Loader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>BestiaryArena SuperMod Loader</h1>
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <!-- Dashboard button removed -->
+    </div>
+  </header>
+  
+  <main>
+    <section id="local-mods">
+      <h2>All Mods</h2>
+      <div id="official-mods-section">
+        <h3>Official Mods</h3>
+        <div id="official-mods-list"></div>
+      </div>
+      <div id="super-mods-section" style="margin-top:24px;">
+        <h3>Super Mods</h3>
+        <div id="super-mods-list"></div>
+      </div>
+      <div id="user-mods-section" style="margin-top:24px;">
+        <h3>User-generated Mods</h3>
+        <div id="user-mods-list"></div>
+      </div>
+    </section>
+  </main>
+  
+  <div style="text-align: center; margin: 15px 0; padding: 15px; border-top: 1px solid var(--theme-border, #444);">
+    <a href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank" style="color: var(--theme-accent, #ffe066); text-decoration: none; font-size: 14px; font-weight: bold;">
+      Find more user-generated mods here! →
+    </a>
+  </div>
+  
+  <!-- Debug Mode Section -->
+  <div style="border-top: 1px solid var(--theme-border, #444); padding-top: 15px; margin-top: 5px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <label for="debug-toggle" style="font-size: 14px; font-weight: bold; color: var(--theme-text, #fff);">
+        Debug Mode
+      </label>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="debug-status" style="font-size: 12px; color: var(--theme-text-secondary, #aaa);">OFF</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="debug-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <p style="font-size: 12px; color: var(--theme-text-secondary, #aaa); margin: 0; line-height: 1.4;">
+      Enable to show console logs from all mods. Disable for a cleaner console. Changes require page refresh.
+    </p>
+  </div>
+  
+  <!-- Easter Egg Section -->
+  <div style="border-top: 1px solid var(--theme-border, #444); padding-top: 15px; margin-top: 5px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <label for="outfiter-toggle" style="font-size: 14px; font-weight: bold; color: var(--theme-text, #fff);">
+        🎭 Outfiter
+      </label>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="outfiter-status" style="font-size: 12px; color: var(--theme-text-secondary, #aaa);">OFF</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="outfiter-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <p style="font-size: 12px; color: var(--theme-text-secondary, #aaa); margin: 0; line-height: 1.4;">
+      Locally unlocks all outfits in the outfit selector. Changes require page refresh.
+    </p>
+  </div>
+  
+  <footer>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <p id="version-display">Version loading...</p>
+      <button id="enable-welcome-btn" style="
+        background: var(--theme-accent, #ffe066);
+        color: var(--theme-bg, #1a1a1a);
+        border: none;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: bold;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.1s ease;
+      ">
+        Enable Welcome Page
+      </button>
+    </div>
+  </footer>
+  
+  <script src="../assets/js/localization.js"></script>
+  <script type="module" src="popup.js"></script>
+</body>
+</html> 

@@ -114,7 +114,6 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
-  - `Test Mods/` - Mods for development/testing purposes.
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
 - `manifest.json` - Extension manifest
@@ -133,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 16 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 17 Super Mods listed below are included by default in this loader:
 
 ### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -207,6 +206,14 @@ Enhances the Yasir shop interface with advanced features and improved usability:
 - Enhanced UI with better visual feedback and confirmation prompts
 - Automatic inventory updates after transactions
 - Support for all item types including equipment, consumables, and special items
+
+### Board Advisor
+Advanced board analysis and recommendations system:
+- Room-based data storage and pattern analysis
+- Performance predictions and optimization suggestions
+- Learning from successful runs to improve recommendations
+- Automatic analysis when board changes
+- Configurable analysis depth and recommendation thresholds
 
 ### Configurator
 Handles import/export of configuration data for the mod loader:
@@ -366,16 +373,6 @@ Speed up gameplay for faster testing and grinding:
 - Perfect for testing strategies quickly
 - Great for farming and grinding sessions
 
-### Experimental Mods
-Some mods in the `Test Mods/` folder are provided as examples or for development/testing. These are not enabled by default but can be activated or used as templates for your own mods.
-
-### Board Advisor
-Advanced board analysis and recommendations system:
-- Room-based data storage and pattern analysis
-- Performance predictions and optimization suggestions
-- Learning from successful runs to improve recommendations
-- Automatic analysis when board changes
-- Configurable analysis depth and recommendation thresholds
 
 ## Contributing
 
