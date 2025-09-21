@@ -99,7 +99,7 @@ function addConfiguratorHeaderButton() {
     
     // Prevent duplicate button
     if (headerUl.querySelector('.configurator-header-btn')) {
-      console.debug('[Configurator] Configurator header button already exists, skipping insert.');
+      console.log('[Configurator] Configurator header button already exists, skipping insert.');
       return;
     }
 
@@ -131,11 +131,11 @@ function addConfiguratorHeaderButton() {
       } else {
         headerUl.appendChild(li);
       }
-      console.debug('[Configurator] Configurator header button inserted after DashboardButton.');
+      console.log('[Configurator] Configurator header button inserted after DashboardButton.');
     } else if (cyclopediaLi) {
       // Insert before Cyclopedia
       headerUl.insertBefore(li, cyclopediaLi);
-      console.debug('[Configurator] Configurator header button inserted before Cyclopedia.');
+      console.log('[Configurator] Configurator header button inserted before Cyclopedia.');
     } else {
       // Fallback: Insert after Wiki
       const wikiLi = Array.from(headerUl.children).find(
@@ -146,7 +146,7 @@ function addConfiguratorHeaderButton() {
       } else {
         headerUl.appendChild(li);
       }
-      console.debug('[Configurator] Configurator header button appended to header.');
+      console.log('[Configurator] Configurator header button appended to header.');
     }
   };
   tryInsert();

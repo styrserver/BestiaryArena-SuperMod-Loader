@@ -15,7 +15,7 @@ function addDashboardHeaderButton() {
     }
     // Prevent duplicate button
     if (headerUl.querySelector('.dashboard-header-btn')) {
-      console.debug('[DashboardButton] Dashboard header button already exists, skipping insert.');
+      console.log('[DashboardButton] Dashboard header button already exists, skipping insert.');
       return;
     }
 
@@ -39,13 +39,13 @@ function addDashboardHeaderButton() {
     if (cyclopediaLi) {
       if (mlAutoLi) {
         headerUl.insertBefore(li, mlAutoLi);
-        console.debug('[DashboardButton] Dashboard header button inserted before ml-auto (Discord).');
+        console.log('[DashboardButton] Dashboard header button inserted before ml-auto (Discord).');
       } else if (cyclopediaLi.nextSibling) {
         headerUl.insertBefore(li, cyclopediaLi.nextSibling);
-        console.debug('[DashboardButton] Dashboard header button inserted after Cyclopedia.');
+        console.log('[DashboardButton] Dashboard header button inserted after Cyclopedia.');
       } else {
         headerUl.appendChild(li);
-        console.debug('[DashboardButton] Dashboard header button appended after Cyclopedia.');
+        console.log('[DashboardButton] Dashboard header button appended after Cyclopedia.');
       }
       return;
     }
@@ -55,10 +55,10 @@ function addDashboardHeaderButton() {
     );
     if (wikiLi && wikiLi.nextSibling) {
       headerUl.insertBefore(li, wikiLi.nextSibling);
-      console.debug('[DashboardButton] Dashboard header button inserted after Wiki.');
+      console.log('[DashboardButton] Dashboard header button inserted after Wiki.');
     } else {
       headerUl.appendChild(li);
-      console.debug('[DashboardButton] Dashboard header button appended to header.');
+      console.log('[DashboardButton] Dashboard header button appended to header.');
     }
   };
   tryInsert();

@@ -3028,7 +3028,6 @@ async function findAndClickFinishButton() {
         
         // Multiple selectors for Finish button
         const finishSelectors = [
-            'button:has-text("Finish")',
             'button[aria-label*="Finish"]',
             'button[title*="Finish"]',
             'button:has(svg.lucide-check)',
@@ -3068,26 +3067,31 @@ async function findAndClickFinishButton() {
             await sleep(1000);
             attempts++;
             
-            // Try each selector
-            for (const selector of finishSelectors) {
-                const buttons = document.querySelectorAll(selector);
-                finishButton = Array.from(buttons).find(btn => 
-                    btn.textContent.includes('Finish') && 
-                    !btn.hasAttribute('disabled') && 
-                    !btn.disabled
-                );
-                
-                if (finishButton) break;
-            }
+            // First try: search all buttons by text content (most reliable)
+            const allButtons = document.querySelectorAll('button');
+            finishButton = Array.from(allButtons).find(btn => 
+                btn.textContent.includes('Finish') && 
+                !btn.hasAttribute('disabled') && 
+                !btn.disabled
+            );
             
-            // Fallback: search all buttons
+            // If not found, try CSS selectors
             if (!finishButton) {
-                const allButtons = document.querySelectorAll('button');
-                finishButton = Array.from(allButtons).find(btn => 
-                    btn.textContent.includes('Finish') && 
-                    !btn.hasAttribute('disabled') && 
-                    !btn.disabled
-                );
+                for (const selector of finishSelectors) {
+                    try {
+                        const buttons = document.querySelectorAll(selector);
+                        finishButton = Array.from(buttons).find(btn => 
+                            btn.textContent.includes('Finish') && 
+                            !btn.hasAttribute('disabled') && 
+                            !btn.disabled
+                        );
+                        
+                        if (finishButton) break;
+                    } catch (error) {
+                        // Skip invalid selectors
+                        console.log(`[Better Tasker] Skipping invalid selector: ${selector}`);
+                    }
+                }
             }
             
             if (finishButton) {
@@ -3119,6 +3123,20 @@ async function findAndClickFinishButton() {
             const taskCompleted = await verifyTaskCompletion();
             if (taskCompleted) {
                 console.log('[Better Tasker] Task completion verified successfully');
+                
+                // Press ESC to clear quest log after successful task completion
+                console.log('[Better Tasker] Pressing ESC to clear quest log...');
+                const escEvent = new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    code: 'Escape',
+                    keyCode: 27,
+                    which: 27,
+                    bubbles: true,
+                    cancelable: true
+                });
+                document.dispatchEvent(escEvent);
+                await sleep(200); // Wait for quest log to close
+                console.log('[Better Tasker] Quest log cleared with ESC key');
                 
                 // Reset task hunting flag since task is completed
                 resetState('taskComplete');
@@ -3157,50 +3175,6 @@ async function findAndClickFinishButton() {
     }
 }
 
-// Find and click New Task button
-async function findAndClickNewTaskButton() {
-    try {
-        console.log('[Better Tasker] Looking for New Task button...');
-        
-        // Wait for quest log to load
-        await sleep(500);
-        
-        // Look for New Task button
-        let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
-        if (!newTaskButton) {
-            // Alternative selector for New Task button
-            const buttons = document.querySelectorAll('button');
-            newTaskButton = Array.from(buttons).find(btn => 
-                btn.textContent.includes('New task') || btn.textContent.includes('New Task')
-            );
-        }
-        
-        if (newTaskButton) {
-            console.log('[Better Tasker] New Task button found, clicking...');
-            newTaskButton.click();
-            await sleep(200);
-            console.log('[Better Tasker] New Task button clicked');
-            
-            // Wait for task selection to load
-            await sleep(500);
-            
-            // Navigate to suggested map and start autoplay
-            await navigateToSuggestedMapAndStartAutoplay();
-            
-            return true;
-        } else {
-            console.log('[Better Tasker] New Task button not found, checking for suggested map...');
-            
-            // Try to navigate to suggested map using API (will validate Paw and Fur Society section internally)
-            await navigateToSuggestedMapAndStartAutoplay();
-            
-            return false;
-        }
-    } catch (error) {
-        console.error('[Better Tasker] Error finding and clicking New Task button:', error);
-        return false;
-    }
-}
 
 // Handle task completion when task.ready = true (API state)
 async function handleTaskReadyCompletion() {
@@ -3234,11 +3208,20 @@ async function handleTaskReadyCompletion() {
         await sleep(200);
         console.log('[Better Tasker] Modal clearing completed');
         
-        // NOTE: Quest log opening and Finish button clicking will be handled 
-        // in the game end event handler, not here, to avoid opening quest log
-        // while game is still running
+        // Check if a game is actually running before waiting for it to finish
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        const isGameRunning = boardContext.gameStarted;
         
-        console.log('[Better Tasker] Task ready completion setup complete - waiting for game to finish');
+        if (isGameRunning) {
+            console.log('[Better Tasker] Game is running, waiting for game to finish before completing task...');
+            // NOTE: Quest log opening and Finish button clicking will be handled 
+            // in the game end event handler, not here, to avoid opening quest log
+            // while game is still running
+        } else {
+            console.log('[Better Tasker] No game running, proceeding with task completion immediately...');
+            // No game running, proceed with quest log opening immediately
+            await handlePostGameTaskCompletion();
+        }
         
     } catch (error) {
         console.error('[Better Tasker] Error in handleTaskReadyCompletion:', error);
@@ -3249,14 +3232,22 @@ async function handleTaskReadyCompletion() {
     }
 }
 
-// Handle quest log opening and button clicking AFTER game finishes
-async function handlePostGameTaskCompletion() {
-    try {
-        console.log('[Better Tasker] Handling post-game task completion...');
+// Open quest log with retry mechanism - tries 3 times with ESC fallback
+async function openQuestLogWithRetry() {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        console.log(`[Better Tasker] Quest log opening attempt ${attempt}/3...`);
         
-        // Clear any modals with ESC key presses
-        console.log('[Better Tasker] Clearing any modals with ESC key presses...');
-        for (let i = 0; i < 3; i++) {
+        // Try to open quest log directly
+        const questLogOpened = await openQuestLogDirectly();
+        
+        if (questLogOpened) {
+            console.log(`[Better Tasker] Quest log opened successfully on attempt ${attempt}`);
+            return true;
+        }
+        
+        // If not the last attempt, try ESC key and retry
+        if (attempt < 3) {
+            console.log(`[Better Tasker] Quest log opening failed, trying ESC key and retrying...`);
             const escEvent = new KeyboardEvent('keydown', {
                 key: 'Escape',
                 code: 'Escape',
@@ -3266,12 +3257,22 @@ async function handlePostGameTaskCompletion() {
                 cancelable: true
             });
             document.dispatchEvent(escEvent);
-            await sleep(50); // Small delay between ESC presses
+            await sleep(200); // Wait for any modals to close
         }
+    }
+    
+    console.log('[Better Tasker] All quest log opening attempts failed');
+    return false;
+}
+
+// Handle quest log opening and button clicking AFTER game finishes
+async function handlePostGameTaskCompletion() {
+    try {
+        console.log('[Better Tasker] Handling post-game task completion...');
         
-        // Wait for modals to clear
-        await sleep(200);
-        console.log('[Better Tasker] Modal clearing completed');
+        // Wait for game to finish completely
+        console.log('[Better Tasker] Waiting for game to finish...');
+        await sleep(1000); // Wait for game end animations and UI to settle
         
         // Check current task state to determine what to do
         const playerContext = globalThis.state.player.getSnapshot().context;
@@ -3281,24 +3282,14 @@ async function handlePostGameTaskCompletion() {
             // Task is ready - open quest log and look for Finish button
             console.log('[Better Tasker] Task is ready, opening quest log for Finish button...');
             
-            // Try to open quest log directly first
-            const questLogOpened = await openQuestLogDirectly();
+            // Try to open quest log with retry mechanism
+            const questLogOpened = await openQuestLogWithRetry();
             
             if (questLogOpened) {
                 // Look for Finish button
                 await findAndClickFinishButton();
             } else {
-                // Fallback: try quest blip
-                console.log('[Better Tasker] Direct quest log opening failed, trying quest blip...');
-                const questBlip = document.querySelector('img[src*="quest-blip.png"]');
-                if (questBlip) {
-                    questBlip.click();
-                    await sleep(300);
-                    console.log('[Better Tasker] Quest log opened via quest blip fallback');
-                    await findAndClickFinishButton();
-                } else {
-                    console.log('[Better Tasker] Quest blip not found, cannot complete task');
-                }
+                console.log('[Better Tasker] Failed to open quest log after 3 attempts');
             }
         } else {
             // No active task or not ready - check for quest blip to start new task
@@ -3309,11 +3300,16 @@ async function handlePostGameTaskCompletion() {
                 questBlip.click();
                 await sleep(300);
                 console.log('[Better Tasker] Quest log opened via quest blip for new task');
-                await findAndClickNewTaskButton();
+                await openQuestLogAndAcceptTask();
             } else {
                 console.log('[Better Tasker] No quest blip found, no new task available');
             }
         }
+        
+        // Clear task operation flag on successful completion
+        taskOperationInProgress = false;
+        updateExposedState();
+        console.log('[Better Tasker] Task operation completed successfully');
         
     } catch (error) {
         console.error('[Better Tasker] Error in handlePostGameTaskCompletion:', error);
@@ -3324,55 +3320,6 @@ async function handlePostGameTaskCompletion() {
     }
 }
 
-// Handle task completion when quest blip is detected (visual indicator)
-async function handleQuestBlipCompletion() {
-    try {
-        console.log('[Better Tasker] Handling quest blip completion via visual indicator...');
-        
-        // Set task operation in progress flag to prevent duplicate operations
-        taskOperationInProgress = true;
-        updateExposedState(); // Update exposed state for other mods
-        console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
-        
-        // Update button to show "Tasking" state
-        updateToggleButtonForTasking();
-        
-        // Start quest button validation monitoring
-        startQuestButtonValidation();
-        
-        // Clear any modals with ESC key presses
-        console.log('[Better Tasker] Clearing any modals with ESC key presses...');
-        for (let i = 0; i < 3; i++) {
-            const escEvent = new KeyboardEvent('keydown', {
-                key: 'Escape',
-                code: 'Escape',
-                keyCode: 27,
-                which: 27,
-                bubbles: true,
-                cancelable: true
-            });
-            document.dispatchEvent(escEvent);
-            await sleep(50); // Small delay between ESC presses
-        }
-        
-        // Wait for modals to clear
-        await sleep(200);
-        console.log('[Better Tasker] Modal clearing completed');
-        
-        // NOTE: Quest log opening and button clicking will be handled 
-        // in the game end event handler, not here, to avoid opening quest log
-        // while game is still running
-        
-        console.log('[Better Tasker] Quest blip completion setup complete - waiting for game to finish');
-        
-    } catch (error) {
-        console.error('[Better Tasker] Error in handleQuestBlipCompletion:', error);
-        
-        // Clear flags on error
-        taskOperationInProgress = false;
-        updateExposedState();
-    }
-}
 
 // Handle task finishing - main function for completing tasks
 async function handleTaskFinishing() {
@@ -3631,6 +3578,29 @@ async function handleTaskFinishing() {
                     
                     // Wait for task selection to load
                     await sleep(500);
+                    
+                    // Check if the task creature is allowed before proceeding
+                    console.log('[Better Tasker] Checking creature filtering in handleTaskFinishing...');
+                    const creatureName = extractCreatureFromTask();
+                    console.log('[Better Tasker] Extracted creature name:', creatureName);
+                    if (creatureName && !isCreatureAllowed(creatureName)) {
+                        console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
+                        
+                        // Remove the task directly while quest log is open
+                        console.log('[Better Tasker] Removing rejected task directly from quest log...');
+                        const taskRemoved = await removeTaskDirectlyFromQuestLog();
+                        if (taskRemoved) {
+                            console.log('[Better Tasker] Rejected task successfully removed from game');
+                        } else {
+                            console.log('[Better Tasker] Failed to remove rejected task from game');
+                        }
+                        
+                        // Clear task operation in progress flag and return early
+                        taskOperationInProgress = false;
+                        return;
+                    }
+                    
+                    console.log('[Better Tasker] Task creature is allowed, proceeding with navigation...');
                     
                     // 3. Navigate to suggested map and start autoplay
                     await navigateToSuggestedMapAndStartAutoplay();
@@ -4117,6 +4087,23 @@ function stopAutomation() {
     
     // Unsubscribe from game state changes
     unsubscribeFromGameState();
+    
+    // Stop autoplay if we have control (like Raid Hunter does)
+    try {
+        if (window.AutoplayManager.hasControl('Better Tasker')) {
+            const boardContext = globalThis.state.board.getSnapshot().context;
+            if (boardContext.mode === 'autoplay') {
+                globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
+                console.log('[Better Tasker] Switched from autoplay to manual mode');
+            }
+            // Release control after switching to manual
+            window.AutoplayManager.releaseControl('Better Tasker');
+        } else {
+            console.log('[Better Tasker] Cannot switch to manual mode - not controlling autoplay');
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error switching to manual mode:', error);
+    }
     
     // Only disable Bestiary Automator settings if Raid Hunter is not actively raiding
     // This prevents conflicts when Raid Hunter needs these settings
@@ -4855,8 +4842,8 @@ function cleanupBetterTasker() {
             cleanupTaskerModal();
         }
         
-        // Note: UI monitoring (questLogObserver) 
-        // is intentionally left running so users can re-enable the mod
+        // Clean up quest log observer
+        stopQuestLogMonitoring();
         
         // Clean up quest button validation and restore appearance
         stopQuestButtonValidation();
