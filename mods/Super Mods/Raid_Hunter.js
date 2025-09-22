@@ -667,11 +667,8 @@ function processNextRaid() {
         return;
     }
     
-    // Check if Better Tasker is processing a task - if so, skip processing
-    if (isBetterTaskerProcessingTask()) {
-        console.log('[Raid Hunter] Better Tasker is processing a task - skipping raid processing');
-        return;
-    }
+    // Raids have absolute priority - no need to check if Better Tasker is processing tasks
+    // Better Tasker will yield control when raids are detected
     
     // Check if automation is still enabled before starting
     if (!isAutomationActive()) {
@@ -3531,14 +3528,24 @@ function startQuestButtonValidation() {
                         modifyQuestButtonForRaiding();
                     }
                 } else {
-                    // We don't have control - check if Better Tasker has control
-                    const currentOwner = window.QuestButtonManager.getCurrentOwner();
-                    if (currentOwner === 'Better Tasker') {
-                        // Better Tasker has control, don't interfere
-                        console.log('[Raid Hunter] Better Tasker has quest button control - not interfering');
-                    } else {
-                        // No one has control or it's available, try to get it
+                    // We don't have control - check if we have active raids
+                    const raidState = globalThis.state?.raids?.getSnapshot?.();
+                    const hasActiveRaids = raidState?.context?.list?.length > 0;
+                    
+                    if (hasActiveRaids) {
+                        // We have active raids - take control regardless of current owner
+                        console.log('[Raid Hunter] Active raids detected - taking quest button control from', window.QuestButtonManager.getCurrentOwner() || 'unknown');
                         modifyQuestButtonForRaiding();
+                    } else {
+                        // No active raids - check if Better Tasker has control
+                        const currentOwner = window.QuestButtonManager.getCurrentOwner();
+                        if (currentOwner === 'Better Tasker') {
+                            // Better Tasker has control, don't interfere
+                            console.log('[Raid Hunter] Better Tasker has quest button control - not interfering');
+                        } else {
+                            // No one has control or it's available, try to get it
+                            modifyQuestButtonForRaiding();
+                        }
                     }
                 }
             }

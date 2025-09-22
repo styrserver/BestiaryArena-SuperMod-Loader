@@ -296,10 +296,16 @@ function isRaidHunterRaiding() {
                 
                 console.log(`[Better Tasker] Raid check - Raid Hunter enabled: ${raidHunterEnabled === 'true'}, Active raids: ${currentRaidList.length}, Board mode: ${boardContext?.mode}, Quest button owner: ${window.QuestButtonManager?.getCurrentOwner() || 'none'}`);
                 
-                // Check if Raid Hunter is in the process of handling a raid (even if not on correct map yet)
-                // This prevents Better Tasker from interfering when Raid Hunter is trying to navigate to raid map
-                if (currentRaidList.length > 0 && boardContext?.mode === 'autoplay' && isRaidHunterCurrentlyRaiding) {
-                    console.log('[Better Tasker] Raid Hunter has active raids and is actively raiding - preventing task automation');
+                // Check if there are active raids - if so, yield control regardless of Raid Hunter's state
+                // This allows manual raid handling or Raid Hunter to take control when enabled
+                if (currentRaidList.length > 0 && boardContext?.mode === 'autoplay') {
+                    if (isRaidHunterCurrentlyRaiding) {
+                        console.log('[Better Tasker] Raid Hunter has active raids and is actively raiding - preventing task automation');
+                    } else {
+                        console.log('[Better Tasker] Active raids detected - yielding quest button control for raid handling');
+                        // Release quest button control to allow raid handling
+                        window.QuestButtonManager?.releaseControl('Better Tasker');
+                    }
                     return true;
                 }
                 

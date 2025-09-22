@@ -1,5 +1,6 @@
 // Bestiary Automator Mod for Bestiary Arena
 // Code by MathiasBynens and TheMegafuji
+// Edited for SuperMod Loader
 
 console.log('[Bestiary Automator] initializing...');
 
