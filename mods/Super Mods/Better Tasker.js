@@ -2379,6 +2379,53 @@ function checkIfAutoplayIsActive() {
     }
 }
 
+// Wait for game to end by continuously checking multiple game state indicators
+async function waitForGameToEnd() {
+    console.log('[Better Tasker] Starting continuous game state monitoring...');
+    
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes max wait time (60 * 2 seconds)
+    
+    while (attempts < maxAttempts) {
+        try {
+            // Check multiple indicators that game has ended
+            const boardContext = globalThis.state.board.getSnapshot().context;
+            const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
+            
+            const isGameRunning = boardContext.gameStarted;
+            const gameState = gameTimerContext.state; // 'initial', 'victory', 'defeat'
+            const hasVictoryScreen = await detectAndCloseVictoryScreen();
+            
+            console.log(`[Better Tasker] Game state check ${attempts + 1}: gameStarted=${isGameRunning}, gameState=${gameState}, victoryScreen=${hasVictoryScreen}`);
+            
+            // Game has ended if any of these conditions are true:
+            // 1. board.gameStarted is false
+            // 2. gameTimer.state is 'victory' or 'defeat' (not 'initial')
+            // 3. Victory screen is detected
+            if (!isGameRunning || (gameState !== 'initial') || hasVictoryScreen) {
+                console.log(`[Better Tasker] Game ended after ${attempts * 2} seconds - gameStarted: ${isGameRunning}, gameState: ${gameState}, victoryScreen: ${hasVictoryScreen}`);
+                return true;
+            }
+            
+            // Log progress every 10 seconds (every 5 attempts)
+            if (attempts % 5 === 0 && attempts > 0) {
+                console.log(`[Better Tasker] Still waiting for game to end... (${attempts * 2}s elapsed)`);
+            }
+            
+            await sleep(2000); // Check every 2 seconds
+            attempts++;
+            
+        } catch (error) {
+            console.error('[Better Tasker] Error checking game state during wait:', error);
+            await sleep(2000);
+            attempts++;
+        }
+    }
+    
+    console.log('[Better Tasker] Game state monitoring timeout - proceeding anyway...');
+    return false;
+}
+
 // Detect and close victory screens
 async function detectAndCloseVictoryScreen() {
     console.log('[Better Tasker] Checking for victory screen...');
@@ -2387,43 +2434,102 @@ async function detectAndCloseVictoryScreen() {
     const hasScrollLock = document.body.hasAttribute('data-scroll-locked') || 
                          document.body.style.pointerEvents === 'none';
     
-    // Look for victory screen indicators
+    console.log('[Better Tasker] Scroll lock check:', hasScrollLock);
+    
+    // Look for victory screen indicators - using supported selectors
     const victoryIndicators = [
-        'h2[id*="radix"]:has(p:has(span:contains("Victory")))',
-        '.widget-top:has(p:has(span:contains("Victory")))',
-        'h2:has(p:has(span:contains("Victory")))'
+        'h2[id*="radix"]',
+        '.widget-top',
+        'h2.widget-top-text',
+        'div[role="dialog"]',
+        '[data-state="open"]'
     ];
     
     let victoryScreen = null;
-    for (const selector of victoryIndicators) {
+    for (let i = 0; i < victoryIndicators.length; i++) {
+        const selector = victoryIndicators[i];
         try {
-            victoryScreen = document.querySelector(selector);
-            if (victoryScreen) {
-                console.log('[Better Tasker] Victory screen detected via selector');
-                break;
+            const elements = document.querySelectorAll(selector);
+            for (const element of elements) {
+                if (element.textContent && element.textContent.includes('Victory')) {
+                    victoryScreen = element;
+                    console.log(`[Better Tasker] Victory screen detected via selector ${i + 1}: ${selector}`);
+                    break;
+                }
             }
+            if (victoryScreen) break;
         } catch (e) {
-            // Selector might not be supported, continue
+            console.log(`[Better Tasker] Selector ${i + 1} failed: ${e.message}`);
         }
     }
     
     // Alternative: Look for victory screen by checking for specific text patterns
     if (!victoryScreen) {
+        console.log('[Better Tasker] Trying text content search for Victory...');
         const allElements = document.querySelectorAll('*');
+        let victoryElements = 0;
         for (const element of allElements) {
-            if (element.textContent && element.textContent.includes('Victory')) {
-                victoryScreen = element.closest('.widget-top, h2, [class*="widget"], div[class*="widget"]') || element;
-                console.log('[Better Tasker] Victory screen detected via text content');
+            if (element.textContent && (element.textContent.includes('Victory -') || element.textContent.includes('Victory'))) {
+                victoryElements++;
+                // Look for the closest dialog or widget container
+                victoryScreen = element.closest('div[role="dialog"], .widget-top, h2, [class*="widget"], div[class*="widget"]') || element;
+                console.log('[Better Tasker] Victory screen detected via text content (found', victoryElements, 'elements with Victory text)');
                 break;
             }
         }
+        if (victoryElements === 0) {
+            console.log('[Better Tasker] No elements found with "Victory" text');
+        }
     }
     
-    // If we found a victory screen OR scroll lock is active, close it with ESC
+    // Additional check: Look for Close button which indicates a modal/victory screen
+    if (!victoryScreen) {
+        console.log('[Better Tasker] Checking for Close button...');
+        const closeButton = Array.from(document.querySelectorAll('button')).find(btn => 
+            btn.textContent && btn.textContent.trim() === 'Close'
+        );
+        if (closeButton) {
+            console.log('[Better Tasker] Close button found, checking if it belongs to victory screen...');
+            // Check if this Close button is part of a victory screen by looking for nearby Victory text
+            const container = closeButton.closest('div[role="dialog"], div[class*="widget"], .widget-bottom, .widget-top');
+            if (container && container.textContent && container.textContent.includes('Victory')) {
+                victoryScreen = container;
+                console.log('[Better Tasker] Victory screen detected via Close button');
+            } else {
+                console.log('[Better Tasker] Close button found but not part of victory screen');
+            }
+        } else {
+            console.log('[Better Tasker] No Close button found');
+        }
+    }
+    
+    // If we found a victory screen OR scroll lock is active, close it
     if (victoryScreen || hasScrollLock) {
-        console.log('[Better Tasker] Victory screen or modal detected, closing with ESC key...');
+        console.log('[Better Tasker] Victory screen or modal detected, waiting 500ms before closing...');
+        console.log('[Better Tasker] Victory screen found:', !!victoryScreen, 'Scroll lock:', hasScrollLock);
         
-        // Send multiple ESC key presses to ensure it closes
+        // Wait for victory screen to fully load before closing
+        await sleep(500);
+        
+        // First try to find and click the Close button directly
+        const closeButton = Array.from(document.querySelectorAll('button')).find(btn => 
+            btn.textContent && btn.textContent.trim() === 'Close'
+        );
+        
+        if (closeButton && closeButton.offsetParent !== null) { // Check if button is visible
+            console.log('[Better Tasker] Found Close button, clicking it...');
+            try {
+                closeButton.click();
+                await sleep(300);
+                console.log('[Better Tasker] Victory screen closed by clicking Close button');
+                return true;
+            } catch (error) {
+                console.log('[Better Tasker] Failed to click Close button, falling back to ESC key');
+            }
+        }
+        
+        // Fallback: Send multiple ESC key presses to ensure it closes
+        console.log('[Better Tasker] Closing with ESC key...');
         for (let i = 0; i < 3; i++) {
             const escEvent = new KeyboardEvent('keydown', {
                 key: 'Escape',
@@ -2443,6 +2549,7 @@ async function detectAndCloseVictoryScreen() {
         return true;
     }
     
+    console.log('[Better Tasker] No victory screen detected');
     return false;
 }
 
@@ -3293,6 +3400,7 @@ async function handleTaskReadyCompletion() {
         // Check if a game is actually running before waiting for it to finish
         const boardContext = globalThis.state.board.getSnapshot().context;
         const isGameRunning = boardContext.gameStarted;
+        console.log('[Better Tasker] Game running check:', isGameRunning);
         
         if (isGameRunning) {
             console.log('[Better Tasker] Game is running, waiting for game to finish before completing task...');
@@ -3300,8 +3408,8 @@ async function handleTaskReadyCompletion() {
             // in the game end event handler, not here, to avoid opening quest log
             // while game is still running
         } else {
-            console.log('[Better Tasker] No game running, proceeding with task completion immediately...');
-            // No game running, proceed with quest log opening immediately
+            console.log('[Better Tasker] No game running, checking for victory screen and proceeding with task completion...');
+            // No game running, check for victory screen and proceed with quest log opening
             await handlePostGameTaskCompletion();
         }
         
@@ -3566,12 +3674,24 @@ async function handleTaskFinishing() {
                 
                 // Check if a game is currently running
                 const boardContext = globalThis.state.board.getSnapshot().context;
-                if (boardContext.gameStarted) {
+                const isGameRunning = boardContext.gameStarted;
+                console.log('[Better Tasker] Game running check:', isGameRunning);
+                
+                if (isGameRunning) {
                     console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
                     pendingTaskCompletion = true;
                     updateExposedState(); // Update exposed state for other mods
                     console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
-                    return; // Exit and wait for game to finish
+                    
+                    // Start continuous checking for game end
+                    await waitForGameToEnd();
+                    
+                    // Game has ended, proceed with task completion
+                    console.log('[Better Tasker] Game ended, proceeding with task completion...');
+                    await handleTaskReadyCompletion();
+                    return;
+                } else {
+                    console.log('[Better Tasker] No game running, proceeding with task completion...');
                 }
                 
                 // Task is ready and no game running - proceed with claiming
@@ -3993,7 +4113,7 @@ function subscribeToGameState() {
         // Subscribe to board state changes for new game detection
         if (globalThis.state && globalThis.state.board) {
             // Consolidated new game handler with debouncing
-            const handleNewGame = (event) => {
+            const handleNewGame = async (event) => {
                 const now = Date.now();
                 if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
                     console.log('[Better Tasker] Ignoring rapid new game event (debounced)');
@@ -4024,13 +4144,24 @@ function subscribeToGameState() {
                                 
                                 // Check if a game is currently running
                                 const boardContext = globalThis.state.board.getSnapshot().context;
-                                if (boardContext.gameStarted) {
+                                const isGameRunning = boardContext.gameStarted;
+                                console.log('[Better Tasker] Game running check:', isGameRunning);
+                                
+                                if (isGameRunning) {
                                     console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
                                     pendingTaskCompletion = true;
                                     updateExposedState(); // Update exposed state for other mods
                                     console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
-                                    // All automations are stopped, task completion will be handled in the emitEndGame event
+                                    
+                                    // Start continuous checking for game end
+                                    await waitForGameToEnd();
+                                    
+                                    // Game has ended, proceed with task completion
+                                    console.log('[Better Tasker] Game ended, proceeding with task completion...');
+                                    await handleTaskReadyCompletion();
                                     return;
+                                } else {
+                                    console.log('[Better Tasker] No game running, proceeding with task completion...');
                                 }
                                 
                                 // Reset task hunting flag since task is ready
