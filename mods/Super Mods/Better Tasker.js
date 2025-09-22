@@ -1136,6 +1136,18 @@ function debouncedProcessAllMutations(mutations) {
                 insertButtons();
             }, 50);
         }
+        
+        // Only trigger task completion logic if we're not already processing a task
+        // and we're not just inserting UI elements
+        if (!taskOperationInProgress && !pendingTaskCompletion && !taskHuntingOngoing) {
+            console.log('[Better Tasker] Quest log opened for task processing - checking for tasks...');
+            // Small delay to let quest log fully load before checking
+            setTimeout(() => {
+                checkQuestLogForTasks();
+            }, 100);
+        } else {
+            console.log('[Better Tasker] Quest log opened but task operation already in progress - skipping task check');
+        }
     }
     
     // Handle Paw and Fur Society detection (only if tasker is enabled)
@@ -2367,6 +2379,73 @@ function checkIfAutoplayIsActive() {
     }
 }
 
+// Detect and close victory screens
+async function detectAndCloseVictoryScreen() {
+    console.log('[Better Tasker] Checking for victory screen...');
+    
+    // Check if document has scroll lock (indicates modal/victory screen is open)
+    const hasScrollLock = document.body.hasAttribute('data-scroll-locked') || 
+                         document.body.style.pointerEvents === 'none';
+    
+    // Look for victory screen indicators
+    const victoryIndicators = [
+        'h2[id*="radix"]:has(p:has(span:contains("Victory")))',
+        '.widget-top:has(p:has(span:contains("Victory")))',
+        'h2:has(p:has(span:contains("Victory")))'
+    ];
+    
+    let victoryScreen = null;
+    for (const selector of victoryIndicators) {
+        try {
+            victoryScreen = document.querySelector(selector);
+            if (victoryScreen) {
+                console.log('[Better Tasker] Victory screen detected via selector');
+                break;
+            }
+        } catch (e) {
+            // Selector might not be supported, continue
+        }
+    }
+    
+    // Alternative: Look for victory screen by checking for specific text patterns
+    if (!victoryScreen) {
+        const allElements = document.querySelectorAll('*');
+        for (const element of allElements) {
+            if (element.textContent && element.textContent.includes('Victory')) {
+                victoryScreen = element.closest('.widget-top, h2, [class*="widget"], div[class*="widget"]') || element;
+                console.log('[Better Tasker] Victory screen detected via text content');
+                break;
+            }
+        }
+    }
+    
+    // If we found a victory screen OR scroll lock is active, close it with ESC
+    if (victoryScreen || hasScrollLock) {
+        console.log('[Better Tasker] Victory screen or modal detected, closing with ESC key...');
+        
+        // Send multiple ESC key presses to ensure it closes
+        for (let i = 0; i < 3; i++) {
+            const escEvent = new KeyboardEvent('keydown', {
+                key: 'Escape',
+                code: 'Escape',
+                keyCode: 27,
+                which: 27,
+                bubbles: true,
+                cancelable: true
+            });
+            document.dispatchEvent(escEvent);
+            await sleep(100); // Small delay between ESC presses
+        }
+        
+        // Wait for modal to close
+        await sleep(300);
+        console.log('[Better Tasker] Victory screen closed with ESC key');
+        return true;
+    }
+    
+    return false;
+}
+
 // Click all Close buttons
 function clickAllCloseButtons() {
     const closeButtons = document.querySelectorAll('button');
@@ -3189,7 +3268,7 @@ async function handleTaskReadyCompletion() {
         // Start quest button validation monitoring
         startQuestButtonValidation();
         
-        // Clear any modals with ESC key presses
+        // Clear any modals with ESC key presses (victory screens only appear after game ends)
         console.log('[Better Tasker] Clearing any modals with ESC key presses...');
         for (let i = 0; i < 3; i++) {
             const escEvent = new KeyboardEvent('keydown', {
@@ -3203,6 +3282,9 @@ async function handleTaskReadyCompletion() {
             document.dispatchEvent(escEvent);
             await sleep(50); // Small delay between ESC presses
         }
+        
+        // Also try clicking any Close buttons
+        clickAllCloseButtons();
         
         // Wait for modals to clear
         await sleep(200);
@@ -3274,6 +3356,14 @@ async function handlePostGameTaskCompletion() {
         console.log('[Better Tasker] Waiting for game to finish...');
         await sleep(1000); // Wait for game end animations and UI to settle
         
+        // First check for and close any victory screens
+        console.log('[Better Tasker] Checking for victory screens...');
+        const victoryClosed = await detectAndCloseVictoryScreen();
+        if (victoryClosed) {
+            console.log('[Better Tasker] Victory screen closed, waiting for UI to settle...');
+            await sleep(500); // Additional wait for UI to settle after victory screen closes
+        }
+        
         // Check current task state to determine what to do
         const playerContext = globalThis.state.player.getSnapshot().context;
         const task = playerContext?.questLog?.task;
@@ -3340,6 +3430,12 @@ async function handleTaskFinishing() {
     // Don't run task finishing if a task operation is already in progress
     if (taskOperationInProgress) {
         console.log('[Better Tasker] Task operation already in progress, skipping quest log check');
+        return;
+    }
+    
+    // Don't run task finishing if pending task completion is already set
+    if (pendingTaskCompletion) {
+        console.log('[Better Tasker] Pending task completion already set, skipping quest log check');
         return;
     }
     
@@ -3526,7 +3622,7 @@ async function handleTaskFinishing() {
                 
                 // Start quest button validation monitoring
                 startQuestButtonValidation();
-                // Clear any modals with ESC key presses
+                // Clear any modals with ESC key presses (victory screens only appear after game ends)
                 console.log('[Better Tasker] Clearing any modals with ESC key presses...');
                 for (let i = 0; i < 3; i++) {
                     const escEvent = new KeyboardEvent('keydown', {
@@ -3540,6 +3636,9 @@ async function handleTaskFinishing() {
                     document.dispatchEvent(escEvent);
                     await sleep(50); // Small delay between ESC presses
                 }
+                
+                // Also try clicking any Close buttons
+                clickAllCloseButtons();
                 
                 // Wait for modals to clear
                 await sleep(200);
@@ -3744,7 +3843,7 @@ async function handleTaskFinishing() {
                         // Start quest button validation monitoring
                         startQuestButtonValidation();
                         
-                        // Clear any modals with ESC key presses
+                        // Clear any modals with ESC key presses (victory screens only appear after game ends)
                         console.log('[Better Tasker] Clearing any modals with ESC key presses...');
                         for (let i = 0; i < 3; i++) {
                             const escEvent = new KeyboardEvent('keydown', {
@@ -3758,6 +3857,9 @@ async function handleTaskFinishing() {
                             document.dispatchEvent(escEvent);
                             await sleep(50);
                         }
+                        
+                        // Also try clicking any Close buttons
+                        clickAllCloseButtons();
                         
                         // Wait for modals to clear
                         await sleep(200);

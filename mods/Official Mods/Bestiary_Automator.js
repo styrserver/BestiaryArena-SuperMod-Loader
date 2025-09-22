@@ -33,7 +33,6 @@ const loadConfig = () => {
       const savedConfig = JSON.parse(savedData);
       const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
       
-      
       return loadedConfig;
     }
   } catch (error) {
@@ -42,7 +41,6 @@ const loadConfig = () => {
   
   // Fallback to context or defaults
   const fallbackConfig = Object.assign({}, defaultConfig, context.config || {});
-  
   
   return fallbackConfig;
 };
@@ -163,36 +161,9 @@ const canTransitionTo = (newState) => {
 
 // Helper functions for automation
 
-// Cache for frequently accessed elements
-const elementCache = new Map();
-const CACHE_TTL = 5000; // 5 seconds
-
-// Clear expired cache entries
-const clearExpiredCache = () => {
-  const now = Date.now();
-  for (const [key, value] of elementCache.entries()) {
-    if (now - value.timestamp > CACHE_TTL) {
-      elementCache.delete(key);
-    }
-  }
-};
-
 // Find button with specific text (considering language differences)
 const findButtonWithText = (textKey) => {
   const text = t(textKey);
-  const cacheKey = `button:${textKey}:${text}`;
-  
-  // Check cache first
-  const cached = elementCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    if (cached.element && document.contains(cached.element)) {
-      return cached.element;
-    }
-  }
-  
-  // Clear expired cache entries periodically
-  if (Math.random() < 0.1) clearExpiredCache();
-  
   const buttons = document.querySelectorAll('button');
   
   for (const button of buttons) {
@@ -200,13 +171,11 @@ const findButtonWithText = (textKey) => {
     
     // Check exact text match first
     if (buttonText === text) {
-      elementCache.set(cacheKey, { element: button, timestamp: Date.now() });
       return button;
     }
     
     // Check if text is contained within the button (for complex buttons)
     if (buttonText.includes(text)) {
-      elementCache.set(cacheKey, { element: button, timestamp: Date.now() });
       return button;
     }
   }
@@ -387,10 +356,7 @@ function showNotification(message, type = 'info', duration = 3000) {
 
 // Automation Tasks
 
-// Stamina refill retry tracking
-let staminaRefillRetryCount = 0;
-let staminaRefillRetryTimeout = null;
-let lastStaminaRefillAttempt = 0;
+// Stamina refill tracking (simplified)
 
 // Check if game is in sandbox mode
 const isSandboxMode = () => {
@@ -436,7 +402,7 @@ const isGameActive = () => {
   }
 };
 
-// Check if game is ready for stamina refill
+// Simple game readiness check for stamina refill
 const isGameReadyForStaminaRefill = () => {
   try {
     // Check if Board Analyzer is running - if so, pause automation
@@ -445,113 +411,114 @@ const isGameReadyForStaminaRefill = () => {
       return false;
     }
     
-    // Check if stamina element exists and is visible
+    // Simple check: just verify stamina element exists
     const elStamina = document.querySelector('[title="Stamina"]');
-    if (!elStamina || !elStamina.offsetParent) return false;
-    
-    // Check if stamina value is readable
-    const staminaElement = elStamina.querySelector('span span');
-    if (!staminaElement || !staminaElement.textContent) return false;
-    
-    return true;
+    return !!elStamina;
   } catch (error) {
     console.error('[Bestiary Automator] Error checking game readiness:', error);
     return false;
   }
 };
 
-// Refill stamina if needed with retry logic
-const refillStaminaIfNeeded = async () => {
-  if (!config.autoRefillStamina) return;
+// Simple stamina refill method for background tabs (original approach)
+const refillStaminaSimple = async (elStamina) => {
+  console.log('[Bestiary Automator] Using simple refill method (background tab)');
   
-  // Prevent rapid retries
-  const now = Date.now();
-  if (now - lastStaminaRefillAttempt < 1000) return;
-  lastStaminaRefillAttempt = now;
+  elStamina.click();
+  await sleep(500);
+  clickButtonWithText('usePotion');
+  await sleep(500);
+  clickButtonWithText('close');
+  await sleep(500);
+};
+
+// Robust stamina refill method for foreground tabs (with retry logic)
+const refillStaminaWithRetry = async (elStamina, staminaElement) => {
+  console.log('[Bestiary Automator] Using retry refill method (foreground tab)');
   
-  try {
-    // Check if game is ready
-    if (!isGameReadyForStaminaRefill()) {
-      console.log('[Bestiary Automator] Game not ready for stamina refill, will retry');
-      return;
-    }
-    
-    const elStamina = document.querySelector('[title="Stamina"]');
-    const staminaElement = elStamina.querySelector('span span');
-    const stamina = Number(staminaElement.textContent);
-    
-    if (stamina >= config.minimumStaminaWithoutRefill) {
-      // Reset retry count on successful check
-      staminaRefillRetryCount = 0;
-      return;
-    }
-    
-    console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}, retry=${staminaRefillRetryCount}`);
-    
-    // Attempt refill
-    elStamina.click();
-    await sleep(200); // Reduced from 500ms
-    
-    const usePotionClicked = clickButtonWithText('usePotion');
-    if (!usePotionClicked) {
-      throw new Error('Use potion button not found');
-    }
-    
-    await sleep(300); // Reduced from 1000ms - stamina updates quickly
-    
-    // Check stamina again before closing
+  elStamina.click();
+  await sleep(500);
+  clickButtonWithText('usePotion');
+  await sleep(500);
+  
+  // Retry logic for foreground tabs
+  let retryCount = 0;
+  const maxRetries = 5;
+  
+  while (retryCount < maxRetries) {
     const newStaminaElement = document.querySelector('[title="Stamina"] span span');
     if (newStaminaElement) {
       const newStamina = Number(newStaminaElement.textContent);
-      if (newStamina < config.minimumStaminaWithoutRefill) {
-        console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, attempting another refill`);
-        // Don't close yet, let the loop try again
-        return;
+      if (newStamina >= config.minimumStaminaWithoutRefill) {
+        console.log(`[Bestiary Automator] Stamina refilled successfully: ${newStamina}`);
+        break;
       }
+      
+      retryCount++;
+      console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, retry ${retryCount}/${maxRetries}`);
+      
+      clickButtonWithText('usePotion');
+      await sleep(500);
+    } else {
+      console.log(`[Bestiary Automator] Could not find stamina element for retry ${retryCount + 1}`);
+      break;
     }
+  }
+  
+  if (retryCount >= maxRetries) {
+    console.log(`[Bestiary Automator] Max retries (${maxRetries}) reached for stamina refill`);
+  }
+  
+  // Use ESC key for foreground tabs (more reliable when tab is active)
+  const escEvent = new KeyboardEvent('keydown', {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    which: 27,
+    bubbles: true,
+    cancelable: true
+  });
+  
+  document.dispatchEvent(escEvent);
+  await sleep(300);
+};
+
+// Refill stamina if needed - chooses method based on tab visibility
+const refillStaminaIfNeeded = async () => {
+  if (!config.autoRefillStamina) return;
+  
+  try {
+    const elStamina = document.querySelector('[title="Stamina"]');
+    if (!elStamina) return;
     
-    // Only close if stamina is sufficient
-    clickAllCloseButtons();
-    await sleep(200); // Reduced from 500ms
+    const staminaElement = elStamina.querySelector('span span');
+    if (!staminaElement) return;
     
-    // Check for scroll lock after using potion
-    await handleScrollLock();
+    const stamina = Number(staminaElement.textContent);
+    if (stamina >= config.minimumStaminaWithoutRefill) return;
     
-    // Reset retry count on success
-    staminaRefillRetryCount = 0;
+    console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
+    
+    // Choose method based on tab visibility
+    if (document.hidden) {
+      await refillStaminaSimple(elStamina);
+    } else {
+      await refillStaminaWithRetry(elStamina, staminaElement);
+    }
     
   } catch (error) {
     console.error('[Bestiary Automator] Error refilling stamina:', error);
-    
-    // Implement exponential backoff retry
-    staminaRefillRetryCount++;
-    if (staminaRefillRetryCount <= 3) {
-      const retryDelay = Math.pow(2, staminaRefillRetryCount) * 1000; // 2s, 4s, 8s
-      
-      console.log(`[Bestiary Automator] Scheduling retry in ${retryDelay}ms (attempt ${staminaRefillRetryCount})`);
-      
-      clearTimeout(staminaRefillRetryTimeout);
-      staminaRefillRetryTimeout = setTimeout(() => {
-        refillStaminaIfNeeded();
-      }, retryDelay);
-    } else {
-      console.log('[Bestiary Automator] Max retry attempts reached, giving up');
-      staminaRefillRetryCount = 0;
-    }
   }
 };
 
 // Track if we've already collected rewards for this game session
 let rewardsCollectedThisSession = false;
 
-
 // Track if Faster Autoplay has been executed for this game session
 let fasterAutoplayExecutedThisSession = false;
 
 // Track if Faster Autoplay is currently running
 let fasterAutoplayRunning = false;
-
-
 
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
@@ -1048,8 +1015,6 @@ const unsubscribeFromGameState = () => {
   }
 };
 
-// Toast detection is now handled by MutationObserver - this function is no longer needed
-
 // Simplified defeat toast processor - no cooldown, process each immediately
 const processDefeatToast = async () => {
   if (!canTransitionTo(AUTOMATION_STATES.PROCESSING_DEFEAT)) {
@@ -1334,9 +1299,6 @@ const getToastText = (element) => {
     return '';
   }
 };
-
-
-
 
 // Faster Autoplay Functions
 
@@ -1645,8 +1607,6 @@ const startCountdown = async (duration) => {
   return true;
 };
 
-
-
 const startAutomation = () => {
   if (automationInterval) return;
   
@@ -1661,8 +1621,56 @@ const startAutomation = () => {
   // Run immediately once
   runAutomationTasks();
   
-  // Set up core automation interval
-  automationInterval = setInterval(runAutomationTasks, 5000); // Core automation every 5s
+  // Set up adaptive automation interval based on tab visibility
+  const getAutomationInterval = () => {
+    return document.hidden ? 10000 : 5000; // 10s in background, 5s in foreground
+  };
+  
+  const runWithAdaptiveInterval = () => {
+    runAutomationTasks();
+    
+    // Schedule next run with appropriate interval
+    const nextInterval = getAutomationInterval();
+    const mode = document.hidden ? 'background (10s)' : 'foreground (5s)';
+    console.log(`[Bestiary Automator] Next run in ${nextInterval}ms - ${mode} mode`);
+    
+    automationInterval = setTimeout(runWithAdaptiveInterval, nextInterval);
+  };
+  
+  // Start the adaptive interval
+  runWithAdaptiveInterval();
+  
+  // Add tab visibility change detection
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      console.log('[Bestiary Automator] Tab became hidden - switching to background mode (10s interval)');
+    } else {
+      console.log('[Bestiary Automator] Tab became visible - switching to foreground mode (5s interval)');
+    }
+  };
+  
+  // Store handler for cleanup
+  window.__bestiaryAutomatorVisibilityHandler = handleVisibilityChange;
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  
+  // Add suspension detection
+  let lastExecution = Date.now();
+  const checkSuspension = () => {
+    const now = Date.now();
+    const timeDiff = now - lastExecution;
+    
+    if (timeDiff > 30000) { // 30 seconds
+      console.log(`[Bestiary Automator] Tab may have been suspended for ${Math.round(timeDiff/1000)}s - resuming automation`);
+    }
+    
+    lastExecution = now;
+  };
+  
+  // Check for suspension every 10 seconds
+  const suspensionCheckInterval = setInterval(checkSuspension, 10000);
+  
+  // Store cleanup function for suspension check
+  window.__bestiaryAutomatorSuspensionCheck = suspensionCheckInterval;
   
   // Subscribe to game state for autoplay after defeat
   subscribeToGameState();
@@ -1673,16 +1681,20 @@ const stopAutomation = () => {
   
   console.log('[Bestiary Automator] Stopping automation loop');
   
-  // Clear main intervals
-  clearInterval(automationInterval);
+  // Clear main timeout (now using setTimeout instead of setInterval)
+  clearTimeout(automationInterval);
   automationInterval = null;
   
-
+  // Clear suspension check interval
+  if (window.__bestiaryAutomatorSuspensionCheck) {
+    clearInterval(window.__bestiaryAutomatorSuspensionCheck);
+    window.__bestiaryAutomatorSuspensionCheck = null;
+  }
   
-  // Clear any pending retry timeouts
-  if (staminaRefillRetryTimeout) {
-    clearTimeout(staminaRefillRetryTimeout);
-    staminaRefillRetryTimeout = null;
+  // Remove visibility change listener (if it exists)
+  if (window.__bestiaryAutomatorVisibilityHandler) {
+    document.removeEventListener('visibilitychange', window.__bestiaryAutomatorVisibilityHandler);
+    window.__bestiaryAutomatorVisibilityHandler = null;
   }
   
   // Clear all active timeouts
@@ -1691,11 +1703,7 @@ const stopAutomation = () => {
   // Cancel any ongoing countdown
   cancelCurrentCountdown();
   
-  // Reset retry counters
-  staminaRefillRetryCount = 0;
-  
-  // Clear element cache
-  elementCache.clear();
+  // Element cache removed for better performance
   
   // Remove focus event listeners (if they exist)
   if (focusEventListeners) {
@@ -1735,7 +1743,6 @@ const runAutomationTasks = async () => {
     console.error('[Bestiary Automator] Error in automation tasks:', error);
   }
 };
-
 
 // Toggle automation on/off (now only used internally)
 const toggleAutomation = () => {
@@ -2194,7 +2201,6 @@ function init() {
 // Initialize the mod
 init();
 
-
 // Track button state to prevent unnecessary updates
 let lastButtonState = {
   autoRefillStamina: config.autoRefillStamina,
@@ -2387,8 +2393,7 @@ context.exports = {
     // Cleanup function for when mod is disabled
     stopAutomation();
     
-    // Clear all caches and timeouts
-    elementCache.clear();
+    // Clear all timeouts
     cancelAllTimeouts();
     
     // Clean up Faster Autoplay subscription
@@ -2408,4 +2413,3 @@ context.exports = {
 
 // Also expose globally for other mods to access
 window.bestiaryAutomator = context.exports; 
-

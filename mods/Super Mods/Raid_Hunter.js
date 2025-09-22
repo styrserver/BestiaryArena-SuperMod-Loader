@@ -343,6 +343,12 @@ function handleFightToast() {
         return;
     }
     
+    // Check if Better Tasker is processing a task - if so, skip processing
+    if (isBetterTaskerProcessingTask()) {
+        console.log('[Raid Hunter] Fight toast detected but Better Tasker is processing a task - skipping');
+        return;
+    }
+    
     console.log('[Raid Hunter] Fight toast detected - checking for raids...');
     
     // Check for existing raids and process them (use immediate execution to avoid state manager conflicts)
@@ -658,6 +664,12 @@ function processNextRaid() {
     // Check if Board Analyzer is running - if so, skip processing
     if (isBoardAnalyzerRunning) {
         console.log('[Raid Hunter] Board Analyzer is running - skipping raid processing');
+        return;
+    }
+    
+    // Check if Better Tasker is processing a task - if so, skip processing
+    if (isBetterTaskerProcessingTask()) {
+        console.log('[Raid Hunter] Better Tasker is processing a task - skipping raid processing');
         return;
     }
     
@@ -2160,6 +2172,12 @@ async function checkForExistingRaids() {
             return;
         }
         
+        // Check if Better Tasker is processing a task - if so, skip processing
+        if (isBetterTaskerProcessingTask()) {
+            console.log('[Raid Hunter] Better Tasker is processing a task - skipping existing raid check');
+            return;
+        }
+        
         // First check if there are any raids available in the raid state
         const raidState = globalThis.state.raids.getSnapshot();
         const currentRaidList = raidState.context.list || [];
@@ -2312,6 +2330,12 @@ async function handleNewRaid(raid) {
     // Check if automation is enabled
     if (isAutomationEnabled === AUTOMATION_DISABLED) {
         console.log('[Raid Hunter] New raid detected but automation is disabled');
+        return;
+    }
+    
+    // Check if Better Tasker is processing a task - if so, skip processing
+    if (isBetterTaskerProcessingTask()) {
+        console.log('[Raid Hunter] New raid detected but Better Tasker is processing a task - skipping');
         return;
     }
     
