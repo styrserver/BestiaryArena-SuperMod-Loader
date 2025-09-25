@@ -342,4 +342,17 @@ if (typeof window !== 'undefined') {
 }
 if (typeof module !== 'undefined') {
   module.exports = inventoryTooltips;
-} 
+}
+
+// Cleanup function for inventory tooltips
+window.cleanupdatabaseinventorytooltipsjs = function(periodic = false) {
+  console.log('[inventory-tooltips.js] Running cleanup...');
+  
+  // Clear any cached data
+  if (window.inventoryTooltips) {
+    // Reset to empty state
+    window.inventoryTooltips = {};
+  }
+  
+  console.log('[inventory-tooltips.js] Cleanup completed');
+}; 

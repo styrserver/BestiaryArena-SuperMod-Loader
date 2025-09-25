@@ -695,11 +695,8 @@ function processNextRaid() {
     isCurrentlyRaiding = true;
     raidRetryCount = 0; // Reset retry count for new raid
     
-    // Modify quest button appearance to show raiding state
-    modifyQuestButtonForRaiding();
-    
-    // Start monitoring quest button validation
-    startQuestButtonValidation();
+    // Don't modify quest button yet - wait until Start button is clicked
+    // Quest button will be modified in handleEventOrRaid() after Start button click
     
     // Close any open modals first, then start the raid
     closeOpenModals().then(() => {
@@ -1806,6 +1803,12 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Automation disabled - stopping raid automation');
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         return;
     }
 
@@ -1821,6 +1824,12 @@ async function handleEventOrRaid(roomId) {
             console.log('[Raid Hunter] Automation disabled during navigation delay - stopping raid');
             isCurrentlyRaiding = false;
             currentRaidInfo = null;
+            
+            // Restore quest button appearance when automation is disabled
+            restoreQuestButtonAppearance();
+            
+            // Stop quest button validation monitoring
+            stopQuestButtonValidation();
             return;
         }
         
@@ -1838,6 +1847,12 @@ async function handleEventOrRaid(roomId) {
             console.log('[Raid Hunter] Automation disabled after navigation - stopping raid');
             isCurrentlyRaiding = false;
             currentRaidInfo = null;
+            
+            // Restore quest button appearance when automation is disabled
+            restoreQuestButtonAppearance();
+            
+            // Stop quest button validation monitoring
+            stopQuestButtonValidation();
             return;
         }
     } catch (error) {
@@ -1864,6 +1879,12 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Automation disabled after auto-setup - stopping raid');
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         return;
     }
 
@@ -1877,6 +1898,12 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Automation disabled after enabling autoplay - stopping raid');
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         return;
     }
     
@@ -1954,6 +1981,12 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Automation disabled before starting raid - stopping raid');
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         return;
     }
 
@@ -1975,8 +2008,20 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Automation disabled after clicking Start - stopping raid');
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
+        
+        // Restore quest button appearance when automation is disabled
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         return;
     }
+    
+    // Now that Start button is clicked, modify quest button to show raiding state
+    modifyQuestButtonForRaiding();
+    
+    // Start monitoring quest button validation
+    startQuestButtonValidation();
     
     console.log('[Raid Hunter] Raid automation sequence completed');
     
@@ -2100,6 +2145,12 @@ function handleRaidFailure(reason) {
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
         
+        // Restore quest button appearance when raid fails
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
+        
         retryTimeout = setTimeout(() => {
             // Check if automation is still enabled before retrying
             if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
@@ -2116,6 +2167,12 @@ function handleRaidFailure(reason) {
         isCurrentlyRaiding = false;
         currentRaidInfo = null;
         raidRetryCount = 0;
+        
+        // Restore quest button appearance when max retries reached
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopQuestButtonValidation();
         
         // Process next raid if available
         if (raidQueue.length > 0) {
@@ -2193,6 +2250,13 @@ async function checkForExistingRaids() {
             console.log('[Raid Hunter] Already in autoplay mode - marking as currently raiding');
             isCurrentlyRaiding = true;
             currentRaidInfo = { name: 'Unknown', roomId: null };
+            
+            // Modify quest button to show raiding state (this is OK since raid is already started)
+            modifyQuestButtonForRaiding();
+            
+            // Start monitoring quest button validation
+            startQuestButtonValidation();
+            
             startRaidEndChecking(); // Start monitoring for raid end
             return;
         }
@@ -3310,9 +3374,10 @@ function isOnCorrectRaidMap() {
 // Function to modify quest button appearance when raiding is active
 function modifyQuestButtonForRaiding() {
     try {
-        // Only check map if we're currently raiding and have raid info
-        if (isCurrentlyRaiding && currentRaidInfo && !isOnCorrectRaidMap()) {
-            console.log('[Raid Hunter] User not on correct raid map - not modifying quest button');
+        // Check if we're currently raiding - if so, modify quest button regardless of map
+        // The user might be navigating to the raid map, so we should show "Raiding" status
+        if (!isCurrentlyRaiding) {
+            console.log('[Raid Hunter] Not currently raiding - not modifying quest button');
             return false;
         }
         
@@ -3331,21 +3396,30 @@ function modifyQuestButtonForRaiding() {
             return false;
         }
         
-        // Store original state if not already stored
+        // Store original state if not already stored AND quest button is in original state
         if (!window.QuestButtonManager.originalState) {
             const img = questButton.querySelector('img');
             const span = questButton.querySelector('span');
             
-            window.QuestButtonManager.originalState = {
-                imgSrc: img ? img.src : null,
-                imgAlt: img ? img.alt : null,
-                imgWidth: img ? img.width : null,
-                imgHeight: img ? img.height : null,
-                imgStyle: img ? img.style.cssText : null,
-                imgClassList: img ? img.className : null,
-                spanText: span ? span.textContent : null,
-                buttonColor: questButton.style.color || ''
-            };
+            // Only store original state if quest button appears to be in original state
+            // Check if it's not already modified by another mod
+            const isInOriginalState = img && img.src.includes('quest.png') && span && span.textContent === 'Quests';
+            
+            if (isInOriginalState) {
+                window.QuestButtonManager.originalState = {
+                    imgSrc: img ? img.src : null,
+                    imgAlt: img ? img.alt : null,
+                    imgWidth: img ? img.width : null,
+                    imgHeight: img ? img.height : null,
+                    imgStyle: img ? img.style.cssText : null,
+                    imgClassList: img ? img.className : null,
+                    spanText: span ? span.textContent : null,
+                    buttonColor: questButton.style.color || ''
+                };
+                console.log('[Raid Hunter] Stored original quest button state');
+            } else {
+                console.log('[Raid Hunter] Quest button not in original state - not storing originalState');
+            }
         }
         
         // Modify the button appearance - replace icon and change text
@@ -3503,14 +3577,41 @@ function startQuestButtonValidation() {
                 return;
             }
             
-            // Check if we're on the correct map
+            // Check if we're still in autoplay mode (indicates raid is still active)
+            const boardContext = globalThis.state.board.getSnapshot().context;
+            if (boardContext.mode !== 'autoplay') {
+                console.log('[Raid Hunter] No longer in autoplay mode - raid likely ended, restoring quest button');
+                isCurrentlyRaiding = false;
+                currentRaidInfo = null;
+                restoreQuestButtonAppearance();
+                stopQuestButtonValidation();
+                return;
+            }
+            
+            // Check if we're on the correct raid map
             if (!isOnCorrectRaidMap()) {
                 console.log('[Raid Hunter] User navigated away from raid map - restoring quest button');
+                isCurrentlyRaiding = false;
+                currentRaidInfo = null;
                 restoreQuestButtonAppearance();
-                // Don't stop the interval - keep monitoring in case they come back
-            } else {
-                // We're on the correct map, ensure quest button shows raiding state (only if we have control)
-                if (window.QuestButtonManager.hasControl('Raid Hunter')) {
+                stopQuestButtonValidation();
+                return;
+            }
+            
+            // Check if the raid is still in the raid list
+            const raidState = globalThis.state?.raids?.getSnapshot?.();
+            const hasActiveRaids = raidState?.context?.list?.length > 0;
+            if (!hasActiveRaids) {
+                console.log('[Raid Hunter] No active raids in list - raid ended, restoring quest button');
+                isCurrentlyRaiding = false;
+                currentRaidInfo = null;
+                restoreQuestButtonAppearance();
+                stopQuestButtonValidation();
+                return;
+            }
+            
+            // If we get here, we're still raiding - ensure quest button shows raiding state
+            if (window.QuestButtonManager.hasControl('Raid Hunter')) {
                     const questButton = findQuestButton();
                     
                     if (questButton) {
@@ -3537,22 +3638,21 @@ function startQuestButtonValidation() {
                         console.log('[Raid Hunter] Active raids detected - taking quest button control from', window.QuestButtonManager.getCurrentOwner() || 'unknown');
                         modifyQuestButtonForRaiding();
                     } else {
-                        // No active raids - check if Better Tasker has control
+                        // No active raids - release control and restore quest button if we still have it
                         const currentOwner = window.QuestButtonManager.getCurrentOwner();
-                        if (currentOwner === 'Better Tasker') {
+                        if (currentOwner === 'Raid Hunter') {
+                            console.log('[Raid Hunter] No active raids - releasing quest button control');
+                            restoreQuestButtonAppearance();
+                        } else if (currentOwner === 'Better Tasker') {
                             // Better Tasker has control, don't interfere
                             console.log('[Raid Hunter] Better Tasker has quest button control - not interfering');
-                        } else {
-                            // No one has control or it's available, try to get it
-                            modifyQuestButtonForRaiding();
                         }
                     }
                 }
-            }
         } catch (error) {
             console.error('[Raid Hunter] Error in quest button validation:', error);
         }
-    }, 2000); // Check every 2 seconds
+    }, 30000); // Check every 30 seconds
 }
 
 // Function to stop monitoring quest button validation
@@ -3569,15 +3669,17 @@ function stopQuestButtonValidation() {
 // ============================================================================
 
 // Cleanup function for when mod is disabled (like Cyclopedia)
-function cleanupRaidHunter() {
+function cleanupRaidHunter(periodic = false) {
     try {
-        // Clean up modal if open
-        if (activeRaidHunterModal) {
+        // Clean up modal if open only if not periodic cleanup
+        if (!periodic && activeRaidHunterModal) {
             cleanupRaidHunterModal();
         }
         
-        // Clean up raid clock (this calls cleanupAll() internally)
-        stopRaidClock();
+        // Clean up raid clock only if not periodic cleanup
+        if (!periodic) {
+            stopRaidClock();
+        }
         
         // Clean up additional items not covered by cleanupAll()
         
@@ -3587,20 +3689,22 @@ function cleanupRaidHunter() {
             window.staminaMonitorInterval = null;
         }
         
-        // Clean up CSS styles
-        const raidShimmerCSS = document.getElementById('raidShimmerCSS');
-        if (raidShimmerCSS) {
-            raidShimmerCSS.remove();
-        }
-        
-        // Clean up event listeners from raid clock buttons
-        const settingsButton = document.querySelector('#raid-hunter-settings-btn');
-        const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
-        if (settingsButton) {
-            settingsButton.replaceWith(settingsButton.cloneNode(true)); // Remove all event listeners
-        }
-        if (toggleButton) {
-            toggleButton.replaceWith(toggleButton.cloneNode(true)); // Remove all event listeners
+        // Clean up CSS styles only if not periodic cleanup
+        if (!periodic) {
+            const raidShimmerCSS = document.getElementById('raidShimmerCSS');
+            if (raidShimmerCSS) {
+                raidShimmerCSS.remove();
+            }
+            
+            // Clean up event listeners from raid clock buttons
+            const settingsButton = document.querySelector('#raid-hunter-settings-btn');
+            const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
+            if (settingsButton) {
+                settingsButton.replaceWith(settingsButton.cloneNode(true)); // Remove all event listeners
+            }
+            if (toggleButton) {
+                toggleButton.replaceWith(toggleButton.cloneNode(true)); // Remove all event listeners
+            }
         }
         
         // Clean up modal cleanup observer
@@ -3663,4 +3767,9 @@ context.exports = {
         // Handle config updates if needed
         console.log('[Raid Hunter] Config update received:', newConfig);
     }
+};
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsRaidHunterjs = (periodic = false) => {
+  cleanupRaidHunter(periodic);
 };

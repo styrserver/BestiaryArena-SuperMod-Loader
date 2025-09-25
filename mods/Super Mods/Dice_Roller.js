@@ -616,8 +616,25 @@
     img.style.maxWidth = '34px';
     img.style.maxHeight = '34px';
     img.style.objectFit = 'contain';
-    img.src = `/assets/portraits/${creature.gameId}.png`;
+    img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
     slot.appendChild(img);
+    
+    // Add shiny star overlay if creature is shiny
+    if (creature.shiny === true) {
+      console.log('[Dice Roller] Adding shiny star to creature:', creature);
+      const shinyIcon = document.createElement('img');
+      shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+      shinyIcon.alt = 'shiny';
+      shinyIcon.title = 'Shiny';
+      shinyIcon.style.position = 'absolute';
+      shinyIcon.style.top = '2px';
+      shinyIcon.style.left = '2px';
+      shinyIcon.style.width = '8px';
+      shinyIcon.style.height = '8px';
+      shinyIcon.style.pointerEvents = 'none';
+      shinyIcon.style.zIndex = '10';
+      slot.appendChild(shinyIcon);
+    }
     
     // Tooltip
     const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
@@ -1307,7 +1324,7 @@
         img.style.maxWidth = '34px';
         img.style.maxHeight = '34px';
         img.style.objectFit = 'contain';
-        img.src = `/assets/portraits/${creature.gameId}.png`;
+        img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
         slot.appendChild(img);
         
         // Tooltip
@@ -1501,7 +1518,7 @@
             img.style.maxWidth = '34px';
             img.style.maxHeight = '34px';
             img.style.objectFit = 'contain';
-            img.src = `/assets/portraits/${creature.gameId}.png`;
+            img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
             slot.appendChild(img);
             
             // Tooltip
@@ -1721,7 +1738,7 @@
       borderDiv.style.boxSizing = 'border-box';
       borderDiv.style.flexShrink = '0';
       const img = document.createElement('img');
-      img.src = `/assets/portraits/${creature.gameId}.png`;
+      img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
       img.width = 40;
       img.height = 40;
       img.style.display = 'block';
@@ -1732,6 +1749,24 @@
       img.style.maxWidth = '100%';
       img.style.maxHeight = '100%';
       borderDiv.appendChild(img);
+      
+      // Add shiny star overlay if creature is shiny
+      if (creature.shiny === true) {
+        console.log('[Dice Roller] Adding shiny star to details portrait for creature:', creature);
+        const shinyIcon = document.createElement('img');
+        shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+        shinyIcon.alt = 'shiny';
+        shinyIcon.title = 'Shiny';
+        shinyIcon.style.position = 'absolute';
+        shinyIcon.style.top = '2px';
+        shinyIcon.style.left = '2px';
+        shinyIcon.style.width = '10px';
+        shinyIcon.style.height = '10px';
+        shinyIcon.style.pointerEvents = 'none';
+        shinyIcon.style.zIndex = '10';
+        borderDiv.appendChild(shinyIcon);
+      }
+      
       portraitNameContainer.appendChild(borderDiv);
       
       // Name and level container
@@ -4601,3 +4636,29 @@
   exports = {};
   
 })();
+
+// Cleanup function for Dice Roller mod
+window.cleanupSuperModsDiceRollerjs = function() {
+  console.log('[Dice Roller] Running cleanup...');
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#dice-roller-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any tracked event listeners
+  if (window.trackedEventListeners) {
+    window.trackedEventListeners.forEach(({ element, event, handler }) => {
+      element.removeEventListener(event, handler);
+    });
+    delete window.trackedEventListeners;
+  }
+  
+  // Clear any cached data
+  if (typeof window.diceRollerState !== 'undefined') {
+    delete window.diceRollerState;
+  }
+  
+  console.log('[Dice Roller] Cleanup completed');
+};

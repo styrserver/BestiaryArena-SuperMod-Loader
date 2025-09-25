@@ -1003,4 +1003,26 @@ context.exports = {
       gridOverlay = createGridOverlay();
     }
   }
+};
+
+// Cleanup function for Custom Display mod
+window.cleanupOfficialModsCustomDisplayjs = function() {
+  console.log('[Custom Display] Running cleanup...');
+  
+  // Remove any existing overlays
+  if (typeof gridOverlay !== 'undefined' && gridOverlay) {
+    gridOverlay.remove();
+  }
+  
+  // Clear any cached elements
+  if (typeof performanceOverlay !== 'undefined' && performanceOverlay) {
+    performanceOverlay.remove();
+  }
+  
+  // Reset any global state
+  if (typeof window.customDisplayState !== 'undefined') {
+    delete window.customDisplayState;
+  }
+  
+  console.log('[Custom Display] Cleanup completed');
 }; 

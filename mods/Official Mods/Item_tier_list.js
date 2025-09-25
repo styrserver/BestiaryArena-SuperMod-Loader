@@ -233,4 +233,22 @@ console.log('Item Tier List Mod initialization complete');
 // Export control functions
 exports = {
   showItemTierList: showItemTierListModal
+};
+
+// Cleanup function for Item Tier List mod
+window.cleanupOfficialModsItemtierlistjs = function(periodic = false) {
+  console.log('[Item Tier List] Running cleanup...');
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#item-tier-list-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.itemTierListState !== 'undefined') {
+    delete window.itemTierListState;
+  }
+  
+  console.log('[Item Tier List] Cleanup completed');
 }; 

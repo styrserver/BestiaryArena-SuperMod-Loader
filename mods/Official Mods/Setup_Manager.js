@@ -1257,4 +1257,35 @@ function forceCloseAllModals() {
   
   // Reset body styles
   document.body.style.overflow = '';
-} 
+}
+
+// Cleanup function for Setup Manager mod
+window.cleanupOfficialModsSetupManagerjs = function(periodic = false) {
+  console.log('[Setup Manager] Running cleanup...');
+  
+  // Remove any active UI components
+  if (activeButtonElement) {
+    activeButtonElement.remove();
+    activeButtonElement = null;
+  }
+  
+  // Restore original button if it was hijacked
+  if (originalButtonElement && originalButtonClickHandler) {
+    originalButtonElement.onclick = originalButtonClickHandler;
+    originalButtonElement = null;
+    originalButtonClickHandler = null;
+  }
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#setup-manager-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.setupManagerState !== 'undefined') {
+    delete window.setupManagerState;
+  }
+  
+  console.log('[Setup Manager] Cleanup completed');
+}; 

@@ -11413,11 +11413,13 @@ exports = {
       return false;
     }
   },
-  cleanup: () => {
+  cleanup: (periodic = false) => {
     console.log('[Board Advisor] Starting comprehensive cleanup...');
     
-    // 1. Stop state refresh system
-    stopStateRefresh();
+    // 1. Stop state refresh system only if not periodic cleanup
+    if (!periodic) {
+      stopStateRefresh();
+    }
     
     // 2. Clear all timeouts and intervals
     if (analysisTimeout) {
@@ -11444,15 +11446,17 @@ exports = {
     // 5. Clean up all window event listeners
     cleanupWindowListeners();
     
-    // 6. Clean up global window functions
-    delete window.getMonsterName;
-    delete window.getEquipmentName;
-    delete window.getMonsterStats;
-    delete window.formatMonsterStats;
-    delete window.getEquipmentStats;
-    delete window.onGameStart;
-    delete window.updateFooterStatus;
-    delete window.BoardAdvisorAPI;
+    // 6. Clean up global window functions only if not periodic cleanup
+    if (!periodic) {
+      delete window.getMonsterName;
+      delete window.getEquipmentName;
+      delete window.getMonsterStats;
+      delete window.formatMonsterStats;
+      delete window.getEquipmentStats;
+      delete window.onGameStart;
+      delete window.updateFooterStatus;
+      delete window.BoardAdvisorAPI;
+    }
     
     // Clear window timeout
     if (window.autoFitTimeout) {
@@ -11466,8 +11470,8 @@ exports = {
     // 8. Clean up tile highlights and overlays
     cleanupTileHighlights();
     
-    // 9. Close panel if open
-    if (panelState.isOpen) {
+    // 9. Close panel if open only if not periodic cleanup
+    if (!periodic && panelState.isOpen) {
       closePanel();
     }
     
@@ -11739,3 +11743,20 @@ addWindowListener('message', (event) => {
     }
   }
 });
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsBoardAdvisorjs = function(periodic = false) {
+  console.log('[Board Advisor] Running global cleanup...');
+  
+  // Call the internal cleanup function if available
+  if (exports && exports.cleanup) {
+    exports.cleanup(periodic);
+  }
+  
+  // Additional global cleanup
+  if (typeof window.boardAdvisorState !== 'undefined') {
+    delete window.boardAdvisorState;
+  }
+  
+  console.log('[Board Advisor] Global cleanup completed');
+};

@@ -970,4 +970,27 @@ function showTeamLoadedNotification(data) {
   } catch (error) {
     console.error('Error showing team loaded notification:', error);
   }
-} 
+}
+
+// Cleanup function for Team Copier mod
+window.cleanupOfficialModsTeamCopierjs = function(periodic = false) {
+  console.log('[Team Copier] Running cleanup...');
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#team-copier-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.teamCopierState !== 'undefined') {
+    delete window.teamCopierState;
+  }
+  
+  // Clear last used seeds
+  if (typeof config !== 'undefined' && config.lastUsedSeeds) {
+    config.lastUsedSeeds = [];
+  }
+  
+  console.log('[Team Copier] Cleanup completed');
+}; 

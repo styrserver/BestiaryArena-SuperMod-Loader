@@ -14,7 +14,7 @@
     // 1. Configuration & Constants
     // =======================
     const modName = "Autoseller";
-    const modDescription = "Automatically sells and squeezes creatures based on gene thresholds and experience levels.";
+    const modDescription = "Automatically sells and squeezes creatures based on gene thresholds and experience levels. Shiny creatures are protected.";
     
     // Core timing constants
     const AUTOSELLER_MIN_DELAY_MS = 5000;
@@ -166,6 +166,7 @@
         }
         
         updateAutosellerNavButtonColor();
+        updateAutosellerSessionWidget();
     }
     
     function debounce(fn, delay) {
@@ -260,9 +261,20 @@
             const genes = hp + ad + ap + armor + magicResist;
             
             if (squeezeEnabled && genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
+                // Never squeeze shiny creatures
+                if (monster.shiny === true) {
+                    console.log(`[Autoseller] Skipping shiny creature for squeeze: ${monster.name || 'unknown'}`);
+                    continue;
+                }
                 toSqueeze.push(monster);
             }
             else if (sellEnabled && genes >= sellMinGenes && genes <= sellMaxGenes) {
+                // Never sell shiny creatures
+                if (monster.shiny === true) {
+                    console.log(`[Autoseller] Skipping shiny creature for sell: ${monster.name || 'unknown'}`);
+                    continue;
+                }
+                
                 const exp = monster.exp || 0;
                 if (exp < maxExpThreshold) {
                     if (hasDaycare && daycareMonsterIds.includes(monster.id)) {
@@ -872,8 +884,8 @@
         if (showTooltip) {
             const isAutosell = warningText.includes('sell');
             const tooltipText = isAutosell 
-                ? 'The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare.'
-                : 'The script will squeeze all creatures in your inventory that are:\n- Unlocked creatures,\n- Within the specified gene range,\n- Not in daycare.';
+                ? 'The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare,\n- Not shiny.'
+                : 'The script will squeeze all creatures in your inventory that are:\n- Unlocked creatures,\n- Within the specified gene range,\n- Not in daycare,\n- Not shiny.';
             
             allSpan.title = tooltipText;
             
@@ -1542,14 +1554,22 @@
                             console.log('[Autoseller] Monster name:', monster?.metadata?.name || monster?.name || 'unknown');
                             console.log('[Autoseller] Ignore list:', ignoreList);
                             
+                            // Get monster name for logging
+                            const monsterName = monster?.metadata?.name || monster?.name;
+                            
                             // Keep creatures with high genes (80+)
                             if (monster.totalGenes >= 80) {
                                 console.log('[Autoseller] Keeping monster (high genes):', monster.totalGenes);
                                 return false; // Keep creatures with 80+ genes
                             }
                             
+                            // Never devour shiny creatures
+                            if (monster.shiny === true) {
+                                console.log('[Autoseller] Keeping monster (shiny):', monsterName);
+                                return false; // Keep shiny creatures (DON'T devour them)
+                            }
+                            
                             // Check if monster is in ignore list
-                            const monsterName = monster?.metadata?.name || monster?.name;
                             if (monsterName && ignoreList.includes(monsterName)) {
                                 console.log('[Autoseller] Keeping monster (in ignore list):', monsterName);
                                 return false; // Keep creatures in ignore list (DON'T devour them)
@@ -3213,3 +3233,20 @@
     }
 
 })();
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsAutosellerjs = function() {
+  console.log('[Autoseller] Running global cleanup...');
+  
+  // Call the internal cleanup function if available
+  if (window.__autosellerLoaded && window.autoseller && window.autoseller.cleanup) {
+    window.autoseller.cleanup();
+  }
+  
+  // Additional global cleanup
+  if (window.__autosellerLoaded) {
+    delete window.__autosellerLoaded;
+  }
+  
+  console.log('[Autoseller] Global cleanup completed');
+};

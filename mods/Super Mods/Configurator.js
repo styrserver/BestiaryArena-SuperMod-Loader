@@ -872,3 +872,27 @@ exports = {
     Object.assign(config, newConfig);
   }
 };
+
+// Cleanup function for Configurator mod
+window.cleanupSuperModsConfiguratorjs = function() {
+  console.log('[Configurator] Running cleanup...');
+  
+  // Remove configurator header button
+  const configuratorBtn = document.querySelector('.configurator-header-btn');
+  if (configuratorBtn && configuratorBtn.parentNode) {
+    configuratorBtn.parentNode.remove();
+  }
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#configurator-modal');
+  if (existingModal) {
+    safeRemoveElement(existingModal);
+  }
+  
+  // Clear any cached data
+  if (typeof window.configuratorState !== 'undefined') {
+    delete window.configuratorState;
+  }
+  
+  console.log('[Configurator] Cleanup completed');
+};

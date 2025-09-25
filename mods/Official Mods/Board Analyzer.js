@@ -2972,9 +2972,17 @@ context.exports = {
     api.service.updateScriptConfig(context.hash, config);
   },
   // NEW: Cleanup function for modal registry
-  cleanup: () => {
-    modalRegistry.closeAll();
+  cleanup: (periodic = false) => {
+    // Only close modals if not periodic cleanup
+    if (!periodic) {
+      modalRegistry.closeAll();
+    }
   }
+};
+
+// Expose cleanup function globally for the mod loader
+window.cleanupOfficialModsBoardAnalyzerjs = (periodic = false) => {
+  context.exports.cleanup(periodic);
 };
 
 // Legacy displayResults function removed - chart functionality is now handled in showResultsModal 

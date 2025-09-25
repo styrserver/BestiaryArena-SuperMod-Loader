@@ -5708,3 +5708,27 @@
   };
   
 })();
+
+// Cleanup function for Better Forge mod
+window.cleanupSuperModsBetterForgejs = function() {
+  console.log('[Better Forge] Running cleanup...');
+  
+  // Clear any intervals
+  if (window.__forgeIntervals) {
+    window.__forgeIntervals.forEach(interval => clearInterval(interval));
+    delete window.__forgeIntervals;
+  }
+  
+  // Clear any timeouts
+  if (window.__forgeTimeouts) {
+    window.__forgeTimeouts.forEach(timeout => clearTimeout(timeout));
+    delete window.__forgeTimeouts;
+  }
+  
+  // Reset any global state
+  if (window.__betterForgeState) {
+    delete window.__betterForgeState;
+  }
+  
+  console.log('[Better Forge] Cleanup completed');
+};

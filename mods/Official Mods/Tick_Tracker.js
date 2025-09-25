@@ -698,4 +698,42 @@ context.exports = {
     Object.assign(config, newConfig);
     api.service.updateScriptConfig(context.hash, config);
   }
+};
+
+// Cleanup function for Tick Tracker mod
+window.cleanupOfficialModsTickTrackerjs = function(periodic = false) {
+  console.log('[Tick Tracker] Running cleanup...');
+  
+  // Stop tracking only if not periodic cleanup
+  if (!periodic) {
+    isTracking = false;
+  }
+  
+  // Clear tick history
+  tickHistory = [];
+  
+  // Unsubscribe from game end events
+  if (onGameEndUnsubscribe) {
+    onGameEndUnsubscribe();
+    onGameEndUnsubscribe = null;
+  }
+  
+  // Remove widget observer
+  if (widgetObserver) {
+    widgetObserver.disconnect();
+    widgetObserver = null;
+  }
+  
+  // Remove active widget
+  if (activeWidget) {
+    activeWidget.remove();
+    activeWidget = null;
+  }
+  
+  // Clear any cached data
+  if (typeof window.tickTrackerState !== 'undefined') {
+    delete window.tickTrackerState;
+  }
+  
+  console.log('[Tick Tracker] Cleanup completed');
 }; 

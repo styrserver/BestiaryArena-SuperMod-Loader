@@ -1478,6 +1478,11 @@
       return { action: 'keep' };
     }
     
+    // Keep if shiny - never autosell or autosqueeze shiny creatures
+    if (monster.shiny === true) {
+      return { action: 'keep' };
+    }
+    
     // Calculate genes for non-selected monsters
     const genes = getMonsterGenes(monster);
     
@@ -1954,7 +1959,12 @@
 
   function getSummonScrollButtons() {
     if (!DOM_ELEMENTS.summonScrollButtons || !DOM_ELEMENTS.isCacheValid()) {
-      DOM_ELEMENTS.summonScrollButtons = DOMCache.getAll('button.focus-style-visible.active\\:opacity-70');
+      // Get all buttons with the focus style, but exclude autoscroller buttons
+      const allButtons = DOMCache.getAll('button.focus-style-visible.active\\:opacity-70');
+      DOM_ELEMENTS.summonScrollButtons = Array.from(allButtons).filter(button => 
+        !button.classList.contains('autoscroller-inventory-button') &&
+        !button.classList.contains('autoscroller-scroll-button')
+      );
       DOM_ELEMENTS.lastCacheTime = Date.now();
     }
     return DOM_ELEMENTS.summonScrollButtons;
@@ -2149,6 +2159,11 @@
       contentDiv.style.flex = '1 1 0';
       
       let availableCreatures = [...getAllCreatures()];
+      // When reopening the modal, respect already selected creatures:
+      // 1) Deduplicate any prior selections
+      // 2) Exclude selected creatures from the available list
+      selectedCreatures = Array.from(new Set(selectedCreatures));
+      availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
       
       resetAutoscrollState();
       // Always default to grey scroll (tier 1) when opening modal
@@ -2516,7 +2531,7 @@
         
         const autosellLabel = document.createElement('label');
         autosellLabel.htmlFor = 'autosell-checkbox';
-        autosellLabel.textContent = 'Autosell and autosqueeze non-selected creatures';
+        autosellLabel.textContent = 'Autosell and autosqueeze non-selected (ignores shiny)';
         autosellLabel.style.color = 'rgb(230, 215, 176)';
         autosellLabel.style.cursor = 'pointer';
         
@@ -3200,7 +3215,12 @@
     
     let summonScrollButtons = getSummonScrollButtons();
     if (!summonScrollButtons || summonScrollButtons.length === 0) {
-      summonScrollButtons = inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70');
+      // Fallback: get all buttons but filter out autoscroller buttons
+      const allButtons = inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70');
+      summonScrollButtons = Array.from(allButtons).filter(button => 
+        !button.classList.contains('autoscroller-inventory-button') &&
+        !button.classList.contains('autoscroller-scroll-button')
+      );
     }
     
     if (!summonScrollButtons || summonScrollButtons.length === 0) {
@@ -3483,4 +3503,39 @@
       statusElement.textContent = message;
     });
   }
-})(); 
+})();
+
+// Cleanup function for Autoscroller mod
+window.cleanupSuperModsAutoscrollerjs = function(periodic = false) {
+  console.log('[Autoscroller] Running cleanup...');
+  
+  // Stop any running autoscroll processes only if not periodic cleanup
+  if (!periodic && window.autoscrollState) {
+    window.autoscrollState.isRunning = false;
+  }
+  
+  // Clear any intervals
+  if (window.__autoscrollIntervals) {
+    window.__autoscrollIntervals.forEach(interval => clearInterval(interval));
+    delete window.__autoscrollIntervals;
+  }
+  
+  // Clear any timeouts
+  if (window.__autoscrollTimeouts) {
+    window.__autoscrollTimeouts.forEach(timeout => clearTimeout(timeout));
+    delete window.__autoscrollTimeouts;
+  }
+  
+  // Remove any status displays
+  const statusElement = document.querySelector('#autoscroll-status');
+  if (statusElement) {
+    statusElement.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.autoscrollState !== 'undefined') {
+    delete window.autoscrollState;
+  }
+  
+  console.log('[Autoscroller] Cleanup completed');
+}; 

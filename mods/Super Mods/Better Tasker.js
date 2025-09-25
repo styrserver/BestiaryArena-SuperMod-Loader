@@ -13,6 +13,165 @@ const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
 const DEFAULT_TASK_START_DELAY = 3;
 const DEFAULT_TASKER_ENABLED = false;
 
+// Task handling delay constants
+const QUEST_LOG_LOAD_DELAY = 300;
+const MAP_NAVIGATION_DELAY = 200;
+const MAP_LOAD_DELAY = 1000;
+const AUTO_SETUP_DELAY = 1000;
+const AUTOPLAY_SETUP_DELAY = 1000;
+const BESTIARY_AUTOMATOR_INIT_DELAY = 500;
+const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
+const ESC_KEY_DELAY = 50;
+const TASK_START_DELAY = 200;
+
+// ============================================================================
+// 1.1. DOM UTILITY FUNCTIONS
+// ============================================================================
+
+// Utility function to handle control request/release with proper error handling
+function withControl(manager, modName, callback, errorContext = 'operation') {
+    // Request control
+    if (!manager.requestControl(modName)) {
+        console.log(`[Better Tasker] Cannot ${errorContext} - controlled by another mod`);
+        return false;
+    }
+    
+    try {
+        const result = callback();
+        return result;
+    } catch (error) {
+        console.error(`[Better Tasker] Error during ${errorContext}:`, error);
+        return false;
+    } finally {
+        // Always release control
+        manager.releaseControl(modName);
+    }
+}
+
+// Utility function to handle control check/release with proper error handling
+function withControlCheck(manager, modName, callback, errorContext = 'operation') {
+    // Check if we have control
+    if (!manager.hasControl(modName)) {
+        console.log(`[Better Tasker] Cannot ${errorContext} - not controlled by Better Tasker`);
+        return false;
+    }
+    
+    try {
+        const result = callback();
+        return result;
+    } catch (error) {
+        console.error(`[Better Tasker] Error during ${errorContext}:`, error);
+        return false;
+    } finally {
+        // Always release control
+        manager.releaseControl(modName);
+    }
+}
+
+// Create a styled button with consistent styling
+function createStyledButton(id, text, color, onClick) {
+    const button = document.createElement('button');
+    button.id = id;
+    button.textContent = text;
+    button.className = `focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-${color} active:frame-pressed-1-${color} surface-${color} gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight`;
+    button.style.cssText = `
+        padding: 2px 6px;
+        height: 20px;
+    `;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+// Create a styled button with custom styling
+function createCustomStyledButton(id, text, className, style, onClick) {
+    const button = document.createElement('button');
+    button.id = id;
+    button.textContent = text;
+    button.className = className;
+    button.style.cssText = style;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+// Create a styled container div
+function createStyledContainer(className, style) {
+    const container = document.createElement('div');
+    if (className) container.className = className;
+    if (style) container.style.cssText = style;
+    return container;
+}
+
+// Create a styled input element
+function createStyledInput(type, id, value, style, attributes = {}) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.id = id;
+    if (value !== undefined) input.value = value;
+    if (style) input.style.cssText = style;
+    
+    // Apply additional attributes
+    Object.entries(attributes).forEach(([key, val]) => {
+        input[key] = val;
+    });
+    
+    return input;
+}
+
+// Create a reusable checkbox setting with label and description
+function createCheckboxSetting(id, labelText, description, checked = false) {
+    const settingDiv = document.createElement('div');
+    settingDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    // Container for checkbox and label on same line
+    const checkboxLabelContainer = document.createElement('div');
+    checkboxLabelContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+    `;
+    
+    const checkbox = createStyledInput('checkbox', id, undefined, `
+        width: 16px;
+        height: 16px;
+        accent-color: #ffe066;
+    `, { checked });
+    // Add auto-save listener immediately
+    checkbox.addEventListener('change', autoSaveSettings);
+    checkboxLabelContainer.appendChild(checkbox);
+    
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    label.className = 'pixel-font-16';
+    label.style.cssText = `
+        font-weight: bold;
+        color: #fff;
+        cursor: pointer;
+    `;
+    label.setAttribute('for', id);
+    checkboxLabelContainer.appendChild(label);
+    
+    settingDiv.appendChild(checkboxLabelContainer);
+    
+    const desc = document.createElement('div');
+    desc.textContent = description;
+    desc.className = 'pixel-font-16';
+    desc.style.cssText = `
+        font-size: 11px;
+        color: #888;
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    settingDiv.appendChild(desc);
+    
+    return settingDiv;
+}
+
 // ============================================================================
 // 2. STATE MANAGEMENT
 // ============================================================================
@@ -21,137 +180,75 @@ const DEFAULT_TASKER_ENABLED = false;
 let questLogObserver = null;
 
 // ============================================================================
-// 2.1. QUEST BUTTON COORDINATION
+// 2.1. CONTROL MANAGER CLASS
 // ============================================================================
 
-// Shared quest button manager for coordination between mods
-window.QuestButtonManager = window.QuestButtonManager || {
-    currentOwner: null,
-    originalState: null,
-    validationInterval: null,
+// Reusable control manager class for coordination between mods
+class ControlManager {
+    constructor(name, uniqueProperties = {}) {
+        this.name = name;
+        this.currentOwner = null;
+        
+        // Add any unique properties specific to this manager
+        Object.assign(this, uniqueProperties);
+    }
     
-    // Request control of quest button (returns true if successful)
+    // Request control (returns true if successful)
     requestControl(modName) {
         if (this.currentOwner === null || this.currentOwner === modName) {
             this.currentOwner = modName;
-            console.log(`[Quest Button Manager] Control granted to ${modName}`);
+            console.log(`[${this.name}] Control granted to ${modName}`);
             return true;
         }
-        console.log(`[Quest Button Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
+        console.log(`[${this.name}] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
         return false;
-    },
+    }
     
-    // Release control of quest button
+    // Release control
     releaseControl(modName) {
         if (this.currentOwner === modName) {
             this.currentOwner = null;
-            console.log(`[Quest Button Manager] Control released by ${modName}`);
+            console.log(`[${this.name}] Control released by ${modName}`);
             return true;
         }
         return false;
-    },
+    }
     
     // Check if mod has control
     hasControl(modName) {
         return this.currentOwner === modName;
-    },
+    }
     
     // Get current owner
     getCurrentOwner() {
         return this.currentOwner;
     }
-};
+}
 
 // ============================================================================
-// 2.2. AUTOPLAY COORDINATION
+// 2.2. CONTROL MANAGER INSTANCES
 // ============================================================================
 
-// Shared autoplay manager for coordination between mods
-window.AutoplayManager = window.AutoplayManager || {
-    currentOwner: null,
+// Quest Button Manager for coordination between mods
+window.QuestButtonManager = window.QuestButtonManager || new ControlManager('Quest Button Manager', {
+    originalState: null,
+    validationInterval: null
+});
+
+// Autoplay Manager for coordination between mods
+window.AutoplayManager = window.AutoplayManager || new ControlManager('Autoplay Manager', {
     originalMode: null,
-    
-    // Request control of autoplay (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[Autoplay Manager] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[Autoplay Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    },
-    
-    // Release control of autoplay
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[Autoplay Manager] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    },
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    },
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    },
-    
-    // Check if another mod is controlling autoplay
     isControlledByOther(modName) {
         return this.currentOwner !== null && this.currentOwner !== modName;
     }
-};
+});
 
-// ============================================================================
-// 2.2. BESTIARY AUTOMATOR SETTINGS COORDINATION
-// ============================================================================
-
-// Shared Bestiary Automator settings manager for coordination between mods
-window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || {
-    currentOwner: null,
-    
-    // Request control of Bestiary Automator settings (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[Bestiary Automator Settings Manager] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[Bestiary Automator Settings Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    },
-    
-    // Release control of Bestiary Automator settings
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[Bestiary Automator Settings Manager] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    },
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    },
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    }
-};
+// Bestiary Automator Settings Manager for coordination between mods
+window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || new ControlManager('Bestiary Automator Settings Manager');
 
 // Raid Hunter coordination state
 let isRaidHunterActive = false;
 let raidHunterCoordinationInterval = null;
-let gameStateObserver = null;
 let gameStateUnsubscribers = [];
 let automationInterval = null;
 let questLogInterval = null;
@@ -199,6 +296,8 @@ function resetState(resetType = 'full') {
             taskHuntingOngoing = false;
             // Clear saved tasking map ID
             taskingMapId = null;
+            // Reset quest button modification flag
+            questButtonModifiedForTasking = false;
             // Stop quest button validation and restore appearance when task hunting stops
             stopQuestButtonValidation();
             restoreQuestButtonAppearance();
@@ -258,13 +357,67 @@ function resetState(resetType = 'full') {
                 console.log('[Better Tasker] Full state reset');
                 break;
         }
+        
+        // Always update exposed state after any reset so other mods (like Raid Hunter) can see the changes
+        updateExposedState();
     } catch (error) {
         console.error('[Better Tasker] Error during state reset:', error);
     }
 }
 
 // ============================================================================
-// 3. RAID HUNTER COORDINATION
+// 3. AUTOPLAY CONTROL FUNCTIONS
+// ============================================================================
+
+// Generic function to control autoplay with button clicks
+function controlAutoplayWithButton(action) {
+    try {
+        console.log(`[Better Tasker] Looking for ${action} button...`);
+        
+        // Define selectors based on action type
+        const selectors = action === 'pause' 
+            ? [
+                'button.frame-1-red[class*="pause"]',
+                'button:has(svg.lucide-pause)',
+                'button[class*="pause"]'
+              ]
+            : [
+                'button.frame-1-green[class*="play"]',
+                'button:has(svg.lucide-play)',
+                'button[class*="play"]',
+                'button:not([class*="pause"]):has(svg)' // Fallback for play button
+              ];
+        
+        // Find button using first matching selector
+        const button = selectors.reduce((found, selector) => 
+            found || document.querySelector(selector), null);
+        
+        if (button) {
+            console.log(`[Better Tasker] Found ${action} button, clicking to ${action} autoplay...`);
+            button.click();
+            return true;
+        } else {
+            console.log(`[Better Tasker] ${action.charAt(0).toUpperCase() + action.slice(1)} button not found`);
+            return false;
+        }
+    } catch (error) {
+        console.error(`[Better Tasker] Error clicking ${action} button:`, error);
+        return false;
+    }
+}
+
+// Find and click the pause button to pause autoplay
+function pauseAutoplayWithButton() {
+    return controlAutoplayWithButton('pause');
+}
+
+// Find and click the play button to resume autoplay
+function resumeAutoplayWithButton() {
+    return controlAutoplayWithButton('play');
+}
+
+// ============================================================================
+// 4. RAID HUNTER COORDINATION
 // ============================================================================
 
 // Check if Raid Hunter is actively raiding
@@ -296,23 +449,14 @@ function isRaidHunterRaiding() {
                 
                 console.log(`[Better Tasker] Raid check - Raid Hunter enabled: ${raidHunterEnabled === 'true'}, Active raids: ${currentRaidList.length}, Board mode: ${boardContext?.mode}, Quest button owner: ${window.QuestButtonManager?.getCurrentOwner() || 'none'}`);
                 
-                // Check if there are active raids - if so, yield control regardless of Raid Hunter's state
-                // This allows manual raid handling or Raid Hunter to take control when enabled
-                if (currentRaidList.length > 0 && boardContext?.mode === 'autoplay') {
-                    if (isRaidHunterCurrentlyRaiding) {
-                        console.log('[Better Tasker] Raid Hunter has active raids and is actively raiding - preventing task automation');
-                    } else {
-                        console.log('[Better Tasker] Active raids detected - yielding quest button control for raid handling');
-                        // Release quest button control to allow raid handling
-                        window.QuestButtonManager?.releaseControl('Better Tasker');
-                    }
-                    return true;
-                }
-                
-                // Also check if Raid Hunter has control of the quest button (backup check)
-                if (isRaidHunterCurrentlyRaiding && boardContext?.mode === 'autoplay') {
+                // Only yield control if Raid Hunter is actually actively raiding (has quest button control)
+                if (isRaidHunterCurrentlyRaiding) {
                     console.log('[Better Tasker] Raid Hunter is actively raiding - preventing task automation');
                     return true;
+                } else if (currentRaidList.length > 0 && raidHunterEnabled === 'true') {
+                    console.log('[Better Tasker] Active raids available but Raid Hunter not actively raiding - allowing task automation');
+                    // Don't yield control - let Better Tasker check for tasks
+                    return false;
                 }
             } else {
                 console.log('[Better Tasker] Raid state not available - assuming no active raids');
@@ -368,6 +512,12 @@ function handleRaidHunterStopped() {
         // Release Raid Hunter's control of Bestiary Automator settings
         window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
         
+        // Ensure Raid Hunter releases quest button control if it still has it
+        if (window.QuestButtonManager.getCurrentOwner() === 'Raid Hunter') {
+            console.log('[Better Tasker] Forcing Raid Hunter to release quest button control');
+            window.QuestButtonManager.releaseControl('Raid Hunter');
+        }
+        
         // Disable Raid Hunter's Bestiary Automator settings
         const settings = loadSettings();
         if (settings.autoRefillStamina) {
@@ -381,14 +531,8 @@ function handleRaidHunterStopped() {
         
         // Small delay before enabling our own settings to avoid conflicts
         setTimeout(() => {
-            if (settings.autoRefillStamina) {
-                console.log('[Better Tasker] Enabling our Bestiary Automator autorefill stamina...');
-                enableBestiaryAutomatorStaminaRefill();
-            }
-            if (settings.fasterAutoplay) {
-                console.log('[Better Tasker] Enabling our Bestiary Automator faster autoplay...');
-                enableBestiaryAutomatorFasterAutoplay();
-            }
+            console.log('[Better Tasker] Enabling our Bestiary Automator settings...');
+            enableBestiaryAutomatorSettings();
         }, 1000);
     } catch (error) {
         console.error('[Better Tasker] Error handling Raid Hunter stop:', error);
@@ -451,42 +595,18 @@ function findPawAndFurSection() {
 
 // Create the settings button
 function createSettingsButton() {
-    const button = document.createElement('button');
-    button.id = TASKER_BUTTON_ID;
-    button.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-    button.style.cssText = `
-        padding: 2px 6px;
-        height: 20px;
-    `;
-    button.textContent = 'Settings';
-    
-    // Add click event listener
-    button.addEventListener('click', () => {
+    return createStyledButton(TASKER_BUTTON_ID, 'Settings', 'blue', () => {
         console.log('[Better Tasker] Settings button clicked');
         openTaskerSettingsModal();
     });
-    
-    return button;
 }
 
 // Create the toggle button
 function createToggleButton() {
-    const button = document.createElement('button');
-    button.id = TASKER_TOGGLE_ID;
-    button.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-    button.style.cssText = `
-        padding: 2px 6px;
-        height: 20px;
-    `;
-    button.textContent = 'Disabled';
-    
-    // Add click event listener
-    button.addEventListener('click', () => {
+    return createStyledButton(TASKER_TOGGLE_ID, 'Disabled', 'red', () => {
         console.log('[Better Tasker] Toggle button clicked');
         toggleTasker();
     });
-    
-    return button;
 }
 
 // Insert buttons into Paw and Fur Society section
@@ -513,12 +633,11 @@ function insertButtons() {
         
         if (titleContainer) {
             // Create a button container
-            const buttonContainer = document.createElement('div');
-            buttonContainer.style.cssText = `
+            const buttonContainer = createStyledContainer(null, `
                 display: flex;
                 gap: 4px;
                 margin-top: 4px;
-            `;
+            `);
             
             // Create the toggle button
             const toggleButton = createToggleButton();
@@ -594,6 +713,8 @@ function toggleTasker() {
         // Reset state when user manually disables automation
         resetState('navigation');
         stopAutomation();
+        // Update exposed state immediately so other mods (like Raid Hunter) can detect the change
+        updateExposedState();
     }
 }
 
@@ -642,38 +763,6 @@ function updateToggleButtonWithRaidHunterStatus() {
     }, 3000);
 }
 
-// Update toggle button to show "Tasking" during actual task execution
-function updateToggleButtonForTasking() {
-    const toggleButton = document.querySelector(`#${TASKER_TOGGLE_ID}`);
-    if (!toggleButton) return;
-    
-    toggleButton.textContent = 'Tasking';
-    toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-    
-    // Add shimmer effect to the text
-    toggleButton.style.background = 'linear-gradient(45deg, #22c55e, #16a34a, #22c55e, #16a34a)';
-    toggleButton.style.backgroundSize = '400% 400%';
-    toggleButton.style.backgroundClip = 'text';
-    toggleButton.style.webkitBackgroundClip = 'text';
-    toggleButton.style.webkitTextFillColor = 'transparent';
-    toggleButton.style.animation = 'taskerShimmer 2s ease-in-out infinite';
-    
-    // Add CSS keyframes for shimmer animation if not already added
-    if (!document.getElementById('taskerShimmerCSS')) {
-        const style = document.createElement('style');
-        style.id = 'taskerShimmerCSS';
-        style.textContent = `
-            @keyframes taskerShimmer {
-                0% { background-position: 0% 50%; }
-                50% { background-position: 100% 50%; }
-                100% { background-position: 0% 50%; }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-    
-    // Quest button modification is now handled after Start button click (like Raid Hunter)
-}
 
 // ============================================================================
 // 6. QUEST BUTTON MODIFICATION FUNCTIONS
@@ -685,6 +774,9 @@ let questButtonValidationInterval = null;
 
 // Store the map ID when tasking starts (after Start button click)
 let taskingMapId = null;
+
+// Track if quest button has been modified for tasking (only after Start button click)
+let questButtonModifiedForTasking = false;
 
 // Function to get current room ID
 function getCurrentRoomId() {
@@ -816,15 +908,9 @@ function findQuestButton() {
 
 // Function to modify quest button appearance when tasking is active
 function modifyQuestButtonForTasking() {
-    try {
-        console.log('[Better Tasker] Attempting to modify quest button for tasking...');
-        
-        // Request control of quest button
-        if (!window.QuestButtonManager.requestControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot modify quest button - controlled by another mod');
-            return false;
-        }
-        
+    console.log('[Better Tasker] Attempting to modify quest button for tasking...');
+    
+    return withControl(window.QuestButtonManager, 'Better Tasker', () => {
         console.log('[Better Tasker] Quest button control granted, finding quest button...');
         
         // Find the quest button in the header navigation
@@ -832,27 +918,35 @@ function modifyQuestButtonForTasking() {
         
         if (!questButton) {
             console.log('[Better Tasker] Quest button not found for modification');
-            window.QuestButtonManager.releaseControl('Better Tasker');
             return false;
         }
         
         console.log('[Better Tasker] Quest button found, proceeding with modification...');
         
-        // Store original state if not already stored
+        // Store original state if not already stored AND quest button is in original state
         if (!window.QuestButtonManager.originalState) {
             const img = questButton.querySelector('img');
             const span = questButton.querySelector('span');
             
-            window.QuestButtonManager.originalState = {
-                imgSrc: img ? img.src : null,
-                imgAlt: img ? img.alt : null,
-                imgWidth: img ? img.width : null,
-                imgHeight: img ? img.height : null,
-                imgStyle: img ? img.style.cssText : null,
-                imgClassList: img ? img.className : null,
-                spanText: span ? span.textContent : null,
-                buttonColor: questButton.style.color || ''
-            };
+            // Only store original state if quest button appears to be in original state
+            // Check if it's not already modified by another mod
+            const isInOriginalState = img && img.src.includes('quest.png') && span && span.textContent === 'Quests';
+            
+            if (isInOriginalState) {
+                window.QuestButtonManager.originalState = {
+                    imgSrc: img ? img.src : null,
+                    imgAlt: img ? img.alt : null,
+                    imgWidth: img ? img.width : null,
+                    imgHeight: img ? img.height : null,
+                    imgStyle: img ? img.style.cssText : null,
+                    imgClassList: img ? img.className : null,
+                    spanText: span ? span.textContent : null,
+                    buttonColor: questButton.style.color || ''
+                };
+                console.log('[Better Tasker] Stored original quest button state');
+            } else {
+                console.log('[Better Tasker] Quest button not in original state - not storing originalState');
+            }
         }
         
         // Modify the button appearance - replace icon and change text
@@ -897,34 +991,22 @@ function modifyQuestButtonForTasking() {
         
         console.log('[Better Tasker] Quest button modified for tasking state');
         return true;
-    } catch (error) {
-        console.error('[Better Tasker] Error modifying quest button for tasking:', error);
-        window.QuestButtonManager.releaseControl('Better Tasker');
-        return false;
-    }
+    }, 'modify quest button');
 }
 
 // Function to restore quest button to original appearance
 function restoreQuestButtonAppearance() {
-    try {
-        // Only restore if we have control
-        if (!window.QuestButtonManager.hasControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot restore quest button - not controlled by Better Tasker');
-            return false;
-        }
-        
+    return withControlCheck(window.QuestButtonManager, 'Better Tasker', () => {
         // Find the quest button - try multiple selectors to find it regardless of current state
         const questButton = findQuestButton();
         
         if (!questButton) {
             console.log('[Better Tasker] Quest button not found for restoration');
-            window.QuestButtonManager.releaseControl('Better Tasker');
             return false;
         }
         
         if (!window.QuestButtonManager.originalState) {
             console.log('[Better Tasker] Original quest button state not found for restoration');
-            window.QuestButtonManager.releaseControl('Better Tasker');
             return false;
         }
         
@@ -974,16 +1056,9 @@ function restoreQuestButtonAppearance() {
         // Restore original color
         questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
         
-        // Release control after restoration
-        window.QuestButtonManager.releaseControl('Better Tasker');
-        
         console.log('[Better Tasker] Quest button appearance restored');
         return true;
-    } catch (error) {
-        console.error('[Better Tasker] Error restoring quest button appearance:', error);
-        window.QuestButtonManager.releaseControl('Better Tasker');
-        return false;
-    }
+    }, 'restore quest button');
 }
 
 // Function to start monitoring quest button validation
@@ -1045,6 +1120,20 @@ function startQuestButtonValidation() {
                 if (currentOwner === 'Raid Hunter') {
                     // Raid Hunter has control, don't interfere
                     console.log('[Better Tasker] Raid Hunter has quest button control - not interfering');
+                } else if (currentOwner === null && taskHuntingOngoing && !isRaidHunterRaiding() && questButtonModifiedForTasking) {
+                    // No one has control and we're tasking - check if quest button needs restoration
+                    const questButton = findQuestButton();
+                    if (questButton) {
+                        const img = questButton.querySelector('img');
+                        const span = questButton.querySelector('span');
+                        const isInTaskingState = img && img.src.includes('taskrank.png') && span && span.textContent === 'Tasking';
+                        
+                        if (!isInTaskingState) {
+                            // Quest button is not in tasking state - restore it
+                            console.log('[Better Tasker] No quest button control and we are tasking - restoring tasking state');
+                            modifyQuestButtonForTasking();
+                        }
+                    }
                 } else {
                     // No one has control - quest button should be in normal state
                     console.log('[Better Tasker] No quest button control - quest button should be in normal state');
@@ -1053,7 +1142,7 @@ function startQuestButtonValidation() {
         } catch (error) {
             console.error('[Better Tasker] Error in quest button validation:', error);
         }
-    }, 2000); // Check every 2 seconds
+    }, 30000); // Check every 30 seconds
 }
 
 // Function to stop monitoring quest button validation
@@ -1478,14 +1567,7 @@ function createGeneralSettings() {
     `;
     taskDelayDiv.appendChild(taskDelayLabel);
     
-    const taskDelayInput = document.createElement('input');
-    taskDelayInput.type = 'number';
-    taskDelayInput.id = 'taskStartDelay';
-    taskDelayInput.value = 3;
-    taskDelayInput.min = 0;
-    taskDelayInput.max = 10;
-    taskDelayInput.className = 'pixel-font-16';
-    taskDelayInput.style.cssText = `
+    const taskDelayInput = createStyledInput('number', 'taskStartDelay', 3, `
         width: 100%;
         padding: 6px;
         background: #333;
@@ -1494,7 +1576,11 @@ function createGeneralSettings() {
         border-radius: 3px;
         box-sizing: border-box;
         font-size: 14px;
-    `;
+    `, { 
+        min: 0, 
+        max: 10, 
+        className: 'pixel-font-16' 
+    });
     // Add auto-save listener immediately
     taskDelayInput.addEventListener('input', autoSaveSettings);
     taskDelayDiv.appendChild(taskDelayInput);
@@ -1512,171 +1598,31 @@ function createGeneralSettings() {
     settingsWrapper.appendChild(taskDelayDiv);
     
     // Auto-refill Stamina setting
-    const staminaRefillDiv = document.createElement('div');
-    staminaRefillDiv.style.cssText = `
-        margin-bottom: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    `;
-    
-    // Container for checkbox and label on same line
-    const staminaRefillCheckboxLabelContainer = document.createElement('div');
-    staminaRefillCheckboxLabelContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-    `;
-    
-    const staminaRefillCheckbox = document.createElement('input');
-    staminaRefillCheckbox.type = 'checkbox';
-    staminaRefillCheckbox.id = 'autoRefillStamina';
-    staminaRefillCheckbox.checked = false;
-    staminaRefillCheckbox.style.cssText = `
-        width: 16px;
-        height: 16px;
-        accent-color: #ffe066;
-    `;
-    // Add auto-save listener immediately
-    staminaRefillCheckbox.addEventListener('change', autoSaveSettings);
-    staminaRefillCheckboxLabelContainer.appendChild(staminaRefillCheckbox);
-    
-    const staminaRefillLabel = document.createElement('label');
-    staminaRefillLabel.textContent = 'Auto-refill Stamina';
-    staminaRefillLabel.className = 'pixel-font-16';
-    staminaRefillLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        cursor: pointer;
-    `;
-    staminaRefillLabel.setAttribute('for', 'autoRefillStamina');
-    staminaRefillCheckboxLabelContainer.appendChild(staminaRefillLabel);
-    
-    staminaRefillDiv.appendChild(staminaRefillCheckboxLabelContainer);
-    
-    const staminaRefillDesc = document.createElement('div');
-    staminaRefillDesc.textContent = 'Automatically refill stamina when starting a task';
-    staminaRefillDesc.className = 'pixel-font-16';
-    staminaRefillDesc.style.cssText = `
-        font-size: 11px;
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    staminaRefillDiv.appendChild(staminaRefillDesc);
-    settingsWrapper.appendChild(staminaRefillDiv);
+    const staminaRefillSetting = createCheckboxSetting(
+        'autoRefillStamina',
+        'Auto-refill Stamina',
+        'Automatically refill stamina when starting a task',
+        false
+    );
+    settingsWrapper.appendChild(staminaRefillSetting);
     
     // Faster Autoplay setting
-    const fasterAutoplayDiv = document.createElement('div');
-    fasterAutoplayDiv.style.cssText = `
-        margin-bottom: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    `;
-    
-    // Container for checkbox and label on same line
-    const fasterAutoplayCheckboxLabelContainer = document.createElement('div');
-    fasterAutoplayCheckboxLabelContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-    `;
-    
-    const fasterAutoplayCheckbox = document.createElement('input');
-    fasterAutoplayCheckbox.type = 'checkbox';
-    fasterAutoplayCheckbox.id = 'fasterAutoplay';
-    fasterAutoplayCheckbox.checked = false;
-    fasterAutoplayCheckbox.style.cssText = `
-        width: 16px;
-        height: 16px;
-        accent-color: #ffe066;
-    `;
-    // Add auto-save listener immediately
-    fasterAutoplayCheckbox.addEventListener('change', autoSaveSettings);
-    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayCheckbox);
-    
-    const fasterAutoplayLabel = document.createElement('label');
-    fasterAutoplayLabel.textContent = 'Faster Autoplay';
-    fasterAutoplayLabel.className = 'pixel-font-16';
-    fasterAutoplayLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        cursor: pointer;
-    `;
-    fasterAutoplayLabel.setAttribute('for', 'fasterAutoplay');
-    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayLabel);
-    
-    fasterAutoplayDiv.appendChild(fasterAutoplayCheckboxLabelContainer);
-    
-    const fasterAutoplayDesc = document.createElement('div');
-    fasterAutoplayDesc.textContent = 'Enable faster autoplay speed during tasks (removes delays and increases game speed)';
-    fasterAutoplayDesc.className = 'pixel-font-16';
-    fasterAutoplayDesc.style.cssText = `
-        font-size: 11px;
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    fasterAutoplayDiv.appendChild(fasterAutoplayDesc);
-    settingsWrapper.appendChild(fasterAutoplayDiv);
+    const fasterAutoplaySetting = createCheckboxSetting(
+        'fasterAutoplay',
+        'Faster Autoplay',
+        'Enable faster autoplay speed during tasks (removes delays and increases game speed)',
+        false
+    );
+    settingsWrapper.appendChild(fasterAutoplaySetting);
     
     // Auto-complete Tasks setting
-    const autoCompleteDiv = document.createElement('div');
-    autoCompleteDiv.style.cssText = `
-        margin-bottom: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    `;
-    
-    // Container for checkbox and label on same line
-    const autoCompleteCheckboxLabelContainer = document.createElement('div');
-    autoCompleteCheckboxLabelContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-    `;
-    
-    const autoCompleteCheckbox = document.createElement('input');
-    autoCompleteCheckbox.type = 'checkbox';
-    autoCompleteCheckbox.id = 'autoCompleteTasks';
-    autoCompleteCheckbox.checked = true;
-    autoCompleteCheckbox.style.cssText = `
-        width: 16px;
-        height: 16px;
-        accent-color: #ffe066;
-    `;
-    // Add auto-save listener immediately
-    autoCompleteCheckbox.addEventListener('change', autoSaveSettings);
-    autoCompleteCheckboxLabelContainer.appendChild(autoCompleteCheckbox);
-    
-    const autoCompleteLabel = document.createElement('label');
-    autoCompleteLabel.textContent = 'Autocomplete Tasks';
-    autoCompleteLabel.className = 'pixel-font-16';
-    autoCompleteLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        cursor: pointer;
-    `;
-    autoCompleteLabel.setAttribute('for', 'autoCompleteTasks');
-    autoCompleteCheckboxLabelContainer.appendChild(autoCompleteLabel);
-    
-    autoCompleteDiv.appendChild(autoCompleteCheckboxLabelContainer);
-    
-    const autoCompleteDesc = document.createElement('div');
-    autoCompleteDesc.textContent = 'Automatically complete tasks when possible';
-    autoCompleteDesc.className = 'pixel-font-16';
-    autoCompleteDesc.style.cssText = `
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    autoCompleteDiv.appendChild(autoCompleteDesc);
-    settingsWrapper.appendChild(autoCompleteDiv);
+    const autoCompleteSetting = createCheckboxSetting(
+        'autoCompleteTasks',
+        'Autocomplete Tasks',
+        'Automatically complete tasks when possible',
+        true
+    );
+    settingsWrapper.appendChild(autoCompleteSetting);
     
     // Add settings wrapper to container
     container.appendChild(settingsWrapper);
@@ -1861,56 +1807,51 @@ function createMonsterSelectionSettings() {
     window.updateWarningText();
     
     // Add select all/none buttons
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = `
+    const buttonContainer = createStyledContainer(null, `
         display: flex;
         gap: 10px;
         margin-top: 10px;
-    `;
+    `);
     
-    const selectAllBtn = document.createElement('button');
-    selectAllBtn.textContent = 'Select All';
-    selectAllBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight';
-    selectAllBtn.style.cssText = `
-        flex: 1;
-    `;
+    const selectAllBtn = createCustomStyledButton(
+        'selectAllBtn',
+        'Select All',
+        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
+        'flex: 1;',
+        () => {
+            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = true;
+                // Hide warning symbol for this checkbox
+                const warningSymbol = cb.parentElement.querySelector('.creature-warning-symbol');
+                if (warningSymbol) {
+                    warningSymbol.style.opacity = '0';
+                }
+            });
+            window.updateWarningText(); // Update the warning count
+            autoSaveSettings(); // Auto-save after selecting all
+        }
+    );
     
-    // Functionality on click
-    selectAllBtn.addEventListener('click', () => {
-        const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach(cb => {
-            cb.checked = true;
-            // Hide warning symbol for this checkbox
-            const warningSymbol = cb.parentElement.querySelector('.creature-warning-symbol');
-            if (warningSymbol) {
-                warningSymbol.style.opacity = '0';
-            }
-        });
-        window.updateWarningText(); // Update the warning count
-        autoSaveSettings(); // Auto-save after selecting all
-    });
-    
-    const selectNoneBtn = document.createElement('button');
-    selectNoneBtn.textContent = 'Select None';
-    selectNoneBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight';
-    selectNoneBtn.style.cssText = `
-        flex: 1;
-    `;
-    
-    // Functionality on click
-    selectNoneBtn.addEventListener('click', () => {
-        const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach(cb => {
-            cb.checked = false;
-            // Show warning symbol for this checkbox
-            const warningSymbol = cb.parentElement.querySelector('.creature-warning-symbol');
-            if (warningSymbol) {
-                warningSymbol.style.opacity = '1';
-            }
-        });
-        window.updateWarningText(); // Update the warning count
-        autoSaveSettings(); // Auto-save after selecting none
-    });
+    const selectNoneBtn = createCustomStyledButton(
+        'selectNoneBtn',
+        'Select None',
+        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
+        'flex: 1;',
+        () => {
+            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = false;
+                // Show warning symbol for this checkbox
+                const warningSymbol = cb.parentElement.querySelector('.creature-warning-symbol');
+                if (warningSymbol) {
+                    warningSymbol.style.opacity = '1';
+                }
+            });
+            window.updateWarningText(); // Update the warning count
+            autoSaveSettings(); // Auto-save after selecting none
+        }
+    );
     
     buttonContainer.appendChild(selectAllBtn);
     buttonContainer.appendChild(selectNoneBtn);
@@ -1983,8 +1924,7 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('autoRefillStamina');
             if (checkbox) {
                 checkbox.checked = settings.autoRefillStamina;
-                // Add auto-save listener
-                checkbox.addEventListener('change', autoSaveSettings);
+                // Event listener already added by createCheckboxSetting
             }
         }
         
@@ -1992,8 +1932,7 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('fasterAutoplay');
             if (checkbox) {
                 checkbox.checked = settings.fasterAutoplay;
-                // Add auto-save listener
-                checkbox.addEventListener('change', autoSaveSettings);
+                // Event listener already added by createCheckboxSetting
             }
         }
         
@@ -2001,8 +1940,7 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('autoCompleteTasks');
             if (checkbox) {
                 checkbox.checked = settings.autoCompleteTasks;
-                // Add auto-save listener
-                checkbox.addEventListener('change', autoSaveSettings);
+                // Event listener already added by createCheckboxSetting
             }
         }
         
@@ -2061,6 +1999,87 @@ function loadAndApplySettings() {
 // 10. TASK HANDLING FUNCTIONS
 // ============================================================================
 
+// Enable Bestiary Automator settings with retry logic
+function enableBestiaryAutomatorSettings(returnSuccess = false) {
+    const settings = loadSettings();
+    let anySuccess = false;
+    
+    if (settings.autoRefillStamina) {
+        console.log('[Better Tasker] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
+        // Add a small delay to ensure Bestiary Automator is fully initialized
+        setTimeout(() => {
+            const success = enableBestiaryAutomatorStaminaRefill();
+            if (success) anySuccess = true;
+            if (!success) {
+                // If first attempt failed, try again with longer delay for Chrome
+                console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
+                setTimeout(() => {
+                    const retrySuccess = enableBestiaryAutomatorStaminaRefill();
+                    if (retrySuccess) anySuccess = true;
+                }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+            }
+        }, BESTIARY_AUTOMATOR_INIT_DELAY);
+    }
+    
+    if (settings.fasterAutoplay) {
+        console.log('[Better Tasker] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
+        // Add a small delay to ensure Bestiary Automator is fully initialized
+        setTimeout(() => {
+            const success = enableBestiaryAutomatorFasterAutoplay();
+            if (success) anySuccess = true;
+            if (!success) {
+                // If first attempt failed, try again with longer delay for Chrome
+                console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
+                setTimeout(() => {
+                    const retrySuccess = enableBestiaryAutomatorFasterAutoplay();
+                    if (retrySuccess) anySuccess = true;
+                }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+            }
+        }, BESTIARY_AUTOMATOR_INIT_DELAY);
+    }
+    
+    // Return success status if requested (for functions that need it)
+    if (returnSuccess) {
+        return anySuccess;
+    }
+}
+
+// Handle quest log state - close quest log first, then navigate to suggested map
+async function handleQuestLogState(roomId) {
+    // First, close the quest log with ESC key presses (like Raid Hunter)
+    console.log('[Better Tasker] Closing quest log before navigation...');
+    for (let i = 0; i < 3; i++) {
+        const escEvent = new KeyboardEvent('keydown', {
+            key: 'Escape',
+            code: 'Escape',
+            keyCode: 27,
+            which: 27,
+            bubbles: true,
+            cancelable: true
+        });
+        document.dispatchEvent(escEvent);
+        await sleep(ESC_KEY_DELAY); // Small delay between ESC presses
+    }
+    
+    // Wait for quest log to close
+    await sleep(MAP_LOAD_DELAY);
+    console.log('[Better Tasker] Quest log closed with ESC presses');
+    
+    // Now navigate to the suggested map
+    console.log('[Better Tasker] Navigating to suggested map via API...');
+    globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: roomId
+    });
+    await sleep(MAP_NAVIGATION_DELAY);
+    
+    // Wait for map to load
+    await sleep(MAP_LOAD_DELAY);
+    console.log('[Better Tasker] Navigation to suggested map completed via API');
+    
+    return true; // Navigation completed, quest log closed
+}
+
 // Check if game is active and ready for task operations
 function isGameActive() {
     try {
@@ -2100,7 +2119,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         console.log('[Better Tasker] Looking for suggested map link...');
         
         // Wait a bit for the quest log to fully load
-        await sleep(300);
+        await sleep(QUEST_LOG_LOAD_DELAY);
         
         // Use provided element or look for the suggested map link
         let suggestedMapLink = suggestedMapElement;
@@ -2163,36 +2182,8 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             if (roomId) {
                 console.log('[Better Tasker] Found room ID for map:', mapName, '->', roomId);
                 
-                // Now simulate ESC key presses to clear quest log
-                console.log('[Better Tasker] Simulating ESC key presses to clear quest log...');
-                for (let i = 0; i < 3; i++) {
-                    const escEvent = new KeyboardEvent('keydown', {
-                        key: 'Escape',
-                        code: 'Escape',
-                        keyCode: 27,
-                        which: 27,
-                        bubbles: true,
-                        cancelable: true
-                    });
-                    document.dispatchEvent(escEvent);
-                    await sleep(50); // Small delay between ESC presses
-                }
-                
-                // Wait for quest log to clear
-                await sleep(200);
-                console.log('[Better Tasker] Quest log cleared with ESC presses');
-                
-                // Use API to navigate to the remembered map
-                console.log('[Better Tasker] Navigating to suggested map via API...');
-                globalThis.state.board.send({
-                    type: 'selectRoomById',
-                    roomId: roomId
-                });
-                await sleep(200);
-                
-                // Wait for map to load
-                await sleep(1000);
-                console.log('[Better Tasker] Navigation to suggested map completed via API');
+                // Handle quest log state and navigation
+                const navigationCompleted = await handleQuestLogState(roomId);
                 
                 // Find and click Auto-setup button
                 console.log('[Better Tasker] Looking for Auto-setup button...');
@@ -2204,43 +2195,15 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 console.log('[Better Tasker] Clicking Auto-setup button...');
                 autoSetupButton.click();
-                await sleep(1000);
+                await sleep(AUTO_SETUP_DELAY);
                 
                 // Enable autoplay mode
                 console.log('[Better Tasker] Enabling autoplay mode...');
                 await ensureAutoplayMode();
-                await sleep(1000);
+                await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
-                const settings = loadSettings();
-                if (settings.autoRefillStamina) {
-                    console.log('[Better Tasker] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
-                    // Add a small delay to ensure Bestiary Automator is fully initialized
-                    setTimeout(() => {
-                        const success = enableBestiaryAutomatorStaminaRefill();
-                        if (!success) {
-                            // If first attempt failed, try again with longer delay for Chrome
-                            console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
-                            setTimeout(() => {
-                                enableBestiaryAutomatorStaminaRefill();
-                            }, 2000);
-                        }
-                    }, 500);
-                }
-                if (settings.fasterAutoplay) {
-                    console.log('[Better Tasker] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
-                    // Add a small delay to ensure Bestiary Automator is fully initialized
-                    setTimeout(() => {
-                        const success = enableBestiaryAutomatorFasterAutoplay();
-                        if (!success) {
-                            // If first attempt failed, try again with longer delay for Chrome
-                            console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
-                            setTimeout(() => {
-                                enableBestiaryAutomatorFasterAutoplay();
-                            }, 2000);
-                        }
-                    }, 500);
-                }
+                enableBestiaryAutomatorSettings();
                 
                 // Set flag BEFORE clicking Start to prevent rechecking during ongoing task
                 taskNavigationCompleted = true;
@@ -2273,16 +2236,14 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 updateExposedState(); // Update exposed state for other mods
                 console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
                 
-                // Update button to show "Tasking" state
-                updateToggleButtonForTasking();
-                
                 // Modify quest button appearance to show tasking state (after Start button click, like Raid Hunter)
                 modifyQuestButtonForTasking();
+                questButtonModifiedForTasking = true;
                 
                 // Start quest button validation monitoring for task hunting
                 startQuestButtonValidation();
                 
-                await sleep(200);
+                await sleep(TASK_START_DELAY);
                 
                 console.log('[Better Tasker] Navigation and setup completed');
                 
@@ -2317,35 +2278,7 @@ async function startAutoplay() {
             console.log('[Better Tasker] Autoplay started');
             
             // Enable Bestiary Automator settings if configured
-            const settings = loadSettings();
-            if (settings.autoRefillStamina) {
-                console.log('[Better Tasker] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
-                // Add a small delay to ensure Bestiary Automator is fully initialized
-                setTimeout(() => {
-                    const success = enableBestiaryAutomatorStaminaRefill();
-                    if (!success) {
-                        // If first attempt failed, try again with longer delay for Chrome
-                        console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
-                        setTimeout(() => {
-                            enableBestiaryAutomatorStaminaRefill();
-                        }, 2000);
-                    }
-                }, 500);
-            }
-            if (settings.fasterAutoplay) {
-                console.log('[Better Tasker] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
-                // Add a small delay to ensure Bestiary Automator is fully initialized
-                setTimeout(() => {
-                    const success = enableBestiaryAutomatorFasterAutoplay();
-                    if (!success) {
-                        // If first attempt failed, try again with longer delay for Chrome
-                        console.log('[Better Tasker] First attempt failed, retrying with longer delay for Chrome...');
-                        setTimeout(() => {
-                            enableBestiaryAutomatorFasterAutoplay();
-                        }, 2000);
-                    }
-                }, 500);
-            }
+            enableBestiaryAutomatorSettings();
         } else {
             console.log('[Better Tasker] Autoplay button not found or not ready');
         }
@@ -2400,16 +2333,13 @@ async function waitForGameToEnd() {
             
             const isGameRunning = boardContext.gameStarted;
             const gameState = gameTimerContext.state; // 'initial', 'victory', 'defeat'
-            const hasVictoryScreen = await detectAndCloseVictoryScreen();
-            
-            console.log(`[Better Tasker] Game state check ${attempts + 1}: gameStarted=${isGameRunning}, gameState=${gameState}, victoryScreen=${hasVictoryScreen}`);
+            console.log(`[Better Tasker] Game state check ${attempts + 1}: gameStarted=${isGameRunning}, gameState=${gameState}`);
             
             // Game has ended if any of these conditions are true:
             // 1. board.gameStarted is false
             // 2. gameTimer.state is 'victory' or 'defeat' (not 'initial')
-            // 3. Victory screen is detected
-            if (!isGameRunning || (gameState !== 'initial') || hasVictoryScreen) {
-                console.log(`[Better Tasker] Game ended after ${attempts * 2} seconds - gameStarted: ${isGameRunning}, gameState: ${gameState}, victoryScreen: ${hasVictoryScreen}`);
+            if (!isGameRunning || (gameState !== 'initial')) {
+                console.log(`[Better Tasker] Game ended after ${attempts * 2} seconds - gameStarted: ${isGameRunning}, gameState: ${gameState}`);
                 return true;
             }
             
@@ -2432,132 +2362,6 @@ async function waitForGameToEnd() {
     return false;
 }
 
-// Detect and close victory screens
-async function detectAndCloseVictoryScreen() {
-    console.log('[Better Tasker] Checking for victory screen...');
-    
-    // Check if document has scroll lock (indicates modal/victory screen is open)
-    const hasScrollLock = document.body.hasAttribute('data-scroll-locked') || 
-                         document.body.style.pointerEvents === 'none';
-    
-    console.log('[Better Tasker] Scroll lock check:', hasScrollLock);
-    
-    // Look for victory screen indicators - using supported selectors
-    const victoryIndicators = [
-        'h2[id*="radix"]',
-        '.widget-top',
-        'h2.widget-top-text',
-        'div[role="dialog"]',
-        '[data-state="open"]'
-    ];
-    
-    let victoryScreen = null;
-    for (let i = 0; i < victoryIndicators.length; i++) {
-        const selector = victoryIndicators[i];
-        try {
-            const elements = document.querySelectorAll(selector);
-            for (const element of elements) {
-                if (element.textContent && element.textContent.includes('Victory')) {
-                    victoryScreen = element;
-                    console.log(`[Better Tasker] Victory screen detected via selector ${i + 1}: ${selector}`);
-                    break;
-                }
-            }
-            if (victoryScreen) break;
-        } catch (e) {
-            console.log(`[Better Tasker] Selector ${i + 1} failed: ${e.message}`);
-        }
-    }
-    
-    // Alternative: Look for victory screen by checking for specific text patterns
-    if (!victoryScreen) {
-        console.log('[Better Tasker] Trying text content search for Victory...');
-        const allElements = document.querySelectorAll('*');
-        let victoryElements = 0;
-        for (const element of allElements) {
-            if (element.textContent && (element.textContent.includes('Victory -') || element.textContent.includes('Victory'))) {
-                victoryElements++;
-                // Look for the closest dialog or widget container
-                victoryScreen = element.closest('div[role="dialog"], .widget-top, h2, [class*="widget"], div[class*="widget"]') || element;
-                console.log('[Better Tasker] Victory screen detected via text content (found', victoryElements, 'elements with Victory text)');
-                break;
-            }
-        }
-        if (victoryElements === 0) {
-            console.log('[Better Tasker] No elements found with "Victory" text');
-        }
-    }
-    
-    // Additional check: Look for Close button which indicates a modal/victory screen
-    if (!victoryScreen) {
-        console.log('[Better Tasker] Checking for Close button...');
-        const closeButton = Array.from(document.querySelectorAll('button')).find(btn => 
-            btn.textContent && btn.textContent.trim() === 'Close'
-        );
-        if (closeButton) {
-            console.log('[Better Tasker] Close button found, checking if it belongs to victory screen...');
-            // Check if this Close button is part of a victory screen by looking for nearby Victory text
-            const container = closeButton.closest('div[role="dialog"], div[class*="widget"], .widget-bottom, .widget-top');
-            if (container && container.textContent && container.textContent.includes('Victory')) {
-                victoryScreen = container;
-                console.log('[Better Tasker] Victory screen detected via Close button');
-            } else {
-                console.log('[Better Tasker] Close button found but not part of victory screen');
-            }
-        } else {
-            console.log('[Better Tasker] No Close button found');
-        }
-    }
-    
-    // If we found a victory screen OR scroll lock is active, close it
-    if (victoryScreen || hasScrollLock) {
-        console.log('[Better Tasker] Victory screen or modal detected, waiting 500ms before closing...');
-        console.log('[Better Tasker] Victory screen found:', !!victoryScreen, 'Scroll lock:', hasScrollLock);
-        
-        // Wait for victory screen to fully load before closing
-        await sleep(500);
-        
-        // First try to find and click the Close button directly
-        const closeButton = Array.from(document.querySelectorAll('button')).find(btn => 
-            btn.textContent && btn.textContent.trim() === 'Close'
-        );
-        
-        if (closeButton && closeButton.offsetParent !== null) { // Check if button is visible
-            console.log('[Better Tasker] Found Close button, clicking it...');
-            try {
-                closeButton.click();
-                await sleep(300);
-                console.log('[Better Tasker] Victory screen closed by clicking Close button');
-                return true;
-            } catch (error) {
-                console.log('[Better Tasker] Failed to click Close button, falling back to ESC key');
-            }
-        }
-        
-        // Fallback: Send multiple ESC key presses to ensure it closes
-        console.log('[Better Tasker] Closing with ESC key...');
-        for (let i = 0; i < 3; i++) {
-            const escEvent = new KeyboardEvent('keydown', {
-                key: 'Escape',
-                code: 'Escape',
-                keyCode: 27,
-                which: 27,
-                bubbles: true,
-                cancelable: true
-            });
-            document.dispatchEvent(escEvent);
-            await sleep(100); // Small delay between ESC presses
-        }
-        
-        // Wait for modal to close
-        await sleep(300);
-        console.log('[Better Tasker] Victory screen closed with ESC key');
-        return true;
-    }
-    
-    console.log('[Better Tasker] No victory screen detected');
-    return false;
-}
 
 // Click all Close buttons
 function clickAllCloseButtons() {
@@ -2593,282 +2397,120 @@ function sleep(timeout = 1000) {
 // 11. BESTIARY AUTOMATOR INTEGRATION
 // ============================================================================
 
-// Enable Bestiary Automator's autorefill stamina setting
-function enableBestiaryAutomatorStaminaRefill() {
+// Find Bestiary Automator instance using multiple access methods
+function findBestiaryAutomator() {
+    // Method 1: Check if Bestiary Automator is available in global scope
+    if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
+        console.log('[Better Tasker] Found Bestiary Automator via global window object');
+        return window.bestiaryAutomator;
+    }
+    // Method 2: Check if it's available in context exports
+    else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
+        console.log('[Better Tasker] Found Bestiary Automator via context exports');
+        return context.exports;
+    }
+    // Method 3: Try to find it in the mod loader's context
+    else if (window.modLoader && window.modLoader.getModContext) {
+        const automatorContext = window.modLoader.getModContext('bestiary-automator');
+        if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
+            console.log('[Better Tasker] Found Bestiary Automator via mod loader');
+            return automatorContext.exports;
+        }
+    }
+    return null;
+}
+
+// Generic function to update Bestiary Automator configuration
+function updateBestiaryAutomatorConfig(setting, value, enableRetry = false) {
     try {
-        // Request control of Bestiary Automator settings
-        if (!window.BestiaryAutomatorSettingsManager.requestControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot control Bestiary Automator settings - controlled by another mod');
-            return false;
-        }
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-            console.log('[Better Tasker] Found Bestiary Automator via global window object');
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-            console.log('[Better Tasker] Found Bestiary Automator via context exports');
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-                console.log('[Better Tasker] Found Bestiary Automator via mod loader');
-            }
-        }
+        const bestiaryAutomator = findBestiaryAutomator();
         
         if (bestiaryAutomator) {
-            console.log('[Better Tasker] Enabling Bestiary Automator autorefill stamina...');
+            console.log(`[Better Tasker] ${value ? 'Enabling' : 'Disabling'} Bestiary Automator ${setting}...`);
             bestiaryAutomator.updateConfig({
-                autoRefillStamina: true
+                [setting]: value
             });
-            console.log('[Better Tasker] Bestiary Automator autorefill stamina enabled');
+            console.log(`[Better Tasker] Bestiary Automator ${setting} ${value ? 'enabled' : 'disabled'}`);
             
-            // Additional verification for Chrome - check if the setting actually took effect
-            setTimeout(() => {
-                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                    console.log('[Better Tasker] Verifying stamina refill setting:', window.bestiaryAutomator.config.autoRefillStamina);
-                }
-            }, 1000);
+            // Verification for enable operations
+            if (value && enableRetry) {
+                setTimeout(() => {
+                    if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                        console.log(`[Better Tasker] Verifying ${setting} setting:`, window.bestiaryAutomator.config[setting]);
+                    }
+                }, 1000);
+            }
             
             return true;
         } else {
-            console.log('[Better Tasker] Bestiary Automator not available for autorefill stamina');
-            // Try again in 2 seconds
-            setTimeout(() => {
-                // Retry the same methods
-                let retryAutomator = null;
-                
-                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-                    retryAutomator = window.bestiaryAutomator;
-                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-                    retryAutomator = context.exports;
-                } else if (window.modLoader && window.modLoader.getModContext) {
-                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
-                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                        retryAutomator = automatorContext.exports;
+            console.log(`[Better Tasker] Bestiary Automator not available for ${setting}`);
+            
+            // Retry logic for enable operations
+            if (value && enableRetry) {
+                setTimeout(() => {
+                    const retryAutomator = findBestiaryAutomator();
+                    if (retryAutomator) {
+                        console.log(`[Better Tasker] Retrying Bestiary Automator ${setting}...`);
+                        retryAutomator.updateConfig({ [setting]: value });
+                        console.log(`[Better Tasker] Bestiary Automator ${setting} enabled (retry)`);
+                        
+                        setTimeout(() => {
+                            if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
+                                console.log(`[Better Tasker] Verifying ${setting} setting (retry):`, window.bestiaryAutomator.config[setting]);
+                            }
+                        }, 1000);
+                    } else {
+                        console.log(`[Better Tasker] Bestiary Automator still not available - you may need to enable ${setting} manually`);
                     }
-                }
-                
-                if (retryAutomator) {
-                    console.log('[Better Tasker] Retrying Bestiary Automator autorefill stamina...');
-                    retryAutomator.updateConfig({
-                        autoRefillStamina: true
-                    });
-                    console.log('[Better Tasker] Bestiary Automator autorefill stamina enabled (retry)');
-                    
-                    // Additional verification for Chrome - check if the setting actually took effect
-                    setTimeout(() => {
-                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                            console.log('[Better Tasker] Verifying stamina refill setting (retry):', window.bestiaryAutomator.config.autoRefillStamina);
-                        }
-                    }, 1000);
-                } else {
-                    console.log('[Better Tasker] Bestiary Automator still not available - you may need to enable autorefill stamina manually');
-                }
-            }, 2000);
+                }, 2000);
+            }
             return false;
         }
     } catch (error) {
-        console.error('[Better Tasker] Error enabling Bestiary Automator autorefill stamina:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
+        console.error(`[Better Tasker] Error ${value ? 'enabling' : 'disabling'} Bestiary Automator ${setting}:`, error);
         return false;
     }
+}
+
+// Generic function to toggle Bestiary Automator settings
+function toggleBestiaryAutomatorSetting(setting, value, enableRetry = false) {
+    const isEnabling = value === true;
+    const controlMethod = isEnabling ? 'requestControl' : 'hasControl';
+    
+    if (!window.BestiaryAutomatorSettingsManager[controlMethod]('Better Tasker')) {
+        const action = isEnabling ? 'control' : 'disable';
+        const reason = isEnabling ? 'controlled by another mod' : 'not controlled by Better Tasker';
+        console.log(`[Better Tasker] Cannot ${action} Bestiary Automator settings - ${reason}`);
+        return false;
+    }
+    
+    const success = updateBestiaryAutomatorConfig(setting, value, enableRetry);
+    if (!success && isEnabling) {
+        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
+    } else if (!isEnabling) {
+        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
+    }
+    return success;
+}
+
+// Enable Bestiary Automator's autorefill stamina setting
+function enableBestiaryAutomatorStaminaRefill() {
+    return toggleBestiaryAutomatorSetting('autoRefillStamina', true, true);
 }
 
 // Disable Bestiary Automator's autorefill stamina setting
 function disableBestiaryAutomatorStaminaRefill() {
-    try {
-        // Only disable if we have control
-        if (!window.BestiaryAutomatorSettingsManager.hasControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot disable Bestiary Automator settings - not controlled by Better Tasker');
-            return false;
-        }
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-            }
-        }
-        
-        if (bestiaryAutomator) {
-            console.log('[Better Tasker] Disabling Bestiary Automator autorefill stamina...');
-            bestiaryAutomator.updateConfig({
-                autoRefillStamina: false
-            });
-            console.log('[Better Tasker] Bestiary Automator autorefill stamina disabled');
-            // Release control after disabling
-            window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-            return true;
-        } else {
-            console.log('[Better Tasker] Bestiary Automator not available for autorefill stamina');
-            window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-            return false;
-        }
-    } catch (error) {
-        console.error('[Better Tasker] Error disabling Bestiary Automator autorefill stamina:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-        return false;
-    }
+    return toggleBestiaryAutomatorSetting('autoRefillStamina', false);
 }
 
 // Enable Bestiary Automator's faster autoplay setting
 function enableBestiaryAutomatorFasterAutoplay() {
-    try {
-        // Request control of Bestiary Automator settings
-        if (!window.BestiaryAutomatorSettingsManager.requestControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot control Bestiary Automator settings - controlled by another mod');
-            return false;
-        }
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-            console.log('[Better Tasker] Found Bestiary Automator via global window object');
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-            console.log('[Better Tasker] Found Bestiary Automator via context exports');
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-                console.log('[Better Tasker] Found Bestiary Automator via mod loader');
-            }
-        }
-        
-        if (bestiaryAutomator) {
-            console.log('[Better Tasker] Enabling Bestiary Automator faster autoplay...');
-            bestiaryAutomator.updateConfig({
-                fasterAutoplay: true
-            });
-            console.log('[Better Tasker] Bestiary Automator faster autoplay enabled');
-            
-            // Additional verification for Chrome - check if the setting actually took effect
-            setTimeout(() => {
-                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                    console.log('[Better Tasker] Verifying faster autoplay setting:', window.bestiaryAutomator.config.fasterAutoplay);
-                }
-            }, 1000);
-            
-            return true;
-        } else {
-            console.log('[Better Tasker] Bestiary Automator not available for faster autoplay');
-            // Try again in 2 seconds
-            setTimeout(() => {
-                // Retry the same methods
-                let retryAutomator = null;
-                
-                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-                    retryAutomator = window.bestiaryAutomator;
-                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-                    retryAutomator = context.exports;
-                } else if (window.modLoader && window.modLoader.getModContext) {
-                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
-                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                        retryAutomator = automatorContext.exports;
-                    }
-                }
-                
-                if (retryAutomator) {
-                    console.log('[Better Tasker] Retrying Bestiary Automator faster autoplay...');
-                    retryAutomator.updateConfig({
-                        fasterAutoplay: true
-                    });
-                    console.log('[Better Tasker] Bestiary Automator faster autoplay enabled (retry)');
-                    
-                    // Additional verification for Chrome - check if the setting actually took effect
-                    setTimeout(() => {
-                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                            console.log('[Better Tasker] Verifying faster autoplay setting (retry):', window.bestiaryAutomator.config.fasterAutoplay);
-                        }
-                    }, 1000);
-                } else {
-                    console.log('[Better Tasker] Bestiary Automator still not available - you may need to enable faster autoplay manually');
-                }
-            }, 2000);
-            return false;
-        }
-    } catch (error) {
-        console.error('[Better Tasker] Error enabling Bestiary Automator faster autoplay:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-        return false;
-    }
+    return toggleBestiaryAutomatorSetting('fasterAutoplay', true, true);
 }
 
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
-    try {
-        // Only disable if we have control
-        if (!window.BestiaryAutomatorSettingsManager.hasControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot disable Bestiary Automator settings - not controlled by Better Tasker');
-            return false;
-        }
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-            }
-        }
-        
-        if (bestiaryAutomator) {
-            console.log('[Better Tasker] Disabling Bestiary Automator faster autoplay...');
-            bestiaryAutomator.updateConfig({
-                fasterAutoplay: false
-            });
-            console.log('[Better Tasker] Bestiary Automator faster autoplay disabled');
-            // Release control after disabling
-            window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-            return true;
-        } else {
-            console.log('[Better Tasker] Bestiary Automator not available for faster autoplay');
-            window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-            return false;
-        }
-    } catch (error) {
-        console.error('[Better Tasker] Error disabling Bestiary Automator faster autoplay:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Better Tasker');
-        return false;
-    }
+    return toggleBestiaryAutomatorSetting('fasterAutoplay', false);
 }
 
 // Finds button by text content - supports both English and Portuguese
@@ -2899,19 +2541,13 @@ function isElementVisible(el) {
 
 // Ensures autoplay mode is enabled with coordination
 function ensureAutoplayMode() {
-    try {
-        // Check if another mod is controlling autoplay
-        if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
-            console.log('[Better Tasker] Cannot switch to autoplay - controlled by another mod');
-            return false;
-        }
-        
-        // Request control of autoplay
-        if (!window.AutoplayManager.requestControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot switch to autoplay - control denied');
-            return false;
-        }
-        
+    // Check if another mod is controlling autoplay
+    if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
+        console.log('[Better Tasker] Cannot switch to autoplay - controlled by another mod');
+        return false;
+    }
+    
+    return withControl(window.AutoplayManager, 'Better Tasker', () => {
         const boardContext = globalThis.state.board.getSnapshot().context;
         const currentMode = boardContext.mode;
         
@@ -2921,10 +2557,7 @@ function ensureAutoplayMode() {
             return true;
         }
         return false;
-    } catch (error) {
-        console.error('[Better Tasker] Error ensuring autoplay mode:', error);
-        return false;
-    }
+    }, 'switch to autoplay');
 }
 
 
@@ -2971,36 +2604,33 @@ async function stopAllAutomationsForTaskCompletion() {
 
 // Pause autoplay using game state API with coordination
 async function pauseAutoplay() {
-    try {
-        console.log('[Better Tasker] Pausing autoplay using state API...');
-        
-        // Check if another mod is controlling autoplay
-        if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
-            console.log('[Better Tasker] Cannot pause autoplay - controlled by another mod');
-            return false;
-        }
-        
-        // Request control of autoplay
-        if (!window.AutoplayManager.requestControl('Better Tasker')) {
-            console.log('[Better Tasker] Cannot pause autoplay - control denied');
-            return false;
-        }
-        
-        // Check current mode and switch to manual if in autoplay
+    console.log('[Better Tasker] Pausing autoplay using state API...');
+    
+    // Check if another mod is controlling autoplay
+    if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
+        console.log('[Better Tasker] Cannot pause autoplay - controlled by another mod');
+        return false;
+    }
+    
+    return withControl(window.AutoplayManager, 'Better Tasker', () => {
+        // Check current mode and pause if in autoplay
         const boardContext = globalThis.state.board.getSnapshot().context;
         if (boardContext.mode === 'autoplay') {
-            globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
-            autoplayPausedByTasker = true;
-            console.log('[Better Tasker] Autoplay paused successfully (switched to manual mode)');
-            return true;
+            // Use pause button to pause autoplay
+            const paused = pauseAutoplayWithButton();
+            if (paused) {
+                autoplayPausedByTasker = true;
+                console.log('[Better Tasker] Autoplay paused successfully using pause button');
+                return true;
+            } else {
+                console.log('[Better Tasker] Pause button not found - autoplay not paused');
+                return false;
+            }
         } else {
             console.log('[Better Tasker] Not in autoplay mode - no need to pause');
             return true; // Already paused/not running
         }
-    } catch (error) {
-        console.error('[Better Tasker] Error pausing autoplay:', error);
-        return false;
-    }
+    }, 'pause autoplay');
 }
 
 // Verify that task completion was successful before resuming automations
@@ -3069,16 +2699,9 @@ async function resumeAllAutomationsAfterTaskCompletion() {
         
         // 2. Resume Bestiary Automator settings if configured and we have control
         let bestiaryAutomatorResumed = false;
-        const settings = loadSettings();
         if (window.BestiaryAutomatorSettingsManager.hasControl('Better Tasker')) {
-            if (settings.autoRefillStamina) {
-                console.log('[Better Tasker] Resuming Bestiary Automator autorefill stamina...');
-                bestiaryAutomatorResumed = enableBestiaryAutomatorStaminaRefill();
-            }
-            if (settings.fasterAutoplay) {
-                console.log('[Better Tasker] Resuming Bestiary Automator faster autoplay...');
-                bestiaryAutomatorResumed = enableBestiaryAutomatorFasterAutoplay() || bestiaryAutomatorResumed;
-            }
+            console.log('[Better Tasker] Resuming Bestiary Automator settings...');
+            bestiaryAutomatorResumed = enableBestiaryAutomatorSettings(true);
         }
         
         // 3. Coordinate with Raid Hunter to resume its automation if needed
@@ -3118,13 +2741,19 @@ async function resumeAutoplay() {
                 return false;
             }
             
-            // Use the ensureAutoplayMode helper
-            const wasChanged = ensureAutoplayMode();
+            // Use play button instead of switching to autoplay mode
+            const resumed = resumeAutoplayWithButton();
             autoplayPausedByTasker = false;
-            if (wasChanged) {
-                console.log('[Better Tasker] Autoplay resumed successfully (switched to autoplay mode)');
+            if (resumed) {
+                console.log('[Better Tasker] Autoplay resumed successfully using play button');
             } else {
-                console.log('[Better Tasker] Already in autoplay mode - no need to resume');
+                // Fallback to autoplay mode if play button not found
+                const wasChanged = ensureAutoplayMode();
+                if (wasChanged) {
+                    console.log('[Better Tasker] Autoplay resumed using fallback (switched to autoplay mode)');
+                } else {
+                    console.log('[Better Tasker] Already in autoplay mode - no need to resume');
+                }
             }
             return true;
         } else {
@@ -3381,7 +3010,7 @@ async function handleTaskReadyCompletion() {
         // Start quest button validation monitoring
         startQuestButtonValidation();
         
-        // Clear any modals with ESC key presses (victory screens only appear after game ends)
+        // Clear any modals with ESC key presses
         console.log('[Better Tasker] Clearing any modals with ESC key presses...');
         for (let i = 0; i < 3; i++) {
             const escEvent = new KeyboardEvent('keydown', {
@@ -3414,8 +3043,8 @@ async function handleTaskReadyCompletion() {
             // in the game end event handler, not here, to avoid opening quest log
             // while game is still running
         } else {
-            console.log('[Better Tasker] No game running, checking for victory screen and proceeding with task completion...');
-            // No game running, check for victory screen and proceed with quest log opening
+            console.log('[Better Tasker] No game running, proceeding with task completion...');
+            // No game running, proceed with quest log opening
             await handlePostGameTaskCompletion();
         }
         
@@ -3470,13 +3099,6 @@ async function handlePostGameTaskCompletion() {
         console.log('[Better Tasker] Waiting for game to finish...');
         await sleep(1000); // Wait for game end animations and UI to settle
         
-        // First check for and close any victory screens
-        console.log('[Better Tasker] Checking for victory screens...');
-        const victoryClosed = await detectAndCloseVictoryScreen();
-        if (victoryClosed) {
-            console.log('[Better Tasker] Victory screen closed, waiting for UI to settle...');
-            await sleep(500); // Additional wait for UI to settle after victory screen closes
-        }
         
         // Check current task state to determine what to do
         const playerContext = globalThis.state.player.getSnapshot().context;
@@ -3535,10 +3157,19 @@ async function handleTaskFinishing() {
     // Check if quest blip is available (indicates new task available)
     const isQuestBlipReady = isQuestBlipAvailable();
     
-    // If task hunting is ongoing, skip task completion checks
+    // If task hunting is ongoing, check if task is ready to complete
     if (taskHuntingOngoing) {
-        console.log('[Better Tasker] Task hunting ongoing, skipping task completion');
-        return;
+        // Check if we have an active task that's ready
+        const playerContext = globalThis.state.player.getSnapshot().context;
+        const task = playerContext?.questLog?.task;
+        
+        if (task && task.gameId && task.ready) {
+            console.log('[Better Tasker] Task hunting complete - task is ready, proceeding with completion');
+            // Don't return - proceed with task completion
+        } else {
+            console.log('[Better Tasker] Task hunting ongoing, skipping task completion');
+            return;
+        }
     }
     
     // Don't run task finishing if a task operation is already in progress
@@ -3743,12 +3374,9 @@ async function handleTaskFinishing() {
                 taskInProgress = true;
                 console.log('[Better Tasker] Task in progress flag set - preventing duplicate quest log operations');
                 
-                // Update button to show "Tasking" state
-                updateToggleButtonForTasking();
-                
                 // Start quest button validation monitoring
                 startQuestButtonValidation();
-                // Clear any modals with ESC key presses (victory screens only appear after game ends)
+                // Clear any modals with ESC key presses
                 console.log('[Better Tasker] Clearing any modals with ESC key presses...');
                 for (let i = 0; i < 3; i++) {
                     const escEvent = new KeyboardEvent('keydown', {
@@ -3797,6 +3425,11 @@ async function handleTaskFinishing() {
                 
                 if (newTaskButton) {
                     console.log('[Better Tasker] New Task button found, clicking...');
+                    // Set task operation in progress flag when actually accepting a new task
+                    taskOperationInProgress = true;
+                    updateExposedState();
+                    console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
+                    
                     newTaskButton.click();
                     await sleep(200);
                     console.log('[Better Tasker] New Task button clicked');
@@ -3963,13 +3596,10 @@ async function handleTaskFinishing() {
                         updateExposedState();
                         console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
                         
-                        // Update button to show "Tasking" state
-                        updateToggleButtonForTasking();
-                        
                         // Start quest button validation monitoring
                         startQuestButtonValidation();
                         
-                        // Clear any modals with ESC key presses (victory screens only appear after game ends)
+                        // Clear any modals with ESC key presses
                         console.log('[Better Tasker] Clearing any modals with ESC key presses...');
                         for (let i = 0; i < 3; i++) {
                             const escEvent = new KeyboardEvent('keydown', {
@@ -4327,21 +3957,26 @@ function stopAutomation() {
     // Unsubscribe from game state changes
     unsubscribeFromGameState();
     
-    // Stop autoplay if we have control (like Raid Hunter does)
+    // Pause autoplay if we have control (using pause button)
     try {
         if (window.AutoplayManager.hasControl('Better Tasker')) {
             const boardContext = globalThis.state.board.getSnapshot().context;
             if (boardContext.mode === 'autoplay') {
-                globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
-                console.log('[Better Tasker] Switched from autoplay to manual mode');
+                // Use pause button to pause autoplay
+                const paused = pauseAutoplayWithButton();
+                if (paused) {
+                    console.log('[Better Tasker] Autoplay paused using pause button');
+                } else {
+                    console.log('[Better Tasker] Pause button not found - autoplay not paused');
+                }
             }
-            // Release control after switching to manual
+            // Release control after pausing
             window.AutoplayManager.releaseControl('Better Tasker');
         } else {
-            console.log('[Better Tasker] Cannot switch to manual mode - not controlling autoplay');
+            console.log('[Better Tasker] Cannot pause autoplay - not controlling autoplay');
         }
     } catch (error) {
-        console.error('[Better Tasker] Error switching to manual mode:', error);
+        console.error('[Better Tasker] Error pausing autoplay:', error);
     }
     
     // Only disable Bestiary Automator settings if Raid Hunter is not actively raiding
@@ -4860,10 +4495,8 @@ function checkQuestLogForTasks() {
 // Open quest log and accept new task (extracted from handleTaskFinishing)
 async function openQuestLogAndAcceptTask() {
     try {
-        // Set task operation in progress flag to prevent duplicate quest log operations
-        taskOperationInProgress = true;
-        updateExposedState(); // Update exposed state for other mods
-        console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate quest log operations');
+        // Don't set task operation in progress flag here - only set it when actually processing a task
+        console.log('[Better Tasker] Opening quest log to check for tasks...');
         
         // Clear any open modals first
         for (let i = 0; i < 3; i++) {
@@ -4969,6 +4602,11 @@ async function openQuestLogAndAcceptTask() {
             
             if (newTaskButton) {
                 console.log('[Better Tasker] New Task button found, clicking...');
+                // Set task operation in progress flag when actually accepting a new task
+                taskOperationInProgress = true;
+                updateExposedState();
+                console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
+                
                 newTaskButton.click();
                 await sleep(200);
                 console.log('[Better Tasker] New Task button clicked');
@@ -5008,13 +4646,15 @@ async function openQuestLogAndAcceptTask() {
             console.log('[Better Tasker] Could not open quest log - neither quest blip nor Quests button found');
         }
         
-        // Clear task operation in progress flag
-        taskOperationInProgress = false;
-        console.log('[Better Tasker] Task operation in progress flag cleared');
+        console.log('[Better Tasker] Quest log check completed');
         
     } catch (error) {
         console.error('[Better Tasker] Error opening quest log and accepting task:', error);
-        taskOperationInProgress = false;
+        // Clear task operation flag on error if it was set
+        if (taskOperationInProgress) {
+            taskOperationInProgress = false;
+            updateExposedState();
+        }
     }
 }
 
@@ -5060,16 +4700,18 @@ init();
 // ============================================================================
 
 // Cleanup function for when mod is disabled
-function cleanupBetterTasker() {
+function cleanupBetterTasker(periodic = false) {
     try {
-        // Stop automation
-        stopAutomation();
+        // Stop automation only if not periodic cleanup
+        if (!periodic) {
+            stopAutomation();
+        }
         
         // Clean up Raid Hunter coordination
         cleanupRaidHunterCoordination();
         
-        // Clean up modal if open
-        if (activeTaskerModal) {
+        // Clean up modal if open only if not periodic cleanup
+        if (!periodic && activeTaskerModal) {
             try {
                 // Close modal if it has a close method
                 if (typeof activeTaskerModal.close === 'function') {
@@ -5103,15 +4745,17 @@ function cleanupBetterTasker() {
             shimmerCSS.remove();
         }
         
-        // Remove buttons if they exist
-        const settingsButton = document.getElementById(TASKER_BUTTON_ID);
-        if (settingsButton) {
-            settingsButton.remove();
-        }
-        
-        const toggleButton = document.getElementById(TASKER_TOGGLE_ID);
-        if (toggleButton) {
-            toggleButton.remove();
+        // Remove buttons if they exist only if not periodic cleanup
+        if (!periodic) {
+            const settingsButton = document.getElementById(TASKER_BUTTON_ID);
+            if (settingsButton) {
+                settingsButton.remove();
+            }
+            
+            const toggleButton = document.getElementById(TASKER_TOGGLE_ID);
+            if (toggleButton) {
+                toggleButton.remove();
+            }
         }
         
         // Remove button containers created by insertButtons()
@@ -5129,6 +4773,9 @@ function cleanupBetterTasker() {
         }
         if (window.cleanupBetterTasker) {
             delete window.cleanupBetterTasker;
+        }
+        if (window.updateWarningText) {
+            delete window.updateWarningText;
         }
         
         // Release control from shared managers
@@ -5187,4 +4834,9 @@ context.exports = {
     stopAutomation: stopAutomation,
     loadSettings: loadSettings,
     autoSaveSettings: autoSaveSettings
+};
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsBetterTaskerjs = (periodic = false) => {
+  cleanupBetterTasker(periodic);
 };

@@ -64,4 +64,22 @@ function addDashboardHeaderButton() {
   tryInsert();
 }
 
-addDashboardHeaderButton(); 
+addDashboardHeaderButton();
+
+// Cleanup function for Dashboard Button mod
+window.cleanupSuperModsDashboardButtonjs = function() {
+  console.log('[Dashboard Button] Running cleanup...');
+  
+  // Remove dashboard header button
+  const dashboardBtn = document.querySelector('.dashboard-header-btn');
+  if (dashboardBtn && dashboardBtn.parentNode) {
+    dashboardBtn.parentNode.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.dashboardButtonState !== 'undefined') {
+    delete window.dashboardButtonState;
+  }
+  
+  console.log('[Dashboard Button] Cleanup completed');
+}; 

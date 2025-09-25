@@ -1145,3 +1145,20 @@
     }
 
 })();
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsBetterAnalyticsjs = function() {
+  console.log('[Better Analytics] Running global cleanup...');
+  
+  // Call the internal cleanup function if available
+  if (window.__betterAnalyticsLoaded && window.betterAnalytics && window.betterAnalytics.cleanup) {
+    window.betterAnalytics.cleanup();
+  }
+  
+  // Additional global cleanup
+  if (window.__betterAnalyticsLoaded) {
+    delete window.__betterAnalyticsLoaded;
+  }
+  
+  console.log('[Better Analytics] Global cleanup completed');
+};

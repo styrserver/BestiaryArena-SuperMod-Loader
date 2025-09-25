@@ -1127,4 +1127,27 @@ function showHeroEditorModal() {
 // Export functionality
 context.exports = {
   showEditor: showHeroEditorModal
+};
+
+// Cleanup function for Hero Editor mod
+window.cleanupOfficialModsHeroEditorjs = function() {
+  console.log('[Hero Editor] Running cleanup...');
+  
+  // Clear equipment map
+  if (typeof equipmentMap !== 'undefined') {
+    equipmentMap = null;
+  }
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#hero-editor-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.heroEditorState !== 'undefined') {
+    delete window.heroEditorState;
+  }
+  
+  console.log('[Hero Editor] Cleanup completed');
 }; 

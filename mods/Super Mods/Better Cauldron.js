@@ -327,4 +327,27 @@
     
     log('Better Cauldron mod loaded successfully');
     
-})(); 
+})();
+
+// Cleanup function for Better Cauldron mod
+window.cleanupSuperModsBetterCauldronjs = function() {
+  console.log('[Better Cauldron] Running cleanup...');
+  
+  // Reset cauldron state
+  if (window.CauldronUpgrade && window.CauldronUpgrade.reset) {
+    window.CauldronUpgrade.reset();
+  }
+  
+  // Remove any added controls
+  const filterControls = document.querySelector('.cauldron-filter-controls');
+  if (filterControls) {
+    filterControls.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.cauldronState !== 'undefined') {
+    delete window.cauldronState;
+  }
+  
+  console.log('[Better Cauldron] Cleanup completed');
+}; 

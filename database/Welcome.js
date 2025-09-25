@@ -751,7 +751,7 @@ function checkPopupToggleStatus() {
 trackEventListener(window, 'message', handleWelcomeToggle);
 
 // Cleanup function
-function cleanup() {
+function cleanup(periodic = false) {
   console.log('[Welcome] Cleaning up...');
   
   // Clear all tracked timeouts
@@ -811,4 +811,9 @@ exports = {
     Object.assign(config, newConfig);
   },
   cleanup: cleanup
+};
+
+// Expose cleanup function globally for the mod loader
+window.cleanupdatabaseWelcomejs = (periodic = false) => {
+  cleanup(periodic);
 };

@@ -180,4 +180,22 @@ console.log('Tier List Mod initialization complete');
 // Export control functions
 exports = {
   showTierList: showTierListModal
+};
+
+// Cleanup function for Monster Tier List mod
+window.cleanupOfficialModsMonstertierlistjs = function(periodic = false) {
+  console.log('[Monster Tier List] Running cleanup...');
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#tier-list-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any cached data
+  if (typeof window.monsterTierListState !== 'undefined') {
+    delete window.monsterTierListState;
+  }
+  
+  console.log('[Monster Tier List] Cleanup completed');
 }; 

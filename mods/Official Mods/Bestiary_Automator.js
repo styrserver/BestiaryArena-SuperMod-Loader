@@ -1716,8 +1716,14 @@ const stopAutomation = () => {
   unsubscribeFromGameState();
   
   // Clean up game state API subscriptions
-  gameStateUnsubscribers.forEach(unsub => unsub());
-  gameStateUnsubscribers = [];
+  if (gameStateUnsubscribers && Array.isArray(gameStateUnsubscribers)) {
+    gameStateUnsubscribers.forEach(unsub => {
+      if (typeof unsub === 'function') {
+        unsub();
+      }
+    });
+    gameStateUnsubscribers = [];
+  }
 };
 
 const runAutomationTasks = async () => {
@@ -2390,9 +2396,11 @@ context.exports = {
     // Update UI elements in the settings modal if it's open
     updateSettingsModalUI();
   },
-  cleanup: () => {
+  cleanup: (periodic = false) => {
     // Cleanup function for when mod is disabled
-    stopAutomation();
+    if (!periodic) {
+      stopAutomation();
+    }
     
     // Clear all timeouts
     cancelAllTimeouts();
@@ -2403,14 +2411,21 @@ context.exports = {
       window.__fasterAutoplaySubscription = null;
     }
     
-    // Reset session flags
-    fasterAutoplayExecutedThisSession = false;
-    fasterAutoplayRunning = false;
-    rewardsCollectedThisSession = false;
+    // Only reset session flags if this is not periodic cleanup
+    if (!periodic) {
+      fasterAutoplayExecutedThisSession = false;
+      fasterAutoplayRunning = false;
+      rewardsCollectedThisSession = false;
+    }
     
     console.log('[Bestiary Automator] Cleanup completed');
   }
 };
 
 // Also expose globally for other mods to access
-window.bestiaryAutomator = context.exports; 
+window.bestiaryAutomator = context.exports;
+
+// Expose cleanup function globally for the mod loader
+window.cleanupOfficialModsBestiaryAutomatorjs = (periodic = false) => {
+  context.exports.cleanup(periodic);
+}; 

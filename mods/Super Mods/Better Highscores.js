@@ -1442,4 +1442,28 @@
     };
   }
 
-})(); 
+})();
+
+// Cleanup function for Better Highscores mod
+window.cleanupSuperModsBetterHighscoresjs = function() {
+  console.log('[Better Highscores] Running cleanup...');
+  
+  // Remove leaderboard display
+  const leaderboardDisplay = document.querySelector('#better-highscores-display');
+  if (leaderboardDisplay) {
+    leaderboardDisplay.remove();
+  }
+  
+  // Clear any intervals
+  if (window.__highscoresIntervals) {
+    window.__highscoresIntervals.forEach(interval => clearInterval(interval));
+    delete window.__highscoresIntervals;
+  }
+  
+  // Clear any cached data
+  if (typeof window.betterHighscoresState !== 'undefined') {
+    delete window.betterHighscoresState;
+  }
+  
+  console.log('[Better Highscores] Cleanup completed');
+}; 

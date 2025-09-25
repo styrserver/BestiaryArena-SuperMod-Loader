@@ -81,3 +81,20 @@ if (globalWindow) {
 if (typeof module !== 'undefined') {
   module.exports = creatureDatabase;
 }
+
+// Cleanup function for creature database
+window.cleanupdatabasecreaturedatabasejs = function(periodic = false) {
+  console.log('[creature-database.js] Running cleanup...');
+  
+  // Clear any cached data
+  if (window.creatureDatabase) {
+    // Reset to empty state
+    window.creatureDatabase = {
+      ALL_CREATURES: [],
+      UNOBTAINABLE_CREATURES: [],
+      HARDCODED_MONSTER_STATS: {}
+    };
+  }
+  
+  console.log('[creature-database.js] Cleanup completed');
+};

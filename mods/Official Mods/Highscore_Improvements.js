@@ -363,4 +363,27 @@ if (window.DEBUG) console.log('Improved Highscore Mod initialization complete');
 // Export control functions
 exports = {
   showImprovements: showImprovementsModal
+};
+
+// Cleanup function for Highscore Improvements mod
+window.cleanupOfficialModsHighscoreImprovementsjs = function(periodic = false) {
+  console.log('[Highscore Improvements] Running cleanup...');
+  
+  // Clear any cached data
+  if (typeof ROOM_NAMES !== 'undefined') {
+    ROOM_NAMES = null;
+  }
+  
+  // Remove any existing modals
+  const existingModal = document.querySelector('#highscore-improvements-modal');
+  if (existingModal) {
+    existingModal.remove();
+  }
+  
+  // Clear any global state
+  if (typeof window.highscoreImprovementsState !== 'undefined') {
+    delete window.highscoreImprovementsState;
+  }
+  
+  console.log('[Highscore Improvements] Cleanup completed');
 }; 

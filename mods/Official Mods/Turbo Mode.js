@@ -611,3 +611,46 @@ function updateTurboButton() {
     }
   }
 }
+
+// Cleanup function for Turbo Mode mod
+window.cleanupOfficialModsTurboModejs = function(periodic = false) {
+  console.log('[Turbo Mode] Running cleanup...');
+  
+  // Only disable turbo mode if this is not periodic cleanup
+  if (!periodic && turboState.active) {
+    disableTurbo();
+  }
+  
+  // Clear timer check interval
+  if (turboState.timerCheckInterval) {
+    clearInterval(turboState.timerCheckInterval);
+    turboState.timerCheckInterval = null;
+  }
+  
+  // Remove tick display element
+  if (turboState.tickDisplayElement) {
+    turboState.tickDisplayElement.remove();
+    turboState.tickDisplayElement = null;
+  }
+  
+  // Disconnect game controls observer
+  if (turboState.gameControlsObserver) {
+    turboState.gameControlsObserver.disconnect();
+    turboState.gameControlsObserver = null;
+  }
+  
+  // Unsubscribe from speedup
+  if (turboState.speedupSubscription) {
+    turboState.speedupSubscription.unsubscribe();
+    turboState.speedupSubscription = null;
+  }
+  
+  // Only reset state if this is not periodic cleanup
+  if (!periodic) {
+    turboState.active = false;
+    turboState.timerSubscribed = false;
+    turboState.lastKnownTick = -1;
+  }
+  
+  console.log('[Turbo Mode] Cleanup completed');
+};

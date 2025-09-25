@@ -74,3 +74,19 @@ if (globalWindow) {
 if (typeof module !== 'undefined') {
   module.exports = equipmentDatabase;
 }
+
+// Cleanup function for equipment database
+window.cleanupdatabaseequipmentdatabasejs = function(periodic = false) {
+  console.log('[equipment-database.js] Running cleanup...');
+  
+  // Clear any cached data
+  if (window.equipmentDatabase) {
+    // Reset to empty state
+    window.equipmentDatabase = {
+      ALL_EQUIPMENT: [],
+      EQUIPMENT_BY_STAT: {}
+    };
+  }
+  
+  console.log('[equipment-database.js] Cleanup completed');
+};

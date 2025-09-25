@@ -319,8 +319,8 @@ const cyclopediaState = {
       leaderboardData: this.cache.leaderboardData.size,
       roomThumbnails: this.cache.roomThumbnails.size,
       pendingRequests: this.pendingRequests.size,
-      queueStatus: RequestQueue.getStatus(),
-      memoryInfo: MemoryUtils.getMemoryInfo()
+      queueStatus: typeof RequestQueue !== 'undefined' ? RequestQueue.getStatus() : { pending: 0, queued: 0, processing: false },
+      memoryInfo: typeof MemoryUtils !== 'undefined' ? MemoryUtils.getMemoryInfo() : { used: 0, total: 0 }
     };
   },
   
@@ -514,9 +514,34 @@ const DOMUtils = {
     return scrollContainer;
   },
   
-  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false) {
+  createListItem: function(text, className = FONT_CONSTANTS.SIZES.BODY, isOwned = true, isPerfect = false, isT5 = false, hasShiny = false) {
     const item = document.createElement('div');
-    item.textContent = text; item.className = className;
+    item.className = className;
+    
+    // Create container for text and shiny star
+    const contentContainer = document.createElement('div');
+    contentContainer.style.display = 'flex';
+    contentContainer.style.alignItems = 'center';
+    contentContainer.style.gap = '4px';
+    
+    // Add shiny star if creature has shiny variants
+    if (hasShiny) {
+      const shinyIcon = document.createElement('img');
+      shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+      shinyIcon.alt = 'shiny';
+      shinyIcon.title = 'Has shiny variant';
+      shinyIcon.style.width = '10px';
+      shinyIcon.style.height = '10px';
+      shinyIcon.style.flexShrink = '0';
+      contentContainer.appendChild(shinyIcon);
+    }
+    
+    // Add text content
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    contentContainer.appendChild(textSpan);
+    
+    item.appendChild(contentContainer);
     
     // Apply styling based on item status
     const baseStyle = { cursor: 'pointer', padding: '2px 4px', borderRadius: '2px', textAlign: 'left' };
@@ -576,6 +601,40 @@ function isCreatureOwned(creatureName) {
     return ownedMonsters.some(monster => monster.gameId === creatureGameId);
   } catch (error) {
     console.warn('[Cyclopedia] Error checking creature ownership:', error);
+    return false;
+  }
+}
+
+// Function to check if user has any shiny variants of a creature
+function hasShinyCreature(creatureName) {
+  try {
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const ownedMonsters = playerContext.monsters || [];
+    
+    // Get the gameId for this creature name
+    let creatureGameId = null;
+    
+    // Try to get gameId from monsterNameMap first
+    if (cyclopediaState.monsterNameMap) {
+      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
+      if (entry) {
+        creatureGameId = entry.index;
+      }
+    }
+    
+    // Fallback to BestiaryModAPI utility
+    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
+      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
+    }
+    
+    // Check if any owned monster with this gameId has shiny property
+    return ownedMonsters.some(monster => monster.gameId === creatureGameId && monster.shiny === true);
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking if creature has shiny variants:', error);
     return false;
   }
 }
@@ -1592,7 +1651,7 @@ const CreatureListManager = {
     
     // Create portrait image
     const img = document.createElement('img');
-    img.src = `/assets/portraits/${actor.id}.png`;
+    img.src = actor.shiny === true ? `/assets/portraits/${actor.id}-shiny.png` : `/assets/portraits/${actor.id}.png`;
     img.alt = 'creature';
     img.style.cssText = `
       width: 100%;
@@ -2097,12 +2156,15 @@ function createBox({
       let isPerfect = false;
       let isT5 = false;
       
+      let hasShiny = false;
+      
       if (type === 'creature') {
         // Check if this is an unobtainable creature - if so, keep default styling
         const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
         if (!isUnobtainable) {
           isOwned = isCreatureOwned(name);
           isPerfect = isCreaturePerfect(name);
+          hasShiny = hasShinyCreature(name);
         }
       } else if (type === 'equipment') {
         isOwned = isEquipmentOwned(name);
@@ -2131,7 +2193,7 @@ function createBox({
         }
       }
       
-      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5);
+      const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny);
       
       const clickHandler = () => {
         if (clearAllSelections) {
@@ -10459,7 +10521,16 @@ function renderCreatureTemplate(name) {
       const starTierIcon = monsterSprite.querySelector('img[alt="star tier"]');
       if (starTierIcon) starTierIcon.remove();
       col1Picture.innerHTML = '';
-      col1Picture.appendChild(monsterSprite);
+      // Wrap portrait to allow overlays (e.g., shiny star)
+      const portraitWrap = document.createElement('div');
+      portraitWrap.style.position = 'relative';
+      portraitWrap.style.width = '110px';
+      portraitWrap.style.height = '110px';
+      portraitWrap.style.display = 'inline-block';
+      portraitWrap.appendChild(monsterSprite);
+      
+      
+      col1Picture.appendChild(portraitWrap);
       const allDivs = Array.from(monsterSprite.querySelectorAll('div'));
       let firstFixedDiv = null;
       allDivs.forEach((div, idx) => {
@@ -11139,6 +11210,29 @@ function renderCreatureTemplate(name) {
         size: 'small'
       });
       portrait.style.margin = '0';
+      
+      // Set shiny attribute on the sprite if creature is shiny
+      if (monster.shiny === true) {
+        console.log('[Cyclopedia] Setting shiny attribute for owned creature:', monster);
+        const spriteImg = portrait.querySelector('img.actor.spritesheet');
+        if (spriteImg) {
+          spriteImg.setAttribute('data-shiny', 'true');
+        }
+        
+        // Add shiny star overlay
+        const shinyIcon = document.createElement('img');
+        shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+        shinyIcon.alt = 'shiny';
+        shinyIcon.title = 'Shiny';
+        shinyIcon.style.position = 'absolute';
+        shinyIcon.style.top = '4px';
+        shinyIcon.style.left = '4px';
+        shinyIcon.style.width = '10px';
+        shinyIcon.style.height = '10px';
+        shinyIcon.style.pointerEvents = 'none';
+        shinyIcon.style.zIndex = '10';
+        portrait.appendChild(shinyIcon);
+      }
 
       const levelBadge = portrait.querySelector('span.pixel-font-16');
       if (levelBadge) levelBadge.remove();
@@ -12220,6 +12314,9 @@ if (typeof window !== 'undefined') {
     close: exports.cleanup
   };
 }
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsCyclopediajs = exports.cleanup;
 
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {

@@ -1663,7 +1663,9 @@ exports = {
       // Reset initialization state for clean reinitialization
       hasInitialized = false;
       isInitializing = false;
-      window.RunTrackerAPI._initialized = false;
+      if (window.RunTrackerAPI && typeof window.RunTrackerAPI === 'object') {
+        window.RunTrackerAPI._initialized = false;
+      }
       console.log('[RunTracker] Reset initialization state');
       
       console.log('[RunTracker] Cleanup completed successfully');
@@ -1671,4 +1673,21 @@ exports = {
       console.error('[RunTracker] Error during cleanup:', error);
     }
   }
+};
+
+// Expose cleanup function globally for the mod loader
+window.cleanupSuperModsRunTrackerjs = function() {
+  console.log('[RunTracker] Running global cleanup...');
+  
+  // Call the internal cleanup function if available
+  if (window.RunTrackerAPI && window.RunTrackerAPI.cleanup) {
+    window.RunTrackerAPI.cleanup();
+  }
+  
+  // Additional global cleanup
+  if (window.RunTrackerAPI) {
+    delete window.RunTrackerAPI;
+  }
+  
+  console.log('[RunTracker] Global cleanup completed');
 };
