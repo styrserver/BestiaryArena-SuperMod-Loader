@@ -365,6 +365,40 @@ function resetState(resetType = 'full') {
     }
 }
 
+// Centralized cleanup function for task completion failures
+function cleanupTaskCompletionFailure(reason = 'unknown') {
+    try {
+        console.log(`[Better Tasker] Cleaning up after task completion failure: ${reason}`);
+        
+        // Clear all task-related flags
+        resetState('taskComplete');
+        
+        // Close any open quest log
+        clickAllCloseButtons();
+        
+        // Press ESC to ensure quest log is closed
+        for (let i = 0; i < 3; i++) {
+            const escEvent = new KeyboardEvent('keydown', {
+                key: 'Escape',
+                code: 'Escape',
+                keyCode: 27,
+                which: 27,
+                bubbles: true,
+                cancelable: true
+            });
+            document.dispatchEvent(escEvent);
+        }
+        
+        // Update exposed state for other mods
+        updateExposedState();
+        
+        console.log('[Better Tasker] Task completion failure cleanup completed');
+        
+    } catch (error) {
+        console.error('[Better Tasker] Error during cleanup:', error);
+    }
+}
+
 // ============================================================================
 // 3. AUTOPLAY CONTROL FUNCTIONS
 // ============================================================================
@@ -377,20 +411,39 @@ function controlAutoplayWithButton(action) {
         // Define selectors based on action type
         const selectors = action === 'pause' 
             ? [
-                'button.frame-1-red[class*="pause"]',
                 'button:has(svg.lucide-pause)',
-                'button[class*="pause"]'
+                'button.frame-1-red[class*="pause"]',
+                'button[class*="pause"]',
+                'button[class*="surface-red"]:has(svg)', // Red button with icon (pause)
+                'div.flex button:nth-child(2)' // Second button in flex container (pause button)
               ]
             : [
-                'button.frame-1-green[class*="play"]',
                 'button:has(svg.lucide-play)',
+                'button.frame-1-green[class*="play"]',
                 'button[class*="play"]',
+                'button[class*="surface-green"]:has(svg)', // Green button with icon (play)
                 'button:not([class*="pause"]):has(svg)' // Fallback for play button
               ];
         
         // Find button using first matching selector
-        const button = selectors.reduce((found, selector) => 
+        let button = selectors.reduce((found, selector) => 
             found || document.querySelector(selector), null);
+        
+        // Fallback: Look for pause button by structure (second button in flex container with pause icon)
+        if (!button && action === 'pause') {
+            const flexContainer = document.querySelector('div.flex');
+            if (flexContainer) {
+                const buttons = flexContainer.querySelectorAll('button');
+                if (buttons.length >= 2) {
+                    const secondButton = buttons[1]; // Second button (pause button)
+                    const hasPauseIcon = secondButton.querySelector('svg.lucide-pause');
+                    if (hasPauseIcon) {
+                        button = secondButton;
+                        console.log('[Better Tasker] Found pause button using structure fallback');
+                    }
+                }
+            }
+        }
         
         if (button) {
             console.log(`[Better Tasker] Found ${action} button, clicking to ${action} autoplay...`);
@@ -3050,10 +3103,7 @@ async function handleTaskReadyCompletion() {
         
     } catch (error) {
         console.error('[Better Tasker] Error in handleTaskReadyCompletion:', error);
-        
-        // Clear flags on error
-        taskOperationInProgress = false;
-        updateExposedState();
+        cleanupTaskCompletionFailure('error in handleTaskReadyCompletion');
     }
 }
 
@@ -3129,6 +3179,7 @@ async function handlePostGameTaskCompletion() {
                 await openQuestLogAndAcceptTask();
             } else {
                 console.log('[Better Tasker] No quest blip found, no new task available');
+                cleanupTaskCompletionFailure('no quest blip found');
             }
         }
         
@@ -3139,10 +3190,7 @@ async function handlePostGameTaskCompletion() {
         
     } catch (error) {
         console.error('[Better Tasker] Error in handlePostGameTaskCompletion:', error);
-        
-        // Clear flags on error
-        taskOperationInProgress = false;
-        updateExposedState();
+        cleanupTaskCompletionFailure('error in handlePostGameTaskCompletion');
     }
 }
 
@@ -3551,6 +3599,7 @@ async function handleTaskFinishing() {
                         console.log('[Better Tasker] Task completion verified - returning to idle state');
                     } else {
                         console.log('[Better Tasker] Task completion verification failed');
+                        cleanupTaskCompletionFailure('task completion verification failed');
                     }
                 } else {
                     // If we were checking during autoplay and no finish button appeared, just close the quest log
@@ -3722,17 +3771,7 @@ async function handleTaskFinishing() {
         }
     } catch (error) {
         console.error('[Better Tasker] Error handling task finishing:', error);
-        // Clear task operation in progress flag on error
-        taskOperationInProgress = false;
-        updateExposedState(); // Update exposed state for other mods
-        console.log('[Better Tasker] Task completion and progress flags cleared - error occurred');
-        
-        // Stop quest button validation and restore appearance
-        stopQuestButtonValidation();
-        restoreQuestButtonAppearance();
-        
-        // Restore normal button state
-        updateToggleButton();
+        cleanupTaskCompletionFailure('error handling task finishing');
     }
 }
 
@@ -4641,6 +4680,7 @@ async function openQuestLogAndAcceptTask() {
                 await navigateToSuggestedMapAndStartAutoplay();
             } else {
                 console.log('[Better Tasker] New Task button not found');
+                cleanupTaskCompletionFailure('no new task button found');
             }
         } else {
             console.log('[Better Tasker] Could not open quest log - neither quest blip nor Quests button found');
@@ -4650,11 +4690,7 @@ async function openQuestLogAndAcceptTask() {
         
     } catch (error) {
         console.error('[Better Tasker] Error opening quest log and accepting task:', error);
-        // Clear task operation flag on error if it was set
-        if (taskOperationInProgress) {
-            taskOperationInProgress = false;
-            updateExposedState();
-        }
+        cleanupTaskCompletionFailure('error opening quest log and accepting task');
     }
 }
 

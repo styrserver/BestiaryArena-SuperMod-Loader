@@ -13,7 +13,6 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
-  fasterAutoplaySpeed: 15, // Speed increase percentage (15% = 1.15x speed)
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -90,7 +89,6 @@ const TRANSLATIONS = {
     autoDayCare: 'Autohandle Daycare',
     autoPlayAfterDefeat: 'Autoplay after Defeat and Network Issues',
     fasterAutoplay: 'Faster Autoplay',
-    fasterAutoplaySpeed: 'Speed Increase (%)',
     saveButton: 'Save Settings',
     closeButton: 'Close',
     statusEnabled: 'Automator Enabled',
@@ -116,7 +114,6 @@ const TRANSLATIONS = {
     autoDayCare: 'Cuidar Automaticamente da Creche',
     autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
     fasterAutoplay: 'Faster Autoplay',
-    fasterAutoplaySpeed: 'Aumento de Velocidade (%)',
     saveButton: 'Salvar Configurações',
     closeButton: 'Fechar',
     statusEnabled: 'Automatizador Ativado',
@@ -1072,7 +1069,7 @@ const processDefeatToast = async () => {
   return true;
 };
 
-// Simplified battle ongoing toast processor
+// Optimized battle ongoing toast processor using Game State API
 const processBattleOngoingToast = async (toastText) => {
   if (!canTransitionTo(AUTOMATION_STATES.PROCESSING_BATTLE)) {
     return false;
@@ -1081,28 +1078,48 @@ const processBattleOngoingToast = async (toastText) => {
   setState(AUTOMATION_STATES.PROCESSING_BATTLE);
   console.log('[Bestiary Automator] Battle ongoing toast detected!');
   
-  // Validate toastText parameter
-  if (!toastText || typeof toastText !== 'string') {
-    console.log('[Bestiary Automator] Invalid toastText parameter:', toastText);
-    setState(null);
-    return false;
+  // Try to get battle ready time from Game State API first (more reliable)
+  let waitTime = null;
+  
+  try {
+    if (globalThis.state && globalThis.state.board) {
+      const boardContext = globalThis.state.board.getSnapshot().context;
+      if (boardContext && boardContext.battleWillBeReadyAt) {
+        const currentTime = Date.now();
+        const battleReadyTime = boardContext.battleWillBeReadyAt;
+        waitTime = Math.max(0, battleReadyTime - currentTime);
+        console.log(`[Bestiary Automator] Using Game State API - battle ready in ${waitTime}ms`);
+      }
+    }
+  } catch (error) {
+    console.warn('[Bestiary Automator] Could not access battleWillBeReadyAt from Game State API:', error);
   }
   
-  // Extract time difference
-  const timeMatch = toastText.match(/\((\d+)ms diff\)/);
-  if (!timeMatch) {
-    console.log('[Bestiary Automator] Could not extract time from battle ongoing toast:', toastText);
-    setState(null);
-    return false;
+  // Fallback to parsing toast message if Game State API is not available
+  if (waitTime === null) {
+    if (!toastText || typeof toastText !== 'string') {
+      console.log('[Bestiary Automator] Invalid toastText parameter:', toastText);
+      setState(null);
+      return false;
+    }
+    
+    // Extract time difference from toast message
+    const timeMatch = toastText.match(/\((\d+)ms diff\)/);
+    if (!timeMatch) {
+      console.log('[Bestiary Automator] Could not extract time from battle ongoing toast:', toastText);
+      setState(null);
+      return false;
+    }
+    
+    const timeDiff = parseInt(timeMatch[1], 10);
+    waitTime = Math.floor(timeDiff / 1000) * 1000; // Round down to nearest second
+    console.log(`[Bestiary Automator] Using toast parsing - battle ready in ${waitTime}ms (original: ${timeDiff}ms)`);
   }
   
-  const timeDiff = parseInt(timeMatch[1], 10);
-  const roundedTimeDiff = Math.floor(timeDiff / 1000) * 1000;
-  
-  console.log(`[Bestiary Automator] Battle ongoing toast detected, original time: ${timeDiff}ms, rounded down to: ${roundedTimeDiff}ms, waiting then clicking autoplay...`);
+  console.log(`[Bestiary Automator] Battle ongoing detected, waiting ${waitTime}ms then clicking autoplay...`);
   
   // Start countdown
-  if (await startCountdown(roundedTimeDiff)) {
+  if (await startCountdown(waitTime)) {
     // Click start button
     const startButton = findStartButton();
     if (startButton) {
@@ -1520,18 +1537,12 @@ const clickAutoplay = async () => {
 
 // Main Faster Autoplay function
 const handleFasterAutoplay = async () => {
-  if (!config.fasterAutoplay || config.fasterAutoplaySpeed === 0 || fasterAutoplayExecutedThisSession) {
-    return;
-  }
-  
-  // Check if we're in autoplay mode - only apply speed increase in autoplay mode
-  if (!isAutoplayMode()) {
-    console.log('[Bestiary Automator] Not in autoplay mode, skipping speed increase (Faster Autoplay only works in autoplay mode)');
+  if (!config.fasterAutoplay || fasterAutoplayExecutedThisSession) {
     return;
   }
   
   try {
-    console.log(`[Bestiary Automator] Setting autoplay delay to 0ms and increasing game speed by ${config.fasterAutoplaySpeed}%...`);
+    console.log('[Bestiary Automator] Setting autoplay delay to 0ms...');
     
     // Set autoplay delay to 0 for instant execution
     globalThis.state.clientConfig.trigger.setState({
@@ -1541,42 +1552,8 @@ const handleFasterAutoplay = async () => {
       }),
     });
     
-    // Increase game speed by configured percentage
-    try {
-      const DEFAULT_TICK_INTERVAL_MS = 62.5;
-      const speedupFactor = 1 + (config.fasterAutoplaySpeed / 100); // Convert percentage to multiplier
-      const newInterval = Math.max(DEFAULT_TICK_INTERVAL_MS / speedupFactor, 16); // Minimum 16ms for performance
-      
-      // Set up subscription for new games to maintain speed
-      if (window.__fasterAutoplaySubscription) {
-        window.__fasterAutoplaySubscription.unsubscribe();
-      }
-      
-      window.__fasterAutoplaySubscription = globalThis.state.board.on('newGame', (event) => {
-        // Only apply speed increase if we're in autoplay mode
-        if (event.world && event.world.tickEngine && isAutoplayMode()) {
-          event.world.tickEngine.setTickInterval(newInterval);
-        }
-      });
-      
-      // Apply to current game if it exists and we're in autoplay mode
-      const boardContext = globalThis.state.board.getSnapshot().context;
-      if (boardContext && boardContext.world && boardContext.world.tickEngine && isAutoplayMode()) {
-        boardContext.world.tickEngine.setTickInterval(newInterval);
-        console.log(`[Bestiary Automator] Game speed increased: ${DEFAULT_TICK_INTERVAL_MS}ms → ${newInterval.toFixed(2)}ms (${speedupFactor.toFixed(2)}x speed)`);
-      }
-    } catch (speedError) {
-      console.warn('[Bestiary Automator] Could not increase game speed:', speedError);
-    }
-    
     fasterAutoplayExecutedThisSession = true;
-    
-    // Log appropriate message based on whether speed was actually applied
-    if (isAutoplayMode()) {
-      console.log(`[Bestiary Automator] Faster Autoplay enabled with ${config.fasterAutoplaySpeed}% speed increase`);
-    } else {
-      console.log(`[Bestiary Automator] Faster Autoplay enabled (autoplay delay set to 0ms, speed increase will apply when in autoplay mode)`);
-    }
+    console.log('[Bestiary Automator] Faster Autoplay enabled - autoplay delay set to 0ms');
   } catch (error) {
     console.warn('[Bestiary Automator] Could not set autoplay delay:', error);
   }
@@ -1790,13 +1767,11 @@ const createConfigPanel = () => {
   
   // Faster autoplay checkbox with warning
   const fasterAutoplayWarningText = config.currentLocale === 'pt' 
-    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay e aumenta a velocidade do jogo (configurável) APENAS no modo autoplay, tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
-    : '⚠️ Removes the 3-second delay between autoplay actions and increases game speed (configurable) ONLY in autoplay mode, making the game run faster. May cause unexpected behavior or conflicts with other mods.';
+    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay, tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
+    : '⚠️ Removes the 3-second delay between autoplay actions, making the game run faster. May cause unexpected behavior or conflicts with other mods.';
   
   const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   
-  // Speed increase input (separate container like stamina section)
-  const fasterAutoplaySpeedContainer = createNumberInputContainer('faster-autoplay-speed-input', t('fasterAutoplaySpeed'), config.fasterAutoplaySpeed, 5, 50, 5);
   
   // Add all elements to content
   content.appendChild(refillContainer);
@@ -1805,7 +1780,6 @@ const createConfigPanel = () => {
   content.appendChild(dayCareContainer);
   content.appendChild(autoPlayContainer);
   content.appendChild(fasterAutoplayContainer);
-  content.appendChild(fasterAutoplaySpeedContainer);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
@@ -1828,8 +1802,6 @@ const createConfigPanel = () => {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
-    const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
-    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeed;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
   }, 100);
   
@@ -1867,9 +1839,6 @@ const createConfigPanel = () => {
           config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           config.fasterAutoplay = document.getElementById('faster-autoplay-checkbox').checked;
-          // Save the input value for persistence (clamp to 5-50% range)
-          const speedInputValue = Math.max(5, Math.min(50, parseInt(document.getElementById('faster-autoplay-speed-input').value, 10) || 15));
-          config.fasterAutoplaySpeed = speedInputValue;
           
           // Reset autoplay delay based on Faster Autoplay setting
           try {
@@ -1882,12 +1851,7 @@ const createConfigPanel = () => {
                 }),
               });
               
-              // Only apply speed increase if we're in autoplay mode
-              if (isAutoplayMode()) {
-                console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms and increased game speed by ${config.fasterAutoplaySpeed}%`);
-              } else {
-                console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms (speed increase will apply when in autoplay mode)`);
-              }
+              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms`);
             } else {
               // Reset autoplay delay to default 3 seconds
               globalThis.state.clientConfig.trigger.setState({
@@ -1896,27 +1860,7 @@ const createConfigPanel = () => {
                   autoplayDelayMs: 3000
                 }),
               });
-              // Reset game speed to default
-              try {
-                const DEFAULT_TICK_INTERVAL_MS = 62.5;
-                
-                // Clean up subscription
-                if (window.__fasterAutoplaySubscription) {
-                  window.__fasterAutoplaySubscription.unsubscribe();
-                  window.__fasterAutoplaySubscription = null;
-                }
-                
-                // Reset current game speed
-                const boardContext = globalThis.state.board.getSnapshot().context;
-                if (boardContext && boardContext.world && boardContext.world.tickEngine) {
-                  boardContext.world.tickEngine.setTickInterval(DEFAULT_TICK_INTERVAL_MS);
-                  console.log(`[Bestiary Automator] Game speed reset to default: ${DEFAULT_TICK_INTERVAL_MS}ms`);
-                }
-              } catch (speedError) {
-                console.warn('[Bestiary Automator] Could not reset game speed:', speedError);
-              }
-              
-              console.log('[Bestiary Automator] Faster Autoplay disabled - reset autoplay delay to 3000ms and game speed to default');
+              console.log('[Bestiary Automator] Faster Autoplay disabled - reset autoplay delay to 3000ms');
             }
           } catch (error) {
             console.warn('[Bestiary Automator] Could not update autoplay delay:', error);
@@ -1930,8 +1874,7 @@ const createConfigPanel = () => {
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
-            fasterAutoplay: config.fasterAutoplay,
-            fasterAutoplaySpeed: config.fasterAutoplaySpeed
+            fasterAutoplay: config.fasterAutoplay
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);
@@ -2348,8 +2291,6 @@ function updateSettingsModalUI() {
     if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
-    const fasterAutoplaySpeedInput = document.getElementById('faster-autoplay-speed-input');
-    if (fasterAutoplaySpeedInput) fasterAutoplaySpeedInput.value = config.fasterAutoplaySpeed;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
     
   } catch (error) {
@@ -2405,11 +2346,6 @@ context.exports = {
     // Clear all timeouts
     cancelAllTimeouts();
     
-    // Clean up Faster Autoplay subscription
-    if (window.__fasterAutoplaySubscription) {
-      window.__fasterAutoplaySubscription.unsubscribe();
-      window.__fasterAutoplaySubscription = null;
-    }
     
     // Only reset session flags if this is not periodic cleanup
     if (!periodic) {
