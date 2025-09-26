@@ -6,8 +6,7 @@
 console.log('[Cyclopedia] initializing...');
 const START_PAGE_CONFIG = { API_TIMEOUT: 10000, COLUMN_WIDTHS: { LEFT: 300, MIDDLE: 300, RIGHT: 300 }, API_BASE_URL: 'https://bestiaryarena.com/api/trpc/serverSide.profilePageData', FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png' };
 const inventoryTooltips = (typeof window !== 'undefined' && window.inventoryTooltips) || {};
-if (!(inventoryTooltips && typeof inventoryTooltips === 'object')) {}
-const CYCLOPEDIA_MODAL_WIDTH = 900, CYCLOPEDIA_MODAL_HEIGHT = 600;
+const inventoryDatabase = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
 
 // RunTracker integration
 let runTrackerAPI = null;
@@ -89,54 +88,8 @@ const MapsTabDOMOptimizer = {
   }
 };
 
-// Configuration constants only - functions moved to appropriate sections
-// Inventory item categories for organizing items in the UI
-const INVENTORY_CATEGORIES = {
-  'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
-  'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
-};
-
-const INVENTORY_VARIANTS = {
-  'Change Nickname': ['nicknameChange'],
-  'Dice Manipulators': ['diceManipulator1', 'diceManipulator2', 'diceManipulator3', 'diceManipulator4', 'diceManipulator5'],
-  'Exaltation Chests': ['equipChest'], 'Nickname Creature': ['nicknameMonster'], 'Outfit Bags': ['hunterOutfitBag', 'outfitBag1'],
-  'Stamina Potions': ['stamina1', 'stamina2', 'stamina3', 'stamina4', 'stamina5'],
-  'Stones of Insight': ['insightStone1', 'insightStone2', 'insightStone3', 'insightStone4', 'insightStone5'],
-  'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
-  'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
-  'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
-  'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
-  'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
-  'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
-};
-
-const INVENTORY_STATIC_ITEMS = {
-  'beastCoins': { name: 'Beast Coins', rarity: '1' }, 'dust': { name: 'Dust', rarity: '2' },
-  'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
-  'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
-  'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
-  'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
-  'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
-  'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
-  'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
-  'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
-  'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
-};
-
-// Rarity configuration for items and equipment
-const RARITY_CONFIG = {
-  text: { '1': 'Common', '2': 'Uncommon', '3': 'Rare', '4': 'Epic', '5': 'Legendary' },
-  colors: { '1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000' }
-};
-
-const INVENTORY_CONFIG = {
-  categories: INVENTORY_CATEGORIES,
-  variants: INVENTORY_VARIANTS,
-  staticItems: INVENTORY_STATIC_ITEMS,
-  rarityText: RARITY_CONFIG.text,
-  rarityColors: RARITY_CONFIG.colors
-};
+// Configuration constants - inventory data now imported from inventory-database.js
+const INVENTORY_CONFIG = inventoryDatabase || {};
 const CURRENCY_CONFIG = {};
 
 const HUNTING_MARKS_PATHS = [
@@ -190,7 +143,16 @@ const GAME_KEYS = {
   UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
-const EXP_TABLE = [[5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250], [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750], [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750], [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500], [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000], [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500], [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000], [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]];
+const EXP_TABLE = [
+  [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
+  [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
+  [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
+  [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
+  [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
+  [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
+  [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
+  [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
+];
 
 // Get hardcoded monster stats from centralized database
 const HARDCODED_MONSTER_STATS = window.creatureDatabase?.HARDCODED_MONSTER_STATS || {};
@@ -225,7 +187,7 @@ const GAME_DATA = {
   NO_RARITY_KEYS: GAME_KEYS.NO_RARITY,
   CURRENCY_KEYS: GAME_KEYS.CURRENCY,
   UPGRADE_KEYS: GAME_KEYS.UPGRADE,
-  RARITY_COLORS: RARITY_CONFIG.colors,
+  RARITY_COLORS: inventoryDatabase.rarityColors || {},
   EXP_TABLE,
   HARDCODED_MONSTER_STATS,
   REGION_NAME_MAP
@@ -475,6 +437,57 @@ const DOMUtils = {
     return element;
   },
   
+  createStyledElement: function(tag, styles = {}, className = '', textContent = '') {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (textContent) element.textContent = textContent;
+    if (typeof styles === 'string') {
+      element.style.cssText = styles;
+    } else if (styles && typeof styles === 'object') {
+      Object.assign(element.style, styles);
+    }
+    return element;
+  },
+  
+  createButton: function(text, styles = {}, hoverStyles = {}, clickHandler = null) {
+    const button = this.createStyledElement('button', styles, '', text);
+    if (clickHandler) button.addEventListener('click', clickHandler);
+    
+    if (hoverStyles && Object.keys(hoverStyles).length > 0) {
+      const originalStyles = { ...styles };
+      button.addEventListener('mouseenter', () => Object.assign(button.style, hoverStyles));
+      button.addEventListener('mouseleave', () => Object.assign(button.style, originalStyles));
+    }
+    
+    return button;
+  },
+  
+  createSection: function(styles = {}, className = '') {
+    const defaultSectionStyles = {
+      marginBottom: '20px',
+      padding: '16px',
+      background: 'rgba(255, 255, 255, 0.05)',
+      borderRadius: '8px',
+      border: '1px solid rgba(255, 255, 255, 0.1)'
+    };
+    return this.createStyledElement('div', { ...defaultSectionStyles, ...styles }, className);
+  },
+  
+  createTableCell: function(content, styles = {}, className = '') {
+    const defaultCellStyles = {
+      padding: '6px 2px',
+      borderRight: '1px solid #444',
+      textAlign: 'center'
+    };
+    const cell = this.createStyledElement('div', { ...defaultCellStyles, ...styles }, className);
+    if (typeof content === 'string') {
+      cell.textContent = content;
+    } else if (content && content.innerHTML) {
+      cell.innerHTML = content.innerHTML;
+    }
+    return cell;
+  },
+  
   applyCommonStyles: function(element, styles = {}) {
     const defaultStyles = { display: 'flex', flexDirection: 'column', margin: '0', padding: '0', minHeight: '0', height: '100%', ...styles };
     Object.assign(element.style, defaultStyles);
@@ -571,11 +584,11 @@ const DOMUtils = {
 // 4. Utility Functions
 // =======================
 
-// Function to check if user owns a creature
-function isCreatureOwned(creatureName) {
+// Unified function to get all creature status information
+function getCreatureStatus(creatureName) {
   try {
     if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return false;
+      return { owned: false, shiny: false, perfect: false };
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
@@ -597,210 +610,141 @@ function isCreatureOwned(creatureName) {
       creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
     }
     
-    // Check if any owned monster has this gameId
-    return ownedMonsters.some(monster => monster.gameId === creatureGameId);
+    // Find all matching monsters for this creature
+    const matchingMonsters = ownedMonsters.filter(monster => monster.gameId === creatureGameId);
+    
+    if (matchingMonsters.length === 0) {
+      return { owned: false, shiny: false, perfect: false };
+    }
+    
+    // Check for shiny variants
+    const hasShiny = matchingMonsters.some(monster => monster.shiny === true);
+    
+    // Check for perfect creatures (level 50 with 100 total genes)
+    const isPerfect = matchingMonsters.some(monster => {
+      const totalGenes = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
+      
+      // Calculate level from experience using the game's utility function
+      let level = 1;
+      if (globalThis.state?.utils?.expToCurrentLevel && monster.exp) {
+        level = globalThis.state.utils.expToCurrentLevel(monster.exp);
+      }
+      
+      // Debug logging for troubleshooting
+      if (totalGenes >= 90) { // Log creatures close to perfect for debugging
+        console.log(`[Cyclopedia] ${creatureName} (gameId: ${monster.gameId}): level=${level}, genes=${totalGenes}, exp=${monster.exp}`);
+      }
+      
+      return level >= 50 && totalGenes >= 100;
+    });
+    
+    return {
+      owned: true,
+      shiny: hasShiny,
+      perfect: isPerfect
+    };
   } catch (error) {
-    console.warn('[Cyclopedia] Error checking creature ownership:', error);
-    return false;
+    console.warn('[Cyclopedia] Error checking creature status:', error);
+    return { owned: false, shiny: false, perfect: false };
   }
+}
+
+// Function to check if user owns a creature
+function isCreatureOwned(creatureName) {
+  return getCreatureStatus(creatureName).owned;
 }
 
 // Function to check if user has any shiny variants of a creature
 function hasShinyCreature(creatureName) {
-  try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return false;
-    }
-    
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const ownedMonsters = playerContext.monsters || [];
-    
-    // Get the gameId for this creature name
-    let creatureGameId = null;
-    
-    // Try to get gameId from monsterNameMap first
-    if (cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
-      if (entry) {
-        creatureGameId = entry.index;
-      }
-    }
-    
-    // Fallback to BestiaryModAPI utility
-    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
-    }
-    
-    // Check if any owned monster with this gameId has shiny property
-    return ownedMonsters.some(monster => monster.gameId === creatureGameId && monster.shiny === true);
-  } catch (error) {
-    console.warn('[Cyclopedia] Error checking if creature has shiny variants:', error);
-    return false;
-  }
+  return getCreatureStatus(creatureName).shiny;
 }
 
 // Function to check if user has a perfect creature (level 50 with 100 total genes)
 function isCreaturePerfect(creatureName) {
+  return getCreatureStatus(creatureName).perfect;
+}
+
+// Unified function to get all equipment status information
+function getEquipmentStatus(equipmentName) {
   try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.monsters) {
-      return false;
+    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
+      return { owned: false, isT5: false };
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
-    const ownedMonsters = playerContext.monsters || [];
+    const ownedEquips = playerContext.equips || [];
     
-    // Get the gameId for this creature name
-    let creatureGameId = null;
+    // Get the gameId for this equipment name
+    let equipmentGameId = null;
     
-    // Try to get gameId from monsterNameMap first
-    if (cyclopediaState.monsterNameMap) {
-      const entry = cyclopediaState.monsterNameMap.get(creatureName.toLowerCase());
-      if (entry) {
-        creatureGameId = entry.index;
+    // Try to get gameId from BestiaryModAPI utility
+    if (window.BestiaryModAPI?.utility?.maps) {
+      equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
+    }
+    
+    // Fallback to global state utils
+    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
+      const utils = globalThis.state.utils;
+      for (let i = 1; i < 1000; i++) {
+        try {
+          const eq = utils.getEquipment(i);
+          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
+            equipmentGameId = i;
+            break;
+          }
+        } catch (e) {
+          console.log('[Cyclopedia] Error in equipment ownership check:', e);
+        }
       }
     }
     
-    // Fallback to BestiaryModAPI utility
-    if (creatureGameId === null && window.BestiaryModAPI?.utility?.maps) {
-      creatureGameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds?.get(creatureName.toLowerCase());
+    // Find all matching equipment for this item
+    const matchingEquips = ownedEquips.filter(equip => equip.gameId === equipmentGameId);
+    
+    if (matchingEquips.length === 0) {
+      return { owned: false, isT5: false };
     }
     
-    // Check if any owned monster with this gameId is perfect (level 50 with 100 total genes)
-    return ownedMonsters.some(monster => {
-      if (monster.gameId === creatureGameId) {
-        const totalGenes = (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0);
-        
-        // Calculate level from experience using the game's utility function
-        let level = 1;
-        if (globalThis.state?.utils?.expToCurrentLevel && monster.exp) {
-          level = globalThis.state.utils.expToCurrentLevel(monster.exp);
-        }
-        
-        // Debug logging for troubleshooting
-        if (totalGenes >= 90) { // Log creatures close to perfect for debugging
-          console.log(`[Cyclopedia] ${creatureName} (gameId: ${monster.gameId}): level=${level}, genes=${totalGenes}, exp=${monster.exp}`);
-        }
-        
-        return level >= 50 && totalGenes >= 100;
+    // Check if user has equipment with ALL 3 stats at tier 5
+    let t5Stats = 0;
+    const totalStats = 3; // hp, ad, ap
+    
+    // Check each stat type for tier 5 equipment
+    const statTypes = ['hp', 'ad', 'ap'];
+    statTypes.forEach(statType => {
+      const statEquips = ownedEquips.filter(e => 
+        e.gameId === equipmentGameId && 
+        e.stat === statType && 
+        e.tier >= 5
+      );
+      if (statEquips.length > 0) {
+        t5Stats++;
       }
-      return false;
     });
+    
+    // Debug logging for troubleshooting
+    if (t5Stats >= 2) { // Log equipment close to T5 for debugging
+      console.log(`[Cyclopedia] ${equipmentName} (gameId: ${equipmentGameId}): T5 stats=${t5Stats}/${totalStats}`);
+    }
+    
+    return {
+      owned: true,
+      isT5: t5Stats >= totalStats
+    };
   } catch (error) {
-    console.warn('[Cyclopedia] Error checking if creature is perfect:', error);
-    return false;
+    console.warn('[Cyclopedia] Error checking equipment status:', error);
+    return { owned: false, isT5: false };
   }
 }
 
 // Function to check if user owns equipment
 function isEquipmentOwned(equipmentName) {
-  try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
-      return false;
-    }
-    
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const ownedEquips = playerContext.equips || [];
-    
-    // Get the gameId for this equipment name
-    let equipmentGameId = null;
-    
-    // Try to get gameId from BestiaryModAPI utility
-    if (window.BestiaryModAPI?.utility?.maps) {
-      equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
-    }
-    
-    // Fallback to global state utils
-    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
-      const utils = globalThis.state.utils;
-      for (let i = 1; i < 1000; i++) {
-        try {
-          const eq = utils.getEquipment(i);
-          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
-            equipmentGameId = i;
-            break;
-          }
-        } catch (e) {
-          console.log('[Cyclopedia] Error in creature ownership check:', e);
-        }
-      }
-    }
-    
-    // Check if any owned equipment has this gameId
-    return ownedEquips.some(equip => equip.gameId === equipmentGameId);
-  } catch (error) {
-    console.warn('[Cyclopedia] Error checking equipment ownership:', error);
-    return false;
-  }
+  return getEquipmentStatus(equipmentName).owned;
 }
 
 // Function to check if user has T5 equipment (ALL 3 stats: hp, ad, ap at tier 5)
 function isEquipmentT5(equipmentName) {
-  try {
-    if (!globalThis.state?.player?.getSnapshot?.()?.context?.equips) {
-      return false;
-    }
-    
-    const playerContext = globalThis.state.player.getSnapshot().context;
-    const ownedEquips = playerContext.equips || [];
-    
-    // Get the gameId for this equipment name
-    let equipmentGameId = null;
-    
-    // Try to get gameId from BestiaryModAPI utility
-    if (window.BestiaryModAPI?.utility?.maps) {
-      equipmentGameId = window.BestiaryModAPI.utility.maps.equipmentNamesToGameIds?.get(equipmentName.toLowerCase());
-    }
-    
-    // Fallback to global state utils
-    if (equipmentGameId === null && globalThis.state?.utils?.getEquipment) {
-      const utils = globalThis.state.utils;
-      for (let i = 1; i < 1000; i++) {
-        try {
-          const eq = utils.getEquipment(i);
-          if (eq?.metadata?.name?.toLowerCase() === equipmentName.toLowerCase()) {
-            equipmentGameId = i;
-            break;
-          }
-        } catch (e) {
-          console.log('[Cyclopedia] Error in creature ownership check:', e);
-        }
-      }
-    }
-    
-    // Check if user has equipment with ALL 3 stats at tier 5
-    return ownedEquips.some(equip => {
-      if (equip.gameId === equipmentGameId) {
-        // Count how many stats are at tier 5
-        let t5Stats = 0;
-        const totalStats = 3; // hp, ad, ap
-        
-        // Check each stat type for tier 5 equipment
-        const statTypes = ['hp', 'ad', 'ap'];
-        statTypes.forEach(statType => {
-          const statEquips = ownedEquips.filter(e => 
-            e.gameId === equipmentGameId && 
-            e.stat === statType && 
-            e.tier >= 5
-          );
-          if (statEquips.length > 0) {
-            t5Stats++;
-          }
-        });
-        
-        // Debug logging for troubleshooting
-        if (t5Stats >= 2) { // Log equipment close to T5 for debugging
-          console.log(`[Cyclopedia] ${equipmentName} (gameId: ${equipmentGameId}): T5 stats=${t5Stats}/${totalStats}`);
-        }
-        
-        // Return true only if ALL 3 stats are at tier 5
-        return t5Stats >= totalStats;
-      }
-      return false;
-    });
-  } catch (error) {
-    console.warn('[Cyclopedia] Error checking if equipment is T5:', error);
-    return false;
-  }
+  return getEquipmentStatus(equipmentName).isT5;
 }
 
 // Function to get creature roles from monster data
@@ -1943,57 +1887,61 @@ window.cyclopediaMenuObserver = cyclopediaMenuObserver;
 // Creates a custom confirmation modal for deleting runs
 function showDeleteConfirmationModal(runType, runData, onConfirm) {
   // Create modal overlay
-  const overlay = document.createElement('div');
-  overlay.style.position = 'fixed';
-  overlay.style.top = '0';
-  overlay.style.left = '0';
-  overlay.style.width = '100%';
-  overlay.style.height = '100%';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-  overlay.style.zIndex = '10000';
-  overlay.style.display = 'flex';
-  overlay.style.justifyContent = 'center';
-  overlay.style.alignItems = 'center';
+  const overlay = DOMUtils.createStyledElement('div', {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    zIndex: '10000',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center'
+  });
   
   // Create modal container
-  const modal = document.createElement('div');
-  modal.style.backgroundColor = '#232323';
-  modal.style.border = '3px solid #444';
-  modal.style.borderRadius = '8px';
-  modal.style.padding = '25px';
-  modal.style.maxWidth = '450px';
-  modal.style.width = '90%';
-  modal.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.6)';
-  modal.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-  modal.style.position = 'relative';
+  const modal = DOMUtils.createStyledElement('div', {
+    backgroundColor: '#232323',
+    border: '3px solid #444',
+    borderRadius: '8px',
+    padding: '25px',
+    maxWidth: '450px',
+    width: '90%',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6)',
+    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    position: 'relative'
+  });
   
   // Create title
-  const titleElement = document.createElement('div');
-  titleElement.textContent = `Delete ${runType} Run`;
-  titleElement.style.fontSize = '20px';
-  titleElement.style.fontWeight = 'bold';
-  titleElement.style.color = '#ffe066';
-  titleElement.style.marginBottom = '20px';
-  titleElement.style.textAlign = 'center';
-  titleElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+  const titleElement = DOMUtils.createStyledElement('div', {
+    fontSize: '20px',
+    fontWeight: 'bold',
+    color: '#ffe066',
+    marginBottom: '20px',
+    textAlign: 'center',
+    textShadow: '2px 2px 4px rgba(0, 0, 0, 0.5)'
+  }, '', `Delete ${runType} Run`);
   
   // Create message
-  const messageElement = document.createElement('div');
-  messageElement.style.fontSize = '16px';
-  messageElement.style.color = '#fff';
-  messageElement.style.marginBottom = '25px';
-  messageElement.style.textAlign = 'center';
-  messageElement.style.lineHeight = '1.5';
+  const messageElement = DOMUtils.createStyledElement('div', {
+    fontSize: '16px',
+    color: '#fff',
+    marginBottom: '25px',
+    textAlign: 'center',
+    lineHeight: '1.5'
+  });
   
   // Create run details
-  const detailsElement = document.createElement('div');
-  detailsElement.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-  detailsElement.style.border = '1px solid #555';
-  detailsElement.style.borderRadius = '6px';
-  detailsElement.style.padding = '15px';
-  detailsElement.style.marginBottom = '25px';
-  detailsElement.style.fontSize = '14px';
-  detailsElement.style.color = '#ccc';
+  const detailsElement = DOMUtils.createStyledElement('div', {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    border: '1px solid #555',
+    borderRadius: '6px',
+    padding: '15px',
+    marginBottom: '25px',
+    fontSize: '14px',
+    color: '#ccc'
+  });
   
   let detailsHtml = '';
   if (runData.time) {
@@ -2012,72 +1960,57 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
   detailsElement.innerHTML = detailsHtml;
   
   // Create warning message
-  const warningElement = document.createElement('div');
-  warningElement.textContent = 'This action cannot be undone.';
-  warningElement.style.fontSize = '14px';
-  warningElement.style.color = '#ff6b6b';
-  warningElement.style.textAlign = 'center';
-  warningElement.style.marginBottom = '25px';
-  warningElement.style.fontStyle = 'italic';
+  const warningElement = DOMUtils.createStyledElement('div', {
+    fontSize: '14px',
+    color: '#ff6b6b',
+    textAlign: 'center',
+    marginBottom: '25px',
+    fontStyle: 'italic'
+  }, '', 'This action cannot be undone.');
   
   // Create button container
-  const buttonContainer = document.createElement('div');
-  buttonContainer.style.display = 'flex';
-  buttonContainer.style.justifyContent = 'center';
-  buttonContainer.style.gap = '20px';
-  
-  // Create cancel button
-  const cancelButton = document.createElement('button');
-  cancelButton.textContent = 'Cancel';
-  cancelButton.style.backgroundColor = '#555';
-  cancelButton.style.color = '#fff';
-  cancelButton.style.border = '2px solid #666';
-  cancelButton.style.borderRadius = '6px';
-  cancelButton.style.padding = '12px 24px';
-  cancelButton.style.cursor = 'pointer';
-  cancelButton.style.fontSize = '16px';
-  cancelButton.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-  cancelButton.style.fontWeight = 'bold';
-  cancelButton.style.transition = 'all 0.2s ease';
-  cancelButton.style.minWidth = '100px';
-  
-  cancelButton.addEventListener('mouseenter', () => {
-    cancelButton.style.backgroundColor = '#666';
-    cancelButton.style.borderColor = '#777';
-    cancelButton.style.transform = 'translateY(-2px)';
+  const buttonContainer = DOMUtils.createStyledElement('div', {
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '20px'
   });
   
-  cancelButton.addEventListener('mouseleave', () => {
-    cancelButton.style.backgroundColor = '#555';
-    cancelButton.style.borderColor = '#666';
-    cancelButton.style.transform = 'translateY(0)';
+  // Create cancel button
+  const cancelButton = DOMUtils.createButton('Cancel', {
+    backgroundColor: '#555',
+    color: '#fff',
+    border: '2px solid #666',
+    borderRadius: '6px',
+    padding: '12px 24px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontWeight: 'bold',
+    transition: 'all 0.2s ease',
+    minWidth: '100px'
+  }, {
+    backgroundColor: '#666',
+    borderColor: '#777',
+    transform: 'translateY(-2px)'
   });
   
   // Create delete button
-  const deleteButton = document.createElement('button');
-  deleteButton.textContent = 'Delete';
-  deleteButton.style.backgroundColor = '#d32f2f';
-  deleteButton.style.color = '#fff';
-  deleteButton.style.border = '2px solid #f44336';
-  deleteButton.style.borderRadius = '6px';
-  deleteButton.style.padding = '12px 24px';
-  deleteButton.style.cursor = 'pointer';
-  deleteButton.style.fontSize = '16px';
-  deleteButton.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-  deleteButton.style.fontWeight = 'bold';
-  deleteButton.style.transition = 'all 0.2s ease';
-  deleteButton.style.minWidth = '100px';
-  
-  deleteButton.addEventListener('mouseenter', () => {
-    deleteButton.style.backgroundColor = '#f44336';
-    deleteButton.style.borderColor = '#ff5252';
-    deleteButton.style.transform = 'translateY(-2px)';
-  });
-  
-  deleteButton.addEventListener('mouseleave', () => {
-    deleteButton.style.backgroundColor = '#d32f2f';
-    deleteButton.style.borderColor = '#f44336';
-    deleteButton.style.transform = 'translateY(0)';
+  const deleteButton = DOMUtils.createButton('Delete', {
+    backgroundColor: '#d32f2f',
+    color: '#fff',
+    border: '2px solid #f44336',
+    borderRadius: '6px',
+    padding: '12px 24px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+    fontWeight: 'bold',
+    transition: 'all 0.2s ease',
+    minWidth: '100px'
+  }, {
+    backgroundColor: '#f44336',
+    borderColor: '#ff5252',
+    transform: 'translateY(-2px)'
   });
   
   // Add event listeners
@@ -2085,10 +2018,7 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
     document.body.removeChild(overlay);
   };
   
-  cancelButton.addEventListener('click', () => {
-    closeModal();
-  });
-  
+  cancelButton.addEventListener('click', closeModal);
   deleteButton.addEventListener('click', () => {
     closeModal();
     if (onConfirm) onConfirm();
@@ -5000,42 +4930,55 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '400px'
         });
 
-        const playerInfoSection = document.createElement('div');
-        playerInfoSection.style.cssText = `margin-bottom: 20px; padding: 16px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);`;
+        const playerInfoSection = DOMUtils.createSection();
 
-        const playerInfoHeader = document.createElement('div');
-        playerInfoHeader.style.cssText = `display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 16px; font-weight: bold; color: ${COLOR_CONSTANTS.PRIMARY};`;
+        const playerInfoHeader = DOMUtils.createStyledElement('div', {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '12px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          color: COLOR_CONSTANTS.PRIMARY
+        }, '', '');
         playerInfoHeader.innerHTML = `<span>📄</span><span>Player information</span>`;
         playerInfoSection.appendChild(playerInfoHeader);
 
-        const playerName = document.createElement('div');
-        playerName.style.cssText = `display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; color: #ccc;`;
+        const playerName = DOMUtils.createStyledElement('div', {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '8px',
+          fontSize: '14px',
+          color: '#ccc'
+        }, '', '');
         playerName.innerHTML = `<span style="color: #4CAF50;">🛡️</span><span style="color: #888;">[Player Name]</span>`;
         playerInfoSection.appendChild(playerName);
 
-        const level = document.createElement('div');
-        level.style.cssText = `margin-bottom: 8px; font-size: 14px; color: #ccc;`;
+        const level = DOMUtils.createStyledElement('div', {
+          marginBottom: '8px',
+          fontSize: '14px',
+          color: '#ccc'
+        }, '', '');
         level.innerHTML = `<span>Level</span><div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;"><div style="flex: 1; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px;"><div style="width: 50%; height: 100%; background: #FFD700; border-radius: 4px;"></div></div><span style="color: #888;">[Level]</span></div>`;
         playerInfoSection.appendChild(level);
 
-        const createdAt = document.createElement('div');
-        createdAt.style.cssText = `
-          margin-bottom: 8px;
-          font-size: 14px;
-          color: #ccc;
-        `;
+        const createdAt = DOMUtils.createStyledElement('div', {
+          marginBottom: '8px',
+          fontSize: '14px',
+          color: '#ccc'
+        }, '', '');
         createdAt.innerHTML = `
           <span>Created at</span>
           <div style="color: #888; margin-top: 2px;">[Date]</div>
         `;
         playerInfoSection.appendChild(createdAt);
 
-        const status = document.createElement('div');
-        status.style.cssText = `
-          margin-bottom: 8px;
-          font-size: 14px;
-          color: #ccc;
-        `;
+        const status = DOMUtils.createStyledElement('div', {
+          marginBottom: '8px',
+          fontSize: '14px',
+          color: '#ccc'
+        }, '', '');
         status.innerHTML = `
           <span>Status</span>
           <div style="display: flex; align-items: center; gap: 4px; margin-top: 2px;">
@@ -5045,11 +4988,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         `;
         playerInfoSection.appendChild(status);
 
-        const loyaltyPoints = document.createElement('div');
-        loyaltyPoints.style.cssText = `
-          font-size: 14px;
-          color: #ccc;
-        `;
+        const loyaltyPoints = DOMUtils.createStyledElement('div', {
+          fontSize: '14px',
+          color: '#ccc'
+        }, '', '');
         loyaltyPoints.innerHTML = `
           <span>Loyalty Points</span>
           <div style="color: #888; margin-top: 2px;">[Points]</div>
@@ -5058,35 +5000,26 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
         profileContainer.appendChild(playerInfoSection);
 
-        const playerStatsSection = document.createElement('div');
-        playerStatsSection.style.cssText = `
-          margin-bottom: 20px;
-          padding: 16px;
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 8px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-        `;
+        const playerStatsSection = DOMUtils.createSection();
 
-        const playerStatsHeader = document.createElement('div');
-        playerStatsHeader.style.cssText = `
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 12px;
-          font-size: 16px;
-          font-weight: bold;
-          color: ${COLOR_CONSTANTS.PRIMARY};
-        `;
+        const playerStatsHeader = DOMUtils.createStyledElement('div', {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '12px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          color: COLOR_CONSTANTS.PRIMARY
+        }, '', '');
         playerStatsHeader.innerHTML = `
           <span>📊</span>
           <span>Player stats</span>
         `;
         playerStatsSection.appendChild(playerStatsHeader);
 
-        const currentTotal = document.createElement('div');
-        currentTotal.style.cssText = `
-          margin-bottom: 12px;
-        `;
+        const currentTotal = DOMUtils.createStyledElement('div', {
+          marginBottom: '12px'
+        }, '', '');
         currentTotal.innerHTML = `
           <div style="font-size: 14px; font-weight: bold; color: #ccc; margin-bottom: 8px;">Current total</div>
           <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -7998,49 +7931,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       speedrunTableTitle.textContent = 'Top 5 Speedruns';
       speedrunTableCol.appendChild(speedrunTableTitle);
       
-      const speedrunTable = document.createElement('div');
-      speedrunTable.style.border = '1px solid #444';
-      speedrunTable.style.borderRadius = '4px';
-      speedrunTable.style.overflow = 'hidden';
-      speedrunTable.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+      const speedrunTable = DOMUtils.createStyledElement('div', {
+        border: '1px solid #444',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        backgroundColor: 'rgba(255, 255, 255, 0.02)'
+      });
       
       // Table header
-      const speedrunHeader = document.createElement('div');
-      speedrunHeader.style.display = 'grid';
-      speedrunHeader.style.gridTemplateColumns = '30px 1fr 30px 30px';
-      speedrunHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-      speedrunHeader.style.borderBottom = '1px solid #444';
-      speedrunHeader.style.fontWeight = 'bold';
-      speedrunHeader.style.fontSize = '11px';
-      speedrunHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
-      speedrunHeader.style.color = COLOR_CONSTANTS.TEXT;
+      const speedrunHeader = DOMUtils.createStyledElement('div', {
+        display: 'grid',
+        gridTemplateColumns: '30px 1fr 30px 30px',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderBottom: '1px solid #444',
+        fontWeight: 'bold',
+        fontSize: '11px',
+        fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+        color: COLOR_CONSTANTS.TEXT
+      });
       
       // Medal column header (empty)
-      const medalHeader = document.createElement('div');
-      medalHeader.style.padding = '6px 2px';
-      medalHeader.style.borderRight = '1px solid #444';
-      medalHeader.style.textAlign = 'center';
-      medalHeader.textContent = '';
+      const medalHeader = DOMUtils.createTableCell('', { padding: '6px 2px' });
       speedrunHeader.appendChild(medalHeader);
       
-      const timeHeader = document.createElement('div');
-      timeHeader.style.padding = '6px 4px';
-      timeHeader.style.borderRight = '1px solid #444';
-      timeHeader.style.textAlign = 'center';
-      timeHeader.textContent = 'Time';
+      const timeHeader = DOMUtils.createTableCell('Time', { padding: '6px 4px' });
       speedrunHeader.appendChild(timeHeader);
       
-      const copyHeader = document.createElement('div');
-      copyHeader.style.padding = '4px 2px';
-      copyHeader.style.borderRight = '1px solid #444';
-      copyHeader.style.textAlign = 'center';
-      copyHeader.textContent = '';
+      const copyHeader = DOMUtils.createTableCell('', { padding: '4px 2px' });
       speedrunHeader.appendChild(copyHeader);
       
-      const deleteHeader = document.createElement('div');
-      deleteHeader.style.padding = '4px 2px';
-      deleteHeader.style.textAlign = 'center';
-      deleteHeader.textContent = '';
+      const deleteHeader = DOMUtils.createTableCell('', { padding: '4px 2px', borderRight: 'none' });
       speedrunHeader.appendChild(deleteHeader);
       
       speedrunTable.appendChild(speedrunHeader);
@@ -10087,8 +10007,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       activeCyclopediaModal = api.ui.components.createModal({
         title: 'Cyclopedia',
-        width: CYCLOPEDIA_MODAL_WIDTH,
-        height: CYCLOPEDIA_MODAL_HEIGHT,
+        width: LAYOUT_CONSTANTS.MODAL_WIDTH,
+        height: LAYOUT_CONSTANTS.MODAL_HEIGHT,
         content: content,
         buttons: [],
         onClose: () => {
@@ -12322,3 +12242,4 @@ window.cleanupSuperModsCyclopediajs = exports.cleanup;
 if (typeof context !== 'undefined' && context.api) {
   exports.init();
 }
+

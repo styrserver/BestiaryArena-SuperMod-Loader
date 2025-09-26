@@ -11,6 +11,105 @@ function safeRemoveElement(element) {
   }
 }
 
+// Toast creation function based on Welcome.js implementation
+function createToast({ message, type = 'info', duration = 5000, icon = null }) {
+  // Get or create the main toast container
+  let mainContainer = document.getElementById('configurator-toast-container');
+  if (!mainContainer) {
+    mainContainer = document.createElement('div');
+    mainContainer.id = 'configurator-toast-container';
+    mainContainer.style.cssText = `
+      position: fixed;
+      z-index: 9999;
+      inset: 16px 16px 64px;
+      pointer-events: none;
+    `;
+    mainContainer.setAttribute('data-aria-hidden', 'true');
+    mainContainer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(mainContainer);
+  }
+  
+  // Count existing toasts to calculate stacking position
+  const existingToasts = mainContainer.querySelectorAll('.toast-item');
+  const stackOffset = existingToasts.length * 46; // 46px per toast
+  
+  // Create the flex container for this specific toast
+  const flexContainer = document.createElement('div');
+  flexContainer.className = 'toast-item';
+  flexContainer.style.cssText = `
+    left: 0px;
+    right: 0px;
+    display: flex;
+    position: absolute;
+    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+    transform: translateY(-${stackOffset}px);
+    bottom: 0px;
+    justify-content: flex-end;
+  `;
+  
+  // Create toast button with proper animation classes
+  const toast = document.createElement('button');
+  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+  
+  // Create widget structure to match game's toast style
+  const widgetTop = document.createElement('div');
+  widgetTop.className = 'widget-top h-2.5';
+  
+  const widgetBottom = document.createElement('div');
+  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+  
+  // Add icon if provided
+  if (icon) {
+    const iconImg = document.createElement('img');
+    iconImg.alt = type;
+    iconImg.src = icon;
+    iconImg.className = 'pixelated';
+    iconImg.style.cssText = 'width: 20px; height: 20px;';
+    widgetBottom.appendChild(iconImg);
+  }
+  
+  // Add message
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'text-left';
+  messageDiv.innerHTML = message; // Use innerHTML to support HTML content
+  widgetBottom.appendChild(messageDiv);
+  
+  // Assemble toast
+  toast.appendChild(widgetTop);
+  toast.appendChild(widgetBottom);
+  flexContainer.appendChild(toast);
+  mainContainer.appendChild(flexContainer);
+  
+  // Auto-remove after duration
+  const timeoutId = setTimeout(() => {
+    if (flexContainer && flexContainer.parentNode) {
+      flexContainer.parentNode.removeChild(flexContainer);
+      updateToastPositions(mainContainer);
+    }
+    activeTimeouts.delete(timeoutId);
+  }, duration);
+  activeTimeouts.add(timeoutId);
+  
+  return {
+    element: flexContainer,
+    remove: () => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        updateToastPositions(mainContainer);
+      }
+    }
+  };
+}
+
+// Update positions of remaining toasts when one is removed
+function updateToastPositions(container) {
+  const toasts = container.querySelectorAll('.toast-item');
+  toasts.forEach((toast, index) => {
+    const offset = index * 46;
+    toast.style.transform = `translateY(-${offset}px)`;
+  });
+}
+
 // Configuration
 const defaultConfig = {
   enabled: true,
@@ -19,6 +118,10 @@ const defaultConfig = {
 
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
+
+// Track timeouts and event listeners for cleanup
+const activeTimeouts = new Set();
+const activeEventListeners = new Map();
 
 // Utility function to generate user-friendly summary
 function generateSummary(data, isImport = false) {
@@ -93,7 +196,8 @@ function addConfiguratorHeaderButton() {
     // Find the header <ul> by its class
     const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
     if (!headerUl) {
-      setTimeout(tryInsert, 500);
+      const timeoutId = setTimeout(tryInsert, 500);
+      activeTimeouts.add(timeoutId);
       return;
     }
     
@@ -209,22 +313,28 @@ function openConfigurator() {
   });
 
   // Add event listeners after modal is created
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     const exportBtn = document.getElementById('export-config-btn');
     const importBtn = document.getElementById('import-config-btn');
     
     if (exportBtn) {
-      exportBtn.addEventListener('click', () => {
+      const exportHandler = () => {
         exportConfiguration(modal);
-      });
+      };
+      exportBtn.addEventListener('click', exportHandler);
+      activeEventListeners.set(exportBtn, { event: 'click', handler: exportHandler });
     }
     
     if (importBtn) {
-      importBtn.addEventListener('click', () => {
+      const importHandler = () => {
         importConfiguration(modal);
-      });
+      };
+      importBtn.addEventListener('click', importHandler);
+      activeEventListeners.set(importBtn, { event: 'click', handler: importHandler });
     }
+    activeTimeouts.delete(timeoutId);
   }, 100);
+  activeTimeouts.add(timeoutId);
   } catch (error) {
     console.error('[Configurator] Error creating modal:', error);
     // Fallback: show a simple alert
@@ -429,17 +539,31 @@ async function exportConfiguration(modal) {
       exportBtn.disabled = false;
     }
     
-    // Show success message
+    // Show success message using toast
     try {
-      api.ui.components.createModal({
-        title: 'Export Successful',
-        content: `<p style="color: #a6adc8;">${message}</p>`,
-        buttons: [{ text: 'OK', primary: true }]
+      createToast({
+        message: `<span class="text-success">✅ Configuration exported successfully!</span><br><span class="text-whiteHighlight">📦 What was saved:</span><br>• ${summary.join('<br>• ')}`,
+        type: 'success',
+        duration: 8000
       });
-    } catch (modalError) {
-      console.error('Could not show export success modal:', modalError);
+    } catch (toastError) {
+      console.error('Could not show export success toast:', toastError);
       // Fallback: show alert instead
       alert(`✅ Configuration exported successfully!\n\n📦 What was saved:\n• ${summary.join('\n• ')}`);
+    }
+    
+    // Close the modal after successful export
+    try {
+      if (modal && typeof modal.close === 'function') {
+        modal.close();
+      } else {
+        // Fallback: remove modal elements from DOM
+        document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
+          safeRemoveElement(el);
+        });
+      }
+    } catch (closeError) {
+      console.warn('[Configurator] Could not close modal after export:', closeError);
     }
     
   } catch (error) {
@@ -452,15 +576,15 @@ async function exportConfiguration(modal) {
       exportBtn.disabled = false;
     }
     
-    // Show error message
+    // Show error message using toast
     try {
-      api.ui.components.createModal({
-        title: 'Export Failed',
-        content: `<p style="color: #e78284;">Failed to export configuration: ${error.message}</p>`,
-        buttons: [{ text: 'OK', primary: true }]
+      createToast({
+        message: `<span class="text-error">❌ Export Failed</span><br><span class="text-whiteHighlight">Failed to export configuration: ${error.message}</span>`,
+        type: 'error',
+        duration: 6000
       });
-    } catch (modalError) {
-      console.error('Could not show export error modal:', modalError);
+    } catch (toastError) {
+      console.error('Could not show export error toast:', toastError);
       alert(`Failed to export configuration: ${error.message}`);
     }
   }
@@ -752,49 +876,16 @@ async function importConfiguration(modal) {
          
          console.log('[Configurator] Success message:', message);
          
-                             // Show success message with fallback handling
-          if (api && api.ui && api.ui.components && api.ui.components.createModal) {
-            try {
-              // Try to create the modal
-              const successModal = api.ui.components.createModal({
-                title: 'Import Successful',
-                content: `<p style="color: #a6adc8;">${message}</p>`,
-                buttons: [{ text: 'OK', primary: true }]
-              });
-              
-              // Check if modal was created and is visible
-              setTimeout(() => {
-                const modalElements = document.querySelectorAll('[role="dialog"], .modal-bg, .modal-content, .modal-overlay');
-                if (modalElements.length === 0) {
-                  // Modal was auto-closed, create persistent modal
-                  try {
-                    api.ui.components.createModal({
-                      title: 'Import Successful',
-                      content: `<p style="color: #a6adc8;">${message}</p>`,
-                      buttons: [{ 
-                        text: 'OK', 
-                        primary: true,
-                        onClick: (e, modalObj) => {
-                          if (modalObj && typeof modalObj.close === 'function') {
-                            modalObj.close();
-                          }
-                        }
-                      }]
-                    });
-                  } catch (persistentError) {
-                    console.error('[Configurator] Persistent modal failed:', persistentError);
-                    alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Please refresh the page to see all changes.`);
-                  }
-                }
-              }, 100);
-              
-            } catch (modalError) {
-              console.error('[Configurator] Could not show import success modal:', modalError);
-              // Fallback: show alert instead
-              alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Please refresh the page to see all changes.`);
-            }
-          } else {
-            // UI components not available, use alert as fallback
+                             // Show success message using toast
+          try {
+            createToast({
+              message: `<span class="text-success">✅ Configuration imported successfully!</span><br><span class="text-whiteHighlight">📦 What was restored:</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 Please refresh the page to see all changes.</span>`,
+              type: 'success',
+              duration: 10000
+            });
+          } catch (toastError) {
+            console.error('[Configurator] Could not show import success toast:', toastError);
+            // Fallback: show alert instead
             alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Please refresh the page to see all changes.`);
           }
         
@@ -831,15 +922,15 @@ async function importConfiguration(modal) {
            importBtn.disabled = false;
          }
          
-         // Show error message
+         // Show error message using toast
          try {
-           api.ui.components.createModal({
-             title: 'Import Failed',
-             content: `<p style="color: #e78284;">Failed to import configuration: ${error.message}</p>`,
-             buttons: [{ text: 'OK', primary: true }]
+           createToast({
+             message: `<span class="text-error">❌ Import Failed</span><br><span class="text-whiteHighlight">Failed to import configuration: ${error.message}</span>`,
+             type: 'error',
+             duration: 6000
            });
-         } catch (modalError) {
-           console.error('Could not show error modal:', modalError);
+         } catch (toastError) {
+           console.error('Could not show error toast:', toastError);
            alert(`Failed to import configuration: ${error.message}`);
          }
        }
@@ -852,11 +943,16 @@ async function importConfiguration(modal) {
     input.click();
   } catch (error) {
     console.error('Error setting up import:', error);
-    api.ui.components.createModal({
-      title: 'Import Error',
-      content: `<p style="color: #e78284;">Failed to set up import: ${error.message}</p>`,
-      buttons: [{ text: 'OK', primary: true }]
-    });
+    try {
+      createToast({
+        message: `<span class="text-error">❌ Import Setup Error</span><br><span class="text-whiteHighlight">Failed to set up import: ${error.message}</span>`,
+        type: 'error',
+        duration: 6000
+      });
+    } catch (toastError) {
+      console.error('Could not show setup error toast:', toastError);
+      alert(`Failed to set up import: ${error.message}`);
+    }
   }
 }
 
@@ -870,29 +966,135 @@ exports = {
   importConfiguration,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
+  },
+  cleanup: () => {
+    console.log('[Configurator] Exports cleanup called');
+    try {
+      // Call the global cleanup function
+      if (window.cleanupSuperModsConfiguratorjs) {
+        window.cleanupSuperModsConfiguratorjs();
+      }
+      console.log('[Configurator] Exports cleanup completed');
+    } catch (error) {
+      console.error('[Configurator] Exports cleanup error:', error);
+    }
   }
 };
 
 // Cleanup function for Configurator mod
 window.cleanupSuperModsConfiguratorjs = function() {
-  console.log('[Configurator] Running cleanup...');
-  
-  // Remove configurator header button
-  const configuratorBtn = document.querySelector('.configurator-header-btn');
-  if (configuratorBtn && configuratorBtn.parentNode) {
-    configuratorBtn.parentNode.remove();
+  try {
+    console.log('[Configurator] Starting comprehensive cleanup...');
+    
+    // Clear all active timeouts
+    activeTimeouts.forEach(timeoutId => {
+      try {
+        clearTimeout(timeoutId);
+      } catch (error) {
+        console.warn('[Configurator] Error clearing timeout:', error);
+      }
+    });
+    activeTimeouts.clear();
+    
+    // Remove all tracked event listeners
+    activeEventListeners.forEach((listenerInfo, element) => {
+      try {
+        if (element && element.removeEventListener) {
+          element.removeEventListener(listenerInfo.event, listenerInfo.handler);
+        }
+      } catch (error) {
+        console.warn('[Configurator] Error removing event listener:', error);
+      }
+    });
+    activeEventListeners.clear();
+    
+    // Remove configurator header button
+    const configuratorBtn = document.querySelector('.configurator-header-btn');
+    if (configuratorBtn && configuratorBtn.parentNode) {
+      try {
+        configuratorBtn.parentNode.remove();
+      } catch (error) {
+        console.warn('[Configurator] Error removing header button:', error);
+      }
+    }
+    
+    // Remove any existing modals (multiple selectors for comprehensive cleanup)
+    const modalSelectors = [
+      '#configurator-modal',
+      '.modal-bg',
+      '.modal-content', 
+      '.modal-overlay',
+      '[role="dialog"]'
+    ];
+    
+    modalSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(element => {
+        try {
+          safeRemoveElement(element);
+        } catch (error) {
+          console.warn('[Configurator] Error removing modal element:', error);
+        }
+      });
+    });
+    
+    // Remove toast container and all toasts
+    const toastContainer = document.getElementById('configurator-toast-container');
+    if (toastContainer) {
+      try {
+        safeRemoveElement(toastContainer);
+      } catch (error) {
+        console.warn('[Configurator] Error removing toast container:', error);
+      }
+    }
+    
+    // Clean up any temporary file input elements
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    fileInputs.forEach(input => {
+      try {
+        if (input.parentNode && input.parentNode.contains(input)) {
+          input.parentNode.removeChild(input);
+        }
+      } catch (error) {
+        console.warn('[Configurator] Error removing file input:', error);
+      }
+    });
+    
+    // Clean up any temporary download links
+    const downloadLinks = document.querySelectorAll('a[download]');
+    downloadLinks.forEach(link => {
+      try {
+        if (link.href && link.href.startsWith('blob:')) {
+          URL.revokeObjectURL(link.href);
+        }
+        if (link.parentNode && link.parentNode.contains(link)) {
+          link.parentNode.removeChild(link);
+        }
+      } catch (error) {
+        console.warn('[Configurator] Error removing download link:', error);
+      }
+    });
+    
+    // Clear any cached data and global state
+    if (typeof window.configuratorState !== 'undefined') {
+      try {
+        delete window.configuratorState;
+      } catch (error) {
+        console.warn('[Configurator] Error clearing configurator state:', error);
+      }
+    }
+    
+    // Clear any remaining global references
+    try {
+      if (window.configuratorModal) {
+        delete window.configuratorModal;
+      }
+    } catch (error) {
+      console.warn('[Configurator] Error clearing modal reference:', error);
+    }
+    
+    console.log('[Configurator] Cleanup completed successfully');
+  } catch (error) {
+    console.error('[Configurator] Error during cleanup:', error);
   }
-  
-  // Remove any existing modals
-  const existingModal = document.querySelector('#configurator-modal');
-  if (existingModal) {
-    safeRemoveElement(existingModal);
-  }
-  
-  // Clear any cached data
-  if (typeof window.configuratorState !== 'undefined') {
-    delete window.configuratorState;
-  }
-  
-  console.log('[Configurator] Cleanup completed');
 };

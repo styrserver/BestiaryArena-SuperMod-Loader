@@ -203,7 +203,7 @@ async function listAllModFiles() {
     // If you have a dynamic index, update this logic accordingly
     const databaseMods = [
       'database/Welcome.js',  // Load Welcome mod first to set up completion listener
-      'database/inventory-tooltips.js',
+      'database/inventory-database.js',
       'database/creature-database.js',
       'database/equipment-database.js'
     ];
@@ -245,7 +245,7 @@ async function listAllModFiles() {
     // fallback: hardcoded list
     return [
       'database/Welcome.js',  // Load Welcome mod first to set up completion listener
-      'database/inventory-tooltips.js',
+      'database/inventory-database.js',
       'database/creature-database.js',
       'database/equipment-database.js',
       'Official Mods/Board Analyzer.js',
@@ -284,7 +284,7 @@ async function listAllModFiles() {
 // List of mods to enable by default
 const defaultEnabledMods = [
   'database/Welcome.js',
-  'database/inventory-tooltips.js',
+  'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
   'Official Mods/Bestiary_Automator.js',

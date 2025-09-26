@@ -880,7 +880,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Count Database Mods
       const databaseMods = [
         'Welcome.js',
-        'inventory-tooltips.js',
+        'inventory-database.js',
         'creature-database.js',
         'equipment-database.js'
       ];

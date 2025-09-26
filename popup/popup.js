@@ -491,7 +491,7 @@ function renderLocalMods(mods) {
 
 
   const hiddenMods = [
-    'inventory-tooltips.js',
+    'inventory-database.js',
     'creature-database.js',
     'Welcome.js',
     'equipment-database.js',

@@ -106,7 +106,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * <code>docs/</code> - Documentation for mod developers
 * <code>database/</code> - Stores persistent data and tooltips used by mods
 ** <code>media.txt</code> - Media asset definitions
-** <code>inventory-tooltips.js</code> - Inventory tooltip data
+** <code>inventory-database.js</code> - Inventory tooltip data
 ** <code>creature-database.js</code> - Creature database
 ** <code>equipment-database.js</code> - Equipment database
 ** <code>Welcome.js</code> - Welcome screen data
