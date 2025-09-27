@@ -404,7 +404,7 @@ function cleanupTaskCompletionFailure(reason = 'unknown') {
 // ============================================================================
 
 // Generic function to control autoplay with button clicks
-function controlAutoplayWithButton(action) {
+async function controlAutoplayWithButton(action) {
     try {
         console.log(`[Better Tasker] Looking for ${action} button...`);
         
@@ -448,6 +448,28 @@ function controlAutoplayWithButton(action) {
         if (button) {
             console.log(`[Better Tasker] Found ${action} button, clicking to ${action} autoplay...`);
             button.click();
+            
+            // For pause action, verify the pause state was successful
+            if (action === 'pause') {
+                // Wait a moment for the UI to update
+                await sleep(500);
+                
+                // Check if pause button is now disabled (indicating successful pause)
+                const pauseButtonAfter = document.querySelector('button:has(svg.lucide-pause)');
+                if (pauseButtonAfter && pauseButtonAfter.disabled) {
+                    console.log('[Better Tasker] Pause button verified as disabled - autoplay paused successfully');
+                    return true;
+                } else {
+                    console.log('[Better Tasker] Pause button not disabled - autoplay pause may have failed');
+                    console.log('[Better Tasker] Pause button state:', {
+                        found: !!pauseButtonAfter,
+                        disabled: pauseButtonAfter?.disabled,
+                        hasDisabledAttr: pauseButtonAfter?.hasAttribute('disabled')
+                    });
+                    return false;
+                }
+            }
+            
             return true;
         } else {
             console.log(`[Better Tasker] ${action.charAt(0).toUpperCase() + action.slice(1)} button not found`);
@@ -460,13 +482,13 @@ function controlAutoplayWithButton(action) {
 }
 
 // Find and click the pause button to pause autoplay
-function pauseAutoplayWithButton() {
-    return controlAutoplayWithButton('pause');
+async function pauseAutoplayWithButton() {
+    return await controlAutoplayWithButton('pause');
 }
 
 // Find and click the play button to resume autoplay
-function resumeAutoplayWithButton() {
-    return controlAutoplayWithButton('play');
+async function resumeAutoplayWithButton() {
+    return await controlAutoplayWithButton('play');
 }
 
 // ============================================================================
@@ -486,7 +508,6 @@ function isRaidHunterRaiding() {
             // First check if Raid Hunter is actually enabled
             const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
             if (raidHunterEnabled !== 'true') {
-                console.log('[Better Tasker] Raid Hunter is disabled - not actively raiding');
                 return false;
             }
             
@@ -497,10 +518,9 @@ function isRaidHunterRaiding() {
                 const currentRaidList = raidState.context?.list || [];
                 const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
                 
-                // Check if Raid Hunter has control of the quest button (indicates it's actively raiding)
-                const isRaidHunterCurrentlyRaiding = window.QuestButtonManager?.getCurrentOwner() === 'Raid Hunter';
-                
-                console.log(`[Better Tasker] Raid check - Raid Hunter enabled: ${raidHunterEnabled === 'true'}, Active raids: ${currentRaidList.length}, Board mode: ${boardContext?.mode}, Quest button owner: ${window.QuestButtonManager?.getCurrentOwner() || 'none'}`);
+                // Check if Raid Hunter has control of the quest button OR is internally raiding
+                const isRaidHunterCurrentlyRaiding = window.QuestButtonManager?.getCurrentOwner() === 'Raid Hunter' ||
+                                                     (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
                 
                 // Only yield control if Raid Hunter is actually actively raiding (has quest button control)
                 if (isRaidHunterCurrentlyRaiding) {
@@ -528,7 +548,7 @@ function setupRaidHunterCoordination() {
         clearInterval(raidHunterCoordinationInterval);
     }
     
-    // Check Raid Hunter status every 2 seconds
+    // Check Raid Hunter status every 10 seconds
     raidHunterCoordinationInterval = setInterval(() => {
         const wasRaidHunterActive = isRaidHunterActive;
         isRaidHunterActive = isRaidHunterRaiding();
@@ -552,7 +572,7 @@ function setupRaidHunterCoordination() {
                 }
             }, 3000);
         }
-    }, 2000);
+    }, 10000);
     
     console.log('[Better Tasker] Raid Hunter coordination set up');
 }
@@ -1663,7 +1683,7 @@ function createGeneralSettings() {
     const fasterAutoplaySetting = createCheckboxSetting(
         'fasterAutoplay',
         'Faster Autoplay',
-        'Enable faster autoplay speed during tasks (removes delays and increases game speed)',
+        'Enable faster autoplay speed during tasks',
         false
     );
     settingsWrapper.appendChild(fasterAutoplaySetting);
@@ -2396,6 +2416,13 @@ async function waitForGameToEnd() {
                 return true;
             }
             
+            // If game has been running for more than 30 seconds and is still in initial state,
+            // it might be stuck - proceed with task completion anyway
+            if (attempts >= 15 && gameState === 'initial' && isGameRunning) {
+                console.log(`[Better Tasker] Game stuck in initial state for ${attempts * 2}s - proceeding with task completion`);
+                return true;
+            }
+            
             // Log progress every 10 seconds (every 5 attempts)
             if (attempts % 5 === 0 && attempts > 0) {
                 console.log(`[Better Tasker] Still waiting for game to end... (${attempts * 2}s elapsed)`);
@@ -2665,25 +2692,46 @@ async function pauseAutoplay() {
         return false;
     }
     
-    return withControl(window.AutoplayManager, 'Better Tasker', () => {
+    // Request control of autoplay
+    if (!window.AutoplayManager.requestControl('Better Tasker')) {
+        console.log('[Better Tasker] Cannot pause autoplay - control denied');
+        return false;
+    }
+    
+    try {
         // Check current mode and pause if in autoplay
         const boardContext = globalThis.state.board.getSnapshot().context;
         if (boardContext.mode === 'autoplay') {
-            // Use pause button to pause autoplay
-            const paused = pauseAutoplayWithButton();
-            if (paused) {
-                autoplayPausedByTasker = true;
-                console.log('[Better Tasker] Autoplay paused successfully using pause button');
-                return true;
-            } else {
-                console.log('[Better Tasker] Pause button not found - autoplay not paused');
-                return false;
+            // Try to pause autoplay with retry logic
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                console.log(`[Better Tasker] Pause attempt ${attempt}/3`);
+                
+                const paused = await pauseAutoplayWithButton();
+                if (paused) {
+                    autoplayPausedByTasker = true;
+                    console.log(`[Better Tasker] Autoplay paused successfully on attempt ${attempt}`);
+                    return true;
+                } else {
+                    console.log(`[Better Tasker] Pause attempt ${attempt} failed`);
+                    if (attempt < 3) {
+                        console.log('[Better Tasker] Waiting 1 second before retry...');
+                        await sleep(1000);
+                    }
+                }
             }
+
+            // All attempts failed - reload page
+            console.log('[Better Tasker] All pause attempts failed, reloading page...');
+            window.location.reload();
+            return false;
         } else {
             console.log('[Better Tasker] Not in autoplay mode - no need to pause');
             return true; // Already paused/not running
         }
-    }, 'pause autoplay');
+    } finally {
+        // Release control after operation
+        window.AutoplayManager.releaseControl('Better Tasker');
+    }
 }
 
 // Verify that task completion was successful before resuming automations
@@ -3215,7 +3263,7 @@ async function handleTaskFinishing() {
             console.log('[Better Tasker] Task hunting complete - task is ready, proceeding with completion');
             // Don't return - proceed with task completion
         } else {
-            console.log('[Better Tasker] Task hunting ongoing, skipping task completion');
+            console.log('[Better Tasker] Task hunting ongoing, task not ready yet - skipping task completion');
             return;
         }
     }
@@ -4853,6 +4901,7 @@ function exposeTaskerState() {
         };
     }
 }
+
 
 // Update exposed state whenever it changes
 function updateExposedState() {

@@ -135,7 +135,8 @@
       targetCreatures: new Set(),
       foundCreatures: new Map(),
       soldMonsters: 0,
-      soldGold: 0
+      soldGold: 0,
+      shinyCount: 0
     },
     
     // UI state
@@ -254,7 +255,8 @@
         soldMonsters: 0,
         soldGold: 0,
         squeezedMonsters: 0,
-        squeezedDust: 0
+        squeezedDust: 0,
+        shinyCount: 0
       };
       
       this.selectedScrollTier = 1;
@@ -1554,6 +1556,9 @@
           } else {
             // No target reached
             message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
+            if (selectedScrollTier === 5) {
+              message += ` Found ${autoscrollStats.shinyCount} shiny creatures.`;
+            }
           }
           statusElement.textContent = message;
         }
@@ -1596,6 +1601,11 @@
       
       if (result && result.summonedMonster) {
         autoscrollStats.successfulSummons++;
+        
+        // Track shiny monsters
+        if (result.summonedMonster.shiny === true) {
+          autoscrollStats.shinyCount++;
+        }
         
         const monsterName = getMonsterNameFromGameId(result.summonedMonster.gameId);
         
@@ -1732,7 +1742,8 @@
       targetCreatures: new Set(selectedCreatures),
       foundCreatures: new Map(),
       soldMonsters: 0,
-      soldGold: 0
+      soldGold: 0,
+      shinyCount: 0
     };
     
     selectedCreatures.forEach(creature => {
@@ -1841,6 +1852,9 @@
         message = `Finished: Target reached of ${stopConditions.totalCreaturesTarget} ${reachedCreature}! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`;
       } else {
         message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
+        if (selectedScrollTier === 5) {
+          message += ` Found ${autoscrollStats.shinyCount} shiny creatures.`;
+        }
       }
       statusElement.textContent = message;
     }
@@ -3483,6 +3497,11 @@
       // Add autosqueeze statistics if any monsters were squeezed
       if (autosellNonSelected && autoscrollStats.squeezedMonsters > 0) {
         messageParts.push(` Squeezed ${autoscrollStats.squeezedMonsters} non-selected creatures for ${autoscrollStats.squeezedDust} dust.`);
+      }
+      
+      // Add shiny count (only for T5 Exceptional Summon Scrolls)
+      if (selectedScrollTier === 5) {
+        messageParts.push(` Found ${autoscrollStats.shinyCount} shiny creatures.`);
       }
       
       // Add rate limit information if there are pending sales

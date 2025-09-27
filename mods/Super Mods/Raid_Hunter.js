@@ -1,5 +1,5 @@
 // Raid Hunter Mod for Bestiary Arena
-console.log('[Raid Hunter] initializing...');
+console.log('[Raid Hunter] Initializing...');
 
 // ============================================================================
 // 1. CONSTANTS
@@ -8,12 +8,37 @@ console.log('[Raid Hunter] initializing...');
 const MOD_ID = 'raid-hunter';
 const RAID_CLOCK_ID = `${MOD_ID}-raid-clock`;
 
-// Default settings constants
+// Default settings
 const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
 
-// Automation state constants
+// Automation state
 const AUTOMATION_ENABLED = true;
 const AUTOMATION_DISABLED = false;
+
+// Timeout and delay
+const RAID_DETECTION_DELAY = 500;
+const RAID_CLOCK_UPDATE_INTERVAL = 1000;
+const RAID_START_DELAY = 1000;
+const MODAL_OPEN_DELAY = 1000;
+const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
+
+// Count
+const MAX_RETRY_ATTEMPTS = 3;
+const INITIAL_COUNT = 0;
+
+// Colors
+const COLOR_ACCENT = '#ffe066';
+const COLOR_WHITE = '#fff';
+const COLOR_GRAY = '#888';
+const COLOR_RED = '#ff6b6b';
+const COLOR_YELLOW = '#ffd93d';
+const COLOR_GREEN = '#22c55e';
+const COLOR_DARK_GREEN = '#16a34a';
+const COLOR_DARK_GRAY = '#333';
+const COLOR_BORDER = '#444';
+const COLOR_BORDER_DARK = '#555';
+const COLOR_LINK = '#666';
+const COLOR_SUCCESS = '#4ade80';
 
 // Helper function for automation state checks
 function isAutomationActive() {
@@ -63,121 +88,373 @@ const EVENT_TO_ROOM_MAPPING = {
 // 2. STATE MANAGEMENT
 // ============================================================================
 
-// Quest Button Manager (shared with Better Tasker)
-window.QuestButtonManager = window.QuestButtonManager || {
-    currentOwner: null,
+// ============================================================================
+// 2.1. CONTROL MANAGER CLASS
+// ============================================================================
+
+// Reusable control manager class for coordination between mods
+class ControlManager {
+    constructor(name, uniqueProperties = {}) {
+        this.name = name;
+        this.currentOwner = null;
+        
+        // Add any unique properties specific to this manager
+        Object.assign(this, uniqueProperties);
+    }
+    
+    // Request control (returns true if successful)
+    requestControl(modName) {
+        if (this.currentOwner === null || this.currentOwner === modName) {
+            this.currentOwner = modName;
+            console.log(`[${this.name}] Control granted to ${modName}`);
+            return true;
+        }
+        console.log(`[${this.name}] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
+        return false;
+    }
+    
+    // Release control
+    releaseControl(modName) {
+        if (this.currentOwner === modName) {
+            this.currentOwner = null;
+            console.log(`[${this.name}] Control released by ${modName}`);
+            return true;
+        }
+        return false;
+    }
+    
+    // Check if mod has control
+    hasControl(modName) {
+        return this.currentOwner === modName;
+    }
+    
+    // Get current owner
+    getCurrentOwner() {
+        return this.currentOwner;
+    }
+}
+
+// ============================================================================
+// 2.2. CONTROL MANAGER INSTANCES
+// ============================================================================
+
+// Quest Button Manager for coordination between mods
+window.QuestButtonManager = window.QuestButtonManager || new ControlManager('Quest Button Manager', {
     originalState: null,
-    validationInterval: null,
-    
-    // Request control of quest button (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[Quest Button Manager] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[Quest Button Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    },
-    
-    // Release control of quest button
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[Quest Button Manager] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    },
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    },
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    }
-};
+    validationInterval: null
+});
 
-// Bestiary Automator Settings Manager (shared with Better Tasker)
-window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || {
-    currentOwner: null,
-    
-    // Request control of Bestiary Automator settings (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[Bestiary Automator Settings Manager] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[Bestiary Automator Settings Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    },
-    
-    // Release control of Bestiary Automator settings
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[Bestiary Automator Settings Manager] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    },
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    },
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    }
-};
-
-// Autoplay Manager (shared with Better Tasker)
-window.AutoplayManager = window.AutoplayManager || {
-    currentOwner: null,
+// Autoplay Manager for coordination between mods
+window.AutoplayManager = window.AutoplayManager || new ControlManager('Autoplay Manager', {
     originalMode: null,
-    
-    // Request control of autoplay (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[Autoplay Manager] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[Autoplay Manager] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    },
-    
-    // Release control of autoplay
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[Autoplay Manager] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    },
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    },
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    },
-    
-    // Check if another mod is controlling autoplay
     isControlledByOther(modName) {
         return this.currentOwner !== null && this.currentOwner !== modName;
     }
-};
+});
+
+// Bestiary Automator Settings Manager for coordination between mods
+window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || new ControlManager('Bestiary Automator Settings Manager');
+
+// ============================================================================
+// 2.3. CENTRALIZED STATE RESET FUNCTION
+// ============================================================================
+
+// Utility function to handle control request/release with proper error handling
+function withControl(manager, modName, callback, errorContext = 'operation') {
+    // Request control
+    if (!manager.requestControl(modName)) {
+        console.log(`[Raid Hunter] Cannot ${errorContext} - controlled by another mod`);
+        return false;
+    }
+    
+    try {
+        const result = callback();
+        return result;
+    } catch (error) {
+        console.error(`[Raid Hunter] Error during ${errorContext}:`, error);
+        return false;
+    } finally {
+        // Always release control
+        manager.releaseControl(modName);
+    }
+}
+
+// Utility function to handle control check/release with proper error handling
+function withControlCheck(manager, modName, callback, errorContext = 'operation') {
+    // Check if we have control
+    if (!manager.hasControl(modName)) {
+        console.log(`[Raid Hunter] Cannot ${errorContext} - not controlled by Raid Hunter`);
+        return false;
+    }
+    
+    try {
+        const result = callback();
+        return result;
+    } catch (error) {
+        console.error(`[Raid Hunter] Error during ${errorContext}:`, error);
+        return false;
+    } finally {
+        // Always release control
+        manager.releaseControl(modName);
+    }
+}
+
+// Create a styled button with consistent styling
+function createStyledButton(id, text, color, onClick) {
+    const button = document.createElement('button');
+    button.id = id;
+    button.textContent = text;
+    button.className = `focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-${color} active:frame-pressed-1-${color} surface-${color} gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight`;
+    button.style.cssText = `
+        padding: 2px 6px;
+        height: 20px;
+    `;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+// Create a styled button with custom styling
+function createCustomStyledButton(id, text, className, style, onClick) {
+    const button = document.createElement('button');
+    button.id = id;
+    button.textContent = text;
+    button.className = className;
+    button.style.cssText = style;
+    button.addEventListener('click', onClick);
+    return button;
+}
+
+// Create a styled container div
+function createStyledContainer(className, style) {
+    const container = document.createElement('div');
+    if (className) container.className = className;
+    if (style) container.style.cssText = style;
+    return container;
+}
+
+// Create a styled input element
+function createStyledInput(type, id, value, style, attributes = {}) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.id = id;
+    if (value !== undefined) input.value = value;
+    if (style) input.style.cssText = style;
+    
+    // Apply additional attributes
+    Object.entries(attributes).forEach(([key, val]) => {
+        input[key] = val;
+    });
+    
+    return input;
+}
+
+// Create a reusable checkbox setting with label and description
+function createCheckboxSetting(id, labelText, description, checked = false) {
+    const settingDiv = document.createElement('div');
+    settingDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    // Container for checkbox and label on same line
+    const checkboxLabelContainer = document.createElement('div');
+    checkboxLabelContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+    `;
+    
+    const checkbox = createStyledInput('checkbox', id, undefined, `
+        width: 16px;
+        height: 16px;
+        accent-color: ${COLOR_ACCENT};
+    `, { checked });
+    // Add auto-save listener immediately
+    checkbox.addEventListener('change', autoSaveSettings);
+    checkboxLabelContainer.appendChild(checkbox);
+    
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    label.className = 'pixel-font-16';
+    label.style.cssText = `
+        font-weight: bold;
+        color: ${COLOR_WHITE};
+        cursor: pointer;
+    `;
+    label.setAttribute('for', id);
+    checkboxLabelContainer.appendChild(label);
+    
+    settingDiv.appendChild(checkboxLabelContainer);
+    
+    const desc = document.createElement('div');
+    desc.textContent = description;
+    desc.className = 'pixel-font-16';
+    desc.style.cssText = `
+        font-size: 11px;
+        color: ${COLOR_GRAY};
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    settingDiv.appendChild(desc);
+    
+    return settingDiv;
+}
+
+// ============================================================================
+// 3. UTILITY FUNCTIONS
+// ============================================================================
+
+// Centralized state reset function
+function resetState(resetType = 'full') {
+    try {
+        // Common reset groups to eliminate duplication
+        const resetAutomationFlags = () => {
+            isAutomationEnabled = AUTOMATION_DISABLED;
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            raidRetryCount = 0;
+            lastRaidTime = 0;
+            
+            // Stop quest button validation and restore appearance
+            stopQuestButtonValidation();
+            restoreQuestButtonAppearance();
+        };
+        
+        const resetRaidState = () => {
+            isRaidActive = false;
+            raidQueue = [];
+            lastRaidList = [];
+            raidCountdownEndTime = null;
+            console.log('[Raid Hunter] Raid state reset');
+        };
+        
+        const resetMonitoringState = () => {
+            // Clear all intervals
+            if (raidClockInterval) {
+                clearInterval(raidClockInterval);
+                raidClockInterval = null;
+            }
+            if (questLogMonitorInterval) {
+                clearInterval(questLogMonitorInterval);
+                questLogMonitorInterval = null;
+            }
+            if (raidEndCheckInterval) {
+                clearInterval(raidEndCheckInterval);
+                raidEndCheckInterval = null;
+            }
+            if (boardAnalyzerCoordinationInterval) {
+                clearInterval(boardAnalyzerCoordinationInterval);
+                boardAnalyzerCoordinationInterval = null;
+            }
+            if (questButtonValidationInterval) {
+                clearInterval(questButtonValidationInterval);
+                questButtonValidationInterval = null;
+            }
+            if (window.staminaMonitorInterval) {
+                clearInterval(window.staminaMonitorInterval);
+                window.staminaMonitorInterval = null;
+            }
+            
+            // Disconnect all observers
+            if (questLogObserver) {
+                questLogObserver.disconnect();
+                questLogObserver = null;
+            }
+            // bodyObserver is no longer used - fight toast monitoring is consolidated
+            if (raidListMonitor) {
+                raidListMonitor.unsubscribe();
+                raidListMonitor = null;
+            }
+            if (modalCleanupObserver) {
+                modalCleanupObserver.disconnect();
+                modalCleanupObserver = null;
+            }
+            
+            // Clear all timeouts
+            if (questLogObserverTimeout) {
+                clearTimeout(questLogObserverTimeout);
+                questLogObserverTimeout = null;
+            }
+            if (retryTimeout) {
+                clearTimeout(retryTimeout);
+                retryTimeout = null;
+            }
+            
+            console.log('[Raid Hunter] Monitoring state reset');
+        };
+        
+        const resetModalState = () => {
+            activeRaidHunterModal = null;
+            raidHunterModalInProgress = false;
+            lastModalCall = 0;
+            console.log('[Raid Hunter] Modal state reset');
+        };
+        
+        const resetBoardAnalyzerState = () => {
+            isBoardAnalyzerRunning = false;
+            console.log('[Raid Hunter] Board Analyzer state reset');
+        };
+        
+        const resetQuestButtonState = () => {
+            originalQuestButtonState = null;
+            console.log('[Raid Hunter] Quest button state reset');
+        };
+        
+        const resetStateManager = () => {
+            stateManager.isInitializing = false;
+            stateManager.isProcessing = false;
+            console.log('[Raid Hunter] State manager reset');
+        };
+        
+        // Apply resets based on type
+        switch (resetType) {
+            case 'automation':
+                resetAutomationFlags();
+                resetRaidState();
+                resetQuestButtonState();
+                console.log('[Raid Hunter] Automation state reset');
+                break;
+                
+            case 'raid':
+                resetRaidState();
+                resetQuestButtonState();
+                console.log('[Raid Hunter] Raid state reset');
+                break;
+                
+            case 'monitoring':
+                resetMonitoringState();
+                console.log('[Raid Hunter] Monitoring state reset');
+                break;
+                
+            case 'modal':
+                resetModalState();
+                console.log('[Raid Hunter] Modal state reset');
+                break;
+                
+            case 'boardAnalyzer':
+                resetBoardAnalyzerState();
+                console.log('[Raid Hunter] Board Analyzer state reset');
+                break;
+                
+            case 'full':
+            default:
+                resetAutomationFlags();
+                resetRaidState();
+                resetMonitoringState();
+                resetModalState();
+                resetBoardAnalyzerState();
+                resetQuestButtonState();
+                resetStateManager();
+                console.log('[Raid Hunter] Full state reset');
+                break;
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error during state reset:', error);
+    }
+}
 
 let raidUnsubscribe = null;
 let raidListMonitor = null;
@@ -185,7 +462,7 @@ let lastRaidTime = 0;
 let raidClockInterval = null;
 let questLogMonitorInterval = null;
 let raidCountdownEndTime = null;
-let bodyObserver = null;
+// bodyObserver removed - fight toast monitoring is now consolidated
 let questLogObserver = null;
 let questLogObserverTimeout = null;
 let lastRaidList = [];
@@ -200,7 +477,7 @@ let currentRaidInfo = null;
 
 // Raid retry system
 let raidRetryCount = 0;
-let maxRetryAttempts = 3;
+let maxRetryAttempts = MAX_RETRY_ATTEMPTS;
 let retryTimeout = null;
 
 // Modal state management (like Cyclopedia)
@@ -215,10 +492,6 @@ let stateManager = {
     isProcessing: false
 };
 
-// Debug function to check state manager status
-function debugStateManager() {
-    console.log(`[Raid Hunter] State Manager - isInitializing: ${stateManager.isInitializing}, isProcessing: ${stateManager.isProcessing}`);
-}
 
 // Board Analyzer coordination
 let boardAnalyzerCoordinationInterval = null;
@@ -252,7 +525,11 @@ function executeImmediately(fn) {
     }
 }
 
-// Check if an element is a raid toast (looks for fight icon like Bestiary Automator's defeat toast detection)
+/**
+ * Check if an element is a raid toast (looks for fight icon like Bestiary Automator's defeat toast detection)
+ * @param {Element} element - The DOM element to check
+ * @returns {boolean} True if the element is a raid toast
+ */
 function isRaidToast(element) {
     try {
         // Check if the element is a toast (either root toast element or child widget-bottom)
@@ -294,12 +571,11 @@ function isRaidToast(element) {
     }
 }
 
-// Keep the old function name for backward compatibility but redirect to new function
-function isFightToast(element) {
-    return isRaidToast(element);
-}
 
-// Check if Better Tasker is currently processing task completion
+/**
+ * Check if Better Tasker is currently processing task completion
+ * @returns {boolean} True if Better Tasker is processing a task
+ */
 function isBetterTaskerProcessingTask() {
     try {
         // Check if Better Tasker is currently processing a task
@@ -327,10 +603,11 @@ function isBetterTaskerProcessingTask() {
     }
 }
 
-// Handle fight toast detection
+/**
+ * Handle fight toast detection and process raids
+ */
 function handleFightToast() {
     console.log('[Raid Hunter] handleFightToast() called');
-    debugStateManager();
     
     // Check if Board Analyzer is running - if so, skip processing
     if (isBoardAnalyzerRunning) {
@@ -374,7 +651,7 @@ function handleFightToast() {
                         console.log('[Raid Hunter] Raid start delay completed - processing raid');
                         processNextRaid();
                     } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                        console.log('[Raid Hunter] Automation disabled during fight toast delay');
+                        console.log('[Raid Hunter] Automation disabled');
                     } else if (isBoardAnalyzerRunning) {
                         console.log('[Raid Hunter] Board Analyzer running during fight toast delay - skipping');
                     } else {
@@ -436,11 +713,8 @@ function pauseRaidHunterMonitoring() {
             questLogMonitorInterval = null;
         }
         
-        // Pause body observer for fight toast detection to prevent interference
-        if (bodyObserver) {
-            bodyObserver.disconnect();
-            bodyObserver = null;
-        }
+        // Fight toast monitoring is now handled by consolidated observer
+        // No need to pause separate bodyObserver
         
         // Don't disconnect the quest log observer - keep it for UI detection
         // The observer won't interfere with Board Analyzer
@@ -474,12 +748,12 @@ function resumeRaidHunterMonitoring() {
                             // Don't stop monitoring - keep it running for future quest log reopenings
                         }
                     });
-                }, 2000); // Reduced frequency since we have MutationObserver
+                }, 10000); // Reduced frequency since we have MutationObserver
             }
             
             console.log('[Raid Hunter] All monitoring resumed after Board Analyzer');
         } else {
-            console.log('[Raid Hunter] Automation disabled - skipping resume');
+            console.log('[Raid Hunter] Automation disabled');
         }
     } catch (error) {
         console.error('[Raid Hunter] Error resuming monitoring:', error);
@@ -512,10 +786,7 @@ function cleanupAll() {
             questLogObserver.disconnect();
             questLogObserver = null;
         }
-        if (bodyObserver) {
-            bodyObserver.disconnect();
-            bodyObserver = null;
-        }
+        // bodyObserver is no longer used - fight toast monitoring is consolidated
         if (raidListMonitor) {
             raidListMonitor.unsubscribe();
             raidListMonitor = null;
@@ -648,7 +919,7 @@ function closeOpenModals() {
         console.log('[Raid Hunter] Sent ESC key to close modals');
         
         // Small delay to let modals close
-        return new Promise(resolve => setTimeout(resolve, 500));
+        return new Promise(resolve => setTimeout(resolve, RAID_DETECTION_DELAY));
     } catch (error) {
         console.error('[Raid Hunter] Error closing modals:', error);
         return Promise.resolve();
@@ -672,7 +943,7 @@ function processNextRaid() {
     
     // Check if automation is still enabled before starting
     if (!isAutomationActive()) {
-        console.log('[Raid Hunter] Automation disabled - stopping raid processing');
+        console.log('[Raid Hunter] Automation disabled');
         return;
     }
     
@@ -702,7 +973,7 @@ function processNextRaid() {
     closeOpenModals().then(() => {
         // Double-check automation is still enabled before proceeding
         if (isAutomationEnabled === AUTOMATION_DISABLED) {
-            console.log('[Raid Hunter] Automation disabled during modal close - stopping raid');
+            console.log('[Raid Hunter] Automation disabled');
             isCurrentlyRaiding = false;
             currentRaidInfo = null;
             restoreQuestButtonAppearance();
@@ -714,7 +985,7 @@ function processNextRaid() {
 }
 
 // ============================================================================
-// 3. UI FUNCTIONS
+// 4. UI FUNCTIONS
 // ============================================================================
 
 // Helper function to find quest log container with optimized selectors
@@ -753,11 +1024,11 @@ function tryImmediateRaidClockCreation() {
         // Final verification - check for the exact Quest Log header structure
         const questLogHeader = document.querySelector('h2[id*="radix-"][class*="widget-top"] p[id*="radix-"]');
         if (!questLogHeader || questLogHeader.textContent !== 'Quest Log') {
-            console.log('[Raid Hunter] Quest Log header verification failed - not the actual Quest Log, skipping raid clock creation');
+            console.log('[Raid Hunter] Quest Log verification failed');
             return false; // Not the actual Quest Log, abort
         }
         
-        console.log('[Raid Hunter] Quest Log verified! Creating raid clock...');
+        console.log('[Raid Hunter] Quest Log verified');
         createRaidClock();
         return true;
     }
@@ -767,7 +1038,7 @@ function tryImmediateRaidClockCreation() {
 
 // Creates the raid clock widget.
 function createRaidClock() {
-    console.log('[Raid Hunter] createRaidClock: Starting raid clock creation...');
+    console.log('[Raid Hunter] Creating raid clock');
     
     const existingClock = document.getElementById(RAID_CLOCK_ID);
     if (existingClock) {
@@ -863,29 +1134,22 @@ function createRaidClock() {
     console.log('[Raid Hunter] createRaidClock: Raid clock created successfully!');
 }
 
-// Consolidated mutation processing for both quest log and fight toast detection
-function debouncedProcessAllMutations(mutations) {
+// Quest log detection handler
+function handleQuestLogDetection(mutations) {
     safeExecute(() => {
         let hasQuestLogContent = false;
-        let hasFightToast = false;
         
-        // Process all mutations in one pass
+        // Process mutations for quest log content
         for (const mutation of mutations) {
             if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                 for (const node of mutation.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        // Check for quest log content
-                        if (!hasQuestLogContent && !document.getElementById(RAID_CLOCK_ID)) {
+                    if (node.nodeType === Node.ELEMENT_NODE && !document.getElementById(RAID_CLOCK_ID)) {
                             hasQuestLogContent = checkForQuestLogContent(node);
+                        if (hasQuestLogContent) break;
                         }
-                        
-                        // Check for raid toast
-                        if (!hasFightToast && isAutomationActive()) {
-                            hasFightToast = isRaidToast(node);
                         }
                     }
-                }
-            }
+            if (hasQuestLogContent) break;
         }
         
         // Handle quest log detection
@@ -910,13 +1174,44 @@ function debouncedProcessAllMutations(mutations) {
                 }
             }, 50);
         }
+    });
+}
+
+// Fight toast detection handler
+function handleFightToastDetection(mutations) {
+    safeExecute(() => {
+        if (!isAutomationActive()) return;
         
-        // Handle raid toast detection
+        let hasFightToast = false;
+        
+        // Process mutations for fight toast
+        for (const mutation of mutations) {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        hasFightToast = isRaidToast(node);
+                        if (hasFightToast) break;
+                    }
+                }
+            }
+            if (hasFightToast) break;
+        }
+        
+        // Handle fight toast detection
         if (hasFightToast) {
             console.log('[Raid Hunter] Raid toast detected!');
             handleFightToast();
         }
     });
+}
+
+// Consolidated mutation processing for both quest log and fight toast detection
+function debouncedProcessAllMutations(mutations) {
+    // Handle quest log detection
+    handleQuestLogDetection(mutations);
+    
+    // Handle fight toast detection
+    handleFightToastDetection(mutations);
 }
 
 // Helper function to check for quest log content
@@ -944,7 +1239,7 @@ function monitorQuestLogVisibility() {
         return;
     }
     
-    // Consolidated MutationObserver for both quest log and fight toast detection
+    // Consolidated MutationObserver for quest log and fight toast detection
     questLogObserver = new MutationObserver(debouncedProcessAllMutations);
     
     questLogObserver.observe(document.body, {
@@ -952,7 +1247,7 @@ function monitorQuestLogVisibility() {
         subtree: true
     });
     
-    console.log('[Raid Hunter] Consolidated MutationObserver set up for quest log and raid toast detection');
+    console.log('[Raid Hunter] Consolidated MutationObserver set up for quest log and fight toast detection');
 }
 
 // Starts quest log monitoring (simplified like Better Yasir)
@@ -984,7 +1279,7 @@ function startQuestLogMonitoring() {
                 // Don't stop monitoring - keep it running for future quest log reopenings
             }
         });
-    }, 5000); // Reduced from 2s to 5s - MutationObserver handles real-time detection
+    }, 10000); // Reduced frequency - MutationObserver handles real-time detection
 }
 
 // Stops quest log monitoring.
@@ -1006,7 +1301,7 @@ function updateRaidClock() {
                 raidCountdownEndTime = Date.now() + msUntilUpdate;
             } else {
                 timerElement.textContent = 'Checking...';
-                timerElement.style.color = '#ffffff';
+                timerElement.style.color = COLOR_WHITE;
                 return;
             }
         }
@@ -1024,11 +1319,11 @@ function updateRaidClock() {
             
             // Color coding to match quest log timer behavior
             if (msRemaining < 60000) {
-                timerElement.style.color = '#ff6b6b'; // Red for < 1 minute
+                timerElement.style.color = COLOR_RED; // Red for < 1 minute
             } else if (msRemaining < 300000) {
-                timerElement.style.color = '#ffd93d'; // Yellow for < 5 minutes
+                timerElement.style.color = COLOR_YELLOW; // Yellow for < 5 minutes
             } else {
-                timerElement.style.color = '#ffffff'; // White for normal
+                timerElement.style.color = COLOR_WHITE; // White for normal
             }
         } else {
             timerElement.textContent = 'Checking...';
@@ -1045,7 +1340,7 @@ function updateRaidClock() {
         }
     } catch (error) {
         timerElement.textContent = 'Error';
-        timerElement.style.color = '#ff6b6b';
+        timerElement.style.color = COLOR_RED;
         console.error('[Raid Hunter] Error updating raid clock:', error);
     }
 }
@@ -1060,7 +1355,7 @@ function startRaidClockUpdates() {
     if (raidClockInterval) {
         clearInterval(raidClockInterval);
     }
-    raidClockInterval = setInterval(updateRaidClock, 1000);
+    raidClockInterval = setInterval(updateRaidClock, RAID_CLOCK_UPDATE_INTERVAL);
 }
 
 // Stops raid clock and cleanup.
@@ -1074,7 +1369,7 @@ function stopRaidClock() {
 }
 
 // ============================================================================
-// 4. UTILITY FUNCTIONS
+// 5. AUTOMATION CONTROL FUNCTIONS
 // ============================================================================
 
 // Check if we can start the raid (stamina/raid availability)
@@ -1161,12 +1456,7 @@ function stopStaminaMonitoring() {
 
 // Enable Bestiary Automator's autorefill stamina setting
 function enableBestiaryAutomatorStaminaRefill() {
-    try {
-        // Request control of Bestiary Automator settings
-        if (!window.BestiaryAutomatorSettingsManager.requestControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot control Bestiary Automator settings - controlled by another mod');
-            return false;
-        }
+    return withControl(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
@@ -1242,21 +1532,12 @@ function enableBestiaryAutomatorStaminaRefill() {
             }, 2000);
             return false;
         }
-    } catch (error) {
-        console.error('[Raid Hunter] Error enabling Bestiary Automator autorefill stamina:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'enable Bestiary Automator autorefill stamina');
 }
 
 // Disable Bestiary Automator's autorefill stamina setting
 function disableBestiaryAutomatorStaminaRefill() {
-    try {
-        // Only disable if we have control
-        if (!window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot disable Bestiary Automator settings - not controlled by Raid Hunter');
-            return false;
-        }
+    return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
@@ -1283,29 +1564,17 @@ function disableBestiaryAutomatorStaminaRefill() {
                 autoRefillStamina: false
             });
             console.log('[Raid Hunter] Bestiary Automator autorefill stamina disabled');
-            // Release control after disabling
-            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for autorefill stamina');
-            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return false;
         }
-    } catch (error) {
-        console.error('[Raid Hunter] Error disabling Bestiary Automator autorefill stamina:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'disable Bestiary Automator autorefill stamina');
 }
 
 // Enable Bestiary Automator's faster autoplay setting
 function enableBestiaryAutomatorFasterAutoplay() {
-    try {
-        // Request control of Bestiary Automator settings
-        if (!window.BestiaryAutomatorSettingsManager.requestControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot control Bestiary Automator settings - controlled by another mod');
-            return false;
-        }
+    return withControl(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
@@ -1381,21 +1650,12 @@ function enableBestiaryAutomatorFasterAutoplay() {
             }, 2000);
             return false;
         }
-    } catch (error) {
-        console.error('[Raid Hunter] Error enabling Bestiary Automator faster autoplay:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'enable Bestiary Automator faster autoplay');
 }
 
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
-    try {
-        // Only disable if we have control
-        if (!window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot disable Bestiary Automator settings - not controlled by Raid Hunter');
-            return false;
-        }
+    return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
         
         // Try multiple ways to access Bestiary Automator
         let bestiaryAutomator = null;
@@ -1422,33 +1682,38 @@ function disableBestiaryAutomatorFasterAutoplay() {
                 fasterAutoplay: false
             });
             console.log('[Raid Hunter] Bestiary Automator faster autoplay disabled');
-            // Release control after disabling
-            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return true;
         } else {
             console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
-            window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
             return false;
         }
-    } catch (error) {
-        console.error('[Raid Hunter] Error disabling Bestiary Automator faster autoplay:', error);
-        window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'disable Bestiary Automator faster autoplay');
 }
 
-// Checks element visibility.
+/**
+ * Checks element visibility
+ * @param {Element} el - The element to check
+ * @returns {boolean} True if the element is visible
+ */
 function isElementVisible(el) {
     if (!el || el.disabled) return false;
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
 }
 
-// Gets room ID for event.
+/**
+ * Gets room ID for event
+ * @param {string} eventName - The event name
+ * @returns {string|null} The room ID or null if not found
+ */
 function getRoomIdForEvent(eventName) {
     return EVENT_TO_ROOM_MAPPING[eventName] || null;
 }
 
-// Gets event name for room ID (reverse lookup)
+/**
+ * Gets event name for room ID
+ * @param {string} roomId - The room ID
+ * @returns {string|null} The event name or null if not found
+ */
 function getEventNameForRoomId(roomId) {
     for (const [eventName, mappedRoomId] of Object.entries(EVENT_TO_ROOM_MAPPING)) {
         if (mappedRoomId === roomId) {
@@ -1479,7 +1744,7 @@ function findButtonByText(text) {
 }
 
 // ============================================================================
-// 5. AUTOMATION CONTROL FUNCTIONS
+// 6. RAID END DETECTION FUNCTIONS
 // ============================================================================
 
 // Loads automation state from localStorage
@@ -1494,14 +1759,14 @@ function loadAutomationState() {
             isAutomationEnabled = AUTOMATION_DISABLED;
         }
     } else {
-        console.log('[Raid Hunter] No saved automation state, using default (disabled)');
+        console.log('[Raid Hunter] Using default automation state');
     }
 }
 
 // Saves automation state to localStorage
 function saveAutomationState() {
     localStorage.setItem('raidHunterAutomationEnabled', JSON.stringify(isAutomationEnabled));
-    console.log('[Raid Hunter] Saved automation state to localStorage:', isAutomationEnabled);
+    console.log('[Raid Hunter] Automation state saved');
 }
 
 // Toggles automation on/off
@@ -1559,26 +1824,17 @@ function toggleAutomation() {
         }
         
         // If we're in autoplay mode, stop it (only if we have control)
-        try {
-            if (window.AutoplayManager.hasControl('Raid Hunter')) {
+        // Switch to manual mode if we have autoplay control
+        withControlCheck(window.AutoplayManager, 'Raid Hunter', () => {
                 const boardContext = globalThis.state.board.getSnapshot().context;
                 if (boardContext.mode === 'autoplay') {
                     globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
                     console.log('[Raid Hunter] Switched to manual mode (automation disabled)');
                 }
-                // Release control after switching to manual
-                window.AutoplayManager.releaseControl('Raid Hunter');
-            } else {
-                console.log('[Raid Hunter] Cannot switch to manual mode - not controlling autoplay');
-            }
-        } catch (error) {
-            console.error('[Raid Hunter] Error switching to manual mode:', error);
-        }
+        }, 'switch to manual mode');
         
-        isRaidActive = false;
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        raidQueue = [];
+        // Reset automation state
+        resetState('automation');
         raidRetryCount = 0;
         if (retryTimeout) {
             clearTimeout(retryTimeout);
@@ -1608,13 +1864,13 @@ function updateToggleButton() {
 }
 
 // ============================================================================
-// 6. RAID END DETECTION FUNCTIONS
+// 7. CORE LOGIC FUNCTIONS
 // ============================================================================
 
 // Stops autoplay when raid ends
 function stopAutoplayOnRaidEnd() {
     try {
-        console.log('[Raid Hunter] Raid ended - stopping autoplay...');
+        console.log('[Raid Hunter] Raid ended');
         
         // Disable Bestiary Automator's autorefill stamina when raid ends
         const settings = loadSettings();
@@ -1627,23 +1883,17 @@ function stopAutoplayOnRaidEnd() {
             disableBestiaryAutomatorFasterAutoplay();
         }
         
-        // Check if we're in autoplay mode and we have control
-        if (window.AutoplayManager.hasControl('Raid Hunter')) {
+        // Switch to manual mode if we have autoplay control
+        withControlCheck(window.AutoplayManager, 'Raid Hunter', () => {
             const boardContext = globalThis.state.board.getSnapshot().context;
             if (boardContext.mode === 'autoplay') {
-                // Switch back to manual mode
                 globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
                 console.log('[Raid Hunter] Switched from autoplay to manual mode');
             }
-            // Release control after switching to manual
-            window.AutoplayManager.releaseControl('Raid Hunter');
-        } else {
-            console.log('[Raid Hunter] Cannot switch to manual mode - not controlling autoplay');
-        }
+        }, 'switch to manual mode on raid failure');
         
-        // Update raid status
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
+        // Reset raid state
+        resetState('raid');
         
         // Restore quest button appearance
         restoreQuestButtonAppearance();
@@ -1674,11 +1924,6 @@ function stopAutoplayOnRaidEnd() {
     }
 }
 
-// Updates raid clock status display (disabled - only shows countdown clock)
-function updateRaidClockStatus(status) {
-    // Status messages removed - only countdown clock is shown
-    // This function is kept to prevent errors but does nothing
-}
 
 // Monitors raid list changes to detect when raids end
 function setupRaidListMonitoring() {
@@ -1705,7 +1950,7 @@ function setupRaidListMonitoring() {
                     
                     // If raids were removed and we were currently raiding, stop autoplay
                     if (currentList.length < lastRaidList.length && isCurrentlyRaiding) {
-                        console.log('[Raid Hunter] Raids removed from list - raid likely ended');
+                        console.log('[Raid Hunter] Raid ended');
                         stopAutoplayOnRaidEnd();
                     }
                     
@@ -1747,7 +1992,7 @@ function startRaidEndChecking() {
                 
                 // Check if no raids are available but we're still in autoplay
                 if (currentRaidList.length === 0) {
-                    console.log('[Raid Hunter] No raids available but still in autoplay - stopping autoplay');
+                    console.log('[Raid Hunter] No raids available');
                     stopAutoplayOnRaidEnd();
                     return;
                 }
@@ -1766,7 +2011,7 @@ function startRaidEndChecking() {
                 );
                 
                 if (hasRaidEndIndicator) {
-                    console.log('[Raid Hunter] Raid end indicator found in UI - stopping autoplay');
+                    console.log('[Raid Hunter] Raid ended');
                     stopAutoplayOnRaidEnd();
                     return;
                 }
@@ -1788,10 +2033,13 @@ function stopRaidEndChecking() {
 }
 
 // ============================================================================
-// 7. CORE LOGIC FUNCTIONS
+// 8. SETTINGS MODAL
 // ============================================================================
 
-// Handles events and raids via API.
+/**
+ * Handles events and raids via API
+ * @param {string} roomId - The room ID for the raid/event
+ */
 async function handleEventOrRaid(roomId) {
     if (!roomId) {
         console.log('[Raid Hunter] No room ID provided for raid');
@@ -1817,7 +2065,7 @@ async function handleEventOrRaid(roomId) {
     try {
         // Sleep for 1000ms before navigating to the raid map
         console.log('[Raid Hunter] Waiting 1000ms before navigation...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, RAID_START_DELAY));
         
         // Check automation status after initial delay
         if (isAutomationEnabled === AUTOMATION_DISABLED) {
@@ -1839,7 +2087,7 @@ async function handleEventOrRaid(roomId) {
             type: 'selectRoomById',
             roomId: roomId
         });
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, RAID_START_DELAY));
         console.log('[Raid Hunter] Navigation completed');
         
         // Check automation status after navigation
@@ -2189,19 +2437,7 @@ function handleRaidFailure(reason) {
 }
 
 function ensureAutoplayMode() {
-    try {
-        // Check if another mod is controlling autoplay
-        if (window.AutoplayManager.isControlledByOther('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot switch to autoplay - controlled by another mod');
-            return false;
-        }
-        
-        // Request control of autoplay
-        if (!window.AutoplayManager.requestControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot switch to autoplay - control denied');
-            return false;
-        }
-        
+    return withControl(window.AutoplayManager, 'Raid Hunter', () => {
         const boardContext = globalThis.state.board.getSnapshot().context;
         const currentMode = boardContext.mode;
         
@@ -2211,10 +2447,7 @@ function ensureAutoplayMode() {
             return true;
         }
         return false;
-    } catch (error) {
-        console.error('[Raid Hunter] Error ensuring autoplay mode:', error);
-        return false;
-    }
+    }, 'switch to autoplay mode');
 }
 
 // Checks for existing raids.
@@ -2336,54 +2569,9 @@ function setupRaidMonitoring() {
 
 // Set up fight toast monitoring (now consolidated with quest log monitoring)
 function setupFightToastMonitoring() {
-    // Set up a dedicated body observer for fight toast detection
-    // This runs independently of quest log monitoring
-    if (bodyObserver) {
-        bodyObserver.disconnect();
-        bodyObserver = null;
-    }
-    
-    bodyObserver = new MutationObserver((mutations) => {
-        safeExecute(() => {
-            // Only check for raid toasts if automation is enabled
-            if (!isAutomationActive()) return;
-            
-            for (const mutation of mutations) {
-                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    for (const node of mutation.addedNodes) {
-                        if (node.nodeType === Node.ELEMENT_NODE) {
-                            // Skip quest log elements to prevent false positives
-                            if (node.textContent && node.textContent.includes('Quest Log')) {
-                                continue; // Skip quest log elements
-                            }
-                            
-                            // Check if the added element is a raid toast (like Bestiary Automator)
-                            if (isRaidToast(node)) {
-                                console.log('[Raid Hunter] Raid toast detected via MutationObserver!');
-                                handleFightToast();
-                                return; // Exit early since we found a raid toast
-                            }
-                            
-                            // Also check child elements for raid toasts (like Bestiary Automator)
-                            const raidToast = node.querySelector && node.querySelector('.widget-bottom');
-                            if (raidToast && isRaidToast(raidToast)) {
-                                console.log('[Raid Hunter] Raid toast found in child elements via MutationObserver!');
-                                handleFightToast();
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    });
-    
-    bodyObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    console.log('[Raid Hunter] Body observer set up for raid toast detection');
+    console.log('[Raid Hunter] Fight toast monitoring is now handled by the consolidated observer');
+    // Fight toast monitoring is now handled by the consolidated questLogObserver
+    // No need for a separate bodyObserver
 }
 
 // Handles new raid detection.
@@ -2415,7 +2603,7 @@ async function handleNewRaid(raid) {
             const closeButton = findButtonByText('Close');
             if (closeButton) {
                 closeButton.click();
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, BESTIARY_AUTOMATOR_RETRY_DELAY));
             } else {
                 break;
             }
@@ -2452,7 +2640,7 @@ async function handleNewRaid(raid) {
 }
 
 // ============================================================================
-// 8. SETTINGS MODAL
+// 9. QUEST BUTTON MODIFICATION FUNCTIONS
 // ============================================================================
 
 // Cleanup function for modal state (like Cyclopedia)
@@ -2551,7 +2739,7 @@ function openRaidHunterSettingsModal() {
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
-                                            color: #4ade80;
+                                            color: ${COLOR_SUCCESS};
                                             font-style: italic;
                                             margin-right: auto;
                                         `;
@@ -2663,7 +2851,7 @@ function createSettingsContent() {
         box-sizing: border-box;
         overflow: hidden;
         background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
-        color: #fff;
+        color: ${COLOR_WHITE};
         font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
         border: 4px solid transparent;
         border-image: url('https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png') 6 fill stretch;
@@ -2678,7 +2866,7 @@ function createSettingsContent() {
         max-width: 250px;
         display: flex;
         flex-direction: column;
-        border-right: 1px solid #444;
+        border-right: 1px solid ${COLOR_BORDER};
         overflow-y: auto;
         min-height: 0;
         padding: 0;
@@ -2733,7 +2921,7 @@ function createAutoRaidSettings() {
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
-        color: #ffe066;
+        color: ${COLOR_ACCENT};
         font-size: 16px;
         font-weight: bold;
         text-align: center;
@@ -2763,28 +2951,25 @@ function createAutoRaidSettings() {
     delayLabel.className = 'pixel-font-16';
     delayLabel.style.cssText = `
         font-weight: bold;
-        color: #fff;
+        color: ${COLOR_WHITE};
         margin-bottom: 4px;
     `;
     delayDiv.appendChild(delayLabel);
     
-    const delayInput = document.createElement('input');
-    delayInput.type = 'number';
-    delayInput.id = 'raidDelay';
-    delayInput.value = 3;
-    delayInput.min = 0;
-    delayInput.max = 10;
-    delayInput.className = 'pixel-font-16';
-    delayInput.style.cssText = `
+    const delayInput = createStyledInput('number', 'raidDelay', 3, `
         width: 100%;
         padding: 6px;
-        background: #333;
-        border: 1px solid #ffe066;
-        color: #fff;
+        background: ${COLOR_DARK_GRAY};
+        border: 1px solid ${COLOR_ACCENT};
+        color: ${COLOR_WHITE};
         border-radius: 3px;
         box-sizing: border-box;
         font-size: 14px;
-    `;
+    `, {
+        min: 0,
+        max: 10,
+        className: 'pixel-font-16'
+    });
     delayDiv.appendChild(delayInput);
     
     const delayDesc = document.createElement('div');
@@ -2792,7 +2977,7 @@ function createAutoRaidSettings() {
     delayDesc.className = 'pixel-font-16';
     delayDesc.style.cssText = `
         font-size: 11px;
-        color: #888;
+        color: ${COLOR_GRAY};
         font-style: italic;
         margin-top: 2px;
     `;
@@ -2817,42 +3002,8 @@ function createAutoRaidSettings() {
         margin-bottom: 4px;
     `;
     
-    const staminaRefillCheckbox = document.createElement('input');
-    staminaRefillCheckbox.type = 'checkbox';
-    staminaRefillCheckbox.id = 'autoRefillStamina';
-    staminaRefillCheckbox.checked = false;
-    staminaRefillCheckbox.style.cssText = `
-        width: 16px;
-        height: 16px;
-        accent-color: #ffe066;
-    `;
-    // Add auto-save listener immediately
-    staminaRefillCheckbox.addEventListener('change', autoSaveSettings);
-    checkboxLabelContainer.appendChild(staminaRefillCheckbox);
-    
-    const staminaRefillLabel = document.createElement('label');
-    staminaRefillLabel.textContent = 'Auto-refill Stamina';
-    staminaRefillLabel.className = 'pixel-font-16';
-    staminaRefillLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        cursor: pointer;
-    `;
-    staminaRefillLabel.setAttribute('for', 'autoRefillStamina');
-    checkboxLabelContainer.appendChild(staminaRefillLabel);
-    
-    staminaRefillDiv.appendChild(checkboxLabelContainer);
-    
-    const staminaRefillDesc = document.createElement('div');
-    staminaRefillDesc.textContent = 'Automatically refill stamina when starting a raid';
-    staminaRefillDesc.className = 'pixel-font-16';
-    staminaRefillDesc.style.cssText = `
-        font-size: 11px;
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    staminaRefillDiv.appendChild(staminaRefillDesc);
+    const staminaRefillSetting = createCheckboxSetting('autoRefillStamina', 'Auto-refill Stamina', 'Automatically refill stamina when starting a raid', false);
+    staminaRefillDiv.appendChild(staminaRefillSetting);
     settingsWrapper.appendChild(staminaRefillDiv);
     
     // Faster Autoplay setting
@@ -2864,51 +3015,8 @@ function createAutoRaidSettings() {
         gap: 6px;
     `;
     
-    // Container for checkbox and label on same line
-    const fasterAutoplayCheckboxLabelContainer = document.createElement('div');
-    fasterAutoplayCheckboxLabelContainer.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-    `;
-    
-    const fasterAutoplayCheckbox = document.createElement('input');
-    fasterAutoplayCheckbox.type = 'checkbox';
-    fasterAutoplayCheckbox.id = 'fasterAutoplay';
-    fasterAutoplayCheckbox.checked = false;
-    fasterAutoplayCheckbox.style.cssText = `
-        width: 16px;
-        height: 16px;
-        accent-color: #ffe066;
-    `;
-    // Add auto-save listener immediately
-    fasterAutoplayCheckbox.addEventListener('change', autoSaveSettings);
-    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayCheckbox);
-    
-    const fasterAutoplayLabel = document.createElement('label');
-    fasterAutoplayLabel.textContent = 'Faster Autoplay';
-    fasterAutoplayLabel.className = 'pixel-font-16';
-    fasterAutoplayLabel.style.cssText = `
-        font-weight: bold;
-        color: #fff;
-        cursor: pointer;
-    `;
-    fasterAutoplayLabel.setAttribute('for', 'fasterAutoplay');
-    fasterAutoplayCheckboxLabelContainer.appendChild(fasterAutoplayLabel);
-    
-    fasterAutoplayDiv.appendChild(fasterAutoplayCheckboxLabelContainer);
-    
-    const fasterAutoplayDesc = document.createElement('div');
-    fasterAutoplayDesc.textContent = 'Enable faster autoplay speed during raids (removes delays and increases game speed)';
-    fasterAutoplayDesc.className = 'pixel-font-16';
-    fasterAutoplayDesc.style.cssText = `
-        font-size: 11px;
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    fasterAutoplayDiv.appendChild(fasterAutoplayDesc);
+    const fasterAutoplaySetting = createCheckboxSetting('fasterAutoplay', 'Faster Autoplay', 'Enable faster autoplay speed during raids', false);
+    fasterAutoplayDiv.appendChild(fasterAutoplaySetting);
     settingsWrapper.appendChild(fasterAutoplayDiv);
     
     // Add settings wrapper to container
@@ -2964,7 +3072,7 @@ function createRaidMapSelection() {
     section.style.cssText = `
         padding: 15px;
         background: rgba(255, 255, 255, 0.05);
-        border: 1px solid #444;
+        border: 1px solid ${COLOR_BORDER};
         border-radius: 5px;
         margin: 0;
         flex: 1;
@@ -2977,7 +3085,7 @@ function createRaidMapSelection() {
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 15px 0;
-        color: #ffe066;
+        color: ${COLOR_ACCENT};
         font-size: 16px;
         font-weight: bold;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
@@ -2990,7 +3098,7 @@ function createRaidMapSelection() {
     description.style.cssText = `
         margin-bottom: 15px;
         font-size: 12px;
-        color: #888;
+        color: ${COLOR_GRAY};
         font-style: italic;
     `;
     section.appendChild(description);
@@ -3004,7 +3112,7 @@ function createRaidMapSelection() {
         flex: 1;
         max-height: 250px;
         overflow-y: auto;
-        border: 1px solid #555;
+        border: 1px solid ${COLOR_BORDER_DARK};
         border-radius: 3px;
         padding: 10px;
         background: rgba(0, 0, 0, 0.3);
@@ -3048,7 +3156,7 @@ function createRaidMapSelection() {
         regionHeader.className = 'pixel-font-16';
         regionHeader.style.cssText = `
             font-weight: bold;
-            color: #ffe066;
+            color: ${COLOR_ACCENT};
             margin: 10px 0 5px 0;
             font-size: 14px;
             border-bottom: 1px solid #555;
@@ -3067,21 +3175,17 @@ function createRaidMapSelection() {
                 padding: 2px 0;
             `;
             
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `raid-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
-            checkbox.checked = false; // Default to disabled
-            checkbox.style.cssText = `
+            const checkbox = createStyledInput('checkbox', `raid-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`, undefined, `
                 width: 16px;
                 height: 16px;
-                accent-color: #ffe066;
-            `;
+                accent-color: ${COLOR_ACCENT};
+            `, { checked: false });
             
             const label = document.createElement('label');
             label.textContent = raidName;
             label.className = 'pixel-font-16';
             label.style.cssText = `
-                color: #fff;
+                color: ${COLOR_WHITE};
                 font-size: 13px;
                 cursor: pointer;
                 flex: 1;
@@ -3104,29 +3208,13 @@ function createRaidMapSelection() {
         margin-top: 10px;
     `;
     
-    const selectAllBtn = document.createElement('button');
-    selectAllBtn.textContent = 'Select All';
-    selectAllBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight';
-    selectAllBtn.style.cssText = `
-        flex: 1;
-    `;
-    
-    // Functionality on click
-    selectAllBtn.addEventListener('click', () => {
+    const selectAllBtn = createStyledButton('select-all-maps', 'Select All', 'green', () => {
         const checkboxes = mapContainer.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = true);
         autoSaveSettings(); // Auto-save after selecting all
     });
     
-    const selectNoneBtn = document.createElement('button');
-    selectNoneBtn.textContent = 'Select None';
-    selectNoneBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight';
-    selectNoneBtn.style.cssText = `
-        flex: 1;
-    `;
-    
-    // Functionality on click
-    selectNoneBtn.addEventListener('click', () => {
+    const selectNoneBtn = createStyledButton('select-none-maps', 'Select None', 'red', () => {
         const checkboxes = mapContainer.querySelectorAll('input[type="checkbox"]');
         checkboxes.forEach(cb => cb.checked = false);
         autoSaveSettings(); // Auto-save after selecting none
@@ -3142,20 +3230,73 @@ function createRaidMapSelection() {
 
 
 
-// Load settings function
+// Default settings with validation
+const DEFAULT_SETTINGS = {
+    raidDelay: DEFAULT_RAID_START_DELAY,
+    autoRefillStamina: false,
+    fasterAutoplay: false,
+    enabledRaidMaps: []
+};
+
+// Settings validation functions
+function validateRaidDelay(value) {
+    const num = parseInt(value);
+    return !isNaN(num) && num >= 0 && num <= 60;
+}
+
+function validateRaidMaps(maps) {
+    if (!Array.isArray(maps)) return false;
+    return maps.every(map => EVENT_TEXTS.includes(map));
+}
+
+function validateBoolean(value) {
+    return typeof value === 'boolean';
+}
+
+function sanitizeSettings(settings) {
+    const sanitized = {};
+    
+    // Validate and sanitize raid delay
+    if (validateRaidDelay(settings.raidDelay)) {
+        sanitized.raidDelay = parseInt(settings.raidDelay);
+    } else {
+        sanitized.raidDelay = DEFAULT_RAID_START_DELAY;
+        console.warn('[Raid Hunter] Invalid raid delay, using default:', DEFAULT_RAID_START_DELAY);
+    }
+    
+    // Validate and sanitize boolean settings
+    sanitized.autoRefillStamina = validateBoolean(settings.autoRefillStamina) ? settings.autoRefillStamina : false;
+    sanitized.fasterAutoplay = validateBoolean(settings.fasterAutoplay) ? settings.fasterAutoplay : false;
+    
+    // Validate and sanitize raid maps
+    if (validateRaidMaps(settings.enabledRaidMaps)) {
+        sanitized.enabledRaidMaps = settings.enabledRaidMaps;
+    } else {
+        sanitized.enabledRaidMaps = [];
+        console.warn('[Raid Hunter] Invalid raid maps, using default: []');
+    }
+    
+    return sanitized;
+}
+
+// Load settings function with validation
 function loadSettings() {
     const saved = localStorage.getItem('raidHunterSettings');
     if (saved) {
         try {
-            return JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            const sanitized = sanitizeSettings(parsed);
+            return { ...DEFAULT_SETTINGS, ...sanitized };
         } catch (error) {
             console.error('[Raid Hunter] Error parsing settings:', error);
+            console.log('[Raid Hunter] Using default settings due to parse error');
+            return DEFAULT_SETTINGS;
         }
     }
-    return {};
+    return DEFAULT_SETTINGS;
 }
 
-// Auto-save settings when changed
+// Auto-save settings when changed with validation
 function autoSaveSettings() {
     try {
         const settings = {};
@@ -3170,14 +3311,21 @@ function autoSaveSettings() {
                         settings[input.id] = input.checked;
                     }
                 } else if (input.type === 'number') {
-                    settings[input.id] = parseInt(input.value) || 0;
+                    const value = parseInt(input.value);
+                    if (input.id === 'raidDelay' && !validateRaidDelay(value)) {
+                        console.warn('[Raid Hunter] Invalid raid delay value:', value);
+                        input.value = DEFAULT_RAID_START_DELAY;
+                        settings[input.id] = DEFAULT_RAID_START_DELAY;
+                    } else {
+                        settings[input.id] = value || 0;
+                    }
                 } else {
                     settings[input.id] = input.value;
                 }
             }
         });
         
-        // Process raid map selections
+        // Process raid map selections with validation
         const enabledRaidMaps = [];
         EVENT_TEXTS.forEach(eventText => {
             const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
@@ -3188,11 +3336,21 @@ function autoSaveSettings() {
         });
         settings.enabledRaidMaps = enabledRaidMaps;
         
+        // Validate and sanitize settings before saving
+        const sanitizedSettings = sanitizeSettings(settings);
+        
         // Save to localStorage
-        localStorage.setItem('raidHunterSettings', JSON.stringify(settings));
-        console.log('[Raid Hunter] Settings auto-saved:', settings);
+        localStorage.setItem('raidHunterSettings', JSON.stringify(sanitizedSettings));
+        console.log('[Raid Hunter] Settings saved');
+        
+        // Show validation feedback if needed
+        if (sanitizedSettings.raidDelay !== settings.raidDelay) {
+            showValidationMessage('Raid delay must be between 0-60 seconds', 'warning');
+        }
+        
     } catch (error) {
         console.error('[Raid Hunter] Error auto-saving settings:', error);
+        showValidationMessage('Failed to save settings. Please try again.', 'error');
     }
 }
 
@@ -3202,13 +3360,21 @@ function loadAndApplySettings() {
         const settings = loadSettings();
         
         
-        if (settings.raidDelay !== undefined) {
-            const input = document.getElementById('raidDelay');
-            if (input) {
-                input.value = settings.raidDelay;
-                // Add auto-save listener
-                input.addEventListener('input', autoSaveSettings);
-            }
+        // Apply raid delay with validation
+        const raidDelayInput = document.getElementById('raidDelay');
+        if (raidDelayInput) {
+            raidDelayInput.value = settings.raidDelay;
+            // Add auto-save listener with validation
+            raidDelayInput.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value);
+                if (!validateRaidDelay(value)) {
+                    e.target.style.borderColor = COLOR_RED;
+                    showValidationMessage('Raid delay must be between 0-60 seconds', 'warning');
+                } else {
+                    e.target.style.borderColor = '';
+                }
+                autoSaveSettings();
+            });
         }
         
         if (settings.autoRefillStamina !== undefined) {
@@ -3229,12 +3395,14 @@ function loadAndApplySettings() {
             }
         }
         
-        // Apply raid map selections and add auto-save listeners
-        if (settings.enabledRaidMaps) {
+        // Apply raid map selections with validation
+        if (settings.enabledRaidMaps && Array.isArray(settings.enabledRaidMaps)) {
             settings.enabledRaidMaps.forEach(eventText => {
+                if (EVENT_TEXTS.includes(eventText)) {
                 const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
                 const checkbox = document.getElementById(checkboxId);
                 if (checkbox) checkbox.checked = true;
+                }
             });
         }
         
@@ -3247,18 +3415,73 @@ function loadAndApplySettings() {
             }
         });
         
-        console.log('[Raid Hunter] Settings applied to modal with auto-save listeners');
+        console.log('[Raid Hunter] Settings loaded');
     } catch (error) {
-        console.error('[Raid Hunter] Error applying settings:', error);
+        console.error('[Raid Hunter] Error loading and applying settings:', error);
+        showValidationMessage('Failed to load settings. Using defaults.', 'error');
+    }
+}
+
+// Show validation message to user
+function showValidationMessage(message, type = 'info') {
+    try {
+        // Create a temporary notification
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 16px;
+            border-radius: 4px;
+            color: white;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            z-index: 10000;
+            max-width: 300px;
+            word-wrap: break-word;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        `;
+        
+        // Set color based on type
+        switch (type) {
+            case 'error':
+                notification.style.backgroundColor = COLOR_RED;
+                break;
+            case 'warning':
+                notification.style.backgroundColor = COLOR_YELLOW;
+                notification.style.color = COLOR_DARK_GRAY;
+                break;
+            case 'success':
+                notification.style.backgroundColor = COLOR_GREEN;
+                break;
+            default:
+                notification.style.backgroundColor = COLOR_ACCENT;
+                notification.style.color = COLOR_DARK_GRAY;
+        }
+        
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+        
+    } catch (error) {
+        console.error('[Raid Hunter] Error showing validation message:', error);
+        // Fallback to console
+        console.log(`[Raid Hunter] ${type.toUpperCase()}: ${message}`);
     }
 }
 
 // ============================================================================
-// 9. INITIALIZATION
+// 10. INITIALIZATION
 // ============================================================================
 
 function init() {
-    console.log('[Raid Hunter] Raid Hunter initializing');
+    console.log('[Raid Hunter] Initializing...');
     
     // Load automation state from localStorage first
     loadAutomationState();
@@ -3274,7 +3497,7 @@ function init() {
     // Check for existing raids immediately and after a delay (only if automation is enabled)
     if (isAutomationEnabled === AUTOMATION_ENABLED) {
         checkForExistingRaids();
-        setTimeout(checkForExistingRaids, 1000);
+        setTimeout(checkForExistingRaids, MODAL_OPEN_DELAY);
     } else {
         console.log('[Raid Hunter] Automation disabled - skipping initial raid check');
     }
@@ -3291,7 +3514,7 @@ function init() {
 init();
 
 // ============================================================================
-// 9. QUEST BUTTON VISUAL MODIFICATIONS
+// 11. QUEST BUTTON MODIFICATION FUNCTIONS
 // ============================================================================
 
 // Store original quest button state
@@ -3373,26 +3596,20 @@ function isOnCorrectRaidMap() {
 
 // Function to modify quest button appearance when raiding is active
 function modifyQuestButtonForRaiding() {
-    try {
         // Check if we're currently raiding - if so, modify quest button regardless of map
         // The user might be navigating to the raid map, so we should show "Raiding" status
         if (!isCurrentlyRaiding) {
-            console.log('[Raid Hunter] Not currently raiding - not modifying quest button');
+            console.log('[Raid Hunter] Quest button unchanged');
             return false;
         }
         
-        // Request control of quest button
-        if (!window.QuestButtonManager.requestControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot modify quest button - controlled by another mod');
-            return false;
-        }
+    return withControl(window.QuestButtonManager, 'Raid Hunter', () => {
         
         // Find the quest button in the header navigation
         const questButton = findQuestButton();
         
         if (!questButton) {
             console.log('[Raid Hunter] Quest button not found for modification');
-            window.QuestButtonManager.releaseControl('Raid Hunter');
             return false;
         }
         
@@ -3416,7 +3633,7 @@ function modifyQuestButtonForRaiding() {
                     spanText: span ? span.textContent : null,
                     buttonColor: questButton.style.color || ''
                 };
-                console.log('[Raid Hunter] Stored original quest button state');
+                console.log('[Raid Hunter] Quest button state stored');
             } else {
                 console.log('[Raid Hunter] Quest button not in original state - not storing originalState');
             }
@@ -3437,7 +3654,7 @@ function modifyQuestButtonForRaiding() {
         if (span) {
             span.textContent = 'Raiding';
             // Add shimmer effect to the text
-            span.style.background = 'linear-gradient(45deg, #22c55e, #16a34a, #22c55e, #16a34a)';
+            span.style.background = `linear-gradient(45deg, ${COLOR_GREEN}, ${COLOR_DARK_GREEN}, ${COLOR_GREEN}, ${COLOR_DARK_GREEN})`;
             span.style.backgroundSize = '400% 400%';
             span.style.backgroundClip = 'text';
             span.style.webkitBackgroundClip = 'text';
@@ -3460,38 +3677,27 @@ function modifyQuestButtonForRaiding() {
         }
         
         // Set green color for the button
-        questButton.style.color = '#22c55e'; // Green color
+        questButton.style.color = COLOR_GREEN; // Green color
         
         console.log('[Raid Hunter] Quest button modified for raiding state');
         return true;
-    } catch (error) {
-        console.error('[Raid Hunter] Error modifying quest button for raiding:', error);
-        window.QuestButtonManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'modify quest button for raiding');
 }
 
 // Function to restore quest button to original appearance
 function restoreQuestButtonAppearance() {
-    try {
-        // Only restore if we have control
-        if (!window.QuestButtonManager.hasControl('Raid Hunter')) {
-            console.log('[Raid Hunter] Cannot restore quest button - not controlled by Raid Hunter');
-            return false;
-        }
+    return withControlCheck(window.QuestButtonManager, 'Raid Hunter', () => {
         
         // Find the quest button - try multiple selectors to find it regardless of current state
         const questButton = findQuestButton();
         
         if (!questButton) {
             console.log('[Raid Hunter] Quest button not found for restoration');
-            window.QuestButtonManager.releaseControl('Raid Hunter');
             return false;
         }
         
         if (!window.QuestButtonManager.originalState) {
-            console.log('[Raid Hunter] Original quest button state not found for restoration');
-            window.QuestButtonManager.releaseControl('Raid Hunter');
+            console.log('[Raid Hunter] Quest button state not found');
             return false;
         }
         
@@ -3541,16 +3747,9 @@ function restoreQuestButtonAppearance() {
         // Restore original color
         questButton.style.color = window.QuestButtonManager.originalState.buttonColor;
         
-        // Release control after restoration
-        window.QuestButtonManager.releaseControl('Raid Hunter');
-        
         console.log('[Raid Hunter] Quest button appearance restored');
         return true;
-    } catch (error) {
-        console.error('[Raid Hunter] Error restoring quest button appearance:', error);
-        window.QuestButtonManager.releaseControl('Raid Hunter');
-        return false;
-    }
+    }, 'restore quest button appearance');
 }
 
 // Function to start monitoring quest button validation
@@ -3566,7 +3765,7 @@ function startQuestButtonValidation() {
         return;
     }
     
-    console.log('[Raid Hunter] Starting quest button validation monitoring');
+    console.log('[Raid Hunter] Quest button monitoring started');
     
     questButtonValidationInterval = setInterval(() => {
         try {
@@ -3580,7 +3779,7 @@ function startQuestButtonValidation() {
             // Check if we're still in autoplay mode (indicates raid is still active)
             const boardContext = globalThis.state.board.getSnapshot().context;
             if (boardContext.mode !== 'autoplay') {
-                console.log('[Raid Hunter] No longer in autoplay mode - raid likely ended, restoring quest button');
+                console.log('[Raid Hunter] Quest button restored');
                 isCurrentlyRaiding = false;
                 currentRaidInfo = null;
                 restoreQuestButtonAppearance();
@@ -3590,7 +3789,7 @@ function startQuestButtonValidation() {
             
             // Check if we're on the correct raid map
             if (!isOnCorrectRaidMap()) {
-                console.log('[Raid Hunter] User navigated away from raid map - restoring quest button');
+                console.log('[Raid Hunter] Quest button restored');
                 isCurrentlyRaiding = false;
                 currentRaidInfo = null;
                 restoreQuestButtonAppearance();
@@ -3602,7 +3801,7 @@ function startQuestButtonValidation() {
             const raidState = globalThis.state?.raids?.getSnapshot?.();
             const hasActiveRaids = raidState?.context?.list?.length > 0;
             if (!hasActiveRaids) {
-                console.log('[Raid Hunter] No active raids in list - raid ended, restoring quest button');
+                console.log('[Raid Hunter] Quest button restored');
                 isCurrentlyRaiding = false;
                 currentRaidInfo = null;
                 restoreQuestButtonAppearance();
@@ -3665,7 +3864,7 @@ function stopQuestButtonValidation() {
 }
 
 // ============================================================================
-// 10. CLEANUP & EXPORTS
+// 12. CLEANUP & EXPORTS
 // ============================================================================
 
 // Cleanup function for when mod is disabled (like Cyclopedia)
@@ -3679,14 +3878,6 @@ function cleanupRaidHunter(periodic = false) {
         // Clean up raid clock only if not periodic cleanup
         if (!periodic) {
             stopRaidClock();
-        }
-        
-        // Clean up additional items not covered by cleanupAll()
-        
-        // Clean up window.staminaMonitorInterval
-        if (window.staminaMonitorInterval) {
-            clearInterval(window.staminaMonitorInterval);
-            window.staminaMonitorInterval = null;
         }
         
         // Clean up CSS styles only if not periodic cleanup
@@ -3707,52 +3898,10 @@ function cleanupRaidHunter(periodic = false) {
             }
         }
         
-        // Clean up modal cleanup observer
-        if (modalCleanupObserver) {
-            modalCleanupObserver.disconnect();
-            modalCleanupObserver = null;
-        }
+        // Note: Control release is handled automatically by withControl functions
         
-        // Clean up global state managers
-        try {
-            // Release control of Quest Button Manager
-            if (window.QuestButtonManager && window.QuestButtonManager.hasControl('Raid Hunter')) {
-                window.QuestButtonManager.releaseControl('Raid Hunter');
-            }
-            
-            // Release control of Bestiary Automator Settings Manager
-            if (window.BestiaryAutomatorSettingsManager && window.BestiaryAutomatorSettingsManager.hasControl('Raid Hunter')) {
-                window.BestiaryAutomatorSettingsManager.releaseControl('Raid Hunter');
-            }
-            
-            // Release control of Autoplay Manager
-            if (window.AutoplayManager && window.AutoplayManager.hasControl('Raid Hunter')) {
-                window.AutoplayManager.releaseControl('Raid Hunter');
-            }
-        } catch (error) {
-            console.error('[Raid Hunter] Error cleaning up global state managers:', error);
-        }
-        
-        // Reset additional state variables
-        isRaidActive = false;
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        raidQueue = [];
-        raidRetryCount = 0;
-        lastRaidList = [];
-        originalQuestButtonState = null;
-        stateManager.isInitializing = false;
-        stateManager.isProcessing = false;
-        isBoardAnalyzerRunning = false;
-        
-        // Reset automation state to default (disabled)
-        isAutomationEnabled = AUTOMATION_DISABLED;
-        
-        // Restore quest button appearance
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopQuestButtonValidation();
+        // Reset all state using centralized function
+        resetState('full');
         
         console.log('[Raid Hunter] Mod cleanup completed');
     } catch (error) {
@@ -3763,6 +3912,7 @@ function cleanupRaidHunter(periodic = false) {
 // Export functionality for mod loader (following mod development guide)
 context.exports = {
     cleanup: cleanupRaidHunter,
+    isCurrentlyRaiding: () => isCurrentlyRaiding,
     updateConfig: (newConfig) => {
         // Handle config updates if needed
         console.log('[Raid Hunter] Config update received:', newConfig);
@@ -3773,3 +3923,6 @@ context.exports = {
 window.cleanupSuperModsRaidHunterjs = (periodic = false) => {
   cleanupRaidHunter(periodic);
 };
+
+// Expose Raid Hunter state globally for Better Tasker coordination
+window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;

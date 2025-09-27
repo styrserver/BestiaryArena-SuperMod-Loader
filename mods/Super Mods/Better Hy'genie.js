@@ -211,44 +211,12 @@
   
   function getItemQuantity(itemSlot) {
     const inventory = getInventoryState();
-    
-    if (!inventory) {
-      return 0;
-    }
+    if (!inventory) return 0;
     
     const itemKey = getItemKeyFromSlot(itemSlot);
-    if (!itemKey) {
-      return 0;
-    }
-    
-    return inventory[itemKey] || 0;
+    return itemKey ? (inventory[itemKey] || 0) : 0;
   }
   
-  function getItemQuantityWithRetry(itemSlot, maxRetries = CONSTANTS.RETRY_MAX_ATTEMPTS) {
-    return new Promise((resolve) => {
-      let attempts = 0;
-      
-      const tryGetQuantity = () => {
-        attempts++;
-        const itemKey = getItemKeyFromSlot(itemSlot);
-        const inventory = getInventoryState();
-        
-        if (inventory && itemKey) {
-          const count = inventory[itemKey] || 0;
-          resolve(count);
-          return;
-        }
-        
-        if (attempts < maxRetries) {
-          setTimeout(tryGetQuantity, CONSTANTS.RETRY_DELAY);
-        } else {
-          resolve(0);
-        }
-      };
-      
-      tryGetQuantity();
-    });
-  }
   
   function getFusionRatio(itemKey) {
     try {
@@ -661,6 +629,8 @@
         return;
       }
       
+      console.log('[Better Hy\'genie] Refreshing all input boxes with updated inventory');
+      
       const quantityInputs = modal.querySelectorAll('.better-hygenie-quantity-input');
       quantityInputs.forEach(input => {
         const gridContainer = input.closest(SELECTORS.GRID_CONTAINERS);
@@ -670,23 +640,41 @@
         if (!itemSlot) return;
         
         const itemKey = getItemKeyFromSlot(itemSlot);
+        if (!itemKey) return;
+        
         const currentQuantity = inventory[itemKey] || 0;
+        console.log(`[Better Hy\'genie] Updating ${itemKey}: ${currentQuantity} items`);
         
         input.style.display = 'block';
         const fuseButton = gridContainer.querySelector('.better-hygenie-fuse-button');
         if (fuseButton) fuseButton.style.display = 'flex';
         
         const fusableAmount = calculateFusableAmount(itemKey, currentQuantity);
-        const maxInputQuantity = fusableAmount > 0 ? fusableAmount * getFusionRatio(itemKey) : 1;
-        const maxInputForDisplay = Math.min(maxInputQuantity, currentQuantity);
+        const fusionRatio = getFusionRatio(itemKey);
+        const maxInputQuantity = fusableAmount > 0 ? fusableAmount * fusionRatio : currentQuantity;
+        const maxInputForDisplay = currentQuantity > 0 ? Math.min(maxInputQuantity, currentQuantity) : 1;
         
-        input.max = currentQuantity;
-        input.value = Math.min(parseInt(input.value) || 1, Math.max(1, maxInputForDisplay));
+        // Update input value to the maximum fusable amount
+        const newValue = Math.max(1, maxInputForDisplay);
+        input.value = newValue.toString();
         
+        // Update button text
         if (fuseButton) {
-          updateFuseButtonText(fuseButton, parseInt(input.value) || 1);
+          updateFuseButtonText(fuseButton, newValue);
+        }
+        
+        // Enable/disable button based on available quantity
+        if (fuseButton) {
+          fuseButton.disabled = currentQuantity < fusionRatio;
+          
+          // Update the stored quantity in the event listener
+          if (fuseButton._updateQuantity) {
+            fuseButton._updateQuantity(currentQuantity);
+          }
         }
       });
+      
+      console.log('[Better Hy\'genie] All input boxes refreshed successfully');
       
     } catch (error) {
       handleError(error, 'Error refreshing UI after fusion');
@@ -711,8 +699,15 @@
     const gridContainers = section.querySelectorAll(SELECTORS.GRID_CONTAINERS);
     console.log('[Better Hy\'genie] Found grid containers:', gridContainers.length);
     
+    // Get inventory once for the entire section
+    const inventory = getInventoryState();
+    if (!inventory) {
+      console.log('[Better Hy\'genie] No inventory available, skipping section');
+      delete section.dataset.betterHygenieSectionProcessed;
+      return;
+    }
+    
     let processedCount = 0;
-    let pendingAsyncCount = 0;
     
     gridContainers.forEach((gridContainer, index) => {
       console.log(`[Better Hy\'genie] Processing grid container ${index}:`, gridContainer);
@@ -735,55 +730,18 @@
       const itemKey = getItemKeyFromSlot(itemSlot);
       console.log(`[Better Hy\'genie] Grid ${index} - itemKey:`, itemKey);
       
-      const isDiceManipulator = itemKey && itemKey.startsWith('diceManipulator');
-      console.log(`[Better Hy\'genie] Grid ${index} - isDiceManipulator:`, isDiceManipulator);
-      
-      if (isDiceManipulator) {
-        console.log(`[Better Hy\'genie] Grid ${index} - Processing dice manipulator asynchronously`);
-        pendingAsyncCount++;
-        getItemQuantityWithRetry(itemSlot).then(totalQuantity => {
-          console.log(`[Better Hy\'genie] Grid ${index} - Got dice manipulator quantity:`, totalQuantity);
-          const fusableAmount = calculateFusableAmount(itemKey, totalQuantity);
-          
-          if (gridContainer.querySelector('.better-hygenie-quantity-input')) {
-            console.log(`[Better Hy\'genie] Grid ${index} - Input already exists during async processing, skipping`);
-            pendingAsyncCount--;
-            checkCompletion();
-            return;
-          }
-          
-          console.log(`[Better Hy\'genie] Grid ${index} - Creating input and button for dice manipulator`);
-          const quantityInput = createQuantityInput(totalQuantity || 1);
-          const customFuseButton = createCustomFuseButton();
-          
-          originalFuseButton.parentNode.insertBefore(quantityInput, originalFuseButton);
-          originalFuseButton.parentNode.insertBefore(customFuseButton, originalFuseButton);
-          
-          originalFuseButton.style.display = 'none';
-          console.log(`[Better Hy\'genie] Grid ${index} - Successfully added dice manipulator input and button`);
-          
-          const fusionRatio = getFusionRatio(itemKey);
-          const maxInputQuantity = fusableAmount > 0 ? fusableAmount * fusionRatio : totalQuantity;
-          const maxInputForDisplay = totalQuantity > 0 ? Math.min(maxInputQuantity, totalQuantity) : 1;
-          
-          quantityInput.value = maxInputForDisplay.toString();
-          
-          updateFuseButtonText(customFuseButton, maxInputForDisplay);
-          
-          addEventListenersToInput(quantityInput, customFuseButton, itemKey, totalQuantity, index, itemSlot);
-          
-          processedCount++;
-          pendingAsyncCount--;
-          checkCompletion();
-        });
+      if (!itemKey) {
+        console.log(`[Better Hy\'genie] Grid ${index} - No item key found, skipping`);
         return;
       }
       
-      const totalQuantity = getItemQuantity(itemSlot);
-      console.log(`[Better Hy\'genie] Grid ${index} - Got summon scroll quantity:`, totalQuantity);
+      // Get quantity directly from inventory
+      const totalQuantity = inventory[itemKey] || 0;
+      console.log(`[Better Hy\'genie] Grid ${index} - Got quantity:`, totalQuantity);
+      
       const fusableAmount = calculateFusableAmount(itemKey, totalQuantity);
       
-      console.log(`[Better Hy\'genie] Grid ${index} - Creating input and button for summon scroll`);
+      console.log(`[Better Hy\'genie] Grid ${index} - Creating input and button`);
       const quantityInput = createQuantityInput(totalQuantity || 1);
       const customFuseButton = createCustomFuseButton();
       
@@ -791,7 +749,7 @@
       originalFuseButton.parentNode.insertBefore(customFuseButton, originalFuseButton);
       
       originalFuseButton.style.display = 'none';
-      console.log(`[Better Hy\'genie] Grid ${index} - Successfully added summon scroll input and button`);
+      console.log(`[Better Hy\'genie] Grid ${index} - Successfully added input and button`);
       
       const fusionRatio = getFusionRatio(itemKey);
       const maxInputQuantity = fusableAmount > 0 ? fusableAmount * fusionRatio : totalQuantity;
@@ -806,25 +764,19 @@
       processedCount++;
     });
     
-    function checkCompletion() {
-      console.log(`[Better Hy\'genie] checkCompletion - pendingAsyncCount: ${pendingAsyncCount}, processedCount: ${processedCount}`);
-      if (pendingAsyncCount === 0) {
-        if (processedCount > 0) {
-          console.log(`[Better Hy\'genie] Section processing completed successfully`);
-          section.dataset.betterHygenieSectionProcessed = 'true';
-        } else {
-          console.log(`[Better Hy\'genie] Section processing completed but no items were processed`);
-          delete section.dataset.betterHygenieSectionProcessed;
-        }
-      }
-    }
-    
-    if (pendingAsyncCount === 0) {
-      checkCompletion();
+    if (processedCount > 0) {
+      console.log(`[Better Hy\'genie] Section processing completed successfully`);
+      section.dataset.betterHygenieSectionProcessed = 'true';
+    } else {
+      console.log(`[Better Hy\'genie] Section processing completed but no items were processed`);
+      delete section.dataset.betterHygenieSectionProcessed;
     }
   }
   
-  function addEventListenersToInput(quantityInput, fuseButton, itemKey, validFusionAmount, index, itemSlot) {
+  function addEventListenersToInput(quantityInput, fuseButton, itemKey, availableQuantity, index, itemSlot) {
+    // Store the available quantity to avoid repeated inventory calls
+    let currentQuantity = availableQuantity;
+    
     quantityInput.addEventListener('input', function() {
       const value = this.value.trim();
       let quantity;
@@ -833,9 +785,8 @@
         quantity = 1;
       } else {
         quantity = parseInt(value) || 1;
-        const availableQuantity = getItemQuantity(itemSlot);
-        if (quantity > availableQuantity) {
-          quantity = availableQuantity;
+        if (quantity > currentQuantity) {
+          quantity = currentQuantity;
         }
       }
       
@@ -855,13 +806,10 @@
         quantity = 1;
       } else {
         quantity = parseInt(value) || 1;
-        const availableQuantity = getItemQuantity(itemSlot);
-        if (quantity > availableQuantity) {
-          quantity = availableQuantity;
+        if (quantity > currentQuantity) {
+          quantity = currentQuantity;
         }
       }
-      
-      const currentQuantity = getItemQuantity(itemSlot);
       
       if (currentQuantity < quantity) {
         handleError(new Error(`Insufficient items for fusion. Requested: ${quantity}, Available: ${currentQuantity}`), { requested: quantity, available: currentQuantity });
@@ -917,6 +865,11 @@
         fuseButton.disabled = false;
       }
     });
+    
+    // Store reference to update quantity after fusion
+    fuseButton._updateQuantity = (newQuantity) => {
+      currentQuantity = newQuantity;
+    };
   }
   
 // =======================
@@ -1045,6 +998,8 @@
   
   let observer = null;
   let observerTimeout = null;
+  let lastProcessTime = 0;
+  const MIN_PROCESS_INTERVAL = 500; // Minimum 500ms between processing attempts
   
      function transformHygenieTooltip() {
      try {
@@ -1060,63 +1015,83 @@
    }
 
   function debouncedProcessMutations(mutations) {
-    console.log('[Better Hy\'genie] debouncedProcessMutations called with', mutations.length, 'mutations');
+    // Early exit if no mutations or already processing
+    if (!mutations || mutations.length === 0) return;
     
+    // Check if we already have an enhanced modal - if so, skip processing
+    const existingModal = document.querySelector(`${SELECTORS.HYGENIE_MODAL}[data-better-hygenie-enhanced]`);
+    if (existingModal) {
+      return;
+    }
+    
+    // Quick filter for potentially relevant mutations before debouncing
+    const hasRelevantMutation = mutations.some(mutation => {
+      if (mutation.type !== 'childList') return false;
+      
+      return Array.from(mutation.addedNodes).some(node => {
+        if (node.nodeType !== Node.ELEMENT_NODE) return false;
+        
+        // Quick text content check
+        const textContent = node.textContent || '';
+        if (textContent.includes('Hy\'genie') || textContent.includes('Hi\'giênio')) {
+          return true;
+        }
+        
+        // Check child elements only if node has children
+        if (node.querySelector) {
+          return Array.from(node.querySelectorAll('*')).some(el => {
+            const elText = el.textContent || '';
+            return elText.includes('Hy\'genie') || elText.includes('Hi\'giênio');
+          });
+        }
+        
+        return false;
+      });
+    });
+    
+    if (!hasRelevantMutation) {
+      return;
+    }
+    
+    // Clear existing timeout
     if (observerTimeout) {
       clearTimeout(observerTimeout);
     }
     
+    // Set new timeout with longer delay for better performance
     observerTimeout = setTimeout(() => {
+      // Throttle processing to prevent excessive calls
+      const now = Date.now();
+      if (now - lastProcessTime < MIN_PROCESS_INTERVAL) {
+        return;
+      }
+      lastProcessTime = now;
+      
+      // Double-check that no modal was enhanced during the delay
+      const currentModal = document.querySelector(`${SELECTORS.HYGENIE_MODAL}[data-better-hygenie-enhanced]`);
+      if (currentModal) {
+        return;
+      }
+      
       console.log('[Better Hy\'genie] Processing mutations after debounce delay');
       transformHygenieTooltip();
-      const existingModal = document.querySelector(`${SELECTORS.HYGENIE_MODAL}[data-better-hygenie-enhanced]`);
-      if (existingModal) {
-        console.log('[Better Hy\'genie] Modal already enhanced, skipping');
-        return;
-      }
       
-             const hasRelevantMutation = mutations.some(mutation => 
-         mutation.type === 'childList' && 
-         Array.from(mutation.addedNodes).some(node => 
-           node.nodeType === Node.ELEMENT_NODE && 
-           (node.textContent?.includes('Hy\'genie') || node.textContent?.includes('Hi\'giênio') || 
-            node.querySelector?.('*') && 
-            Array.from(node.querySelectorAll('*')).some(el => 
-              el.textContent?.includes('Hy\'genie') || el.textContent?.includes('Hi\'giênio')
-            ))
-         )
-       );
-      
-      if (!hasRelevantMutation) {
-        console.log('[Better Hy\'genie] No relevant mutations found, skipping');
-        return;
-      }
-      
-      console.log('[Better Hy\'genie] Found relevant mutations, looking for widgets');
       const widgetBottoms = document.querySelectorAll(SELECTORS.HYGENIE_MODAL);
-      console.log('[Better Hy\'genie] Found widgets:', widgetBottoms.length);
       
       for (const widget of widgetBottoms) {
-        console.log('[Better Hy\'genie] Checking widget:', widget);
         if (widget.querySelector(SELECTORS.RARITY_ELEMENT) && 
             !widget.dataset.betterHygenieProcessing && 
             !widget.dataset.betterHygenieEnhanced) {
-          console.log('[Better Hy\'genie] Widget matches criteria, enhancing');
+          
           widget.dataset.betterHygenieProcessing = 'true';
           enhanceHygenieModal();
           if (widget.dataset.betterHygenieProcessing) {
             delete widget.dataset.betterHygenieProcessing;
           }
           break;
-        } else {
-          console.log('[Better Hy\'genie] Widget does not match criteria:', {
-            hasRarityElement: !!widget.querySelector(SELECTORS.RARITY_ELEMENT),
-            isProcessing: !!widget.dataset.betterHygenieProcessing,
-            isEnhanced: !!widget.dataset.betterHygenieEnhanced
-          });
         }
       }
-    }, CONSTANTS.DEBOUNCE_DELAY);
+    }, CONSTANTS.DEBOUNCE_DELAY); // Reduced delay for faster input box creation
   }
   
   function retryEnhanceHygenieModal(maxAttempts = CONSTANTS.RETRY_MAX_ATTEMPTS, baseDelay = CONSTANTS.RETRY_BASE_DELAY) {
@@ -1152,10 +1127,20 @@
     
     observer = new MutationObserver(debouncedProcessMutations);
     
+    // More selective observation - only watch for child additions in main content areas
     observer.observe(document.body, {
       childList: true,
-      subtree: true
+      subtree: false  // Only direct children of body, not deep subtree
     });
+    
+    // Also observe the main game container if it exists
+    const gameContainer = document.querySelector('#__next') || document.querySelector('.game-container');
+    if (gameContainer) {
+      observer.observe(gameContainer, {
+        childList: true,
+        subtree: true
+      });
+    }
     
     transformHygenieTooltip();
   }
