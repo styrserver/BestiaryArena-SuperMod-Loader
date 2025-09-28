@@ -222,6 +222,7 @@
       border-radius: 3px;
       cursor: pointer;
       font-weight: bold;
+      transition: all 0.1s ease;
     `;
     
     const buttonTypes = {
@@ -242,6 +243,27 @@
     };
     
     return baseStyles + (buttonTypes[type] || '') + customStyles;
+  }
+  
+  // Add click animation to buttons
+  function addClickAnimation(button) {
+    button.addEventListener('mousedown', (event) => {
+      event.stopPropagation();
+      button.style.transform = 'scale(0.95)';
+      button.style.filter = 'brightness(0.8)';
+    });
+    
+    button.addEventListener('mouseup', (event) => {
+      event.stopPropagation();
+      button.style.transform = 'scale(1)';
+      button.style.filter = 'brightness(1)';
+    });
+    
+    button.addEventListener('mouseleave', (event) => {
+      event.stopPropagation();
+      button.style.transform = 'scale(1)';
+      button.style.filter = 'brightness(1)';
+    });
   }
   
   function createDropdownStyle(customStyles = '') {
@@ -1604,6 +1626,7 @@
       height: 24px;
       font-size: 14px;
     `);
+    addClickAnimation(speedDecreaseBtn);
     
     const speedDisplay = document.createElement('span');
     speedDisplay.id = 'auto-open-speed-display';
@@ -1622,6 +1645,7 @@
       height: 24px;
       font-size: 14px;
     `);
+    addClickAnimation(speedIncreaseBtn);
     
     // Auto-open speed state (load from localStorage, default: 2000ms)
     let autoOpenSpeed = loadSetting(STORAGE_KEYS.AUTO_OPEN_SPEED, 2000);
@@ -1679,6 +1703,7 @@
       height: 32px;
       font-size: 12px;
     `);
+    addClickAnimation(copyLogButton);
     copyLogButton.addEventListener('click', async (event) => {
       event.stopPropagation();
       const summaryText = generateSummaryLogText();
@@ -1720,6 +1745,7 @@
       height: 32px;
       font-size: 12px;
     `);
+    addClickAnimation(clearLogButton);
     clearLogButton.addEventListener('click', (event) => {
       event.stopPropagation();
       clearEquipmentLog();
@@ -1847,6 +1873,7 @@
       height: 32px;
       font-size: 16px;
     `);
+    addClickAnimation(addButton);
     addButton.addEventListener('click', (event) => {
       event.stopPropagation();
       addEquipmentSetupRow(rowsContainer);
@@ -1861,6 +1888,7 @@
       height: 32px;
       font-size: 12px;
     `);
+    addClickAnimation(resetButton);
     resetButton.addEventListener('click', (event) => {
       event.stopPropagation();
       resetEquipmentSetup(rowsContainer);
@@ -1925,7 +1953,7 @@
     `);
     
     // Populate tier dropdown
-    ['All', '≥T1', '≥T2', '≥T3', '≥T4', 'T5'].forEach(tier => {
+    ['All', '≥T2', '≥T3', '≥T4', 'T5'].forEach(tier => {
       const option = document.createElement('option');
       option.value = tier;
       option.textContent = tier;
@@ -1956,6 +1984,7 @@
       border-radius: 2px;
       font-size: 14px;
     `);
+    addClickAnimation(removeButton);
     removeButton.addEventListener('click', (event) => {
       event.stopPropagation();
       
