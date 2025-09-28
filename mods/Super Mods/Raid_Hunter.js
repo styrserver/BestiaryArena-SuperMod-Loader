@@ -66,7 +66,7 @@ const EVENT_TEXTS = [
 
 // Event to room ID mapping
 const EVENT_TO_ROOM_MAPPING = {
-    'Rat Plague': 'rkswrs',
+    'Rat Plague': 'rkcent',
     'Buzzing Madness': 'crwasp',
     'Monastery Catacombs': 'crcat',
     'Ghostlands Boneyard': 'crghst4',

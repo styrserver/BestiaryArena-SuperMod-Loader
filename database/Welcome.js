@@ -238,14 +238,14 @@ async function getModCounts() {
     console.log('[Welcome] Using fallback mod counts');
     return {
       official: 11,
-      super: 18
+      super: 19
     };
   } catch (error) {
     console.warn('[Welcome] Could not get mod counts:', error);
     // Fallback to hardcoded counts
     return {
       official: 11,
-      super: 18
+      super: 19
     };
   }
 }

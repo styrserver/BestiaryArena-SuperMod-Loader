@@ -474,6 +474,7 @@ function renderLocalMods(mods) {
     'Autoscroller.js',
     'Better Analytics.js',
     'Better Cauldron.js',
+    'Better Exaltation Chest.js',
     'Better Forge.js',
     'Better Highscores.js',
     'Better Hy\'genie.js',

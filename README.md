@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 17 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 19 Super Mods listed below are included by default in this loader:
 
 ### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -157,6 +157,16 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Support for all game modes (manual, autoplay, sandbox)
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
+
+### Better Exaltation Chest
+Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
+- Auto-opening functionality with configurable speed settings
+- Equipment filtering and setup management with tier and stat requirements
+- Automatic disenchanting of unwanted equipment based on user preferences
+- Real-time dust tracking with animated counters and session statistics
+- Comprehensive settings panel for equipment setup configuration
+- Equipment statistics tracking (kept, disenchanted, dust gained)
+- Smart equipment evaluation against customizable criteria
 
 ### Better Cauldron
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
