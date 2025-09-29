@@ -239,14 +239,6 @@ A comprehensive game data viewer and player profile manager with advanced featur
 * '''Leaderboards''': Access real-time leaderboards for maps, rankings, and competitions
 * '''Run Tracking''': View and analyze personal run history with RunTracker integration
 
-=== Dashboard Button ===
-Quick access to the mod dashboard:
-* Provides easy access to all mod features
-* Integrates seamlessly with the game interface
-* Streamlines mod management
-* Centralized mod control and configuration
-* One-click access to all mod functionality
-
 === Dice Roller ===
 Automates dice rolling for stat rerolling:
 * Automatically clicks the roll button and checks for target stats
@@ -270,6 +262,14 @@ Comprehensive outfit management system:
 * Color customization for outfits
 * Outfit storage and retrieval system
 * Integration with game's outfit system
+
+=== Playercount ===
+Displays live player count in the game header:
+* Real-time player count updates every 30 seconds
+* Shows current online player count in the header
+* Automatic API integration with the game's player count endpoint
+* Visual indicators for connection status and last update time
+* Non-intrusive display that integrates seamlessly with the existing header
 
 === Raid Hunter ===
 Advanced raid automation system for Bestiary Arena:

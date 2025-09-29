@@ -234,10 +234,10 @@ async function listAllModFiles() {
       'Super Mods/Board Advisor.js',
       'Super Mods/Configurator.js',
       'Super Mods/Cyclopedia.js',
-      'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
+      'Super Mods/Playercount.js',
       'Super Mods/Raid_Hunter.js',
       'Super Mods/RunTracker.js'
     ];
@@ -273,10 +273,10 @@ async function listAllModFiles() {
       'Super Mods/Board Advisor.js',
       'Super Mods/Configurator.js',
       'Super Mods/Cyclopedia.js',
-      'Super Mods/DashboardButton.js',
       'Super Mods/Dice_Roller.js',
       'Super Mods/Hunt Analyzer.js',
       'Super Mods/Outfiter.js',
+      'Super Mods/Playercount.js',
       'Super Mods/Raid_Hunter.js',
       'Super Mods/RunTracker.js'
     ];

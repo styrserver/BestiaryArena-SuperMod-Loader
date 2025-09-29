@@ -591,7 +591,7 @@ async function showWelcomeModal() {
             </div>
             <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1; min-width: 300px; transition: all 0.2s ease;">
               <p style="color: #a6adc8; margin: 0; font-size: 14px;">
-                <strong>💡 Tip:</strong> Click the extension icon to open the popup where you can enable/disable mods, or look for the "SuperMod" button in the header to access the dashboard!
+                <strong>💡 Tip:</strong> Click the extension icon to open the popup where you can enable/disable mods and access the dashboard via the "Dashboard" button!
               </p>
             </div>
           </div>

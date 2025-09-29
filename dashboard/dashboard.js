@@ -127,7 +127,6 @@ async function scanAndRegisterLocalMods() {
     { name: 'Board Advisor.js', enabled: true },
     { name: 'Configurator.js', enabled: true },
     { name: 'Cyclopedia.js', enabled: true },
-    { name: 'DashboardButton.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
     { name: 'RunTracker.js', enabled: true },
@@ -262,9 +261,9 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Board Advisor.js',
     'Configurator.js',
     'Cyclopedia.js',
-    'DashboardButton.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
+    'Playercount.js',
     'Raid_Hunter.js'
   ];
 
@@ -274,9 +273,9 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'inventory-database.js',
     'creature-database.js',
     'equipment-database.js',
-    'DashboardButton.js',
     'RunTracker.js',
-    'Outfiter.js'
+    'Outfiter.js',
+    'Playercount.js'
   ];
 
 // Helper to normalize mod names for comparison

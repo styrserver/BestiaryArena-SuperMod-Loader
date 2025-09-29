@@ -207,6 +207,25 @@ async function enableWelcomePage() {
   originalConsoleLog('Welcome page enabled');
 }
 
+// Function to open dashboard
+async function openDashboard() {
+  try {
+    const response = await window.browserAPI.runtime.sendMessage({ action: 'openDashboard' });
+    if (response && response.success) {
+      originalConsoleLog('Dashboard opened successfully');
+    }
+  } catch (error) {
+    originalConsoleLog('Failed to open dashboard:', error);
+    // Fallback: try to open dashboard URL directly
+    try {
+      const dashboardUrl = window.browserAPI.runtime.getURL('dashboard/dashboard.html');
+      window.browserAPI.tabs.create({ url: dashboardUrl });
+    } catch (fallbackError) {
+      originalConsoleLog('Fallback dashboard opening also failed:', fallbackError);
+    }
+  }
+}
+
 
 // Function to load debug mode from storage
 async function loadDebugMode() {
@@ -406,6 +425,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     originalConsoleLog('Enable welcome button not found in DOM');
   }
   
+  // Set up open dashboard button event listener
+  const openDashboardBtn = document.getElementById('open-dashboard-btn');
+  if (openDashboardBtn) {
+    originalConsoleLog('Open dashboard button found, setting up event listener');
+    
+    // Add click animation
+    openDashboardBtn.addEventListener('mousedown', () => {
+      openDashboardBtn.style.transform = 'scale(0.95)';
+      openDashboardBtn.style.background = '#e6d15c';
+    });
+    
+    openDashboardBtn.addEventListener('mouseup', () => {
+      openDashboardBtn.style.transform = 'scale(1)';
+      openDashboardBtn.style.background = 'var(--theme-accent, #ffe066)';
+    });
+    
+    openDashboardBtn.addEventListener('mouseleave', () => {
+      openDashboardBtn.style.transform = 'scale(1)';
+      openDashboardBtn.style.background = 'var(--theme-accent, #ffe066)';
+    });
+    
+    openDashboardBtn.addEventListener('click', () => {
+      originalConsoleLog('Open dashboard button clicked');
+      openDashboard();
+    });
+  } else {
+    originalConsoleLog('Open dashboard button not found in DOM');
+  }
+  
   // Update version display
   await updateVersionDisplay();
   
@@ -483,10 +531,9 @@ function renderLocalMods(mods) {
     'Board Advisor.js',
     'Configurator.js',
     'Cyclopedia.js',
-    'DashboardButton.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
-    'Outfiter.js',
+    'Playercount.js',
     'Raid_Hunter.js'
   ];
 
@@ -496,9 +543,9 @@ function renderLocalMods(mods) {
     'creature-database.js',
     'Welcome.js',
     'equipment-database.js',
-    'DashboardButton.js',
     'RunTracker.js',
-    'Outfiter.js'
+    'Outfiter.js',
+    'Playercount.js'
   ];
 
   function normalizeModName(name) {
