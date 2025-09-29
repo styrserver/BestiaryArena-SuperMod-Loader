@@ -322,7 +322,10 @@ function resetState(resetType = 'full') {
                     pendingTaskCompletion = false;
                     taskOperationInProgress = false;
                     lastNoTaskCheck = 0;
-                    console.log('[Better Tasker] Session reset during task hunting - preserving quest button state');
+                    // CRITICAL FIX: Reset quest button modification flag during session reset
+                    // This prevents the quest button from staying in modified state indefinitely
+                    questButtonModifiedForTasking = false;
+                    console.log('[Better Tasker] Session reset during task hunting - reset quest button modification flag');
                 }
                 // Don't reset taskHuntingOngoing during session reset - it should persist until task completion
                 console.log('[Better Tasker] Session state reset (preserving task hunting flag)');
@@ -1164,7 +1167,9 @@ function startQuestButtonValidation() {
                 restoreQuestButtonAppearance();
                 // Clear the saved tasking map ID since user switched maps
                 taskingMapId = null;
-                console.log('[Better Tasker] Cleared tasking map ID - quest button reset to normal state');
+                // CRITICAL FIX: Reset quest button modification flag to match visual state
+                questButtonModifiedForTasking = false;
+                console.log('[Better Tasker] Cleared tasking map ID and quest button modification flag - quest button reset to normal state');
                 // Don't stop the interval - keep monitoring in case they come back
                 return;
             }

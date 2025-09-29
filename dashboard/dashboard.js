@@ -310,7 +310,7 @@ async function renderMods(fileMods) {
     nameSpan.className = 'mod-name';
     nameSpan.textContent = modFileName.replace('.js', '').replace(/_/g, ' ');
     const editBtn = document.createElement('button');
-    editBtn.innerHTML = '<span>' + (isSuper || isTest || true ? 'View' : 'Edit') + '</span>';
+    editBtn.innerHTML = '<span>' + (isSuper ? 'View' : 'Edit') + '</span>';
     editBtn.className = 'unified-btn mod-action-btn';
     editBtn.style.marginLeft = '16px';
     editBtn.onclick = async () => {

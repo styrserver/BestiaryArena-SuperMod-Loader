@@ -2359,6 +2359,8 @@
   // =======================
   
   let observer = null;
+  let observerTimeout = null;
+  const DEBOUNCE_DELAY = 50;
   
   function initializeObserver() {
     if (observer) {
@@ -2366,54 +2368,31 @@
     }
     
     observer = new MutationObserver((mutations) => {
-      console.log('MutationObserver triggered, mutations count:', mutations.length);
-      let shouldProcess = false;
+      // Early content filtering - only process if exaltation chest content exists
+      const hasExaltationChestContent = mutations.some(mutation => 
+        mutation.addedNodes.length > 0 && 
+        Array.from(mutation.addedNodes).some(node => 
+          node.nodeType === Node.ELEMENT_NODE && 
+          (node.textContent?.includes('Open Exaltation Chest') || 
+           node.querySelector?.('*') && 
+           Array.from(node.querySelectorAll('*')).some(el => 
+             el.textContent?.includes('Open Exaltation Chest')
+           ))
+        )
+      );
       
-      mutations.forEach((mutation) => {
-        console.log('Mutation type:', mutation.type, 'addedNodes:', mutation.addedNodes.length);
-        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-          mutation.addedNodes.forEach((node) => {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              console.log('Processing node:', node.tagName, node.className);
-              
-              // Check if this is an exaltation chest modal by looking for the static modal title
-              if (node.querySelector && node.querySelector('h2.widget-top-text p')) {
-                const modalTitle = node.querySelector('h2.widget-top-text p');
-                console.log('Found modal title in node:', modalTitle ? modalTitle.textContent : 'null');
-                if (modalTitle && modalTitle.textContent.includes('Open Exaltation Chest')) {
-                  console.log('Exaltation chest modal title found, setting shouldProcess to true');
-                  shouldProcess = true;
-                }
-              }
-              // Also check if the node itself is the modal title
-              else if (node.matches && node.matches('h2.widget-top-text p')) {
-                console.log('Node is modal title element:', node.textContent);
-                if (node.textContent.includes('Open Exaltation Chest')) {
-                  console.log('Exaltation chest modal title found (node is title), setting shouldProcess to true');
-                  shouldProcess = true;
-                }
-              }
-              // Check for exaltation chest image as another indicator (more specific)
-              else if (node.querySelector && node.querySelector('img[src*="exaltation-chest"]')) {
-                console.log('Found exaltation chest image in node');
-                // Double-check this is in an exaltation chest context by looking for the modal title
-                const modalTitle = node.closest('[role="dialog"]')?.querySelector('h2.widget-top-text p');
-                console.log('Found modal title in dialog:', modalTitle ? modalTitle.textContent : 'null');
-                if (modalTitle && modalTitle.textContent.includes('Open Exaltation Chest')) {
-                  console.log('Exaltation chest context confirmed via image and modal title, setting shouldProcess to true');
-                  shouldProcess = true;
-                }
-              }
-            }
-          });
-        }
-      });
+      // Skip processing if no relevant content
+      if (!hasExaltationChestContent) return;
       
-      console.log('shouldProcess:', shouldProcess);
-      if (shouldProcess) {
-        console.log('Starting retry mechanism for exaltation chest modal');
-        retryEnhanceExaltationChestModal();
+      // Debounce processing
+      if (observerTimeout) {
+        clearTimeout(observerTimeout);
       }
+      
+      observerTimeout = setTimeout(() => {
+        console.log('[Better Exaltation Chest] Exaltation chest modal detected, enhancing...');
+        retryEnhanceExaltationChestModal();
+      }, DEBOUNCE_DELAY);
     });
     
     observer.observe(document.body, {
@@ -2426,6 +2405,10 @@
     if (observer) {
       observer.disconnect();
       observer = null;
+    }
+    if (observerTimeout) {
+      clearTimeout(observerTimeout);
+      observerTimeout = null;
     }
     
     // Stop auto-opening
