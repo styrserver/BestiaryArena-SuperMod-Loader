@@ -2364,12 +2364,12 @@ function addCyclopediaHeaderButton() {
         if (configuratorLi && configuratorLi.nextSibling) {
           headerUl.insertBefore(li, configuratorLi.nextSibling);
         } else {
-          // Fallback: Insert after Wiki if Configurator not found
-          const wikiLi = Array.from(headerUl.children).find(
-            el => el.querySelector('a') && el.textContent.includes('Wiki')
+          // Fallback: Insert after Trophy Room if Configurator not found
+          const trophyRoomLi = Array.from(headerUl.children).find(
+            el => el.querySelector('button') && el.textContent.includes('Trophy Room')
           );
-          if (wikiLi && wikiLi.nextSibling) {
-            headerUl.insertBefore(li, wikiLi.nextSibling);
+          if (trophyRoomLi && trophyRoomLi.nextSibling) {
+            headerUl.insertBefore(li, trophyRoomLi.nextSibling);
           } else {
             headerUl.appendChild(li);
           }

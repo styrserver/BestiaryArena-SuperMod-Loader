@@ -6,7 +6,9 @@ console.log('Playercount initializing...');
 const defaultConfig = {
   enabled: true,
   updateInterval: 30000, // 30 seconds
-  showNotifications: true
+  showNotifications: true,
+  hideWikiLink: true,
+  hideDiscordLink: true
 };
 
 // Initialize with saved config or defaults
@@ -86,6 +88,41 @@ function startPlayerCountUpdates() {
   activeTimeouts.add(updateInterval);
 }
 
+// Remove Wiki and Discord links from header
+function removeHeaderLinks() {
+  const tryRemove = () => {
+    const headerUl = document.querySelector('header ul.pixel-font-16.flex.items-center');
+    if (!headerUl) {
+      const timeoutId = setTimeout(tryRemove, 500);
+      activeTimeouts.add(timeoutId);
+      return;
+    }
+    
+    // Remove Wiki link
+    if (config.hideWikiLink) {
+      const wikiLi = Array.from(headerUl.children).find(
+        el => el.querySelector('a') && el.querySelector('a').href && el.querySelector('a').href.includes('bestiaryarena.wiki.gg')
+      );
+      if (wikiLi) {
+        safeRemoveElement(wikiLi);
+        console.log('[Playercount] Wiki link removed from header');
+      }
+    }
+    
+    // Remove Discord link
+    if (config.hideDiscordLink) {
+      const discordLi = Array.from(headerUl.children).find(
+        el => el.querySelector('a') && el.querySelector('a').href && el.querySelector('a').href.includes('discord.gg')
+      );
+      if (discordLi) {
+        safeRemoveElement(discordLi);
+        console.log('[Playercount] Discord link removed from header');
+      }
+    }
+  };
+  tryRemove();
+}
+
 // Add Playercount button to the header
 function addPlayercountHeaderButton() {
   const tryInsert = () => {
@@ -112,45 +149,29 @@ function addPlayercountHeaderButton() {
     
     li.appendChild(btn);
 
-    // Insert after Discord if it exists, otherwise after Configurator
-    const discordLi = Array.from(headerUl.children).find(
-      el => el.querySelector('a') && el.querySelector('a').href && el.querySelector('a').href.includes('discord')
-    );
-    const configuratorLi = Array.from(headerUl.children).find(
-      el => el.querySelector('.configurator-header-btn')
-    );
-    const mlAutoLi = Array.from(headerUl.children).find(
-      el => el.classList.contains('ml-auto')
+    // Insert after Cyclopedia
+    const cyclopediaLi = Array.from(headerUl.children).find(
+      el => el.querySelector('.cyclopedia-header-btn')
     );
 
-    if (discordLi) {
-      // Insert after Discord
-      if (discordLi.nextSibling) {
-        headerUl.insertBefore(li, discordLi.nextSibling);
+    if (cyclopediaLi) {
+      if (cyclopediaLi.nextSibling) {
+        headerUl.insertBefore(li, cyclopediaLi.nextSibling);
       } else {
         headerUl.appendChild(li);
       }
-      console.log('[Playercount] Playercount header button inserted after Discord.');
-    } else if (configuratorLi) {
-      if (mlAutoLi) {
-        headerUl.insertBefore(li, mlAutoLi);
-      } else if (configuratorLi.nextSibling) {
+      console.log('[Playercount] Playercount header button inserted after Cyclopedia.');
+    } else {
+      // Fallback: Insert after Configurator
+      const configuratorLi = Array.from(headerUl.children).find(
+        el => el.querySelector('.configurator-header-btn')
+      );
+      if (configuratorLi && configuratorLi.nextSibling) {
         headerUl.insertBefore(li, configuratorLi.nextSibling);
       } else {
         headerUl.appendChild(li);
       }
       console.log('[Playercount] Playercount header button inserted after Configurator.');
-    } else {
-      // Fallback: Insert after Wiki
-      const wikiLi = Array.from(headerUl.children).find(
-        el => el.querySelector('a') && el.textContent.includes('Wiki')
-      );
-      if (wikiLi && wikiLi.nextSibling) {
-        headerUl.insertBefore(li, wikiLi.nextSibling);
-      } else {
-        headerUl.appendChild(li);
-      }
-      console.log('[Playercount] Playercount header button appended to header.');
     }
     
     // Start the periodic updates
@@ -160,12 +181,14 @@ function addPlayercountHeaderButton() {
 }
 
 // Initialize the mod
+removeHeaderLinks();
 addPlayercountHeaderButton();
 
 // Export functionality
 exports = {
   fetchPlayerCount,
   updatePlayerCountDisplay,
+  removeHeaderLinks,
   updateConfig: (newConfig) => {
     Object.assign(config, newConfig);
   },

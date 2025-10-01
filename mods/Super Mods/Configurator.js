@@ -216,41 +216,29 @@ function addConfiguratorHeaderButton() {
     btn.onclick = openConfigurator;
     li.appendChild(btn);
 
-    // Insert after DashboardButton if it exists, otherwise before Cyclopedia
-    const dashboardLi = Array.from(headerUl.children).find(
-      el => el.querySelector('.dashboard-header-btn')
-    );
-    const cyclopediaLi = Array.from(headerUl.children).find(
-      el => el.querySelector('button') && el.textContent.includes('Cyclopedia')
-    );
-    const mlAutoLi = Array.from(headerUl.children).find(
-      el => el.classList.contains('ml-auto')
+    // Insert after Trophy Room
+    const trophyRoomLi = Array.from(headerUl.children).find(
+      el => el.querySelector('button') && el.textContent.includes('Trophy Room')
     );
 
-    if (dashboardLi) {
-      if (mlAutoLi) {
-        headerUl.insertBefore(li, mlAutoLi);
-      } else if (dashboardLi.nextSibling) {
-        headerUl.insertBefore(li, dashboardLi.nextSibling);
+    if (trophyRoomLi) {
+      if (trophyRoomLi.nextSibling) {
+        headerUl.insertBefore(li, trophyRoomLi.nextSibling);
       } else {
         headerUl.appendChild(li);
       }
-      console.log('[Configurator] Configurator header button inserted after DashboardButton.');
-    } else if (cyclopediaLi) {
-      // Insert before Cyclopedia
-      headerUl.insertBefore(li, cyclopediaLi);
-      console.log('[Configurator] Configurator header button inserted before Cyclopedia.');
+      console.log('[Configurator] Configurator header button inserted after Trophy Room.');
     } else {
-      // Fallback: Insert after Wiki
-      const wikiLi = Array.from(headerUl.children).find(
-        el => el.querySelector('a') && el.textContent.includes('Wiki')
+      // Fallback: Insert after logo
+      const logoLi = Array.from(headerUl.children).find(
+        el => el.querySelector('a') && el.querySelector('img[alt="Bestiary Arena"]')
       );
-      if (wikiLi && wikiLi.nextSibling) {
-        headerUl.insertBefore(li, wikiLi.nextSibling);
+      if (logoLi && logoLi.nextSibling) {
+        headerUl.insertBefore(li, logoLi.nextSibling);
       } else {
         headerUl.appendChild(li);
       }
-      console.log('[Configurator] Configurator header button appended to header.');
+      console.log('[Configurator] Configurator header button inserted after logo.');
     }
   };
   tryInsert();

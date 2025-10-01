@@ -3555,12 +3555,14 @@
             const newDust = Number(state.context?.dust) || 0;
             const dustChange = newDust - previousDust;
             
-            if (dustChange > 0) {
+            // Handle both positive and negative changes with animation
+            if (dustChange !== 0) {
               updateDustDisplayWithAnimation(dustChange);
             } else {
+              // No change, just update display directly
               const dustAmountElement = document.getElementById('better-forge-dust-amount');
               if (dustAmountElement) {
-                dustAmountElement.textContent = newDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                dustAmountElement.textContent = Math.max(0, newDust).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
               }
             }
             
@@ -3581,7 +3583,9 @@
       if (dustAmountElement) {
         const playerContext = globalThis.state?.player?.getSnapshot()?.context;
         const currentDust = Number(playerContext?.dust) || 0;
-        dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        // Ensure dust is never displayed as negative
+        const safeDust = Math.max(0, currentDust);
+        dustAmountElement.textContent = safeDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       }
     } catch (error) {
       console.warn('[Better Forge] Error updating dust display:', error);
@@ -3593,17 +3597,23 @@
       const dustAmountElement = document.getElementById('better-forge-dust-amount');
       if (!dustAmountElement) return;
       
+      // Ensure values are never negative for display
+      const safeStartValue = Math.max(0, startValue);
+      const safeEndValue = Math.max(0, endValue);
+      
       const startTime = Date.now();
-      const difference = endValue - startValue;
+      const difference = safeEndValue - safeStartValue;
       
       function updateCount() {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
         
         const easeProgress = 1 - Math.pow(1 - progress, 4);
-        const currentValue = Math.floor(startValue + (difference * easeProgress));
+        const currentValue = Math.floor(safeStartValue + (difference * easeProgress));
         
-        dustAmountElement.textContent = currentValue.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        // Ensure displayed value is never negative
+        const displayValue = Math.max(0, currentValue);
+        dustAmountElement.textContent = displayValue.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         
         if (progress < 1) {
           requestAnimationFrame(updateCount);
@@ -3645,14 +3655,19 @@
       console.log(`[Better Forge] 📊 Current dust from global state:`, currentDust);
       
       if (numericDustChange !== 0) {
-        // Calculate the start value for animation (current - change)
+        // Calculate the start value for animation (current dust BEFORE the change)
         const startValue = currentDust - numericDustChange;
         const endValue = currentDust;
-        console.log(`[Better Forge] 🎬 Animating dust from ${startValue} to ${endValue}`);
-        animateDustCount(startValue, endValue, 800);
+        
+        // Ensure start value is never negative for display purposes
+        const safeStartValue = Math.max(0, startValue);
+        const safeEndValue = Math.max(0, endValue);
+        
+        console.log(`[Better Forge] 🎬 Animating dust from ${safeStartValue} to ${safeEndValue} (original: ${startValue} to ${endValue})`);
+        animateDustCount(safeStartValue, safeEndValue, 800);
       } else {
         console.log(`[Better Forge] 📝 Setting dust display to:`, currentDust);
-        dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = Math.max(0, currentDust).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
       }
       
     } catch (error) {
@@ -5149,7 +5164,9 @@
           }
           
           if (dustChange !== 0) {
-            newState.inventory.dust = currentDust + dustChange;
+            const newDust = currentDust + dustChange;
+            // Ensure dust never goes negative in local state
+            newState.inventory.dust = Math.max(0, newDust);
             newState.dust = newState.inventory.dust;
           }
           
