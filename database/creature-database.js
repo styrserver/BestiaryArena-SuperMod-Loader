@@ -1,6 +1,33 @@
 console.log('[creature-database.js] Loading creature database...');
 
-// Function to dynamically fetch all monsters
+/**
+ * Enhanced Creature Database with Shiny Portrait Support
+ * 
+ * Usage Examples:
+ * 
+ * // Get portrait URLs for a monster
+ * const normalUrl = creatureDatabase.getMonsterPortraitUrl(1, false);
+ * const shinyUrl = creatureDatabase.getMonsterPortraitUrl(1, true);
+ * 
+ * // Get both portrait URLs at once
+ * const portraits = creatureDatabase.getMonsterPortraitUrls(1);
+ * // portraits.normal = "/assets/portraits/1.png"
+ * // portraits.shiny = "/assets/portraits/1-shiny.png"
+ * 
+ * // Find monster data with portrait information
+ * const monster = creatureDatabase.findMonsterByGameId(1);
+ * // monster.portraits.normal and monster.portraits.shiny are available
+ * 
+ * // Get all monsters with portrait data
+ * const allMonsters = creatureDatabase.getAllMonstersWithPortraits();
+ * 
+ * // Display shiny portrait if creature is shiny
+ * const portraitUrl = creature.isShiny ? 
+ *   creatureDatabase.getMonsterPortraitUrl(creature.gameId, true) : 
+ *   creatureDatabase.getMonsterPortraitUrl(creature.gameId, false);
+ */
+
+// Function to dynamically fetch all monsters with enhanced portrait data
 function getAllMonsters() {
   const monsters = [];
   for (let i = 1; i < 1000; i++) {
@@ -13,7 +40,15 @@ function getAllMonsters() {
       }
       const monster = state.utils.getMonster(i);
       if (monster?.metadata?.name) {
-        monsters.push({ gameId: i, ...monster });
+        // Enhanced monster data with portrait information
+        monsters.push({ 
+          gameId: i, 
+          ...monster,
+          portraits: {
+            normal: `/assets/portraits/${i}.png`,
+            shiny: `/assets/portraits/${i}-shiny.png`
+          }
+        });
       }
     } catch (e) { break; }
   }
@@ -66,8 +101,60 @@ function buildCreatureDatabase() {
   };
 }
 
+// Portrait utility functions for shiny creature support
+/**
+ * Get the portrait URL for a monster
+ * @param {number} monsterId - The game ID of the monster
+ * @param {boolean} isShiny - Whether to get the shiny variant (default: false)
+ * @returns {string} The portrait URL
+ */
+function getMonsterPortraitUrl(monsterId, isShiny = false) {
+  return `/assets/portraits/${monsterId}${isShiny ? '-shiny' : ''}.png`;
+}
+
+/**
+ * Get both normal and shiny portrait URLs for a monster
+ * @param {number} monsterId - The game ID of the monster
+ * @returns {Object} Object with normal and shiny portrait URLs
+ */
+function getMonsterPortraitUrls(monsterId) {
+  return {
+    normal: getMonsterPortraitUrl(monsterId, false),
+    shiny: getMonsterPortraitUrl(monsterId, true)
+  };
+}
+
+/**
+ * Find a monster by its game ID
+ * @param {number} gameId - The game ID to search for
+ * @returns {Object|null} The monster object or null if not found
+ */
+function findMonsterByGameId(gameId) {
+  const allMonsters = getAllMonsters();
+  return allMonsters.find(monster => monster.gameId === gameId);
+}
+
+/**
+ * Find a monster by its name (case-insensitive)
+ * @param {string} name - The monster name to search for
+ * @returns {Object|null} The monster object or null if not found
+ */
+function findMonsterByName(name) {
+  const allMonsters = getAllMonsters();
+  return allMonsters.find(monster => 
+    monster.metadata?.name?.toLowerCase() === name.toLowerCase()
+  );
+}
+
 // Build the database dynamically
 const creatureDatabase = buildCreatureDatabase();
+
+// Add portrait utilities to the database
+creatureDatabase.getMonsterPortraitUrl = getMonsterPortraitUrl;
+creatureDatabase.getMonsterPortraitUrls = getMonsterPortraitUrls;
+creatureDatabase.findMonsterByGameId = findMonsterByGameId;
+creatureDatabase.findMonsterByName = findMonsterByName;
+creatureDatabase.getAllMonstersWithPortraits = getAllMonsters;
 
 // Export for use in other mods
 // Use multiple fallbacks to ensure the database is available globally
@@ -77,6 +164,7 @@ if (globalWindow) {
   console.log(`[creature-database.js] Loaded ${creatureDatabase.ALL_CREATURES.length} creatures dynamically (cached for all mods)`);
   console.log('[creature-database.js] ALL_CREATURES length:', creatureDatabase.ALL_CREATURES?.length);
   console.log('[creature-database.js] UNOBTAINABLE_CREATURES length:', creatureDatabase.UNOBTAINABLE_CREATURES?.length);
+  console.log('[creature-database.js] Portrait utilities added for shiny creature support');
 }
 if (typeof module !== 'undefined') {
   module.exports = creatureDatabase;

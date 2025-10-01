@@ -2951,6 +2951,9 @@ function openCyclopediaModal(options) {
     }
 
     function createBestiaryTabPage(selectedCreature, selectedEquipment, selectedInventory, setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol) {
+      // Shiny portrait toggle state
+      let showShinyPortraits = false;
+      
       // Common layout styles
       const LAYOUT_STYLES = {
         container: {
@@ -2981,7 +2984,7 @@ function openCyclopediaModal(options) {
       function updateRightColInternal() {
         rightCol.innerHTML = '';
         if (selectedCreature) {
-          rightCol.appendChild(renderCreatureTemplate(selectedCreature));
+          rightCol.appendChild(renderCreatureTemplate(selectedCreature, showShinyPortraits));
         } else {
           const msg = DOMUtils.createElement('div', FONT_CONSTANTS.SIZES.BODY, 'Select a creature from the left column to view.');
           Object.assign(msg.style, {
@@ -2995,6 +2998,7 @@ function openCyclopediaModal(options) {
       const leftCol = DOMUtils.createElement('div');
       Object.assign(leftCol.style, LAYOUT_STYLES.leftCol);
       
+      
       // Create boxes with common configuration
       const createCreatureBox = (title, items) => {
         const box = createBox({
@@ -3005,6 +3009,91 @@ function openCyclopediaModal(options) {
         updateRightCol: updateRightColInternal
       });
         Object.assign(box.style, LAYOUT_STYLES.box);
+        
+        // Add shiny toggle button to the "Creatures" box title
+        if (title === 'Creatures') {
+          const titleEl = box.querySelector('h2.widget-top');
+          if (titleEl) {
+            // Create a flex container for title and button
+            const titleContainer = document.createElement('div');
+            titleContainer.style.cssText = `
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              width: 100%;
+              padding: 0;
+              gap: 1px;
+            `;
+            
+            // Create first title: "Creatures" (80% width)
+            const creaturesTitle = document.createElement('h2');
+            creaturesTitle.className = 'widget-top widget-top-text pixel-font-16';
+            creaturesTitle.style.cssText = `
+              margin: 0px;
+              padding: 2px 8px;
+              text-align: center;
+              color: rgb(255, 255, 255);
+              width: 83%;
+              flex: 0 0 83%;
+            `;
+            creaturesTitle.textContent = 'Creatures';
+            titleContainer.appendChild(creaturesTitle);
+            
+            // Create the toggle button as a second title (same styling as "Creatures")
+            const toggleButton = document.createElement('button');
+            toggleButton.className = 'widget-top widget-top-text pixel-font-16';
+            toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
+            toggleButton.style.cssText = `
+              margin: 0px;
+              padding: 2px 8px;
+              text-align: center;
+              color: rgb(255, 255, 255);
+              cursor: pointer;
+              width: 15%;
+              flex: 0 0 15%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 16px;
+              height: 100%;
+              align-self: stretch;
+              outline: none;
+            `;
+            
+            const buttonImg = document.createElement('img');
+            buttonImg.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+            buttonImg.alt = 'shiny';
+            buttonImg.style.cssText = 'width: 10px; height: 10px;';
+            toggleButton.appendChild(buttonImg);
+            
+            toggleButton.addEventListener('click', (e) => {
+              e.stopPropagation(); // Prevent title click event
+              showShinyPortraits = !showShinyPortraits;
+              toggleButton.title = showShinyPortraits ? 'Shiny Mode' : 'Normal Mode';
+              
+              // Update background and border color to show toggle state
+              if (showShinyPortraits) {
+                toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
+                toggleButton.style.border = '1px solid #4CAF50';
+              } else {
+                // Reset to default widget-top styling (remove custom background/border to let CSS take over)
+                toggleButton.style.background = '';
+                toggleButton.style.border = '';
+              }
+              
+              console.log(`[Cyclopedia] Toggled to ${showShinyPortraits ? 'shiny' : 'normal'} portrait mode`);
+              
+              // Update the right column to reflect the new mode
+              updateRightColInternal();
+            });
+            
+            titleContainer.appendChild(toggleButton);
+            
+            // Replace the original title with our new structure
+            titleEl.parentNode.replaceChild(titleContainer, titleEl);
+          }
+        }
+        
         return box;
       };
       
@@ -10283,7 +10372,7 @@ function renderMonsterStats(monsterData) {
   }
 }
 
-function renderCreatureTemplate(name) {
+function renderCreatureTemplate(name, showShinyPortraits = false) {
   let monstersArr = null;
   if (
     globalThis.state &&
@@ -10428,6 +10517,41 @@ function renderCreatureTemplate(name) {
           level: 1,
           size: 'small'
         });
+        
+        // Override portrait for shiny mode using the same approach as inventory
+        // Check if creature is unobtainable - if so, don't apply shiny mode
+        const isUnobtainable = UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === name.toLowerCase());
+        if (showShinyPortraits && !isUnobtainable) {
+          const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
+          if (spriteImg) {
+            spriteImg.setAttribute('data-shiny', 'true');
+            console.log(`[Cyclopedia] Set shiny attribute for monster ${monsterId}`);
+          }
+          
+          // Add shiny star overlay like in inventory (same size as owned section)
+          const shinyIcon = document.createElement('img');
+          shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+          shinyIcon.alt = 'shiny';
+          shinyIcon.title = 'Shiny';
+          shinyIcon.style.position = 'absolute';
+          shinyIcon.style.top = '4px';
+          shinyIcon.style.left = '4px';
+          shinyIcon.style.width = '10px';
+          shinyIcon.style.height = '10px';
+          shinyIcon.style.zIndex = '10';
+          monsterSprite.appendChild(shinyIcon);
+        } else if (!isUnobtainable) {
+          // Remove shiny attribute when switching back to normal mode (only for obtainable creatures)
+          const spriteImg = monsterSprite.querySelector('img.actor.spritesheet');
+          if (spriteImg) {
+            spriteImg.removeAttribute('data-shiny');
+            console.log(`[Cyclopedia] Removed shiny attribute for monster ${monsterId}`);
+          }
+          
+          // Remove any existing shiny star icons
+          const existingShinyIcons = monsterSprite.querySelectorAll('img[alt="shiny"]');
+          existingShinyIcons.forEach(icon => icon.remove());
+        }
       }
       [monsterSprite.style.width,
        monsterSprite.style.height,
