@@ -4038,10 +4038,6 @@ context.exports = {
     }
 };
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsRaidHunterjs = (periodic = false) => {
-  cleanupRaidHunter(periodic);
-};
 
 // Expose Raid Hunter state globally for Better Tasker coordination
 window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;

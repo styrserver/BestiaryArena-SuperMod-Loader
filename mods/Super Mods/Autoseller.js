@@ -3206,12 +3206,38 @@
                     stopDragonPlantObserver();
                     stopAutoplantClickObserver();
                     
-                    // 5. Clear caches and reset state
+                    // 5. Remove game state event listeners and filters
+                    if (globalThis.state?.board?.off) {
+                        try {
+                            globalThis.state.board.off('emitNewGame');
+                            globalThis.state.board.off('emitEndGame');
+                            globalThis.state.board.off('newGame');
+                        } catch (error) {
+                            console.warn('[Autoseller] Error removing game state event listeners:', error);
+                        }
+                    }
+                    
+                    // Remove plant monster filter
+                    if (globalThis.state?.clientConfig?.trigger?.setState) {
+                        try {
+                            globalThis.state.clientConfig.trigger.setState({
+                                fn: (prev) => ({ ...prev, plantMonsterFilter: undefined })
+                            });
+                        } catch (error) {
+                            console.warn('[Autoseller] Error removing plant monster filter:', error);
+                        }
+                    }
+                    
+                    // 6. Clear caches and reset state
                     serverMonsterCache.clear();
                     daycareCache.clear();
                     stateManager.resetSession();
+                    clearSettingsCache();
                     
-                    // 6. Restore global state
+                    // 7. Clear rate limiter state
+                    apiRateLimiter.requestTimes = [];
+                    
+                    // 8. Restore global state
                     if (originalFetch) {
                         window.fetch = originalFetch;
                         originalFetch = null;
@@ -3222,6 +3248,20 @@
                     }
                     delete window.autoplantCheckbox;
                     delete window.autosellCheckbox;
+                    delete window.__autosellerLoaded;
+                    
+                    // 9. Verify cleanup was successful
+                    const remainingReferences = [
+                        boardSubscription1,
+                        boardSubscription2,
+                        debounceTimer,
+                        dragonPlantObserver,
+                        autoplantClickObserver
+                    ].filter(Boolean);
+                    
+                    if (remainingReferences.length > 0) {
+                        console.warn('[Autoseller] Some references were not properly cleaned up:', remainingReferences.length);
+                    }
                     
                     console.log('[Autoseller] Cleanup completed');
                     
@@ -3234,19 +3274,3 @@
 
 })();
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsAutosellerjs = function() {
-  console.log('[Autoseller] Running global cleanup...');
-  
-  // Call the internal cleanup function if available
-  if (window.__autosellerLoaded && window.autoseller && window.autoseller.cleanup) {
-    window.autoseller.cleanup();
-  }
-  
-  // Additional global cleanup
-  if (window.__autosellerLoaded) {
-    delete window.__autosellerLoaded;
-  }
-  
-  console.log('[Autoseller] Global cleanup completed');
-};

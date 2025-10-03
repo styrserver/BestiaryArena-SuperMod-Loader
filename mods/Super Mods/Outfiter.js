@@ -418,26 +418,3 @@ if (typeof context !== 'undefined' && context.api) {
   exports.init();
 }
 
-// Cleanup function for Outfiter mod
-window.cleanupSuperModsOutfiterjs = function() {
-  console.log('[Outfiter] Running cleanup...');
-  
-  // Restore original fetch if it was overridden
-  if (originalFetch && typeof window.fetch !== 'undefined') {
-    window.fetch = originalFetch;
-    originalFetch = null;
-  }
-  
-  // Remove any existing modals
-  const existingModal = document.querySelector('#outfiter-modal');
-  if (existingModal) {
-    existingModal.remove();
-  }
-  
-  // Clear any cached data
-  if (typeof window.outfiterState !== 'undefined') {
-    delete window.outfiterState;
-  }
-  
-  console.log('[Outfiter] Cleanup completed');
-};

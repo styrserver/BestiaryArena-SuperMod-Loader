@@ -77,6 +77,10 @@
     let cacheTimestamp = 0;
     const CACHE_DURATION = 1000; // 1 second cache
     
+    // Event listener references for cleanup
+    let pageUnloadHandler = null;
+    let visibilityChangeHandler = null;
+    
     // =======================
     // 3. Conflict Prevention Functions
     // =======================
@@ -825,27 +829,40 @@
         
         isTracking = false;
         
+        // Clear the DPS update interval
         if (dpsUpdateInterval) {
             clearInterval(dpsUpdateInterval);
             dpsUpdateInterval = null;
         }
         
         // Update damage data one final time
-        updateDamageData();
+        try {
+            updateDamageData();
+        } catch (error) {
+            console.error(`[${modName}][ERROR][stopDamageTracking] Error updating damage data:`, error);
+        }
         
         if (currentGameMode === 'sandbox') {
-            const timerSnapshot = globalThis.state.gameTimer.getSnapshot();
-            const finalTick = timerSnapshot.context.currentTick;
-            const localGameTicks = finalTick - gameStartTick;
-            
-            if (localGameTicks > 0) {
-                updateFinalDPSWithGameTicks(localGameTicks);
+            try {
+                const timerSnapshot = globalThis.state.gameTimer.getSnapshot();
+                const finalTick = timerSnapshot.context.currentTick;
+                const localGameTicks = finalTick - gameStartTick;
+                
+                if (localGameTicks > 0) {
+                    updateFinalDPSWithGameTicks(localGameTicks);
+                }
+            } catch (error) {
+                console.error(`[${modName}][ERROR][stopDamageTracking] Error in sandbox mode:`, error);
             }
         } else if (currentGameMode === 'autoplay' || currentGameMode === 'manual') {
             // For autoplay and manual modes, ensure DPS displays are maintained
             // Server results will trigger the final DPS update
             setTimeout(() => {
-                restoreFrozenDPSDisplays();
+                try {
+                    restoreFrozenDPSDisplays();
+                } catch (error) {
+                    console.error(`[${modName}][ERROR][stopDamageTracking] Error restoring frozen DPS displays:`, error);
+                }
             }, 100);
         }
     }
@@ -1029,51 +1046,80 @@
     }
     
     function cleanup() {
-
-        stopDamageTracking();
-        
-        // Clear processing timeout
-        if (processingTimeout) {
-            clearTimeout(processingTimeout);
-            processingTimeout = null;
+        try {
+            stopDamageTracking();
+            
+            // Clear processing timeout
+            if (processingTimeout) {
+                clearTimeout(processingTimeout);
+                processingTimeout = null;
+            }
+            isProcessing = false;
+            
+            // Reset panel waiting flag
+            isWaitingForPanel = false;
+            
+            // Clean up tab button event listeners
+            cleanupTabButtonListeners();
+            
+            // Disconnect and reset observers
+            if (analyzerObserver) {
+                analyzerObserver.disconnect();
+                analyzerObserver = null;
+            }
+            
+            if (autoOpenObserver) {
+                autoOpenObserver.disconnect();
+                autoOpenObserver = null;
+            }
+            
+            // Unsubscribe from state subscriptions
+            if (boardSubscription) {
+                boardSubscription.unsubscribe();
+                boardSubscription = null;
+            }
+            
+            if (gameTimerSubscription) {
+                gameTimerSubscription.unsubscribe();
+                gameTimerSubscription = null;
+            }
+            
+            if (serverResultsSubscription) {
+                serverResultsSubscription.unsubscribe();
+                serverResultsSubscription = null;
+            }
+            
+            // Clear all DPS displays
+            cleanupAllDPSDisplays();
+            
+            // Clear data structures
+            damageTrackingData.clear();
+            
+            // Reset cache
+            cachedAnalyzerPanel = null;
+            cacheTimestamp = 0;
+            
+            // Remove event listeners
+            if (pageUnloadHandler) {
+                window.removeEventListener('beforeunload', pageUnloadHandler);
+                window.removeEventListener('unload', pageUnloadHandler);
+                pageUnloadHandler = null;
+            }
+            
+            if (visibilityChangeHandler) {
+                document.removeEventListener('visibilitychange', visibilityChangeHandler);
+                visibilityChangeHandler = null;
+            }
+            
+            // Reset state variables
+            currentGameMode = null;
+            isTracking = false;
+            gameStartTick = null;
+            
+            console.log(`[${modName}][DEBUG][cleanup] Cleanup completed successfully`);
+        } catch (error) {
+            console.error(`[${modName}][ERROR][cleanup] Error during cleanup:`, error);
         }
-        isProcessing = false;
-        
-        // Reset panel waiting flag
-        isWaitingForPanel = false;
-        
-        // Clean up tab button event listeners
-        cleanupTabButtonListeners();
-        
-        if (analyzerObserver) {
-            analyzerObserver.disconnect();
-            analyzerObserver = null;
-        }
-        
-        if (autoOpenObserver) {
-            autoOpenObserver.disconnect();
-            autoOpenObserver = null;
-        }
-        
-        if (boardSubscription) {
-            boardSubscription.unsubscribe();
-            boardSubscription = null;
-        }
-        
-        if (gameTimerSubscription) {
-            gameTimerSubscription.unsubscribe();
-            gameTimerSubscription = null;
-        }
-        
-        if (serverResultsSubscription) {
-            serverResultsSubscription.unsubscribe();
-            serverResultsSubscription = null;
-        }
-        
-        damageTrackingData.clear();
-        // Don't reset gameStartTick - preserve it for post-game analysis
-        currentGameMode = null;
-        isTracking = false;
     }
     function cleanupAllDPSDisplays() {
         try {
@@ -1121,13 +1167,34 @@
     
     function initBetterAnalytics() {
         initializeBetterAnalytics();
+        
+        // Add page unload cleanup to prevent memory leaks
+        pageUnloadHandler = () => {
+            cleanup();
+        };
+        
+        // Listen for page unload events
+        window.addEventListener('beforeunload', pageUnloadHandler);
+        window.addEventListener('unload', pageUnloadHandler);
+        
+        // Also listen for visibility change to cleanup when tab becomes hidden
+        visibilityChangeHandler = () => {
+            if (document.hidden) {
+                // Don't cleanup completely on visibility change, just pause tracking
+                if (isTracking) {
+                    stopDamageTracking();
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', visibilityChangeHandler);
     }
     
     if (typeof window !== 'undefined' && window.registerMod) {
         window.registerMod({
             name: modName,
             description: modDescription,
-            init: initBetterAnalytics
+            init: initBetterAnalytics,
+            cleanup: cleanup
         });
     } else {
         initBetterAnalytics();
@@ -1146,19 +1213,3 @@
 
 })();
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsBetterAnalyticsjs = function() {
-  console.log('[Better Analytics] Running global cleanup...');
-  
-  // Call the internal cleanup function if available
-  if (window.__betterAnalyticsLoaded && window.betterAnalytics && window.betterAnalytics.cleanup) {
-    window.betterAnalytics.cleanup();
-  }
-  
-  // Additional global cleanup
-  if (window.__betterAnalyticsLoaded) {
-    delete window.__betterAnalyticsLoaded;
-  }
-  
-  console.log('[Better Analytics] Global cleanup completed');
-};

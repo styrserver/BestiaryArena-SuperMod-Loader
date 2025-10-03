@@ -1192,19 +1192,3 @@
   
 })();
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsBetterHygeniejs = function() {
-  console.log('[Better Hy\'genie] Running global cleanup...');
-  
-  // Call the internal cleanup function if available
-  if (window.betterHygenie && window.betterHygenie.cleanup) {
-    window.betterHygenie.cleanup();
-  }
-  
-  // Additional global cleanup
-  if (typeof window.betterHygenieState !== 'undefined') {
-    delete window.betterHygenieState;
-  }
-  
-  console.log('[Better Hy\'genie] Global cleanup completed');
-}; 

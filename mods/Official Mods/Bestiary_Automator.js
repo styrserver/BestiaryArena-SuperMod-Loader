@@ -518,6 +518,122 @@ let fasterAutoplayExecutedThisSession = false;
 // Track if Faster Autoplay is currently running
 let fasterAutoplayRunning = false;
 
+
+// Remove stamina potion from local inventory when 403 error occurs
+const removeStaminaPotionFromInventory = (potionTier = 1) => {
+  try {
+    if (!globalThis.state || !globalThis.state.player) {
+      console.log('[Bestiary Automator] Game state not available for inventory update');
+      return false;
+    }
+    
+    const player = globalThis.state.player;
+    const potionKey = `stamina${potionTier}`;
+    
+    console.log(`[Bestiary Automator] Removing stamina potion (tier ${potionTier}) from local inventory due to API error`);
+    
+    player.send({
+      type: 'setState',
+      fn: (prev) => {
+        const newState = { ...prev };
+        
+        // Ensure nested inventory exists
+        newState.inventory = { ...prev.inventory };
+        
+        // Remove the potion from inventory
+        if (newState.inventory[potionKey] && newState.inventory[potionKey] > 0) {
+          newState.inventory[potionKey] = Math.max(0, newState.inventory[potionKey] - 1);
+          // Mirror on root for compatibility
+          newState[potionKey] = newState.inventory[potionKey];
+          console.log(`[Bestiary Automator] Removed 1 stamina potion (tier ${potionTier}) from inventory. Remaining: ${newState.inventory[potionKey]}`);
+        }
+        
+        return newState;
+      }
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error removing stamina potion from inventory:', error);
+    return false;
+  }
+};
+
+// Store original fetch function
+let originalFetch = null;
+
+// Intercept fetch requests to handle 403 errors from stamina potion API
+const setupStaminaPotionErrorHandler = () => {
+  try {
+    // Store original fetch if not already stored
+    if (!originalFetch) {
+      originalFetch = window.fetch;
+    }
+    
+    // Hook into fetch to intercept stamina potion API calls
+    window.fetch = function(...args) {
+      const [url, options] = args;
+      
+      // Check if this is a stamina potion request
+      if (url && url.includes('inventory.staminaPotion') && options && options.method === 'POST') {
+        return originalFetch.apply(this, args).then(async response => {
+          // Check for client/server errors (400, 401, 403, 404)
+          if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
+            console.log(`[Bestiary Automator] ${response.status} error detected for stamina potion API`);
+            
+            // Try to extract potion tier from request body
+            let potionTier = 1; // Default to tier 1
+            try {
+              if (options.body) {
+                const requestBody = JSON.parse(options.body);
+                console.log('[Bestiary Automator] Request body for tier detection:', requestBody);
+                
+                // Try different possible structures for tier
+                if (requestBody['0'] && requestBody['0'].json) {
+                  const jsonData = requestBody['0'].json;
+                  if (jsonData.rarity) {
+                    // Game uses 'rarity' field to indicate potion tier
+                    potionTier = jsonData.rarity;
+                  } else if (jsonData.tier) {
+                    potionTier = jsonData.tier;
+                  } else if (jsonData.potionTier) {
+                    potionTier = jsonData.potionTier;
+                  } else if (jsonData.type && jsonData.type.includes('stamina')) {
+                    // Try to extract tier from type field like "stamina2"
+                    const tierMatch = jsonData.type.match(/stamina(\d+)/);
+                    if (tierMatch) {
+                      potionTier = parseInt(tierMatch[1]);
+                    }
+                  }
+                }
+                
+                console.log(`[Bestiary Automator] Detected potion tier: ${potionTier}`);
+              }
+            } catch (parseError) {
+              console.warn('[Bestiary Automator] Could not parse request body for potion tier, using default tier 1:', parseError);
+            }
+            
+            // Remove the potion from local inventory immediately
+            removeStaminaPotionFromInventory(potionTier);
+          }
+          
+          return response;
+        }).catch(error => {
+          console.error('[Bestiary Automator] Error in fetch interceptor:', error);
+          throw error;
+        });
+      }
+      
+      // For non-stamina potion requests, use original fetch
+      return originalFetch.apply(this, args);
+    };
+    
+    console.log('[Bestiary Automator] Stamina potion error handler set up successfully');
+  } catch (error) {
+    console.error('[Bestiary Automator] Error setting up stamina potion error handler:', error);
+  }
+};
+
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
   if (!config.autoCollectRewards || rewardsCollectedThisSession) return;
@@ -2131,6 +2247,9 @@ function init() {
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
+  // Set up stamina potion error handler
+  setupStaminaPotionErrorHandler();
+  
   // Create the buttons
   createButtons();
   
@@ -2345,6 +2464,12 @@ context.exports = {
     
     // Clear all timeouts
     cancelAllTimeouts();
+    
+    // Restore original fetch function if it was overridden
+    if (originalFetch && window.fetch !== originalFetch) {
+      window.fetch = originalFetch;
+      console.log('[Bestiary Automator] Restored original fetch function');
+    }
     
     
     // Only reset session flags if this is not periodic cleanup

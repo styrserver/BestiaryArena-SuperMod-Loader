@@ -4926,7 +4926,3 @@ context.exports = {
     autoSaveSettings: autoSaveSettings
 };
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsBetterTaskerjs = (periodic = false) => {
-  cleanupBetterTasker(periodic);
-};

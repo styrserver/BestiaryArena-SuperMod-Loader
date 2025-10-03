@@ -2494,33 +2494,3 @@ exports = {
     })
 };
 
-// Cleanup function for Hunt Analyzer mod
-window.cleanupSuperModsHuntAnalyzerjs = function() {
-  console.log('[Hunt Analyzer] Running cleanup...');
-  
-  // Remove the analyzer panel
-  const analyzerPanel = document.getElementById(PANEL_ID);
-  if (analyzerPanel) {
-    analyzerPanel.remove();
-  }
-  
-  // Remove the analyzer button
-  const analyzerButton = document.getElementById(BUTTON_ID);
-  if (analyzerButton) {
-    analyzerButton.remove();
-  }
-  
-  // Reset global variables
-  autoplayCount = 0;
-  modOverallStartTime = 0;
-  totalGoldQuantity = 0;
-  totalCreatureDrops = 0;
-  totalEquipmentDrops = 0;
-  
-  // Clear any cached data
-  if (typeof window.huntAnalyzerState !== 'undefined') {
-    delete window.huntAnalyzerState;
-  }
-  
-  console.log('[Hunt Analyzer] Cleanup completed');
-};

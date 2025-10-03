@@ -1675,19 +1675,3 @@ exports = {
   }
 };
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsRunTrackerjs = function() {
-  console.log('[RunTracker] Running global cleanup...');
-  
-  // Call the internal cleanup function if available
-  if (window.RunTrackerAPI && window.RunTrackerAPI.cleanup) {
-    window.RunTrackerAPI.cleanup();
-  }
-  
-  // Additional global cleanup
-  if (window.RunTrackerAPI) {
-    delete window.RunTrackerAPI;
-  }
-  
-  console.log('[RunTracker] Global cleanup completed');
-};

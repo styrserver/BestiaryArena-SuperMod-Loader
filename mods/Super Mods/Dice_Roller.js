@@ -467,6 +467,160 @@
   // Search Functions (Module Level)
   // =======================
   
+  // Helper function to detect if search is stat-based
+  function isStatBasedSearch(searchTerm) {
+    if (!searchTerm) return false;
+    
+    // Check for stat search patterns (including combined searches)
+    const statPatterns = [
+      /\/[HP|AD|AP|ARM|MR]\s*[><=!]+/i,  // /HP 20, /AD >15, etc.
+      /\/[><=!]*\s*\d+/,                  // /20, />15, etc. (operator is optional)
+      /\/\d+x[><=!]*\s*\d+/,             // /3x20, />3x20, etc.
+      /\/[><=!]+\s*\d+x[><=!]*\s*\d+/    // />3x20, /<2x>15, etc.
+    ];
+    
+    return statPatterns.some(pattern => pattern.test(searchTerm.trim()));
+  }
+
+  // Helper function to get stat sum for sorting
+  function getStatSum(creature) {
+    return (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
+  }
+
+  // Helper function to extract target value and operator from count-based search terms
+  function extractTargetValueFromSearch(searchTerm) {
+    if (!searchTerm) return null;
+    
+    // Look for count-based patterns: /3x20, />3x20, /<=3x20, etc.
+    // Handle both single patterns and combined searches like "/<=3x20 and />1x20"
+    const countMatch = searchTerm.match(/(>=|<=|>|<|=)?\s*(\d+)x(>=|<=|>|<|=)?\s*(\d+)/);
+    if (countMatch) {
+      return {
+        value: parseInt(countMatch[4]), // Return the target value (20)
+        operator: countMatch[3] || '=' // Return the stat operator
+      };
+    }
+    
+    // Also handle "any stat equals value" patterns: /20, />15, etc.
+    const anyStatMatch = searchTerm.match(/\/(>=|<=|>|<|=)?\s*(\d+)(?:\s|$)/);
+    if (anyStatMatch) {
+      return {
+        value: parseInt(anyStatMatch[2]), // Return the target value (20)
+        operator: anyStatMatch[1] || '=' // Return the operator (default to '=')
+      };
+    }
+    
+    return null;
+  }
+
+  // Helper function to get count of stats matching a specific value for sorting
+  function getStatCountForValue(creature, targetValue, operator = '=') {
+    const stats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+    let count = 0;
+    stats.forEach(stat => {
+      const statValue = creature[stat] || 0;
+      if (compareStatValue(statValue, operator, targetValue)) {
+        count++;
+      }
+    });
+    return count;
+  }
+
+  // Helper function to enrich creature data with computed properties
+  function enrichCreatureData(monster) {
+    return {
+      ...monster,
+      creatureName: getMonsterNameFromId(monster.gameId) || monster.name || monster.gameId,
+      _level: getLevelFromExp(monster.exp),
+      _statSum: (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0)
+    };
+  }
+
+  // Helper function to get creature display name
+  function getCreatureDisplayName(creature) {
+    return getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+  }
+
+  // Helper function to compare stat values with operators
+  function compareStatValue(statValue, operator, targetValue) {
+    switch (operator) {
+      case '>': return statValue > targetValue;
+      case '<': return statValue < targetValue;
+      case '>=': return statValue >= targetValue;
+      case '<=': return statValue <= targetValue;
+      case '=':
+      default: return statValue === targetValue;
+    }
+  }
+
+  // Helper function to check if creature matches tier filter
+  function matchesTierFilter(creature, filterValue) {
+    if (filterValue === 'all') return true;
+    
+    // Calculate stat sum (same logic as getRarityFromStats)
+    const statSum = (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
+    
+    console.log(`[Dice Roller] Checking creature ${creature.gameId}: statSum=${statSum}, filter=${filterValue}`);
+    
+    let matches = false;
+    switch (filterValue.toLowerCase()) {
+      case 'grey':
+        matches = statSum >= 5 && statSum <= 49;
+        break;
+      case 'green':
+        matches = statSum >= 50 && statSum <= 59;
+        break;
+      case 'blue':
+        matches = statSum >= 60 && statSum <= 69;
+        break;
+      case 'purple':
+        matches = statSum >= 70 && statSum <= 79;
+        break;
+      case 'yellow':
+        matches = statSum >= 80 && statSum <= 100;
+        break;
+      default:
+        matches = false;
+    }
+    
+    return matches;
+  }
+
+  // Helper function to sort creatures based on search type
+  function sortCreatures(creatures, searchTerm) {
+    return creatures.sort((a, b) => {
+      // Check if this is a stat-based search
+      if (isStatBasedSearch(searchTerm)) {
+        // Check if this is a count-based search (like /3x20, />3x20, /20, etc.)
+        const targetInfo = extractTargetValueFromSearch(searchTerm);
+        if (targetInfo !== null) {
+          // Count-based search sorting: Count > Level > Name
+          const countA = getStatCountForValue(a, targetInfo.value, targetInfo.operator);
+          const countB = getStatCountForValue(b, targetInfo.value, targetInfo.operator);
+          if (countA !== countB) return countB - countA; // Count (desc) - most matching stats first
+          if (a._level !== b._level) return b._level - a._level; // Level (desc)
+          return (a.creatureName || a.name || String(a.gameId)).localeCompare(b.creatureName || b.name || String(b.gameId)); // Name (asc)
+        } else {
+          // Regular stat-based search sorting: Stats > Level > Name
+          const statSumA = getStatSum(a);
+          const statSumB = getStatSum(b);
+          if (statSumA !== statSumB) return statSumB - statSumA; // Stats (desc)
+          if (a._level !== b._level) return b._level - a._level; // Level (desc)
+          return (a.creatureName || a.name || String(a.gameId)).localeCompare(b.creatureName || b.name || String(b.gameId)); // Name (asc)
+        }
+      } else {
+        // Default sorting: Level > Tier > Game ID > Stat sum
+        if (a._level !== b._level) return b._level - a._level;
+        const tierA = a.tier || 0;
+        const tierB = b.tier || 0;
+        if (tierA !== tierB) return tierB - tierA;
+        const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
+        if (gameIdCompare !== 0) return gameIdCompare;
+        return b._statSum - a._statSum;
+      }
+    });
+  }
+
   // Module-level search functions to eliminate code duplication
   const SearchMatcher = {
     // Main search function that handles AND/OR operators
@@ -537,19 +691,23 @@
         return SearchMatcher.matchesStatsSearch(creature, condition);
       }
       
-      // Regular name search (existing functionality)
+      // Regular name search (smart matching)
       const creatureName = creature.creatureName || creature.name || creature.gameId || '';
       const name = creatureName.toLowerCase();
       
-      // Handle wildcard patterns
+      // Handle wildcard patterns for partial matching
       if (condition.includes('*')) {
         const regexPattern = condition.replace(/\*/g, '.*');
         const regex = new RegExp(regexPattern);
         return regex.test(name);
       }
       
-      // Simple substring match
-      return name.includes(condition);
+      // Smart matching: short searches (≤3 chars) do partial matching, longer searches do exact matching
+      if (condition.length <= 3) {
+        return name.includes(condition);
+      } else {
+        return name === condition;
+      }
     },
     
     // Helper function to handle stats search patterns
@@ -558,20 +716,17 @@
       const pattern = searchTerm.substring(1).trim();
       
       // Parse comparison operators and values
-      const comparisonMatch = pattern.match(/^(HP|AD|AP|ARMOR|MR)\s*(>=|<=|>|<|=)?\s*(\d+)$/i);
+      const comparisonMatch = pattern.match(/^(HP|AD|AP|ARM|MR)\s*(>=|<=|>|<|=)?\s*(\d+)$/i);
       if (comparisonMatch) {
         const [, statName, operator = '=', value] = comparisonMatch;
-        const statValue = creature[statName.toLowerCase()] || 0;
+        // Map abbreviations to full property names
+        const mappedStatName = statName.toUpperCase() === 'ARM' ? 'armor' : 
+                              statName.toUpperCase() === 'MR' ? 'magicResist' : 
+                              statName.toLowerCase();
+        const statValue = creature[mappedStatName] || 0;
         const targetValue = parseInt(value);
         
-        switch (operator) {
-          case '>': return statValue > targetValue;
-          case '<': return statValue < targetValue;
-          case '>=': return statValue >= targetValue;
-          case '<=': return statValue <= targetValue;
-          case '=':
-          default: return statValue === targetValue;
-        }
+        return compareStatValue(statValue, operator, targetValue);
       }
       
       // Handle "any stat equals value" pattern: /20
@@ -591,14 +746,28 @@
         
         return stats.some(stat => {
           const statValue = creature[stat] || 0;
-          switch (operator) {
-            case '>': return statValue > targetValue;
-            case '<': return statValue < targetValue;
-            case '>=': return statValue >= targetValue;
-            case '<=': return statValue <= targetValue;
-            default: return false;
+          return compareStatValue(statValue, operator, targetValue);
+        });
+      }
+      
+      // Handle count-based stat patterns: /3x20, /2x>15, />3x20, /<2x10, etc.
+      const countStatMatch = pattern.match(/^(>=|<=|>|<|=)?\s*(\d+)x(>=|<=|>|<|=)?\s*(\d+)$/);
+      if (countStatMatch) {
+        const [, countOperator = '=', count, statOperator = '=', value] = countStatMatch;
+        const targetCount = parseInt(count);
+        const targetValue = parseInt(value);
+        const stats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
+        
+        let matchingStats = 0;
+        stats.forEach(stat => {
+          const statValue = creature[stat] || 0;
+          if (compareStatValue(statValue, statOperator, targetValue)) {
+            matchingStats++;
           }
         });
+        
+        // Apply count operator logic
+        return compareStatValue(matchingStats, countOperator, targetCount);
       }
       
       // If pattern doesn't match any known format, return false
@@ -858,7 +1027,7 @@
     }
     
     // Tooltip
-    const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+    const creatureName = getCreatureDisplayName(creature);
     btn.title = creatureName;
     
     // Assemble
@@ -1059,10 +1228,11 @@
     searchInput.id = 'dice-roller-search';
     searchInput.placeholder = 'Search creatures...';
     searchInput.title = `Search Syntaxes:
-• Name search: dragon, goblin, etc.
-• Wildcards: drag* (matches dragon, dragoon, etc.)
-• Stat search: /HP 20, /AD >15, /AP <=10, /ARMOR >=5, /MR <8
+• Name search: smart matching (spi→partial, Spider→exact)
+• Wildcards: *spider* (matches poison spider, giant spider, etc.) - use for partial matching
+• Stat search: /HP 20, /AD >15, /AP <=10, /ARM >=5, /MR <8
 • Any stat: /20 (any stat equals 20), />15 (any stat > 15)
+• Count stats: /3x20 (exactly 3 stats = 20), />3x20 (more than 3 stats = 20), /<2x>15 (less than 2 stats > 15)
 • Combined: dragon AND /HP >15, /AD 20 OR /AP 20
 • Operators: AND, OR (case insensitive)`;
     searchInput.style.cssText = `
@@ -1078,11 +1248,11 @@
       box-sizing: border-box;
     `;
     
-    searchInput.addEventListener('focus', () => {
+    addTrackedEventListener(searchInput, 'focus', () => {
       searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
     });
     
-    searchInput.addEventListener('blur', () => {
+    addTrackedEventListener(searchInput, 'blur', () => {
       searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
     });
     
@@ -1106,12 +1276,12 @@
       flex-shrink: 0;
     `;
     
-    filterBtn.addEventListener('mouseenter', () => {
+    addTrackedEventListener(filterBtn, 'mouseenter', () => {
       filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
       filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
     });
     
-    filterBtn.addEventListener('mouseleave', () => {
+    addTrackedEventListener(filterBtn, 'mouseleave', () => {
       filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
       filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
     });
@@ -1193,13 +1363,13 @@
     thumb.style.transition = 'background 0.2s ease, box-shadow 0.2s ease';
     
     // Add hover effects
-    thumb.addEventListener('mouseenter', () => {
+    addTrackedEventListener(thumb, 'mouseenter', () => {
       thumb.style.background = 'linear-gradient(180deg, #555 0%, #444 50%, #333 100%)';
       thumb.style.boxShadow = '0 3px 6px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2)';
       thumb.style.border = '1px solid #666';
     });
     
-    thumb.addEventListener('mouseleave', () => {
+    addTrackedEventListener(thumb, 'mouseleave', () => {
       thumb.style.background = 'linear-gradient(180deg, #444 0%, #333 50%, #222 100%)';
       thumb.style.boxShadow = '0 2px 4px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1)';
       thumb.style.border = '1px solid #555';
@@ -1225,7 +1395,7 @@
       thumb.style.transform = `translate3d(0px, ${thumbTop}px, 0px)`;
     }
     
-    scrollArea.addEventListener('scroll', updateThumb);
+    addTrackedEventListener(scrollArea, 'scroll', updateThumb);
     addTrackedEventListener(window, 'resize', updateThumb);
     
     const resizeObserver = addTrackedObserver(new ResizeObserver(updateThumb));
@@ -1236,7 +1406,7 @@
     let dragStartY = 0;
     let dragStartScroll = 0;
     
-    thumb.addEventListener('mousedown', e => {
+    addTrackedEventListener(thumb, 'mousedown', e => {
       isDragging = true;
       dragStartY = e.clientY;
       dragStartScroll = scrollArea.scrollTop;
@@ -1263,7 +1433,7 @@
     });
     
     // Track click logic
-    customScrollbar.addEventListener('mousedown', e => {
+    addTrackedEventListener(customScrollbar, 'mousedown', e => {
       if (e.target !== thumb) {
         const rect = customScrollbar.getBoundingClientRect();
         const clickY = e.clientY - rect.top;
@@ -1447,7 +1617,7 @@
     };
     
     // Listen for search events to handle creature selection
-    scrollArea.addEventListener('creatureSelected', (event) => {
+    addTrackedEventListener(scrollArea, 'creatureSelected', (event) => {
       const { creatureId, creature } = event.detail;
       const isNewCreature = selectedGameId !== creatureId;
       
@@ -1468,7 +1638,7 @@
     });
     
     // Listen for search cleared events to restore full list
-    scrollArea.addEventListener('searchCleared', () => {
+    addTrackedEventListener(scrollArea, 'searchCleared', () => {
       // Re-render the full creature list
       const monsters = safeGetMonsters();
       if (!monsters.length) {
@@ -1606,7 +1776,7 @@
         slot.appendChild(img);
         
         // Tooltip
-        const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+        const creatureName = getCreatureDisplayName(creature);
         btn.title = creatureName;
         
         // Assemble
@@ -1645,39 +1815,6 @@
           
           // Use module-level search functions (no duplication)
           
-          // Helper function to check if creature matches tier filter (only used when filterValue is not 'all')
-          const matchesFilter = (creature, filterValue) => {
-            if (filterValue === 'all') return true;
-            
-            // Calculate stat sum (same logic as getRarityFromStats)
-            const statSum = (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
-            
-            console.log(`[Dice Roller] Checking creature ${creature.gameId}: statSum=${statSum}, filter=${filterValue}`);
-            
-            let matches = false;
-            switch (filterValue.toLowerCase()) {
-              case 'grey':
-                matches = statSum >= 5 && statSum <= 49;
-                break;
-              case 'green':
-                matches = statSum >= 50 && statSum <= 59;
-                break;
-              case 'blue':
-                matches = statSum >= 60 && statSum <= 69;
-                break;
-              case 'purple':
-                matches = statSum >= 70 && statSum <= 79;
-                break;
-              case 'yellow':
-                matches = statSum >= 80 && statSum <= 100;
-                break;
-              default:
-                matches = true;
-            }
-            
-            console.log(`[Dice Roller] Creature ${creature.gameId} matches ${filterValue}: ${matches}`);
-            return matches;
-          };
           
           // Filter and sort matching creatures directly from monster data
           const logMessage = filterValue === 'all' 
@@ -1685,37 +1822,22 @@
             : `Starting filter with ${monsters.length} total creatures, searchTerm="${searchTerm}", filterValue="${filterValue}"`;
           console.log(`[Dice Roller] ${logMessage}`);
           
-          const matchingMonsters = monsters
-            .map(monster => ({
-              ...monster,
-              creatureName: getMonsterNameFromId(monster.gameId) || monster.name || monster.gameId,
-              _level: getLevelFromExp(monster.exp),
-              _statSum: (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0)
-            }))
-            .filter(monster => {
-              const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
-              const filterMatch = matchesFilter(monster, filterValue);
-              const overallMatch = searchMatch && filterMatch;
-              
-              if (!overallMatch && filterValue !== 'all') {
-                console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
-              }
-              
-              return overallMatch;
-            })
-            .sort((a, b) => {
-              // Level (desc)
-              if (a._level !== b._level) return b._level - a._level;
-              // Tier (desc)
-              const tierA = a.tier || 0;
-              const tierB = b.tier || 0;
-              if (tierA !== tierB) return tierB - tierA;
-              // Game ID (asc, string compare)
-              const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
-              if (gameIdCompare !== 0) return gameIdCompare;
-              // Stat sum (desc)
-              return b._statSum - a._statSum;
-            });
+          const matchingMonsters = sortCreatures(
+            monsters
+              .map(monster => enrichCreatureData(monster))
+              .filter(monster => {
+                const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
+                const filterMatch = matchesTierFilter(monster, filterValue);
+                const overallMatch = searchMatch && filterMatch;
+                
+                if (!overallMatch && filterValue !== 'all') {
+                  console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
+                }
+                
+                return overallMatch;
+              }),
+            searchTerm
+          );
           
           // Performance optimization: Use DocumentFragment for batch DOM updates
           const fragment = document.createDocumentFragment();
@@ -1878,76 +2000,28 @@
         
         // Use module-level search functions (no duplication)
         
-        // Helper function to check if creature matches tier filter
-        const matchesFilter = (creature, filterValue) => {
-          if (filterValue === 'all') return true;
-          
-          // Calculate stat sum (same logic as getRarityFromStats)
-          const statSum = (creature.hp || 0) + (creature.ad || 0) + (creature.ap || 0) + (creature.armor || 0) + (creature.magicResist || 0);
-          
-          console.log(`[Dice Roller] Checking creature ${creature.gameId}: statSum=${statSum}, filter=${filterValue}`);
-          
-          let matches = false;
-          switch (filterValue.toLowerCase()) {
-            case 'grey':
-              matches = statSum >= 5 && statSum <= 49;
-              break;
-            case 'green':
-              matches = statSum >= 50 && statSum <= 59;
-              break;
-            case 'blue':
-              matches = statSum >= 60 && statSum <= 69;
-              break;
-            case 'purple':
-              matches = statSum >= 70 && statSum <= 79;
-              break;
-            case 'yellow':
-              matches = statSum >= 80 && statSum <= 100;
-              break;
-            default:
-              matches = true;
-          }
-          
-          console.log(`[Dice Roller] Creature ${creature.gameId} matches ${filterValue}: ${matches}`);
-          return matches;
-        };
         
         // Filter and sort matching creatures directly from monster data
         console.log(`[Dice Roller] Starting filter with ${monsters.length} total creatures, searchTerm="${searchTerm}", filterValue="${filterValue}"`);
         
-        const matchingMonsters = monsters
-          .map(monster => ({
-            ...monster,
-            creatureName: getMonsterNameFromId(monster.gameId) || monster.name || monster.gameId,
-            _level: getLevelFromExp(monster.exp),
-            _statSum: (monster.hp || 0) + (monster.ad || 0) + (monster.ap || 0) + (monster.armor || 0) + (monster.magicResist || 0)
-          }))
-          .filter(monster => {
-            const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
-            const filterMatch = matchesFilter(monster, filterValue);
-            const overallMatch = searchMatch && filterMatch;
-            
-            if (!overallMatch) {
-              console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
-            } else {
-              console.log(`[Dice Roller] Creature ${monster.gameId} MATCHES: searchMatch=${searchMatch}, filterMatch=${filterMatch}, name="${monster.creatureName}"`);
-            }
-            
-            return overallMatch;
-          })
-          .sort((a, b) => {
-            // Level (desc)
-            if (a._level !== b._level) return b._level - a._level;
-            // Tier (desc)
-            const tierA = a.tier || 0;
-            const tierB = b.tier || 0;
-            if (tierA !== tierB) return tierB - tierA;
-            // Game ID (asc, string compare)
-            const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
-            if (gameIdCompare !== 0) return gameIdCompare;
-            // Stat sum (desc)
-            return b._statSum - a._statSum;
-          });
+        const matchingMonsters = sortCreatures(
+          monsters
+            .map(monster => enrichCreatureData(monster))
+            .filter(monster => {
+              const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
+              const filterMatch = matchesTierFilter(monster, filterValue);
+              const overallMatch = searchMatch && filterMatch;
+              
+              if (!overallMatch) {
+                console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
+              } else {
+                console.log(`[Dice Roller] Creature ${monster.gameId} MATCHES: searchMatch=${searchMatch}, filterMatch=${filterMatch}, name="${monster.creatureName}"`);
+              }
+              
+              return overallMatch;
+            }),
+          searchTerm
+        );
         
         console.log(`[Dice Roller] Filter complete: ${matchingMonsters.length} creatures match the criteria`);
         
@@ -2074,7 +2148,7 @@
             slot.appendChild(img);
             
             // Tooltip
-            const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+            const creatureName = getCreatureDisplayName(creature);
             btn.title = creatureName;
             
             // Assemble
@@ -2324,7 +2398,7 @@
       
       // Creature name
       const nameDiv = document.createElement('div');
-      const creatureName = getMonsterNameFromId(creature.gameId) || creature.name || creature.gameId;
+      const creatureName = getCreatureDisplayName(creature);
       nameDiv.textContent = creatureName;
       nameDiv.style.fontSize = '13px';
       nameDiv.style.fontWeight = 'bold';
@@ -4911,7 +4985,7 @@
       addAutoDiceButton();
     }, BUTTON_CHECK_INTERVAL);
     
-    inventoryObserver = new MutationObserver((mutations) => {
+    inventoryObserver = addTrackedObserver(new MutationObserver((mutations) => {
       let shouldCheck = false;
       
       for (const mutation of mutations) {
@@ -4934,7 +5008,7 @@
         DOMCache.clearSelector('button.focus-style-visible');
         addAutoDiceButton();
       }
-    });
+    }));
     
     inventoryObserver.observe(document.body, { 
       childList: true, 
@@ -5026,7 +5100,7 @@
     const autoButton = document.createElement('button');
     autoButton.className = 'focus-style-visible active:opacity-70 auto-inventory-button';
     autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="has-rarity relative grid h-full place-items-center"><div class="sprite item relative id-${DICE_CONFIG.DICE_MANIPULATOR_ID}"><div class="viewport"><img alt="${DICE_CONFIG.DICE_MANIPULATOR_ID}" data-cropped="false" class="spritesheet" style="--cropX: 0; --cropY: 0;"></div></div><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5"><span class="relative" style="line-height: 1; font-size: 16px; color: #fff; font-family: inherit;" translate="no">Auto</span></div></div></div>`;
-    autoButton.addEventListener('click', () => { showAutoDiceModal(); });
+    addTrackedEventListener(autoButton, 'click', () => { showAutoDiceModal(); });
     
     try {
       targetButton.insertAdjacentElement('afterend', autoButton);
@@ -5114,6 +5188,13 @@
         DOMCache.clear();
       } catch (e) {
         console.warn('[Dice Roller] Error clearing DOM cache:', e);
+      }
+      
+      // Clear PerformanceMonitor timers
+      try {
+        PerformanceMonitor.timers.clear();
+      } catch (e) {
+        console.warn('[Dice Roller] Error clearing PerformanceMonitor timers:', e);
       }
       
       // Remove auto buttons
@@ -5206,7 +5287,7 @@
   }
   
   // Listen for mod disable events
-  window.addEventListener('message', (event) => {
+  addTrackedEventListener(window, 'message', (event) => {
     if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
       const modName = event.data.message.name;
       const enabled = event.data.message.enabled;
@@ -5228,29 +5309,3 @@
   exports = {};
   
 })();
-
-// Cleanup function for Dice Roller mod
-window.cleanupSuperModsDiceRollerjs = function() {
-  console.log('[Dice Roller] Running cleanup...');
-  
-  // Remove any existing modals
-  const existingModal = document.querySelector('#dice-roller-modal');
-  if (existingModal) {
-    existingModal.remove();
-  }
-  
-  // Clear any tracked event listeners
-  if (window.trackedEventListeners) {
-    window.trackedEventListeners.forEach(({ element, event, handler }) => {
-      element.removeEventListener(event, handler);
-    });
-    delete window.trackedEventListeners;
-  }
-  
-  // Clear any cached data
-  if (typeof window.diceRollerState !== 'undefined') {
-    delete window.diceRollerState;
-  }
-  
-  console.log('[Dice Roller] Cleanup completed');
-};

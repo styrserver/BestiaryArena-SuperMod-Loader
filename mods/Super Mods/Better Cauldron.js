@@ -18,6 +18,11 @@
         originalRows: []
     };
     
+    // Memory leak prevention
+    let mainObserver = null;
+    let closeObserver = null;
+    let eventListeners = new Map();
+    
     // Utility functions
     function log(message, ...args) {
         if (CONFIG.DEBUG) {
@@ -34,7 +39,7 @@
         log('Initializing Better Cauldron mod...');
         
         // Set up mutation observer to watch for cauldron modal opening
-        const observer = new MutationObserver((mutations) => {
+        mainObserver = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
@@ -48,7 +53,7 @@
             });
         });
         
-        observer.observe(document.body, {
+        mainObserver.observe(document.body, {
             childList: true,
             subtree: true
         });
@@ -223,15 +228,17 @@
         const filterSelect = controlsContainer.querySelector('#cauldron-filter-select');
         
         // Search functionality
-        searchInput.addEventListener('input', () => {
-            applyFiltering(table);
-        });
+        const searchHandler = () => applyFiltering(table);
+        searchInput.addEventListener('input', searchHandler);
+        eventListeners.set('search-input', { element: searchInput, event: 'input', handler: searchHandler });
         
         // Filter functionality
-        filterSelect.addEventListener('change', () => {
+        const filterHandler = () => {
             cauldronState.currentFilter = filterSelect.value;
             applyFiltering(table);
-        });
+        };
+        filterSelect.addEventListener('change', filterHandler);
+        eventListeners.set('filter-select', { element: filterSelect, event: 'change', handler: filterHandler });
         
         // Initial application
         setTimeout(() => applyFiltering(table), 100);
@@ -290,11 +297,59 @@
     function resetState() {
         cauldronState.controlsAdded = false;
         cauldronState.originalRows = [];
+        
+        // Clean up event listeners
+        eventListeners.forEach((listener, key) => {
+            try {
+                listener.element.removeEventListener(listener.event, listener.handler);
+            } catch (error) {
+                log('Error removing event listener:', error);
+            }
+        });
+        eventListeners.clear();
+        
         log('State reset');
     }
     
+    // Complete cleanup function
+    function cleanup() {
+        log('Cleaning up Better Cauldron mod...');
+        
+        // Disconnect observers
+        if (mainObserver) {
+            mainObserver.disconnect();
+            mainObserver = null;
+        }
+        if (closeObserver) {
+            closeObserver.disconnect();
+            closeObserver = null;
+        }
+        
+        // Clean up event listeners
+        eventListeners.forEach((listener, key) => {
+            try {
+                listener.element.removeEventListener(listener.event, listener.handler);
+            } catch (error) {
+                log('Error removing event listener:', error);
+            }
+        });
+        eventListeners.clear();
+        
+        // Reset state
+        cauldronState.isInitialized = false;
+        cauldronState.controlsAdded = false;
+        cauldronState.originalRows = [];
+        
+        // Remove global reference
+        if (window.CauldronUpgrade) {
+            delete window.CauldronUpgrade;
+        }
+        
+        log('Better Cauldron mod cleaned up successfully');
+    }
+    
     // Watch for modal closing
-    const closeObserver = new MutationObserver((mutations) => {
+    closeObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
             mutation.removedNodes.forEach((node) => {
                 if (node.nodeType === Node.ELEMENT_NODE && isCauldronModal(node)) {
@@ -322,32 +377,18 @@
         initialize: initializeCauldronUpgrade,
         config: CONFIG,
         state: cauldronState,
-        reset: resetState
+        reset: resetState,
+        cleanup: cleanup
+    };
+    
+    // Export cleanup function for mod loader
+    exports = {
+        cleanup: cleanup,
+        reset: resetState,
+        initialize: initializeCauldronUpgrade
     };
     
     log('Better Cauldron mod loaded successfully');
     
 })();
 
-// Cleanup function for Better Cauldron mod
-window.cleanupSuperModsBetterCauldronjs = function() {
-  console.log('[Better Cauldron] Running cleanup...');
-  
-  // Reset cauldron state
-  if (window.CauldronUpgrade && window.CauldronUpgrade.reset) {
-    window.CauldronUpgrade.reset();
-  }
-  
-  // Remove any added controls
-  const filterControls = document.querySelector('.cauldron-filter-controls');
-  if (filterControls) {
-    filterControls.remove();
-  }
-  
-  // Clear any cached data
-  if (typeof window.cauldronState !== 'undefined') {
-    delete window.cauldronState;
-  }
-  
-  console.log('[Better Cauldron] Cleanup completed');
-}; 

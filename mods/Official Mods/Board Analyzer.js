@@ -1,14 +1,9 @@
-// Board Analyzer Mod for Bestiary Arena
-console.log('Board Analyzer Mod initializing...');
+// =======================
+// 1. Configuration
+// =======================
+'use strict';
 
-// Global state management for mod coordination
-if (!window.__modCoordination) {
-  window.__modCoordination = {
-    boardAnalyzerRunning: false,
-    boardAnalyzerStartTime: null,
-    boardAnalyzerEndTime: null
-  };
-}
+console.log('[Board Analyzer] initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -33,92 +28,588 @@ const BUTTON_ID = `${MOD_ID}-button`;
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const DEFAULT_TICK_INTERVAL_MS = 62.5;
 
+// Timing constants
+const ANALYSIS_STOP_DELAY_MS = 200;
+const UI_UPDATE_DELAY_MS = 600;
+const MODAL_CLEANUP_DELAY_MS = 100;
+const BOARD_RESTORE_DELAY_MS = 50;
+const TURBO_RESET_DELAY_MS = 25;
+const NOTIFICATION_DISPLAY_MS = 3000;
+const COPY_FEEDBACK_DELAY_MS = 2000;
+
+// Chart rendering constants
+const CHART_BAR_WIDTH = 8;
+const CHART_BAR_SPACING = 4;
+const CHART_BATCH_SIZE = 10;
+const CHART_MIN_HEIGHT = 20;
+const CHART_MAX_HEIGHT = 120;
+
+// Modal constants
+const MODAL_TYPES = {
+  CONFIG: 'config',
+  RUNNING: 'running',
+  RESULTS: 'results'
+};
+
+// Analysis state constants
+const ANALYSIS_STATES = {
+  IDLE: 'idle',
+  RUNNING: 'running',
+  STOPPING: 'stopping',
+  ERROR: 'error'
+};
+
+// =======================
+// 2. Global State & Classes
+// =======================
+
+// Global state management for mod coordination
+if (!window.__modCoordination) {
+  window.__modCoordination = {
+    boardAnalyzerRunning: false,
+    boardAnalyzerStartTime: null,
+    boardAnalyzerEndTime: null
+  };
+}
+
 // Track active modals to ensure they can be closed properly
 let activeRunningModal = null;
 let activeConfigPanel = null;
 
-// NEW: Lightweight modal registry to replace excessive DOM queries
-const modalRegistry = {
-  modals: new Set(),
-  isClosing: false, // Add recursion protection flag
-  register(modal) {
-    this.modals.add(modal);
-  },
-  unregister(modal) {
-    this.modals.delete(modal);
-  },
+// ModalManager class for proper modal lifecycle management
+class ModalManager {
+  constructor() {
+    this.activeModals = new Map();
+    this.isClosing = false;
+  }
+  
+  register(id, modal) {
+    if (this.activeModals.has(id)) {
+      this.close(id);
+    }
+    this.activeModals.set(id, modal);
+  }
+  
+  close(id) {
+    const modal = this.activeModals.get(id);
+    if (modal) {
+      try {
+        if (typeof modal.close === 'function') {
+          modal.close();
+        } else if (modal.element && typeof modal.element.remove === 'function') {
+          modal.element.remove();
+        } else if (typeof modal.remove === 'function') {
+          modal.remove();
+        }
+      } catch (e) {
+        console.warn('[Board Analyzer] Error closing modal:', e);
+      }
+      this.activeModals.delete(id);
+    }
+  }
+  
   closeAll() {
-    // Prevent recursive calls
     if (this.isClosing) {
-      console.warn('Modal registry is already closing modals, skipping recursive call');
+      console.warn('Modal manager is already closing modals, skipping recursive call');
       return;
     }
     
     this.isClosing = true;
     try {
-      this.modals.forEach(modal => {
+      this.activeModals.forEach((modal, id) => {
         try {
-          // Handle different modal structures
-          if (modal && typeof modal === 'function') {
-            // Modal is a function (like closeModal)
-            modal();
-          } else if (modal && typeof modal.close === 'function') {
-            // Modal has a close method
+          if (typeof modal.close === 'function') {
             modal.close();
-          } else if (modal && modal.element && typeof modal.element.remove === 'function') {
-            // Modal has an element with remove method
+          } else if (modal.element && typeof modal.element.remove === 'function') {
             modal.element.remove();
-          } else if (modal && typeof modal.remove === 'function') {
-            // Modal has a remove method
+          } else if (typeof modal.remove === 'function') {
             modal.remove();
-          } else {
-            console.warn('Unknown modal structure:', modal);
           }
         } catch (e) {
-          console.warn('Error closing modal:', e);
+          console.warn('[Board Analyzer] Error closing modal in closeAll:', e);
         }
       });
-      this.modals.clear();
+      this.activeModals.clear();
     } finally {
       this.isClosing = false;
     }
-  },
+  }
+  
   closeByType(type) {
-    // Prevent recursive calls
     if (this.isClosing) {
-      console.warn('Modal registry is already closing modals, skipping recursive call');
+      console.warn('Modal manager is already closing modals, skipping recursive call');
       return;
     }
     
     this.isClosing = true;
     try {
-      this.modals.forEach(modal => {
+      this.activeModals.forEach((modal, id) => {
         try {
           if (modal && modal.type === type) {
-            // Handle different modal structures
-            if (typeof modal === 'function') {
-              modal();
-            } else if (typeof modal.close === 'function') {
+            if (typeof modal.close === 'function') {
               modal.close();
             } else if (modal.element && typeof modal.element.remove === 'function') {
               modal.element.remove();
             } else if (typeof modal.remove === 'function') {
               modal.remove();
             }
-            this.modals.delete(modal);
+            this.activeModals.delete(id);
           }
         } catch (e) {
-          console.warn('Error closing modal by type:', e);
+          console.warn('[Board Analyzer] Error closing modal by type:', e);
         }
       });
     } finally {
       this.isClosing = false;
     }
   }
-};
+}
 
-// Variable to signal forced stop
-let forceStop = false;
+// Create global modal manager instance
+const modalManager = new ModalManager();
+
+
+// DOM optimization utility for batch operations
+class DOMOptimizer {
+  static createDocumentFragment() {
+    return document.createDocumentFragment();
+  }
+  
+  static batchAppend(parent, elements) {
+    const fragment = this.createDocumentFragment();
+    elements.forEach(element => {
+      if (element) {
+        fragment.appendChild(element);
+      }
+    });
+    parent.appendChild(fragment);
+  }
+  
+  static batchStyleUpdate(elements, styles) {
+    elements.forEach(element => {
+      if (element && element.style) {
+        Object.assign(element.style, styles);
+      }
+    });
+  }
+  
+  static batchTextUpdate(elements, text) {
+    elements.forEach(element => {
+      if (element) {
+        element.textContent = text;
+      }
+    });
+  }
+}
+
+// Event listener management utility
+class EventManager {
+  constructor() {
+    this.listeners = new Map();
+  }
+  
+  addListener(element, event, handler, options = {}) {
+    element.addEventListener(event, handler, options);
+    
+    if (!this.listeners.has(element)) {
+      this.listeners.set(element, []);
+    }
+    
+    this.listeners.get(element).push({ event, handler, options });
+  }
+  
+  removeListener(element, event, handler) {
+    element.removeEventListener(event, handler);
+    
+    if (this.listeners.has(element)) {
+      const listeners = this.listeners.get(element);
+      const index = listeners.findIndex(l => l.event === event && l.handler === handler);
+      if (index !== -1) {
+        listeners.splice(index, 1);
+      }
+    }
+  }
+  
+  removeAllListeners(element) {
+    if (this.listeners.has(element)) {
+      const listeners = this.listeners.get(element);
+      listeners.forEach(({ event, handler, options }) => {
+        element.removeEventListener(event, handler, options);
+      });
+      this.listeners.delete(element);
+    }
+  }
+  
+  cleanup() {
+    this.listeners.forEach((listeners, element) => {
+      listeners.forEach(({ event, handler, options }) => {
+        element.removeEventListener(event, handler, options);
+      });
+    });
+    this.listeners.clear();
+  }
+}
+
+
+
+// AnalysisState class for proper state management
+class AnalysisState {
+  constructor() {
+    this.state = ANALYSIS_STATES.IDLE;
+    this.currentId = null;
+    this.forceStop = false;
+  }
+  
+  canStart() {
+    return this.state === ANALYSIS_STATES.IDLE;
+  }
+  
+  start() {
+    if (!this.canStart()) {
+      throw new Error(`Cannot start analysis from state: ${this.state}`);
+    }
+    this.state = ANALYSIS_STATES.RUNNING;
+    this.currentId = Date.now();
+    this.forceStop = false;
+    return this.currentId;
+  }
+  
+  stop() {
+    this.state = ANALYSIS_STATES.STOPPING;
+    this.forceStop = true;
+  }
+  
+  reset() {
+    this.state = ANALYSIS_STATES.IDLE;
+    this.currentId = null;
+    this.forceStop = false;
+  }
+  
+  setError() {
+    this.state = ANALYSIS_STATES.ERROR;
+  }
+  
+  isRunning() {
+    return this.state === ANALYSIS_STATES.RUNNING;
+  }
+  
+  isStopping() {
+    return this.state === ANALYSIS_STATES.STOPPING;
+  }
+  
+  isIdle() {
+    return this.state === ANALYSIS_STATES.IDLE;
+  }
+  
+  isValidId(id) {
+    return this.currentId === id;
+  }
+}
+
+// Create global analysis state instance
+const analysisState = new AnalysisState();
+
+// ChartRenderer class for efficient chart rendering
+class ChartRenderer {
+  constructor(container, results) {
+    this.container = container;
+    this.results = results;
+    this.eventManager = new EventManager();
+    this.currentSort = 'runs';
+  }
+  
+  render() {
+    try {
+      // Create chart container
+      const chartContainer = document.createElement('div');
+      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
+      
+      // Create all chart elements
+      const chartClickableNote = document.createElement('div');
+      chartClickableNote.textContent = '💡 Tip: Click on any bar in the chart below to copy replay data for that specific run';
+      chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
+      
+      // Create sorting buttons and scrollable chart area
+      this.createSortButtons(chartContainer);
+      this.createScrollableChart(chartContainer);
+      
+      // Batch append all elements to container
+      DOMOptimizer.batchAppend(this.container, [chartClickableNote, chartContainer]);
+      
+      // Initial render
+      this.renderChart();
+      
+    } catch (error) {
+      console.error('Error creating chart:', error);
+      this.showChartError();
+    }
+  }
+  
+  createSortButtons(container) {
+    const sortButtonsContainer = document.createElement('div');
+    sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
+    
+    const buttons = [
+      { text: 'All Runs', sortType: 'runs' },
+      { text: 'Min Time', sortType: 'time' },
+      { text: 'S+ Ranks', sortType: 'splus' }
+    ];
+    
+    buttons.forEach(({ text, sortType }) => {
+      const button = document.createElement('button');
+      button.textContent = text;
+      button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+      button.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
+      
+      if (sortType === this.currentSort) {
+        button.style.backgroundColor = '#4a5';
+      }
+      
+      this.addEventListener(button, 'click', () => {
+        this.updateSortButtons(sortButtonsContainer, button);
+        this.currentSort = sortType;
+        this.renderChart();
+      });
+      
+      sortButtonsContainer.appendChild(button);
+    });
+    
+    container.appendChild(sortButtonsContainer);
+  }
+  
+  createScrollableChart(container) {
+    // Create bars container
+    const barsContainer = document.createElement('div');
+    barsContainer.style.cssText = 'height: 150px; position: relative;';
+    
+    // Create scrollable wrapper
+    const scrollWrapper = document.createElement('div');
+    scrollWrapper.style.cssText = `
+      width: 246px; 
+      height: 150px; 
+      overflow-x: auto; 
+      overflow-y: hidden;
+      border: 1px solid #555;
+      border-radius: 4px;
+      position: relative;
+      padding-left: 2px;
+      padding-right: 2px;
+    `;
+    
+    scrollWrapper.appendChild(barsContainer);
+    container.appendChild(scrollWrapper);
+    
+    // Store references for later use
+    this.barsContainer = barsContainer;
+    this.scrollWrapper = scrollWrapper;
+  }
+  
+  updateSortButtons(container, activeButton) {
+    container.querySelectorAll('button').forEach(btn => {
+      btn.style.backgroundColor = '';
+    });
+    activeButton.style.backgroundColor = '#4a5';
+  }
+  
+  renderChart() {
+    if (!this.barsContainer) return;
+    
+    // Clear existing bars
+    this.barsContainer.innerHTML = '';
+    
+    // Sort results based on current sort type
+    const sortedResults = this.getSortedResults();
+    
+    // Calculate dimensions
+    const spacing = CHART_BAR_SPACING;
+    const barWidth = CHART_BAR_WIDTH;
+    const totalChartWidth = sortedResults.length * (barWidth + spacing) - spacing;
+    
+    // Update container width
+    this.barsContainer.style.width = `${totalChartWidth}px`;
+    
+    // Find max ticks for scaling
+    const maxTicks = Math.max(...sortedResults.map(r => r.ticks));
+    
+    // Render bars asynchronously to prevent UI blocking
+    this.renderBarsAsync(sortedResults, maxTicks, spacing, barWidth);
+  }
+  
+  getSortedResults() {
+    switch (this.currentSort) {
+      case 'time':
+        return [...this.results].sort((a, b) => a.ticks - b.ticks);
+      case 'splus':
+        return [...this.results].sort((a, b) => {
+          if (a.grade === 'S+' && b.grade !== 'S+') return -1;
+          if (a.grade !== 'S+' && b.grade === 'S+') return 1;
+          if (a.grade === 'S+' && b.grade === 'S+') {
+            return (b.rankPoints || 0) - (a.rankPoints || 0);
+          }
+          const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6, 'F': 7 };
+          return (gradeOrder[a.grade] || 999) - (gradeOrder[b.grade] || 999);
+        });
+      default:
+        return [...this.results];
+    }
+  }
+  
+  async renderBarsAsync(sortedResults, maxTicks, spacing, barWidth) {
+    const batchSize = CHART_BATCH_SIZE; // Process bars in batches
+    
+    for (let i = 0; i < sortedResults.length; i += batchSize) {
+      const batch = sortedResults.slice(i, i + batchSize);
+      
+      // Use requestAnimationFrame to prevent UI blocking
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      
+      // Create document fragment for batch DOM operations
+      const fragment = DOMOptimizer.createDocumentFragment();
+      
+      batch.forEach((result, batchIndex) => {
+        const index = i + batchIndex;
+        const bar = this.createBar(result, index, maxTicks, spacing, barWidth);
+        if (bar) {
+          fragment.appendChild(bar);
+        }
+      });
+      
+      // Batch append all bars in this batch
+      this.barsContainer.appendChild(fragment);
+    }
+  }
+  
+  createBar(result, index, maxTicks, spacing, barWidth) {
+    try {
+      const bar = document.createElement('div');
+      const height = Math.max(CHART_MIN_HEIGHT, Math.floor((result.ticks / maxTicks) * CHART_MAX_HEIGHT));
+      
+      // Determine bar color
+      const barColor = this.getBarColor(result);
+      
+      // Set bar styles
+      bar.style.cssText = `
+        position: absolute;
+        bottom: 0;
+        left: ${index * (barWidth + spacing)}px;
+        width: ${barWidth}px;
+        height: ${height}px;
+        background-color: ${barColor};
+        transition: height 0.3s ease;
+        cursor: pointer;
+        border: 1px solid transparent;
+        z-index: 1;
+        display: block;
+        box-sizing: border-box;
+      `;
+      
+      // Add hover effects
+      this.addEventListener(bar, 'mouseenter', () => {
+        bar.style.border = '1px solid white';
+        bar.style.transform = 'scale(1.1)';
+      });
+      
+      this.addEventListener(bar, 'mouseleave', () => {
+        bar.style.border = '1px solid transparent';
+        bar.style.transform = 'scale(1)';
+      });
+      
+      // Add tooltip
+      bar.title = this.createTooltipText(result);
+      
+      // Add click handler
+      this.addEventListener(bar, 'click', () => {
+        this.handleBarClick(result);
+      });
+      
+      return bar;
+      
+    } catch (error) {
+      console.error(`Error creating bar ${index}:`, error);
+      return null;
+    }
+  }
+  
+  getBarColor(result) {
+    if (result.completed) {
+      if (result.grade === 'S+' && result.rankPoints) {
+        const sPlusResults = this.results.filter(r => r.grade === 'S+' && r.rankPoints);
+        const highestRankPoints = sPlusResults.length > 0 ? 
+          Math.max(...sPlusResults.map(r => r.rankPoints)) : 0;
+        
+        const rankDifference = highestRankPoints - result.rankPoints;
+        
+        switch (rankDifference) {
+          case 0: return '#FFD700';
+          case 1: return '#FFA500';
+          case 2: return '#FF8C00';
+          case 3: return '#FF6347';
+          case 4: return '#FF4500';
+          case 5: return '#FF0000';
+          case 6: return '#DC143C';
+          case 7: return '#8B0000';
+          default: return '#FFD700';
+        }
+      } else if (result.grade === 'S+') {
+        return '#FFD700';
+      } else {
+        return '#4CAF50';
+      }
+    } else {
+      return '#e74c3c';
+    }
+  }
+  
+  createTooltipText(result) {
+    let tooltipText = `Run ${this.results.indexOf(result) + 1}: ${result.ticks} ticks, Grade: `;
+    
+    if (result.grade === 'S+' && result.rankPoints) {
+      tooltipText += `S+${result.rankPoints}`;
+    } else {
+      tooltipText += result.grade;
+    }
+    
+    tooltipText += `, ${result.completed ? 'Completed' : 'Failed'}`;
+    if (result.seed) {
+      tooltipText += `, Seed: ${result.seed}`;
+    }
+    tooltipText += '\nClick to copy replay data';
+    
+    return tooltipText;
+  }
+  
+  handleBarClick(result) {
+    const replayData = createReplayDataForRun(result);
+    
+    if (replayData) {
+      const replayText = `$replay(${JSON.stringify(replayData)})`;
+      const success = copyToClipboard(replayText);
+      
+      if (success) {
+        showCopyNotification(`Copied run ${this.results.indexOf(result) + 1} replay data!`);
+      } else {
+        showCopyNotification('Failed to copy replay data', true);
+      }
+    } else {
+      showCopyNotification('Failed to create replay data for this run', true);
+    }
+  }
+  
+  showChartError() {
+    const errorMessage = document.createElement('div');
+    errorMessage.textContent = 'Error creating chart. Please check console for details.';
+    errorMessage.style.cssText = 'text-align: center; color: #e74c3c; margin-top: 15px; padding: 10px; border: 1px solid #e74c3c; border-radius: 4px;';
+    this.container.appendChild(errorMessage);
+  }
+  
+  addEventListener(element, event, handler) {
+    this.eventManager.addListener(element, event, handler);
+  }
+  
+  cleanup() {
+    this.eventManager.cleanup();
+  }
+}
 
 // Global variables to track game data
 let currentSeed = null;
@@ -289,6 +780,10 @@ const configureBoard = (config) => {
     },
   });
 };
+
+// =======================
+// 3. Utility Functions
+// =======================
 
 // Enable turbo mode to speed up the game using the more efficient approach
 function enableTurbo(speedupFactor = config.speedupFactor) {
@@ -680,7 +1175,6 @@ function clickButtonWithText(text) {
   return false;
 }
 
-// REMOVED: calculateMedian and calculateAverage functions - now handled by StatisticsCalculator
 
 // Ensure the game is in sandbox mode
 function ensureSandboxMode() {
@@ -704,12 +1198,12 @@ function ensureSandboxMode() {
   }
 }
 
-// NEW: Function to properly restore the board state
+// Function to properly restore the board state
 function restoreBoardState() {
   try {
     console.log('Restoring board state...');
     
-    // NEW: Reset global coordination state to allow other mods to resume
+    // Reset global coordination state to allow other mods to resume
     if (window.__modCoordination) {
       window.__modCoordination.boardAnalyzerRunning = false;
       window.__modCoordination.boardAnalyzerEndTime = Date.now();
@@ -719,7 +1213,7 @@ function restoreBoardState() {
       setTimeout(() => {
         // Force a small state change to trigger any watchers
         window.__modCoordination.boardAnalyzerRunning = false;
-      }, 25);
+      }, TURBO_RESET_DELAY_MS);
     }
     
     // Stop any running game
@@ -748,20 +1242,20 @@ function restoreBoardState() {
       document.body.style.overflow = '';
     }
     
-    // NEW: Restore Better Highscores container if it exists
+    // Restore Better Highscores container if it exists
     if (window.BetterHighscores && typeof window.BetterHighscores.restoreContainer === 'function') {
       try {
         console.log('[Board Analyzer] Restoring Better Highscores container...');
         // Small delay to ensure DOM is ready
         setTimeout(() => {
           window.BetterHighscores.restoreContainer();
-        }, 50);
+        }, BOARD_RESTORE_DELAY_MS);
       } catch (error) {
         console.warn('[Board Analyzer] Error restoring Better Highscores container:', error);
       }
     }
     
-    // NEW: Restore the original map that was active before analysis
+    // Restore the original map that was active before analysis
     if (currentRoomId) {
       try {
         globalThis.state.board.send({
@@ -770,7 +1264,7 @@ function restoreBoardState() {
         });
         console.log('[Board Analyzer] Restored original map:', currentRoomId);
         
-        // NEW: Also restore the original board configuration if we have it
+        // Also restore the original board configuration if we have it
         if (boardSetup && boardSetup.length > 0) {
           console.log('[Board Analyzer] Restoring original board configuration with', boardSetup.length, 'pieces');
           console.log('[Board Analyzer] Board setup to restore:', boardSetup);
@@ -800,11 +1294,11 @@ function restoreBoardState() {
                 } catch (verifyError) {
                   console.warn('[Board Analyzer] Error verifying board restoration:', verifyError);
                 }
-              }, 50);
+              }, BOARD_RESTORE_DELAY_MS);
             } catch (error) {
               console.warn('[Board Analyzer] Error restoring board configuration:', error);
             }
-          }, 50); // Reduced delay for faster restoration
+          }, BOARD_RESTORE_DELAY_MS); // Reduced delay for faster restoration
         } else {
           console.log('[Board Analyzer] No board configuration to restore');
         }
@@ -819,9 +1313,13 @@ function restoreBoardState() {
   }
 }
 
-// NEW: Shared game state tracker to avoid multiple subscriptions
+// Shared game state tracker to avoid multiple subscriptions
 let gameStateTracker = null;
 let currentGameState = null;
+
+// =======================
+// 4. Game State Management
+// =======================
 
 // Simple board data storage - serialize once, store, reuse
 let currentBoardData = null;
@@ -849,7 +1347,7 @@ function getBoardData(seed = null) {
   return { ...currentBoardData };
 }
 
-// NEW: Optimized statistics calculator to avoid repeated array operations
+// Optimized statistics calculator to avoid repeated array operations
 class StatisticsCalculator {
   constructor() {
     this.reset();
@@ -1021,8 +1519,8 @@ const getLastTick = (analysisId = null) => {
     let hasResolved = false;
     let unsubscribe = null;
     
-    // NEW: Check if this analysis instance is still valid
-    if (analysisId && currentAnalysisId !== analysisId) {
+    // Check if this analysis instance is still valid
+    if (analysisId && !analysisState.isValidId(analysisId)) {
       console.log('[Board Analyzer] Analysis instance changed in getLastTick - stopping immediately');
       resolve({
         ticks: 0,
@@ -1035,8 +1533,8 @@ const getLastTick = (analysisId = null) => {
       return;
     }
     
-    // NEW: Check for force stop immediately
-    if (forceStop) {
+    // Check for force stop immediately
+    if (analysisState.forceStop) {
       console.log('Force stop detected in getLastTick - stopping immediately');
       resolve({
         ticks: 0,
@@ -1048,14 +1546,14 @@ const getLastTick = (analysisId = null) => {
       return;
     }
     
-    // NEW: Use shared game state tracker instead of creating new subscription
+    // Use shared game state tracker instead of creating new subscription
     const tracker = getGameStateTracker();
     
     const listener = (context) => {
       const { currentTick, state, readableGrade, rankPoints } = context;
       
-      // NEW: Check if this analysis instance is still valid
-      if (analysisId && currentAnalysisId !== analysisId && !hasResolved) {
+      // Check if this analysis instance is still valid
+      if (analysisId && !analysisState.isValidId(analysisId) && !hasResolved) {
         console.log('[Board Analyzer] Analysis instance changed during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
@@ -1070,8 +1568,8 @@ const getLastTick = (analysisId = null) => {
         return;
       }
       
-      // NEW: Check if analysis state was reset (stop button was clicked)
-      if (!isAnalysisRunning && !hasResolved) {
+      // Check if analysis state was reset (stop button was clicked)
+      if (!analysisState.isRunning() && !hasResolved) {
         console.log('[Board Analyzer] Analysis state reset during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
@@ -1086,8 +1584,8 @@ const getLastTick = (analysisId = null) => {
         return;
       }
       
-      // NEW: Check for force stop on every timer update
-      if (forceStop && !hasResolved) {
+      // Check for force stop on every timer update
+      if (analysisState.forceStop && !hasResolved) {
         console.log('Force stop detected during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
@@ -1162,25 +1660,29 @@ const getLastTick = (analysisId = null) => {
   });
 };
 
-// Analysis state tracker
-let isAnalysisRunning = false;
-let currentAnalysisId = null;
 
-// Main analyze function
-async function analyzeBoard(runs = config.runs, statusCallback = null) {
-  // NEW: Prevent multiple analyses from running simultaneously
-  if (isAnalysisRunning) {
+// =======================
+// 6. Analysis Engine
+// =======================
+
+// Helper function to initialize analysis
+function initializeAnalysis() {
+  // Prevent multiple analyses from running simultaneously
+  if (!analysisState.canStart()) {
     console.log('[Board Analyzer] Analysis already running, stopping previous analysis first');
-    forceStop = true;
-    // Wait a bit for the previous analysis to stop
-    await sleep(200);
+    analysisState.stop();
+    return false;
   }
   
-  // NEW: Set analysis state
-  isAnalysisRunning = true;
-  currentAnalysisId = Date.now();
-  const thisAnalysisId = currentAnalysisId;
+  // Set analysis state
+  const thisAnalysisId = analysisState.start();
   
+  
+  return thisAnalysisId;
+}
+
+// Helper function to setup analysis environment
+function setupAnalysisEnvironment() {
   // Set global state to indicate Board Analyzer is running
   window.__modCoordination.boardAnalyzerRunning = true;
   window.__modCoordination.boardAnalyzerStartTime = Date.now();
@@ -1188,13 +1690,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   
   console.log('[Board Analyzer] Analysis started - other mods should pause');
   
-  // Reset force stop flag
-  forceStop = false;
-  
-      // Reset board data for fresh analysis
-    currentBoardData = null;
-  
-  // NEW: Disable Turbo Mode button during analysis
+  // Disable Turbo Mode button during analysis
   if (window.turboButton) {
     window.turboButton.disabled = true;
     window.turboButton.title = 'Turbo Mode disabled during Board Analysis';
@@ -1207,23 +1703,10 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   currentRoomId = null;
   currentRoomName = null;
   boardSetup = [];
-  
-  // NEW: Use optimized statistics calculator
-  const statsCalculator = new StatisticsCalculator();
-  
-  // Variables to store best runs
-  let bestTimeRun = null;
-  let bestScoreRun = null;
-  let targetTicksRun = null; // To store the run that reached the target ticks
-  
-  // Timing variables
-  const startTime = performance.now();
-  let lastRunStart = 0;
-  
-  // Ensure sandbox mode
-  const modeSwitched = ensureSandboxMode();
-  
-  // NEW: Capture the current board configuration before starting analysis
+}
+
+// Helper function to capture current board state
+function captureCurrentBoardState() {
   try {
     const boardContext = globalThis.state.board.getSnapshot().context;
     if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
@@ -1236,8 +1719,10 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   } catch (error) {
     console.warn('[Board Analyzer] Error capturing board configuration:', error);
   }
-  
-  // NEW: Preserve Better Highscores container before hiding game board
+}
+
+// Helper function to preserve Better Highscores container
+function preserveBetterHighscores() {
   if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
     try {
       console.log('[Board Analyzer] Preserving Better Highscores container...');
@@ -1246,342 +1731,611 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
       console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
     }
   }
-  
-  // Hide the game board if configured
+}
+
+// Helper function to hide game board if configured
+function hideGameBoardIfConfigured() {
   const gameFrame = document.querySelector('main .frame-4');
   if (config.hideGameBoard && gameFrame) {
     gameFrame.style.display = 'none';
   }
+}
 
-  const results = [];
-
+// Helper function to capture map information
+function captureMapInformation() {
   try {
-    // If we just switched to sandbox mode, ensure UI is updated
-    if (modeSwitched) {
-      await sleep(100);
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const selectedMap = boardContext.selectedMap || {};
+    
+    if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
+      currentRegionId = selectedMap.selectedRegion.id;
+      console.log('Captured region ID:', currentRegionId);
     }
     
-    // Enable turbo mode if configured - do this before starting games
-    if (config.enableTurboAutomatically) {
-      enableTurbo(config.speedupFactor);
+    if (selectedMap.selectedRoom) {
+      currentRoomId = selectedMap.selectedRoom.id;
+      currentRoomName = mapIdsToNames.get(currentRoomId) || 
+                         globalThis.state.utils.ROOM_NAME[currentRoomId] || 
+                         selectedMap.selectedRoom.file.name;
+      console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
     }
+  } catch (error) {
+    console.error('Error capturing map information:', error);
+  }
+}
 
-    // Capture current map information
-    try {
-      const boardContext = globalThis.state.board.getSnapshot().context;
-      const selectedMap = boardContext.selectedMap || {};
-      
-      if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
-        currentRegionId = selectedMap.selectedRegion.id;
-        console.log('Captured region ID:', currentRegionId);
-      }
-      
-      if (selectedMap.selectedRoom) {
-        currentRoomId = selectedMap.selectedRoom.id;
-        currentRoomName = mapIdsToNames.get(currentRoomId) || 
-                           globalThis.state.utils.ROOM_NAME[currentRoomId] || 
-                           selectedMap.selectedRoom.file.name;
-        console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
-      }
-    } catch (error) {
-      console.error('Error capturing map information:', error);
+// Helper function to run a single analysis run
+async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalculator) {
+  // Check if this analysis instance is still valid
+  if (!analysisState.isValidId(thisAnalysisId)) {
+    console.log('[Board Analyzer] Analysis instance changed, stopping this run');
+    return null;
+  }
+  
+  // Check if analysis state was reset (stop button was clicked)
+  if (!analysisState.isRunning()) {
+    console.log('[Board Analyzer] Analysis state reset, stopping this run');
+    return null;
+  }
+  
+  // Start timing this run
+  const lastRunStart = performance.now();
+  
+  // Check if forced stop was requested
+  if (analysisState.forceStop) {
+    console.log('Analysis stopped by user - breaking out of loop');
+    return null;
+  }
+  
+  // Update status callback if provided
+  if (statusCallback && statsCalculator.runTimes.length > 0) {
+    const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
+    const remainingRuns = config.runs - i + 1;
+    const estimatedTimeRemaining = avgRunTime * remainingRuns;
+    
+    statusCallback({
+      current: i,
+      total: config.runs,
+      status: 'running',
+      avgRunTime: avgRunTime.toFixed(0),
+      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining)
+    });
+  } else if (statusCallback) {
+    statusCallback({
+      current: i,
+      total: config.runs,
+      status: 'running'
+    });
+  }
+  
+  // Generate a new unique seed for this run
+  const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
+  console.log(`Run ${i} using generated seed: ${runSeed}`);
+  
+  try {
+    // Start the game using direct state manipulation with embedded seed
+    globalThis.state.board.send({
+      type: "setState",
+      fn: prevState => ({
+        ...prevState,
+        customSandboxSeed: runSeed,
+        gameStarted: true
+      })
+    });
+    
+    // Wait for game to complete
+    const result = await getLastTick(thisAnalysisId);
+    
+    // Check if this run was force stopped, analysis changed, or analysis reset
+    if (result.forceStopped || result.analysisChanged || result.analysisReset) {
+      console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
+      return null;
     }
     
-    for (let i = 1; i <= runs; i++) {
-      // NEW: Check if this analysis instance is still valid
-      if (currentAnalysisId !== thisAnalysisId) {
-        console.log('[Board Analyzer] Analysis instance changed, stopping this run');
-        break;
-      }
+    // Add seed to result
+    result.seed = runSeed;
+    
+    const { ticks, grade, rankPoints, completed } = result;
+    
+    // Use statistics calculator to track stats efficiently
+    const runTime = performance.now() - lastRunStart;
+    statsCalculator.addRun(result, runTime);
+    
+    // Stop the game using direct state manipulation
+    globalThis.state.board.send({
+      type: "setState",
+      fn: prevState => ({
+        ...prevState,
+        gameStarted: false
+      })
+    });
+    
+    return result;
+    
+  } catch (runError) {
+    console.error(`Error in run ${i}:`, runError);
+    // Try to ensure game is stopped before continuing
+    try {
+      globalThis.state.board.send({
+        type: "setState",
+        fn: prevState => ({
+          ...prevState,
+          gameStarted: false
+        })
+      });
+    } catch (e) {}
+    return null;
+  }
+}
+
+// Helper function to initialize analysis environment
+function initializeAnalysisEnvironment() {
+  // Set global state to indicate Board Analyzer is running
+  window.__modCoordination.boardAnalyzerRunning = true;
+  window.__modCoordination.boardAnalyzerStartTime = Date.now();
+  window.__modCoordination.boardAnalyzerEndTime = null;
+  
+  console.log('[Board Analyzer] Analysis started - other mods should pause');
+  
+  // Reset board data for fresh analysis
+  currentBoardData = null;
+  
+  // Disable Turbo Mode button during analysis
+  if (window.turboButton) {
+    window.turboButton.disabled = true;
+    window.turboButton.title = 'Turbo Mode disabled during Board Analysis';
+    console.log('[Board Analyzer] Turbo Mode button disabled');
+  }
+  
+  // Reset tracking variables
+  currentSeed = null;
+  currentRegionId = null;
+  currentRoomId = null;
+  currentRoomName = null;
+  boardSetup = [];
+}
+
+// Helper function to setup analysis state
+function setupAnalysisState() {
+  // Use optimized statistics calculator
+  const statsCalculator = new StatisticsCalculator();
+  
+  // Variables to store best runs
+  const bestRuns = {
+    bestTimeRun: null,
+    bestScoreRun: null,
+    targetTicksRun: null
+  };
+  
+  // Timing variables
+  const timing = {
+    startTime: performance.now(),
+    lastRunStart: 0
+  };
+  
+  return { statsCalculator, bestRuns, timing };
+}
+
+// Helper function to prepare analysis environment
+async function prepareAnalysisEnvironment() {
+  // Ensure sandbox mode
+  const modeSwitched = ensureSandboxMode();
+  
+  // Capture the current board configuration before starting analysis
+  captureCurrentBoardState();
+  
+  // Preserve Better Highscores container before hiding game board
+  preserveBetterHighscores();
+  
+  // Hide the game board if configured
+  hideGameBoardIfConfigured();
+
+  // If we just switched to sandbox mode, ensure UI is updated
+  if (modeSwitched) {
+    await sleep(100);
+  }
+  
+  // Enable turbo mode if configured - do this before starting games
+  if (config.enableTurboAutomatically) {
+    enableTurbo(config.speedupFactor);
+  }
+
+  // Capture current map information
+  captureMapInformation();
+  
+  return modeSwitched;
+}
+
+// Helper function to capture current board state
+function captureCurrentBoardState() {
+  try {
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    if (boardContext.boardConfig && Array.isArray(boardContext.boardConfig)) {
+      // Deep clone the board configuration to preserve it
+      boardSetup = JSON.parse(JSON.stringify(boardContext.boardConfig));
+      console.log('[Board Analyzer] Captured board configuration with', boardSetup.length, 'pieces');
+    } else {
+      console.log('[Board Analyzer] No board configuration found to capture');
+    }
+  } catch (error) {
+    console.warn('[Board Analyzer] Error capturing board configuration:', error);
+  }
+}
+
+// Helper function to preserve Better Highscores container
+function preserveBetterHighscores() {
+  if (window.BetterHighscores && typeof window.BetterHighscores.preserveContainer === 'function') {
+    try {
+      console.log('[Board Analyzer] Preserving Better Highscores container...');
+      window.BetterHighscores.preserveContainer();
+    } catch (error) {
+      console.warn('[Board Analyzer] Error preserving Better Highscores container:', error);
+    }
+  }
+}
+
+// Helper function to hide game board if configured
+function hideGameBoardIfConfigured() {
+  const gameFrame = document.querySelector('main .frame-4');
+  if (config.hideGameBoard && gameFrame) {
+    gameFrame.style.display = 'none';
+  }
+}
+
+// Helper function to capture map information
+function captureMapInformation() {
+  try {
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const selectedMap = boardContext.selectedMap || {};
       
-      // NEW: Check if analysis state was reset (stop button was clicked)
-      if (!isAnalysisRunning) {
-        console.log('[Board Analyzer] Analysis state reset, stopping this run');
-        break;
-      }
-      
-      // Start timing this run
-      lastRunStart = performance.now();
-      
-      // Check if forced stop was requested
-      if (forceStop) {
-        console.log('Analysis stopped by user - breaking out of loop');
-        break;
-      }
-      
-      // NEW: Update status callback if provided
-      if (statusCallback && statsCalculator.runTimes.length > 0) {
-        // Calculate average run time and estimated time remaining
-        const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
-        const remainingRuns = runs - i + 1;
-        const estimatedTimeRemaining = avgRunTime * remainingRuns;
-        
-        statusCallback({
-          current: i,
-          total: runs,
-          status: 'running',
-          avgRunTime: avgRunTime.toFixed(0),
-          estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining)
-        });
-      } else if (statusCallback) {
-        statusCallback({
-          current: i,
-          total: runs,
-          status: 'running'
-        });
-      }
-      
-      // Generate a new unique seed for this run
-      const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-      console.log(`Run ${i} using generated seed: ${runSeed}`);
-      
-      try {
-        // Start the game using direct state manipulation with embedded seed
-        globalThis.state.board.send({
-          type: "setState",
-          fn: prevState => ({
-            ...prevState,
-            customSandboxSeed: runSeed,
-            gameStarted: true
-          })
-        });
-        
-        // Wait for game to complete
-        const result = await getLastTick(thisAnalysisId);
-        
-        // NEW: Check if this run was force stopped, analysis changed, or analysis reset
-        if (result.forceStopped || result.analysisChanged || result.analysisReset) {
-          console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
-          break;
-        }
-        
-        // Add seed to result
-        result.seed = runSeed;
-        results.push(result);
-        
-        const { ticks, grade, rankPoints, completed } = result;
-        
-        // NEW: Use statistics calculator to track stats efficiently
-        const runTime = performance.now() - lastRunStart;
-        statsCalculator.addRun(result, runTime);
-        
-        if (completed) {
-          // Update min ticks if this is a completed run with lower ticks
-          if (ticks < statsCalculator.minTicks) {
-            const minTicksResult = {
-              ticks,
-              grade,
-              rankPoints,
-              seed: runSeed,
-              runIndex: i
-            };
-            
-                  // Get board data for best time replay
-      const boardData = getBoardData(runSeed);
+    if (selectedMap.selectedRegion && selectedMap.selectedRegion.id) {
+      currentRegionId = selectedMap.selectedRegion.id;
+      console.log('Captured region ID:', currentRegionId);
+    }
+    
+    if (selectedMap.selectedRoom) {
+      currentRoomId = selectedMap.selectedRoom.id;
+      currentRoomName = mapIdsToNames.get(currentRoomId) || 
+                         globalThis.state.utils.ROOM_NAME[currentRoomId] || 
+                         selectedMap.selectedRoom.file.name;
+      console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
+    }
+  } catch (error) {
+    console.error('Error capturing map information:', error);
+  }
+}
+
+// Helper function to run the main analysis loop
+async function runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback) {
+  const results = [];
+  
+  for (let i = 1; i <= runs; i++) {
+    // Check if analysis should continue
+    if (!shouldContinueAnalysis(thisAnalysisId)) {
+      break;
+    }
+    
+    // Start timing this run
+    timing.lastRunStart = performance.now();
+    
+    // Update status callback if provided
+    updateStatusCallback(i, runs, statsCalculator, statusCallback);
+    
+    // Process individual run
+    const runResult = await processSingleRun(i, thisAnalysisId, statsCalculator, bestRuns, timing);
+    
+    if (runResult === null) {
+      // Analysis was stopped
+      break;
+    }
+    
+    results.push(runResult);
+  }
+  
+  return results;
+}
+
+// Helper function to check if analysis should continue
+function shouldContinueAnalysis(thisAnalysisId) {
+  // Check if this analysis instance is still valid
+  if (!analysisState.isValidId(thisAnalysisId)) {
+    console.log('[Board Analyzer] Analysis instance changed, stopping this run');
+    return false;
+  }
+  
+  // Check if analysis state was reset (stop button was clicked)
+  if (!analysisState.isRunning()) {
+    console.log('[Board Analyzer] Analysis state reset, stopping this run');
+    return false;
+  }
+  
+  // Check if forced stop was requested
+  if (analysisState.forceStop) {
+    console.log('Analysis stopped by user - breaking out of loop');
+    return false;
+  }
+  
+  return true;
+}
+
+// Helper function to update status callback
+function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCallback) {
+  if (!statusCallback) return;
+  
+  if (statsCalculator.runTimes.length > 0) {
+    // Calculate average run time and estimated time remaining
+    const avgRunTime = statsCalculator.runTimesSum / statsCalculator.runTimes.length;
+    const remainingRuns = totalRuns - currentRun + 1;
+    const estimatedTimeRemaining = avgRunTime * remainingRuns;
+    
+    statusCallback({
+      current: currentRun,
+      total: totalRuns,
+      status: 'running',
+      avgRunTime: avgRunTime.toFixed(0),
+      estimatedTimeRemaining: formatMilliseconds(estimatedTimeRemaining)
+    });
+  } else {
+    statusCallback({
+      current: currentRun,
+      total: totalRuns,
+      status: 'running'
+    });
+  }
+}
+
+// Helper function to process a single analysis run
+async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestRuns, timing) {
+  // Generate a new unique seed for this run
+  const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
+  console.log(`Run ${runIndex} using generated seed: ${runSeed}`);
+  
+  try {
+    // Start the game using direct state manipulation with embedded seed
+    globalThis.state.board.send({
+      type: "setState",
+      fn: prevState => ({
+        ...prevState,
+        customSandboxSeed: runSeed,
+        gameStarted: true
+      })
+    });
+    
+    // Wait for game to complete
+    const result = await getLastTick(thisAnalysisId);
+    
+    // Check if this run was force stopped, analysis changed, or analysis reset
+    if (result.forceStopped || result.analysisChanged || result.analysisReset) {
+      console.log('Run was force stopped, analysis changed, or analysis reset - breaking out of analysis loop');
+      return null;
+    }
+    
+    // Add seed to result
+    result.seed = runSeed;
+    
+    const { ticks, grade, rankPoints, completed } = result;
+    
+    // Use statistics calculator to track stats efficiently
+    const runTime = performance.now() - timing.lastRunStart;
+    statsCalculator.addRun(result, runTime);
+    
+    // Process run results and update best runs
+    const shouldStop = processRunResults(result, runIndex, statsCalculator, bestRuns);
+    
+    if (shouldStop) {
+      return null; // Signal to stop analysis
+    }
+    
+    // Stop the game using direct state manipulation
+    globalThis.state.board.send({
+      type: "setState",
+      fn: prevState => ({
+        ...prevState,
+        gameStarted: false
+      })
+    });
+    
+    return result;
+    
+  } catch (runError) {
+    console.error(`Error in run ${runIndex}:`, runError);
+    // Try to ensure game is stopped before continuing
+    try {
+      globalThis.state.board.send({
+        type: "setState",
+        fn: prevState => ({
+          ...prevState,
+          gameStarted: false
+        })
+      });
+    } catch (e) {}
+    return null;
+  }
+}
+
+// Helper function to process run results and update best runs
+function processRunResults(result, runIndex, statsCalculator, bestRuns) {
+  const { ticks, grade, rankPoints, completed, seed } = result;
+  
+  if (completed) {
+    // Update min ticks if this is a completed run with lower ticks
+    if (ticks < statsCalculator.minTicks) {
+      const boardData = getBoardData(seed);
       
       if (boardData) {
         console.log('Best time: Using board data');
+        bestRuns.bestTimeRun = {
+          seed: seed,
+          board: boardData
+        };
+        console.log(`New best time: ${ticks} ticks with seed ${seed} in run ${runIndex}`);
       } else {
         console.warn('Failed to get board data for best time replay');
-        continue;
-      }
-            
-            bestTimeRun = {
-              seed: runSeed,
-              board: boardData
-            };
-            
-            console.log(`New best time: ${ticks} ticks with seed ${runSeed} in run ${i}`);
-            console.log('Best time board data:', boardData);
-          }
-        }
-        
-        if (grade === 'S+') {
-          // Check if this S+ run achieved the maximum rank points
-          if (rankPoints === statsCalculator.maxRankPoints) {
-            // This is handled by the statistics calculator
-          }
-          // If stopOnSPlus is enabled, we might want to exit early
-          if (config.stopOnSPlus) {
-            console.log('Achieved S+ grade, stopping analysis early');
-            break;
-          }
-        }
-        
-        // Check if should stop for reaching the desired number of ticks or below
-        if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
-          console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
-          
-          // Get board data for target ticks replay
-          const boardData = getBoardData(runSeed);
-          
-          if (boardData) {
-            console.log('Target ticks: Using board data');
-          } else {
-            console.warn('Failed to get board data for target ticks replay');
-            break;
-          }
-          
-          targetTicksRun = {
-            seed: runSeed,
-            board: boardData,
-            ticks: ticks,
-            grade: grade,
-            rankPoints: rankPoints
-          };
-          
-          console.log(`Target ticks run captured: ${ticks} ticks with seed ${runSeed}`);
-          break;
-        }
-        
-        // Update max rank points (handled by statistics calculator, but we need the result object)
-        if (rankPoints > statsCalculator.maxRankPoints) {
-          const maxRankPointsResult = {
-            ticks,
-            grade,
-            rankPoints,
-            seed: runSeed,
-            runIndex: i
-          };
-          
-                      // Get board data for max points replay
-            const boardData = getBoardData(runSeed);
-            
-            if (boardData) {
-              console.log('Max points: Using board data');
-            } else {
-              console.warn('Failed to get board data for max points replay');
-              continue;
-            }
-          
-          bestScoreRun = {
-            seed: runSeed,
-            board: boardData
-          };
-          
-          console.log(`New max points: ${rankPoints} with seed ${runSeed} in run ${i}`);
-          console.log('Max points board data:', boardData);
-        }
-        
-        // Check for force stop again
-        if (forceStop) {
-          console.log('Analysis stopped by user after run completed - breaking out of loop');
-          break;
-        }
-        
-        // Stop the game using direct state manipulation
-        globalThis.state.board.send({
-          type: "setState",
-          fn: prevState => ({
-            ...prevState,
-            gameStarted: false
-          })
-        });
-      } catch (runError) {
-        console.error(`Error in run ${i}:`, runError);
-        // Try to ensure game is stopped before continuing
-        try {
-          globalThis.state.board.send({
-            type: "setState",
-            fn: prevState => ({
-              ...prevState,
-              gameStarted: false
-            })
-          });
-        } catch (e) {}
-      }
-      
-      // Record the time taken for this run (handled by statistics calculator)
-      const runTime = performance.now() - lastRunStart;
-      console.log(`Run ${i} took ${runTime.toFixed(2)}ms`);
-      
-      // Brief pause between runs to ensure clean state
-      await sleep(1);
-    }
-  } catch (error) {
-    console.error('Error during analysis:', error);
-    throw error;
-  } finally {
-    // NEW: Use the proper board restoration function (includes global state reset)
-    restoreBoardState();
-    
-    // Disable turbo mode if it was enabled
-    if (config.enableTurboAutomatically && turboActive) {
-      disableTurbo();
-    }
-    
-    // NEW: Reset analysis state
-    if (currentAnalysisId === thisAnalysisId) {
-      isAnalysisRunning = false;
-      currentAnalysisId = null;
-      console.log('[Board Analyzer] Analysis state reset');
-    }
-    
-    // NEW: Clean up game state tracker if no more listeners
-    if (gameStateTracker && gameStateTracker.listeners.size === 0) {
-      gameStateTracker.stopSubscription();
-      gameStateTracker = null;
-      console.log('[Board Analyzer] Game state tracker cleaned up');
-    }
-    
-    // Reset board data
-    currentBoardData = null;
-    console.log('[Board Analyzer] Board data reset');
-    
-    // NEW: Re-enable Turbo Mode button after analysis
-    if (window.turboButton) {
-      window.turboButton.disabled = false;
-      window.turboButton.title = '';
-      console.log('[Board Analyzer] Turbo Mode button re-enabled');
-    }
-    
-    // NEW: Also restore Turbo Mode button text and style if it was modified
-    if (window.turboButton && window.__turboState) {
-      // Only restore if turbo is actually inactive (not re-enabled by user)
-      if (!window.__turboState.active) {
-        window.turboButton.textContent = 'Enable Turbo';
-        window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-        window.turboButton.style.color = "#ffe066";
-        console.log('[Board Analyzer] Turbo Mode button style restored');
       }
     }
   }
-
-  // NEW: Use optimized statistics calculator
-  const totalTime = performance.now() - startTime;
-  const stats = statsCalculator.calculateStatistics();
   
-  return {
-    results,
-    summary: {
-      runs,
-      totalRuns: stats.totalRuns,
-      completedRuns: stats.completedRuns,
-      sPlusCount: stats.sPlusCount,
-      sPlusMaxPointsCount: stats.sPlusMaxPointsCount,
-      sPlusRate: stats.sPlusRate,
-      completionRate: stats.completionRate,
-      minTicks: stats.minTicks,
-      maxTicks: stats.maxTicks,
-      minDefeatTicks: stats.minDefeatTicks,
-      maxDefeatTicks: stats.maxDefeatTicks,
-      medianTicks: stats.medianTicks,
-      averageTicks: stats.averageTicks,
-      maxRankPoints: stats.maxRankPoints,
-      forceStopped: forceStop,
-      modeSwitched,
-      bestTimeResult: bestTimeRun,
-      maxPointsResult: bestScoreRun,
-      targetTicksResult: targetTicksRun,
-      // Timing stats
-      totalTimeMs: totalTime,
-      totalTimeFormatted: formatMilliseconds(totalTime),
-      averageRunTimeMs: stats.averageRunTime,
-      averageRunTimeFormatted: formatMilliseconds(stats.averageRunTime),
-      fastestRunTimeMs: stats.fastestRunTime,
-      slowestRunTimeMs: stats.slowestRunTime
+  if (grade === 'S+') {
+    // If stopOnSPlus is enabled, we might want to exit early
+    if (config.stopOnSPlus) {
+      console.log('Achieved S+ grade, stopping analysis early');
+      return true; // Signal to stop
     }
-  };
+  }
+  
+  // Check if should stop for reaching the desired number of ticks or below
+  if (config.stopWhenTicksReached > 0 && completed && ticks <= config.stopWhenTicksReached) {
+    console.log(`Reached target ticks: ${ticks} <= ${config.stopWhenTicksReached}, stopping analysis`);
+    
+    const boardData = getBoardData(seed);
+    
+    if (boardData) {
+      console.log('Target ticks: Using board data');
+      bestRuns.targetTicksRun = {
+        seed: seed,
+        board: boardData,
+        ticks: ticks,
+        grade: grade,
+        rankPoints: rankPoints
+      };
+      console.log(`Target ticks run captured: ${ticks} ticks with seed ${seed}`);
+    } else {
+      console.warn('Failed to get board data for target ticks replay');
+    }
+    
+    return true; // Signal to stop
+  }
+  
+  // Update max rank points
+  if (rankPoints > statsCalculator.maxRankPoints) {
+    const boardData = getBoardData(seed);
+    
+    if (boardData) {
+      console.log('Max points: Using board data');
+      bestRuns.bestScoreRun = {
+        seed: seed,
+        board: boardData
+      };
+      console.log(`New max points: ${rankPoints} with seed ${seed} in run ${runIndex}`);
+    } else {
+      console.warn('Failed to get board data for max points replay');
+    }
+  }
+  
+  return false; // Continue analysis
+}
+
+// Helper function to cleanup analysis resources
+function cleanupAnalysisResources(thisAnalysisId) {
+  // Use the proper board restoration function (includes global state reset)
+  restoreBoardState();
+  
+  // Disable turbo mode if it was enabled
+  if (config.enableTurboAutomatically && turboActive) {
+    disableTurbo();
+  }
+  
+  // Reset analysis state
+  if (analysisState.isValidId(thisAnalysisId)) {
+    analysisState.reset();
+    console.log('[Board Analyzer] Analysis state reset');
+  }
+  
+  // Clean up game state tracker if no more listeners
+  if (gameStateTracker && gameStateTracker.listeners.size === 0) {
+    gameStateTracker.stopSubscription();
+    gameStateTracker = null;
+    console.log('[Board Analyzer] Game state tracker cleaned up');
+  }
+  
+  // Reset board data
+  currentBoardData = null;
+  console.log('[Board Analyzer] Board data reset');
+  
+  // Re-enable Turbo Mode button after analysis
+  if (window.turboButton) {
+    window.turboButton.disabled = false;
+    window.turboButton.title = '';
+    console.log('[Board Analyzer] Turbo Mode button re-enabled');
+  }
+  
+  // Also restore Turbo Mode button text and style if it was modified
+  if (window.turboButton && window.__turboState) {
+    // Only restore if turbo is actually inactive (not re-enabled by user)
+    if (!window.__turboState.active) {
+      window.turboButton.textContent = 'Enable Turbo';
+      window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      window.turboButton.style.color = "#ffe066";
+      console.log('[Board Analyzer] Turbo Mode button style restored');
+    }
+  }
+}
+
+// Main analyze function - refactored to use helper functions
+async function analyzeBoard(runs = config.runs, statusCallback = null) {
+  // Initialize analysis
+  const thisAnalysisId = initializeAnalysis();
+  if (!thisAnalysisId) {
+    await sleep(ANALYSIS_STOP_DELAY_MS);
+    return null;
+  }
+  
+  try {
+    // Initialize analysis environment
+    initializeAnalysisEnvironment();
+    
+    // Setup analysis state
+    const { statsCalculator, bestRuns, timing } = setupAnalysisState();
+    
+    // Prepare analysis environment
+    const modeSwitched = await prepareAnalysisEnvironment();
+    
+    // Run the main analysis loop
+    const results = await runAnalysisLoop(runs, thisAnalysisId, statsCalculator, bestRuns, timing, statusCallback);
+    
+    // Calculate final statistics
+    const totalTime = performance.now() - timing.startTime;
+    const stats = statsCalculator.calculateStatistics();
+    
+    return {
+      results,
+      summary: {
+        runs,
+        totalRuns: stats.totalRuns,
+        completedRuns: stats.completedRuns,
+        sPlusCount: stats.sPlusCount,
+        sPlusMaxPointsCount: stats.sPlusMaxPointsCount,
+        sPlusRate: stats.sPlusRate,
+        completionRate: stats.completionRate,
+        minTicks: stats.minTicks,
+        maxTicks: stats.maxTicks,
+        minDefeatTicks: stats.minDefeatTicks,
+        maxDefeatTicks: stats.maxDefeatTicks,
+        medianTicks: stats.medianTicks,
+        averageTicks: stats.averageTicks,
+        maxRankPoints: stats.maxRankPoints,
+        forceStopped: analysisState.forceStop,
+        modeSwitched,
+        bestTimeResult: bestRuns.bestTimeRun,
+        maxPointsResult: bestRuns.bestScoreRun,
+        targetTicksResult: bestRuns.targetTicksRun,
+        // Timing stats
+        totalTimeMs: totalTime,
+        totalTimeFormatted: formatMilliseconds(totalTime),
+        averageRunTimeMs: stats.averageRunTime,
+        averageRunTimeFormatted: formatMilliseconds(stats.averageRunTime),
+        fastestRunTimeMs: stats.fastestRunTime,
+        slowestRunTimeMs: stats.slowestRunTime
+      }
+    };
+    
+  } catch (error) {
+    console.error('[Board Analyzer] Error during analysis execution:', error);
+    throw error;
+  } finally {
+    // Cleanup analysis resources
+    cleanupAnalysisResources(thisAnalysisId);
+  }
 }
 
 // Function to format milliseconds into a readable string
@@ -1699,6 +2453,10 @@ function createCopyReplayButton(replayData) {
   
   return button;
 }
+
+// =======================
+// 5. UI Management
+// =======================
 
 // Create the configuration panel UI
 function createConfigPanel(startAnalysisCallback) {
@@ -1838,8 +2596,8 @@ function createConfigPanel(startAnalysisCallback) {
       text: t('startAnalysisButton'),
       primary: true,
       onClick: () => {
-        // NEW: Check if analysis is already running
-        if (isAnalysisRunning) {
+        // Check if analysis is already running
+        if (!analysisState.canStart()) {
           console.log('[Board Analyzer] Analysis already running, cannot start new analysis');
           return;
         }
@@ -1900,9 +2658,9 @@ function createConfigPanel(startAnalysisCallback) {
     buttons: buttons
   });
   
-  // NEW: Register config panel with registry
-  panel.type = 'config';
-  modalRegistry.register(panel);
+  // Register config panel with modal manager
+  panel.type = MODAL_TYPES.CONFIG;
+  modalManager.register('config-panel', panel);
   
   activeConfigPanel = panel;
   return panel;
@@ -1911,7 +2669,18 @@ function createConfigPanel(startAnalysisCallback) {
 // Add a global function to forcefully close all analysis modals
 function forceCloseAllModals() {
   console.log("Closing all registered modals...");
-  modalRegistry.closeAll();
+  modalManager.closeAll();
+}
+
+// Helper function to close running modal specifically
+function closeRunningModal() {
+  try {
+    modalManager.close('running-modal');
+    activeRunningModal = null;
+    console.log('[Board Analyzer] Running modal closed successfully');
+  } catch (error) {
+    console.warn('[Board Analyzer] Error closing running modal:', error);
+  }
 }
 
 // Call this function when starting a new analysis
@@ -1957,11 +2726,12 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
         primary: false,
         onClick: () => {
           // Reset analysis state - this will stop everything immediately
-          isAnalysisRunning = false;
-          currentAnalysisId = null;
-          forceStop = true;
+          analysisState.stop();
           
-          // NEW: Re-enable Turbo Mode button when stopping
+          // Close the running modal immediately
+          closeRunningModal();
+          
+          // Re-enable Turbo Mode button when stopping
           if (window.turboButton) {
             window.turboButton.disabled = false;
             window.turboButton.title = '';
@@ -1987,9 +2757,9 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
     ]
   });
   
-  // NEW: Register modal with registry for efficient management
-  modal.type = 'running';
-  modalRegistry.register(modal);
+  // Register modal with modal manager for efficient management
+  modal.type = MODAL_TYPES.RUNNING;
+  modalManager.register('running-modal', modal);
   
   // Add a special identifier to the running modal
   if (modal && modal.element) {
@@ -2008,9 +2778,6 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
 
 // Show the analysis results modal
 function showResultsModal(results) {
-  // Force close ALL modals before showing results
-  forceCloseAllModals();
-  
   // Small delay to ensure UI is clean
   setTimeout(() => {
     const content = document.createElement('div');
@@ -2246,314 +3013,9 @@ function showResultsModal(results) {
           results: results.results.slice(0, 5) // Log first 5 results for debugging
         });
         
-        // Create a chart visualization
-        const chartContainer = document.createElement('div');
-        chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
-      
-      // Add note about clickable bars above the chart
-      const chartClickableNote = document.createElement('div');
-      chartClickableNote.textContent = '💡 Tip: Click on any bar in the chart below to copy replay data for that specific run';
-      chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
-      content.appendChild(chartClickableNote);
-      
-      // Create sorting buttons container
-      const sortButtonsContainer = document.createElement('div');
-      sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
-      
-      // Create sorting buttons
-      const createSortButton = (text, sortType) => {
-        const button = document.createElement('button');
-        button.textContent = text;
-        button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-        button.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
-        
-        // Set first button as active by default
-        if (sortType === 'runs') {
-          button.style.backgroundColor = '#4a5';
-        }
-        
-        button.addEventListener('click', () => {
-          // Update button styles
-          sortButtonsContainer.querySelectorAll('button').forEach(btn => {
-            btn.style.backgroundColor = '';
-          });
-          button.style.backgroundColor = '#4a5';
-          
-          // Sort and redraw chart
-          sortAndRedrawChart(sortType);
-        });
-        
-        return button;
-      };
-      
-      const allRunsButton = createSortButton('All Runs', 'runs');
-      const minTimeButton = createSortButton('Min Time', 'time');
-      const sPlusRanksButton = createSortButton('S+ Ranks', 'splus');
-      
-      sortButtonsContainer.appendChild(allRunsButton);
-      sortButtonsContainer.appendChild(minTimeButton);
-      sortButtonsContainer.appendChild(sPlusRanksButton);
-      
-      chartContainer.appendChild(sortButtonsContainer);
-      
-      // Create chart bars container
-      const barsContainer = document.createElement('div');
-      barsContainer.style.cssText = 'height: 150px; position: relative;';
-      chartContainer.appendChild(barsContainer);
-      
-      // Use all results for the chart
-      const displayResults = results.results;
-      
-      // Validate displayResults
-      if (!Array.isArray(displayResults) || displayResults.length === 0) {
-        console.warn('No valid results to display in chart');
-        return;
-      }
-      
-      // Calculate bar width and total chart width
-      const spacing = 4; // Spacing between bars
-      const barWidth = 8; // Fixed bar width for consistent appearance
-      const totalChartWidth = displayResults.length * (barWidth + spacing) - spacing; // Total width needed for all bars
-      
-      // Set the bars container to accommodate all bars
-      barsContainer.style.cssText = `height: 150px; position: relative; width: ${totalChartWidth}px;`;
-      
-      // Create a scrollable wrapper
-      const scrollWrapper = document.createElement('div');
-      scrollWrapper.style.cssText = `
-        width: 246px; 
-        height: 150px; 
-        overflow-x: auto; 
-        overflow-y: hidden;
-        border: 1px solid #555;
-        border-radius: 4px;
-        position: relative;
-        padding-left: 2px;
-        padding-right: 2px;
-      `;
-      
-      // Replace the bars container in the scroll wrapper
-      chartContainer.removeChild(barsContainer);
-      scrollWrapper.appendChild(barsContainer);
-      chartContainer.appendChild(scrollWrapper);
-      
-      // Ensure the bars container is properly sized for scrolling
-      barsContainer.style.cssText = `height: 150px; position: relative; width: ${totalChartWidth}px;`;
-      
-      // Function to sort and redraw chart
-      const sortAndRedrawChart = (sortType) => {
-        // Clear existing bars
-        barsContainer.innerHTML = '';
-        
-        let sortedResults;
-        switch (sortType) {
-          case 'runs':
-            // Sort by run order (original order)
-            sortedResults = [...displayResults];
-            break;
-          case 'time':
-            // Sort by ticks (ascending - fastest first)
-            sortedResults = [...displayResults].sort((a, b) => a.ticks - b.ticks);
-            break;
-          case 'splus':
-            // Sort by grade hierarchy (S+ → S → A → B → C...), then by ticks, then by run order
-            sortedResults = [...displayResults].sort((a, b) => {
-              // First priority: S+ grades come before all other grades
-              if (a.grade === 'S+' && b.grade !== 'S+') return -1;
-              if (a.grade !== 'S+' && b.grade === 'S+') return 1;
-              
-              // Second priority: Among S+ grades, sort by rank points (descending - highest first)
-              if (a.grade === 'S+' && b.grade === 'S+') {
-                const rankDiff = (b.rankPoints || 0) - (a.rankPoints || 0);
-                if (rankDiff !== 0) return rankDiff;
-              }
-              
-              // Third priority: Among non-S+ grades, sort by grade hierarchy (S → A → B → C...)
-              if (a.grade !== 'S+' && b.grade !== 'S+') {
-                const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6, 'F': 7 };
-                const aGradeOrder = gradeOrder[a.grade] || 999;
-                const bGradeOrder = gradeOrder[b.grade] || 999;
-                
-                if (aGradeOrder !== bGradeOrder) {
-                  return aGradeOrder - bGradeOrder;
-                }
-              }
-              
-              // Fourth priority: ticks (fastest first)
-              const tickDiff = a.ticks - b.ticks;
-              if (tickDiff !== 0) return tickDiff;
-              
-              // Fifth priority: run order (earliest first)
-              return results.results.indexOf(a) - results.results.indexOf(b);
-            });
-            break;
-          default:
-            sortedResults = [...displayResults];
-          }
-        
-        // Find the maximum tick value for proper scaling
-        const maxTicks = Math.max(...sortedResults.map(r => r.ticks));
-        
-              // Create bars with error handling and debugging
-      sortedResults.forEach((result, index) => {
-        try {
-          // Validate result data
-          if (!result || typeof result.ticks !== 'number') {
-            console.warn(`Invalid result data at index ${index}:`, result);
-            return;
-          }
-          
-          const bar = document.createElement('div');
-          const height = Math.max(20, Math.floor((result.ticks / maxTicks) * 120));
-          
-          // Debug logging for height calculation
-          console.log(`Bar ${index}: ticks=${result.ticks}, maxTicks=${maxTicks}, height=${height}`);
-          
-          // Determine bar color based on grade and rank points
-          let barColor;
-          if (result.completed) {
-            if (result.grade === 'S+' && result.rankPoints) {
-              // Calculate the highest rank points dynamically for this run
-              const sPlusResults = displayResults.filter(r => r.grade === 'S+' && r.rankPoints);
-              const highestRankPoints = sPlusResults.length > 0 ? 
-                Math.max(...sPlusResults.map(r => r.rankPoints)) : 0;
-              
-              // Different shades of yellow based on rank difference from highest
-              const rankDifference = highestRankPoints - result.rankPoints;
-              
-              switch (rankDifference) {
-                case 0: barColor = '#FFD700'; break; // Bright gold for highest rank points
-                case 1: barColor = '#FFA500'; break; // Orange for second highest
-                case 2: barColor = '#FF8C00'; break; // Dark orange for third highest
-                case 3: barColor = '#FF6347'; break; // Tomato for fourth highest
-                case 4: barColor = '#FF4500'; break; // Orange red for fifth highest
-                case 5: barColor = '#FF0000'; break; // Red for sixth highest
-                case 6: barColor = '#DC143C'; break; // Crimson for seventh highest
-                case 7: barColor = '#8B0000'; break; // Dark red for eighth highest
-                default: barColor = '#FFD700'; break; // Default gold for unknown rank differences
-              }
-            } else if (result.grade === 'S+') {
-              barColor = '#FFD700'; // Default gold for S+ without rank points
-            } else {
-              barColor = '#4CAF50'; // Green for other completed grades
-            }
-          } else {
-            barColor = '#e74c3c'; // Red for failed runs
-          }
-          
-          // Ensure minimum dimensions for visibility
-          const finalHeight = Math.max(20, height);
-          const finalWidth = Math.max(4, barWidth);
-          
-          // Use individual style properties for better browser compatibility
-          bar.style.position = 'absolute';
-          bar.style.bottom = '0';
-          bar.style.left = `${index * (barWidth + spacing)}px`;
-          bar.style.width = `${finalWidth}px`;
-          bar.style.height = `${finalHeight}px`;
-          bar.style.backgroundColor = barColor;
-          bar.style.transition = 'height 0.3s ease';
-          bar.style.cursor = 'pointer';
-          bar.style.border = '1px solid transparent';
-          bar.style.zIndex = '1';
-          
-          // Additional fallback styles for problematic browsers
-          bar.style.display = 'block';
-          bar.style.boxSizing = 'border-box';
-          
-          // Add hover effects
-          bar.addEventListener('mouseenter', () => {
-            bar.style.border = '1px solid white';
-            bar.style.transform = 'scale(1.1)';
-          });
-          
-          bar.addEventListener('mouseleave', () => {
-            bar.style.border = '1px solid transparent';
-            bar.style.transform = 'scale(1)';
-          });
-          
-          // Add tooltip on hover
-          let tooltipText = `Run ${results.results.indexOf(result) + 1}: ${result.ticks} ticks, Grade: `;
-          
-          // Show S+ with rank points directly in the grade
-          if (result.grade === 'S+' && result.rankPoints) {
-            tooltipText += `S+${result.rankPoints}`;
-          } else {
-            tooltipText += result.grade;
-          }
-          
-          tooltipText += `, ${result.completed ? 'Completed' : 'Failed'}`;
-          if (result.seed) {
-            tooltipText += `, Seed: ${result.seed}`;
-          }
-          tooltipText += '\nClick to copy replay data';
-          bar.title = tooltipText;
-          
-          // Add click handler to copy replay data for this specific run
-          bar.addEventListener('click', () => {
-            // Create replay data for this specific run
-            const replayData = createReplayDataForRun(result);
-            
-            if (replayData) {
-              // Create the $replay formatted string
-              const replayText = `$replay(${JSON.stringify(replayData)})`;
-              
-              // Copy to clipboard
-              const success = copyToClipboard(replayText);
-              
-              if (success) {
-                // Show visual feedback
-                const originalBorder = bar.style.border;
-                
-                bar.style.border = '2px solid white';
-                
-                // Reset after 2 seconds
-                setTimeout(() => {
-                  bar.style.border = originalBorder;
-                }, 2000);
-                
-                // Show a brief notification
-                showCopyNotification(`Copied run ${results.results.indexOf(result) + 1} replay data!`);
-              } else {
-                showCopyNotification('Failed to copy replay data', true);
-              }
-            } else {
-              showCopyNotification('Failed to create replay data for this run', true);
-            }
-          });
-          
-          // Debug: Log bar creation
-          console.log(`Created bar ${index}:`, {
-            ticks: result.ticks,
-            height: finalHeight,
-            width: finalWidth,
-            color: barColor,
-            left: index * (barWidth + spacing)
-          });
-          
-          barsContainer.appendChild(bar);
-          
-        } catch (error) {
-          console.error(`Error creating bar ${index}:`, error, result);
-        }
-      });
-        
-        // Reset scroll position to left when sorting
-        scrollWrapper.scrollLeft = 0;
-      };
-      
-      // Initial chart draw
-      sortAndRedrawChart('runs');
-      
-      // Add note about clickable bars
-      const clickableNote = document.createElement('div');
-      clickableNote.textContent = '💡 Click on any bar to copy replay data for that specific run';
-      clickableNote.style.cssText = 'text-align: center; color: #aaa; font-size: 0.9em; margin-top: 10px; font-style: italic;';
-      chartContainer.appendChild(clickableNote);
-      
-      // No need for limit note since we show all runs with scrollbar
-      
-      content.appendChild(chartContainer);
+        // Use the new ChartRenderer class for better performance
+        const chartRenderer = new ChartRenderer(content, results.results);
+        chartRenderer.render();
       
       } catch (error) {
         console.error('Error creating chart:', error);
@@ -2589,9 +3051,9 @@ function showResultsModal(results) {
       ]
     });
     
-    // NEW: Register results modal with registry
-    resultsModal.type = 'results';
-    modalRegistry.register(resultsModal);
+    // Register results modal with modal manager
+    resultsModal.type = MODAL_TYPES.RESULTS;
+    modalManager.register('results-modal', resultsModal);
     
     return resultsModal;
   }, 100);
@@ -2721,12 +3183,12 @@ function showCopyNotification(message, isError = false) {
   // Add to document
   document.body.appendChild(notification);
   
-  // Remove after 3 seconds
+  // Remove after specified time
   setTimeout(() => {
     if (notification.parentNode) {
       notification.parentNode.removeChild(notification);
     }
-  }, 3000);
+  }, NOTIFICATION_DISPLAY_MS);
 }
 
 // Show the configuration modal and prepare for analysis
@@ -2741,10 +3203,14 @@ function showConfigAndPrepareAnalysis() {
   api.ui.toggleConfigPanel(CONFIG_PANEL_ID);
 }
 
+// =======================
+// 7. Main Entry Point & Lifecycle
+// =======================
+
 // Main entry point - Run the analysis
 async function runAnalysis() {
-  // NEW: Check if analysis is already running
-  if (isAnalysisRunning) {
+  // Check if analysis is already running
+  if (!analysisState.canStart()) {
     console.log('[Board Analyzer] Analysis already running, cannot start new analysis');
     return;
   }
@@ -2804,12 +3270,11 @@ async function runAnalysis() {
     console.log('Turbo Mode mod has been completely disabled for analysis');
   }
   
-  // Force close any existing modals first
-  forceCloseAllModals();
-  
-  // NEW: Use modal registry to close any existing modals
-  modalRegistry.closeByType('running');
+  // Close any existing modals using modal manager
+  modalManager.closeByType(MODAL_TYPES.RUNNING);
   activeRunningModal = null;
+  
+  console.log('[Board Analyzer] Cleared any existing running modals');
   
   // Create a variable to store the running modal
   let runningModal = null;
@@ -2854,13 +3319,13 @@ async function runAnalysis() {
       }
     });
     
-    // NEW: Always show results, even if analysis was stopped early
+    // Always show results, even if analysis was stopped early
     console.log('Analysis completed, showing results:', results);
     console.log('Results summary:', results.summary);
     console.log('Force stopped:', results.summary.forceStopped);
     console.log('Total runs completed:', results.summary.totalRuns);
     
-    // NEW: Store results globally for Board Advisor to access
+    // Store results globally for Board Advisor to access
     window.__boardAnalyzerResults = results;
     console.log('[Board Analyzer] Results stored globally for Board Advisor access');
     
@@ -2870,25 +3335,28 @@ async function runAnalysis() {
     // Ensure the running modal is closed through the API too
     if (runningModal) {
       try {
-        // Check if the modal has a close method before calling it
-        if (typeof runningModal.close === 'function') {
+        // Check if the modal is a function (like closeModal)
+        if (typeof runningModal === 'function') {
+          runningModal();
+        } else if (typeof runningModal.close === 'function') {
           runningModal.close();
         } else if (runningModal.element && typeof runningModal.element.remove === 'function') {
-          // Try to remove the element directly if close method doesn't exist
           runningModal.element.remove();
         } else if (runningModal.remove && typeof runningModal.remove === 'function') {
-          // Try alternative remove method
           runningModal.remove();
+        } else {
+          console.warn('[Board Analyzer] No valid close method found for modal:', runningModal);
         }
       } catch (e) {
-        console.error('Error closing running modal:', e);
+        console.error('[Board Analyzer] Error closing running modal:', e);
       }
+      
       runningModal = null;
       activeRunningModal = null;
     }
     
     // Small delay to ensure UI updates properly
-    await sleep(600);
+    await sleep(UI_UPDATE_DELAY_MS);
     
     // Force close all modals one more time
     forceCloseAllModals();
@@ -2897,39 +3365,23 @@ async function runAnalysis() {
     showResultsModal(results);
     
   } catch (error) {
-    console.error('Analysis error:', error);
+    console.error('[Board Analyzer] Analysis error:', error);
     
-    // NEW: Use modal registry to close modals and restore board state
-    modalRegistry.closeAll();
+    // Close all modals and restore board state
+    modalManager.closeAll();
     restoreBoardState();
     runningModal = null;
     activeRunningModal = null;
     
-    // Show error modal
-    api.ui.components.createModal({
-      title: t('errorTitle'),
-      content: `<p>${t('errorText')}</p><p>${error.message || ''}</p>`,
-      buttons: [
-        {
-          text: t('closeButton'),
-          primary: true,
-          onClick: () => {
-            // One more check for lingering modals when user closes error
-            forceCloseAllModals();
-          }
-        }
-      ]
-    });
+    console.log('[Board Analyzer] Error cleanup completed - all modals closed');
   }
 }
 
-// REMOVED: setupModalWatcher function - replaced with lightweight modal registry
 
 // Initialize UI
 function init() {
   console.log('Board Analyzer initializing UI...');
   
-  // REMOVED: setupModalWatcher() - replaced with lightweight modal registry
   
   // Make sure turbo mode is disabled on startup
   if (turboActive) {
@@ -2950,7 +3402,6 @@ function init() {
     }
   });
   
-  // REMOVED: Cogwheel button - redundant since main button opens the same config panel
   
   // Create the configuration panel (without analysis callback)
   createConfigPanel();
@@ -2971,11 +3422,11 @@ context.exports = {
     Object.assign(config, newConfig);
     api.service.updateScriptConfig(context.hash, config);
   },
-  // NEW: Cleanup function for modal registry
+  // Cleanup function for modal manager
   cleanup: (periodic = false) => {
     // Only close modals if not periodic cleanup
     if (!periodic) {
-      modalRegistry.closeAll();
+      modalManager.closeAll();
     }
   }
 };
@@ -2985,4 +3436,3 @@ window.cleanupOfficialModsBoardAnalyzerjs = (periodic = false) => {
   context.exports.cleanup(periodic);
 };
 
-// Legacy displayResults function removed - chart functionality is now handled in showResultsModal 

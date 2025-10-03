@@ -1,25 +1,6 @@
 // =======================
 // Autoscroller.js - Bestiary Arena Auto Scroll Mod
 // =======================
-// Version: 2.0 (Optimized)
-// Features: 
-// - Enhanced DOM caching and memory management
-// - Advanced error handling with circuit breaker
-// - API request queuing and rate limiting
-// - Improved state management and cleanup
-//
-// MODULE INDEX:
-// 1. Configuration & Constants
-// 2. State Management
-// 3. DOM Cache Management
-// 4. Inventory Integration Variables
-// 5. Error Handling & Circuit Breaker
-// 6. API Functions & Request Queue
-// 7. Utility Functions
-// 8. Modal UI & Rendering
-// 9. Inventory Integration & Button Management
-// 10. Cleanup & Exports
-// =======================
 (function() {
   
 // =======================
@@ -66,6 +47,129 @@
     TIER_COLORS: ['#888888', '#4ade80', '#60a5fa', '#a78bfa', '#fbbf24'],
     TIER_NAMES: ['grey', 'green', 'blue', 'purple', 'yellow'],
     DEFAULT_TIER_TARGETS: [0, 5, 4, 3, 2]
+  };
+
+  // Style constants and theme management
+  const THEME = {
+    colors: {
+      primary: 'rgb(230, 215, 176)',
+      white: 'rgb(255, 255, 255)',
+      background: '#2a2a2a',
+      border: '#444',
+      error: '#ff6b6b',
+      warning: '#ff9800'
+    },
+    fonts: {
+      small: '11px',
+      medium: '12px', 
+      large: '14px'
+    },
+    spacing: {
+      inputPadding: '2px 4px',
+      borderRadius: '2px',
+      gap: '8px',
+      marginBottom: '5px'
+    }
+  };
+
+  // Style utility functions
+  const StyleUtils = {
+    applyThemeColor: (element, colorKey) => {
+      element.style.color = THEME.colors[colorKey];
+    },
+    
+    applyInputStyles: (element) => {
+      Object.assign(element.style, {
+        padding: THEME.spacing.inputPadding,
+        border: `1px solid ${THEME.colors.border}`,
+        borderRadius: THEME.spacing.borderRadius,
+        background: THEME.colors.background,
+        color: THEME.colors.primary
+      });
+    },
+    
+    applyLabelStyles: (element, fontSize = 'large') => {
+      element.style.color = THEME.colors.primary;
+      element.style.fontSize = THEME.fonts[fontSize];
+    },
+    
+    applySectionStyles: (element) => {
+      element.style.fontSize = THEME.fonts.large;
+      element.style.marginBottom = THEME.spacing.marginBottom;
+    }
+  };
+
+  // DOM utility functions for consistent element creation
+  const DOMUtils = {
+    createElement: (tag, className = '', styles = {}) => {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      Object.assign(element.style, styles);
+      return element;
+    },
+
+    createFlexColumn: (className = '', styles = {}) => {
+      return DOMUtils.createElement('div', className, {
+        display: 'flex',
+        flexDirection: 'column',
+        ...styles
+      });
+    },
+
+    createFlexRow: (className = '', styles = {}) => {
+      return DOMUtils.createElement('div', className, {
+        display: 'flex',
+        flexDirection: 'row',
+        ...styles
+      });
+    },
+
+    createModalColumn: (width, className = '', styles = {}) => {
+      return DOMUtils.createElement('div', className, {
+        width: width,
+        minWidth: width,
+        maxWidth: width,
+        height: '100%',
+        flex: `0 0 ${width}`,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        ...styles
+      });
+    },
+
+    createInput: (type = 'text', styles = {}) => {
+      const input = DOMUtils.createElement('input', '', {
+        fontSize: THEME.fonts.medium,
+        ...styles
+      });
+      input.type = type;
+      StyleUtils.applyInputStyles(input);
+      return input;
+    },
+
+    createCheckbox: (styles = {}) => {
+      return DOMUtils.createElement('input', '', {
+        width: '16px',
+        height: '16px',
+        margin: '0',
+        ...styles
+      });
+    },
+
+    applyModalColumnStyles: (element, width) => {
+      const styles = {
+        width: width,
+        minWidth: width,
+        maxWidth: width,
+        height: '100%',
+        flex: `0 0 ${width}`,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+      };
+      Object.assign(element.style, styles);
+    }
   };
   
   // Pre-computed strings for better performance
@@ -126,202 +230,45 @@
 // =======================
 // MODULE 2: State Management
 // =======================
-  // Centralized state management
-  const AutoscrollerState = {
-    // Core state
-    autoscrollStats: {
-      totalScrolls: 0,
-      successfulSummons: 0,
-      targetCreatures: new Set(),
-      foundCreatures: new Map(),
-      soldMonsters: 0,
-      soldGold: 0,
-      shinyCount: 0
-    },
-    
-    // UI state
-    selectedScrollTier: 1,
-    selectedCreatures: [],
-    autoscrolling: false,
-    
-    // Configuration state
-    stopConditions: {
-      useTotalCreatures: true,
-      totalCreaturesTarget: 15,
-      useTierSystem: false,
-      tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
-    },
-    
-    // Autosell state
-    autosellNonSelected: false,
-    autosellGenesMin: 5,
-    autosellGenesMax: 79,
-    autosqueezeGenesMin: 80,
-    autosqueezeGenesMax: 100,
-    
-    // Rate limiting state
-    rateLimitedSales: new Set(),
-    rateLimitedSalesRetryCount: new Map(),
-    lastRateLimitTime: 0,
-    consecutiveRateLimits: 0,
-    lastApiCall: 0,
-    userDefinedSpeed: 400,
-    rateLimitedInterval: null,
-    
-      // State validation with caching
-  validateState() {
-    const errors = [];
-    
-    if (this.selectedScrollTier < 1 || this.selectedScrollTier > 5) {
-      errors.push('Invalid scroll tier');
-    }
-    
-    if (this.stopConditions.totalCreaturesTarget < 1) {
-      errors.push('Invalid creature target');
-    }
-    
-    if (this.userDefinedSpeed < 100 || this.userDefinedSpeed > 2000) {
-      errors.push('Invalid speed setting');
-    }
-    
-    return errors;
-  },
-  
-  // Debounced state updates for better performance
-  debouncedUpdate: null,
-  
-  // Update state with debouncing to prevent excessive re-renders
-  debouncedUpdateState(newState, delay = 100) {
-    if (this.debouncedUpdate) {
-      clearTimeout(this.debouncedUpdate);
-    }
-    
-    this.debouncedUpdate = setTimeout(() => {
-      this.update(newState);
-      this.debouncedUpdate = null;
-    }, delay);
-  },
-    
-    // State persistence
-    saveToStorage() {
-      try {
-        const stateToSave = {
-          selectedScrollTier: this.selectedScrollTier,
-          selectedCreatures: [...this.selectedCreatures],
-          stopConditions: { ...this.stopConditions },
-          userDefinedSpeed: this.userDefinedSpeed,
-          autosellNonSelected: this.autosellNonSelected,
-          autosellGenesMin: this.autosellGenesMin,
-          autosellGenesMax: this.autosellGenesMax,
-          autosqueezeGenesMin: this.autosqueezeGenesMin,
-          autosqueezeGenesMax: this.autosqueezeGenesMax
-        };
-        localStorage.setItem('autoscroller_state', JSON.stringify(stateToSave));
-      } catch (error) {
-        console.warn('[Autoscroller] Failed to save state:', error);
-      }
-    },
-    
-    loadFromStorage() {
-      try {
-        const saved = localStorage.getItem('autoscroller_state');
-        if (saved) {
-          const state = JSON.parse(saved);
-          
-                  if (state.selectedScrollTier) this.selectedScrollTier = state.selectedScrollTier;
-        if (state.selectedCreatures) this.selectedCreatures = [...state.selectedCreatures];
-        if (state.stopConditions) this.stopConditions = { ...this.stopConditions, ...state.stopConditions };
-        if (state.userDefinedSpeed) this.userDefinedSpeed = state.userDefinedSpeed;
-        if (state.autosellNonSelected !== undefined) this.autosellNonSelected = state.autosellNonSelected;
-        if (state.autosellGenesMin !== undefined) this.autosellGenesMin = state.autosellGenesMin;
-        if (state.autosellGenesMax !== undefined) this.autosellGenesMax = state.autosellGenesMax;
-        if (state.autosqueezeGenesMin !== undefined) this.autosqueezeGenesMin = state.autosqueezeGenesMin;
-        if (state.autosqueezeGenesMax !== undefined) this.autosqueezeGenesMax = state.autosqueezeGenesMax;
-          
-                  // State loaded from storage
-      }
-      } catch (error) {
-        console.warn('[Autoscroller] Failed to load state:', error);
-      }
-    },
-    
-    // State reset
-    reset() {
-      this.autoscrollStats = {
-        totalScrolls: 0,
-        successfulSummons: 0,
-        targetCreatures: new Set(),
-        foundCreatures: new Map(),
-        soldMonsters: 0,
-        soldGold: 0,
-        squeezedMonsters: 0,
-        squeezedDust: 0,
-        shinyCount: 0
-      };
-      
-      this.selectedScrollTier = 1;
-      this.selectedCreatures = [];
-      this.autoscrolling = false;
-      
-      this.stopConditions = {
-        useTotalCreatures: true,
-        totalCreaturesTarget: 15,
-        useTierSystem: false,
-        tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
-      };
-      
-      this.autosellNonSelected = false;
-      this.autosellGenesMin = 5;
-      this.autosellGenesMax = 79;
-      this.autosqueezeGenesMin = 80;
-      this.autosqueezeGenesMax = 100;
-      this.rateLimitedSales.clear();
-      this.rateLimitedSalesRetryCount.clear();
-      this.lastRateLimitTime = 0;
-      this.consecutiveRateLimits = 0;
-      this.lastApiCall = 0;
-      this.userDefinedSpeed = 400;
-      
-      if (this.rateLimitedInterval) {
-        clearInterval(this.rateLimitedInterval);
-        this.rateLimitedInterval = null;
-      }
-    },
-    
-    // State update with validation
-    update(newState) {
-      const oldState = { ...this };
-      Object.assign(this, newState);
-      
-      const errors = this.validateState();
-      if (errors.length > 0) {
-        console.warn('[Autoscroller] State validation errors:', errors);
-        Object.assign(this, oldState); // Revert on validation failure
-        return false;
-      }
-      
-      return true;
-    }
+  // Core state variables
+  let autoscrollStats = {
+    totalScrolls: 0,
+    successfulSummons: 0,
+    targetCreatures: new Set(),
+    foundCreatures: new Map(),
+    soldMonsters: 0,
+    soldGold: 0,
+    shinyCount: 0
   };
   
-  // Legacy variable aliases for backward compatibility
-  let autoscrollStats = AutoscrollerState.autoscrollStats;
-  let selectedScrollTier = AutoscrollerState.selectedScrollTier;
-  let selectedCreatures = AutoscrollerState.selectedCreatures;
-  let autoscrolling = AutoscrollerState.autoscrolling;
-  let stopConditions = AutoscrollerState.stopConditions;
-  let autosellNonSelected = AutoscrollerState.autosellNonSelected;
-  let autosellGenesMin = AutoscrollerState.autosellGenesMin;
-  let autosellGenesMax = AutoscrollerState.autosellGenesMax;
-  let autosqueezeGenesMin = AutoscrollerState.autosqueezeGenesMin;
-  let autosqueezeGenesMax = AutoscrollerState.autosqueezeGenesMax;
-  let rateLimitedSales = AutoscrollerState.rateLimitedSales;
-  let rateLimitedSalesRetryCount = AutoscrollerState.rateLimitedSalesRetryCount;
-  let lastRateLimitTime = AutoscrollerState.lastRateLimitTime;
-  let consecutiveRateLimits = AutoscrollerState.consecutiveRateLimits;
-  let lastApiCall = AutoscrollerState.lastApiCall;
-  let userDefinedSpeed = AutoscrollerState.userDefinedSpeed;
-  let rateLimitedInterval = AutoscrollerState.rateLimitedInterval;
+  // UI state
+  let selectedScrollTier = 1;
+  let selectedCreatures = [];
+  let autoscrolling = false;
+  
+  // Configuration state
+  let stopConditions = {
+    useTotalCreatures: true,
+    totalCreaturesTarget: 15,
+    useTierSystem: false,
+    tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
+  };
+  
+  // Autosell state
+  let autosellNonSelected = false;
+  let autosellGenesMin = 5;
+  let autosellGenesMax = 79;
+  let autosqueezeGenesMin = 80;
+  let autosqueezeGenesMax = 100;
+  
+  // Rate limiting state
+  let rateLimitedSales = new Set();
+  let rateLimitedSalesRetryCount = new Map();
+  let lastRateLimitTime = 0;
+  let consecutiveRateLimits = 0;
+  let lastApiCall = 0;
+  let userDefinedSpeed = 400;
+  let rateLimitedInterval = null;
   
   // Error handling state
   let errorState = {
@@ -677,12 +624,7 @@
   };
 
 // =======================
-// MODULE 4: Inventory Integration Variables
-// =======================
-  // Variables moved to MODULE 9 for optimization
-
-// =======================
-// MODULE 5: Error Handling & Circuit Breaker
+// MODULE 4: Error Handling & Circuit Breaker
 // =======================
   function handleError(error, context = 'unknown') {
     // Don't count "Autoscroll stopped by user" as an error
@@ -779,7 +721,7 @@
   }
 
 // =======================
-// MODULE 6: API Functions & Request Queue
+// MODULE 5: API Functions & Request Queue
 // =======================
   async function summonScroll(rarity) {
     return new Promise((resolve, reject) => {
@@ -1132,9 +1074,92 @@
     return 1;
   }
   
+  function saveStateToStorage() {
+    try {
+      const stateToSave = {
+        selectedScrollTier,
+        selectedCreatures: [...selectedCreatures],
+        stopConditions: { ...stopConditions },
+        userDefinedSpeed,
+        autosellNonSelected,
+        autosellGenesMin,
+        autosellGenesMax,
+        autosqueezeGenesMin,
+        autosqueezeGenesMax
+      };
+      localStorage.setItem('autoscroller_state', JSON.stringify(stateToSave));
+    } catch (error) {
+      console.warn('[Autoscroller] Failed to save state:', error);
+    }
+  }
+  
+  function loadStateFromStorage() {
+    try {
+      const saved = localStorage.getItem('autoscroller_state');
+      if (saved) {
+        const state = JSON.parse(saved);
+        
+        if (state.selectedScrollTier) selectedScrollTier = state.selectedScrollTier;
+        if (state.selectedCreatures) selectedCreatures = [...state.selectedCreatures];
+        if (state.stopConditions) stopConditions = { ...stopConditions, ...state.stopConditions };
+        if (state.userDefinedSpeed) userDefinedSpeed = state.userDefinedSpeed;
+        if (state.autosellNonSelected !== undefined) autosellNonSelected = state.autosellNonSelected;
+        if (state.autosellGenesMin !== undefined) autosellGenesMin = state.autosellGenesMin;
+        if (state.autosellGenesMax !== undefined) autosellGenesMax = state.autosellGenesMax;
+        if (state.autosqueezeGenesMin !== undefined) autosqueezeGenesMin = state.autosqueezeGenesMin;
+        if (state.autosqueezeGenesMax !== undefined) autosqueezeGenesMax = state.autosqueezeGenesMax;
+      }
+    } catch (error) {
+      console.warn('[Autoscroller] Failed to load state:', error);
+    }
+  }
+
   function resetAutoscrollState() {
-    // Use centralized state management
-    AutoscrollerState.reset();
+    // Reset core state
+    autoscrollStats = {
+      totalScrolls: 0,
+      successfulSummons: 0,
+      targetCreatures: new Set(),
+      foundCreatures: new Map(),
+      soldMonsters: 0,
+      soldGold: 0,
+      squeezedMonsters: 0,
+      squeezedDust: 0,
+      shinyCount: 0
+    };
+    
+    // Reset UI state
+    selectedScrollTier = 1;
+    selectedCreatures = [];
+    autoscrolling = false;
+    
+    // Reset configuration state
+    stopConditions = {
+      useTotalCreatures: true,
+      totalCreaturesTarget: 15,
+      useTierSystem: false,
+      tierTargets: [...SCROLL_CONFIG.DEFAULT_TIER_TARGETS]
+    };
+    
+    // Reset autosell state
+    autosellNonSelected = false;
+    autosellGenesMin = 5;
+    autosellGenesMax = 79;
+    autosqueezeGenesMin = 80;
+    autosqueezeGenesMax = 100;
+    
+    // Reset rate limiting state
+    rateLimitedSales.clear();
+    rateLimitedSalesRetryCount.clear();
+    lastRateLimitTime = 0;
+    consecutiveRateLimits = 0;
+    lastApiCall = 0;
+    userDefinedSpeed = 400;
+    
+    if (rateLimitedInterval) {
+      clearInterval(rateLimitedInterval);
+      rateLimitedInterval = null;
+    }
     
     // Reset error state
     resetErrorState();
@@ -1298,7 +1323,6 @@
           }
         }
         
- 
         return true;
       }
     
@@ -1808,11 +1832,16 @@
     
     setUILocked(false);
     
+    // Invalidate cache to ensure we get the current button
+    DOM_ELEMENTS.lastCacheTime = 0;
     const { autoscrollBtn, stopBtn } = getAutoscrollButtons();
     
     if (autoscrollBtn) {
-      autoscrollBtn.textContent = 'Autoscroll';
       autoscrollBtn.style.display = 'block';
+      // Update button appearance based on current conditions
+      if (window.updateAutoscrollButtonAppearance) {
+        window.updateAutoscrollButtonAppearance();
+      }
     }
     
     if (stopBtn) {
@@ -1898,7 +1927,7 @@
   }
 
 // =======================
-// MODULE 7: Utility Functions
+// MODULE 6: Utility Functions
 // =======================
   // Cached DOM elements for better performance
   const DOM_ELEMENTS = {
@@ -2134,7 +2163,7 @@
     contentWrapper.style.display = 'flex';
     contentWrapper.style.flexDirection = 'column';
     contentWrapper.style.alignItems = 'stretch';
-    contentWrapper.style.justifyContent = 'flex-start';
+    contentWrapper.style.justifyContent = 'center';
     contentWrapper.style.padding = '0';
     
     if (typeof content === 'string') {
@@ -2147,7 +2176,7 @@
   }
 
 // =======================
-// MODULE 8: Modal UI & Rendering
+// MODULE 7: Modal UI & Rendering
 // =======================
   function showAutoscrollerModal() {
     injectAutoscrollerButtonStyles();
@@ -2158,19 +2187,20 @@
     setTimeout(() => {
       let selectedGameId = null;
       let lastStatusMessage = '';
-      const contentDiv = document.createElement('div');
-      contentDiv.style.width = '100%';
-      contentDiv.style.height = '100%';
-      contentDiv.style.minWidth = '750px';
-      contentDiv.style.maxWidth = '750px';
-      contentDiv.style.minHeight = '400px';
-      contentDiv.style.maxHeight = '400px';
-      contentDiv.style.boxSizing = 'border-box';
-      contentDiv.style.overflow = 'hidden';
-      contentDiv.style.display = 'flex';
-      contentDiv.style.flexDirection = 'row';
-      contentDiv.style.gap = '8px';
-      contentDiv.style.flex = '1 1 0';
+      const contentDiv = DOMUtils.createElement('div', '', {
+        width: '100%',
+        height: '100%',
+        minWidth: '750px',
+        maxWidth: '750px',
+        minHeight: '400px',
+        maxHeight: '400px',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'row',
+        gap: '8px',
+        flex: '1 1 0'
+      });
       
       let availableCreatures = [...getAllCreatures()];
       // When reopening the modal, respect already selected creatures:
@@ -2192,15 +2222,7 @@
         
         contentDiv.innerHTML = '';
         
-        const col1 = document.createElement('div');
-        col1.style.width = '170px';
-        col1.style.minWidth = '170px';
-        col1.style.maxWidth = '170px';
-        col1.style.height = '100%';
-        col1.style.flex = '0 0 170px';
-        col1.style.display = 'flex';
-        col1.style.flexDirection = 'column';
-        col1.style.gap = '8px';
+        const col1 = DOMUtils.createModalColumn('170px');
         
         const creaturesBox = createCreaturesBox({
           title: 'Available Creatures',
@@ -2215,6 +2237,10 @@
             // Update selected creatures display
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
+            }
+            // Update button appearance when creature selection changes
+            if (window.updateAutoscrollButtonAppearance) {
+              window.updateAutoscrollButtonAppearance();
             }
             // Maintain scroll tier border
             updateSelectedScrollTierBorder();
@@ -2236,6 +2262,10 @@
             if (window.AutoscrollerRenderSelectedCreatures) {
               window.AutoscrollerRenderSelectedCreatures();
             }
+            // Update button appearance when creature selection changes
+            if (window.updateAutoscrollButtonAppearance) {
+              window.updateAutoscrollButtonAppearance();
+            }
             // Maintain scroll tier border
             updateSelectedScrollTierBorder();
           }
@@ -2250,21 +2280,13 @@
           title: 'Rules',
           content: getRulesColumn()
         });
-        col2.style.width = '250px';
-        col2.style.minWidth = '250px';
-        col2.style.maxWidth = '250px';
-        col2.style.height = '100%';
-        col2.style.flex = '0 0 250px';
+        DOMUtils.applyModalColumnStyles(col2, '250px');
         
         const col3 = createBox({
           title: 'Autoscrolling',
           content: getAutoscrollingColumn()
         });
-        col3.style.width = '280px';
-        col3.style.minWidth = '280px';
-        col3.style.maxWidth = '280px';
-        col3.style.height = '100%';
-        col3.style.flex = '0 0 280px';
+        DOMUtils.applyModalColumnStyles(col3, '280px');
         
         contentDiv.appendChild(col1);
         contentDiv.appendChild(col2);
@@ -2282,25 +2304,22 @@
         totalOptionDiv.style.display = 'flex';
         totalOptionDiv.style.flexDirection = 'column';
         totalOptionDiv.style.gap = '4px';
-        totalOptionDiv.style.fontSize = '14px';
+        StyleUtils.applySectionStyles(totalOptionDiv);
         
         const totalCheckboxRow = document.createElement('div');
         totalCheckboxRow.style.display = 'flex';
         totalCheckboxRow.style.alignItems = 'center';
         totalCheckboxRow.style.gap = '8px';
         
-        const totalCheckbox = document.createElement('input');
+        const totalCheckbox = DOMUtils.createCheckbox();
         totalCheckbox.type = 'checkbox';
         totalCheckbox.id = 'total-creatures-checkbox';
         totalCheckbox.checked = stopConditions.useTotalCreatures !== false; // Preserve state, default to true
-        totalCheckbox.style.width = '16px';
-        totalCheckbox.style.height = '16px';
-        totalCheckbox.style.margin = '0';
         
         const totalLabel = document.createElement('label');
         totalLabel.htmlFor = 'total-creatures-checkbox';
         totalLabel.textContent = 'Collect a total of';
-        totalLabel.style.color = 'rgb(230, 215, 176)';
+        StyleUtils.applyLabelStyles(totalLabel);
         totalLabel.style.cursor = 'pointer';
         
         totalCheckboxRow.appendChild(totalCheckbox);
@@ -2313,25 +2332,19 @@
         totalInputRow.style.gap = '8px';
         totalInputRow.style.marginLeft = '24px';
         
-        const totalInput = document.createElement('input');
-        totalInput.type = 'number';
+        const totalInput = DOMUtils.createInput('number', {
+          width: '50px',
+          height: '20px',
+          textAlign: 'center'
+        });
         totalInput.id = 'total-creatures-input';
         totalInput.min = '1';
         totalInput.value = stopConditions.totalCreaturesTarget || '15';
-        totalInput.style.width = '50px';
-        totalInput.style.height = '24px';
-        totalInput.style.padding = '2px 4px';
-        totalInput.style.border = '1px solid #444';
-        totalInput.style.borderRadius = '2px';
-        totalInput.style.background = '#2a2a2a';
-        totalInput.style.color = 'rgb(230, 215, 176)';
-        totalInput.style.fontSize = '12px';
-        totalInput.style.textAlign = 'center';
         totalInput.disabled = !stopConditions.useTotalCreatures;
         
         const totalCreaturesText = document.createElement('span');
         totalCreaturesText.textContent = 'creatures';
-        totalCreaturesText.style.color = 'rgb(230, 215, 176)';
+        StyleUtils.applyThemeColor(totalCreaturesText, 'primary');
         
         totalInputRow.appendChild(totalInput);
         totalInputRow.appendChild(totalCreaturesText);
@@ -2342,20 +2355,17 @@
         tierOptionDiv.style.display = 'flex';
         tierOptionDiv.style.alignItems = 'center';
         tierOptionDiv.style.gap = '8px';
-        tierOptionDiv.style.fontSize = '14px';
+        StyleUtils.applySectionStyles(tierOptionDiv);
         
-        const tierCheckbox = document.createElement('input');
+        const tierCheckbox = DOMUtils.createCheckbox();
         tierCheckbox.type = 'checkbox';
         tierCheckbox.id = 'tier-system-checkbox';
         tierCheckbox.checked = stopConditions.useTierSystem === true; // Preserve state, default to false
-        tierCheckbox.style.width = '16px';
-        tierCheckbox.style.height = '16px';
-        tierCheckbox.style.margin = '0';
         
         const tierLabel = document.createElement('label');
         tierLabel.htmlFor = 'tier-system-checkbox';
         tierLabel.textContent = 'Collect by tier:';
-        tierLabel.style.color = 'rgb(230, 215, 176)';
+        StyleUtils.applyLabelStyles(tierLabel);
         tierLabel.style.cursor = 'pointer';
         
         tierOptionDiv.appendChild(tierCheckbox);
@@ -2385,21 +2395,16 @@
           ruleDiv.style.gap = '8px';
           ruleDiv.style.fontSize = '12px';
           
-          const input = document.createElement('input');
-          input.type = 'number';
+          const input = DOMUtils.createInput('number', {
+            width: '50px',
+            height: '20px',
+            fontSize: THEME.fonts.small,
+            textAlign: 'center'
+          });
           input.className = 'tier-input';
           input.min = '0';
           const defaultValues = [0, 5, 4, 3, 2];
           input.value = stopConditions.tierTargets[index] || defaultValues[index];
-          input.style.width = '40px';
-          input.style.height = '20px';
-          input.style.padding = '2px 4px';
-          input.style.border = '1px solid #444';
-          input.style.borderRadius = '2px';
-          input.style.background = '#2a2a2a';
-          input.style.color = 'rgb(230, 215, 176)';
-          input.style.fontSize = '11px';
-          input.style.textAlign = 'center';
           
           const creatureText = document.createElement('span');
           creatureText.textContent = `${rarity.name} creatures.`;
@@ -2471,25 +2476,26 @@
         speedWrapper.style.alignItems = 'center';
         speedWrapper.style.gap = '6px';
         speedWrapper.style.marginTop = '8px';
+        speedWrapper.style.marginBottom = '5px';
         
         const speedLabel = document.createElement('span');
         speedLabel.textContent = 'Autoscroll Speed:';
+        StyleUtils.applyLabelStyles(speedLabel);
         speedWrapper.appendChild(speedLabel);
         
-        const speedInput = document.createElement('input');
-        speedInput.type = 'number';
+        const speedInput = DOMUtils.createInput('number', {
+          width: '60px',
+          height: '20px',
+          fontFamily: 'Arial, sans-serif'
+        });
         speedInput.id = 'autoscroll-speed-input';
         speedInput.min = '100';
         speedInput.max = '2000';
         speedInput.step = '100';
         speedInput.value = userDefinedSpeed;
-        speedInput.style.width = '60px';
-        speedInput.style.padding = '2px 4px';
-        speedInput.style.fontSize = '12px';
-        speedInput.style.fontFamily = 'Arial, sans-serif';
         speedInput.style.fontWeight = 'bold';
         speedInput.style.textAlign = 'left';
-        speedInput.style.color = '#000';
+        speedInput.style.color = 'rgb(230, 215, 176)';
         speedInput.onchange = () => {
           userDefinedSpeed = Math.max(100, Math.min(2000, parseInt(speedInput.value) || 400));
           speedInput.value = userDefinedSpeed;
@@ -2498,7 +2504,7 @@
           if (userDefinedSpeed < 400) {
             speedInput.style.color = '#ff6b6b';
           } else {
-            speedInput.style.color = '#000';
+            speedInput.style.color = 'rgb(230, 215, 176)';
           }
         };
         
@@ -2510,22 +2516,18 @@
         
         const speedUnit = document.createElement('span');
         speedUnit.textContent = 'ms';
-        speedUnit.style.color = '#fff';
+        StyleUtils.applyThemeColor(speedUnit, 'white');
         speedWrapper.appendChild(speedUnit);
         
-        div.appendChild(speedWrapper);
+        // Add info tooltip after "ms"
+        const speedTooltip = DOMUtils.createElement('span', '', {
+          cursor: 'help'
+        });
+        speedTooltip.textContent = 'ⓘ';
+        speedTooltip.title = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
+        speedWrapper.appendChild(speedTooltip);
         
-        // Add rate-limit warning below speed input
-        const rateLimitWarning = document.createElement('div');
-        rateLimitWarning.textContent = '30 requests per 10 seconds is the rate-limit. Set 400ms or higher to avoid being rate-limited.';
-        rateLimitWarning.style.fontSize = '11px';
-        rateLimitWarning.style.fontStyle = 'italic';
-        rateLimitWarning.style.color = '#ff9800';
-        rateLimitWarning.style.marginTop = '2px';
-        rateLimitWarning.style.marginLeft = '2px';
-        rateLimitWarning.style.paddingLeft = '12px';
-        rateLimitWarning.style.paddingRight = '12px';
-        div.appendChild(rateLimitWarning);
+        div.appendChild(speedWrapper);
         
         // Add autosell checkbox below warning text
         const autosellDiv = document.createElement('div');
@@ -2533,20 +2535,17 @@
         autosellDiv.style.alignItems = 'center';
         autosellDiv.style.gap = '8px';
         autosellDiv.style.marginTop = '8px';
-        autosellDiv.style.fontSize = '14px';
+        StyleUtils.applySectionStyles(autosellDiv);
         
-        const autosellCheckbox = document.createElement('input');
+        const autosellCheckbox = DOMUtils.createCheckbox();
         autosellCheckbox.type = 'checkbox';
         autosellCheckbox.id = 'autosell-checkbox';
         autosellCheckbox.checked = autosellNonSelected; // Use the preserved state
-        autosellCheckbox.style.width = '16px';
-        autosellCheckbox.style.height = '16px';
-        autosellCheckbox.style.margin = '0';
         
         const autosellLabel = document.createElement('label');
         autosellLabel.htmlFor = 'autosell-checkbox';
         autosellLabel.textContent = 'Autosell and autosqueeze non-selected (ignores shiny)';
-        autosellLabel.style.color = 'rgb(230, 215, 176)';
+        StyleUtils.applyLabelStyles(autosellLabel);
         autosellLabel.style.cursor = 'pointer';
         
         autosellDiv.appendChild(autosellCheckbox);
@@ -2557,9 +2556,11 @@
         autosellCheckbox.addEventListener('change', () => {
           autosellNonSelected = autosellCheckbox.checked;
           // Autosell setting updated
+          // Update button appearance when autosell setting changes
+          if (window.updateAutoscrollButtonAppearance) {
+            window.updateAutoscrollButtonAppearance();
+          }
         });
-        
-
         
         return div;
       }
@@ -2621,8 +2622,6 @@
             return;
           }
           
-
-          
           selectedCreatures.forEach(creatureName => {
             const creatureRow = document.createElement('div');
             creatureRow.style.display = 'grid';
@@ -2662,8 +2661,6 @@
             );
             
             const totalCount = creatureMonsters.length;
-            
-            // Inventory vs session count tracking (debug info removed for production)
             
             const tierCounts = [0, 0, 0, 0, 0];
             creatureMonsters.forEach(monster => {
@@ -2789,13 +2786,70 @@
         buttonWrapper.style.alignItems = 'center';
         
         const autoscrollBtn = document.createElement('button');
-        autoscrollBtn.textContent = 'Autoscroll';
         autoscrollBtn.className = 'autoscroller-btn';
-        autoscrollBtn.style.width = '120px';
-        autoscrollBtn.style.padding = '6px 28px';
+        autoscrollBtn.style.width = '140px'; // Increased width to accommodate "Shiny hunt"
+        autoscrollBtn.style.setProperty('padding', '6px 8px', 'important');
         autoscrollBtn.style.margin = '0 4px';
         autoscrollBtn.style.boxSizing = 'border-box';
         autoscrollBtn.style.setProperty('font-size', '12px', 'important');
+        autoscrollBtn.style.setProperty('min-width', '140px', 'important'); // Ensure consistent width
+        
+        // Helper functions for button state management
+        const isShinyHuntMode = () => {
+          return autosellNonSelected && selectedCreatures.length === 0 && selectedScrollTier === 5;
+        };
+
+        const showButtonError = (errorMessage, duration = 2000) => {
+          const originalContent = isShinyHuntMode() ? autoscrollBtn.innerHTML : autoscrollBtn.textContent;
+          const isShinyMode = isShinyHuntMode();
+          
+          if (isShinyMode) {
+            autoscrollBtn.innerHTML = errorMessage;
+          } else {
+            autoscrollBtn.textContent = errorMessage;
+          }
+          
+          setTimeout(() => {
+            if (isShinyMode) {
+              autoscrollBtn.innerHTML = originalContent;
+            } else {
+              autoscrollBtn.textContent = originalContent;
+            }
+          }, duration);
+        };
+
+        // Function to update button appearance based on conditions
+        const updateButtonAppearance = () => {
+          if (isShinyHuntMode()) {
+            // Create shiny hunt button with star icons
+            autoscrollBtn.innerHTML = `
+              <img src="https://bestiaryarena.com/assets/icons/shiny-star.png" style="width: 10px; height: 10px; vertical-align: middle; margin-right: 4px;" alt="⭐">
+              Shiny hunt
+              <img src="https://bestiaryarena.com/assets/icons/shiny-star.png" style="width: 10px; height: 10px; vertical-align: middle; margin-left: 4px;" alt="⭐">
+            `;
+            autoscrollBtn.style.removeProperty('background');
+            autoscrollBtn.style.removeProperty('background-size');
+            autoscrollBtn.style.removeProperty('animation');
+            autoscrollBtn.style.removeProperty('color');
+            autoscrollBtn.style.removeProperty('text-shadow');
+            autoscrollBtn.style.setProperty('border-color', '#8B5CF6', 'important');
+          } else {
+            autoscrollBtn.textContent = 'Autoscroll';
+            autoscrollBtn.style.removeProperty('background');
+            autoscrollBtn.style.removeProperty('background-size');
+            autoscrollBtn.style.removeProperty('animation');
+            autoscrollBtn.style.removeProperty('color');
+            autoscrollBtn.style.removeProperty('text-shadow');
+            autoscrollBtn.style.removeProperty('border-color');
+          }
+        };
+        
+        // Initial button appearance
+        updateButtonAppearance();
+        
+        // Store the update function globally so it can be called when conditions change
+        window.updateAutoscrollButtonAppearance = updateButtonAppearance;
+        
         buttonWrapper.appendChild(autoscrollBtn);
         
         const stopBtn = document.createElement('button');
@@ -2814,12 +2868,9 @@
         const handleAutoscrollClick = async () => {
           if (!autoscrolling) {
             // Start autoscroll
-            if (selectedCreatures.length === 0) {
-              const originalText = autoscrollBtn.textContent;
-              autoscrollBtn.textContent = 'Select creatures first';
-              setTimeout(() => {
-                autoscrollBtn.textContent = originalText;
-              }, 2000);
+            // Check if creatures need to be selected (skip for shiny hunt mode)
+            if (selectedCreatures.length === 0 && !isShinyHuntMode()) {
+              showButtonError('Select creatures first');
               return;
             }
             
@@ -2829,39 +2880,23 @@
             const availableScrolls = inventory[scrollKey] || 0;
             
             if (availableScrolls <= 0) {
-              const originalText = autoscrollBtn.textContent;
-              autoscrollBtn.textContent = 'No scrolls available';
-              setTimeout(() => {
-                autoscrollBtn.textContent = originalText;
-              }, 2000);
+              showButtonError('No scrolls available');
               return;
             }
             
             if (stopConditions.useTotalCreatures) {
               if (stopConditions.totalCreaturesTarget <= 0) {
-                const originalText = autoscrollBtn.textContent;
-                autoscrollBtn.textContent = 'Set target > 0';
-                setTimeout(() => {
-                  autoscrollBtn.textContent = originalText;
-                }, 2000);
+                showButtonError('Set target > 0');
                 return;
               }
             } else if (stopConditions.useTierSystem) {
               const hasValidTarget = stopConditions.tierTargets.some(target => target > 0);
               if (!hasValidTarget) {
-                const originalText = autoscrollBtn.textContent;
-                autoscrollBtn.textContent = 'Set tier targets';
-                setTimeout(() => {
-                  autoscrollBtn.textContent = originalText;
-                }, 2000);
+                showButtonError('Set tier targets');
                 return;
               }
             } else {
-              const originalText = autoscrollBtn.textContent;
-              autoscrollBtn.textContent = 'Select stopping rule';
-              setTimeout(() => {
-                autoscrollBtn.textContent = originalText;
-              }, 2000);
+              showButtonError('Select stopping rule');
               return;
             }
             
@@ -2960,6 +2995,11 @@
               slot.style.boxShadow = '0 0 0 2px #00ff00';
               slot.style.borderRadius = '0';
             }
+            
+            // Update button appearance when scroll tier changes
+            if (window.updateAutoscrollButtonAppearance) {
+              window.updateAutoscrollButtonAppearance();
+            }
           };
           
           eventHandlers.add(btn, 'click', handleScrollTierClick);
@@ -3046,11 +3086,22 @@
           DOM_ELEMENTS.modal = null;
           
           // Save state before resetting
-          AutoscrollerState.saveToStorage();
+          saveStateToStorage();
           resetAutoscrollState();
         }
       });
       setTimeout(() => {
+        // Add rainbow animation CSS
+        const style = document.createElement('style');
+        style.textContent = `
+          @keyframes rainbow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+        `;
+        document.head.appendChild(style);
+        
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
           dialog.style.width = '750px';
@@ -3083,7 +3134,7 @@
   }
 
 // =======================
-// MODULE 9: Inventory Integration & Button Management
+// MODULE 8: Inventory Integration & Button Management
 // =======================
   // Optimized inventory observer with debouncing and filtering
   let inventoryObserver = null;
@@ -3247,22 +3298,18 @@
     
     let targetButton = null;
     
-    for (const button of summonScrollButtons) {
-      const img = button.querySelector('img[alt*="summon scroll"]');
-      if (img && img.src && img.src.includes('summonscroll5.png')) {
-        targetButton = button;
-        break;
-      }
-    }
+    // Look for summon scrolls in descending tier order (T5, T4, T3, T2, T1)
+    const tierOrder = ['summonscroll5.png', 'summonscroll4.png', 'summonscroll3.png', 'summonscroll2.png', 'summonscroll1.png'];
     
-    if (!targetButton) {
+    for (const tier of tierOrder) {
       for (const button of summonScrollButtons) {
         const img = button.querySelector('img[alt*="summon scroll"]');
-        if (img && img.src && img.src.includes('summonscroll')) {
+        if (img && img.src && img.src.includes(tier)) {
           targetButton = button;
           break;
         }
       }
+      if (targetButton) break;
     }
     
     if (!targetButton && summonScrollButtons.length > 0) {
@@ -3301,10 +3348,8 @@
     }
   }
   
-
-
 // =======================
-// MODULE 10: Cleanup & Exports
+// MODULE 9: Cleanup & Exports
 // =======================
   function cleanup() {
     if (autoscrolling) {
@@ -3369,7 +3414,7 @@
     console.log('[Autoscroller] Initializing version 2.0 (Optimized)');
     
     // Load saved state from storage
-    AutoscrollerState.loadFromStorage();
+    loadStateFromStorage();
     
     // Initialize modules
     resetAutoscrollState();
@@ -3461,8 +3506,6 @@
       const tierName = STRING_CACHE.tierNames[selectedScrollTier - 1] || 'unknown';
       const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
       
-      // Session summary tracking (debug info removed for production)
-      
       const gameState = globalThis.state?.player?.getSnapshot()?.context;
       const monsters = gameState?.monsters || [];
       let reachedCreature = null;
@@ -3523,38 +3566,3 @@
     });
   }
 })();
-
-// Cleanup function for Autoscroller mod
-window.cleanupSuperModsAutoscrollerjs = function(periodic = false) {
-  console.log('[Autoscroller] Running cleanup...');
-  
-  // Stop any running autoscroll processes only if not periodic cleanup
-  if (!periodic && window.autoscrollState) {
-    window.autoscrollState.isRunning = false;
-  }
-  
-  // Clear any intervals
-  if (window.__autoscrollIntervals) {
-    window.__autoscrollIntervals.forEach(interval => clearInterval(interval));
-    delete window.__autoscrollIntervals;
-  }
-  
-  // Clear any timeouts
-  if (window.__autoscrollTimeouts) {
-    window.__autoscrollTimeouts.forEach(timeout => clearTimeout(timeout));
-    delete window.__autoscrollTimeouts;
-  }
-  
-  // Remove any status displays
-  const statusElement = document.querySelector('#autoscroll-status');
-  if (statusElement) {
-    statusElement.remove();
-  }
-  
-  // Clear any cached data
-  if (typeof window.autoscrollState !== 'undefined') {
-    delete window.autoscrollState;
-  }
-  
-  console.log('[Autoscroller] Cleanup completed');
-}; 

@@ -2662,34 +2662,13 @@ async function forceUpdateAllData() {
       return;
     }
     
-    console.log('[Board Advisor] Starting force-update of all data sources...');
-    
-    // 1. Force-update RunTracker data
-    console.log('[Board Advisor] Force-updating RunTracker data...');
-    await loadRunTrackerData(false); // Don't trigger analysis yet
-    
-    // 2. Force-update Board Analyzer data
-    console.log('[Board Advisor] Force-updating Board Analyzer data...');
-    await loadBoardAnalyzerData(false); // Don't trigger analysis yet
-    
-    // Update last load time
-    analysisState.lastDataLoadTime = now;
-    
-    // 4. Current map data is already refreshed by the data loading above
-    
-    // 5. Force refresh panel display after all data is loaded
-    console.log('[Board Advisor] Force-refreshing panel display...');
-    if (panelState.isOpen) {
-      await refreshPanelData();
-    }
-    
-    console.log('[Board Advisor] Force-update completed');
-    
-    // Trigger analysis after force-update completes
-    console.log('[Board Advisor] Triggering analysis after force-update...');
-    setTimeout(() => {
-      debouncedAnalyzeCurrentBoard();
-    }, 100);
+    // Use unified refresh for force update
+    await performUnifiedRefresh({
+      clearCache: false,
+      forceRefresh: false,
+      immediateAnalysis: false,
+      reason: 'panel open force update'
+    });
   } catch (error) {
     console.error('[Board Advisor] Error during force-update:', error);
   }
@@ -3119,151 +3098,6 @@ async function loadBoardAnalyzerData(triggerAnalysis = true) {
   }
 }
 
-// Convert Board Analyzer results to our analysis format
-function convertBoardAnalyzerResults(boardAnalyzerResults) {
-  try {
-    if (!boardAnalyzerResults || !boardAnalyzerResults.results || !Array.isArray(boardAnalyzerResults.results)) {
-      console.log('[Board Advisor] Invalid Board Analyzer results format');
-      return;
-    }
-
-    const currentBoard = dataCollector.getCurrentBoardData();
-    if (!currentBoard) {
-      console.log('[Board Advisor] No current board data to match against');
-      return;
-    }
-
-    const roomId = currentBoard.roomId;
-    const roomName = currentBoard.mapName;
-    
-    console.log(`[Board Advisor] Current board data:`, {
-      roomId: roomId,
-      roomName: roomName,
-      boardSetup: currentBoard.boardSetup
-    });
-    
-    console.log(`[Board Advisor] Converting Board Analyzer data for room: ${roomName} (${roomId})`);
-
-    // Serialize board setup once for all results (performance optimization)
-    const serializedBoardSetup = dataCollector.serializeBoardSetup(currentBoard.boardSetup);
-    
-    // Process each result from Board Analyzer
-    boardAnalyzerResults.results.forEach((result, index) => {
-      if (!result || typeof result.ticks !== 'number') return;
-
-      // Skip if no seed (required for accurate replays)
-      if (!result.seed) {
-        console.warn(`[Board Advisor] Skipping Board Analyzer result ${index + 1} - no seed data`);
-        return;
-      }
-
-      const runData = {
-        id: `board_analyzer_${Date.now()}_${index}`,
-        timestamp: Date.now(),
-        seed: result.seed,
-        roomId: roomId,
-        mapName: roomName,
-        completed: result.completed,
-        winner: result.completed ? 'nonVillains' : 'villains',
-        ticks: result.ticks,
-        rankPoints: result.rankPoints,
-        boardSetup: serializedBoardSetup,
-        playerMonsters: currentBoard.playerMonsters,
-        playerEquipment: currentBoard.playerEquipment,
-        source: 'board_analyzer'
-      };
-
-      // Check anti-cheat flag
-      if (isCheatingDetected()) {
-        console.warn('[Board Advisor] Anti-cheat: Cheating detected, skipping Board Analyzer run');
-        return;
-      }
-      
-      // Add to performance tracker
-      performanceTracker.runs.push(runData);
-      
-      // Also add to lookup map for O(1) duplicate detection
-      const boardSetupHash = createBoardSetupHash(runData.boardSetup);
-      const runKey = createRunKey(runData.roomId, runData.ticks, runData.timestamp, runData.source, boardSetupHash);
-      performanceTracker.runLookup.set(runKey, runData);
-
-      // Also save as Board Analyzer run to IndexedDB
-      addBoardAnalyzerRun(runData).then(boardAnalyzerSaved => {
-      if (boardAnalyzerSaved) {
-        console.log(`[Board Advisor] Board Analyzer run ${index + 1} saved to IndexedDB`);
-      } else {
-        console.log(`[Board Advisor] Board Analyzer run ${index + 1} skipped (failed run)`);
-      }
-      }).catch(error => {
-        console.error(`[Board Advisor] Error saving Board Analyzer run ${index + 1} to IndexedDB:`, error);
-      });
-
-      // Create pattern key for this setup
-      const patternKey = createPatternKey(currentBoard.boardSetup);
-      if (!performanceTracker.patterns.has(roomId)) {
-        performanceTracker.patterns.set(roomId, new Map());
-      }
-
-      const roomPatterns = performanceTracker.patterns.get(roomId);
-      if (!roomPatterns.has(patternKey)) {
-        roomPatterns.set(patternKey, {
-          setup: currentBoard.boardSetup,
-          runs: [],
-          averageTime: 0,
-          averagePoints: 0,
-          successRate: 0,
-          bestTime: Infinity,
-          bestPoints: 0
-        });
-      }
-
-      const pattern = roomPatterns.get(patternKey);
-      pattern.runs.push(runData);
-      
-      // Update pattern statistics
-      const completedRuns = pattern.runs.filter(r => r.completed);
-      pattern.averageTime = pattern.runs.reduce((sum, r) => sum + r.ticks, 0) / pattern.runs.length;
-      pattern.averagePoints = pattern.runs.reduce((sum, r) => sum + r.rankPoints, 0) / pattern.runs.length;
-      pattern.successRate = completedRuns.length / pattern.runs.length;
-      pattern.bestTime = Math.min(pattern.bestTime, ...pattern.runs.map(r => r.ticks));
-      pattern.bestPoints = Math.max(pattern.bestPoints, ...pattern.runs.map(r => r.rankPoints));
-
-      console.log(`[Board Advisor] Added Board Analyzer run ${index + 1}: ${result.ticks} ticks, ${result.rankPoints} points, Completed: ${result.completed}`);
-    });
-
-    console.log(`[Board Advisor] Converted ${boardAnalyzerResults.results.length} Board Analyzer runs to performance tracker for ${roomName}`);
-
-    // Clear Board Analyzer results to avoid duplicate processing
-    window.__boardAnalyzerResults = null;
-
-    // Update room statistics
-    if (!performanceTracker.roomStats.has(roomId)) {
-      performanceTracker.roomStats.set(roomId, {
-        totalRuns: 0,
-        completedRuns: 0,
-        averageTime: 0,
-        bestTime: Infinity,
-        successRate: 0,
-        setups: []
-      });
-    }
-
-    const roomStats = performanceTracker.roomStats.get(roomId);
-    const roomRuns = performanceTracker.runs.filter(r => r.roomId === roomId);
-    const completedRoomRuns = roomRuns.filter(r => r.completed);
-    
-    roomStats.totalRuns = roomRuns.length;
-    roomStats.completedRuns = completedRoomRuns.length;
-    roomStats.averageTime = roomRuns.reduce((sum, r) => sum + r.ticks, 0) / roomRuns.length;
-    roomStats.bestTime = Math.min(...roomRuns.map(r => r.ticks));
-    roomStats.successRate = completedRoomRuns.length / roomRuns.length;
-
-    console.log(`[Board Advisor] Updated room stats for ${roomName}: ${roomStats.totalRuns} runs, ${roomStats.completedRuns} completed, ${roomStats.successRate.toFixed(2)} success rate`);
-
-  } catch (error) {
-    console.error('[Board Advisor] Error converting Board Analyzer data:', error);
-  }
-}
 
 // Convert RunTracker data to our analysis format
 function convertRunTrackerData() {
@@ -3635,12 +3469,15 @@ class DataCollector {
             }
             
             // Always trigger automatic analysis after run completion for real-time updates
-            if (config.autoAnalyzeAfterRun) {
+            // Skip individual run analysis during Board Analyzer execution to prevent performance issues
+            if (config.autoAnalyzeAfterRun && !window.__modCoordination?.boardAnalyzerRunning) {
               setTimeout(() => {
                 console.log('[Board Advisor] Auto-analyzing board after server results...');
                 // Use immediate analysis for better responsiveness after run completion
                 debouncedAnalyzeCurrentBoardImmediate();
               }, 200); // Reduced delay for faster response
+            } else if (window.__modCoordination?.boardAnalyzerRunning) {
+              console.log('[Board Advisor] Skipping individual run analysis during Board Analyzer execution - will analyze after batch completion');
             }
             
             // Trigger immediate panel refresh after run completion
@@ -4013,9 +3850,13 @@ class DataCollector {
           clearTimeout(this.boardChangeTimeout);
         }
         
-        // Start analysis immediately for map changes (no debounce)
-        this.triggerAutomaticAnalysis();
-        this.refreshDataForCurrentMap();
+        // Use unified refresh for map changes
+        performUnifiedRefresh({
+          clearCache: false,
+          forceRefresh: false,
+          immediateAnalysis: false,
+          reason: 'map change detected'
+        });
       } else if (!isRunStart || isAutoSetupChange) {
         // For same-room board changes (not run starts) or auto-setup changes, use debounce to avoid excessive analysis
         if (this.boardChangeTimeout) {
@@ -4033,13 +3874,23 @@ class DataCollector {
         // Only trigger new analysis if we don't have specific setup recommendations to preserve
         if (!currentRecommendedSetup || currentRecommendedSetup.length === 0) {
           this.boardChangeTimeout = setTimeout(() => {
-            this.triggerAutomaticAnalysis();
-            this.refreshDataForCurrentMap();
+            performUnifiedRefresh({
+              clearCache: false,
+              forceRefresh: false,
+              immediateAnalysis: false,
+              reason: 'board change (debounced)'
+            });
           }, isAutoSetupChange ? 500 : BOARD_CHANGE_DEBOUNCE_TIME); // Faster response for auto-setup
         } else {
           console.log('[Board Advisor] Skipping analysis trigger to preserve specific setup recommendations');
           // Still refresh data for current map but don't run analysis
-          this.refreshDataForCurrentMap();
+          performUnifiedRefresh({
+            clearCache: false,
+            forceRefresh: false,
+            immediateAnalysis: false,
+            skipPanelRefresh: true,
+            reason: 'preserve recommendations (data only)'
+          });
         }
       }
       // For run starts (same room, same board), do nothing - keep UI stable
@@ -5108,7 +4959,8 @@ class AnalysisEngine {
         prediction,
         leaderboard: leaderboardComparison,
         timestamp: Date.now(),
-        hasData: true // Ensure hasData is set for successful analysis
+        hasData: true, // Ensure hasData is set for successful analysis
+        runs: performanceTracker.runs.filter(run => run.roomId === currentBoard.roomId) // Add runs data for equipment/creature suggestions
       };
       
       // Update analysis timestamp
@@ -5480,7 +5332,8 @@ class AnalysisEngine {
           priority: 'high',
           expectedImprovement: null,
           setup: setupManagerFormat, // Use Setup_Manager.js format
-          bestRun: bestRun
+          bestRun: bestRun,
+          focusArea: 'both' // Show for both ticks and ranks focus areas
         }],
         similarSetups: [],
         currentAnalysis: {
@@ -6986,7 +6839,7 @@ class AnalysisEngine {
         priority: 'high',
         setup: setupWithNames,
         expectedImprovement: timeImprovement,
-        focusArea: config.focusArea || 'ticks'
+        focusArea: 'both' // Show for both ticks and ranks focus areas
       });
     }
     
@@ -8078,12 +7931,26 @@ async function openPanel() {
       }
     }, 100);
   }
+  
+  // Update reset button visibility when panel opens
+  try {
+    await updateResetButtonVisibility();
+  } catch (error) {
+    console.error('[Board Advisor] Error calling updateResetButtonVisibility:', error);
+  }
 }
 
 function closePanel() {
   const panel = document.getElementById(PANEL_ID);
   if (panel) {
     panel.style.display = 'none';
+    
+    // Clean up keyboard handler
+    if (panel._keyboardHandler) {
+      documentListeners = documentListeners.filter(listener => listener.handler !== panel._keyboardHandler);
+      document.removeEventListener('keydown', panel._keyboardHandler);
+      delete panel._keyboardHandler;
+    }
   }
   
   // Set panel state to closed BEFORE stopping state refresh to prevent timing issues
@@ -8145,6 +8012,26 @@ function createPanel() {
   
   // Add Hunt Analyzer-style resizing and dragging functionality
   addResizeAndDragFunctionality(panel, header);
+  
+  // Add keyboard shortcuts
+  const handleKeyDown = (e) => {
+    // Ctrl+R: Reset invalid runs
+    if (e.ctrlKey && e.key === 'r' && panelState.isOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Trigger the reset button click
+      const resetButton = header.querySelector('button[title*="Reset Invalid Runs"]');
+      if (resetButton && !resetButton.disabled) {
+        resetButton.click();
+      }
+    }
+  };
+  
+  addDocumentListener('keydown', handleKeyDown);
+  
+  // Store the handler for cleanup
+  panel._keyboardHandler = handleKeyDown;
   
   document.body.appendChild(panel);
   
@@ -9577,21 +9464,13 @@ async function refreshUIAfterDeletion() {
       performanceTracker.patterns.clear();
     }
     
-    // Force refresh all data sources
-    console.log('[Board Advisor] Refreshing all data sources for UI update...');
-    await loadAllDataSources(false, true); // Force refresh
-    
-    // Update the panel with fresh data
-    if (panelState.isOpen) {
-      console.log('[Board Advisor] Updating panel with fresh data...');
-      await refreshPanelData(true); // Force refresh to clear cached data
-    }
-    
-    // Trigger fresh analysis with updated data
-    console.log('[Board Advisor] Triggering fresh analysis after UI refresh...');
-    setTimeout(() => {
-      debouncedAnalyzeCurrentBoard();
-    }, 300); // Slightly longer delay to ensure all data is refreshed
+    // Use unified refresh for core refresh operations
+    await performUnifiedRefresh({
+      clearCache: true,
+      forceRefresh: true,
+      immediateAnalysis: true,
+      reason: 'UI refresh after deletion'
+    });
     
     console.log('[Board Advisor] UI refresh completed successfully');
   } catch (error) {
@@ -10018,9 +9897,12 @@ async function updatePanelWithAnalysis(analysis) {
     
     analysisHTML += `
       <div style="margin-bottom: 12px; padding: 10px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #E5C07B; border-radius: 4px;">
-        <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-          <span>📊</span>
-          <span>Historical Performance (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
+        <div style="font-weight: 600; color: #E5C07B; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span>📊</span>
+            <span>Historical Performance (${config.focusArea === 'ticks' ? 'Speed' : 'Rank Points'})</span>
+          </div>
+          <button id="reset-invalid-runs-button" style="display: none; background: transparent; color: #E5C07B; border: none; padding: 4px 8px; font-size: 10px; cursor: pointer; font-weight: 600;" title="Reset Invalid Runs (Better than World Record) - Ctrl+R">🔄 Reset</button>
         </div>
         ${historicalContent}
       </div>
@@ -10042,6 +9924,63 @@ async function updatePanelWithAnalysis(analysis) {
   
   analysisDisplay.innerHTML = analysisHTML;
   
+  // Add event listener for reset button (only if not already attached)
+  const resetButton = document.getElementById('reset-invalid-runs-button');
+  if (resetButton && !resetButton.hasAttribute('data-listener-attached')) {
+    resetButton.setAttribute('data-listener-attached', 'true');
+    resetButton.addEventListener("click", async (e) => {
+      console.log('[Board Advisor] Reset button clicked!');
+      e.stopPropagation();
+      
+      console.log('[Board Advisor] About to enter try block...');
+      try {
+        console.log('[Board Advisor] Starting reset process...');
+        resetButton.textContent = "⏳";
+        resetButton.disabled = true;
+        
+        console.log('[Board Advisor] About to call resetInvalidRuns...');
+        let result;
+        try {
+          result = await resetInvalidRuns(); // Will use current room automatically
+          console.log('[Board Advisor] resetInvalidRuns completed, result:', result);
+        } catch (error) {
+          console.error('[Board Advisor] Error in resetInvalidRuns:', error);
+          throw error;
+        }
+        
+        if (result.success) {
+          // Show "Resetted" feedback in green
+          resetButton.textContent = "🔄 Resetted";
+          resetButton.style.color = "#10B981"; // Green color
+          resetButton.disabled = false;
+          
+          // Use unified refresh for complete data refresh and UI update
+          if (panelState.isOpen) {
+            await performUnifiedRefresh({
+              clearCache: true,
+              forceRefresh: true,
+              immediateAnalysis: true,
+              reason: 'reset invalid runs'
+            });
+          }
+          
+          // Hide button after 5 seconds
+          setTimeout(() => {
+            resetButton.style.display = 'none';
+          }, 5000);
+        } else {
+          console.error(`[Board Advisor] Reset failed: ${result.error || 'Failed to reset invalid runs'}`);
+          resetButton.textContent = "🔄 Reset";
+          resetButton.disabled = false;
+        }
+      } catch (error) {
+        console.error('[Board Advisor] Error resetting invalid runs:', error);
+        resetButton.textContent = "🔄 Reset";
+        resetButton.disabled = false;
+      }
+    });
+  }
+  
   // Update separate recommendation sections
   
   // Update recommendations section with enhanced display (filtered by focus area)
@@ -10056,6 +9995,8 @@ async function updatePanelWithAnalysis(analysis) {
     const filteredRecommendations = analysis.recommendations.filter(rec => {
       // Always show leaderboard recommendations
       if (rec.type === 'leaderboard') return true;
+      // Always show "Best Available Setup" recommendations regardless of focus area
+      if (rec.title && rec.title.includes('Best Available Setup')) return true;
       // Show recommendations that match the current focus area or are for both
       return rec.focusArea === config.focusArea || rec.focusArea === 'both' || !rec.focusArea;
     });
@@ -10200,11 +10141,20 @@ async function updatePanelWithAnalysis(analysis) {
       const creatureSuggestions = [];
       
       // Get top 10 runs for this room from IndexedDB (same source as Best Available Setup)
-      const currentRoomId = analysis.currentBoard?.roomId || dataCollector.getCurrentBoardData()?.roomId;
-      if (!currentRoomId) return;
+      const currentRoomId = analysis.roomId || analysis.currentBoard?.roomId || dataCollector.getCurrentBoardData()?.roomId;
+      if (!currentRoomId) {
+        console.log('[Board Advisor] No room ID found for equipment/creature suggestions');
+        return;
+      }
       
       // Use IndexedDB data instead of performanceTracker.runs for consistent monster names
       const currentRoomRuns = analysis.runs || [];
+      console.log('[Board Advisor] Equipment/creature suggestions - room runs data:', {
+        currentRoomId,
+        currentRoomRunsLength: currentRoomRuns.length,
+        analysisRuns: analysis.runs?.length || 0
+      });
+      
       const top10Runs = currentRoomRuns.sort((a, b) => {
         if (config.focusArea === 'ticks') {
           return a.ticks - b.ticks;
@@ -10300,6 +10250,13 @@ async function updatePanelWithAnalysis(analysis) {
           }
         }
       }
+      
+      console.log('[Board Advisor] Equipment/creature suggestions generated:', {
+        equipmentSuggestions: equipmentSuggestions.length,
+        creatureSuggestions: creatureSuggestions.length,
+        equipmentList: equipmentSuggestions,
+        creatureList: creatureSuggestions
+      });
       
       if (equipmentSuggestions.length > 0 || creatureSuggestions.length > 0) {
         recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px; border: 1px solid #61AFEF;">
@@ -10475,6 +10432,15 @@ async function updatePanelWithAnalysis(analysis) {
   
   // Schedule auto-fit after content update
   scheduleAutoFit();
+  
+  // Update reset button visibility based on invalid runs
+  console.log('[Board Advisor] About to call updateResetButtonVisibility...');
+  try {
+    // Call the function directly instead of through exports
+    await updateResetButtonVisibility();
+  } catch (error) {
+    console.error('[Board Advisor] Error calling updateResetButtonVisibility:', error);
+  }
 }
 
 async function updatePanelWithNoDataAnalysis(analysis) {
@@ -10710,6 +10676,63 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   
   analysisDisplay.innerHTML = analysisHTML;
   
+  // Add event listener for reset button (only if not already attached)
+  const resetButton = document.getElementById('reset-invalid-runs-button');
+  if (resetButton && !resetButton.hasAttribute('data-listener-attached')) {
+    resetButton.setAttribute('data-listener-attached', 'true');
+    resetButton.addEventListener("click", async (e) => {
+      console.log('[Board Advisor] Reset button clicked!');
+      e.stopPropagation();
+      
+      console.log('[Board Advisor] About to enter try block...');
+      try {
+        console.log('[Board Advisor] Starting reset process...');
+        resetButton.textContent = "⏳";
+        resetButton.disabled = true;
+        
+        console.log('[Board Advisor] About to call resetInvalidRuns...');
+        let result;
+        try {
+          result = await resetInvalidRuns(); // Will use current room automatically
+          console.log('[Board Advisor] resetInvalidRuns completed, result:', result);
+        } catch (error) {
+          console.error('[Board Advisor] Error in resetInvalidRuns:', error);
+          throw error;
+        }
+        
+        if (result.success) {
+          // Show "Resetted" feedback in green
+          resetButton.textContent = "🔄 Resetted";
+          resetButton.style.color = "#10B981"; // Green color
+          resetButton.disabled = false;
+          
+          // Use unified refresh for complete data refresh and UI update
+          if (panelState.isOpen) {
+            await performUnifiedRefresh({
+              clearCache: true,
+              forceRefresh: true,
+              immediateAnalysis: true,
+              reason: 'reset invalid runs'
+            });
+          }
+          
+          // Hide button after 5 seconds
+          setTimeout(() => {
+            resetButton.style.display = 'none';
+          }, 5000);
+        } else {
+          console.error(`[Board Advisor] Reset failed: ${result.error || 'Failed to reset invalid runs'}`);
+          resetButton.textContent = "🔄 Reset";
+          resetButton.disabled = false;
+        }
+      } catch (error) {
+        console.error('[Board Advisor] Error resetting invalid runs:', error);
+        resetButton.textContent = "🔄 Reset";
+        resetButton.disabled = false;
+      }
+    });
+  }
+  
   // Update recommendation sections based on focus area
   
   // Update recommendations section with helpful guidance
@@ -10812,6 +10835,13 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   
   // Schedule auto-fit after content update
   scheduleAutoFit();
+  
+  // Update reset button visibility based on invalid runs
+  try {
+    await updateResetButtonVisibility();
+  } catch (error) {
+    console.error('[Board Advisor] Error calling updateResetButtonVisibility:', error);
+  }
 }
 
 
@@ -10825,7 +10855,67 @@ function getPriorityColor(priority) {
 }
 
 // =======================
-// 7. AUTO-REFRESH SYSTEM
+// 7. UNIFIED REFRESH SYSTEM
+// =======================
+
+// Unified function for refreshing UI and data after major changes
+async function performUnifiedRefresh(options = {}) {
+  const {
+    clearCache = false,
+    forceRefresh = false,
+    immediateAnalysis = false,
+    skipPanelRefresh = false,
+    reason = 'unified refresh'
+  } = options;
+
+  try {
+    console.log(`[Board Advisor] Starting unified refresh: ${reason}`);
+    
+    // Clear cached data if requested
+    if (clearCache) {
+      console.log('[Board Advisor] Clearing cached data...');
+      analysisState.currentAnalysis = null;
+      analysisState.historicalData = [];
+      analysisState.patterns = new Map();
+      analysisState.recommendations = null;
+      analysisState.lastDataLoadTime = 0;
+    }
+    
+    // Load all data sources
+    console.log('[Board Advisor] Loading all data sources...');
+    await loadAllDataSources(false, forceRefresh);
+    
+    // Refresh data for current map (ensures map name is correct)
+    console.log('[Board Advisor] Refreshing data for current map...');
+    dataCollector.refreshDataForCurrentMap();
+    
+    // Refresh panel data if not skipped
+    if (!skipPanelRefresh && panelState.isOpen) {
+      console.log('[Board Advisor] Refreshing panel data...');
+      await refreshPanelData(true);
+    }
+    
+    // Trigger analysis with appropriate timing
+    if (immediateAnalysis) {
+      console.log('[Board Advisor] Triggering immediate analysis...');
+      setTimeout(async () => {
+        await boardAnalyzer.analyzeCurrentBoard();
+      }, 300);
+    } else {
+      console.log('[Board Advisor] Triggering debounced analysis...');
+      setTimeout(() => {
+        debouncedAnalyzeCurrentBoard();
+      }, 100);
+    }
+    
+    console.log(`[Board Advisor] Unified refresh completed: ${reason}`);
+  } catch (error) {
+    console.error(`[Board Advisor] Error in unified refresh (${reason}):`, error);
+  }
+}
+
+// =======================
+// 8. AUTO-REFRESH SYSTEM
 // =======================
 
 function startStateRefresh() {
@@ -11023,9 +11113,11 @@ async function fetchLeaderboardWRData(mapCode) {
   try {
     const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
     
-    // Extract data from the correct structure
+    // Extract data from the correct structure - same as Better Highscores mod
     const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
     const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
+    
+    console.log(`[Board Advisor] Fetched leaderboard data for ${mapCode}:`, { tickData, rankData });
     
     return {
       tickData,
@@ -11347,6 +11439,249 @@ if (!window.BoardAdvisorAPI) {
   };
 }
 
+// Standalone function for resetInvalidRuns to avoid circular reference issues
+async function resetInvalidRuns(roomId = null) {
+  try {
+    // Get current room ID if not provided
+    if (!roomId) {
+      const currentBoard = dataCollector.getCurrentBoardData();
+      if (!currentBoard || !currentBoard.roomId) {
+        throw new Error('No room ID provided and no current room detected');
+      }
+      roomId = currentBoard.roomId;
+    }
+    
+    let totalRemoved = 0;
+    const removedRuns = [];
+    
+    // Get current world record for this room
+    const leaderboardData = await fetchLeaderboardWRData(roomId);
+    if (!leaderboardData || !leaderboardData.tickData || leaderboardData.tickData.length === 0) {
+      throw new Error(`No world record data available for room ${roomId}`);
+    }
+    
+    const worldRecordTime = leaderboardData.tickData[0].ticks;
+    console.log(`[Board Advisor] World record for room ${roomId}: ${worldRecordTime} ticks`);
+    
+    // Get all runs for this room
+    const roomRuns = performanceTracker.runs.filter(run => run.roomId === roomId);
+    const invalidRuns = roomRuns.filter(run => run.ticks < worldRecordTime);
+    
+    // Debug: Log all runs and their ticks
+    console.log(`[Board Advisor] All runs for room ${roomId}:`, roomRuns.map(run => ({ ticks: run.ticks, source: run.source })));
+    console.log(`[Board Advisor] World record: ${worldRecordTime} ticks`);
+    console.log(`[Board Advisor] Invalid runs (ticks < ${worldRecordTime}):`, invalidRuns.map(run => ({ ticks: run.ticks, source: run.source })));
+    
+    // Additional debug: Show the actual tick values
+    const allTicks = roomRuns.map(run => run.ticks).sort((a, b) => a - b);
+    console.log(`[Board Advisor] All tick values sorted:`, allTicks);
+    console.log(`[Board Advisor] Runs with ticks < ${worldRecordTime}:`, allTicks.filter(ticks => ticks < worldRecordTime));
+    
+    if (invalidRuns.length === 0) {
+      console.log(`[Board Advisor] No invalid runs found in room ${roomId}`);
+      return { 
+        success: true, 
+        totalRemoved: 0, 
+        removedRuns: [],
+        message: `No invalid runs found in room ${roomId}`
+      };
+    }
+    
+    console.log(`[Board Advisor] Found ${invalidRuns.length} invalid runs in room ${roomId} (better than WR ${worldRecordTime})`);
+    
+    // Remove invalid runs from main runs array
+    performanceTracker.runs = performanceTracker.runs.filter(run => 
+      !(run.roomId === roomId && run.ticks < worldRecordTime)
+    );
+    
+    // Remove from lookup map
+    invalidRuns.forEach(run => {
+      const boardSetupHash = createBoardSetupHash(run.boardSetup);
+      const runKey = createRunKey(run.roomId, run.ticks, run.timestamp, run.source, boardSetupHash);
+      performanceTracker.runLookup.delete(runKey);
+    });
+    
+    // Remove invalid runs from IndexedDB
+    console.log(`[Board Advisor] Removing ${invalidRuns.length} invalid runs from IndexedDB...`);
+    for (const run of invalidRuns) {
+      try {
+        if (run.id && isDBReady) {
+          // Delete from IndexedDB using the run ID
+          const storeName = getRoomStoreName(run.roomId);
+          console.log(`[Board Advisor] Attempting to delete run ${run.id} (${run.ticks} ticks) from store ${storeName}`);
+          
+          const deleteOperation = async () => {
+            const transaction = sandboxDB.transaction([storeName], 'readwrite');
+            const store = transaction.objectStore(storeName);
+            
+            // Try to delete by the run ID
+            const deleteRequest = store.delete(run.id);
+            
+            return new Promise((resolve, reject) => {
+              deleteRequest.onsuccess = () => {
+                console.log(`[Board Advisor] Successfully deleted run ${run.id} from IndexedDB`);
+                resolve(true);
+              };
+              deleteRequest.onerror = () => {
+                console.error(`[Board Advisor] Failed to delete run ${run.id} from IndexedDB:`, deleteRequest.error);
+                reject(deleteRequest.error);
+              };
+            });
+          };
+          
+          await safeDBOperation(deleteOperation);
+        } else if (run.id) {
+          console.log(`[Board Advisor] Skipping IndexedDB deletion for run ${run.id} - DB not ready`);
+        } else {
+          console.log(`[Board Advisor] Skipping IndexedDB deletion - no run ID available`);
+        }
+      } catch (error) {
+        console.error(`[Board Advisor] Error deleting run ${run.id} from IndexedDB:`, error);
+      }
+    }
+    
+    // Update patterns for this room
+    if (performanceTracker.patterns.has(roomId)) {
+      const roomPatterns = performanceTracker.patterns.get(roomId);
+      
+      // Remove invalid runs from each pattern
+      for (const [patternHash, pattern] of roomPatterns.entries()) {
+        const originalRunCount = pattern.runs.length;
+        pattern.runs = pattern.runs.filter(run => run.ticks >= worldRecordTime);
+        
+        if (pattern.runs.length !== originalRunCount) {
+          // Recalculate pattern statistics
+          const completedRuns = pattern.runs.filter(r => r.completed);
+          pattern.successRate = completedRuns.length / pattern.runs.length;
+          
+          if (completedRuns.length > 0) {
+            pattern.averageTime = completedRuns.reduce((sum, r) => sum + r.ticks, 0) / completedRuns.length;
+            pattern.bestTime = Math.min(...completedRuns.map(r => r.ticks));
+          } else {
+            pattern.averageTime = 0;
+            pattern.bestTime = Infinity;
+          }
+          
+          // Remove empty patterns
+          if (pattern.runs.length === 0) {
+            roomPatterns.delete(patternHash);
+          }
+        }
+      }
+      
+      // Remove room if no patterns left
+      if (roomPatterns.size === 0) {
+        performanceTracker.patterns.delete(roomId);
+      }
+    }
+    
+    totalRemoved = invalidRuns.length;
+    removedRuns.push(...invalidRuns.map(run => ({
+      roomId: run.roomId,
+      ticks: run.ticks,
+      timestamp: run.timestamp,
+      source: run.source
+    })));
+    
+    // Also remove invalid runs from RunTracker
+    let runTrackerRemoved = 0;
+    if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
+      try {
+        console.log(`[Board Advisor] Removing invalid runs from RunTracker for room ${roomId}...`);
+        
+        // Get all RunTracker runs for this room
+        const allRuns = window.RunTrackerAPI.getAllRuns();
+        let correctMapKey = null;
+        
+        // Find the correct map key for this room
+        for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+          if (mapData.speedrun && mapData.speedrun.length > 0) {
+            // Check if any run in this map has the matching room ID
+            const hasMatchingRoom = mapData.speedrun.some(run => {
+              if (run.setup && run.setup.mapId) {
+                return run.setup.mapId === roomId;
+              }
+              return false;
+            });
+            if (hasMatchingRoom) {
+              correctMapKey = mapKey;
+              break;
+            }
+          }
+        }
+        
+        if (correctMapKey) {
+          const speedrunRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'speedrun') || [];
+          const rankRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'rank') || [];
+          
+          // Find invalid runs in RunTracker
+          const invalidSpeedrunRuns = speedrunRuns.filter(run => 
+            run.setup && run.setup.mapId === roomId && run.time < worldRecordTime
+          );
+          const invalidRankRuns = rankRuns.filter(run => 
+            run.setup && run.setup.mapId === roomId && run.time < worldRecordTime
+          );
+          
+          console.log(`[Board Advisor] Found ${invalidSpeedrunRuns.length} invalid speedrun runs and ${invalidRankRuns.length} invalid rank runs in RunTracker`);
+          
+          // Delete invalid speedrun runs (in reverse order to maintain indices)
+          for (let i = invalidSpeedrunRuns.length - 1; i >= 0; i--) {
+            const run = invalidSpeedrunRuns[i];
+            const index = speedrunRuns.indexOf(run);
+            if (index !== -1) {
+              const success = await window.RunTrackerAPI.deleteRun(correctMapKey, 'speedrun', index);
+              if (success) {
+                runTrackerRemoved++;
+                console.log(`[Board Advisor] Deleted invalid speedrun run from RunTracker: ${run.time} ticks`);
+              }
+            }
+          }
+          
+          // Delete invalid rank runs (in reverse order to maintain indices)
+          for (let i = invalidRankRuns.length - 1; i >= 0; i--) {
+            const run = invalidRankRuns[i];
+            const index = rankRuns.indexOf(run);
+            if (index !== -1) {
+              const success = await window.RunTrackerAPI.deleteRun(correctMapKey, 'rank', index);
+              if (success) {
+                runTrackerRemoved++;
+                console.log(`[Board Advisor] Deleted invalid rank run from RunTracker: ${run.time} ticks, ${run.points} points`);
+              }
+            }
+          }
+        } else {
+          console.log(`[Board Advisor] Could not find correct map key for room ${roomId} in RunTracker`);
+        }
+      } catch (error) {
+        console.error('[Board Advisor] Error removing invalid runs from RunTracker:', error);
+      }
+    } else {
+      console.log('[Board Advisor] RunTracker API not available');
+    }
+    
+    // Clear analysis state to force refresh
+    analysisState.currentAnalysis = null;
+    
+    const totalRemovedFromAll = totalRemoved + runTrackerRemoved;
+    console.log(`[Board Advisor] Reset invalid runs completed for room ${roomId}. Removed ${totalRemoved} from Board Advisor, ${runTrackerRemoved} from RunTracker.`);
+    return { 
+      success: true, 
+      totalRemoved: totalRemovedFromAll,
+      removedRuns,
+      message: `Successfully removed ${totalRemovedFromAll} invalid runs from room ${roomId} (${totalRemoved} from Board Advisor, ${runTrackerRemoved} from RunTracker)`
+    };
+    
+  } catch (error) {
+    console.error('[Board Advisor] Error resetting invalid runs:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      totalRemoved: 0,
+      removedRuns: []
+    };
+  }
+}
+
 exports = {
   analyzeBoard: () => boardAnalyzer.analyzeCurrentBoard(),
   getRecommendations: () => analysisState.currentAnalysis?.recommendations || [],
@@ -11356,17 +11691,19 @@ exports = {
   loadBoardAnalyzerData: () => loadBoardAnalyzerData(),
   loadAllDataSources: () => loadAllDataSources(),
   refreshData: async () => {
-    // Clear current data and reload from all sources
-    performanceTracker.runs = [];
-    performanceTracker.patterns.clear();
+    // Use unified refresh with full cache clearing
+    await performUnifiedRefresh({
+      clearCache: true,
+      forceRefresh: true,
+      immediateAnalysis: false,
+      reason: 'API refresh data call'
+    });
+    
+    // Clear additional performance tracker data
     performanceTracker.optimalSetups.clear();
     performanceTracker.roomStats.clear();
+    dataCollector.forceRefreshRoomDetection();
     
-  // CACHE FIX: Also clear all performance caches
-  dataCollector.forceRefreshRoomDetection();
-  analysisState.currentAnalysis = null;
-    
-    await loadAllDataSources(false); // Don't trigger analysis automatically
     console.log('[Board Advisor] Data refreshed from all sources with cache invalidation');
   },
   clearData: () => {
@@ -11528,9 +11865,137 @@ exports = {
     };
     
     console.log('[Board Advisor] Comprehensive cleanup completed');
-  }
+  },
+
+  // Check if current room has invalid runs (better than world record)
+  hasInvalidRuns: hasInvalidRuns,
+
+  // Update reset button visibility based on invalid runs
+  updateResetButtonVisibility: updateResetButtonVisibility,
+
+  // Reset invalid runs that are better than the current world record (current room only)
+  resetInvalidRuns: resetInvalidRuns
 };
 
+// Helper function to check for invalid runs
+async function hasInvalidRuns(roomId = null) {
+  try {
+    console.log('[Board Advisor] hasInvalidRuns called with roomId:', roomId);
+    
+    // Get current room ID if not provided
+    if (!roomId) {
+      const currentBoard = dataCollector.getCurrentBoardData();
+      if (!currentBoard || !currentBoard.roomId) {
+        console.log('[Board Advisor] No current board or room ID found');
+        return false;
+      }
+      roomId = currentBoard.roomId;
+      console.log('[Board Advisor] Using current room ID:', roomId);
+    }
+    
+    // Get current world record for this room
+    console.log('[Board Advisor] Fetching leaderboard data for room:', roomId);
+    const leaderboardData = await fetchLeaderboardWRData(roomId);
+    if (!leaderboardData || !leaderboardData.tickData || leaderboardData.tickData.length === 0) {
+      console.log('[Board Advisor] No leaderboard data available for room:', roomId);
+      return false;
+    }
+    
+    const worldRecordTime = leaderboardData.tickData[0].ticks;
+    console.log(`[Board Advisor] World record for room ${roomId}: ${worldRecordTime} ticks`);
+    
+    // Check Board Advisor runs
+    const boardAdvisorRuns = performanceTracker.runs.filter(run => run.roomId === roomId);
+    const invalidBoardAdvisorRuns = boardAdvisorRuns.filter(run => run.ticks < worldRecordTime);
+    console.log(`[Board Advisor] Found ${boardAdvisorRuns.length} Board Advisor runs for room ${roomId}`);
+    console.log(`[Board Advisor] Board Advisor runs with ticks:`, boardAdvisorRuns.map(run => ({ ticks: run.ticks, source: run.source })));
+    console.log(`[Board Advisor] Found ${invalidBoardAdvisorRuns.length} invalid Board Advisor runs (better than WR ${worldRecordTime})`);
+    console.log(`[Board Advisor] Invalid Board Advisor runs:`, invalidBoardAdvisorRuns.map(run => ({ ticks: run.ticks, source: run.source })));
+    
+    // Check RunTracker runs
+    let invalidRunTrackerRuns = 0;
+    if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
+      try {
+        const allRuns = window.RunTrackerAPI.getAllRuns();
+        let correctMapKey = null;
+        
+        // Find the correct map key for this room
+        for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+          if (mapData.speedrun && mapData.speedrun.length > 0) {
+            // Check if any run in this map has the matching room ID
+            const hasMatchingRoom = mapData.speedrun.some(run => {
+              if (run.setup && run.setup.mapId) {
+                return run.setup.mapId === roomId;
+              }
+              return false;
+            });
+            if (hasMatchingRoom) {
+              correctMapKey = mapKey;
+              break;
+            }
+          }
+        }
+        
+        if (correctMapKey) {
+          const speedrunRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'speedrun') || [];
+          const rankRuns = window.RunTrackerAPI.getRuns(correctMapKey, 'rank') || [];
+          
+          // Find invalid runs in RunTracker
+          const invalidSpeedrunRuns = speedrunRuns.filter(run => 
+            run.setup && run.setup.mapId === roomId && run.time < worldRecordTime
+          );
+          const invalidRankRuns = rankRuns.filter(run => 
+            run.setup && run.setup.mapId === roomId && run.time < worldRecordTime
+          );
+          
+          invalidRunTrackerRuns = invalidSpeedrunRuns.length + invalidRankRuns.length;
+          console.log(`[Board Advisor] Found ${speedrunRuns.length} speedrun + ${rankRuns.length} rank RunTracker runs for room ${roomId}`);
+          console.log(`[Board Advisor] RunTracker speedrun runs with time:`, speedrunRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
+          console.log(`[Board Advisor] RunTracker rank runs with time:`, rankRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
+          console.log(`[Board Advisor] Found ${invalidRunTrackerRuns} invalid RunTracker runs (better than WR ${worldRecordTime})`);
+          console.log(`[Board Advisor] Invalid RunTracker speedrun runs:`, invalidSpeedrunRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
+          console.log(`[Board Advisor] Invalid RunTracker rank runs:`, invalidRankRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
+        } else {
+          console.log(`[Board Advisor] Could not find correct map key for room ${roomId} in RunTracker`);
+        }
+      } catch (error) {
+        console.error('[Board Advisor] Error checking RunTracker for invalid runs:', error);
+      }
+    } else {
+      console.log('[Board Advisor] RunTracker API not available');
+    }
+    
+    const totalInvalidRuns = invalidBoardAdvisorRuns.length + invalidRunTrackerRuns;
+    console.log(`[Board Advisor] Total invalid runs: ${totalInvalidRuns} (${invalidBoardAdvisorRuns.length} from Board Advisor, ${invalidRunTrackerRuns} from RunTracker)`);
+    
+    return totalInvalidRuns > 0;
+  } catch (error) {
+    console.error('[Board Advisor] Error checking for invalid runs:', error);
+    return false;
+  }
+}
+
+// Helper function for reset button visibility
+async function updateResetButtonVisibility() {
+  try {
+    console.log('[Board Advisor] updateResetButtonVisibility called');
+    const resetButton = document.getElementById('reset-invalid-runs-button');
+    if (!resetButton) {
+      console.log('[Board Advisor] Reset button not found in DOM');
+      return;
+    }
+    
+    console.log('[Board Advisor] Reset button found, checking for invalid runs...');
+    const hasInvalid = await hasInvalidRuns();
+    console.log(`[Board Advisor] Has invalid runs: ${hasInvalid}`);
+    
+    resetButton.style.display = hasInvalid ? 'block' : 'none';
+    
+    console.log(`[Board Advisor] Reset button visibility updated: ${hasInvalid ? 'visible' : 'hidden'}`);
+  } catch (error) {
+    console.error('[Board Advisor] Error updating reset button visibility:', error);
+  }
+}
 
 function addDocumentListener(event, handler) {
   document.addEventListener(event, handler);
@@ -11744,19 +12209,3 @@ addWindowListener('message', (event) => {
   }
 });
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsBoardAdvisorjs = function(periodic = false) {
-  console.log('[Board Advisor] Running global cleanup...');
-  
-  // Call the internal cleanup function if available
-  if (exports && exports.cleanup) {
-    exports.cleanup(periodic);
-  }
-  
-  // Additional global cleanup
-  if (typeof window.boardAdvisorState !== 'undefined') {
-    delete window.boardAdvisorState;
-  }
-  
-  console.log('[Board Advisor] Global cleanup completed');
-};

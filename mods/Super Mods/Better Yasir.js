@@ -2890,21 +2890,4 @@
       
     })();
 
-// Cleanup function for Better Yasir mod
-window.cleanupSuperModsBetterYasirjs = function() {
-  console.log('[Better Yasir] Running cleanup...');
-  
-  // Remove any existing modals
-  const existingModal = document.querySelector('#better-yasir-modal');
-  if (existingModal) {
-    existingModal.remove();
-  }
-  
-  // Clear any cached data
-  if (typeof window.betterYasirState !== 'undefined') {
-    delete window.betterYasirState;
-  }
-  
-  console.log('[Better Yasir] Cleanup completed');
-}; 
     

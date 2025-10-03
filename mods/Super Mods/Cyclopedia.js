@@ -8054,6 +8054,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       speedrunTable.appendChild(speedrunHeader);
       
+      // Store yourRooms data for warning icon comparisons
+      let currentYourRooms = null;
+      
       // Function to populate speedrun table with local data
       async function populateSpeedrunTable() {
         try {
@@ -8065,6 +8068,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
           let localRuns = await getLocalRunsForMap(mapKey, 'speedrun');
           console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} speedrun records:`, localRuns);
+          
+          // Ensure currentYourRooms is populated for warning icon comparisons
+          if (!currentYourRooms) {
+            const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+            currentYourRooms = playerState?.rooms || {};
+            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+          }
           
           // Filter out defeated runs with 0 rank points (for consistency)
           if (localRuns && localRuns.length > 0) {
@@ -8234,10 +8244,45 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             timeCell.style.padding = '4px 2px';
             timeCell.style.borderRight = '1px solid #333';
             timeCell.style.textAlign = 'center';
+            timeCell.style.display = 'flex';
+            timeCell.style.alignItems = 'center';
+            timeCell.style.justifyContent = 'center';
+            timeCell.style.gap = '4px';
+            timeCell.style.position = 'relative';
             
             if (run.time) {
-              timeCell.textContent = formatLocalRunTime(run.time);
+              const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Speedrun run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+              
+              // Check if this run is lower than "Your Best" and add warning icon
+              const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
+              if (yourTicks > 0 && run.time < yourTicks) {
+                // Create warning icon separately for left alignment
+                const warningIcon = document.createElement('span');
+                warningIcon.innerHTML = '⚠️';
+                warningIcon.title = 'This run might be invalid';
+                warningIcon.style.cursor = 'help';
+                warningIcon.style.position = 'absolute';
+                warningIcon.style.left = '1px';
+                warningIcon.style.fontSize = '10px';
+                warningIcon.style.zIndex = '1';
+                
+                // Create time text centered with left margin to avoid overlap
+                timeText.textContent = formatLocalRunTime(run.time);
+                timeText.style.textAlign = 'center';
+                timeText.style.flex = '1';
+                timeText.style.marginLeft = '12px';
+                
+                timeCell.appendChild(warningIcon);
+                timeCell.appendChild(timeText);
+                
+                // Make the entire row red
+                row.style.color = '#ff6b6b';
+                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: ${run.time} < ${yourTicks}`);
+              } else {
+                timeText.textContent = formatLocalRunTime(run.time);
+                timeCell.appendChild(timeText);
+              }
             } else {
               timeCell.textContent = 'N/A';
               console.log(`[Cyclopedia] Speedrun run ${i + 1} has no time property`);
@@ -8562,7 +8607,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Table header
       const ranksHeader = document.createElement('div');
       ranksHeader.style.display = 'grid';
-      ranksHeader.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
+      ranksHeader.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
       ranksHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
       ranksHeader.style.borderBottom = '1px solid #444';
       ranksHeader.style.fontWeight = 'bold';
@@ -8619,6 +8664,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           let localRuns = await getLocalRunsForMap(mapKey, 'rank');
           console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} rank records:`, localRuns);
           
+          // Ensure currentYourRooms is populated for warning icon comparisons
+          if (!currentYourRooms) {
+            const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+            currentYourRooms = playerState?.rooms || {};
+            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+          }
+          
           // Filter out defeated runs with 0 rank points
           if (localRuns && localRuns.length > 0) {
             const originalCount = localRuns.length;
@@ -8658,7 +8710,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             for (let i = 1; i <= 5; i++) {
               const row = document.createElement('div');
               row.style.display = 'grid';
-              row.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
+              row.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
               row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
               row.style.fontSize = '10px';
               row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
@@ -8720,7 +8772,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           for (let i = 0; i < 5; i++) {
             const row = document.createElement('div');
             row.style.display = 'grid';
-            row.style.gridTemplateColumns = '30px 1fr 50px 30px 30px';
+            row.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
             row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
             row.style.fontSize = '10px';
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
@@ -8810,10 +8862,51 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             timeCell.style.padding = '4px 2px';
             timeCell.style.borderRight = '1px solid #333';
             timeCell.style.textAlign = 'center';
+            timeCell.style.display = 'flex';
+            timeCell.style.alignItems = 'center';
+            timeCell.style.justifyContent = 'center';
+            timeCell.style.gap = '4px';
+            timeCell.style.position = 'relative';
             
             if (run.time) {
-              timeCell.textContent = formatLocalRunTime(run.time);
+              const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Rank run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
+              
+              // Check if this run is invalid (either faster than your best time OR worse rank than your best)
+              const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
+              const yourBestRank = currentYourRooms?.[selectedMap]?.rank || 0;
+              const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
+              const isRankInvalid = yourBestRank > 0 && run.points > yourBestRank;
+              
+              if (isTimeInvalid || isRankInvalid) {
+                // Create warning icon separately for left alignment
+                const warningIcon = document.createElement('span');
+                warningIcon.innerHTML = '⚠️';
+                warningIcon.title = isTimeInvalid && isRankInvalid ? 'This run might be invalid (both time and rank)' : 
+                                   isTimeInvalid ? 'This run might be invalid (faster than your best time)' : 
+                                   'This run might be invalid (worse rank than your best)';
+                warningIcon.style.cursor = 'help';
+                warningIcon.style.position = 'absolute';
+                warningIcon.style.left = '1px';
+                warningIcon.style.fontSize = '10px';
+                warningIcon.style.zIndex = '1';
+                
+                // Create time text centered with left margin to avoid overlap
+                timeText.textContent = formatLocalRunTime(run.time);
+                timeText.style.textAlign = 'center';
+                timeText.style.flex = '1';
+                timeText.style.marginLeft = '12px';
+                
+                timeCell.appendChild(warningIcon);
+                timeCell.appendChild(timeText);
+                
+                // Make the entire row red
+                row.style.color = '#ff6b6b';
+                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank})`);
+              } else {
+                timeText.textContent = formatLocalRunTime(run.time);
+                timeCell.appendChild(timeText);
+              }
             } else {
               timeCell.textContent = 'N/A';
               console.log(`[Cyclopedia] Rank run ${i + 1} has no time property`);
@@ -8825,6 +8918,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             rankCell.style.padding = '4px 2px';
             rankCell.style.borderRight = '1px solid #333';
             rankCell.style.textAlign = 'center';
+            rankCell.style.display = 'flex';
+            rankCell.style.alignItems = 'center';
+            rankCell.style.justifyContent = 'center';
+            rankCell.style.position = 'relative';
             if (run.points) {
               rankCell.textContent = run.points.toLocaleString();
               console.log(`[Cyclopedia] Rank run ${i + 1} points: ${run.points} -> ${run.points.toLocaleString()}`);
@@ -9206,6 +9303,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const { best, roomsHighscores, yourRooms } = data;
           const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
           
+          // Store yourRooms data for warning icon comparisons
+          currentYourRooms = yourRooms;
+          
           // Update speedrun content
           const yourTicks = yourRooms?.[selectedMap]?.ticks || 0;
           const bestTicks = best?.[selectedMap]?.ticks || 0;
@@ -9515,20 +9615,26 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       mapInfoDiv.style.boxSizing = 'border-box';
       mapInfoDiv.style.marginBottom = '0';
       
-      // Add room thumbnail
+      // Add room thumbnail with overlay container
+      const thumbnailContainer = document.createElement('div');
+      thumbnailContainer.style.position = 'relative';
+      thumbnailContainer.style.width = '192px';
+      thumbnailContainer.style.height = '192px';
+      thumbnailContainer.style.margin = '0 auto';
+      thumbnailContainer.style.display = 'block';
+      
       const thumbnail = document.createElement('img');
       thumbnail.alt = roomName;
       thumbnail.className = 'pixelated';
-      thumbnail.style.width = '192px';
-      thumbnail.style.height = '192px';
+      thumbnail.style.width = '100%';
+      thumbnail.style.height = '100%';
       thumbnail.style.objectFit = 'cover';
       thumbnail.style.border = '2px solid #666';
       thumbnail.style.borderRadius = '4px';
-      thumbnail.style.margin = '0 auto';
-      thumbnail.style.display = 'block';
       thumbnail.src = `/assets/room-thumbnails/${selectedMap}.png`;
       
-      mapInfoDiv.appendChild(thumbnail);
+      thumbnailContainer.appendChild(thumbnail);
+      mapInfoDiv.appendChild(thumbnailContainer);
       
       // Add map name with click interaction
       const title = document.createElement('h3');
@@ -9574,6 +9680,34 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
       });
       mapInfoDiv.appendChild(title);
+      
+      // Add defeat count overlay on thumbnail
+      try {
+        const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+        if (playerState?.rooms?.[selectedMap]?.count) {
+          const defeatCount = playerState.rooms[selectedMap].count;
+          const countOverlay = document.createElement('div');
+          countOverlay.style.position = 'absolute';
+          countOverlay.style.bottom = '8px';
+          countOverlay.style.left = '8px';
+          countOverlay.style.right = '8px';
+          countOverlay.style.backgroundImage = 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")';
+          countOverlay.style.backgroundSize = 'cover';
+          countOverlay.style.backgroundPosition = 'center';
+          countOverlay.style.color = '#ffffff';
+          countOverlay.style.fontSize = '12px';
+          countOverlay.style.fontWeight = 'bold';
+          countOverlay.style.textAlign = 'center';
+          countOverlay.style.padding = '4px 6px';
+          countOverlay.style.borderRadius = '4px';
+          countOverlay.style.border = '3px solid transparent';
+          countOverlay.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill';
+          countOverlay.textContent = `Defeated ${defeatCount.toLocaleString()} times`;
+          thumbnailContainer.appendChild(countOverlay);
+        }
+      } catch (error) {
+        console.warn('[Cyclopedia] Error accessing defeat count:', error);
+      }
       
       return mapInfoDiv;
     }
@@ -12359,8 +12493,6 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Expose cleanup function globally for the mod loader
-window.cleanupSuperModsCyclopediajs = exports.cleanup;
 
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {
