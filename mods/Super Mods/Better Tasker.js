@@ -3970,6 +3970,12 @@ function subscribeToGameState() {
                         if (task && task.killCount !== undefined) {
                             console.log(`[Better Tasker] Progress: ${task.killCount} creatures killed`);
                             
+                            // If 60+ creatures killed, assume task is finished (max quest requirement)
+                            if (task.killCount >= 60) {
+                                console.log('[Better Tasker] 60+ creatures killed - assuming task is finished!');
+                                task.ready = true; // Force task to be ready
+                            }
+                            
                             // Calculate remaining kills if we can determine the target
                             if (task.ready) {
                                 console.log('[Better Tasker] Task is ready to complete!');
@@ -4068,6 +4074,12 @@ function subscribeToGameState() {
                         
                         if (task && task.killCount !== undefined) {
                             console.log(`[Better Tasker] Progress: ${task.killCount} creatures killed`);
+                            
+                            // If 60+ creatures killed, assume task is finished (max quest requirement)
+                            if (task.killCount >= 60) {
+                                console.log('[Better Tasker] 60+ creatures killed - assuming task is finished!');
+                                task.ready = true; // Force task to be ready
+                            }
                             
                             // Calculate remaining kills if we can determine the target
                             if (task.ready) {
@@ -4290,8 +4302,8 @@ function extractCreatureFromTask() {
                     const text = taskDescription.textContent;
                     console.log('[Better Tasker] Task description:', text);
                     
-                    // Look for "kill count" pattern to extract creature name
-                    const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                    // Look for "kill count" pattern (English) or "mortos" pattern (Portuguese)
+                    const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
                     if (killCountMatch) {
                         const creatureName = killCountMatch[1].trim();
                         console.log('[Better Tasker] Extracted creature from description:', creatureName);
@@ -4304,9 +4316,9 @@ function extractCreatureFromTask() {
         // Alternative: Look for creature name in task description text
         const taskDescriptions = document.querySelectorAll('.pixel-font-14');
         for (const desc of taskDescriptions) {
-            if (desc.textContent && desc.textContent.includes('kill count')) {
+            if (desc.textContent && (desc.textContent.includes('kill count') || desc.textContent.includes('mortos'))) {
                 const text = desc.textContent;
-                const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
                 if (killCountMatch) {
                     const creatureName = killCountMatch[1].trim();
                     console.log('[Better Tasker] Extracted creature from description:', creatureName);
@@ -4352,8 +4364,8 @@ function extractCreatureFromSection(section) {
                     const text = taskDescription.textContent;
                     console.log('[Better Tasker] Task description:', text);
                     
-                    // Look for "kill count" pattern to extract creature name
-                    const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                    // Look for "kill count" pattern (English) or "mortos" pattern (Portuguese)
+                    const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
                     if (killCountMatch) {
                         const creatureName = killCountMatch[1].trim();
                         console.log('[Better Tasker] Extracted creature from description:', creatureName);
@@ -4366,9 +4378,9 @@ function extractCreatureFromSection(section) {
         // Alternative: Look for creature name in task description text within the section
         const taskDescriptions = section.querySelectorAll('.pixel-font-14');
         for (const desc of taskDescriptions) {
-            if (desc.textContent && desc.textContent.includes('kill count')) {
+            if (desc.textContent && (desc.textContent.includes('kill count') || desc.textContent.includes('mortos'))) {
                 const text = desc.textContent;
-                const killCountMatch = text.match(/^(.+?)\s+kill\s+count/i);
+                const killCountMatch = text.match(/^(.+?)\s+(?:kill\s+count|mortos?)/i);
                 if (killCountMatch) {
                     const creatureName = killCountMatch[1].trim();
                     console.log('[Better Tasker] Extracted creature from description:', creatureName);

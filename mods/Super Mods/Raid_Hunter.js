@@ -1880,37 +1880,7 @@ function stopAutoplayOnRaidEnd() {
     try {
         console.log('[Raid Hunter] Raid ended');
         
-        // Disable Bestiary Automator's autorefill stamina when raid ends
-        const settings = loadSettings();
-        if (settings.autoRefillStamina) {
-            console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
-            disableBestiaryAutomatorStaminaRefill();
-        }
-        if (settings.fasterAutoplay) {
-            console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
-            disableBestiaryAutomatorFasterAutoplay();
-        }
-        
-        // Switch to manual mode if we have autoplay control
-        withControlCheck(window.AutoplayManager, 'Raid Hunter', () => {
-            const boardContext = globalThis.state.board.getSnapshot().context;
-            if (boardContext.mode === 'autoplay') {
-                globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
-                console.log('[Raid Hunter] Switched from autoplay to manual mode');
-            }
-        }, 'switch to manual mode on raid failure');
-        
-        // Reset raid state
-        resetState('raid');
-        
-        // Restore quest button appearance
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
-        
-        // Update state and check for next raid
+        // Update state and check for next raid first
         updateRaidState();
         
         // If there are more raids available, process the next one
@@ -1926,6 +1896,32 @@ function stopAutoplayOnRaidEnd() {
             }, 2000); // Small delay before starting next raid
         } else {
             console.log('[Raid Hunter] No more raids in queue');
+        }
+        
+        // Reset raid state
+        resetState('raid');
+        
+        // Restore quest button appearance
+        restoreQuestButtonAppearance();
+        
+        // Stop quest button validation monitoring
+        stopAutoplayStateMonitoring();
+        stopQuestButtonValidation();
+        
+        // Check if Better Tasker is active before disabling Bestiary Automator settings
+        if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
+            console.log('[Raid Hunter] Better Tasker is active - skipping Bestiary Automator settings reset to avoid conflicts');
+        } else {
+            // Disable Bestiary Automator's autorefill stamina when raid ends
+            const settings = loadSettings();
+            if (settings.autoRefillStamina) {
+                console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
+                disableBestiaryAutomatorStaminaRefill();
+            }
+            if (settings.fasterAutoplay) {
+                console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
+                disableBestiaryAutomatorFasterAutoplay();
+            }
         }
         
     } catch (error) {
