@@ -3162,7 +3162,9 @@ function createRaidMapSelection() {
     // Group raids by region for better organization
     const raidGroups = {
         'Rookgaard': [
-            'Rat Plague',
+            'Rat Plague'
+        ],
+        'Carlin': [
             'Buzzing Madness',
             'Monastery Catacombs',
             'Ghostlands Boneyard'
@@ -3176,14 +3178,14 @@ function createRaidMapSelection() {
             'Hedge Maze Trap',
             'Tower of Whitewatch (Shield)',
             'Tower of Whitewatch (Helmet)',
-            'Tower of Whitewatch (Armor)'
-        ],
-        'Kazordoon': [
+            'Tower of Whitewatch (Armor)',
             'Orcish Barricade'
         ],
-        'Venore': [
+        'Kazordoon': [
             'Poacher Cave (Bear)',
-            'Poacher Cave (Wolf)',
+            'Poacher Cave (Wolf)'
+        ],
+        'Venore': [
             'Dwarven Bank Heist',
             'An Arcanist Ritual'
         ]

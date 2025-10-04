@@ -2202,6 +2202,9 @@
         flex: '1 1 0'
       });
       
+      // Load saved state first
+      loadStateFromStorage();
+      
       let availableCreatures = [...getAllCreatures()];
       // When reopening the modal, respect already selected creatures:
       // 1) Deduplicate any prior selections
@@ -2209,11 +2212,36 @@
       selectedCreatures = Array.from(new Set(selectedCreatures));
       availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
       
-      resetAutoscrollState();
-      // Always default to grey scroll (tier 1) when opening modal
-      selectedScrollTier = 1;
-      // Always default autosell to OFF
-      autosellNonSelected = false;
+      // Only reset autoscroll state, not the configuration
+      autoscrollStats = {
+        totalScrolls: 0,
+        successfulSummons: 0,
+        targetCreatures: new Set(),
+        foundCreatures: new Map(),
+        soldMonsters: 0,
+        soldGold: 0,
+        squeezedMonsters: 0,
+        squeezedDust: 0,
+        shinyCount: 0
+      };
+      
+      // Reset rate limiting state
+      rateLimitedSales.clear();
+      rateLimitedSalesRetryCount.clear();
+      lastRateLimitTime = 0;
+      consecutiveRateLimits = 0;
+      lastApiCall = 0;
+      
+      if (rateLimitedInterval) {
+        clearInterval(rateLimitedInterval);
+        rateLimitedInterval = null;
+      }
+      
+      // Reset error state
+      resetErrorState();
+      
+      // Clear API queue
+      clearApiQueue();
       
       function render(statusMessage) {
         if (typeof statusMessage === 'string') {
@@ -3412,9 +3440,6 @@
   // =======================
   function initializeAutoscroller() {
     console.log('[Autoscroller] Initializing version 2.0 (Optimized)');
-    
-    // Load saved state from storage
-    loadStateFromStorage();
     
     // Initialize modules
     resetAutoscrollState();

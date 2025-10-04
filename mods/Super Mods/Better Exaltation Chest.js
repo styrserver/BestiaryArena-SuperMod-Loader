@@ -28,6 +28,35 @@
   // Track processed elements to prevent re-processing
   const processedElements = new WeakSet();
   
+  // Event listener management for memory leak prevention
+  const eventListeners = new Map();
+  
+  function addManagedEventListener(element, event, handler, options = {}) {
+    element.addEventListener(event, handler, options);
+    const key = `${element.id || element.className || 'anonymous'}_${event}_${Date.now()}`;
+    eventListeners.set(key, { element, event, handler, options });
+    return key;
+  }
+  
+  function removeManagedEventListener(key) {
+    const listener = eventListeners.get(key);
+    if (listener) {
+      listener.element.removeEventListener(listener.event, listener.handler, listener.options);
+      eventListeners.delete(key);
+    }
+  }
+  
+  function cleanupAllEventListeners() {
+    eventListeners.forEach((listener, key) => {
+      try {
+        listener.element.removeEventListener(listener.event, listener.handler, listener.options);
+      } catch (error) {
+        console.warn('[Better Exaltation Chest] Error removing event listener:', error);
+      }
+    });
+    eventListeners.clear();
+  }
+  
   // =======================
   // 2. LocalStorage Functions
   // =======================
@@ -247,23 +276,30 @@
   
   // Add click animation to buttons
   function addClickAnimation(button) {
-    button.addEventListener('mousedown', (event) => {
+    const mousedownHandler = (event) => {
       event.stopPropagation();
       button.style.transform = 'scale(0.95)';
       button.style.filter = 'brightness(0.8)';
-    });
+    };
     
-    button.addEventListener('mouseup', (event) => {
+    const mouseupHandler = (event) => {
       event.stopPropagation();
       button.style.transform = 'scale(1)';
       button.style.filter = 'brightness(1)';
-    });
+    };
     
-    button.addEventListener('mouseleave', (event) => {
+    const mouseleaveHandler = (event) => {
       event.stopPropagation();
       button.style.transform = 'scale(1)';
       button.style.filter = 'brightness(1)';
-    });
+    };
+    
+    // Store handlers on button for potential cleanup
+    button._clickAnimationHandlers = { mousedownHandler, mouseupHandler, mouseleaveHandler };
+    
+    addManagedEventListener(button, 'mousedown', mousedownHandler);
+    addManagedEventListener(button, 'mouseup', mouseupHandler);
+    addManagedEventListener(button, 'mouseleave', mouseleaveHandler);
   }
   
   function createDropdownStyle(customStyles = '') {
@@ -485,9 +521,9 @@
     // Add dust display last (will be first in the sequence)
     injectDustDisplayIntoModal(footer);
     
-    // Add event listeners
-    autoButton.addEventListener('click', handleAutoButtonClick);
-    settingsButton.addEventListener('click', handleSettingsButtonClick);
+    // Add event listeners using managed system
+    addManagedEventListener(autoButton, 'click', handleAutoButtonClick);
+    addManagedEventListener(settingsButton, 'click', handleSettingsButtonClick);
     
     console.log('Buttons created and added to footer');
     markAsProcessed(footer);
@@ -534,6 +570,7 @@
   
   function handleSettingsButtonClick() {
     console.log('Settings button clicked');
+    console.log('activeExaltationPanel state:', activeExaltationPanel ? 'exists' : 'null');
     
     // Check if settings panel is already open
     if (activeExaltationPanel) {
@@ -1085,11 +1122,23 @@
   // Cleanup function for panel state
   function cleanupExaltationPanel() {
     try {
+      console.log('[Better Exaltation Chest] cleanupExaltationPanel called, activeExaltationPanel:', activeExaltationPanel ? 'exists' : 'null');
+      
       // Stop auto-opening when panel is closed
       stopAutoOpening();
       
-      // Remove panel from DOM
+      // Clean up ResizeObserver BEFORE removing the panel
       if (activeExaltationPanel) {
+        const attachedModalId = activeExaltationPanel.dataset?.attachedModal;
+        if (attachedModalId) {
+          const modal = document.querySelector(`[data-attached-modal="${attachedModalId}"]`);
+          if (modal && modal.dataset.resizeObserver) {
+            modal.dataset.resizeObserver.disconnect();
+            delete modal.dataset.resizeObserver;
+          }
+        }
+        
+        // Remove panel from DOM
         activeExaltationPanel.remove();
         activeExaltationPanel = null;
       }
@@ -1104,16 +1153,6 @@
       if (resizeListener) {
         window.removeEventListener('resize', resizeListener);
         resizeListener = null;
-      }
-      
-      // Clean up ResizeObserver
-      const attachedModalId = activeExaltationPanel?.dataset?.attachedModal;
-      if (attachedModalId) {
-        const modal = document.querySelector(`[data-attached-modal="${attachedModalId}"]`);
-        if (modal && modal.dataset.resizeObserver) {
-          modal.dataset.resizeObserver.disconnect();
-          delete modal.dataset.resizeObserver;
-        }
       }
       
       // Clean up reposition timeout
@@ -1176,8 +1215,10 @@
       
       // Store reference for cleanup
       modal._globalClickInterceptor = globalClickInterceptor;
-      document.addEventListener('click', globalClickInterceptor, true);
-      document.addEventListener('mousedown', globalClickInterceptor, true);
+      modal._globalClickInterceptorKeys = [
+        addManagedEventListener(document, 'click', globalClickInterceptor, true),
+        addManagedEventListener(document, 'mousedown', globalClickInterceptor, true)
+      ];
       
     } catch (error) {
       console.warn('[Better Exaltation Chest] Could not disable modal click-outside:', error);
@@ -1189,8 +1230,12 @@
     try {
       // Remove global click interceptor
       if (modal._globalClickInterceptor) {
-        document.removeEventListener('click', modal._globalClickInterceptor, true);
-        document.removeEventListener('mousedown', modal._globalClickInterceptor, true);
+        if (modal._globalClickInterceptorKeys) {
+          modal._globalClickInterceptorKeys.forEach(key => {
+            removeManagedEventListener(key);
+          });
+          delete modal._globalClickInterceptorKeys;
+        }
         delete modal._globalClickInterceptor;
         console.log('[Better Exaltation Chest] Global click interceptor removed');
       }
@@ -1253,7 +1298,7 @@
           cleanupExaltationPanel();
         }
       };
-      document.addEventListener('keydown', escKeyListener);
+      addManagedEventListener(document, 'keydown', escKeyListener);
       
       exaltationPanelInProgress = false;
       console.log('[Better Exaltation Chest] Settings panel opened');
@@ -1283,6 +1328,7 @@
     const modalContent = modal.querySelector('.widget-bottom') || modal;
     modalContent.appendChild(panel);
     activeExaltationPanel = panel;
+    console.log('[Better Exaltation Chest] Panel created and activeExaltationPanel set');
     
     // Mark the panel as part of the modal system
     panel.setAttribute('data-modal-part', 'true');
@@ -1400,21 +1446,21 @@
     });
   }
   
-  // Set up resize listener to reposition panel when window resizes
-  function setupResizeListener(modal) {
-    // Clean up existing resize listener
-    if (resizeListener) {
-      window.removeEventListener('resize', resizeListener);
-      resizeListener = null;
-    }
-    
-    resizeListener = () => {
-      if (activeExaltationPanel && modal.isConnected) {
-        positionPanelInsideModal(activeExaltationPanel, modal);
+    // Set up resize listener to reposition panel when window resizes
+    function setupResizeListener(modal) {
+      // Clean up existing resize listener
+      if (resizeListener) {
+        window.removeEventListener('resize', resizeListener);
+        resizeListener = null;
       }
-    };
-    
-    window.addEventListener('resize', resizeListener);
+      
+      resizeListener = () => {
+        if (activeExaltationPanel && modal.isConnected) {
+          positionPanelInsideModal(activeExaltationPanel, modal);
+        }
+      };
+      
+      addManagedEventListener(window, 'resize', resizeListener);
     
     // Also observe modal size changes
     const modalObserver = new ResizeObserver(() => {
@@ -1448,7 +1494,7 @@
     
     // Prevent clicks on the panel from bubbling up and closing it
     // But allow clicks on interactive elements (dropdowns, buttons, inputs)
-    panel.addEventListener('click', (event) => {
+    addManagedEventListener(panel, 'click', (event) => {
       const target = event.target;
       const isInteractiveElement = target.tagName === 'SELECT' || 
                                   target.tagName === 'BUTTON' || 
@@ -1464,7 +1510,7 @@
     });
     
     // Prevent mousedown events from bubbling up (but allow for interactive elements)
-    panel.addEventListener('mousedown', (event) => {
+    addManagedEventListener(panel, 'mousedown', (event) => {
       const target = event.target;
       const isInteractiveElement = target.tagName === 'SELECT' || 
                                   target.tagName === 'BUTTON' || 
@@ -1480,7 +1526,7 @@
     });
     
     // Prevent mouseup events from bubbling up (but allow for interactive elements)
-    panel.addEventListener('mouseup', (event) => {
+    addManagedEventListener(panel, 'mouseup', (event) => {
       const target = event.target;
       const isInteractiveElement = target.tagName === 'SELECT' || 
                                   target.tagName === 'BUTTON' || 
@@ -1659,7 +1705,7 @@
     updateSpeedDisplay();
     
     // Speed control event listeners
-    speedDecreaseBtn.addEventListener('click', (event) => {
+    addManagedEventListener(speedDecreaseBtn, 'click', (event) => {
       event.stopPropagation();
       if (autoOpenSpeed > 1000) {
         autoOpenSpeed -= 100;
@@ -1669,7 +1715,7 @@
       }
     });
     
-    speedIncreaseBtn.addEventListener('click', (event) => {
+    addManagedEventListener(speedIncreaseBtn, 'click', (event) => {
       event.stopPropagation();
       if (autoOpenSpeed < 2000) {
         autoOpenSpeed += 100;
@@ -1704,7 +1750,7 @@
       font-size: 12px;
     `);
     addClickAnimation(copyLogButton);
-    copyLogButton.addEventListener('click', async (event) => {
+    addManagedEventListener(copyLogButton, 'click', async (event) => {
       event.stopPropagation();
       const summaryText = generateSummaryLogText();
       console.log('[Better Exaltation Chest] Generated summary text:', summaryText);
@@ -1746,7 +1792,7 @@
       font-size: 12px;
     `);
     addClickAnimation(clearLogButton);
-    clearLogButton.addEventListener('click', (event) => {
+    addManagedEventListener(clearLogButton, 'click', (event) => {
       event.stopPropagation();
       clearEquipmentLog();
       updateStatusDisplay();
@@ -1874,7 +1920,7 @@
       font-size: 16px;
     `);
     addClickAnimation(addButton);
-    addButton.addEventListener('click', (event) => {
+    addManagedEventListener(addButton, 'click', (event) => {
       event.stopPropagation();
       addEquipmentSetupRow(rowsContainer);
       disableAutoOpeningIfActive();
@@ -1889,7 +1935,7 @@
       font-size: 12px;
     `);
     addClickAnimation(resetButton);
-    resetButton.addEventListener('click', (event) => {
+    addManagedEventListener(resetButton, 'click', (event) => {
       event.stopPropagation();
       resetEquipmentSetup(rowsContainer);
       disableAutoOpeningIfActive();
@@ -1985,7 +2031,7 @@
       font-size: 14px;
     `);
     addClickAnimation(removeButton);
-    removeButton.addEventListener('click', (event) => {
+    addManagedEventListener(removeButton, 'click', (event) => {
       event.stopPropagation();
       
       // Check if this is the last row
@@ -2022,7 +2068,7 @@
     
     // Add change listeners to save setup
     [equipmentSelect, tierSelect, statSelect].forEach(select => {
-      select.addEventListener('change', () => {
+      addManagedEventListener(select, 'change', () => {
         saveEquipmentSetup();
         disableAutoOpeningIfActive();
       });
@@ -2360,6 +2406,8 @@
   
   let observer = null;
   let observerTimeout = null;
+  let beforeUnloadListener = null;
+  let domContentLoadedListener = null;
   const DEBOUNCE_DELAY = 50;
   
   function initializeObserver() {
@@ -2402,6 +2450,9 @@
   }
   
   function cleanup() {
+    // Clean up all managed event listeners first
+    cleanupAllEventListeners();
+    
     if (observer) {
       observer.disconnect();
       observer = null;
@@ -2422,6 +2473,16 @@
     
     // Clean up panel state
     cleanupExaltationPanel();
+    
+    // Clean up global event listeners
+    if (beforeUnloadListener) {
+      window.removeEventListener('beforeunload', beforeUnloadListener);
+      beforeUnloadListener = null;
+    }
+    if (domContentLoadedListener) {
+      document.removeEventListener('DOMContentLoaded', domContentLoadedListener);
+      domContentLoadedListener = null;
+    }
   }
   
   function initializeBetterExaltationChest() {
@@ -2433,7 +2494,8 @@
     initializeObserver();
     
     // Cleanup on page unload
-    window.addEventListener('beforeunload', cleanup);
+    beforeUnloadListener = cleanup;
+    window.addEventListener('beforeunload', beforeUnloadListener);
     console.log('Better Exaltation Chest mod initialized');
   }
   
@@ -2454,7 +2516,8 @@
   // =======================
   
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeBetterExaltationChest);
+    domContentLoadedListener = initializeBetterExaltationChest;
+    document.addEventListener('DOMContentLoaded', domContentLoadedListener);
   } else {
     initializeBetterExaltationChest();
   }

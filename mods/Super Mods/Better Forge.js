@@ -8,7 +8,7 @@
   // ============================================================================
   
   const defaultConfig = { enabled: true };
-  const config = Object.assign({}, defaultConfig, context?.config);
+  const config = { ...defaultConfig, ...context?.config };
   
   const FORGE_CONFIG = {
     BUTTON_CHECK_INTERVAL: 1000,
@@ -66,7 +66,13 @@
     totalSteps: 0,
     completedSteps: 0,
     // Track if we're on the final step
-    isFinalStep: false
+    isFinalStep: false,
+    // Track selected equipment filter for col1
+    selectedEquipmentFilter: null,
+    // Track global search term across tabs
+    globalSearchTerm: '',
+    // Track global tier filter across tabs
+    globalTierFilter: 'all'
   };
 
   // ============================================================================
@@ -129,8 +135,6 @@
   // 4. Network Errors: Retry logic with exponential backoff
   // 5. State Recovery: Reset state when errors occur
   
-
-
   // Clear inventory cache to force fresh data fetch
   const clearInventoryCache = () => {
     try {
@@ -2292,7 +2296,62 @@
   }
   
   // ============================================================================
-  // 7. UI COMPONENT CREATION FUNCTIONS
+  // 7. FILTER AND SEARCH UTILITIES
+  // ============================================================================
+  
+  // Centralized filter logic
+  function applyTierFilter(equipment, tierFilter) {
+    if (!tierFilter || tierFilter === 'all') {
+      return equipment;
+    }
+    const tierNum = parseInt(tierFilter.substring(1));
+    return equipment.filter(equip => equip.tier === tierNum);
+  }
+  
+  // Centralized search logic
+  function resolveSearchTerm(searchBarContent, globalSearchTerm) {
+    return searchBarContent || globalSearchTerm || '';
+  }
+  
+  // Apply both tier and search filters
+  function applyFilters(equipment, searchTerm, tierFilter) {
+    let filtered = equipment;
+    
+    // Apply tier filter first
+    filtered = applyTierFilter(filtered, tierFilter);
+    
+    // Apply search filter if present
+    if (searchTerm) {
+      filtered = filtered.filter(equip => 
+        equip.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    return filtered;
+  }
+  
+  // Update search input field
+  function updateSearchInput(searchInput, searchTerm, searchBarContent) {
+    if (searchInput && !searchBarContent && searchTerm) {
+      searchInput.value = searchTerm;
+      console.log(`[Better Forge] 🔍 Set search input value to: "${searchTerm}"`);
+    }
+  }
+  
+  // Update filter button text
+  function updateFilterButtonText(filterBtn, tierFilter) {
+    if (filterBtn && tierFilter) {
+      const filterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+      const filterIndex = filterOptions.findIndex(option => option.toLowerCase() === tierFilter);
+      if (filterIndex >= 0) {
+        filterBtn.textContent = filterOptions[filterIndex];
+        console.log(`[Better Forge] 🔍 Updated filter button to: "${filterOptions[filterIndex]}"`);
+      }
+    }
+  }
+
+  // ============================================================================
+  // 8. UI COMPONENT CREATION FUNCTIONS
   // ============================================================================
   
   // Helper function to create fallback equipment icon
@@ -2335,54 +2394,74 @@
     return equipmentList.sort(); // Alphabetical order
   }
   
+  // Debounce mechanism to prevent rapid successive calls
+  let selectionDebounceTimeout = null;
+  
   // Generic selection handler factory
   function createSelectionHandler(type, value, updateFunction) {
     return (event) => {
-      console.log(`[Better Forge] 🔍 Selection handler called:`, { type, value });
-      
-      // Clear previous selection based on type
-      const container = document.getElementById(`auto-upgrade-${type}-col`);
-      if (container) {
-        container.querySelectorAll('div').forEach(div => {
-          div.classList.remove('selected');
-        });
+      // Clear any existing debounce timeout
+      if (selectionDebounceTimeout) {
+        clearTimeout(selectionDebounceTimeout);
       }
       
-      // Apply selection styling to clicked element
-      let clickedElement = event.target.closest('div');
-      
-      // For equipment items, we need to find the parent div with the title attribute
-      if (type === 'equipment' && clickedElement) {
-        // Look for the div that has the title attribute (the equipment container)
-        while (clickedElement && !clickedElement.title) {
-          clickedElement = clickedElement.parentElement;
+      // Debounce the selection to prevent rapid successive calls
+      selectionDebounceTimeout = setTimeout(() => {
+        console.log(`[Better Forge] 🔍 Selection handler called:`, { type, value });
+        
+        // Get current state to check for toggle
+        const currentState = getCurrentSelection();
+        
+        // Check if this is a toggle (clicking the same item again)
+        let isToggle = false;
+        if (type === 'equipment' && currentState.selectedEquipment === value) {
+          isToggle = true;
+          console.log(`[Better Forge] 🔄 Toggle detected for equipment: ${value}`);
         }
-      }
-      
-      if (clickedElement) {
-        clickedElement.classList.add('selected');
-      }
-      
-      // Update centralized state
-      const currentState = getCurrentSelection();
-      const newState = { ...currentState };
-      
-      if (type === 'equipment') {
-        newState.selectedEquipment = value;
-      } else if (type === 'tiers') {
-        newState.selectedTier = value;
-      } else if (type === 'stats') {
-        newState.selectedStat = value;
-      }
-      
-      console.log(`[Better Forge] 🔄 Selection state updated:`, { from: currentState, to: newState });
-      
-      updateAutoUpgradeSelection(newState.selectedEquipment, newState.selectedTier, newState.selectedStat);
-      
-      // Call custom update function if provided
-      if (updateFunction) {
-        updateFunction(value);
-      }
+        
+        // Clear previous selection based on type
+        const container = document.getElementById(`auto-upgrade-${type}-col`);
+        if (container) {
+          container.querySelectorAll('div').forEach(div => {
+            div.classList.remove('selected');
+          });
+        }
+        
+        // Apply selection styling to clicked element (only if not toggling)
+        let clickedElement = event.target.closest('div');
+        
+        // For equipment items, we need to find the parent div with the title attribute
+        if (type === 'equipment' && clickedElement) {
+          // Look for the div that has the title attribute (the equipment container)
+          while (clickedElement && !clickedElement.title) {
+            clickedElement = clickedElement.parentElement;
+          }
+        }
+        
+        if (clickedElement && !isToggle) {
+          clickedElement.classList.add('selected');
+        }
+        
+        // Update centralized state
+        const newState = { ...currentState };
+        
+        if (type === 'equipment') {
+          newState.selectedEquipment = isToggle ? null : value;
+        } else if (type === 'tiers') {
+          newState.selectedTier = value;
+        } else if (type === 'stats') {
+          newState.selectedStat = value;
+        }
+        
+        console.log(`[Better Forge] 🔄 Selection state updated:`, { from: currentState, to: newState });
+        
+        updateAutoUpgradeSelection(newState.selectedEquipment, newState.selectedTier, newState.selectedStat);
+        
+        // Call custom update function if provided
+        if (updateFunction) {
+          updateFunction(newState.selectedEquipment || newState.selectedTier || newState.selectedStat);
+        }
+      }, 50); // 50ms debounce to prevent rapid successive calls
     };
   }
   
@@ -2486,11 +2565,19 @@
         return;
       }
       
-      if (!equipment || !tier || !stat) {
-        console.log(`[Better Forge] ⚠️ Missing selection: equipment=${equipment}, tier=${tier}, stat=${stat}`);
-        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select equipment, tier, and stat to see result</div>';
+      if (!equipment) {
+        console.log(`[Better Forge] ⚠️ Missing equipment selection: equipment=${equipment}, tier=${tier}, stat=${stat}`);
+        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select equipment to see available options</div>';
         updateForgeButtonColor(null); // Reset to default (grey)
-        updateAutoUpgradeStatus('Select equipment, tier, and stat to upgrade');
+        updateAutoUpgradeStatus('Select equipment to see available options');
+        return;
+      }
+      
+      if (!tier || !stat) {
+        console.log(`[Better Forge] 📝 Equipment selected: ${equipment}, waiting for tier and stat selection`);
+        detailsContent.innerHTML = '<div style="color: #888888; font-size: 11px; text-align: center;">Select tier and stat to see upgrade details</div>';
+        updateForgeButtonColor(null); // Reset to default (grey)
+        updateAutoUpgradeStatus('Select tier and stat to see upgrade details');
         return;
       }
       
@@ -2611,14 +2698,8 @@
               stepDiv.textContent = `Step ${index + 1}: T${fromTier} → T${toTier} = T${resultTier}`;
             }
             
-            // Debug logging to help identify object display issues
-            console.log(`[Better Forge] Step ${index + 1} display:`, {
-              step: step,
-              textContent: stepDiv.textContent,
-              equipAType: typeof step.equipA,
-              equipBType: typeof step.equipB,
-              resultType: typeof step.result
-            });
+            // Log step information for debugging
+            console.log(`[Better Forge] Step ${index + 1}: T${step.fromTier} → T${step.toTier}`);
             
             planDiv.appendChild(stepDiv);
           });
@@ -3002,6 +3083,9 @@
     
     // Update details display with new selection
     updateDetailsDisplay(equipment, tier, stat);
+    
+    // Filter col1 equipment display based on selected equipment
+    filterCol1BySelectedEquipment(equipment);
   }
   
   function getCurrentSelection() {
@@ -3023,6 +3107,147 @@
     autoUpgradeState.selectedTier = null;
     autoUpgradeState.selectedStat = null;
     forgeState.highlightedEquipment.clear();
+    
+    // Clear equipment filter but preserve global search term
+    forgeState.selectedEquipmentFilter = null;
+    
+    // Only apply filter if modal is open (don't clear search when just switching tabs)
+    const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (dialog) {
+      filterCol1BySelectedEquipment(null);
+    }
+  }
+  
+  // Clear only visual selection without affecting search
+  function clearAutoUpgradeVisualSelection() {
+    console.log('[Better Forge] 🔄 clearAutoUpgradeVisualSelection called');
+    
+    // Reset forge confirmation mode if clearing selection
+    if (forgeState.isForgeConfirmationMode) {
+      console.log('[Better Forge] 🔄 Forge confirmation mode reset due to visual selection cleared');
+    }
+    resetForgeConfirmationModeIfActive();
+    
+    // Clear equipment filter FIRST before checking search bar
+    console.log('[Better Forge] 📝 Clearing equipment filter (was:', forgeState.selectedEquipmentFilter, ')');
+    forgeState.selectedEquipmentFilter = null;
+    
+    autoUpgradeState.selectedEquipment = null;
+    autoUpgradeState.selectedTier = null;
+    autoUpgradeState.selectedStat = null;
+    forgeState.highlightedEquipment.clear();
+    
+    // Apply appropriate filtering based on search bar content
+    setTimeout(() => {
+      console.log('[Better Forge] 🔍 Checking search bar content after clearing equipment filter');
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (dialog) {
+        const actualMainContent = dialog.querySelector('.modal-content') || 
+                                 dialog.querySelector('[class*="content"]') ||
+                                 dialog.children[1];
+        
+        if (actualMainContent) {
+          const scrollArea = actualMainContent.querySelector('div[style*="grid-template-columns: repeat(6, 34px)"]');
+          const searchInput = actualMainContent.querySelector('input[type="text"]');
+          
+          if (scrollArea) {
+            const allEquipment = getUserOwnedEquipment();
+            
+            // Resolve search term using centralized logic
+            const searchBarContent = searchInput ? searchInput.value.trim() : '';
+            const globalSearchTerm = forgeState.globalSearchTerm || '';
+            const searchTerm = resolveSearchTerm(searchBarContent, globalSearchTerm);
+            
+            console.log('[Better Forge] 🔍 Search bar content:', `"${searchBarContent}"`);
+            console.log('[Better Forge] 🔍 Global search term:', `"${globalSearchTerm}"`);
+            console.log('[Better Forge] 🔍 Final search term to use:', `"${searchTerm}"`);
+            
+            // Update filter button using centralized logic
+            const filterBtn = actualMainContent.querySelector('button');
+            updateFilterButtonText(filterBtn, forgeState.globalTierFilter);
+            
+            if (searchTerm) {
+              // Apply search filter if search bar has text or global search term exists
+              console.log('[Better Forge] 🔍 Applying search filter from search term');
+              
+              // Update search input field using centralized logic
+              updateSearchInput(searchInput, searchTerm, searchBarContent);
+              
+              // Apply filters using centralized logic
+              const equipmentToSearch = applyFilters(allEquipment, searchTerm, forgeState.globalTierFilter);
+              console.log(`[Better Forge] 🔍 Applied filters: ${equipmentToSearch.length} items`);
+              
+              applyEquipmentSearch(scrollArea, searchTerm, equipmentToSearch, transferToDisenchant);
+              console.log(`[Better Forge] 🔍 Applied search filter: "${searchTerm}" on ${equipmentToSearch.length} items`);
+            } else {
+              // Apply tier filter even when no search term
+              const equipmentToShow = applyFilters(allEquipment, '', forgeState.globalTierFilter);
+              
+              console.log('[Better Forge] 🧹 No search term, showing equipment with tier filter');
+              console.log('[Better Forge] 📦 Total equipment count:', equipmentToShow.length);
+              
+              // Log equipment count for debugging
+              if (equipmentToShow.length > 0) {
+                console.log(`[Better Forge] 🔍 Showing ${equipmentToShow.length} equipment items`);
+              }
+              
+              console.log('[Better Forge] 🔍 About to call renderEquipmentList with', equipmentToShow.length, 'items');
+              console.log('[Better Forge] 🔍 First 3 items being passed to renderEquipmentList:');
+              for (let i = 0; i < Math.min(3, equipmentToShow.length); i++) {
+                const item = equipmentToShow[i];
+                console.log(`[Better Forge] ${i + 1}. ${item.name} - Tier: ${item.tier}, Stat: ${item.stat}`);
+              }
+              
+              renderEquipmentList(scrollArea, equipmentToShow, transferToDisenchant);
+              console.log('[Better Forge] 🧹 Applied tier filter, showing equipment');
+            }
+          }
+        }
+      }
+    }, 100);
+  }
+  
+  // Filter col1 equipment display based on selected equipment type
+  function filterCol1BySelectedEquipment(selectedEquipment) {
+    try {
+      console.log(`[Better Forge] 🔍 Filtering col1 by selected equipment:`, selectedEquipment);
+      
+      // Store the selected equipment for when the modal opens
+      if (selectedEquipment) {
+        forgeState.selectedEquipmentFilter = selectedEquipment;
+        console.log(`[Better Forge] 📝 Stored equipment filter: ${selectedEquipment}`);
+      } else {
+        forgeState.selectedEquipmentFilter = null;
+        console.log(`[Better Forge] 📝 Cleared equipment filter`);
+      }
+      
+      // If modal is already open, apply the search filter immediately
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      
+      if (dialog) {
+        // Look for content inside the dialog
+        const actualMainContent = dialog.querySelector('.modal-content') || 
+                                 dialog.querySelector('[class*="content"]') ||
+                                 dialog.children[1]; // Usually the second child is the content
+        
+        if (actualMainContent) {
+          const scrollArea = actualMainContent.querySelector('div[style*="grid-template-columns: repeat(6, 34px)"]');
+          
+          if (scrollArea) {
+            // Get all equipment and apply search filter directly
+            const allEquipment = getUserOwnedEquipment();
+            
+            // Use global search term if no equipment selected, otherwise use equipment filter
+            const searchTerm = selectedEquipment || forgeState.globalSearchTerm || '';
+            applyEquipmentSearch(scrollArea, searchTerm, allEquipment, transferToDisenchant);
+            console.log(`[Better Forge] 🔍 Applied search filter for: "${searchTerm || 'all'}"`);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.warn('[Better Forge] Error filtering col1 equipment:', error);
+    }
   }
   
   function reapplyHighlighting() {
@@ -3797,6 +4022,10 @@
                    stopForging();
                  }
                  
+                 // Clear global search term and tier filter when modal closes
+                 forgeState.globalSearchTerm = '';
+                 forgeState.globalTierFilter = 'all';
+                 
                  cleanupDustDisplay();
                });
              }
@@ -3862,25 +4091,51 @@
                    const scrollArea = document.createElement('div');
                    scrollArea.style.cssText = 'flex: 1 1 0; height: calc(100% - 40px); min-height: 0; width: 100%; max-width: 100%; overflow-y: auto; display: grid; grid-template-columns: repeat(6, 34px); grid-auto-rows: 34px; gap: 0; padding: 5px; background: rgba(40,40,40,0.96); box-sizing: border-box; justify-content: center;';
                    
-                   let currentFilter = 'all';
+                   let currentFilter = forgeState.globalTierFilter || 'all';
                    let filteredEquipment = availableEquipment;
-                   let currentSearchTerm = '';
+                   let currentSearchTerm = forgeState.globalSearchTerm || '';
+                   // Initialize filter index based on current filter
+                   const filterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+                   let currentFilterIndex = filterOptions.findIndex(option => option.toLowerCase() === currentFilter);
+                   if (currentFilterIndex < 0) currentFilterIndex = 0;
                    
-                   renderEquipmentList(scrollArea, filteredEquipment, transferToDisenchant);
+                   // Set search input to global search term
+                   if (currentSearchTerm) {
+                     searchInput.value = currentSearchTerm;
+                     console.log(`[Better Forge] 🔍 Set search input to global search term: "${currentSearchTerm}"`);
+                   }
                    
-                   let searchTimeout = null;
+          // Set filter button to global tier filter using centralized logic
+          updateFilterButtonText(filterBtn, currentFilter);
+                   
+                   // Apply equipment filter if one is selected in auto-upgrade tab
+                   const selectedEquipment = forgeState.selectedEquipmentFilter || getCurrentSelection().selectedEquipment;
+                   if (selectedEquipment) {
+                     // Override with equipment filter if selected
+                     searchInput.value = selectedEquipment;
+                     currentSearchTerm = selectedEquipment;
+                     console.log(`[Better Forge] 🔍 Override with equipment filter: "${selectedEquipment}"`);
+                     
+                     // Apply the search filter using the search function
+                     applyEquipmentSearch(scrollArea, selectedEquipment, availableEquipment, transferToDisenchant);
+                     console.log(`[Better Forge] 📝 Applied search filter for "${selectedEquipment}"`);
+                   } else if (currentSearchTerm) {
+                     // Apply global search term if no equipment filter
+                     applyEquipmentSearch(scrollArea, currentSearchTerm, availableEquipment, transferToDisenchant);
+                     console.log(`[Better Forge] 📝 Applied global search filter for "${currentSearchTerm}"`);
+                   } else {
+                     renderEquipmentList(scrollArea, filteredEquipment, transferToDisenchant);
+                   }
+                   
                    const debouncedSearch = (value) => {
                      if (searchTimeout) clearTimeout(searchTimeout);
                      searchTimeout = setTimeout(() => {
                        currentSearchTerm = value;
+                       forgeState.globalSearchTerm = value; // Store globally
                        const freshEquipment = getUserOwnedEquipment();
                        
-                       // Apply tier filter to fresh equipment before searching
-                       let equipmentToSearch = freshEquipment;
-                       if (currentFilter !== 'all') {
-                         const tierNum = parseInt(currentFilter.substring(1));
-                         equipmentToSearch = freshEquipment.filter(equip => equip.tier === tierNum);
-                       }
+                       // Apply filters using centralized logic
+                       const equipmentToSearch = applyFilters(freshEquipment, value, currentFilter);
                        
                        applyEquipmentSearch(scrollArea, value, equipmentToSearch, transferToDisenchant);
                        
@@ -3894,24 +4149,31 @@
                      debouncedSearch(e.target.value);
                    });
                    
-                   let currentFilterIndex = 0;
-                   const filterOptions = ['All', 'T1', 'T2', 'T3', 'T4', 'T5'];
-                   
                    eventManager.add(filterBtn, 'click', () => {
                      currentFilterIndex = (currentFilterIndex + 1) % filterOptions.length;
                      const selectedFilter = filterOptions[currentFilterIndex];
                      
-                     filterBtn.textContent = selectedFilter;
                      currentFilter = selectedFilter.toLowerCase(); // Update currentFilter variable
+                     forgeState.globalTierFilter = currentFilter; // Store globally
+                     console.log(`[Better Forge] 🔍 Updated global tier filter to: "${currentFilter}"`);
+                     
+                     // Update filter button text using centralized logic
+                     updateFilterButtonText(filterBtn, currentFilter);
                      
                      const freshEquipment = getUserOwnedEquipment();
                      
-                     if (selectedFilter === 'All') {
-                       filteredEquipment = freshEquipment;
-                     } else {
-                       const tierNum = parseInt(selectedFilter.substring(1));
-                       filteredEquipment = freshEquipment.filter(equip => equip.tier === tierNum);
+                     // Apply equipment filter first (from auto-upgrade selection)
+                     let baseEquipment = freshEquipment;
+                     const selectedEquipment = forgeState.selectedEquipmentFilter || getCurrentSelection().selectedEquipment;
+                     if (selectedEquipment) {
+                       baseEquipment = freshEquipment.filter(equip => 
+                         equip.name.toLowerCase().includes(selectedEquipment.toLowerCase())
+                       );
+                       console.log(`[Better Forge] 📝 Tier filter preserving equipment filter for "${selectedEquipment}":`, baseEquipment.length, 'items');
                      }
+                     
+                     // Apply tier filter using centralized logic
+                     filteredEquipment = applyTierFilter(baseEquipment, currentFilter);
                      
                      scrollArea.innerHTML = '';
                      
@@ -3928,6 +4190,21 @@
                    });
                    
                    eventManager.add(scrollArea, 'searchCleared', () => {
+                     // Recalculate filtered equipment with current filters
+                     const freshEquipment = getUserOwnedEquipment();
+                     
+                     // Apply equipment filter first (from auto-upgrade selection)
+                     let baseEquipment = freshEquipment;
+                     const selectedEquipment = forgeState.selectedEquipmentFilter || getCurrentSelection().selectedEquipment;
+                     if (selectedEquipment) {
+                       baseEquipment = freshEquipment.filter(equip => 
+                         equip.name.toLowerCase().includes(selectedEquipment.toLowerCase())
+                       );
+                     }
+                     
+                     // Apply tier filter using centralized logic
+                     filteredEquipment = applyTierFilter(baseEquipment, currentFilter);
+                     
                      if (!filteredEquipment.length) {
                        scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">No equipment found.</div>';
                        return;
@@ -3951,12 +4228,6 @@
                    return document.createElement('div');
                  }
                }
-    
-
-    
-
-    
-
      
      function getUserOwnedEquipment() {
        try {
@@ -4174,6 +4445,14 @@
 
 
      function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
+       console.log('[Better Forge] 🔍 renderEquipmentList called with', equipmentItems.length, 'items');
+       console.log('[Better Forge] 🔍 scrollArea element:', scrollArea);
+       console.log('[Better Forge] 🔍 scrollArea children count before clear:', scrollArea.children.length);
+       
+       // Force clear the scroll area
+       scrollArea.innerHTML = '';
+       console.log('[Better Forge] 🔍 scrollArea children count after clear:', scrollArea.children.length);
+       
        if (!equipmentItems.length) {
          scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">No equipment found.</div>';
          return;
@@ -4184,10 +4463,37 @@
            return;
          }
        
-       for (const equipment of equipmentItems) {
+       // Log equipment count for debugging
+       if (equipmentItems.length > 0) {
+         console.log(`[Better Forge] 🔍 Processing ${equipmentItems.length} equipment items`);
+       }
+       
+       // Sort equipment items before rendering
+       const sortedEquipment = [...equipmentItems].sort((a, b) => {
+         if (a.tier !== b.tier) return b.tier - a.tier;
+         if (a.name !== b.name) return a.name.localeCompare(b.name);
+         return a.stat.localeCompare(b.stat);
+       });
+       
+       // Log sorted equipment count
+       if (sortedEquipment.length > 0) {
+         console.log(`[Better Forge] 🔍 Sorted ${sortedEquipment.length} equipment items for display`);
+       }
+       
+       console.log('[Better Forge] 🔍 About to render', sortedEquipment.length, 'equipment items');
+       let renderedCount = 0;
+       for (const equipment of sortedEquipment) {
          const btn = createEquipmentButton(equipment, onSelect);
          scrollArea.appendChild(btn);
+         renderedCount++;
+         
+         // Log first few rendered items
+         if (renderedCount <= 5) {
+           console.log(`[Better Forge] 🔍 Rendered item ${renderedCount}: ${equipment.name} - Tier: ${equipment.tier}, Stat: ${equipment.stat}`);
+         }
        }
+       console.log('[Better Forge] 🔍 Total items rendered:', renderedCount);
+       console.log('[Better Forge] 🔍 scrollArea children count after rendering:', scrollArea.children.length);
      }
 
      function applyEquipmentSearch(scrollArea, searchValue, equipmentItems, onSelect) {
@@ -4314,8 +4620,9 @@
            stopForging();
          }
          
-                 // Clear equipment highlights and auto-upgrade selection when switching to disenchant tab
-        clearAutoUpgradeSelection();
+                 // Clear equipment highlights when switching to disenchant tab (but preserve search)
+        console.log('[Better Forge] 🔄 Switching to disenchant tab - calling clearAutoUpgradeVisualSelection');
+        clearAutoUpgradeVisualSelection();
         highlightEquipmentForForging(null, null, null);
          
          const disenchantContent = getDisenchantContent();
@@ -4354,9 +4661,10 @@
          contentArea.innerHTML = '';
          contentArea.appendChild(autoUpgradeContent);
          
-         // Clear equipment highlights when switching to auto-upgrade tab
+         // Clear equipment highlights when switching to auto-upgrade tab (but preserve search)
          setTimeout(() => {
-           clearAutoUpgradeSelection();
+           console.log('[Better Forge] 🔄 Switching to auto-upgrade tab - calling clearAutoUpgradeVisualSelection');
+           clearAutoUpgradeVisualSelection();
            highlightEquipmentForForging(null, null, null);
          }, 100);
        });
@@ -5341,6 +5649,7 @@
 
   let inventoryObserver = null;
   let buttonCheckInterval = null;
+  let searchTimeout = null;
   let lastButtonCheck = 0;
   let failedAttempts = 0;
   let hasLoggedInventoryNotFound = false;
@@ -5523,6 +5832,18 @@
       if (buttonCheckInterval) {
         clearInterval(buttonCheckInterval);
         buttonCheckInterval = null;
+      }
+      
+      // Cancel any ongoing animation frame
+      if (currentAnimationFrame) {
+        cancelAnimationFrame(currentAnimationFrame);
+        currentAnimationFrame = null;
+      }
+      
+      // Clear search timeout
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+        searchTimeout = null;
       }
       
       forgeState.isDisenchanting = false;

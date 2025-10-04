@@ -2953,10 +2953,8 @@ async function findAndClickFinishButton() {
         // Wait for quest log to load
         await sleep(500);
         
-        // Multiple selectors for Finish button
+        // Multiple selectors for Finish button - SVG icon based (language-independent)
         const finishSelectors = [
-            'button[aria-label*="Finish"]',
-            'button[title*="Finish"]',
             'button:has(svg.lucide-check)',
             'button:has(svg.lucide-check-circle)'
         ];
@@ -2970,7 +2968,7 @@ async function findAndClickFinishButton() {
             for (const mutation of mutations) {
                 if (mutation.type === 'attributes' && mutation.attributeName === 'disabled') {
                     const target = mutation.target;
-                    if (target.textContent?.includes('Finish')) {
+                    if (target.querySelector('svg.lucide-check')) {
                         // Check if button is now enabled
                         if (!target.hasAttribute('disabled') && !target.disabled) {
                             finishButton = target;
@@ -2994,10 +2992,10 @@ async function findAndClickFinishButton() {
             await sleep(1000);
             attempts++;
             
-            // First try: search all buttons by text content (most reliable)
+            // Search for buttons with SVG check icon (language-independent)
             const allButtons = document.querySelectorAll('button');
             finishButton = Array.from(allButtons).find(btn => 
-                btn.textContent.includes('Finish') && 
+                btn.querySelector('svg.lucide-check') && 
                 !btn.hasAttribute('disabled') && 
                 !btn.disabled
             );
@@ -3008,7 +3006,7 @@ async function findAndClickFinishButton() {
                     try {
                         const buttons = document.querySelectorAll(selector);
                         finishButton = Array.from(buttons).find(btn => 
-                            btn.textContent.includes('Finish') && 
+                            btn.querySelector('svg.lucide-check') && 
                             !btn.hasAttribute('disabled') && 
                             !btn.disabled
                         );
@@ -3405,10 +3403,41 @@ async function handleTaskFinishing() {
             }
             
             if (isTaskReady) {
-                console.log('[Better Tasker] Task ready via API, opening quest log directly...');
+                console.log('[Better Tasker] Task ready via API, checking if finish button is enabled...');
                 
-                // Stop ALL automations when task is ready
-                await stopAllAutomationsForTaskCompletion();
+                // First check if finish button is actually enabled before stopping automations
+                const questLogOpened = await openQuestLogWithRetry();
+                if (questLogOpened) {
+                    // Check if finish button exists and is enabled
+                    const allButtons = document.querySelectorAll('button');
+                    const enabledFinishButton = Array.from(allButtons).find(btn => 
+                        btn.querySelector('svg.lucide-check') && 
+                        !btn.hasAttribute('disabled') && 
+                        !btn.disabled
+                    );
+                    
+                    if (enabledFinishButton) {
+                        console.log('[Better Tasker] Finish button is enabled, stopping automations and proceeding...');
+                        // Stop ALL automations when task is ready AND finish button is enabled
+                        await stopAllAutomationsForTaskCompletion();
+                    } else {
+                        console.log('[Better Tasker] Task is ready but finish button is disabled - leaving autoplay running');
+                        // Close quest log and return without stopping automations
+                        const escEvent = new KeyboardEvent('keydown', {
+                            key: 'Escape',
+                            code: 'Escape',
+                            keyCode: 27,
+                            which: 27,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        document.dispatchEvent(escEvent);
+                        return;
+                    }
+                } else {
+                    console.log('[Better Tasker] Could not open quest log to check finish button state');
+                    return;
+                }
                 
                 // Check if a game is currently running
                 const boardContext = globalThis.state.board.getSnapshot().context;
@@ -3580,7 +3609,7 @@ async function handleTaskFinishing() {
                     for (const mutation of mutations) {
                         if (mutation.type === 'attributes' && mutation.attributeName === 'disabled') {
                             const target = mutation.target;
-                            if (target.textContent.includes('Finish')) {
+                            if (target.querySelector('svg.lucide-check')) {
                                 // Check if button is now enabled
                                 if (!target.hasAttribute('disabled') && !target.disabled) {
                                     finishButton = target;
@@ -3604,10 +3633,10 @@ async function handleTaskFinishing() {
                     await sleep(100); // Faster polling - 100ms instead of 500ms
                     attempts++;
                     
-                    // Look for Finish button that's not disabled
+                    // Look for Finish button that's not disabled - SVG icon based
                     const buttons = document.querySelectorAll('button');
                     finishButton = Array.from(buttons).find(btn => 
-                        btn.textContent.includes('Finish') && 
+                        btn.querySelector('svg.lucide-check') && 
                         !btn.hasAttribute('disabled') && 
                         !btn.disabled
                     );
@@ -3867,8 +3896,38 @@ function subscribeToGameState() {
                             if (task.ready) {
                                 console.log('[Better Tasker] Task is ready to complete!');
                                 
-                                // Stop ALL automations when task is ready (regardless of game state)
-                                stopAllAutomationsForTaskCompletion();
+                                // Check if finish button is enabled before stopping automations
+                                const questLogOpened = await openQuestLogWithRetry();
+                                if (questLogOpened) {
+                                    const allButtons = document.querySelectorAll('button');
+                                    const enabledFinishButton = Array.from(allButtons).find(btn => 
+                                        btn.querySelector('svg.lucide-check') && 
+                                        !btn.hasAttribute('disabled') && 
+                                        !btn.disabled
+                                    );
+                                    
+                                    if (enabledFinishButton) {
+                                        console.log('[Better Tasker] Finish button is enabled, stopping automations...');
+                                        // Stop ALL automations when task is ready AND finish button is enabled
+                                        stopAllAutomationsForTaskCompletion();
+                                    } else {
+                                        console.log('[Better Tasker] Task is ready but finish button is disabled - leaving autoplay running');
+                                        // Close quest log and continue without stopping automations
+                                        const escEvent = new KeyboardEvent('keydown', {
+                                            key: 'Escape',
+                                            code: 'Escape',
+                                            keyCode: 27,
+                                            which: 27,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        document.dispatchEvent(escEvent);
+                                        return;
+                                    }
+                                } else {
+                                    console.log('[Better Tasker] Could not open quest log to check finish button state');
+                                    return;
+                                }
                                 
                                 // Check if a game is currently running
                                 const boardContext = globalThis.state.board.getSnapshot().context;
