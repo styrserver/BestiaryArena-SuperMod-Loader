@@ -5,6 +5,42 @@ console.log('[Better Tasker] initializing...');
 // 1. CONSTANTS
 // ============================================================================
 
+// UI Text Constants - Centralized text management for multi-language support
+const UI_TEXT = {
+    BUTTONS: {
+        ENABLED: 'Enabled',
+        SETTINGS: 'Settings',
+        CLOSE: 'Close',
+        START: 'Start',
+        REMOVE: 'Remove',
+        CONFIRM: 'Confirm',
+        AUTO_SETUP: 'Auto-setup',
+        NEW_TASK: 'New task'
+    },
+    BUTTONS_PT: {
+        ENABLED: 'Habilitado',
+        SETTINGS: 'Configurações', 
+        CLOSE: 'Fechar',
+        START: 'Iniciar',
+        REMOVE: 'Remover',
+        CONFIRM: 'Confirmar',
+        AUTO_SETUP: 'Autoconfigurar',
+        NEW_TASK: 'Nova task'
+    },
+    LABELS: {
+        TASK_START_DELAY: 'Task Start Delay (seconds)',
+        AUTO_REFILL_STAMINA: 'Automatically refill stamina when starting a task',
+        CREATURE_SELECTION: 'Select which creatures you want to hunt for tasks:',
+        WARNING_UNSELECTED: 'Unselected creatures will cause active tasks to be removed'
+    },
+    LABELS_PT: {
+        TASK_START_DELAY: 'Delay de Início da Task (segundos)',
+        AUTO_REFILL_STAMINA: 'Recarregar stamina automaticamente ao iniciar uma task',
+        CREATURE_SELECTION: 'Selecione quais criaturas você quer caçar para tasks:',
+        WARNING_UNSELECTED: 'Criaturas não selecionadas causarão remoção de tasks ativas'
+    }
+};
+
 const MOD_ID = 'better-tasker';
 const TASKER_BUTTON_ID = `${MOD_ID}-settings-button`;
 const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
@@ -671,7 +707,7 @@ function findPawAndFurSection() {
 
 // Create the settings button
 function createSettingsButton() {
-    return createStyledButton(TASKER_BUTTON_ID, 'Settings', 'blue', () => {
+    return createStyledButton(TASKER_BUTTON_ID, UI_TEXT.BUTTONS.SETTINGS, 'blue', () => {
         console.log('[Better Tasker] Settings button clicked');
         openTaskerSettingsModal();
     });
@@ -800,7 +836,7 @@ function updateToggleButton() {
     if (!toggleButton) return;
     
     if (isTaskerEnabled) {
-        toggleButton.textContent = 'Enabled';
+        toggleButton.textContent = UI_TEXT.BUTTONS.ENABLED;
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
         
         // Clear any shimmer effect when just enabled
@@ -1464,7 +1500,7 @@ function openTaskerSettingsModal() {
                                 width: TASKER_MODAL_WIDTH,
                                 height: TASKER_MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: 'Close', primary: true }],
+                                buttons: [{ text: UI_TEXT.BUTTONS.CLOSE, primary: true }],
                                 onClose: () => {
                                     console.log('[Better Tasker] Settings modal closed');
                                     cleanupTaskerModal();
@@ -2453,9 +2489,12 @@ function clickAllCloseButtons() {
     const closeButtons = document.querySelectorAll('button');
     let clickedCount = 0;
     
+    // Use centralized text mapping for close button detection
+    const closeTexts = [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE];
+    
     for (const button of closeButtons) {
         const buttonText = button.textContent.trim();
-        if (buttonText === 'Close' || buttonText === 'Fechar') {
+        if (closeTexts.includes(buttonText)) {
             console.log(`[Better Tasker] Clicking close button: "${buttonText}"`);
             button.click();
             clickedCount++;
@@ -2602,11 +2641,16 @@ function disableBestiaryAutomatorFasterAutoplay() {
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    // Define text mappings for different languages
+    // Define text mappings for different languages using centralized constants
     const textMappings = {
-        'Auto-setup': ['Auto-setup', 'Autoconfigurar'],
-        'Start': ['Start', 'Iniciar'],
-        'Close': ['Close', 'Fechar']
+        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
+        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
+        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE],
+        'New task': [UI_TEXT.BUTTONS.NEW_TASK, UI_TEXT.BUTTONS_PT.NEW_TASK],
+        'Remove': [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE],
+        'Remove current task': ['Remove current task', 'Remover task atual'],
+        'Remove task': ['Remove task', 'Remover task'],
+        'Confirm': [UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM]
     };
     
     // Get the list of possible texts for the given text key
@@ -2615,6 +2659,43 @@ function findButtonByText(text) {
     return buttons.find(button => {
         const buttonText = button.textContent.trim();
         return possibleTexts.includes(buttonText) && isElementVisible(button);
+    }) || null;
+}
+
+// Finds button by partial text content with language support
+function findButtonByPartialText(textKey) {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    
+    // Define text mappings for different languages using centralized constants
+    const textMappings = {
+        'Remove': [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE]
+    };
+    
+    // Get the list of possible texts for the given text key
+    const possibleTexts = textMappings[textKey] || [textKey];
+    
+    return buttons.find(button => {
+        if (!isElementVisible(button)) return false;
+        const buttonText = button.textContent.trim();
+        return possibleTexts.some(text => buttonText.includes(text));
+    }) || null;
+}
+
+// Finds confirmation button for task removal
+function findConfirmationButton() {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    
+    // Define confirmation button text mappings using centralized constants
+    const confirmationTexts = [
+        'Remove current task', 'Remover task atual',
+        'Remove task', 'Remover task', 
+        UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM
+    ];
+    
+    return buttons.find(button => {
+        if (!isElementVisible(button)) return false;
+        const buttonText = button.textContent.trim();
+        return confirmationTexts.includes(buttonText);
     }) || null;
 }
 
@@ -3546,11 +3627,8 @@ async function handleTaskFinishing() {
                 console.log('[Better Tasker] Looking for New Task button...');
                 let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
                 if (!newTaskButton) {
-                    // Alternative selector for New Task button
-                    const buttons = document.querySelectorAll('button');
-                    newTaskButton = Array.from(buttons).find(btn => 
-                        btn.textContent.includes('New task') || btn.textContent.includes('New Task')
-                    );
+                    // Use localization system to find New Task button
+                    newTaskButton = findButtonByText('New task');
                 }
                 
                 if (newTaskButton) {
@@ -4422,9 +4500,14 @@ async function removeCurrentTaskIfNotAllowed() {
         const allButtons = document.querySelectorAll('button');
         for (const btn of allButtons) {
             const trashIcon = btn.querySelector('svg.lucide-trash2');
-            if (trashIcon && btn.textContent && btn.textContent.includes('Remove')) {
-                removeButton = btn;
-                break;
+            if (trashIcon && isElementVisible(btn)) {
+                // Use centralized function to check for remove button text
+                const possibleTexts = [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE];
+                const buttonText = btn.textContent.trim();
+                if (possibleTexts.some(text => buttonText.includes(text))) {
+                    removeButton = btn;
+                    break;
+                }
             }
         }
         
@@ -4440,17 +4523,16 @@ async function removeCurrentTaskIfNotAllowed() {
         // Wait for the confirmation dialog to appear
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Find and click the "Remove current task" confirmation button
-        const confirmButtons = document.querySelectorAll('button');
-        for (const btn of confirmButtons) {
-            if (btn.textContent && btn.textContent.includes('Remove current task')) {
-                console.log('[Better Tasker] Clicking confirmation button...');
-                btn.click();
-                
-                // Wait after confirmation click
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                break;
-            }
+        // Find and click the confirmation button
+        const confirmButton = findConfirmationButton();
+        if (confirmButton) {
+            console.log('[Better Tasker] Clicking confirmation button...');
+            confirmButton.click();
+            
+            // Wait after confirmation click
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+            console.log('[Better Tasker] Confirmation button not found');
         }
         
         console.log('[Better Tasker] Task removal completed');
@@ -4498,10 +4580,14 @@ async function removeTaskDirectlyFromQuestLog() {
             const allButtons = document.querySelectorAll('button');
             for (const btn of allButtons) {
                 const trashIcon = btn.querySelector('svg.lucide-trash2');
-                if (trashIcon && btn.textContent) {
+                if (trashIcon && isElementVisible(btn)) {
                     const text = btn.textContent.trim().toLowerCase();
                     // More specific matching to avoid false positives
-                    if (text === 'remove' || text === 'remove task' || text.includes('remove current')) {
+                    const possibleTexts = [UI_TEXT.BUTTONS.REMOVE.toLowerCase(), UI_TEXT.BUTTONS_PT.REMOVE.toLowerCase()];
+                    if (possibleTexts.some(possibleText => 
+                        text === possibleText || 
+                        text === `${possibleText} task` || 
+                        text.includes(`${possibleText} current`))) {
                         removeButton = btn;
                         break;
                     }
@@ -4528,23 +4614,18 @@ async function removeTaskDirectlyFromQuestLog() {
         // Wait for the confirmation dialog to appear
         await sleep(1000);
         
-        // Find and click the "Remove current task" confirmation button
+        // Find and click the confirmation button
+        const confirmButton = findConfirmationButton();
         let confirmationClicked = false;
-        const confirmButtons = document.querySelectorAll('button');
-        for (const btn of confirmButtons) {
-            if (btn.textContent) {
-                const text = btn.textContent.trim();
-                // More specific matching for confirmation button
-                if (text === 'Remove current task' || text === 'Remove task' || text === 'Confirm') {
-                    console.log('[Better Tasker] Clicking confirmation button...');
-                    btn.click();
-                    confirmationClicked = true;
-                    
-                    // Wait after confirmation click
-                    await sleep(1000);
-                    break;
-                }
-            }
+        if (confirmButton) {
+            console.log('[Better Tasker] Clicking confirmation button...');
+            confirmButton.click();
+            confirmationClicked = true;
+            
+            // Wait after confirmation click
+            await sleep(1000);
+        } else {
+            console.log('[Better Tasker] Confirmation button not found');
         }
         
         if (!confirmationClicked) {
@@ -4745,10 +4826,8 @@ async function openQuestLogAndAcceptTask() {
             console.log('[Better Tasker] Looking for New Task button...');
             let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
             if (!newTaskButton) {
-                const buttons = document.querySelectorAll('button');
-                newTaskButton = Array.from(buttons).find(btn => 
-                    btn.textContent.includes('New task') || btn.textContent.includes('New Task')
-                );
+                // Use localization system to find New Task button
+                newTaskButton = findButtonByText('New task');
             }
             
             if (newTaskButton) {
