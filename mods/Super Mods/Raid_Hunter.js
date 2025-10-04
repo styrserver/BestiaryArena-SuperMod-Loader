@@ -2451,17 +2451,25 @@ function handleRaidFailure(reason) {
 }
 
 function ensureAutoplayMode() {
+    // For raids, we need priority over other autoplay mods
+    const currentOwner = window.AutoplayManager.getCurrentOwner();
+    if (currentOwner && currentOwner !== 'Raid Hunter') {
+        console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for raid priority`);
+        // Force take control for raid priority
+        window.AutoplayManager.currentOwner = 'Raid Hunter';
+    }
+    
     return withControl(window.AutoplayManager, 'Raid Hunter', () => {
         const boardContext = globalThis.state.board.getSnapshot().context;
         const currentMode = boardContext.mode;
         
         if (currentMode !== 'autoplay') {
             globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
-            console.log('[Raid Hunter] Switched to autoplay mode');
+            console.log('[Raid Hunter] Switched to autoplay mode (raid priority)');
             return true;
         }
         return false;
-    }, 'switch to autoplay mode');
+    }, 'switch to autoplay mode for raid');
 }
 
 // Checks for existing raids.
