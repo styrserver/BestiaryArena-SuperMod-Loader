@@ -29,6 +29,7 @@ let totalGoldQuantity = 0;
 let totalCreatureDrops = 0;
 let totalEquipmentDrops = 0;
 let totalDustQuantity = 0;
+let totalShinyDrops = 0;
 let totalStaminaSpent = 0;
 let allGameSessionsData = [];
 let globalAggregatedLootData = new Map();
@@ -41,6 +42,15 @@ let lastSeed = null;
 // Cleanup references
 let boardSubscription = null;
 let gameTimerSubscription = null;
+
+// Event handler tracking for memory leak prevention
+let panelResizeMouseMoveHandler = null;
+let panelResizeMouseUpHandler = null;
+let panelDragMouseMoveHandler = null;
+let panelDragMouseUpHandler = null;
+let globalResizeMouseMoveHandler = null;
+let globalResizeMouseUpHandler = null;
+let windowMessageHandler = null;
 
 // Global variable for autoplay state - Declared once at the top
 let autoplayLogText = ""; 
@@ -56,6 +66,7 @@ let cachedEquipmentRateElement = null;
 let cachedRoomIdDisplayElement = null;
 let cachedTotalGoldDisplayElement = null;
 let cachedTotalDustDisplayElement = null;
+let cachedTotalShinyDisplayElement = null;
 let cachedTotalStaminaSpentElement = null;
 
 // Add cache for item visuals
@@ -248,16 +259,45 @@ function getCreatureDetails(monsterDrop) {
     const friendlyName = getMonsterNameFromId(monsterDrop.gameId);
     if (friendlyName) name = friendlyName;
     name = formatNameToTitleCase(name);
+    
+    // Check if creature is shiny
+    const isShiny = monsterDrop.shiny === true;
+    
+    // Create container for creature visual with potential shiny overlay
+    const visualContainer = document.createElement('div');
+    visualContainer.style.position = 'relative';
+    visualContainer.style.width = '36px';
+    visualContainer.style.height = '36px';
+    visualContainer.style.display = 'inline-block';
+    
     const creatureVisualImg = document.createElement('img');
-    creatureVisualImg.src = `/assets/portraits/${monsterDrop.gameId}.png`;
+    creatureVisualImg.src = `/assets/portraits/${monsterDrop.gameId}${isShiny ? '-shiny' : ''}.png`;
     creatureVisualImg.alt = name;
     creatureVisualImg.style.width = '36px';
     creatureVisualImg.style.height = '36px';
     creatureVisualImg.style.imageRendering = 'pixelated';
     creatureVisualImg.style.borderRadius = '3px';
-    let visual = creatureVisualImg;
+    
+    visualContainer.appendChild(creatureVisualImg);
+    
+    // Add shiny star overlay if creature is shiny
+    if (isShiny) {
+        const shinyIcon = document.createElement('img');
+        shinyIcon.src = '/assets/icons/shiny-star.png';
+        shinyIcon.alt = 'shiny';
+        shinyIcon.title = 'Shiny';
+        shinyIcon.style.position = 'absolute';
+        shinyIcon.style.top = '2px';
+        shinyIcon.style.left = '2px';
+        shinyIcon.style.width = '8px';
+        shinyIcon.style.height = '8px';
+        shinyIcon.style.zIndex = '10';
+        shinyIcon.style.pointerEvents = 'none';
+        visualContainer.appendChild(shinyIcon);
+    }
+    
     const { totalStats, tierName, tierLevel } = getCreatureTierDetails(monsterDrop.genes);
-    return { name, visual, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId };
+    return { name, visual: visualContainer, rarity: tierLevel, totalStats, tierName, tierLevel, gameId: monsterDrop.gameId, isShiny };
 }
 function copyToClipboard(text) {
     const textarea = document.createElement('textarea');
@@ -300,6 +340,7 @@ function renderAllSessions() {
     totalCreatureDrops = 0;
     totalEquipmentDrops = 0; // Recalculate total equipment drops
     totalDustQuantity = 0; // Recalculate total dust drops
+    totalShinyDrops = 0; // Recalculate total shiny drops
 
     // Clear global aggregated data before re-populating from all sessions
     globalAggregatedLootData.clear();
@@ -328,7 +369,8 @@ function renderAllSessions() {
         });
 
         sessionData.creatures.forEach(creature => {
-            const mapKey = `${creature.gameId}_${creature.tierLevel}`;
+            // Use the same map key format as in processAutoplaySummary
+            const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}`;
             if (globalAggregatedCreatureData.has(mapKey)) {
                 const existing = globalAggregatedCreatureData.get(mapKey);
                 existing.count += creature.count;
@@ -336,15 +378,23 @@ function renderAllSessions() {
             } else {
                 globalAggregatedCreatureData.set(mapKey, { ...creature });
             }
+            
+            // Count shiny drops for display
+            if (creature.isShiny) {
+                totalShinyDrops += creature.count;
+            }
         });
     });
 
-    // Update Gold and Dust display next to Loot title
+    // Update Gold, Dust, and Shiny display next to Loot title
     if (cachedTotalGoldDisplayElement) {
         cachedTotalGoldDisplayElement.textContent = totalGoldQuantity;
     }
     if (cachedTotalDustDisplayElement) {
         cachedTotalDustDisplayElement.textContent = totalDustQuantity;
+    }
+    if (cachedTotalShinyDisplayElement) {
+        cachedTotalShinyDisplayElement.textContent = totalShinyDrops;
     }
 
     // Filter out Gold and Dust from the main loot display (as they have separate totals)
@@ -466,11 +516,18 @@ function renderAllSessions() {
 
     // Sort and render overall aggregated creatures
     const sortedOverallCreatures = Array.from(globalAggregatedCreatureData.values()).sort((a, b) => {
-        // Sort by GameId (which is stored in 'gameId' property), then by tierLevel
+        // Sort by GameId (which is stored in 'gameId' property), then by tierLevel, then by shiny status
         if (a.gameId !== b.gameId) {
             return a.gameId - b.gameId; // Sort by GameId numerically
         }
-        return a.tierLevel - b.tierLevel; // Then by tier level
+        if (a.tierLevel !== b.tierLevel) {
+            return a.tierLevel - b.tierLevel; // Then by tier level
+        }
+        // Finally, sort normal creatures before shiny ones
+        if (a.isShiny !== b.isShiny) {
+            return a.isShiny ? 1 : -1;
+        }
+        return 0;
     });
 
     sortedOverallCreatures.forEach((data) => {
@@ -511,10 +568,14 @@ function renderAllSessions() {
 
         const nameSpan = document.createElement('span');
         nameSpan.style.flexGrow = '1';
-        // Display creature name as "GameID: X" or friendly name if available
-        nameSpan.textContent = data.originalName; // Now storing the friendly name or GameID: X
+        // Display creature name with shiny indicator if applicable
+        let displayName = data.originalName;
+        if (data.isShiny) {
+            displayName = `✨ ${displayName}`;
+        }
+        nameSpan.textContent = displayName;
         nameSpan.style.fontSize = "10px";
-        nameSpan.style.color = '#ABB2BF';
+        nameSpan.style.color = data.isShiny ? '#FFD700' : '#ABB2BF'; // Gold color for shiny creatures
         nameSpan.style.whiteSpace = 'nowrap';
         nameSpan.style.overflow = 'hidden';
         nameSpan.style.textOverflow = 'ellipsis';
@@ -652,11 +713,17 @@ function processAutoplaySummary(serverResults) {
 
     // Process Creature Drop
     if (rewardScreen.monsterDrop) {
-        const { name: creatureName, visual: creatureVisual, totalStats, tierName, tierLevel, gameId: creatureGameId } = 
+        const { name: creatureName, visual: creatureVisual, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny } = 
             getCreatureDetails(rewardScreen.monsterDrop);
 
         if (!creatureName.toLowerCase().includes('monster squeezer')) {
-            const mapKey = `${creatureGameId}_${tierLevel}`;
+            // Track shiny drops
+            if (isShiny) {
+                totalShinyDrops += 1;
+            }
+            
+            // Include shiny status in map key to separate shiny and normal creatures
+            const mapKey = `${creatureGameId}_${tierLevel}_${isShiny ? 'shiny' : 'normal'}`;
             if (aggregatedCreaturesForSession.has(mapKey)) {
                 const existing = aggregatedCreaturesForSession.get(mapKey);
                 existing.count += 1;
@@ -672,7 +739,8 @@ function processAutoplaySummary(serverResults) {
                     tierName,
                     tierLevel,
                     rarityBorderColor: getRarityBorderColor(tierLevel),
-                    gameId: creatureGameId
+                    gameId: creatureGameId,
+                    isShiny: isShiny
                 });
             }
         }
@@ -709,7 +777,7 @@ function generateSummaryLogText() {
     summary += `Sessions: ${autoplayCount}\n`;
     summary += `Time Elapsed: ${formatTime(overallElapsedTimeMs)}\n`;
     summary += `Gold: ${totalGoldQuantity} | Dust: ${totalDustQuantity}\n`;
-    summary += `Equipment Drops: ${totalEquipmentDrops} | Creature Drops: ${totalCreatureDrops}\n`;
+    summary += `Equipment Drops: ${totalEquipmentDrops} | Creature Drops: ${totalCreatureDrops} | Shiny Drops: ${totalShinyDrops}\n`;
     summary += `Total Stamina Spent: ${totalStaminaSpent}\n`;
     summary += `---------------------------\n\n`;
 
@@ -771,15 +839,26 @@ function generateSummaryLogText() {
     } else {
         // Sort creatures for consistent output
         const sortedCreatures = Array.from(globalAggregatedCreatureData.values()).sort((a, b) => {
-            // Sort by GameId (which is stored in 'gameId' property), then by tierLevel
+            // Sort by GameId (which is stored in 'gameId' property), then by tierLevel, then by shiny status
             if (a.gameId !== b.gameId) {
                 return a.gameId - b.gameId; // Sort by GameId numerically
             }
-            return a.tierLevel - b.tierLevel; // Then by tier level
+            if (a.tierLevel !== b.tierLevel) {
+                return a.tierLevel - b.tierLevel; // Then by tier level
+            }
+            // Finally, sort normal creatures before shiny ones
+            if (a.isShiny !== b.isShiny) {
+                return a.isShiny ? 1 : -1;
+            }
+            return 0;
         });
 
         sortedCreatures.forEach(creature => {
-            summary += `${creature.originalName} (${creature.tierName}): x${creature.count}\n`;
+            let creatureLine = `${creature.originalName} (${creature.tierName}): x${creature.count}`;
+            if (creature.isShiny) {
+                creatureLine = `✨ ${creatureLine}`;
+            }
+            summary += `${creatureLine}\n`;
         });
     }
     summary += `---------------------------\n`;
@@ -1069,6 +1148,25 @@ function createAutoplayAnalyzerPanel() {
     closeButton.addEventListener("click", () => {
         // Save panel settings before closing
         savePanelSettings(panel);
+        
+        // Remove document event listeners to prevent memory leaks
+        if (panelResizeMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
+            panelResizeMouseMoveHandler = null;
+        }
+        if (panelResizeMouseUpHandler) {
+            document.removeEventListener('mouseup', panelResizeMouseUpHandler);
+            panelResizeMouseUpHandler = null;
+        }
+        if (panelDragMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelDragMouseMoveHandler);
+            panelDragMouseMoveHandler = null;
+        }
+        if (panelDragMouseUpHandler) {
+            document.removeEventListener('mouseup', panelDragMouseUpHandler);
+            panelDragMouseUpHandler = null;
+        }
+        
         // Clear cached DOM references
         cachedLootDiv = null;
         cachedCreatureDropDiv = null;
@@ -1080,6 +1178,7 @@ function createAutoplayAnalyzerPanel() {
         cachedRoomIdDisplayElement = null;
         cachedTotalGoldDisplayElement = null;
         cachedTotalDustDisplayElement = null;
+        cachedTotalShinyDisplayElement = null;
         cachedTotalStaminaSpentElement = null;
         // Stop the live update interval
         if (updateIntervalId) {
@@ -1150,7 +1249,6 @@ function createAutoplayAnalyzerPanel() {
 
     // Start resizing on mousedown near edge/corner
     panel.addEventListener('mousedown', function(e) {
-        console.log('Current mode:', currentLayoutMode);
         if (currentLayoutMode === LAYOUT_MODES.MINIMIZED) {
             const layout = LAYOUT_DIMENSIONS[LAYOUT_MODES.MINIMIZED];
             panel.style.width = layout.width + 'px';
@@ -1176,7 +1274,7 @@ function createAutoplayAnalyzerPanel() {
         e.preventDefault();
     });
 
-    document.addEventListener('mousemove', function(e) {
+    panelResizeMouseMoveHandler = function(e) {
         if (!isResizing || currentLayoutMode === LAYOUT_MODES.MINIMIZED) return;
         let dx = e.clientX - resizeStartX;
         let dy = e.clientY - resizeStartY;
@@ -1206,15 +1304,17 @@ function createAutoplayAnalyzerPanel() {
         panel.style.left = newLeft + 'px';
         panel.style.top = newTop + 'px';
         panel.style.transition = 'none';
-    });
+    };
+    document.addEventListener('mousemove', panelResizeMouseMoveHandler);
 
-    document.addEventListener('mouseup', function() {
+    panelResizeMouseUpHandler = function() {
         if (isResizing) {
             isResizing = false;
             document.body.style.userSelect = '';
             panel.style.transition = '';
         }
-    });
+    };
+    document.addEventListener('mouseup', panelResizeMouseUpHandler);
     // --- END NATIVE-LIKE RESIZABLE PANEL LOGIC ---
 
     // --- DRAGGABLE PANEL LOGIC ---
@@ -1232,7 +1332,7 @@ function createAutoplayAnalyzerPanel() {
         e.preventDefault();
     });
 
-    document.addEventListener('mousemove', function(e) {
+    panelDragMouseMoveHandler = function(e) {
         if (!isDragging) return;
         let newLeft = e.clientX - dragOffsetX;
         let newTop = e.clientY - dragOffsetY;
@@ -1242,15 +1342,17 @@ function createAutoplayAnalyzerPanel() {
         panel.style.left = newLeft + 'px';
         panel.style.top = newTop + 'px';
         panel.style.transition = 'none';
-    });
+    };
+    document.addEventListener('mousemove', panelDragMouseMoveHandler);
 
-    document.addEventListener('mouseup', function() {
+    panelDragMouseUpHandler = function() {
         if (isDragging) {
             isDragging = false;
             document.body.style.userSelect = '';
             panel.style.transition = '';
         }
-    });
+    };
+    document.addEventListener('mouseup', panelDragMouseUpHandler);
     // --- END DRAGGABLE PANEL LOGIC ---
 
     // 2. Live Display Section
@@ -1353,8 +1455,8 @@ function createAutoplayAnalyzerPanel() {
     goldAmountSpan.style.fontWeight = 'bold';
     goldAmountSpan.textContent = '0';
 
-    goldDisplayDiv.appendChild(goldIcon);
     goldDisplayDiv.appendChild(goldAmountSpan);
+    goldDisplayDiv.appendChild(goldIcon);
     rightTotalsSection.appendChild(goldDisplayDiv);
 
     // Dust Display
@@ -1372,14 +1474,38 @@ function createAutoplayAnalyzerPanel() {
 
     const dustAmountSpan = document.createElement('span');
     dustAmountSpan.id = 'mod-total-dust-display';
-    dustAmountSpan.style.color = '#C678DD';
+    dustAmountSpan.style.color = '#61AFEF';
     dustAmountSpan.style.fontSize = '12px';
     dustAmountSpan.style.fontWeight = 'bold';
     dustAmountSpan.textContent = '0';
 
-    dustDisplayDiv.appendChild(dustIcon);
     dustDisplayDiv.appendChild(dustAmountSpan);
+    dustDisplayDiv.appendChild(dustIcon);
     rightTotalsSection.appendChild(dustDisplayDiv);
+
+    // Shiny Display
+    const shinyDisplayDiv = document.createElement('div');
+    shinyDisplayDiv.style.display = 'flex';
+    shinyDisplayDiv.style.alignItems = 'center';
+    shinyDisplayDiv.style.gap = '4px';
+
+    const shinyIcon = document.createElement('img');
+    shinyIcon.style.width = '20px';
+    shinyIcon.style.height = '20px';
+    shinyIcon.style.imageRendering = 'pixelated';
+    shinyIcon.src = '/assets/icons/shiny-star.png';
+    shinyIcon.alt = 'Shiny';
+
+    const shinyAmountSpan = document.createElement('span');
+    shinyAmountSpan.id = 'mod-total-shiny-display';
+    shinyAmountSpan.style.color = '#C678DD';
+    shinyAmountSpan.style.fontSize = '12px';
+    shinyAmountSpan.style.fontWeight = 'bold';
+    shinyAmountSpan.textContent = '0';
+
+    shinyDisplayDiv.appendChild(shinyAmountSpan);
+    shinyDisplayDiv.appendChild(shinyIcon);
+    rightTotalsSection.appendChild(shinyDisplayDiv);
 
     dropRateLiveFeedDiv.appendChild(leftRatesSection);
     dropRateLiveFeedDiv.appendChild(rightTotalsSection);
@@ -1552,6 +1678,7 @@ function createAutoplayAnalyzerPanel() {
             totalCreatureDrops = 0;
             totalEquipmentDrops = 0; // NEW: Reset equipment drops on clear
             totalDustQuantity = 0; // NEW: Reset dust drops on clear
+            totalShinyDrops = 0; // NEW: Reset shiny drops on clear
             totalStaminaSpent = 0; // Reset stamina on clear
             modOverallStartTime = Date.now(); // Reset overall session timer
             sessionStartTime = 0;
@@ -1678,6 +1805,7 @@ function createAutoplayAnalyzerPanel() {
     cachedRoomIdDisplayElement = roomIdDisplay;
     cachedTotalGoldDisplayElement = goldAmountSpan;
     cachedTotalDustDisplayElement = dustAmountSpan;
+    cachedTotalShinyDisplayElement = shinyAmountSpan;
     cachedTotalStaminaSpentElement = totalStaminaSpentElement;
 
     // Set custom properties for layout management
@@ -1735,6 +1863,7 @@ function updatePanelDisplay() {
     if (!cachedRoomIdDisplayElement) cachedRoomIdDisplayElement = document.getElementById("mod-room-id-display");
     if (!cachedTotalGoldDisplayElement) cachedTotalGoldDisplayElement = document.getElementById("mod-total-gold-display");
     if (!cachedTotalDustDisplayElement) cachedTotalDustDisplayElement = document.getElementById("mod-total-dust-display");
+    if (!cachedTotalShinyDisplayElement) cachedTotalShinyDisplayElement = document.getElementById("mod-total-shiny-display");
     if (!cachedTotalStaminaSpentElement) cachedTotalStaminaSpentElement = document.getElementById("mod-total-stamina-spent");
 
     // Update the session counter display
@@ -1776,6 +1905,9 @@ function updatePanelDisplay() {
     }
     if (cachedEquipmentRateElement) {
         cachedEquipmentRateElement.textContent = `Equipment/h: ${equipmentRatePerHour}`;
+    }
+    if (cachedTotalShinyDisplayElement) {
+        cachedTotalShinyDisplayElement.textContent = totalShinyDrops;
     }
     if (cachedTotalStaminaSpentElement) {
         cachedTotalStaminaSpentElement.textContent = `Stamina spent: ${totalStaminaSpent} (${staminaSpentRatePerHour}/h)`;
@@ -2061,30 +2193,9 @@ if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
         primary: false,
         onClick: createAutoplayAnalyzerPanel
     });
-} else {
-    // This block is a fallback for development/testing environments
-    // where the game's 'api' object might not be present.
-    // In a production environment with the game API, this block can be removed.
-    const testButton = document.createElement("button");
-    testButton.textContent = "Open Hunt Analyzer (Test)"; // Renamed button text
-    testButton.style.position = "fixed";
-    testButton.style.bottom = "10px";
-    testButton.style.right = "10px";
-    testButton.style.padding = "10px";
-    testButton.style.backgroundColor = "#555";
-    testButton.style.color = "#fff";
-    testButton.style.border = "none";
-    testButton.style.borderRadius = "5px";
-    testButton.style.zIndex = "10000";
-    testButton.style.cursor = "pointer";
-    testButton.setAttribute('data-hunt-analyzer-test', 'true');
-    testButton.addEventListener("click", createAutoplayAnalyzerPanel);
-    document.body.appendChild(testButton);
-    console.log("[Hunt Analyzer] Fallback test button added.");
 }
 
 // Initial script execution setup.
-console.log("[Hunt Analyzer] Hunt Analyzer script initialized.");
 
 // Add these functions before createAutoplayAnalyzerPanel()
 function savePanelSettings(panel) {
@@ -2242,7 +2353,7 @@ function onResizeHandleMouseDown(e) {
     e.preventDefault();
 }
 
-document.addEventListener('mousemove', function(e) {
+globalResizeMouseMoveHandler = function(e) {
     if (!panelState.isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
     const panel = document.getElementById(PANEL_ID);
     const layout = LAYOUT_DIMENSIONS[panelState.mode];
@@ -2283,9 +2394,10 @@ document.addEventListener('mousemove', function(e) {
     panel.style.left = newLeft + 'px';
     panel.style.top = newTop + 'px';
     panel.classList.add('resizing');
-});
+};
+document.addEventListener('mousemove', globalResizeMouseMoveHandler);
 
-document.addEventListener('mouseup', function(e) {
+globalResizeMouseUpHandler = function(e) {
     if (panelState.isResizing) {
         const panel = document.getElementById(PANEL_ID);
         if (panel) {
@@ -2294,7 +2406,8 @@ document.addEventListener('mouseup', function(e) {
         document.body.style.userSelect = '';
         panelState.resetResizeState();
     }
-});
+};
+document.addEventListener('mouseup', globalResizeMouseUpHandler);
 
 // Double-click header to maximize/restore
 function onHeaderDblClick(e) {
@@ -2362,50 +2475,8 @@ const panelState = {
     }
 };
 
-// Update the onHeaderDblClick function to use the new state management
-function onHeaderDblClick(e) {
-    const panel = document.getElementById(PANEL_ID);
-    if (!panel) return;
-    panelState.setMaximized(panel, !panelState.isMaximized);
-}
 
-// Update the onResizeHandleMouseDown function
-function onResizeHandleMouseDown(e) {
-    if (panelState.mode === LAYOUT_MODES.MINIMIZED) return;
-    
-    const dir = e.target.getAttribute('data-dir');
-    if (!dir) return;
-    
-    const panel = e.target.parentElement;
-    const rect = panel.getBoundingClientRect();
-    
-    Object.assign(panelState, {
-        isResizing: true,
-        resizeDir: dir,
-        resizeStartX: e.clientX,
-        resizeStartY: e.clientY,
-        startWidth: rect.width,
-        startHeight: rect.height,
-        startLeft: rect.left,
-        startTop: rect.top
-    });
-    
-    panel.classList.add('resizing');
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-}
 
-// Update the mouseup event listener
-document.addEventListener('mouseup', function(e) {
-    if (panelState.isResizing) {
-        const panel = document.getElementById(PANEL_ID);
-        if (panel) {
-            panel.classList.remove('resizing');
-        }
-        document.body.style.userSelect = '';
-        panelState.resetResizeState();
-    }
-});
 
 // =======================
 // 6. Cleanup System
@@ -2422,7 +2493,37 @@ function cleanupHuntAnalyzer() {
             updateIntervalId = null;
         }
         
-        // 2. Unsubscribe from subscriptions
+        // 2. Remove document event listeners to prevent memory leaks
+        if (panelResizeMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
+            panelResizeMouseMoveHandler = null;
+        }
+        if (panelResizeMouseUpHandler) {
+            document.removeEventListener('mouseup', panelResizeMouseUpHandler);
+            panelResizeMouseUpHandler = null;
+        }
+        if (panelDragMouseMoveHandler) {
+            document.removeEventListener('mousemove', panelDragMouseMoveHandler);
+            panelDragMouseMoveHandler = null;
+        }
+        if (panelDragMouseUpHandler) {
+            document.removeEventListener('mouseup', panelDragMouseUpHandler);
+            panelDragMouseUpHandler = null;
+        }
+        if (globalResizeMouseMoveHandler) {
+            document.removeEventListener('mousemove', globalResizeMouseMoveHandler);
+            globalResizeMouseMoveHandler = null;
+        }
+        if (globalResizeMouseUpHandler) {
+            document.removeEventListener('mouseup', globalResizeMouseUpHandler);
+            globalResizeMouseUpHandler = null;
+        }
+        if (windowMessageHandler) {
+            window.removeEventListener('message', windowMessageHandler);
+            windowMessageHandler = null;
+        }
+        
+        // 3. Unsubscribe from subscriptions
         if (boardSubscription) {
             try {
                 boardSubscription.unsubscribe();
@@ -2441,18 +2542,14 @@ function cleanupHuntAnalyzer() {
             }
         }
         
-        // 3. Remove panel and test button
+        // 4. Remove panel and test button
         const panel = document.getElementById(PANEL_ID);
         if (panel && panel.parentNode) {
             panel.parentNode.removeChild(panel);
         }
         
-        const testButton = document.querySelector('[data-hunt-analyzer-test]');
-        if (testButton && testButton.parentNode) {
-            testButton.parentNode.removeChild(testButton);
-        }
         
-        // 4. Reset critical state only
+        // 5. Reset critical state only
         autoplayCount = 0;
         isGameActive = false;
         allGameSessionsData = [];
@@ -2468,7 +2565,7 @@ function cleanupHuntAnalyzer() {
 }
 
 // Listen for mod disable events
-window.addEventListener('message', (event) => {
+windowMessageHandler = function(event) {
     if (event.data && event.data.message && event.data.message.action === 'updateLocalModState') {
         const modName = event.data.message.name;
         const enabled = event.data.message.enabled;
@@ -2478,7 +2575,8 @@ window.addEventListener('message', (event) => {
             cleanupHuntAnalyzer();
         }
     }
-});
+};
+window.addEventListener('message', windowMessageHandler);
 
 // Export functionality
 exports = {
@@ -2493,4 +2591,3 @@ exports = {
         totalStaminaSpent
     })
 };
-

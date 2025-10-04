@@ -126,6 +126,9 @@
     // Subscription management for cleanup
     subscriptions: [],
     
+    // Timeout tracking for cleanup
+    timeouts: [],
+    
     // State validation
     validateState() {
       const errors = [];
@@ -180,6 +183,19 @@
       this.totalErrors = 0;
       this.leaderboardCache.clear();
       this.subscriptions = [];
+      this.timeouts = [];
+    },
+    
+    // Helper function to track timeouts for cleanup
+    trackTimeout(timeoutId) {
+      this.timeouts.push(timeoutId);
+      return timeoutId;
+    },
+    
+    // Helper function to clear all tracked timeouts
+    clearTimeouts() {
+      this.timeouts.forEach(id => clearTimeout(id));
+      this.timeouts = [];
     },
     
     // State update with validation
@@ -523,9 +539,9 @@
             // If we were analyzing and now we're not, restore the container if we have one
             if (BetterHighscoresState.preservedContainer) {
               log('[Better Highscores] Board analysis completed, restoring preserved container');
-              setTimeout(() => {
+              BetterHighscoresState.trackTimeout(setTimeout(() => {
                 restoreContainer();
-              }, 100);
+              }, 100));
             }
           }
         }
@@ -578,7 +594,7 @@
       BetterHighscoresState.wasInSandboxMode = false;
       
       // Force update to ensure correct map data is displayed
-      setTimeout(() => updateLeaderboards(), 100);
+      BetterHighscoresState.trackTimeout(setTimeout(() => updateLeaderboards(), 100));
     } else if (BetterHighscoresState.preservedContainer) {
       // We have a preserved container but not in sandbox mode (probably from board analysis)
       log('[Better Highscores] Restoring preserved container from board analysis');
@@ -603,7 +619,7 @@
       BetterHighscoresState.preservedContainer = null;
       
       // Force update to ensure correct map data is displayed after board analysis
-      setTimeout(() => updateLeaderboards(), 100);
+      BetterHighscoresState.trackTimeout(setTimeout(() => updateLeaderboards(), 100));
     } else {
       // Only log this once to avoid spam
       if (!BetterHighscoresState.lastNoContainerLog || Date.now() - BetterHighscoresState.lastNoContainerLog > 5000) {
@@ -968,6 +984,7 @@
     BetterHighscoresState.loadFromStorage();
     
     // Wait for game state to be available
+    let checkGameStateTimeout = null;
     const checkGameState = () => {
       if (globalThis.state && globalThis.state.board) {
         // Initial update
@@ -1135,9 +1152,9 @@
                  log('[Better Highscores] Battle completed in sandbox mode, restoring container');
                  
                  // Small delay to ensure game state is fully updated
-                 setTimeout(() => {
+                 BetterHighscoresState.trackTimeout(setTimeout(() => {
                    restoreContainer();
-                 }, 100);
+                 }, 100));
                  return;
                }
                
@@ -1146,7 +1163,7 @@
                  log('[Better Highscores] Battle completed in autoplay mode, ensuring leaderboard is visible');
                  
                  // Small delay to ensure game state is fully updated
-                 setTimeout(() => {
+                 BetterHighscoresState.trackTimeout(setTimeout(() => {
                    // Check if leaderboard is missing and restore it
                    if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
                      log('[Better Highscores] Leaderboard missing after autoplay battle, restoring');
@@ -1156,14 +1173,14 @@
                      log('[Better Highscores] Refreshing leaderboard data after autoplay battle');
                      updateLeaderboards();
                    }
-                 }, 200);
+                 }, 200));
                  return;
                }
                
                log('[Better Highscores] Battle completed, refreshing leaderboard data');
                
                // Force refresh with fresh data
-               setTimeout(async () => {
+               BetterHighscoresState.trackTimeout(setTimeout(async () => {
                  const mapCode = getCurrentMapCode();
                  if (mapCode) {
                    try {
@@ -1184,7 +1201,7 @@
                      console.warn('[Better Highscores] Failed to refresh leaderboard after battle:', error);
                    }
                  }
-               }, 500); // Small delay to ensure game state is fully updated
+               }, 500)); // Small delay to ensure game state is fully updated
              }
              
              // NEW: Detect transition from 'playing' to 'initial' (sandbox game ended)
@@ -1192,9 +1209,9 @@
                log('[Better Highscores] Sandbox game ended, restoring container');
                
                // Small delay to ensure game state is fully updated
-               setTimeout(() => {
+               BetterHighscoresState.trackTimeout(setTimeout(() => {
                  restoreContainer();
-               }, 100);
+               }, 100));
              }
              
              // NEW: Detect transition from 'initial' to 'playing' (sandbox game started)
@@ -1202,9 +1219,9 @@
                log('[Better Highscores] Sandbox game started, preserving container');
                
                // Small delay to ensure game state is fully updated
-               setTimeout(() => {
+               BetterHighscoresState.trackTimeout(setTimeout(() => {
                  preserveContainer();
-               }, 100);
+               }, 100));
              }
              
              // NEW: Detect transition from 'playing' to 'initial' (autoplay game ended)
@@ -1212,7 +1229,7 @@
                log('[Better Highscores] Autoplay game ended, ensuring leaderboard is visible');
                
                // Small delay to ensure game state is fully updated
-               setTimeout(() => {
+               BetterHighscoresState.trackTimeout(setTimeout(() => {
                  // Check if leaderboard is missing and restore it
                  if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
                    log('[Better Highscores] Leaderboard missing after autoplay game ended, restoring');
@@ -1222,7 +1239,7 @@
                    log('[Better Highscores] Refreshing leaderboard data after autoplay game ended');
                    updateLeaderboards();
                  }
-               }, 200);
+               }, 200));
              }
              
              // NEW: Detect transition from 'initial' to 'playing' (autoplay game started)
@@ -1230,13 +1247,13 @@
                log('[Better Highscores] Autoplay game started, ensuring leaderboard is visible');
                
                // Small delay to ensure game state is fully updated
-               setTimeout(() => {
+               BetterHighscoresState.trackTimeout(setTimeout(() => {
                  // Ensure leaderboard is visible when autoplay starts
                  if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
                    log('[Better Highscores] Leaderboard missing when autoplay started, restoring');
                    updateLeaderboards();
                  }
-               }, 200);
+               }, 200));
              }
              
              previousState = currentState;
@@ -1247,7 +1264,8 @@
          }
         
         // NEW: Set up periodic check for autoplay mode to ensure leaderboard stays visible
-        window.betterHighscoresInterval = setInterval(() => {
+        window.BetterHighscoresInternals = window.BetterHighscoresInternals || {};
+        window.BetterHighscoresInternals.interval = setInterval(() => {
           if (isAutoplayMode() && (!leaderboardContainer || !document.contains(leaderboardContainer))) {
             log('[Better Highscores] Periodic check: Leaderboard missing in autoplay mode, restoring');
             updateLeaderboards();
@@ -1255,7 +1273,7 @@
         }, 5000); // Check every 5 seconds
         
         // NEW: Set up MutationObserver to detect when leaderboard gets removed from DOM
-        window.betterHighscoresObserver = new MutationObserver((mutations) => {
+        window.BetterHighscoresInternals.observer = new MutationObserver((mutations) => {
           if (!isAutoplayMode()) return;
           
           for (const mutation of mutations) {
@@ -1265,9 +1283,9 @@
                     (removedNode.nodeType === Node.ELEMENT_NODE && 
                      removedNode.contains && removedNode.contains(leaderboardContainer))) {
                   log('[Better Highscores] Leaderboard removed from DOM during autoplay, restoring');
-                  setTimeout(() => {
+                  BetterHighscoresState.trackTimeout(setTimeout(() => {
                     updateLeaderboards();
-                  }, 100);
+                  }, 100));
                   break;
                 }
               }
@@ -1276,7 +1294,7 @@
         });
         
         // Observe the document body for leaderboard removal
-        window.betterHighscoresObserver.observe(document.body, { 
+        window.BetterHighscoresInternals.observer.observe(document.body, { 
           childList: true, 
           subtree: true 
         });
@@ -1284,7 +1302,8 @@
         log('[Better Highscores] Initialization complete');
       } else {
         // Retry after a short delay
-        setTimeout(checkGameState, 1000);
+        checkGameStateTimeout = BetterHighscoresState.trackTimeout(setTimeout(checkGameState, 1000));
+        window.betterHighscoresCheckGameStateTimeout = checkGameStateTimeout;
       }
     };
     
@@ -1328,20 +1347,33 @@
     DOMCache.clear();
     BetterHighscoresState.leaderboardCache.clear();
     
+    // Clear all tracked timeouts
+    BetterHighscoresState.clearTimeouts();
+    
+    // Clear checkGameState timeout if it exists
+    if (window.betterHighscoresCheckGameStateTimeout) {
+      clearTimeout(window.betterHighscoresCheckGameStateTimeout);
+      window.betterHighscoresCheckGameStateTimeout = null;
+    }
+    
     // Clean up observers and intervals
-    if (window.betterHighscoresInterval) {
-      clearInterval(window.betterHighscoresInterval);
-      window.betterHighscoresInterval = null;
+    if (window.BetterHighscoresInternals?.interval) {
+      clearInterval(window.BetterHighscoresInternals.interval);
+      window.BetterHighscoresInternals.interval = null;
     }
     
-    if (window.betterHighscoresObserver) {
-      window.betterHighscoresObserver.disconnect();
-      window.betterHighscoresObserver = null;
+    if (window.BetterHighscoresInternals?.observer) {
+      window.BetterHighscoresInternals.observer.disconnect();
+      window.BetterHighscoresInternals.observer = null;
     }
     
-    // Clean up global window object
+    // Clean up global window objects
     if (window.BetterHighscores) {
       delete window.BetterHighscores;
+    }
+    
+    if (window.BetterHighscoresInternals) {
+      delete window.BetterHighscoresInternals;
     }
     
     log('[Better Highscores] Cleanup complete');

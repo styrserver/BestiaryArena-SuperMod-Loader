@@ -698,7 +698,7 @@ const handleDayCare = async () => {
     console.log('[Bestiary Automator] Found', blipElements.length, 'elements with data-blip="true"');
     
     // Check for daycare button with visual indicator
-    const dayCareButton = document.querySelector('button:has(img[alt="daycare"])');
+    const dayCareButton = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
     let hasDayCareButtonIndicator = false;
     
     if (dayCareButton) {
@@ -711,7 +711,7 @@ const handleDayCare = async () => {
     }
     
     // Look for creatures that are actually in daycare slots (have both creature and daycare images)
-    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="daycare"])');
+    const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="daycare"]), div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="Daycare"])');
     
     if (creatureAtDaycare) {
       console.log('[Bestiary Automator] Found creature at daycare with blip');
@@ -733,13 +733,14 @@ const handleDayCare = async () => {
     // Check if there are any elements that contain both a blip AND a daycare image
     let foundBlipWithDaycare = false;
     let foundReadyCreature = false;
+    let foundMaxedCreature = false;
     
     // Analyze blip elements for daycare creatures
     for (let i = 0; i < blipElements.length; i++) {
       const blipElement = blipElements[i];
       
       // Only check blip elements that have both creature and daycare images (actual daycare creatures)
-      const daycareImg = blipElement.querySelector('img[alt="daycare"]');
+      const daycareImg = blipElement.querySelector('img[alt="daycare"], img[alt="Daycare"]');
       const creatureImg = blipElement.querySelector('img[alt="creature"]');
       
       if (daycareImg && creatureImg) {
@@ -755,13 +756,14 @@ const handleDayCare = async () => {
           console.log(`[Bestiary Automator] Creature ${i + 1} is ready for level up!`);
           foundReadyCreature = true;
         } else if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
-          console.log(`[Bestiary Automator] Creature ${i + 1} is at max level, skipping`);
+          console.log(`[Bestiary Automator] Creature ${i + 1} is at max level, needs ejection`);
+          foundMaxedCreature = true;
         }
       }
     }
     
     // Check if there are any daycare images without blips that might be ready
-    const allDaycareImages = document.querySelectorAll('img[alt="daycare"]');
+    const allDaycareImages = document.querySelectorAll('img[alt="daycare"], img[alt="Daycare"]');
     for (let i = 0; i < allDaycareImages.length; i++) {
       const daycareImg = allDaycareImages[i];
       const parentElement = daycareImg.closest('[data-blip="true"]');
@@ -779,21 +781,27 @@ const handleDayCare = async () => {
           // For creatures without blips, check if they're not at max level
           if (!maxLevelText?.textContent?.includes('Max')) {
             foundReadyCreature = true;
+          } else {
+            foundMaxedCreature = true;
           }
         }
       }
     }
     
-    // Check if any creatures are ready for level up
+    // Check if any creatures need daycare attention (ready for level up OR maxed and need ejection)
     
-    if (foundBlipWithDaycare && !foundReadyCreature) {
-      console.log('[Bestiary Automator] Found daycare creatures but none ready for level up');
+    if (foundBlipWithDaycare && !foundReadyCreature && !foundMaxedCreature) {
+      console.log('[Bestiary Automator] Found daycare creatures but none ready for level up or maxed');
     }
     
-    // Only proceed if there are actually creatures ready for level up
-    if (!foundReadyCreature) {
-      console.log('[Bestiary Automator] No creatures ready for level up at daycare, skipping');
+    // Only proceed if there are creatures that need daycare attention
+    if (!foundReadyCreature && !foundMaxedCreature) {
+      console.log('[Bestiary Automator] No creatures need daycare attention, skipping');
       return;
+    }
+    
+    if (foundMaxedCreature) {
+      console.log('[Bestiary Automator] Found maxed creatures that need ejection from daycare');
     }
     
     console.log('[Bestiary Automator] Handling day care');
@@ -802,7 +810,7 @@ const handleDayCare = async () => {
     await sleep(500);
     
     // Double-check after opening inventory
-    const dayCareButtonAfter = document.querySelector('button:has(img[alt="daycare"])');
+    const dayCareButtonAfter = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
     if (!dayCareButtonAfter) return;
     
     dayCareButtonAfter.click();
@@ -824,7 +832,7 @@ const handleDayCare = async () => {
       
       for (let i = 0; i < readyCreatures.length; i++) {
         const creature = readyCreatures[i];
-        const daycareImg = creature.querySelector('img[alt="daycare"]');
+        const daycareImg = creature.querySelector('img[alt="daycare"], img[alt="Daycare"]');
         
         if (daycareImg) {
           const isRedBlip = creature.querySelector('.text-invalid');
@@ -873,6 +881,92 @@ const handleDayCare = async () => {
     }
     
     console.log(`[Bestiary Automator] Completed ${levelUpCount} level ups`);
+    
+    // Handle ejection of maxed creatures
+    if (foundMaxedCreature) {
+      console.log('[Bestiary Automator] Starting maxed creature ejection process');
+      
+      let ejectionCount = 0;
+      const maxEjections = 4; // Maximum 4 creatures can be in daycare
+      
+      while (ejectionCount < maxEjections) {
+        console.log(`[Bestiary Automator] === Ejection attempt ${ejectionCount + 1} ===`);
+        
+        // Check if there are any maxed creatures that need ejection
+        // Look for daycare slot containers that contain maxed creatures
+        const daycareSlots = document.querySelectorAll('div.relative.flex.items-center.gap-2');
+        let foundMaxedCreatureInModal = false;
+        
+        console.log(`[Bestiary Automator] Checking ${daycareSlots.length} daycare slots for maxed creatures...`);
+        
+        for (let i = 0; i < daycareSlots.length; i++) {
+          const slot = daycareSlots[i];
+          // Check if this slot has a maxed creature (has "Max" text)
+          const maxLevelText = slot.querySelector('span[data-state="closed"]');
+          const withdrawButton = slot.querySelector('button[title="Withdraw"]');
+          
+          console.log(`[Bestiary Automator] Daycare slot ${i + 1}:`);
+          console.log(`[Bestiary Automator] - Max text:`, maxLevelText?.textContent);
+          console.log(`[Bestiary Automator] - Withdraw button:`, !!withdrawButton);
+          
+          if (maxLevelText?.textContent?.includes('Max') && withdrawButton) {
+            console.log(`[Bestiary Automator] Daycare slot ${i + 1} has maxed creature, ejecting!`);
+            foundMaxedCreatureInModal = true;
+            break; // Found one to eject, break and process it
+          }
+        }
+        
+        if (!foundMaxedCreatureInModal) {
+          console.log('[Bestiary Automator] No more maxed creatures to eject, stopping');
+          break;
+        }
+        
+        // Click the withdraw button for the maxed creature
+        console.log('[Bestiary Automator] Attempting to click withdraw button...');
+        
+        // Try multiple methods to find and click the withdraw button
+        let withdrawClicked = false;
+        
+        // Method 1: Try the text-based button finder
+        withdrawClicked = clickButtonWithText('withdraw');
+        
+        // Method 2: If that fails, look for button by title attribute
+        if (!withdrawClicked) {
+          const withdrawButton = document.querySelector('button[title="Withdraw"]');
+          if (withdrawButton) {
+            console.log('[Bestiary Automator] Found withdraw button by title attribute, clicking...');
+            withdrawButton.click();
+            withdrawClicked = true;
+          }
+        }
+        
+        // Method 3: If that fails, look for button by aria-label
+        if (!withdrawClicked) {
+          const withdrawButton = document.querySelector('button[aria-label="Withdraw"]');
+          if (withdrawButton) {
+            console.log('[Bestiary Automator] Found withdraw button by aria-label, clicking...');
+            withdrawButton.click();
+            withdrawClicked = true;
+          }
+        }
+        
+        if (!withdrawClicked) {
+          console.log('[Bestiary Automator] Withdraw button not found by any method, stopping ejection process');
+          break;
+        }
+        
+        ejectionCount++;
+        console.log(`[Bestiary Automator] Successfully ejected creature ${ejectionCount}`);
+        
+        // Wait for the ejection to process
+        console.log('[Bestiary Automator] Waiting 1 second for ejection to process...');
+        await sleep(1000);
+        
+        console.log(`[Bestiary Automator] Ejection ${ejectionCount} completed`);
+      }
+      
+      console.log(`[Bestiary Automator] Completed ${ejectionCount} ejections`);
+    }
     
     // Close the modal after handling all creatures
     clickAllCloseButtons();

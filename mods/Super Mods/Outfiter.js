@@ -15,6 +15,12 @@ const DATA_AVAILABLE = typeof DATA !== 'undefined';
 // Store original fetch for cleanup
 let originalFetch = null;
 
+// Store timer IDs for cleanup
+let restoreTimer = null;
+
+// Store notification cleanup timers
+const notificationTimers = new Set();
+
 // =======================
 // 3. Helper Functions
 // =======================
@@ -162,15 +168,21 @@ function showOutfitChangeNotification(message, type = 'success') {
     }, 100);
     
     // Auto-remove after 3 seconds
-    setTimeout(() => {
+    const fadeTimer = setTimeout(() => {
       notification.style.opacity = '0';
       notification.style.transform = 'translateX(100%)';
-      setTimeout(() => {
+      const removeTimer = setTimeout(() => {
         if (notification.parentNode) {
           notification.parentNode.removeChild(notification);
         }
+        // Clean up timer references
+        notificationTimers.delete(removeTimer);
       }, 300);
+      notificationTimers.add(removeTimer);
     }, 3000);
+    
+    // Store timer for cleanup
+    notificationTimers.add(fadeTimer);
     
   } catch (error) {
     console.error('[Outfiter] Error showing notification:', error);
@@ -332,7 +344,7 @@ function executeOutfiter() {
     interceptOutfitChangeErrors();
     
     // Restore saved outfit after a short delay to ensure state is ready
-    setTimeout(() => {
+    restoreTimer = setTimeout(() => {
       restoreSavedOutfit();
     }, 1000);
     
@@ -369,6 +381,26 @@ exports = {
       if (typeof window !== 'undefined') {
         // Remove event listener to prevent memory leaks
         window.removeEventListener('message', handleOutfiterToggle);
+        
+        // Clear any pending timers
+        if (restoreTimer) {
+          clearTimeout(restoreTimer);
+          restoreTimer = null;
+        }
+        
+        // Clear all notification timers
+        notificationTimers.forEach(timer => {
+          clearTimeout(timer);
+        });
+        notificationTimers.clear();
+        
+        // Clean up any remaining notifications
+        const notifications = document.querySelectorAll('[style*="position: fixed"][style*="top: 20px"][style*="right: 20px"]');
+        notifications.forEach(notification => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        });
         
         // Restore original fetch if it was modified
         if (originalFetch) {
