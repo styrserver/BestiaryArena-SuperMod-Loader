@@ -248,6 +248,11 @@
     return ' (' + shinies.map(shiny => `${shiny.name} (${shiny.totalGenes}%)`).join(', ') + ')';
   }
   
+  // Helper function to get proper pluralization for shiny creatures
+  function getShinyCreatureText(count) {
+    return count === 1 ? '1 shiny creature' : `${count} shiny creatures`;
+  }
+  
   // UI state
   let selectedScrollTier = 1;
   let selectedCreatures = [];
@@ -1591,11 +1596,11 @@
               return autosellNonSelected && selectedCreatures.length === 0 && selectedScrollTier === 5;
             };
             if (isShinyHuntMode()) {
-              message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`;
+              message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`;
             } else {
               message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
               if (selectedScrollTier === 5) {
-                message += ` Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`;
+                message += ` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`;
               }
             }
           }
@@ -1645,8 +1650,7 @@
         if (result.summonedMonster.shiny === true) {
           autoscrollStats.shinyCount++;
           const monsterName = getMonsterNameFromGameId(result.summonedMonster.gameId);
-          const genes = getMonsterGenes(result.summonedMonster);
-          const totalGenes = genes.totalGenes || 0;
+          const totalGenes = getMonsterGenes(result.summonedMonster);
           console.log(`✨ SHINY FOUND! ${monsterName || 'Unknown'} (${totalGenes}% genes)`);
           autoscrollStats.foundShinies.push({
             name: monsterName || 'Unknown',
@@ -1908,11 +1912,11 @@
           return autosellNonSelected && selectedCreatures.length === 0 && selectedScrollTier === 5;
         };
         if (isShinyHuntMode()) {
-          message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`;
+          message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`;
         } else {
           message = `Finished: Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`;
           if (selectedScrollTier === 5) {
-            message += ` Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`;
+            message += ` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`;
           }
         }
       }
@@ -3590,7 +3594,7 @@
           return autosellNonSelected && selectedCreatures.length === 0 && selectedScrollTier === 5;
         };
         if (isShinyHuntMode()) {
-          messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`);
+          messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
         } else {
           messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`);
         }
@@ -3608,7 +3612,7 @@
       
       // Add shiny count (only for T5 Exceptional Summon Scrolls, but not in shiny hunt mode)
       if (selectedScrollTier === 5 && !(autosellNonSelected && selectedCreatures.length === 0)) {
-        messageParts.push(` Found ${autoscrollStats.shinyCount} shiny creatures${formatShinyList(autoscrollStats.foundShinies)}.`);
+        messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
       }
       
       // Add rate limit information if there are pending sales
