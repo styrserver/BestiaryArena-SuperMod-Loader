@@ -1977,8 +1977,8 @@ const createConfigPanel = () => {
   
   // Faster autoplay checkbox with warning
   const fasterAutoplayWarningText = config.currentLocale === 'pt' 
-    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay, tornando o jogo mais rápido. Pode causar comportamento inesperado ou conflitos com outros mods.'
-    : '⚠️ Removes the 3-second delay between autoplay actions, making the game run faster. May cause unexpected behavior or conflicts with other mods.';
+    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay. Pode causar comportamento inesperado ou conflitos com outros mods.'
+    : '⚠️ Removes the 3-second delay between autoplay actions. May cause unexpected behavior or conflicts with other mods.';
   
   const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   

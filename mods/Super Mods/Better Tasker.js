@@ -47,7 +47,14 @@ const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
 
 // Default settings constants
 const DEFAULT_TASK_START_DELAY = 3;
-const DEFAULT_TASKER_ENABLED = false;
+
+// Tasker states
+const TASKER_STATES = {
+    DISABLED: 'disabled',
+    NEW_TASK_ONLY: 'new_task_only',
+    ENABLED: 'enabled'
+};
+const DEFAULT_TASKER_STATE = TASKER_STATES.DISABLED;
 
 // Task handling delay constants
 const QUEST_LOG_LOAD_DELAY = 300;
@@ -298,12 +305,13 @@ let lastModalCall = 0;
 let escKeyListener = null;
 
 // Automation State
-let isTaskerEnabled = false;
+let taskerState = TASKER_STATES.DISABLED;
 let taskHuntingOngoing = false;
 let taskNavigationCompleted = false;
 let autoplayPausedByTasker = false;
 let pendingTaskCompletion = false;
 let taskOperationInProgress = false;
+let questBlipObserver = null;
 
 // Session State
 let lastGameStateChange = 0;
@@ -593,17 +601,17 @@ function setupRaidHunterCoordination() {
         isRaidHunterActive = isRaidHunterRaiding();
         
         // If Raid Hunter just became active and we're running automation, stop it
-        if (isRaidHunterActive && !wasRaidHunterActive && isTaskerEnabled) {
+        if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
             console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation');
             stopAutomation();
         }
         
         // If Raid Hunter stopped raiding and we were enabled, resume automation
-        if (!isRaidHunterActive && wasRaidHunterActive && isTaskerEnabled) {
+        if (!isRaidHunterActive && wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
             console.log('[Better Tasker] Raid Hunter stopped raiding - resuming task automation');
             // Small delay before resuming to ensure Raid Hunter has fully stopped
             setTimeout(() => {
-                if (!isRaidHunterRaiding() && isTaskerEnabled) {
+                if (!isRaidHunterRaiding() && taskerState === TASKER_STATES.ENABLED) {
                     // Now that Raid Hunter has stopped, we can safely disable its Bestiary Automator settings
                     // and enable our own if needed
                     handleRaidHunterStopped();
@@ -781,53 +789,185 @@ function insertButtons() {
 // 5. STATE MANAGEMENT FUNCTIONS
 // ============================================================================
 
+// Setup quest blip monitoring for "New Task Only" mode
+function setupQuestBlipMonitoring() {
+    if (questBlipObserver) {
+        console.log('[Better Tasker] Quest blip observer already exists');
+        return;
+    }
+    
+    console.log('[Better Tasker] Setting up quest blip monitoring...');
+    
+    questBlipObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE && taskerState === TASKER_STATES.NEW_TASK_ONLY) {
+                    // Check if quest blip appeared
+                    const questBlip = node.querySelector?.('img[src*="quest-blip.png"]') || 
+                                    node.querySelector?.('[class*="quest-blip"]') ||
+                                    (node.matches?.('img[src*="quest-blip.png"]') ? node : null);
+                    
+                    if (questBlip) {
+                        console.log('[Better Tasker] Quest blip detected - triggering New Task Only mode');
+                        handleNewTaskOnly();
+                    }
+                }
+            });
+        });
+    });
+    
+    questBlipObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Better Tasker] Quest blip monitoring started');
+}
+
+// Stop quest blip monitoring
+function stopQuestBlipMonitoring() {
+    if (questBlipObserver) {
+        questBlipObserver.disconnect();
+        questBlipObserver = null;
+        console.log('[Better Tasker] Quest blip monitoring stopped');
+    }
+}
+
 // Load tasker state from localStorage
 function loadTaskerState() {
-    const saved = localStorage.getItem('betterTaskerEnabled');
+    const saved = localStorage.getItem('betterTaskerState');
     if (saved !== null) {
         try {
-            isTaskerEnabled = JSON.parse(saved);
-            console.log('[Better Tasker] Loaded tasker state from localStorage:', isTaskerEnabled);
+            taskerState = saved;
+            console.log('[Better Tasker] Loaded tasker state from localStorage:', taskerState);
         } catch (error) {
             console.error('[Better Tasker] Error parsing tasker state:', error);
-            isTaskerEnabled = false;
+            taskerState = TASKER_STATES.DISABLED;
         }
     } else {
-        console.log('[Better Tasker] No saved tasker state, using default (disabled)');
+        // Try to migrate from old boolean system
+        const oldSaved = localStorage.getItem('betterTaskerEnabled');
+        if (oldSaved !== null) {
+            try {
+                const oldState = JSON.parse(oldSaved);
+                taskerState = oldState ? TASKER_STATES.ENABLED : TASKER_STATES.DISABLED;
+                console.log('[Better Tasker] Migrated from old boolean system:', taskerState);
+                // Clean up old key
+                localStorage.removeItem('betterTaskerEnabled');
+            } catch (error) {
+                console.error('[Better Tasker] Error migrating from old system:', error);
+                taskerState = TASKER_STATES.DISABLED;
+            }
+        } else {
+            console.log('[Better Tasker] No saved tasker state, using default (disabled)');
+            taskerState = TASKER_STATES.DISABLED;
+        }
     }
 }
 
 // Save tasker state to localStorage
 function saveTaskerState() {
-    localStorage.setItem('betterTaskerEnabled', JSON.stringify(isTaskerEnabled));
-    console.log('[Better Tasker] Saved tasker state to localStorage:', isTaskerEnabled);
+    localStorage.setItem('betterTaskerState', taskerState);
+    console.log('[Better Tasker] Saved tasker state to localStorage:', taskerState);
 }
 
-// Toggle tasker on/off
+// Handle "New Task Only" functionality
+async function handleNewTaskOnly() {
+    try {
+        console.log('[Better Tasker] New Task Only mode - opening quest log...');
+        
+        // 1. Find and click quest blip to open quest log
+        const questBlip = document.querySelector('img[src*="quest-blip.png"]');
+        if (!questBlip) {
+            console.log('[Better Tasker] No quest blip found');
+            return;
+        }
+        
+        questBlip.click();
+        await sleep(300); // Wait for quest log to open
+        
+        // 2. Look for and click "New Task" button
+        console.log('[Better Tasker] Looking for New Task button...');
+        let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
+        if (!newTaskButton) {
+            // Use localization system to find New Task button
+            newTaskButton = findButtonByText('New task');
+        }
+        
+        if (newTaskButton) {
+            console.log('[Better Tasker] New Task button found, clicking...');
+            newTaskButton.click();
+            await sleep(200);
+            console.log('[Better Tasker] New Task button clicked');
+            
+            // 3. Close quest log with ESC key
+            await sleep(500); // Wait for task selection to load
+            for (let i = 0; i < 3; i++) {
+                const escEvent = new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    keyCode: 27,
+                    which: 27,
+                    bubbles: true
+                });
+                document.dispatchEvent(escEvent);
+                await sleep(50);
+            }
+            
+            console.log('[Better Tasker] Quest log closed - New Task Only mode complete');
+        } else {
+            console.log('[Better Tasker] New Task button not found');
+            // Close quest log anyway
+            for (let i = 0; i < 3; i++) {
+                const escEvent = new KeyboardEvent('keydown', {
+                    key: 'Escape',
+                    keyCode: 27,
+                    which: 27,
+                    bubbles: true
+                });
+                document.dispatchEvent(escEvent);
+                await sleep(50);
+            }
+        }
+        
+    } catch (error) {
+        console.error('[Better Tasker] Error in New Task Only mode:', error);
+    }
+}
+
+// Toggle tasker through the 3 states
 function toggleTasker() {
-    // Check if Raid Hunter is actively raiding before enabling
-    if (!isTaskerEnabled && isRaidHunterRaiding()) {
+    // Check if Raid Hunter is actively raiding before enabling full automation
+    if (taskerState === TASKER_STATES.DISABLED && isRaidHunterRaiding()) {
         console.log('[Better Tasker] Cannot enable Tasker - Raid Hunter is actively raiding');
         // Show user feedback that Tasker cannot be enabled due to Raid Hunter
         updateToggleButtonWithRaidHunterStatus();
         return;
     }
     
-    isTaskerEnabled = !isTaskerEnabled;
+    // Rotate through states: Enable → New Task+ → Disabled
+    switch (taskerState) {
+        case TASKER_STATES.DISABLED:
+            taskerState = TASKER_STATES.ENABLED;
+            stopQuestBlipMonitoring();
+            startAutomation();
+            break;
+        case TASKER_STATES.ENABLED:
+            taskerState = TASKER_STATES.NEW_TASK_ONLY;
+            stopAutomation();
+            setupQuestBlipMonitoring();
+            break;
+        case TASKER_STATES.NEW_TASK_ONLY:
+            taskerState = TASKER_STATES.DISABLED;
+            stopQuestBlipMonitoring();
+            resetState('navigation');
+            updateExposedState();
+            break;
+    }
+    
     saveTaskerState();
     updateToggleButton();
     
-    if (isTaskerEnabled) {
-        console.log('[Better Tasker] Tasker enabled');
-        startAutomation();
-    } else {
-        console.log('[Better Tasker] Tasker disabled');
-        // Reset state when user manually disables automation
-        resetState('navigation');
-        stopAutomation();
-        // Update exposed state immediately so other mods (like Raid Hunter) can detect the change
-        updateExposedState();
-    }
+    console.log('[Better Tasker] Tasker state changed to:', taskerState);
 }
 
 // Update the toggle button appearance
@@ -835,28 +975,31 @@ function updateToggleButton() {
     const toggleButton = document.querySelector(`#${TASKER_TOGGLE_ID}`);
     if (!toggleButton) return;
     
-    if (isTaskerEnabled) {
-        toggleButton.textContent = UI_TEXT.BUTTONS.ENABLED;
-        toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-        
-        // Clear any shimmer effect when just enabled
-        toggleButton.style.background = '';
-        toggleButton.style.backgroundSize = '';
-        toggleButton.style.backgroundClip = '';
-        toggleButton.style.webkitBackgroundClip = '';
-        toggleButton.style.webkitTextFillColor = '';
-        toggleButton.style.animation = '';
-    } else {
-        toggleButton.textContent = 'Disabled';
-        toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-        
-        // Clear shimmer effect
-        toggleButton.style.background = '';
-        toggleButton.style.backgroundSize = '';
-        toggleButton.style.backgroundClip = '';
-        toggleButton.style.webkitBackgroundClip = '';
-        toggleButton.style.webkitTextFillColor = '';
-        toggleButton.style.animation = '';
+    // Clear any shimmer effect
+    toggleButton.style.background = '';
+    toggleButton.style.backgroundSize = '';
+    toggleButton.style.backgroundClip = '';
+    toggleButton.style.webkitBackgroundClip = '';
+    toggleButton.style.webkitTextFillColor = '';
+    toggleButton.style.animation = '';
+    
+    switch (taskerState) {
+        case TASKER_STATES.DISABLED:
+            toggleButton.textContent = 'Disabled';
+            toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
+            break;
+        case TASKER_STATES.NEW_TASK_ONLY:
+            toggleButton.textContent = 'New Task+';
+            toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
+            // Set custom blue background
+            toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
+            toggleButton.style.backgroundSize = 'cover';
+            toggleButton.style.backgroundPosition = 'center';
+            break;
+        case TASKER_STATES.ENABLED:
+            toggleButton.textContent = UI_TEXT.BUTTONS.ENABLED;
+            toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
+            break;
     }
 }
 
@@ -1360,7 +1503,7 @@ function debouncedProcessAllMutations(mutations) {
     }
     
     // Handle Paw and Fur Society detection (only if tasker is enabled)
-    if (hasPawAndFurContent && isTaskerEnabled) {
+    if (hasPawAndFurContent && taskerState === TASKER_STATES.ENABLED) {
         console.log('[Better Tasker] Paw and Fur Society content detected!');
         
         // Try to insert buttons immediately
@@ -2727,6 +2870,61 @@ function ensureAutoplayMode() {
 }
 
 
+// Consolidated failsafe function - replaces all duplicated failsafe logic
+async function triggerFailsafe(reason) {
+    console.log(`[Better Tasker] FAILSAFE TRIGGERED: ${reason} - stopping autoplay immediately!`);
+    
+    // Stop all automations immediately (includes autoplay, Bestiary Automator, Raid Hunter coordination)
+    const automationsStopped = await stopAllAutomationsForTaskCompletion();
+    if (!automationsStopped) {
+        console.warn('[Better Tasker] Failed to stop automations, continuing with task completion anyway');
+    }
+    
+    // Wait for game to end if running, then complete task
+    await waitForGameEndAndCompleteTask();
+}
+
+
+// Wait for game to end and complete task
+async function waitForGameEndAndCompleteTask() {
+    try {
+        // Check if a game is currently running
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        const isGameRunning = boardContext.gameStarted;
+        console.log('[Better Tasker] Game running check after failsafe:', isGameRunning);
+        
+        if (isGameRunning) {
+            console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
+            pendingTaskCompletion = true;
+            updateExposedState(); // Update exposed state for other mods
+            console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
+            
+            // Start continuous checking for game end
+            await waitForGameToEnd();
+            
+            // Game has ended, proceed with task completion
+            console.log('[Better Tasker] Game ended, proceeding with task completion...');
+        } else {
+            console.log('[Better Tasker] No game running, proceeding with task completion immediately...');
+        }
+        
+        // Complete task regardless of game state
+        resetState('taskComplete');
+        await handleTaskReadyCompletion();
+        
+    } catch (error) {
+        console.error('[Better Tasker] Error in waitForGameEndAndCompleteTask:', error);
+        // Still try to complete the task even if there was an error
+        try {
+            resetState('taskComplete');
+            await handleTaskReadyCompletion();
+        } catch (completionError) {
+            console.error('[Better Tasker] Error in task completion after error:', completionError);
+            cleanupTaskCompletionFailure('error in waitForGameEndAndCompleteTask');
+        }
+    }
+}
+
 // Stop all automations when task is ready to be claimed
 async function stopAllAutomationsForTaskCompletion() {
     try {
@@ -3192,6 +3390,15 @@ async function handleTaskReadyCompletion() {
         updateExposedState(); // Update exposed state for other mods
         console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
         
+        // Safety timeout to reset the flag if operation gets stuck (30 seconds)
+        setTimeout(() => {
+            if (taskOperationInProgress) {
+                console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+                taskOperationInProgress = false;
+                updateExposedState();
+            }
+        }, 30000);
+        
         // Start quest button validation monitoring
         startQuestButtonValidation();
         
@@ -3329,8 +3536,8 @@ async function handlePostGameTaskCompletion() {
 
 // Handle task finishing - main function for completing tasks
 async function handleTaskFinishing() {
-    if (!isTaskerEnabled) {
-        console.log('[Better Tasker] Tasker disabled, skipping task completion');
+    if (taskerState !== TASKER_STATES.ENABLED) {
+        console.log('[Better Tasker] Tasker not in enabled state, skipping task completion');
         return;
     }
     
@@ -3430,7 +3637,7 @@ async function handleTaskFinishing() {
                     await new Promise(resolve => setTimeout(resolve, taskStartDelay * 1000));
                     
                     // Check if tasker is still enabled after delay
-                    if (!isTaskerEnabled) {
+                    if (taskerState !== TASKER_STATES.ENABLED) {
                         console.log('[Better Tasker] Tasker disabled during task start delay');
                         return;
                     }
@@ -3484,66 +3691,7 @@ async function handleTaskFinishing() {
             }
             
             if (isTaskReady) {
-                console.log('[Better Tasker] Task ready via API, checking if finish button is enabled...');
-                
-                // First check if finish button is actually enabled before stopping automations
-                const questLogOpened = await openQuestLogWithRetry();
-                if (questLogOpened) {
-                    // Check if finish button exists and is enabled
-                    const allButtons = document.querySelectorAll('button');
-                    const enabledFinishButton = Array.from(allButtons).find(btn => 
-                        btn.querySelector('svg.lucide-check') && 
-                        !btn.hasAttribute('disabled') && 
-                        !btn.disabled
-                    );
-                    
-                    if (enabledFinishButton) {
-                        console.log('[Better Tasker] Finish button is enabled, stopping automations and proceeding...');
-                        // Stop ALL automations when task is ready AND finish button is enabled
-                        await stopAllAutomationsForTaskCompletion();
-                    } else {
-                        console.log('[Better Tasker] Task is ready but finish button is disabled - leaving autoplay running');
-                        // Close quest log and return without stopping automations
-                        const escEvent = new KeyboardEvent('keydown', {
-                            key: 'Escape',
-                            code: 'Escape',
-                            keyCode: 27,
-                            which: 27,
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        document.dispatchEvent(escEvent);
-                        return;
-                    }
-                } else {
-                    console.log('[Better Tasker] Could not open quest log to check finish button state');
-                    return;
-                }
-                
-                // Check if a game is currently running
-                const boardContext = globalThis.state.board.getSnapshot().context;
-                const isGameRunning = boardContext.gameStarted;
-                console.log('[Better Tasker] Game running check:', isGameRunning);
-                
-                if (isGameRunning) {
-                    console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
-                    pendingTaskCompletion = true;
-                    updateExposedState(); // Update exposed state for other mods
-                    console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
-                    
-                    // Start continuous checking for game end
-                    await waitForGameToEnd();
-                    
-                    // Game has ended, proceed with task completion
-                    console.log('[Better Tasker] Game ended, proceeding with task completion...');
-                    await handleTaskReadyCompletion();
-                    return;
-                } else {
-                    console.log('[Better Tasker] No game running, proceeding with task completion...');
-                }
-                
-                // Task is ready and no game running - proceed with claiming
-                await handleTaskReadyCompletion();
+                await triggerFailsafe('Task is ready');
                 return;
                 
             } else if (isQuestBlipReady) {
@@ -3638,6 +3786,15 @@ async function handleTaskFinishing() {
                     updateExposedState();
                     console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
                     
+                    // Safety timeout to reset the flag if operation gets stuck (30 seconds)
+                    setTimeout(() => {
+                        if (taskOperationInProgress) {
+                            console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+                            taskOperationInProgress = false;
+                            updateExposedState();
+                        }
+                    }, 30000);
+                    
                     newTaskButton.click();
                     await sleep(200);
                     console.log('[Better Tasker] New Task button clicked');
@@ -3663,6 +3820,7 @@ async function handleTaskFinishing() {
                         
                         // Clear task operation in progress flag and return early
                         taskOperationInProgress = false;
+                        updateExposedState();
                         return;
                     }
                     
@@ -3737,6 +3895,7 @@ async function handleTaskFinishing() {
                     
                 // Clear task operation in progress flag
                 taskOperationInProgress = false;
+                updateExposedState();
                     
                     // Reset task hunting flag since task is now completed
                     resetState('taskComplete');
@@ -3781,6 +3940,7 @@ async function handleTaskFinishing() {
                         console.log('[Better Tasker] Finish button never became ready');
                         // Clear task operation in progress flag since no finish button appeared
                         taskOperationInProgress = false;
+                        updateExposedState();
                         console.log('[Better Tasker] Task completion and progress flags cleared - no finish button');
                         
                         // Stop quest button validation and restore appearance
@@ -3804,6 +3964,15 @@ async function handleTaskFinishing() {
                         taskOperationInProgress = true;
                         updateExposedState();
                         console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
+                        
+                        // Safety timeout to reset the flag if operation gets stuck (30 seconds)
+                        setTimeout(() => {
+                            if (taskOperationInProgress) {
+                                console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+                                taskOperationInProgress = false;
+                                updateExposedState();
+                            }
+                        }, 30000);
                         
                         // Start quest button validation monitoring
                         startQuestButtonValidation();
@@ -3843,6 +4012,7 @@ async function handleTaskFinishing() {
                         if (!pawAndFurSection) {
                             console.log('[Better Tasker] Paw and Fur Society section not found');
                             taskOperationInProgress = false;
+                            updateExposedState();
                             return;
                         }
                         
@@ -3864,6 +4034,7 @@ async function handleTaskFinishing() {
                             
                             // Clear flags and return
                             taskOperationInProgress = false;
+                            updateExposedState();
                             return;
                         }
                         
@@ -3896,6 +4067,7 @@ async function handleTaskFinishing() {
                 console.log('[Better Tasker] Quest blip not found and Quests button fallback failed - waiting 1 minute before next check');
                 // Clear task operation in progress flag since no quest blip was found
                 taskOperationInProgress = false;
+                updateExposedState();
                 console.log('[Better Tasker] Task completion and progress flags cleared - no quest blip');
                 
                 // Stop quest button validation and restore appearance
@@ -3920,6 +4092,7 @@ async function handleTaskFinishing() {
             console.log('[Better Tasker] No quest log or task found - waiting 1 minute before next check');
             // Clear task operation in progress flag since no quest log or task was found
             taskOperationInProgress = false;
+            updateExposedState();
             console.log('[Better Tasker] Task completion and progress flags cleared - no quest log or task');
             
             // Stop quest button validation and restore appearance
@@ -3972,74 +4145,8 @@ function subscribeToGameState() {
                             
                             // If 60+ creatures killed, assume task is finished (max quest requirement)
                             if (task.killCount >= 60) {
-                                console.log('[Better Tasker] 60+ creatures killed - assuming task is finished!');
-                                task.ready = true; // Force task to be ready
-                            }
-                            
-                            // Calculate remaining kills if we can determine the target
-                            if (task.ready) {
-                                console.log('[Better Tasker] Task is ready to complete!');
-                                
-                                // Check if finish button is enabled before stopping automations
-                                const questLogOpened = await openQuestLogWithRetry();
-                                if (questLogOpened) {
-                                    const allButtons = document.querySelectorAll('button');
-                                    const enabledFinishButton = Array.from(allButtons).find(btn => 
-                                        btn.querySelector('svg.lucide-check') && 
-                                        !btn.hasAttribute('disabled') && 
-                                        !btn.disabled
-                                    );
-                                    
-                                    if (enabledFinishButton) {
-                                        console.log('[Better Tasker] Finish button is enabled, stopping automations...');
-                                        // Stop ALL automations when task is ready AND finish button is enabled
-                                        stopAllAutomationsForTaskCompletion();
-                                    } else {
-                                        console.log('[Better Tasker] Task is ready but finish button is disabled - leaving autoplay running');
-                                        // Close quest log and continue without stopping automations
-                                        const escEvent = new KeyboardEvent('keydown', {
-                                            key: 'Escape',
-                                            code: 'Escape',
-                                            keyCode: 27,
-                                            which: 27,
-                                            bubbles: true,
-                                            cancelable: true
-                                        });
-                                        document.dispatchEvent(escEvent);
-                                        return;
-                                    }
-                                } else {
-                                    console.log('[Better Tasker] Could not open quest log to check finish button state');
-                                    return;
-                                }
-                                
-                                // Check if a game is currently running
-                                const boardContext = globalThis.state.board.getSnapshot().context;
-                                const isGameRunning = boardContext.gameStarted;
-                                console.log('[Better Tasker] Game running check:', isGameRunning);
-                                
-                                if (isGameRunning) {
-                                    console.log('[Better Tasker] Game is running, waiting for game to finish before claiming task...');
-                                    pendingTaskCompletion = true;
-                                    updateExposedState(); // Update exposed state for other mods
-                                    console.log('[Better Tasker] Pending task completion flag set - waiting for game to end');
-                                    
-                                    // Start continuous checking for game end
-                                    await waitForGameToEnd();
-                                    
-                                    // Game has ended, proceed with task completion
-                                    console.log('[Better Tasker] Game ended, proceeding with task completion...');
-                                    await handleTaskReadyCompletion();
-                                    return;
-                                } else {
-                                    console.log('[Better Tasker] No game running, proceeding with task completion...');
-                                }
-                                
-                                // Reset task hunting flag since task is ready
-                                resetState('taskComplete');
-                                
-                                // Check and finish tasks immediately if they're ready
-                                handleTaskFinishing();
+                                await triggerFailsafe('60+ creatures killed');
+                                return;
                             }
                         }
                     }
@@ -4077,32 +4184,8 @@ function subscribeToGameState() {
                             
                             // If 60+ creatures killed, assume task is finished (max quest requirement)
                             if (task.killCount >= 60) {
-                                console.log('[Better Tasker] 60+ creatures killed - assuming task is finished!');
-                                task.ready = true; // Force task to be ready
-                            }
-                            
-                            // Calculate remaining kills if we can determine the target
-                            if (task.ready) {
-                                console.log('[Better Tasker] Task is ready to complete!');
-                                
-                                // Check if we have a pending task completion
-                                if (pendingTaskCompletion) {
-                                    console.log('[Better Tasker] Game ended, now claiming pending task...');
-                                    pendingTaskCompletion = false;
-                                    
-                                    // Autoplay is already paused from when task became ready
-                                    // Reset task hunting flag since task is ready
-                                    resetState('taskComplete');
-                                    
-                                    // Handle task completion now that game has ended
-                                    await handlePostGameTaskCompletion();
-                                } else {
-                                    // Stop ALL automations to prevent interference during task completion
-                                    stopAllAutomationsForTaskCompletion();
-                                    
-                                    // Reset task hunting flag since task is ready
-                                    resetState('taskComplete');
-                                }
+                                await triggerFailsafe('60+ creatures killed');
+                                return;
                             }
                         }
                     }
@@ -4240,7 +4323,7 @@ function stopAutomation() {
 function runAutomationTasks() {
     try {
         // Only run if tasker is enabled
-        if (!isTaskerEnabled) {
+        if (taskerState !== TASKER_STATES.ENABLED) {
             return;
         }
         
@@ -4693,7 +4776,7 @@ function isCreatureAllowed(creatureName) {
 function checkQuestLogForTasks() {
     try {
         // Only run if tasker is enabled
-        if (!isTaskerEnabled) {
+        if (taskerState !== TASKER_STATES.ENABLED) {
             return;
         }
         
@@ -4790,6 +4873,7 @@ async function openQuestLogAndAcceptTask() {
                     if (!pawAndFurSection) {
                         console.log('[Better Tasker] Paw and Fur Society section not found');
                         taskOperationInProgress = false;
+                        updateExposedState();
                         return;
                     }
                     
@@ -4811,6 +4895,7 @@ async function openQuestLogAndAcceptTask() {
                         
                         // Clear flags and return
                         taskOperationInProgress = false;
+                        updateExposedState();
                         return;
                     }
                     
@@ -4849,6 +4934,15 @@ async function openQuestLogAndAcceptTask() {
                 updateExposedState();
                 console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
                 
+                // Safety timeout to reset the flag if operation gets stuck (30 seconds)
+                setTimeout(() => {
+                    if (taskOperationInProgress) {
+                        console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+                        taskOperationInProgress = false;
+                        updateExposedState();
+                    }
+                }, 30000);
+                
                 newTaskButton.click();
                 await sleep(200);
                 console.log('[Better Tasker] New Task button clicked');
@@ -4874,6 +4968,7 @@ async function openQuestLogAndAcceptTask() {
                     
                     // Clear task operation in progress flag and return early
                     taskOperationInProgress = false;
+                    updateExposedState();
                     return;
                 }
                 
@@ -4908,7 +5003,7 @@ function init() {
     loadTaskerState();
     
     // Only set up Raid Hunter coordination if tasker is enabled
-    if (isTaskerEnabled) {
+    if (taskerState === TASKER_STATES.ENABLED) {
         setupRaidHunterCoordination();
         
         // Check Raid Hunter status immediately on startup
@@ -4925,8 +5020,13 @@ function init() {
     startUIMonitoring();
     
     // Start automation if enabled (will check for Raid Hunter internally)
-    if (isTaskerEnabled) {
+    if (taskerState === TASKER_STATES.ENABLED) {
         startAutomation();
+    }
+    
+    // Start quest blip monitoring if in New Task Only mode
+    if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
+        setupQuestBlipMonitoring();
     }
     
     console.log('[Better Tasker] Better Tasker Mod initialized.');
@@ -5051,7 +5151,7 @@ function exposeTaskerState() {
             taskOperationInProgress: taskOperationInProgress,
             taskHuntingOngoing: taskHuntingOngoing,
             pendingTaskCompletion: pendingTaskCompletion,
-            isTaskerEnabled: isTaskerEnabled,
+            taskerState: taskerState,
             taskNavigationCompleted: taskNavigationCompleted
         };
     }
