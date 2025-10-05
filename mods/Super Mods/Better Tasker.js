@@ -3077,21 +3077,33 @@ async function verifyTaskCompletion() {
             // If task has no gameId, it means it was completed successfully
             if (!task.gameId) {
                 console.log('[Better Tasker] Task verification successful - no active task found');
+                // Reset task navigation flag to allow future task completions
+                taskNavigationCompleted = false;
+                console.log('[Better Tasker] Task navigation flag reset - ready for next task');
                 return true;
             }
             
             // If task exists but is not ready, it was completed
             if (!task.ready) {
                 console.log('[Better Tasker] Task verification successful - task no longer ready');
+                // Reset task navigation flag to allow future task completions
+                taskNavigationCompleted = false;
+                console.log('[Better Tasker] Task navigation flag reset - ready for next task');
                 return true;
             }
         } else {
             // No task in quest log means it was completed successfully
             console.log('[Better Tasker] Task verification successful - no task in quest log');
+            // Reset task navigation flag to allow future task completions
+            taskNavigationCompleted = false;
+            console.log('[Better Tasker] Task navigation flag reset - ready for next task');
             return true;
         }
         
         console.log('[Better Tasker] Task verification inconclusive - defaulting to successful');
+        // Reset task navigation flag to allow future task completions
+        taskNavigationCompleted = false;
+        console.log('[Better Tasker] Task navigation flag reset - ready for next task');
         return true;
     } catch (error) {
         console.error('[Better Tasker] Error verifying task completion:', error);
