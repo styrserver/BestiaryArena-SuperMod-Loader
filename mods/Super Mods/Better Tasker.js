@@ -160,6 +160,25 @@ function createStyledInput(type, id, value, style, attributes = {}) {
     return input;
 }
 
+// Helper function to add tracked event listeners
+function addTrackedListener(element, event, handler) {
+    element.addEventListener(event, handler);
+    if (!trackedListeners.has(element)) {
+        trackedListeners.set(element, []);
+    }
+    trackedListeners.get(element).push({ event, handler });
+}
+
+// Helper function to clear tracked timeouts
+function clearTrackedTimeouts() {
+    safetyTimeouts.forEach(timeoutId => {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
+    });
+    safetyTimeouts = [];
+}
+
 // Create a reusable checkbox setting with label and description
 function createCheckboxSetting(id, labelText, description, checked = false) {
     const settingDiv = document.createElement('div');
@@ -184,8 +203,8 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
         height: 16px;
         accent-color: #ffe066;
     `, { checked });
-    // Add auto-save listener immediately
-    checkbox.addEventListener('change', autoSaveSettings);
+    // Add auto-save listener with tracking
+    addTrackedListener(checkbox, 'change', autoSaveSettings);
     checkboxLabelContainer.appendChild(checkbox);
     
     const label = document.createElement('label');
@@ -304,6 +323,10 @@ let lastModalCall = 0;
 // Event listener management
 let escKeyListener = null;
 
+// Timeout tracking for cleanup
+let safetyTimeouts = [];
+let trackedListeners = new Map();
+
 // Automation State
 let taskerState = TASKER_STATES.DISABLED;
 let taskHuntingOngoing = false;
@@ -312,6 +335,8 @@ let autoplayPausedByTasker = false;
 let pendingTaskCompletion = false;
 let taskOperationInProgress = false;
 let questBlipObserver = null;
+let questBlipCheckInterval = null;
+let lastQuestBlipTrigger = 0;
 
 // Session State
 let lastGameStateChange = 0;
@@ -800,21 +825,35 @@ function setupQuestBlipMonitoring() {
     
     // Check for existing quest blip immediately when setting up monitoring
     if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-        const existingQuestBlip = document.querySelector('img[src*="quest-blip.png"]');
+        const existingQuestBlip = document.querySelector('#header-slot img[src*="quest-blip.png"]');
         if (existingQuestBlip) {
             console.log('[Better Tasker] Existing quest blip found during setup - triggering New Task Only mode');
             handleNewTaskOnly();
         }
     }
     
+    // Enhanced MutationObserver that watches for both node additions and attribute changes
     questBlipObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
+            // Check for newly added nodes
             mutation.addedNodes.forEach((node) => {
                 if (node.nodeType === Node.ELEMENT_NODE && taskerState === TASKER_STATES.NEW_TASK_ONLY) {
                     // Check if quest blip appeared
-                    const questBlip = node.querySelector?.('img[src*="quest-blip.png"]') || 
-                                    node.querySelector?.('[class*="quest-blip"]') ||
-                                    (node.matches?.('img[src*="quest-blip.png"]') ? node : null);
+                    const questBlipSelectors = [
+                        '#header-slot img[src*="quest-blip.png"]',
+                        '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+                        '#header-slot img[alt="Quests"][src*="quest-blip"]',
+                        '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+                        'img[src*="quest-blip.png"]', // Fallback
+                        'img[src*="/assets/icons/quest-blip.png"]' // Fallback
+                    ];
+                    
+                    let questBlip = null;
+                    for (const selector of questBlipSelectors) {
+                        questBlip = node.querySelector?.(selector) || 
+                                   (node.matches?.(selector) ? node : null);
+                        if (questBlip) break;
+                    }
                     
                     // Debug: Log what was added to help identify quest blip
                     if (node.querySelector && node.querySelector('img[src*="quest"]')) {
@@ -822,20 +861,84 @@ function setupQuestBlipMonitoring() {
                     }
                     
                     if (questBlip) {
-                        console.log('[Better Tasker] Quest blip detected - triggering New Task Only mode');
+                        console.log('[Better Tasker] Quest blip detected via node addition - triggering New Task Only mode');
                         handleNewTaskOnly();
                     }
                 }
             });
+            
+            // Check for attribute changes (like src changes that transition quest.png to quest-blip.png)
+            if (mutation.type === 'attributes' && taskerState === TASKER_STATES.NEW_TASK_ONLY) {
+                const target = mutation.target;
+                
+                // Check if this is a quest image src change in the header navigation
+                if ((target.matches?.('#header-slot img[alt="Quests"]') || target.matches?.('#header-slot img[alt="Tasking"]')) && mutation.attributeName === 'src') {
+                    const newSrc = target.src;
+                    if (newSrc && newSrc.includes('quest-blip.png')) {
+                        console.log('[Better Tasker] Quest image src changed to quest-blip.png in header navigation - triggering New Task Only mode');
+                        handleNewTaskOnly();
+                        return;
+                    }
+                }
+                
+                // Check if the changed element or its parent contains a quest blip
+                const questBlipSelectors = [
+                    '#header-slot img[src*="quest-blip.png"]',
+                    '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+                    '#header-slot img[alt="Quests"][src*="quest-blip"]',
+                    '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+                    'img[src*="quest-blip.png"]', // Fallback
+                    'img[src*="/assets/icons/quest-blip.png"]' // Fallback
+                ];
+                
+                let questBlip = null;
+                for (const selector of questBlipSelectors) {
+                    questBlip = target.querySelector?.(selector) || 
+                               (target.matches?.(selector) ? target : null) ||
+                               target.closest?.('li')?.querySelector?.(selector);
+                    if (questBlip) break;
+                }
+                
+                if (questBlip) {
+                    console.log('[Better Tasker] Quest blip detected via attribute change - triggering New Task Only mode');
+                    handleNewTaskOnly();
+                }
+            }
         });
     });
     
     questBlipObserver.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'data-selected', 'src']
     });
     
-    console.log('[Better Tasker] Quest blip monitoring started');
+    // Also set up periodic checking as backup (every 30 seconds)
+    questBlipCheckInterval = setInterval(() => {
+        if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
+            const questBlipSelectors = [
+                '#header-slot img[src*="quest-blip.png"]',
+                '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+                '#header-slot img[alt="Quests"][src*="quest-blip"]',
+                '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+                'img[src*="quest-blip.png"]', // Fallback
+                'img[src*="/assets/icons/quest-blip.png"]' // Fallback
+            ];
+            
+            let questBlip = null;
+            for (const selector of questBlipSelectors) {
+                questBlip = document.querySelector(selector);
+                if (questBlip && questBlip.offsetParent !== null) { // Check if visible
+                    console.log(`[Better Tasker] Quest blip detected via periodic check with selector: ${selector} - triggering New Task Only mode`);
+                    handleNewTaskOnly();
+                    break;
+                }
+            }
+        }
+    }, 30000);
+    
+    console.log('[Better Tasker] Quest blip monitoring started (MutationObserver + periodic checks)');
 }
 
 // Stop quest blip monitoring
@@ -843,7 +946,13 @@ function stopQuestBlipMonitoring() {
     if (questBlipObserver) {
         questBlipObserver.disconnect();
         questBlipObserver = null;
-        console.log('[Better Tasker] Quest blip monitoring stopped');
+        console.log('[Better Tasker] Quest blip MutationObserver stopped');
+    }
+    
+    if (questBlipCheckInterval) {
+        clearInterval(questBlipCheckInterval);
+        questBlipCheckInterval = null;
+        console.log('[Better Tasker] Quest blip periodic checking stopped');
     }
 }
 
@@ -888,19 +997,51 @@ function saveTaskerState() {
 // Handle "New Task Only" functionality
 async function handleNewTaskOnly() {
     try {
-        console.log('[Better Tasker] New Task Only mode - opening quest log...');
-        
-        // 1. Find and click quest blip to open quest log
-        const questBlip = document.querySelector('img[src*="quest-blip.png"]');
-        if (!questBlip) {
-            console.log('[Better Tasker] No quest blip found');
+        // Prevent infinite triggering with cooldown
+        const now = Date.now();
+        if (now - lastQuestBlipTrigger < 5000) { // 5 second cooldown
+            console.log('[Better Tasker] Quest blip trigger cooldown active, skipping...');
             return;
         }
+        lastQuestBlipTrigger = now;
         
-        console.log('[Better Tasker] Quest blip found, clicking it...');
-        questBlip.click();
-        await sleep(300); // Wait for quest log to open
-        console.log('[Better Tasker] Quest blip clicked, waiting for quest log to open...');
+        console.log('[Better Tasker] New Task Only mode - opening quest log...');
+        
+        // Check if quest log is already open
+        const existingQuestLog = document.querySelector('.widget-bottom .grid.h-\\[260px\\].items-start.gap-1');
+        if (existingQuestLog) {
+            console.log('[Better Tasker] Quest log already open, skipping quest blip click');
+            // Still proceed to look for New Task button
+        } else {
+            // 1. Find and click quest blip to open quest log
+        const questBlipSelectors = [
+            '#header-slot img[src*="quest-blip.png"]',
+            '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+            '#header-slot img[alt="Quests"][src*="quest-blip"]',
+            '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+            'img[src*="quest-blip.png"]', // Fallback
+            'img[src*="/assets/icons/quest-blip.png"]' // Fallback
+        ];
+        
+        let questBlip = null;
+        for (const selector of questBlipSelectors) {
+            questBlip = document.querySelector(selector);
+            if (questBlip) {
+                console.log(`[Better Tasker] Quest blip found with selector: ${selector}`);
+                break;
+            }
+        }
+        
+            if (!questBlip) {
+                console.log('[Better Tasker] No quest blip found');
+                return;
+            }
+            
+            console.log('[Better Tasker] Quest blip found, clicking it...');
+            questBlip.click();
+            await sleep(300); // Wait for quest log to open
+            console.log('[Better Tasker] Quest blip clicked, waiting for quest log to open...');
+        }
         
         // 2. Look for and click "New Task" button
         console.log('[Better Tasker] Looking for New Task button...');
@@ -1854,8 +1995,8 @@ function createGeneralSettings() {
         max: 10, 
         className: 'pixel-font-16' 
     });
-    // Add auto-save listener immediately
-    taskDelayInput.addEventListener('input', autoSaveSettings);
+    // Add auto-save listener with tracking
+    addTrackedListener(taskDelayInput, 'input', autoSaveSettings);
     taskDelayDiv.appendChild(taskDelayInput);
     
     const taskDelayDesc = document.createElement('div');
@@ -2054,8 +2195,8 @@ function createMonsterSelectionSettings() {
             window.updateWarningText(); // Update the warning count
         };
             
-            // Add change listener to checkbox
-            checkbox.addEventListener('change', updateWarningVisibility);
+            // Add change listener to checkbox with tracking
+            addTrackedListener(checkbox, 'change', updateWarningVisibility);
             
             creatureDiv.appendChild(checkbox);
             creatureDiv.appendChild(warningSymbol);
@@ -2221,8 +2362,8 @@ function loadAndApplySettings() {
             const input = document.getElementById('taskStartDelay');
             if (input) {
                 input.value = settings.taskStartDelay;
-                // Add auto-save listener
-                input.addEventListener('input', autoSaveSettings);
+                // Add auto-save listener with tracking
+                addTrackedListener(input, 'input', autoSaveSettings);
             }
         }
         
@@ -2253,7 +2394,7 @@ function loadAndApplySettings() {
             const checkboxId = `creature-${creatureName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
             const checkbox = document.getElementById(checkboxId);
             if (checkbox) {
-                checkbox.addEventListener('change', autoSaveSettings);
+                addTrackedListener(checkbox, 'change', autoSaveSettings);
             }
         });
         
@@ -2372,8 +2513,24 @@ function isGameActive() {
 // Check if quest blip exists (indicates task is ready)
 function isQuestBlipAvailable() {
     try {
-        // Check for quest blip (pending task indicator)
-        const questBlip = document.querySelector('img[src*="quest-blip.png"]');
+        // Check for quest blip (pending task indicator) with multiple selectors, focusing on header navigation
+        const questBlipSelectors = [
+            '#header-slot img[src*="quest-blip.png"]',
+            '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+            '#header-slot img[alt="Quests"][src*="quest-blip"]',
+            '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+            'img[src*="quest-blip.png"]', // Fallback to any quest blip
+            'img[src*="/assets/icons/quest-blip.png"]' // Fallback to full path
+        ];
+        
+        let questBlip = null;
+        for (const selector of questBlipSelectors) {
+            questBlip = document.querySelector(selector);
+            if (questBlip) {
+                console.log(`[Better Tasker] Quest blip found with selector: ${selector}`);
+                break;
+            }
+        }
         
         // Debug: Log all quest-related images on the page
         const allQuestImages = document.querySelectorAll('img[src*="quest"]');
@@ -2388,7 +2545,7 @@ function isQuestBlipAvailable() {
             return true;
         }
         
-        console.log('[Better Tasker] No quest blip found with selector: img[src*="quest-blip.png"]');
+        console.log('[Better Tasker] No quest blip found with any selector');
         return false;
     } catch (error) {
         console.error('[Better Tasker] Error checking quest blip:', error);
@@ -3429,13 +3586,14 @@ async function handleTaskReadyCompletion() {
         console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
         
         // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-        setTimeout(() => {
+        const safetyTimeout = setTimeout(() => {
             if (taskOperationInProgress) {
                 console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
                 taskOperationInProgress = false;
                 updateExposedState();
             }
         }, 30000);
+        safetyTimeouts.push(safetyTimeout);
         
         // Start quest button validation monitoring
         startQuestButtonValidation();
@@ -3825,13 +3983,14 @@ async function handleTaskFinishing() {
                     console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
                     
                     // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-                    setTimeout(() => {
+                    const safetyTimeout = setTimeout(() => {
                         if (taskOperationInProgress) {
                             console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
                             taskOperationInProgress = false;
                             updateExposedState();
                         }
                     }, 30000);
+                    safetyTimeouts.push(safetyTimeout);
                     
                     newTaskButton.click();
                     await sleep(200);
@@ -4004,13 +4163,14 @@ async function handleTaskFinishing() {
                         console.log('[Better Tasker] Task operation in progress flag set - preventing duplicate operations');
                         
                         // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-                        setTimeout(() => {
+                        const safetyTimeout = setTimeout(() => {
                             if (taskOperationInProgress) {
                                 console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
                                 taskOperationInProgress = false;
                                 updateExposedState();
                             }
                         }, 30000);
+                        safetyTimeouts.push(safetyTimeout);
                         
                         // Start quest button validation monitoring
                         startQuestButtonValidation();
@@ -4973,13 +5133,14 @@ async function openQuestLogAndAcceptTask() {
                 console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
                 
                 // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-                setTimeout(() => {
+                const safetyTimeout = setTimeout(() => {
                     if (taskOperationInProgress) {
                         console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
                         taskOperationInProgress = false;
                         updateExposedState();
                     }
                 }, 30000);
+                safetyTimeouts.push(safetyTimeout);
                 
                 newTaskButton.click();
                 await sleep(200);
@@ -5157,6 +5318,17 @@ function cleanupBetterTasker(periodic = false) {
             escKeyListener = null;
         }
         
+        // Clear all tracked timeouts
+        clearTrackedTimeouts();
+        
+        // Clean up tracked event listeners
+        trackedListeners.forEach((listeners, element) => {
+            listeners.forEach(({ event, handler }) => {
+                element.removeEventListener(event, handler);
+            });
+        });
+        trackedListeners.clear();
+        
         // Remove custom CSS
         const shimmerCSS = document.getElementById('taskerShimmerCSS');
         if (shimmerCSS) {
@@ -5196,10 +5368,14 @@ function cleanupBetterTasker(periodic = false) {
             delete window.updateWarningText;
         }
         
-        // Release control from shared managers
+        // Release control from shared managers and clean up if no other mods need them
         try {
             if (window.QuestButtonManager) {
                 window.QuestButtonManager.releaseControl('Better Tasker');
+                // Reset original state to prevent memory leaks
+                if (window.QuestButtonManager.originalState) {
+                    window.QuestButtonManager.originalState = null;
+                }
             }
         } catch (managerError) {
             console.warn('[Better Tasker] Error releasing Quest Button Manager control:', managerError);
@@ -5211,6 +5387,18 @@ function cleanupBetterTasker(periodic = false) {
             }
         } catch (managerError) {
             console.warn('[Better Tasker] Error releasing Bestiary Automator Settings Manager control:', managerError);
+        }
+        
+        try {
+            if (window.AutoplayManager) {
+                window.AutoplayManager.releaseControl('Better Tasker');
+                // Reset original mode to prevent memory leaks
+                if (window.AutoplayManager.originalMode) {
+                    window.AutoplayManager.originalMode = null;
+                }
+            }
+        } catch (managerError) {
+            console.warn('[Better Tasker] Error releasing Autoplay Manager control:', managerError);
         }
         
         // Reset session flags

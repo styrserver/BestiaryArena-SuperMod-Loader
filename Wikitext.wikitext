@@ -1,4 +1,4 @@
-'''<big>Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the [https://github.com/TheMegafuji/bestiary-arena-mod-loader original mod loader].</big>'''
+'''<big>Thanks to [https://github.com/TheMegafuji/ TheMegafuji] and [https://github.com/mathiasbynens MathiasBynens] for providing the [[Bestiary Arena Mod Loader|original mod loader]].</big>'''
 
 = BestiaryArena SuperMod Loader =
 
