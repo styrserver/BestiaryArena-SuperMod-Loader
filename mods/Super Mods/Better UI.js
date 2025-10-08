@@ -450,35 +450,6 @@ async function lockCreatureAPI(uniqueId) {
   return await response.json();
 }
 
-// Verify server lock status
-async function verifyServerLockStatus(uniqueId) {
-  try {
-    const playerResponse = await fetch('https://bestiaryarena.com/api/trpc/game.getPlayer?batch=1', {
-      method: 'GET',
-      headers: {
-        'X-Game-Version': '1'
-      }
-    });
-    
-    if (!playerResponse.ok) return null;
-    
-    const playerData = await playerResponse.json();
-    const serverMonsters = playerData[0]?.result?.data?.json?.monsters || [];
-    const serverCreature = serverMonsters.find(m => m.id === uniqueId);
-    
-    console.log('[Better UI] Server creature state:', {
-      id: serverCreature?.id,
-      locked: serverCreature?.locked,
-      gameId: serverCreature?.gameId
-    });
-    
-    return serverCreature?.locked || false;
-  } catch (e) {
-    console.error('[Better UI] Failed to fetch player data:', e);
-    return null;
-  }
-}
-
 // Update local state for locked creature
 function updateLocalCreatureLock(uniqueId) {
   try {
@@ -558,17 +529,8 @@ async function toggleFavorite(uniqueId, symbolKey = 'heart') {
       const data = await lockCreatureAPI(uniqueId);
       console.log('[Better UI] Lock API response:', data);
       
-      // Check if the response indicates success
-      const result = data[0]?.result?.data;
-      if (result?.json === null && result?.meta?.values?.[0] === 'undefined') {
-        console.warn('[Better UI] ⚠️ API returned null/undefined - verifying server state...');
-        const isLocked = await verifyServerLockStatus(uniqueId);
-        if (!isLocked) {
-          console.error('[Better UI] ❌ SERVER SHOWS CREATURE IS NOT LOCKED!');
-        } else {
-          console.log('[Better UI] ✅ Server confirms creature is locked');
-        }
-      }
+      // API returns null/undefined but the lock still succeeds
+      // No need to verify - the local state update handles it
       
       console.log('[Better UI] Locked successfully:', uniqueId);
       updateLocalCreatureLock(uniqueId);
@@ -1083,19 +1045,36 @@ function updateFavoriteHearts(targetUniqueId = null) {
   
   const creatures = getVisibleCreatures();
   
-  let heartsAdded = 0;
-  
-  // Get all monsters from game state
+  // Get all monsters from game state once
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
+  
+  // Helper function to calculate level from exp (copied from getCreatureUniqueId for performance)
+  const getLevelFromExp = (exp) => {
+    const EXP_TABLE = [
+      [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
+      [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
+      [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
+      [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
+      [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
+      [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
+      [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
+      [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
+    ];
+    if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) return 1;
+    for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
+      if (exp >= EXP_TABLE[i][1]) return EXP_TABLE[i][0];
+    }
+    return 1;
+  };
   
   // Track which creatures of each gameId we've seen
   const gameIdIndexMap = new Map();
   
+  let heartsAdded = 0;
+  
   creatures.forEach((imgEl) => {
     const gameId = getCreatureGameId(imgEl);
-    if (!gameId) {
-      return;
-    }
+    if (!gameId) return;
     
     // Get or initialize the index for this gameId
     if (!gameIdIndexMap.has(gameId)) {
@@ -1103,18 +1082,37 @@ function updateFavoriteHearts(targetUniqueId = null) {
     }
     const currentIndex = gameIdIndexMap.get(gameId);
     
-    // Find all monsters with this gameId
-    const matchingMonsters = monsters.filter(m => m.gameId === gameId);
+    // Find all monsters with this gameId, sorted by stats
+    const matchingMonsters = monsters.filter(m => m.gameId === gameId).map(m => {
+      m._statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+      return m;
+    }).sort((a, b) => {
+      const gameIdCompare = (a.gameId || 0) - (b.gameId || 0);
+      if (gameIdCompare !== 0) return gameIdCompare;
+      return b._statSum - a._statSum;
+    });
     
-    // Get the unique ID of the monster at this index
-    const uniqueId = matchingMonsters[currentIndex]?.id;
+    // Get displayed level to help with disambiguation
+    const button = imgEl.closest('button');
+    const levelSpan = button?.querySelector('span[translate="no"]');
+    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
+    
+    // Identify the creature at this index
+    let identifiedMonster = matchingMonsters[currentIndex];
+    
+    // If we have multiple monsters with same gameId and displayed level, use level to match
+    if (matchingMonsters.length > 1 && displayedLevel) {
+      const levelMatch = matchingMonsters.find(m => getLevelFromExp(m.exp || 0) === displayedLevel);
+      if (levelMatch) {
+        identifiedMonster = levelMatch;
+      }
+    }
     
     // Increment the index for next creature with same gameId
     gameIdIndexMap.set(gameId, currentIndex + 1);
     
-    if (!uniqueId) {
-      return;
-    }
+    const uniqueId = identifiedMonster?.id;
+    if (!uniqueId) return;
     
     // Skip if we're only updating a specific creature
     if (targetUniqueId && uniqueId !== targetUniqueId) {
@@ -1212,7 +1210,10 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
   });
   
   console.log('[Better UI] getCreatureUniqueId - Found', matchingMonsters.length, 'monsters in game state with gameId', gameId);
-  console.log('[Better UI] getCreatureUniqueId - Monster IDs in SORTED order:', matchingMonsters.map(m => m.id));
+  console.log('[Better UI] getCreatureUniqueId - Monster IDs in SORTED order:', matchingMonsters.map(m => {
+    const level = getLevelFromExp(m.exp || 0);
+    return `${m.id} (lvl ${level})`;
+  }));
   
   // Get ALL visible creatures in DOM order, EXCLUDING creatures inside context menus or modals
   const allVisibleCreatures = Array.from(document.querySelectorAll('img[alt="creature"]')).filter(img => {
@@ -1275,16 +1276,46 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     if (contextMenuPercentage !== null) {
       console.log('[Better UI] getCreatureUniqueId - Using provided percentage:', contextMenuPercentage + '%');
       
-      // Find monster with matching stats percentage
-      const monster = matchingMonsters.find(m => {
+      // Find all monsters with matching stats percentage
+      const monstersWithPercentage = matchingMonsters.filter(m => {
         const statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
         return statSum === contextMenuPercentage;
       });
       
+      console.log('[Better UI] getCreatureUniqueId - Found', monstersWithPercentage.length, 'monster(s) with', contextMenuPercentage + '%');
+      
+      let monster = null;
+      
+      // If multiple monsters with same percentage, use displayed level to disambiguate
+      if (monstersWithPercentage.length > 1 && displayedLevel) {
+        console.log('[Better UI] getCreatureUniqueId - Multiple monsters with same percentage, using displayed level:', displayedLevel);
+        
+        // Log all candidates with their levels
+        monstersWithPercentage.forEach(m => {
+          const mLevel = getLevelFromExp(m.exp || 0);
+          console.log(`[Better UI] getCreatureUniqueId - Candidate: ${m.id}, level ${mLevel}, exp ${m.exp}`);
+        });
+        
+        monster = monstersWithPercentage.find(m => {
+          const monsterLevel = getLevelFromExp(m.exp || 0);
+          return monsterLevel === displayedLevel;
+        });
+        if (monster) {
+          console.log('[Better UI] getCreatureUniqueId - Matched by percentage AND level:', contextMenuPercentage + '%', 'level', displayedLevel, '→', monster.id);
+        } else {
+          console.warn('[Better UI] getCreatureUniqueId - No monster matched level', displayedLevel, '- using first match');
+        }
+      }
+      
+      // If no level match or only one monster with that percentage, just use percentage
+      if (!monster && monstersWithPercentage.length > 0) {
+        monster = monstersWithPercentage[0];
+        console.log('[Better UI] getCreatureUniqueId - Matched by provided percentage:', contextMenuPercentage + '%', '→', monster.id);
+      }
+      
       if (monster) {
         identifiedMonster = monster;
         matchedByPercentage = true;
-        console.log('[Better UI] getCreatureUniqueId - Matched by provided percentage:', contextMenuPercentage + '%', '→', monster.id);
       } else {
         console.warn('[Better UI] getCreatureUniqueId - No monster found with percentage:', contextMenuPercentage + '%');
       }
@@ -1347,10 +1378,12 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     
     const statSum = (identifiedMonster?.hp || 0) + (identifiedMonster?.ad || 0) + (identifiedMonster?.ap || 0) + (identifiedMonster?.armor || 0) + (identifiedMonster?.magicResist || 0);
     const statPercent = Math.round((statSum / 100) * 100);
+    const monsterLevel = getLevelFromExp(identifiedMonster?.exp || 0);
     
     console.log('[Better UI] getCreatureUniqueId - Mapping to monster:', identifiedMonster?.id);
     console.log('[Better UI] getCreatureUniqueId - Monster stats:', {
       id: identifiedMonster?.id,
+      level: monsterLevel,
       hp: identifiedMonster?.hp,
       ad: identifiedMonster?.ad,
       ap: identifiedMonster?.ap,
