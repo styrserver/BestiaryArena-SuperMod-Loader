@@ -868,66 +868,45 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'getModCounts') {
-    try {
-      // Count mods in each directory
-      const modCounts = {
-        database: 0,
-        official: 0,
-        super: 0,
-        test: 0
-      };
-      
-      // Count Database Mods
-      const databaseMods = [
-        'Welcome.js',
-        'inventory-database.js',
-        'creature-database.js',
-        'equipment-database.js'
-      ];
-      modCounts.database = databaseMods.length;
-      
-      // Count Official Mods
-      const officialMods = [
-        'Bestiary_Automator.js',
-        'Board Analyzer.js', 
-        'Custom_Display.js',
-        'Hero_Editor.js',
-        'Highscore_Improvements.js',
-        'Item_tier_list.js',
-        'Monster_tier_list.js',
-        'Setup_Manager.js',
-        'Team_Copier.js',
-        'Tick_Tracker.js',
-        'Turbo Mode.js'
-      ];
-      modCounts.official = officialMods.length;
-      
-      // Count Super Mods
-      const superMods = [
-        'Autoscroller.js',
-        'Autoseller.js',
-        'Better Analytics.js',
-        'Better Cauldron.js',
-        'Better Forge.js',
-        'Better Highscores.js',
-        'Better Hy\'genie.js',
-        'Better Yasir.js',
-        'Configurator.js',
-        'Cyclopedia.js',
-        'DashboardButton.js',
-        'Dice_Roller.js',
-        'Hunt Analyzer.js',
-        'Outfiter.js',
-        'Raid_Hunter.js',
-        'RunTracker.js'
-      ];
-      modCounts.super = superMods.length;
-      
-      
-      sendResponse({ success: true, counts: modCounts });
-    } catch (error) {
-      sendResponse({ success: false, error: error.message });
-    }
+    // Chrome service workers cannot use import() or new Function()
+    // Firefox background scripts CAN use dynamic import
+    // So we need different approaches for each browser
+    
+    (async () => {
+      try {
+        // Try dynamic import for Firefox
+        if (typeof browser !== 'undefined') {
+          console.log('[Background] Firefox detected, using dynamic import...');
+          const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+          const registry = await import(registryUrl);
+          
+          if (registry && registry.getModCounts) {
+            const counts = registry.getModCounts();
+            console.log('[Background] Firefox: Got counts from registry:', counts);
+            sendResponse({ success: true, counts });
+            return;
+          }
+        }
+        
+        // Chrome fallback: Use hardcoded counts
+        // NOTE: Keep these in sync with content/mod-registry.js
+        console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
+        const modCounts = {
+          database: 4,
+          official: 11,
+          super: 21
+        };
+        
+        sendResponse({ success: true, counts: modCounts });
+      } catch (error) {
+        console.error('[Background] Error getting mod counts:', error);
+        // Ultimate fallback
+        sendResponse({ 
+          success: true, 
+          counts: { database: 4, official: 11, super: 21 } 
+        });
+      }
+    })();
     return true; // Indicate async response
   }
 });

@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 19 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 21 Super Mods listed below are included by default in this loader:
 
 ### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -200,6 +200,14 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 - Automatically refreshes inventory counts and UI after fusion
 - Smart fusion ratio calculations for optimal resource usage
 
+### Better Setups
+Comprehensive setup label management system for organizing team configurations:
+- Activates and manages setup labels (Farm, Speedrun, Rank Points, Boosted Map, Other)
+- Add, edit, and remove custom setup labels for different strategies
+- Edit individual setup labels directly from the setup interface
+- Automatic integration with the game's native setup system
+- Backup reminder integration with Configurator for safe label management
+
 ### Better Tasker
 Advanced quest automation system that streamlines task completion and management:
 - Automatically opens quest log and accepts new tasks when available
@@ -208,6 +216,14 @@ Advanced quest automation system that streamlines task completion and management
 - Pauses all automations when tasks are ready to be claimed
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
+
+### Better UI
+Enhances the game's user interface with quality-of-life improvements:
+- Stamina timer showing exact time when stamina will be full (HH:MM format)
+- Settings button in the currency section for quick configuration access
+- Configurable features through an integrated settings panel
+- Real-time stamina tracking with automatic updates
+- Non-intrusive display that integrates seamlessly with the game's native UI
 
 ### Better Yasir
 Enhances the Yasir shop interface with advanced features and improved usability:
