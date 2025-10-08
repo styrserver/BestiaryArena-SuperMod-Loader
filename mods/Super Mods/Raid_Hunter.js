@@ -583,7 +583,7 @@ function isRaidToast(element) {
  * Handle fight toast detection and process raids
  */
 function handleFightToast() {
-    console.log('[Raid Hunter] handleFightToast() called');
+    console.log(`[Raid Hunter] handleFightToast() called - automation enabled: ${isAutomationEnabled}, AUTOMATION_ENABLED: ${AUTOMATION_ENABLED}`);
     
     // Check if Board Analyzer is running - if so, skip processing
     if (isBoardAnalyzerRunning) {
@@ -592,7 +592,7 @@ function handleFightToast() {
     }
     
     if (!isAutomationActive()) {
-        console.log('[Raid Hunter] Fight toast detected but automation is disabled');
+        console.log(`[Raid Hunter] Fight toast detected but automation is disabled (${isAutomationEnabled} !== ${AUTOMATION_ENABLED})`);
         return;
     }
     
@@ -1152,7 +1152,10 @@ function handleFightToastDetection(mutations) {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         hasFightToast = isRaidToast(node);
-                        if (hasFightToast) break;
+                        if (hasFightToast) {
+                            console.log('[Raid Hunter] Fight toast element detected in DOM');
+                            break;
+                        }
                     }
                 }
             }
@@ -1161,7 +1164,7 @@ function handleFightToastDetection(mutations) {
         
         // Handle fight toast detection
         if (hasFightToast) {
-            console.log('[Raid Hunter] Raid toast detected!');
+            console.log('[Raid Hunter] Raid toast detected in handler!');
             handleFightToast();
         }
     });
@@ -1905,19 +1908,28 @@ function setupRaidListMonitoring() {
                         changeType: currentList.length > lastRaidList.length ? "ADDED" : "REMOVED"
                     });
                     
-                    // Update state consistently
+                    // IMPORTANT: Check conditions BEFORE updating state
+                    const raidsAdded = currentList.length > lastRaidList.length;
+                    const raidsRemoved = currentList.length < lastRaidList.length;
+                    
+                    // Update state consistently (this updates lastRaidList)
                     updateRaidState();
                     
                     // If raids were removed and we were currently raiding, stop autoplay
-                    if (currentList.length < lastRaidList.length && isCurrentlyRaiding) {
+                    if (raidsRemoved && isCurrentlyRaiding) {
                         console.log('[Raid Hunter] Raid ended');
                         stopAutoplayOnRaidEnd();
                     }
                     
                     // If new raids were added, process next raid (raids have priority over current autoplay)
-                    if (currentList.length > lastRaidList.length && isAutomationEnabled === AUTOMATION_ENABLED) {
-                        console.log('[Raid Hunter] New raids detected - processing next raid (raid priority)');
-                        processNextRaid();
+                    if (raidsAdded) {
+                        console.log(`[Raid Hunter] New raid detected - automation enabled: ${isAutomationEnabled}, AUTOMATION_ENABLED: ${AUTOMATION_ENABLED}, match: ${isAutomationEnabled === AUTOMATION_ENABLED}`);
+                        if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                            console.log('[Raid Hunter] New raids detected - processing next raid (raid priority)');
+                            processNextRaid();
+                        } else {
+                            console.log('[Raid Hunter] New raids detected but automation is disabled - not processing');
+                        }
                     }
                 }
             });

@@ -415,6 +415,7 @@ function resetState(resetType = 'full') {
                 break;
                 
             case 'taskComplete':
+                resetNavigation();
                 resetTaskHunting();
                 resetCommonFlags();
                 console.log('[Better Tasker] Task hunting flag reset - task completed');
@@ -3301,33 +3302,43 @@ async function pauseAutoplay() {
     }
     
     try {
-        // Check current mode and pause if in autoplay
+        // Check if game is actually started and needs pausing
         const boardContext = globalThis.state.board.getSnapshot().context;
-        if (boardContext.mode === 'autoplay') {
-            // Try to pause autoplay with retry logic
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                console.log(`[Better Tasker] Pause attempt ${attempt}/3`);
-                
-                const paused = await pauseAutoplayWithButton();
-                if (paused) {
-                    autoplayPausedByTasker = true;
-                    console.log(`[Better Tasker] Autoplay paused successfully on attempt ${attempt}`);
-                    return true;
-                } else {
-                    console.log(`[Better Tasker] Pause attempt ${attempt} failed`);
-                    if (attempt < 3) {
-                        console.log('[Better Tasker] Waiting 1 second before retry...');
-                        await sleep(1000);
+        const gameStarted = boardContext.gameStarted;
+        const currentMode = boardContext.mode;
+        
+        console.log(`[Better Tasker] Current state - gameStarted: ${gameStarted}, mode: ${currentMode}`);
+        
+        if (gameStarted) {
+            // Game is running, need to pause it
+            console.log('[Better Tasker] Attempting to pause autoplay...');
+            
+            const paused = await pauseAutoplayWithButton();
+            if (paused) {
+                // Wait for game state to update (give it up to 3 seconds)
+                let verified = false;
+                for (let checkAttempt = 0; checkAttempt < 6; checkAttempt++) {
+                    await sleep(500);
+                    const newBoardContext = globalThis.state.board.getSnapshot().context;
+                    if (!newBoardContext.gameStarted) {
+                        verified = true;
+                        autoplayPausedByTasker = true;
+                        console.log(`[Better Tasker] Autoplay paused and verified (took ${(checkAttempt + 1) * 500}ms)`);
+                        return true;
                     }
                 }
+                
+                if (!verified) {
+                    console.warn('[Better Tasker] Pause button clicked but game still running after 3s - continuing anyway');
+                    autoplayPausedByTasker = true;
+                    return true; // Don't reload, just continue
+                }
+            } else {
+                console.warn('[Better Tasker] Pause button not found - game may still be running');
+                return false;
             }
-
-            // All attempts failed - reload page
-            console.log('[Better Tasker] All pause attempts failed, reloading page...');
-            window.location.reload();
-            return false;
         } else {
-            console.log('[Better Tasker] Not in autoplay mode - no need to pause');
+            console.log('[Better Tasker] Game not started - no need to pause');
             return true; // Already paused/not running
         }
     } finally {
