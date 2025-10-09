@@ -351,11 +351,11 @@ function getCreatureLevel(levelElement) {
 }
 
 // Check if scroll is locked (e.g., Bestiary tab, modals)
-// Returns true when data-scroll-locked >= 2
+// Returns true when data-scroll-locked >= 1
 // When unlocked, the attribute is removed (returns null), which evaluates to false
 function isScrollLocked() {
   const scrollLocked = document.body.getAttribute('data-scroll-locked');
-  return scrollLocked >= '2';
+  return scrollLocked >= '1';
 }
 
 // CSS template system
@@ -1123,8 +1123,21 @@ function updateFavoriteHearts(targetUniqueId = null) {
   
   if (isScrollLocked()) return;
   
-  const creatures = getVisibleCreatures();
-  console.log('[Better UI] Found', creatures.length, 'visible creatures');
+  // Only process creatures in the main collection grid
+  // This excludes creatures on the board, in menus, modals, etc.
+  const creaturesContainer = document.querySelector('[data-testid="monster-grid"]') || 
+                             document.querySelector('.grid') ||
+                             document.querySelector('[class*="grid"]');
+  if (!creaturesContainer) {
+    console.log('[Better UI] Creatures container not found');
+    return;
+  }
+  
+  const allCreatures = getVisibleCreatures();
+  const creatures = Array.from(allCreatures).filter(img => {
+    return creaturesContainer.contains(img);
+  });
+  console.log('[Better UI] Found', creatures.length, 'visible creatures in collection');
   
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   

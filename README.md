@@ -134,7 +134,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 These are advanced mods that provide comprehensive game enhancement features. All 21 Super Mods listed below are included by default in this loader:
 
-### Autoscroller
+#### Autoscroller
 Automates summon scroll usage to collect specific creatures:
 - Select target creatures from a comprehensive list
 - Choose scroll tier (grey, green, blue, purple, yellow)
@@ -142,7 +142,7 @@ Automates summon scroll usage to collect specific creatures:
 - Configurable autoscroll speed with rate-limit protection
 - Real-time tracking of found creatures and scroll usage
 
-### Autoseller
+#### Autoseller
 Automatically sells or squeezes creatures based on gene thresholds and user settings:
 - Configurable gene thresholds for selling and squeezing
 - Minimum count triggers for batch actions
@@ -150,7 +150,7 @@ Automatically sells or squeezes creatures based on gene thresholds and user sett
 - Integrated with the mod loader's configuration system
 - Real-time tracking of gold and dust earnings
 
-### Better Analytics
+##### Better Analytics
 Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
 - Real-time damage per second (DPS) calculations displayed next to damage values
 - Automatic tracking of damage changes throughout the game session
@@ -158,17 +158,15 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
 
-### Better Exaltation Chest
+##### Better Exaltation Chest
 Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
-- Auto-opening functionality with configurable speed settings
-- Equipment filtering and setup management with tier and stat requirements
+- Auto-opening functionality with configurable speed and disenchanting settings
+- Equipment filtering by tier, stat requirements, and customizable criteria
 - Automatic disenchanting of unwanted equipment based on user preferences
 - Real-time dust tracking with animated counters and session statistics
-- Comprehensive settings panel for equipment setup configuration
-- Equipment statistics tracking (kept, disenchanted, dust gained)
-- Smart equipment evaluation against customizable criteria
+- Equipment statistics tracking (kept, disenchanted, dust gained) with comprehensive settings panel
 
-### Better Cauldron
+#### Better Cauldron
 Enhances the native Monster Cauldron interface with powerful search and filter functionality:
 - Real-time search through all monsters in your cauldron
 - Filter monsters by rarity (Grey, Green, Blue, Purple, Yellow)
@@ -176,7 +174,7 @@ Enhances the native Monster Cauldron interface with powerful search and filter f
 - Automatic detection and enhancement of the cauldron modal
 - Efficient filtering system for managing large monster collections
 
-### Better Forge
+#### Better Forge
 Comprehensive equipment management system with advanced disenchanting capabilities:
 - Arsenal management with search and tier filtering functionality
 - Batch disenchanting with confirmation system and progress tracking
@@ -184,7 +182,7 @@ Comprehensive equipment management system with advanced disenchanting capabiliti
 - Equipment search by name and filter by tier (T1-T5)
 - Visual progress bar and status updates during disenchanting
 
-### Better Highscores
+#### Better Highscores
 Displays real-time leaderboard information for the current map:
 - Show current map's tick and rank leaderboards in bottom left corner
 - Real-time updates when switching between maps
@@ -192,7 +190,7 @@ Displays real-time leaderboard information for the current map:
 - Styled leaderboard display with medal colors (gold, silver, bronze)
 - Manual refresh capability for up-to-date information
 
-### Better Hy'genie
+#### Better Hy'genie
 Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios, and improved UI:
 - Adds quantity input fields and custom fuse buttons to the Hy'genie modal
 - Calculates maximum fusable amount based on inventory and fusion ratio
@@ -200,7 +198,7 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 - Automatically refreshes inventory counts and UI after fusion
 - Smart fusion ratio calculations for optimal resource usage
 
-### Better Setups
+#### Better Setups
 Comprehensive setup label management system for organizing team configurations:
 - Activates and manages setup labels (Farm, Speedrun, Rank Points, Boosted Map, Other)
 - Add, edit, and remove custom setup labels for different strategies
@@ -208,24 +206,23 @@ Comprehensive setup label management system for organizing team configurations:
 - Automatic integration with the game's native setup system
 - Backup reminder integration with Configurator for safe label management
 
-### Better Tasker
+#### Better Tasker
 Advanced quest automation system that streamlines task completion and management:
-- Automatically opens quest log and accepts new tasks when available
-- Navigates to recommended maps for task completion
+- Automatically opens quest log, accepts new tasks, and navigates to recommended maps
 - Coordinates with other mods to prevent conflicts during automation
 - Pauses all automations when tasks are ready to be claimed
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
 
-### Better UI
+#### Better UI
 Enhances the game's user interface with quality-of-life improvements:
-- Stamina timer showing exact time when stamina will be full (HH:MM format)
-- Settings button in the currency section for quick configuration access
-- Configurable features through an integrated settings panel
-- Real-time stamina tracking with automatic updates
-- Non-intrusive display that integrates seamlessly with the game's native UI
+- Stamina timer showing exact time when stamina will be full with real-time tracking
+- Visual enhancements: Max Creatures and Shinies highlighting with 6 customizable color themes (Prismatic, Demonic, Frosty, Venomous, Divine, Undead)
+- Favorites system to mark creatures with custom symbols (heart or stat icons) and Shiny Enemies feature for battles
+- Setup labels visibility toggle with configurable features through integrated settings panel
+- Settings button in currency section for quick access and seamless integration with native UI
 
-### Better Yasir
+#### Better Yasir
 Enhances the Yasir shop interface with advanced features and improved usability:
 - Add quantity input fields for buying and selling items
 - Real-time price calculations and resource tracking
@@ -233,7 +230,7 @@ Enhances the Yasir shop interface with advanced features and improved usability:
 - Automatic inventory updates after transactions
 - Support for all item types including equipment, consumables, and special items
 
-### Board Advisor
+#### Board Advisor
 Advanced board analysis and recommendations system:
 - Room-based data storage and pattern analysis
 - Performance predictions and optimization suggestions
@@ -241,7 +238,7 @@ Advanced board analysis and recommendations system:
 - Automatic analysis when board changes
 - Configurable analysis depth and recommendation thresholds
 
-### Configurator
+#### Configurator
 Handles import/export of configuration data for the mod loader:
 - Export complete configuration including active mods, settings, and game data
 - Import configuration files to restore mod settings and game state
@@ -249,7 +246,7 @@ Handles import/export of configuration data for the mod loader:
 - User-friendly summary of what will be imported/exported
 - Safe configuration management with confirmation dialogs
 
-### Cyclopedia
+#### Cyclopedia
 A comprehensive game data viewer and player profile manager with advanced features:
 - **Monster Database**: Browse and search all monsters with detailed stats, abilities, and locations
 - **Equipment Database**: View all equipment with stats, tiers, and optimization recommendations
@@ -257,7 +254,7 @@ A comprehensive game data viewer and player profile manager with advanced featur
 - **Leaderboards**: Access real-time leaderboards for maps, rankings, and competitions
 - **Run Tracking**: View and analyze personal run history with RunTracker integration
 
-### Dice Roller
+#### Dice Roller
 Automates dice rolling for stat rerolling:
 - Automatically clicks the roll button and checks for target stats
 - Lets you set target values for each stat
@@ -265,7 +262,7 @@ Automates dice rolling for stat rerolling:
 - Displays roll count and status in a custom panel
 - Configurable target thresholds for optimal stat optimization
 
-### Hunt Analyzer
+#### Hunt Analyzer
 Advanced autoplay and loot tracking system:
 - Track detailed statistics from autoplay sessions
 - Monitor gold, dust, and item drops
@@ -273,7 +270,7 @@ Advanced autoplay and loot tracking system:
 - View session summaries and performance metrics
 - Export data for further analysis
 
-### Outfiter
+#### Outfiter
 Comprehensive outfit management system:
 - Browse and preview all available outfits
 - Save and manage custom outfit combinations
@@ -281,7 +278,7 @@ Comprehensive outfit management system:
 - Outfit storage and retrieval system
 - Integration with game's outfit system
 
-### Playercount
+#### Playercount
 Displays live player count in the game header:
 - Real-time player count updates every 30 seconds
 - Shows current online player count in the header
@@ -289,17 +286,15 @@ Displays live player count in the game header:
 - Visual indicators for connection status and last update time
 - Non-intrusive display that integrates seamlessly with the existing header
 
-### Raid Hunter
+#### Raid Hunter
 Advanced raid automation system for Bestiary Arena:
-- Automatically detects and joins available raids based on user preferences
-- Configurable raid map selection with regional organization
+- Automatically detects and joins available raids based on user preferences with regional organization
 - Auto-setup and autoplay integration for seamless raid execution
 - Stamina monitoring and auto-refill integration with Bestiary Automator
-- Real-time raid status monitoring with countdown timers
-- Queue system for handling multiple raids efficiently
-- Comprehensive settings panel for customization
+- Real-time raid status monitoring with countdown timers and queue system for multiple raids
+- Comprehensive settings panel for customization and raid map selection
 
-### RunTracker
+#### RunTracker
 Local run data tracking and storage system:
 - Automatically tracks and stores run data locally
 - Stores run history with detailed statistics
@@ -311,7 +306,7 @@ Local run data tracking and storage system:
 
 These are the core mods that provide essential gameplay enhancements. All 11 Official Mods listed below are included by default:
 
-### Bestiary Automator
+#### Bestiary Automator
 Automates routine gameplay actions to streamline your Bestiary Arena experience:
 - Automatic stamina refilling when low
 - Auto-collection of available rewards
@@ -319,7 +314,7 @@ Automates routine gameplay actions to streamline your Bestiary Arena experience:
 - Customizable automation settings for safe and efficient play
 - Streamlined gameplay experience with minimal manual intervention
 
-### Board Analyzer
+#### Board Analyzer
 Analyzes and simulates board setups for optimal strategies and performance:
 - Advanced board setup analysis and simulation
 - Performance optimization recommendations
@@ -327,7 +322,7 @@ Analyzes and simulates board setups for optimal strategies and performance:
 - Testing environment for different configurations
 - Useful for advanced planning and testing
 
-### Custom Display
+#### Custom Display
 Enhances game visuals with two powerful features:
 - Performance Mode: Strips down graphics for better performance on low-end devices
 - Map Grid: Adds a coordinate grid overlay to help with positioning and planning
@@ -335,7 +330,7 @@ Enhances game visuals with two powerful features:
 - Real-time visual adjustments without page refresh
 - Optimized performance for various device capabilities
 
-### Hero Editor
+#### Hero Editor
 A powerful tool that allows players to:
 - Edit monster stats directly in the game
 - Modify equipment attributes (stat type, tier)
@@ -343,7 +338,7 @@ A powerful tool that allows players to:
 - Save and load custom setups
 - Perfect for testing different monster and equipment combinations without having to collect and level them in-game
 
-### Highscore Improvements
+#### Highscore Improvements
 Enhances the game's highscore display with additional statistics, improved sorting options, and visual enhancements:
 - Detailed performance analysis
 - Potential time improvements compared to top scores
@@ -351,7 +346,7 @@ Enhances the game's highscore display with additional statistics, improved sorti
 - Visual indicators for time differences
 - Enhanced sorting and filtering options for better comparison
 
-### Item Tier List
+#### Item Tier List
 Displays equipment statistics and rankings, allowing players to compare items and make informed decisions about their loadouts:
 - Item effectiveness by tier
 - Stat optimizations for different monsters
@@ -359,7 +354,7 @@ Displays equipment statistics and rankings, allowing players to compare items an
 - Visual quality indicators
 - Comprehensive equipment comparison and analysis
 
-### Monster Tier List
+#### Monster Tier List
 Analyzes monster usage patterns and displays statistics and rankings, helping players identify the most effective monsters for different scenarios:
 - Sortable tier list of monsters
 - Usage statistics across different room types
@@ -367,7 +362,7 @@ Analyzes monster usage patterns and displays statistics and rankings, helping pl
 - Visual representation of monster effectiveness
 - Data-driven monster selection recommendations
 
-### Setup Manager
+#### Setup Manager
 Allows players to save, load, and manage team configurations for different maps:
 - Multiple saved team setups per map
 - Easy switching between configurations
@@ -375,7 +370,7 @@ Allows players to save, load, and manage team configurations for different maps:
 - Custom naming of team configurations
 - Integration with the game's auto-configure button
 
-### Team Copier
+#### Team Copier
 Enables sharing team configurations with other players through:
 - Copying team setup as JSON command
 - Generating sharable links (compact or readable)
@@ -383,7 +378,7 @@ Enables sharing team configurations with other players through:
 - Optional inclusion of game seeds for exact replays
 - History of recently used seeds
 
-### Tick Tracker
+#### Tick Tracker
 Tracks and displays the number of game ticks (and optionally milliseconds) for each session:
 - Real-time tick tracking widget
 - History of recent tick counts
@@ -391,7 +386,7 @@ Tracks and displays the number of game ticks (and optionally milliseconds) for e
 - Copy and clear tick history with a single click
 - Useful for speedrunners and performance analysis
 
-### Turbo Mode
+#### Turbo Mode
 Speed up gameplay for faster testing and grinding:
 - Increase game speed for faster progression
 - Customizable speed multipliers
