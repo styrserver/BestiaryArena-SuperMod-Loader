@@ -15,7 +15,8 @@ const defaultConfig = {
   enableMaxShinies: false,
   maxShiniesColor: 'prismatic',
   enableFavorites: true,
-  favoriteSymbol: 'hp'
+  favoriteSymbol: 'heart',
+  showSetupLabels: true
 };
 
 // Storage key for this mod
@@ -66,6 +67,18 @@ const GAME_CONSTANTS = {
   STAMINA_REGEN_MINUTES: 1
 };
 
+// Experience table for level calculation
+const EXP_TABLE = [
+  [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
+  [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
+  [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
+  [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
+  [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
+  [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
+  [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
+  [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
+];
+
 // Timer element styles
 const TIMER_STYLES = {
   opacity: '0.7',
@@ -94,6 +107,42 @@ const TIMEOUT_DELAYS = {
   CONTAINER_DEBOUNCE: 200
 };
 
+// Translations
+const TRANSLATIONS = {
+  en: {
+    settingsTitle: 'Better UI Settings',
+    settingsTooltip: 'Better UI Settings',
+    showStaminaTimer: 'Show Stamina Timer',
+    showSetupLabels: 'Show Setup Labels',
+    enableFavorites: 'Enable Favorites',
+    enableMaxCreatures: 'Enable Max Creatures',
+    color: 'Color:',
+    enableShinies: 'Enable Shinies',
+    shinyColor: 'Color:',
+    close: 'Close'
+  },
+  pt: {
+    settingsTitle: 'Configurações do Better UI',
+    settingsTooltip: 'Configurações do Better UI',
+    showStaminaTimer: 'Mostrar Temporizador de Stamina',
+    showSetupLabels: 'Mostrar Rótulos de Times',
+    enableFavorites: 'Ativar Favoritos',
+    enableMaxCreatures: 'Ativar Criaturas Máximas',
+    color: 'Cor:',
+    enableShinies: 'Ativar Shinies',
+    shinyColor: 'Cor:',
+    close: 'Fechar'
+  }
+};
+
+// Translate function (dynamically detects current language)
+const t = (key) => {
+  const currentLocale = document.documentElement.lang === 'pt' || 
+    document.querySelector('html[lang="pt"]') || 
+    window.location.href.includes('/pt/') ? 'pt' : 'en';
+  return TRANSLATIONS[currentLocale][key] || TRANSLATIONS.en[key] || key;
+};
+
 // =======================
 // 3. Global State
 // =======================
@@ -111,6 +160,7 @@ let settingsButton = null;
 let tabObserver = null;
 let contextMenuObserver = null;
 let creatureObserver = null;
+let setupLabelsObserver = null;
 let creatureButtonListeners = new WeakMap(); // Track event listeners on creature buttons
 let favoriteCreatures = new Map(); // Maps uniqueId -> symbolKey
 
@@ -198,6 +248,15 @@ const FAVORITE_SYMBOLS = {
 // =======================
 // 4. Utility Functions
 // =======================
+
+// Calculate level from experience points
+function getLevelFromExp(exp) {
+  if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) return 1;
+  for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
+    if (exp >= EXP_TABLE[i][1]) return EXP_TABLE[i][0];
+  }
+  return 1;
+}
 
 // Chrome flexbox fix helper
 function applyChromeFlex() {
@@ -289,10 +348,10 @@ function getCreatureLevel(levelElement) {
 const CSS_TEMPLATES = {
   maxCreatures: (colorOption, colorKey) => `
     .has-rarity[data-rarity="${GAME_CONSTANTS.ELITE_RARITY_LEVEL}"][data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
-      border: 3px solid;
+      border: 2px solid;
       border-image: ${colorOption.borderGradient} 1;
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      box-shadow: 0 0 10px ${colorOption.textColor}40, inset 0 0 10px ${colorOption.textColor}20;
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
     .has-rarity-text[data-rarity="${GAME_CONSTANTS.ELITE_RARITY_LEVEL}"][data-max-creatures="true"][data-max-creatures-color="${colorKey}"] {
       --tw-text-opacity: 1;
@@ -545,6 +604,47 @@ async function toggleFavorite(uniqueId, symbolKey = 'heart') {
   updateFavoriteHearts(uniqueId);
 }
 
+// Generate color picker dropdown HTML
+function generateColorPickerHTML(id, configKey) {
+  return `
+    <select id="${id}" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
+      ${Object.entries(COLOR_OPTIONS).map(([key, option]) => 
+        `<option value="${key}" ${config[configKey] === key ? 'selected' : ''}>${option.name}</option>`
+      ).join('')}
+    </select>
+  `;
+}
+
+// Create settings event handler for checkboxes
+function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
+  return (checkbox) => {
+    checkbox.addEventListener('change', () => {
+      config[configKey] = checkbox.checked;
+      saveConfig();
+      
+      if (config[configKey]) {
+        onEnable?.();
+      } else {
+        onDisable?.();
+      }
+      
+      console.log('[Better UI] Setting updated:', { [configKey]: config[configKey] });
+    });
+  };
+}
+
+// Create settings event handler for dropdowns
+function createSettingsDropdownHandler(configKey, onChangeCallback) {
+  return (dropdown) => {
+    dropdown.addEventListener('change', () => {
+      config[configKey] = dropdown.value;
+      saveConfig();
+      onChangeCallback?.();
+      console.log('[Better UI] Setting updated:', { [configKey]: config[configKey] });
+    });
+  };
+}
+
 // Show settings modal
 function showSettingsModal() {
   try {
@@ -554,164 +654,107 @@ function showSettingsModal() {
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="stamina-timer-toggle" ${config.showStaminaTimer ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>Show Stamina Timer</span>
+          <span>${t('showStaminaTimer')}</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="setup-labels-toggle" ${config.showSetupLabels ? 'checked' : ''} style="transform: scale(1.2);">
+          <span>${t('showSetupLabels')}</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="favorites-toggle" ${config.enableFavorites ? 'checked' : ''} style="transform: scale(1.2);">
+          <span>${t('enableFavorites')}</span>
         </label>
       </div>
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="rainbow-tiers-toggle" ${config.enableMaxCreatures ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>Enable Max Creatures</span>
+          <span>${t('enableMaxCreatures')}</span>
         </label>
       </div>
       <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-        <span style="color: #ccc;">Color:</span>
-        <select id="color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
-          <option value="prismatic" ${config.maxCreaturesColor === 'prismatic' ? 'selected' : ''}>Prismatic</option>
-          <option value="demon" ${config.maxCreaturesColor === 'demon' ? 'selected' : ''}>Demonic</option>
-          <option value="ice" ${config.maxCreaturesColor === 'ice' ? 'selected' : ''}>Frosty</option>
-          <option value="poison" ${config.maxCreaturesColor === 'poison' ? 'selected' : ''}>Venomous</option>
-          <option value="gold" ${config.maxCreaturesColor === 'gold' ? 'selected' : ''}>Divine</option>
-          <option value="undead" ${config.maxCreaturesColor === 'undead' ? 'selected' : ''}>Undead</option>
-        </select>
+        <span style="color: #ccc;">${t('color')}</span>
+        ${generateColorPickerHTML('color-picker', 'maxCreaturesColor')}
       </div>
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="shinies-toggle" ${config.enableMaxShinies ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>Enable Shinies</span>
+          <span>${t('enableShinies')}</span>
         </label>
       </div>
       <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-        <span style="color: #ccc;">Shiny Color:</span>
-        <select id="shiny-color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
-          <option value="prismatic" ${config.maxShiniesColor === 'prismatic' ? 'selected' : ''}>Prismatic</option>
-          <option value="demon" ${config.maxShiniesColor === 'demon' ? 'selected' : ''}>Demonic</option>
-          <option value="ice" ${config.maxShiniesColor === 'ice' ? 'selected' : ''}>Frosty</option>
-          <option value="poison" ${config.maxShiniesColor === 'poison' ? 'selected' : ''}>Venomous</option>
-          <option value="gold" ${config.maxShiniesColor === 'gold' ? 'selected' : ''}>Divine</option>
-          <option value="undead" ${config.maxShiniesColor === 'undead' ? 'selected' : ''}>Undead</option>
-        </select>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="favorites-toggle" ${config.enableFavorites ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>Enable Favorites</span>
-        </label>
+        <span style="color: #ccc;">${t('shinyColor')}</span>
+        ${generateColorPickerHTML('shiny-color-picker', 'maxShiniesColor')}
       </div>
     `;
     
-    // Add change event listener to stamina checkbox
+    // Setup event handlers using factories
     const staminaCheckbox = content.querySelector('#stamina-timer-toggle');
-    staminaCheckbox.addEventListener('change', () => {
-      config.showStaminaTimer = staminaCheckbox.checked;
-      saveConfig();
-      
-      // Handle timer element based on setting
-      if (config.showStaminaTimer) {
-        // If enabling, create/show timer
+    createSettingsCheckboxHandler('showStaminaTimer',
+      () => {
         if (staminaTimerElement) {
           staminaTimerElement.style.display = 'inline';
         } else {
-          // Force timer update to create element
           updateStaminaTimer();
         }
-      } else {
-        // If disabling, hide timer
+      },
+      () => {
         if (staminaTimerElement) {
           staminaTimerElement.style.display = 'none';
         }
       }
-      
-      console.log('[Better UI] Setting updated:', { showStaminaTimer: config.showStaminaTimer });
-    });
+    )(staminaCheckbox);
     
-    // Add change event listener to max creatures checkbox
     const rainbowCheckbox = content.querySelector('#rainbow-tiers-toggle');
-    rainbowCheckbox.addEventListener('change', () => {
-      config.enableMaxCreatures = rainbowCheckbox.checked;
-      saveConfig();
-      
-      // Apply or remove max creatures based on setting
-      if (config.enableMaxCreatures) {
-        applyMaxCreatures();
-      } else {
-        removeMaxCreatures();
-      }
-      
-      console.log('[Better UI] Setting updated:', { enableMaxCreatures: config.enableMaxCreatures });
-    });
+    createSettingsCheckboxHandler('enableMaxCreatures', applyMaxCreatures, removeMaxCreatures)(rainbowCheckbox);
     
-    // Add change event listener to color picker
     const colorPicker = content.querySelector('#color-picker');
-    colorPicker.addEventListener('change', () => {
-      config.maxCreaturesColor = colorPicker.value;
-      saveConfig();
-      
-      // Reapply max creatures with new color if enabled
-      if (config.enableMaxCreatures) {
-        applyMaxCreatures();
-      }
-      
-      console.log('[Better UI] Color updated:', { maxCreaturesColor: config.maxCreaturesColor });
-    });
+    createSettingsDropdownHandler('maxCreaturesColor', () => {
+      if (config.enableMaxCreatures) applyMaxCreatures();
+    })(colorPicker);
     
-    // Add change event listener to shinies checkbox
     const shiniesCheckbox = content.querySelector('#shinies-toggle');
-    shiniesCheckbox.addEventListener('change', () => {
-      config.enableMaxShinies = shiniesCheckbox.checked;
-      saveConfig();
-      
-      // Apply or remove max shinies based on setting
-      if (config.enableMaxShinies) {
-        applyMaxShinies();
-      } else {
-        removeMaxShinies();
-      }
-      
-      console.log('[Better UI] Setting updated:', { enableMaxShinies: config.enableMaxShinies });
-    });
+    createSettingsCheckboxHandler('enableMaxShinies', applyMaxShinies, removeMaxShinies)(shiniesCheckbox);
     
-    // Add change event listener to shiny color picker
     const shinyColorPicker = content.querySelector('#shiny-color-picker');
-    shinyColorPicker.addEventListener('change', () => {
-      config.maxShiniesColor = shinyColorPicker.value;
-      saveConfig();
-      
-      // Reapply max shinies with new color if enabled
-      if (config.enableMaxShinies) {
-        applyMaxShinies();
-      }
-      
-      console.log('[Better UI] Shiny color updated:', { maxShiniesColor: config.maxShiniesColor });
-    });
+    createSettingsDropdownHandler('maxShiniesColor', () => {
+      if (config.enableMaxShinies) applyMaxShinies();
+    })(shinyColorPicker);
     
-    // Add change event listener to favorites checkbox
     const favoritesCheckbox = content.querySelector('#favorites-toggle');
-    favoritesCheckbox.addEventListener('change', () => {
-      config.enableFavorites = favoritesCheckbox.checked;
-      saveConfig();
-      
-      // Show or hide favorites based on setting
-      if (config.enableFavorites) {
-        updateFavoriteHearts();
-      } else {
-        // Remove all favorite hearts
-        document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
+    createSettingsCheckboxHandler('enableFavorites',
+      updateFavoriteHearts,
+      () => document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove())
+    )(favoritesCheckbox);
+    
+    const setupLabelsCheckbox = content.querySelector('#setup-labels-toggle');
+    createSettingsCheckboxHandler('showSetupLabels',
+      () => {
+        // Show setup labels
+        applySetupLabelsVisibility(true);
+        console.log('[Better UI] Setup labels shown');
+      },
+      () => {
+        // Hide setup labels
+        applySetupLabelsVisibility(false);
+        console.log('[Better UI] Setup labels hidden');
       }
-      
-      console.log('[Better UI] Setting updated:', { enableFavorites: config.enableFavorites });
-    });
+    )(setupLabelsCheckbox);
     
     // Store modal reference for button handlers
     let modalRef = null;
     
     // Create modal using the API
     modalRef = api.ui.components.createModal({
-      title: 'Better UI Settings',
+      title: t('settingsTitle'),
       width: 300,
       content: content,
       buttons: [
         {
-          text: 'Close',
+          text: t('close'),
           primary: true,
           closeOnClick: true,
           onClick: () => {
@@ -741,7 +784,7 @@ function createSettingsButton() {
     // Create settings button matching the currency button style
     const settingsButtonElement = document.createElement('button');
     settingsButtonElement.className = 'focus-style-visible';
-    settingsButtonElement.title = 'Better UI Settings';
+    settingsButtonElement.title = t('settingsTooltip');
     settingsButtonElement.innerHTML = `
       <div class="pixel-font-16 frame-pressed-1 surface-darker flex items-center justify-end gap-1 px-1.5 pb-px text-right text-whiteRegular">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -813,6 +856,10 @@ function injectFavoriteButton(menuElem) {
   // Check if favorites are enabled
   if (!config.enableFavorites) return false;
   
+  // Skip if scroll is locked (e.g., Bestiary tab)
+  const scrollLocked = document.body.getAttribute('data-scroll-locked');
+  if (scrollLocked >= '2') return false;
+  
   // Mark this menu as processed to prevent duplicate processing
   if (menuElem.hasAttribute('data-favorite-processed')) return false;
   menuElem.setAttribute('data-favorite-processed', 'true');
@@ -821,10 +868,14 @@ function injectFavoriteButton(menuElem) {
   const creatureName = getCreatureNameFromMenu(menuElem);
   if (!creatureName) return false;
   
+  // Check if menu is for equipment (contains "Tier: X" pattern)
+  const menuText = menuElem.textContent || '';
+  const isEquipmentMenu = /\(Tier: \d+\)/.test(menuText);
+  if (isEquipmentMenu) return false;
+  
   // Check if menu is for account/game mode
-  const menuText = menuElem.textContent?.toLowerCase() || '';
-  const isAccountMenu = menuText.includes('my account') || menuText.includes('logout');
-  const isGameModeMenu = menuText.includes('game mode') || menuText.includes('manual');
+  const isAccountMenu = menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout');
+  const isGameModeMenu = menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual');
   if (isAccountMenu || isGameModeMenu) return false;
   
   // Parse percentage from the context menu
@@ -1036,53 +1087,47 @@ function injectFavoriteButton(menuElem) {
 
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
+  console.log('[Better UI] updateFavoriteHearts called with targetUniqueId:', targetUniqueId);
   // Check if favorites are enabled
   if (!config.enableFavorites) {
+    console.log('[Better UI] Favorites disabled, removing hearts');
     // Remove all favorite hearts if disabled
     document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
     return;
   }
   
   const creatures = getVisibleCreatures();
+  console.log('[Better UI] Found', creatures.length, 'visible creatures');
   
   // Get all monsters from game state once
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   
-  // Helper function to calculate level from exp (copied from getCreatureUniqueId for performance)
-  const getLevelFromExp = (exp) => {
-    const EXP_TABLE = [
-      [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-      [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-      [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-      [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-      [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-      [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-      [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-      [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-    ];
-    if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) return 1;
-    for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
-      if (exp >= EXP_TABLE[i][1]) return EXP_TABLE[i][0];
-    }
-    return 1;
-  };
-  
-  // Track which creatures of each gameId we've seen
-  const gameIdIndexMap = new Map();
+  // Track which creatures of each (gameId, level) we've seen
+  const creatureIndexMap = new Map();
   
   let heartsAdded = 0;
+  let creaturesChecked = 0;
+  let targetFound = false;
   
-  creatures.forEach((imgEl) => {
+  creatures.forEach((imgEl, idx) => {
     const gameId = getCreatureGameId(imgEl);
     if (!gameId) return;
     
-    // Get or initialize the index for this gameId
-    if (!gameIdIndexMap.has(gameId)) {
-      gameIdIndexMap.set(gameId, 0);
-    }
-    const currentIndex = gameIdIndexMap.get(gameId);
+    // Get displayed level
+    const button = imgEl.closest('button');
+    const levelSpan = button?.querySelector('span[translate="no"]');
+    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
     
-    // Find all monsters with this gameId, sorted by stats
+    // Create a unique key for this (gameId, level) combination
+    const indexKey = `${gameId}-${displayedLevel || 'unknown'}`;
+    
+    // Get or initialize the index for this (gameId, level) combination
+    if (!creatureIndexMap.has(indexKey)) {
+      creatureIndexMap.set(indexKey, 0);
+    }
+    const currentIndex = creatureIndexMap.get(indexKey);
+    
+    // Find all monsters with this gameId, sorted by stats (descending)
     const matchingMonsters = monsters.filter(m => m.gameId === gameId).map(m => {
       m._statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
       return m;
@@ -1092,31 +1137,34 @@ function updateFavoriteHearts(targetUniqueId = null) {
       return b._statSum - a._statSum;
     });
     
-    // Get displayed level to help with disambiguation
-    const button = imgEl.closest('button');
-    const levelSpan = button?.querySelector('span[translate="no"]');
-    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
-    
-    // Identify the creature at this index
-    let identifiedMonster = matchingMonsters[currentIndex];
-    
-    // If we have multiple monsters with same gameId and displayed level, use level to match
-    if (matchingMonsters.length > 1 && displayedLevel) {
-      const levelMatch = matchingMonsters.find(m => getLevelFromExp(m.exp || 0) === displayedLevel);
-      if (levelMatch) {
-        identifiedMonster = levelMatch;
+    // Filter by level to get candidates
+    let candidateMonsters = matchingMonsters;
+    if (displayedLevel && matchingMonsters.length > 1) {
+      const sameLevelMonsters = matchingMonsters.filter(m => getLevelFromExp(m.exp || 0) === displayedLevel);
+      if (sameLevelMonsters.length > 0) {
+        candidateMonsters = sameLevelMonsters;
       }
     }
     
-    // Increment the index for next creature with same gameId
-    gameIdIndexMap.set(gameId, currentIndex + 1);
+    // Use the sequential index to pick the right one from the level-filtered candidates
+    const identifiedMonster = candidateMonsters[currentIndex] || matchingMonsters[currentIndex];
+    
+    // Increment the index for next creature with same (gameId, level)
+    creatureIndexMap.set(indexKey, currentIndex + 1);
     
     const uniqueId = identifiedMonster?.id;
     if (!uniqueId) return;
     
+    creaturesChecked++;
+    
     // Skip if we're only updating a specific creature
     if (targetUniqueId && uniqueId !== targetUniqueId) {
       return;
+    }
+    
+    if (targetUniqueId && uniqueId === targetUniqueId) {
+      targetFound = true;
+      console.log('[Better UI] Found target creature at DOM index:', idx, 'gameId:', gameId, 'uniqueId:', uniqueId);
     }
     
     const isFavorite = favoriteCreatures.has(uniqueId);
@@ -1130,6 +1178,8 @@ function updateFavoriteHearts(targetUniqueId = null) {
     if (isFavorite) {
       const symbolKey = favoriteCreatures.get(uniqueId) || 'heart';
       const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
+      
+      console.log('[Better UI] Adding favorite heart for:', uniqueId, 'symbolKey:', symbolKey);
       
       const heart = document.createElement('div');
       heart.className = 'favorite-heart pixelated';
@@ -1150,8 +1200,91 @@ function updateFavoriteHearts(targetUniqueId = null) {
       }
       container.appendChild(heart);
       heartsAdded++;
+      console.log('[Better UI] Heart added successfully for:', uniqueId);
     }
   });
+  
+  console.log('[Better UI] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
+  if (targetUniqueId) {
+    console.log('[Better UI] Target search result:', targetFound ? `Found ${targetUniqueId}` : `NOT FOUND: ${targetUniqueId}`);
+  }
+}
+
+// Sort monsters by visual grid order: Level (desc) → Tier (desc) → GameID (asc) → Stats (desc)
+function sortMonstersByVisualOrder(monsters) {
+  return monsters.map(m => ({
+    ...m,
+    _level: getLevelFromExp(m.exp),
+    _statSum: (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0)
+  })).sort((a, b) => {
+    if (a._level !== b._level) return b._level - a._level;
+    const tierA = a.tier || 0;
+    const tierB = b.tier || 0;
+    if (tierA !== tierB) return tierB - tierA;
+    const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
+    if (gameIdCompare !== 0) return gameIdCompare;
+    return b._statSum - a._statSum;
+  });
+}
+
+// Match monster by stat percentage
+function matchMonsterByPercentage(matchingMonsters, percentage, displayedLevel) {
+  const monstersWithPercentage = matchingMonsters.filter(m => {
+    const statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+    return statSum === percentage;
+  });
+  
+  console.log('[Better UI] Found', monstersWithPercentage.length, 'monster(s) with', percentage + '%');
+  
+  if (monstersWithPercentage.length === 0) return null;
+  if (monstersWithPercentage.length === 1) return monstersWithPercentage[0];
+  
+  // Multiple monsters with same percentage - use level to disambiguate
+  if (displayedLevel) {
+    console.log('[Better UI] Multiple monsters with same percentage, using displayed level:', displayedLevel);
+    const levelMatch = monstersWithPercentage.find(m => getLevelFromExp(m.exp || 0) === displayedLevel);
+    if (levelMatch) return levelMatch;
+  }
+  
+  return monstersWithPercentage[0];
+}
+
+// Match monster by level and visual clues
+function matchMonsterByLevelAndVisuals(matchingMonsters, displayedLevel, isShiny, hasStars) {
+  if (!displayedLevel) return null;
+  
+  const levelMatches = matchingMonsters.filter(m => getLevelFromExp(m.exp) === displayedLevel);
+  
+  if (levelMatches.length === 0) return null;
+  if (levelMatches.length === 1) return levelMatches[0];
+  
+  // Multiple creatures with same level - use visual clues
+  return levelMatches.find(m => {
+    if (isShiny && !m.shiny) return false;
+    if (!isShiny && m.shiny) return false;
+    if (hasStars && !m.tier) return false;
+    if (!hasStars && m.tier) return false;
+    return true;
+  }) || null;
+}
+
+// Calculate and format creature stats
+function calculateCreatureStats(monster) {
+  const statSum = (monster?.hp || 0) + (monster?.ad || 0) + (monster?.ap || 0) + (monster?.armor || 0) + (monster?.magicResist || 0);
+  const statPercent = Math.round((statSum / 100) * 100);
+  const level = getLevelFromExp(monster?.exp || 0);
+  
+  return {
+    id: monster?.id,
+    level,
+    hp: monster?.hp,
+    ad: monster?.ad,
+    ap: monster?.ap,
+    armor: monster?.armor,
+    magicResist: monster?.magicResist,
+    total: statSum,
+    percentage: statPercent + '%'
+  };
 }
 
 // Helper function to get the unique ID of a creature from its image element
@@ -1167,47 +1300,9 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     console.log('[Better UI] getCreatureUniqueId - Context menu percentage provided:', contextMenuPercentage + '%');
   }
   
-  // Helper function to calculate level from exp
-  const getLevelFromExp = (exp) => {
-    const EXP_TABLE = [
-      [5, 11250], [6, 17000], [7, 24000], [8, 32250], [9, 41750], [10, 52250],
-      [11, 64250], [12, 77750], [13, 92250], [14, 108500], [15, 126250], [16, 145750],
-      [17, 167000], [18, 190000], [19, 215250], [20, 242750], [21, 272750], [22, 305750],
-      [23, 342000], [24, 382000], [25, 426250], [26, 475250], [27, 530000], [28, 591500],
-      [29, 660500], [30, 738500], [31, 827000], [32, 928000], [33, 1043500], [34, 1176000],
-      [35, 1329000], [36, 1505750], [37, 1710500], [38, 1948750], [39, 2226500], [40, 2550500],
-      [41, 2929500], [42, 3373500], [43, 3894000], [44, 4504750], [45, 5222500], [46, 6066000],
-      [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
-    ];
-    if (typeof exp !== 'number' || exp < EXP_TABLE[0][1]) return 1;
-    for (let i = EXP_TABLE.length - 1; i >= 0; i--) {
-      if (exp >= EXP_TABLE[i][1]) return EXP_TABLE[i][0];
-    }
-    return 1;
-  };
-  
   // Get all monsters from game state
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
-  let matchingMonsters = monsters.filter(m => m.gameId === gameId);
-  
-  // Sort monsters the same way as the visual grid: Level (desc) → Tier (desc) → GameID (asc) → Stats (desc)
-  matchingMonsters = matchingMonsters.map(m => ({
-    ...m,
-    _level: getLevelFromExp(m.exp),
-    _statSum: (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0)
-  })).sort((a, b) => {
-    // Level (desc)
-    if (a._level !== b._level) return b._level - a._level;
-    // Tier (desc)
-    const tierA = a.tier || 0;
-    const tierB = b.tier || 0;
-    if (tierA !== tierB) return tierB - tierA;
-    // Game ID (asc, string compare)
-    const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
-    if (gameIdCompare !== 0) return gameIdCompare;
-    // Stat sum (desc)
-    return b._statSum - a._statSum;
-  });
+  const matchingMonsters = sortMonstersByVisualOrder(monsters.filter(m => m.gameId === gameId));
   
   console.log('[Better UI] getCreatureUniqueId - Found', matchingMonsters.length, 'monsters in game state with gameId', gameId);
   console.log('[Better UI] getCreatureUniqueId - Monster IDs in SORTED order:', matchingMonsters.map(m => {
@@ -1272,50 +1367,14 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     let identifiedMonster = matchingMonsters[currentIndex];
     let matchedByPercentage = false;
     
-    // Use the percentage passed from context menu if available
     if (contextMenuPercentage !== null) {
       console.log('[Better UI] getCreatureUniqueId - Using provided percentage:', contextMenuPercentage + '%');
-      
-      // Find all monsters with matching stats percentage
-      const monstersWithPercentage = matchingMonsters.filter(m => {
-        const statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
-        return statSum === contextMenuPercentage;
-      });
-      
-      console.log('[Better UI] getCreatureUniqueId - Found', monstersWithPercentage.length, 'monster(s) with', contextMenuPercentage + '%');
-      
-      let monster = null;
-      
-      // If multiple monsters with same percentage, use displayed level to disambiguate
-      if (monstersWithPercentage.length > 1 && displayedLevel) {
-        console.log('[Better UI] getCreatureUniqueId - Multiple monsters with same percentage, using displayed level:', displayedLevel);
-        
-        // Log all candidates with their levels
-        monstersWithPercentage.forEach(m => {
-          const mLevel = getLevelFromExp(m.exp || 0);
-          console.log(`[Better UI] getCreatureUniqueId - Candidate: ${m.id}, level ${mLevel}, exp ${m.exp}`);
-        });
-        
-        monster = monstersWithPercentage.find(m => {
-          const monsterLevel = getLevelFromExp(m.exp || 0);
-          return monsterLevel === displayedLevel;
-        });
-        if (monster) {
-          console.log('[Better UI] getCreatureUniqueId - Matched by percentage AND level:', contextMenuPercentage + '%', 'level', displayedLevel, '→', monster.id);
-        } else {
-          console.warn('[Better UI] getCreatureUniqueId - No monster matched level', displayedLevel, '- using first match');
-        }
-      }
-      
-      // If no level match or only one monster with that percentage, just use percentage
-      if (!monster && monstersWithPercentage.length > 0) {
-        monster = monstersWithPercentage[0];
-        console.log('[Better UI] getCreatureUniqueId - Matched by provided percentage:', contextMenuPercentage + '%', '→', monster.id);
-      }
+      const monster = matchMonsterByPercentage(matchingMonsters, contextMenuPercentage, displayedLevel);
       
       if (monster) {
         identifiedMonster = monster;
         matchedByPercentage = true;
+        console.log('[Better UI] getCreatureUniqueId - Matched by percentage:', contextMenuPercentage + '%', '→', monster.id);
       } else {
         console.warn('[Better UI] getCreatureUniqueId - No monster found with percentage:', contextMenuPercentage + '%');
       }
@@ -1323,75 +1382,21 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     
     // Fallback to level-based matching if percentage matching failed
     if (!matchedByPercentage && displayedLevel) {
-      // Get additional visual clues
       const button = currentImg.closest('button');
       const isShiny = currentImg.src.includes('-shiny');
-      const rarity = button.querySelector('[data-rarity]')?.getAttribute('data-rarity');
       const hasStars = button.querySelector('.tier-stars') !== null;
       
-      console.log('[Better UI] getCreatureUniqueId - Visual clues:', {
-        level: displayedLevel,
-        isShiny: isShiny,
-        rarity: rarity,
-        hasStars: hasStars
-      });
+      console.log('[Better UI] getCreatureUniqueId - Visual clues:', { level: displayedLevel, isShiny, hasStars });
       
-      // Find monsters with matching level
-      const levelMatches = matchingMonsters.filter(m => getLevelFromExp(m.exp) === displayedLevel);
-      console.log('[Better UI] getCreatureUniqueId - Level matches:', levelMatches.map(m => ({
-        id: m.id,
-        shiny: m.shiny,
-        tier: m.tier
-      })));
-      
-      if (levelMatches.length === 1) {
-        // Only one creature with this level
-        identifiedMonster = levelMatches[0];
-        console.log('[Better UI] getCreatureUniqueId - Matched by unique level:', displayedLevel);
-      } else if (levelMatches.length > 1) {
-        // Multiple creatures with same level, use additional criteria
-        let bestMatch = levelMatches.find(m => {
-          // Match shiny status
-          if (isShiny && !m.shiny) return false;
-          if (!isShiny && m.shiny) return false;
-          
-          // Match tier (stars)
-          if (hasStars && !m.tier) return false;
-          if (!hasStars && m.tier) return false;
-          
-          return true;
-        });
-        
-        if (bestMatch) {
-          identifiedMonster = bestMatch;
-          console.log('[Better UI] getCreatureUniqueId - Matched by level + visual clues');
-        } else {
-          // Fall back to index-based matching within level group
-          const levelIndex = matchingMonsters.filter(m => getLevelFromExp(m.exp) === displayedLevel).indexOf(matchingMonsters[currentIndex]);
-          if (levelIndex >= 0 && levelIndex < levelMatches.length) {
-            identifiedMonster = levelMatches[levelIndex];
-            console.log('[Better UI] getCreatureUniqueId - Matched by level + index within level group');
-          }
-        }
+      const bestMatch = matchMonsterByLevelAndVisuals(matchingMonsters, displayedLevel, isShiny, hasStars);
+      if (bestMatch) {
+        identifiedMonster = bestMatch;
+        console.log('[Better UI] getCreatureUniqueId - Matched by level + visual clues');
       }
     }
     
-    const statSum = (identifiedMonster?.hp || 0) + (identifiedMonster?.ad || 0) + (identifiedMonster?.ap || 0) + (identifiedMonster?.armor || 0) + (identifiedMonster?.magicResist || 0);
-    const statPercent = Math.round((statSum / 100) * 100);
-    const monsterLevel = getLevelFromExp(identifiedMonster?.exp || 0);
-    
     console.log('[Better UI] getCreatureUniqueId - Mapping to monster:', identifiedMonster?.id);
-    console.log('[Better UI] getCreatureUniqueId - Monster stats:', {
-      id: identifiedMonster?.id,
-      level: monsterLevel,
-      hp: identifiedMonster?.hp,
-      ad: identifiedMonster?.ad,
-      ap: identifiedMonster?.ap,
-      armor: identifiedMonster?.armor,
-      magicResist: identifiedMonster?.magicResist,
-      total: statSum,
-      percentage: statPercent + '%'
-    });
+    console.log('[Better UI] getCreatureUniqueId - Monster stats:', calculateCreatureStats(identifiedMonster));
     
     return {
       uniqueId: identifiedMonster?.id,
@@ -1450,6 +1455,7 @@ function startContextMenuObserver() {
     if (contextMenuThrottle) return;
     
     contextMenuThrottle = setTimeout(() => {
+      activeTimeouts.delete(contextMenuThrottle);
       contextMenuThrottle = null;
       
       // Add listeners to new creature buttons
@@ -1481,6 +1487,7 @@ function startContextMenuObserver() {
         }
       }
     }, 50); // 50ms throttle
+    activeTimeouts.add(contextMenuThrottle);
   });
   
   // Observe both document.body and document.documentElement to catch portals
@@ -1519,6 +1526,23 @@ function stopContextMenuObserver() {
 // =======================
 // 6. Rainbow Tiers Functions
 // =======================
+
+// Apply data attributes to elements for styling
+function applyDataAttributes(elements, prefix, colorKey, extraAttributes = {}) {
+  Object.entries(elements).forEach(([key, element]) => {
+    if (!element) return;
+    
+    element.setAttribute(`data-${prefix}`, 'true');
+    element.setAttribute(`data-${prefix}-color`, colorKey);
+    
+    // Apply any extra attributes specific to this element
+    if (extraAttributes[key]) {
+      Object.entries(extraAttributes[key]).forEach(([attr, value]) => {
+        element.setAttribute(attr, value);
+      });
+    }
+  });
+}
 
 // Generic styling helper to reduce duplication
 function applySpecialStyling(options) {
@@ -1590,21 +1614,16 @@ function applyStylingToCreature(creature, colorKey) {
     elements.starImg.setAttribute('data-original-src', elements.starImg.src);
   }
   
-  // Apply star styling
-  elements.starImg.setAttribute('data-max-creatures', 'true');
-  elements.starImg.setAttribute('data-max-creatures-color', colorKey);
-
-  // Apply rarity div styling
-  elements.rarityDiv.setAttribute('data-rarity', GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString());
-  elements.rarityDiv.setAttribute('data-max-creatures', 'true');
-  elements.rarityDiv.setAttribute('data-max-creatures-color', colorKey);
-
-  // Apply text rarity styling if it exists
-  if (elements.textRarityEl) {
-    elements.textRarityEl.setAttribute('data-rarity', GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString());
-    elements.textRarityEl.setAttribute('data-max-creatures', 'true');
-    elements.textRarityEl.setAttribute('data-max-creatures-color', colorKey);
-  }
+  // Apply styling with data attributes
+  applyDataAttributes(
+    { starImg: elements.starImg, rarityDiv: elements.rarityDiv, textRarityEl: elements.textRarityEl },
+    'max-creatures',
+    colorKey,
+    {
+      rarityDiv: { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() },
+      textRarityEl: { 'data-rarity': GAME_CONSTANTS.ELITE_RARITY_LEVEL.toString() }
+    }
+  );
 }
 
 function injectMaxCreaturesCSS(colorOption, colorKey) {
@@ -1707,21 +1726,18 @@ function filterEligibleShinies(visibleCreatures) {
 function applyShinyStyling(shiny, colorKey) {
   const { elements, imgEl } = shiny;
   
-  // Apply styling to the creature image itself
-  imgEl.setAttribute('data-max-shinies', 'true');
-  imgEl.setAttribute('data-max-shinies-color', colorKey);
-  
-  // Apply rarity div styling
+  // Store original rarity
   const currentRarity = elements.rarityDiv.getAttribute('data-rarity') || '5';
-  elements.rarityDiv.setAttribute('data-max-shinies', 'true');
-  elements.rarityDiv.setAttribute('data-max-shinies-color', colorKey);
-  elements.rarityDiv.setAttribute('data-original-rarity', currentRarity);
   
-  // Apply text rarity styling if it exists
-  if (elements.textRarityEl) {
-    elements.textRarityEl.setAttribute('data-max-shinies', 'true');
-    elements.textRarityEl.setAttribute('data-max-shinies-color', colorKey);
-  }
+  // Apply styling with data attributes
+  applyDataAttributes(
+    { imgEl, rarityDiv: elements.rarityDiv, textRarityEl: elements.textRarityEl },
+    'max-shinies',
+    colorKey,
+    {
+      rarityDiv: { 'data-original-rarity': currentRarity }
+    }
+  );
 }
 
 function injectMaxShiniesCSS(colorOption, colorKey) {
@@ -1742,10 +1758,10 @@ function injectMaxShiniesCSS(colorOption, colorKey) {
   // Generate CSS for shinies - matching Max Creatures styling
   style.textContent = `
     .has-rarity[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
-      border: 3px solid;
+      border: 2px solid;
       border-image: ${colorOption.borderGradient} 1;
       background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      box-shadow: 0 0 10px ${colorOption.textColor}40, inset 0 0 10px ${colorOption.textColor}20;
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
     }
     .has-rarity-text[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
       --tw-text-opacity: 1;
@@ -1802,7 +1818,45 @@ function removeMaxShinies() {
 }
 
 // =======================
-// 8. Stamina Timer Functions
+// 8. Setup Labels Visibility Functions
+// =======================
+
+// Apply setup labels visibility
+function applySetupLabelsVisibility(show) {
+  const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
+  if (setupContainer) {
+    setupContainer.style.display = show ? '' : 'none';
+    console.log('[Better UI] Setup labels container visibility:', show ? 'visible' : 'hidden');
+  }
+}
+
+// Start observer for setup labels container
+function startSetupLabelsObserver() {
+  console.log('[Better UI] Starting setup labels observer');
+  
+  const observer = new MutationObserver(() => {
+    // Reapply visibility whenever DOM changes
+    const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
+    if (setupContainer) {
+      const shouldBeVisible = config.showSetupLabels;
+      const currentlyVisible = setupContainer.style.display !== 'none';
+      
+      if (shouldBeVisible !== currentlyVisible) {
+        applySetupLabelsVisibility(shouldBeVisible);
+      }
+    }
+  });
+  
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  
+  return observer;
+}
+
+// =======================
+// 9. Stamina Timer Functions
 // =======================
 
 // Update stamina timer display
@@ -1931,10 +1985,12 @@ function initStaminaTimer() {
         // Throttle updates to prevent spam
         if (updateThrottle) return;
         updateThrottle = setTimeout(() => {
+          activeTimeouts.delete(updateThrottle);
           updateThrottle = null;
           console.log('[Better UI] Stamina span changed, checking timer');
           updateStaminaTimer();
         }, THROTTLE_SETTINGS.DOM_CHECK);
+        activeTimeouts.add(updateThrottle);
       });
       
       staminaObserver.observe(staminaSpan, {
@@ -2165,6 +2221,14 @@ function initBetterUI() {
       activeTimeouts.add(timeoutId);
     }
     
+    // Apply initial setup labels visibility and start observer
+    const timeoutId = setTimeout(() => {
+      applySetupLabelsVisibility(config.showSetupLabels);
+      setupLabelsObserver = startSetupLabelsObserver();
+      console.log('[Better UI] Setup labels visibility applied:', config.showSetupLabels);
+    }, 1000); // Delay to ensure DOM is ready
+    activeTimeouts.add(timeoutId);
+    
     console.log('[Better UI] Initialization completed');
   } catch (error) {
     console.error('[Better UI] Initialization error:', error);
@@ -2192,10 +2256,15 @@ function cleanupBetterUI() {
     });
     activeTimeouts.clear();
     
-    // Clear throttle timeout
+    // Clear throttle timeouts
     if (updateThrottle) {
       clearTimeout(updateThrottle);
       updateThrottle = null;
+    }
+    
+    if (contextMenuThrottle) {
+      clearTimeout(contextMenuThrottle);
+      contextMenuThrottle = null;
     }
     
     // Disconnect MutationObservers
@@ -2231,6 +2300,17 @@ function cleanupBetterUI() {
         console.warn('[Better UI] Error disconnecting creature container MutationObserver:', error);
       }
       creatureObserver = null;
+    }
+    
+    // Disconnect setup labels observer
+    if (setupLabelsObserver) {
+      try {
+        setupLabelsObserver.disconnect();
+        console.log('[Better UI] Setup labels MutationObserver disconnected');
+      } catch (error) {
+        console.warn('[Better UI] Error disconnecting setup labels MutationObserver:', error);
+      }
+      setupLabelsObserver = null;
     }
     
     // Remove favorite hearts

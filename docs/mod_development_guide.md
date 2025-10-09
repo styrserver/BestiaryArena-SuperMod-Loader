@@ -97,6 +97,11 @@ const superModNames = [
 - Dashboard and popup cannot load ES6 modules due to browser security restrictions
 - They use static lists for UI display
 
+**Important Browser Limitations:**
+- **Firefox**: Background scripts can use dynamic `import()` to load `mod-registry.js`
+- **Chrome**: Service workers cannot use dynamic imports (HTML spec restriction)
+- **Chrome Fallback**: Background script uses hardcoded lists that must be kept in sync with `mod-registry.js`
+
 **Tip:** Search for "kept in sync with mod-registry.js" in `dashboard.js` and `popup.js` to find the exact locations quickly.
 
 ### Debug System

@@ -595,11 +595,28 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
         }
       }, '*');
 
-      // Execute with a slight delay to allow config to be received
+      // Wait for config response before executing
       return new Promise((resolve) => {
-        setTimeout(async () => {
+        const responseHandler = (event) => {
+          if (event.source !== window) return;
+          if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === configId) {
+            window.removeEventListener('message', responseHandler);
+            clearTimeout(timeoutId);
+            
+            if (event.data.response && event.data.response.success) {
+              modConfig = event.data.response.config || {};
+            }
+            
+            // Include enabled state in config
+            modConfig.enabled = mod.enabled;
+            
+            executeModWithConfig();
+          }
+        };
+        
+        const executeModWithConfig = () => {
           try {
-            console.log(`Creating context for local mod: ${modName}`);
+            console.log(`Creating context for local mod: ${modName} with config:`, modConfig);
             const scriptContext = {
               hash: `local_${modName}`,
               config: modConfig,
@@ -642,7 +659,18 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
             console.error(`Error executing mod ${modName}:`, error);
             resolve(null);
           }
-        }, 50);
+        };
+        
+        // Add event listener for config response
+        window.addEventListener('message', responseHandler);
+        
+        // Timeout fallback after 1 second
+        const timeoutId = setTimeout(() => {
+          window.removeEventListener('message', responseHandler);
+          console.warn(`Config timeout for mod ${modName}, proceeding with default config`);
+          modConfig.enabled = mod.enabled;
+          executeModWithConfig();
+        }, 1000);
       });
     } catch (error) {
       console.warn(`Could not load config for mod ${modName}:`, error);
@@ -650,7 +678,7 @@ async function executeLocalMod(modNameOrObject, forceExecution = false) {
       console.log(`Creating context for local mod: ${modName}`);
       const scriptContext = {
         hash: `local_${modName}`,
-        config: {},
+        config: { enabled: mod.enabled },
         api: window.BestiaryModAPI,
         // Add debug flag to context
         BESTIARY_DEBUG: window.BESTIARY_DEBUG || localStorage.getItem('bestiary-debug') === 'true'

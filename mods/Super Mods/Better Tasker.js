@@ -342,6 +342,12 @@ let lastQuestBlipTrigger = 0;
 let lastGameStateChange = 0;
 let lastNoTaskCheck = 0;
 
+// Loop detection and auto-refresh
+let consecutiveFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 5; // Refresh after 5 consecutive failures
+let lastFailureType = null;
+const FAILURE_RESET_TIME = 60000; // Reset counter after 60 seconds of no failures
+
 // Centralized state reset function
 function resetState(resetType = 'full') {
     try {
@@ -438,10 +444,66 @@ function resetState(resetType = 'full') {
     }
 }
 
+// Track failures and trigger page refresh if stuck in a loop
+function trackFailureAndCheckRefresh(failureType, shouldRefresh = true) {
+    try {
+        const now = Date.now();
+        
+        // Reset counter if it's been a while since last failure (successful recovery)
+        if (lastFailureType && now - lastGameStateChange > FAILURE_RESET_TIME) {
+            console.log('[Better Tasker] Resetting failure counter after successful recovery period');
+            consecutiveFailures = 0;
+            lastFailureType = null;
+        }
+        
+        // Increment counter for same failure type
+        if (lastFailureType === failureType) {
+            consecutiveFailures++;
+        } else {
+            // Different failure type, reset counter
+            consecutiveFailures = 1;
+            lastFailureType = failureType;
+        }
+        
+        console.log(`[Better Tasker] Failure tracked: ${failureType} (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`);
+        
+        // Check if we should refresh
+        if (shouldRefresh && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            console.warn(`[Better Tasker] STUCK IN LOOP DETECTED: ${failureType} failed ${consecutiveFailures} times consecutively`);
+            console.warn('[Better Tasker] Triggering page refresh in 3 seconds to recover...');
+            
+            // Give user a moment to see the warning
+            setTimeout(() => {
+                console.log('[Better Tasker] Refreshing page to recover from stuck state...');
+                location.reload();
+            }, 3000);
+            
+            return true; // Indicates refresh is scheduled
+        }
+        
+        return false; // No refresh needed
+    } catch (error) {
+        console.error('[Better Tasker] Error tracking failure:', error);
+        return false;
+    }
+}
+
+// Reset failure counter on successful operations
+function resetFailureCounter() {
+    if (consecutiveFailures > 0) {
+        console.log('[Better Tasker] Operation successful - resetting failure counter');
+        consecutiveFailures = 0;
+        lastFailureType = null;
+    }
+}
+
 // Centralized cleanup function for task completion failures
 function cleanupTaskCompletionFailure(reason = 'unknown') {
     try {
         console.log(`[Better Tasker] Cleaning up after task completion failure: ${reason}`);
+        
+        // Track this failure
+        trackFailureAndCheckRefresh(reason);
         
         // Clear all task-related flags
         resetState('taskComplete');
@@ -2812,6 +2874,9 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 updateExposedState(); // Update exposed state for other mods
                 console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
                 
+                // Reset failure counter on successful task start
+                resetFailureCounter();
+                
                 // Modify quest button appearance to show tasking state (after Start button click, like Raid Hunter)
                 modifyQuestButtonForTasking();
                 questButtonModifiedForTasking = true;
@@ -3498,7 +3563,37 @@ async function openQuestLogDirectly() {
     try {
         console.log('[Better Tasker] Opening quest log directly...');
         
-        // Try to find quest log button or icon
+        // FIRST: Try to find and click quest blip (most reliable for task completion)
+        const questBlipSelectors = [
+            '#header-slot img[src*="quest-blip.png"]',
+            '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+            '#header-slot img[alt="Quests"][src*="quest-blip"]',
+            '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+            'img[src*="quest-blip.png"]',
+            'img[src*="/assets/icons/quest-blip.png"]'
+        ];
+        
+        let questBlip = null;
+        for (const selector of questBlipSelectors) {
+            questBlip = document.querySelector(selector);
+            if (questBlip && questBlip.offsetParent !== null) {
+                console.log(`[Better Tasker] Found quest blip with selector: ${selector}`);
+                questBlip.click();
+                await sleep(300);
+                
+                // Validate that quest log actually opened
+                const questLogContainer = findQuestLogContainer();
+                if (questLogContainer) {
+                    console.log('[Better Tasker] Quest log opened via quest blip and validated');
+                    return true;
+                } else {
+                    console.log('[Better Tasker] Quest blip clicked but quest log did not appear');
+                }
+                break;
+            }
+        }
+        
+        // SECOND: Try to find quest log button or icon (fallback)
         const questSelectors = [
             'button[aria-label*="quest"]',
             'button[title*="quest"]',
@@ -3668,6 +3763,7 @@ async function findAndClickFinishButton() {
             const taskCompleted = await verifyTaskCompletion();
             if (taskCompleted) {
                 console.log('[Better Tasker] Task completion verified successfully');
+                resetFailureCounter(); // Success - reset failure counter
                 
                 // Press ESC to clear quest log after successful task completion
                 console.log('[Better Tasker] Pressing ESC to clear quest log...');
@@ -3801,6 +3897,7 @@ async function openQuestLogWithRetry() {
         
         if (questLogOpened) {
             console.log(`[Better Tasker] Quest log opened successfully on attempt ${attempt}`);
+            resetFailureCounter(); // Success - reset failure counter
             return true;
         }
         
@@ -3821,6 +3918,13 @@ async function openQuestLogWithRetry() {
     }
     
     console.log('[Better Tasker] All quest log opening attempts failed');
+    
+    // Track this failure - will trigger refresh after 3 consecutive failures
+    const refreshScheduled = trackFailureAndCheckRefresh('quest_log_opening_failed');
+    if (refreshScheduled) {
+        console.warn('[Better Tasker] Page refresh scheduled due to repeated quest log opening failures');
+    }
+    
     return false;
 }
 

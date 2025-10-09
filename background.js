@@ -33,6 +33,69 @@ let registeredTabs = new Set(); // Track which tabs have received local mods
 
 const DEBUG = false; // Set to true for development
 
+// Function to load default enabled mods from mod-registry.js
+async function loadDefaultEnabledMods() {
+  try {
+    // Try dynamic import for Firefox
+    if (typeof browser !== 'undefined') {
+      console.log('[Background] Loading default enabled mods from registry (Firefox)');
+      const registryUrl = browserAPI.runtime.getURL('content/mod-registry.js');
+      const registry = await import(registryUrl);
+      
+      if (registry && registry.DEFAULT_ENABLED_MODS) {
+        console.log('[Background] Successfully loaded default enabled mods from registry:', registry.DEFAULT_ENABLED_MODS);
+        return registry.DEFAULT_ENABLED_MODS;
+      }
+    }
+    
+    // Chrome fallback: Use hardcoded list since Chrome service workers can't use dynamic import
+    console.log('[Background] Using hardcoded default enabled mods (Chrome limitation)');
+    return [
+      'database/Welcome.js',
+      'database/inventory-database.js',
+      'database/creature-database.js',
+      'database/equipment-database.js',
+      'Official Mods/Bestiary_Automator.js',
+      'Official Mods/Board Analyzer.js',
+      'Official Mods/Custom_Display.js',
+      'Official Mods/Hero_Editor.js',
+      'Official Mods/Highscore_Improvements.js',
+      'Official Mods/Item_tier_list.js',
+      'Official Mods/Monster_tier_list.js',
+      'Official Mods/Setup_Manager.js',
+      'Official Mods/Team_Copier.js',
+      'Official Mods/Tick_Tracker.js',
+      'Official Mods/Turbo Mode.js',
+      'Super Mods/RunTracker.js',
+      'Super Mods/Outfiter.js',
+      'Super Mods/Playercount.js'
+    ];
+  } catch (error) {
+    console.error('[Background] Error loading default enabled mods from registry:', error);
+    // Return hardcoded fallback
+    return [
+      'database/Welcome.js',
+      'database/inventory-database.js',
+      'database/creature-database.js',
+      'database/equipment-database.js',
+      'Official Mods/Bestiary_Automator.js',
+      'Official Mods/Board Analyzer.js',
+      'Official Mods/Custom_Display.js',
+      'Official Mods/Hero_Editor.js',
+      'Official Mods/Highscore_Improvements.js',
+      'Official Mods/Item_tier_list.js',
+      'Official Mods/Monster_tier_list.js',
+      'Official Mods/Setup_Manager.js',
+      'Official Mods/Team_Copier.js',
+      'Official Mods/Tick_Tracker.js',
+      'Official Mods/Turbo Mode.js',
+      'Super Mods/RunTracker.js',
+      'Super Mods/Outfiter.js',
+      'Super Mods/Playercount.js'
+    ];
+  }
+}
+
 // Enhanced function to handle multiple mod sources
 function parseModSource(source) {
   // Check if it's a base64 encoded content
@@ -530,25 +593,53 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         existingModStates[mod.name] = mod.enabled;
       });
       
-      // Process incoming mods, preserving enabled states from existing mods
-      localMods = newMods.map(mod => ({
-        name: mod.name,
-        displayName: mod.displayName || mod.name,
-        isLocal: true,
-        // If mod existed before, use its previous enabled state, otherwise default to enabled
-        enabled: existingModStates.hasOwnProperty(mod.name) ? existingModStates[mod.name] : true,
-        // Preserve type and content for manual mods
-        type: mod.type,
-        content: mod.content,
-        originalName: mod.originalName
-      }));
-      
-      console.log('Background: Processed local mods with preserved states:', localMods);
-      
-      // Save to sync storage first, then to local
-      browserAPI.storage.sync.set({ localMods }, () => {
-        browserAPI.storage.local.set({ localMods }, () => {
-          sendResponse({ success: true, mods: localMods });
+      // Load default enabled mods from mod-registry.js
+      loadDefaultEnabledMods().then(defaultEnabledMods => {
+        // Process incoming mods, preserving enabled states from existing mods
+        localMods = newMods.map(mod => ({
+          name: mod.name,
+          displayName: mod.displayName || mod.name,
+          isLocal: true,
+          // If mod existed before, use its previous enabled state, otherwise check if it should be enabled by default
+          enabled: existingModStates.hasOwnProperty(mod.name) ? existingModStates[mod.name] : defaultEnabledMods.includes(mod.name),
+          // Preserve type and content for manual mods
+          type: mod.type,
+          content: mod.content,
+          originalName: mod.originalName
+        }));
+        
+        console.log('Background: Processed local mods with preserved states:', localMods);
+        
+        // Save to sync storage first, then to local
+        browserAPI.storage.sync.set({ localMods }, () => {
+          browserAPI.storage.local.set({ localMods }, () => {
+            sendResponse({ success: true, mods: localMods });
+          });
+        });
+      }).catch(error => {
+        console.error('Background: Error loading default enabled mods:', error);
+        // This should not happen since loadDefaultEnabledMods has its own fallback
+        // But just in case, use a minimal fallback
+        const minimalFallback = ['database/Welcome.js'];
+        
+        // Process with minimal fallback
+        localMods = newMods.map(mod => ({
+          name: mod.name,
+          displayName: mod.displayName || mod.name,
+          isLocal: true,
+          enabled: existingModStates.hasOwnProperty(mod.name) ? existingModStates[mod.name] : minimalFallback.includes(mod.name),
+          type: mod.type,
+          content: mod.content,
+          originalName: mod.originalName
+        }));
+        
+        console.log('Background: Processed local mods with minimal fallback:', localMods);
+        
+        // Save to sync storage first, then to local
+        browserAPI.storage.sync.set({ localMods }, () => {
+          browserAPI.storage.local.set({ localMods }, () => {
+            sendResponse({ success: true, mods: localMods });
+          });
         });
       });
     });

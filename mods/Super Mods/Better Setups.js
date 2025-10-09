@@ -13,6 +13,21 @@ const defaultConfig = {
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
 
+// Early exit if mod is disabled
+if (!config.enabled) {
+  console.log('[Better Setups] Mod is disabled, skipping initialization');
+  exports = {
+    activate: () => console.log('[Better Setups] Mod is disabled'),
+    updateConfig: (newConfig) => {
+      Object.assign(config, newConfig);
+      if (config.enabled) {
+        console.log('[Better Setups] Mod enabled, please reload the page for changes to take effect');
+      }
+    },
+    cleanup: () => {}
+  };
+} else {
+
 // Default setup labels
 const DEFAULT_LABELS = ["Farm", "Speedrun", "Rank Points", "Boosted Map", "Other"];
 
@@ -237,217 +252,6 @@ function activateSetups() {
     });
   }
 }
-
-// Function to show edit labels modal
-function showEditLabelsModal() {
-  console.log('[Better Setups] showEditLabelsModal() called');
-  
-  try {
-    // Get current map information
-    const currentMapId = getCurrentMapId();
-    const currentMapName = getCurrentMapName();
-    
-    console.log('[Better Setups] Current map:', currentMapId, currentMapName);
-    
-    // Get current labels
-    const existingLabels = window.localStorage.getItem('stored-setup-labels');
-    let currentLabels = ["Farm", "Speedrun", "Rank Points", "Boosted Map", "Other"];
-    
-    if (existingLabels) {
-      try {
-        currentLabels = JSON.parse(existingLabels);
-      } catch (e) {
-        console.warn('[Better Setups] Failed to parse existing labels, using defaults');
-      }
-    }
-    
-    // Get map-specific setup data
-    const mapSetupData = getMapSetupData(currentMapId);
-    console.log('[Better Setups] Map setup data:', mapSetupData);
-    
-    // Create modal content
-    const content = document.createElement('div');
-    
-    // Add map information header
-    const mapInfo = document.createElement('div');
-    mapInfo.style.marginBottom = '15px';
-    mapInfo.style.padding = '10px';
-    mapInfo.style.backgroundColor = '#2a2a2a';
-    mapInfo.style.borderRadius = '5px';
-    mapInfo.style.border = '1px solid #444';
-    
-    mapInfo.innerHTML = `
-      <h3 style="margin: 0 0 5px 0; color: #fff;">Current Map: ${currentMapName}</h3>
-      <p style="margin: 0; color: #ccc; font-size: 12px;">Map ID: ${currentMapId}</p>
-      <p style="margin: 5px 0 0 0; color: #ccc; font-size: 12px;">Saved setups: ${mapSetupData.count} (from ${mapSetupData.source})</p>
-    `;
-    
-    content.appendChild(mapInfo);
-    
-    // Add setup labels section
-    const labelsSection = document.createElement('div');
-    labelsSection.innerHTML = '<h4 style="margin: 15px 0 10px 0; color: #fff;">Edit Setup Labels:</h4>';
-    content.appendChild(labelsSection);
-    
-    // Create input fields for each label
-    const inputsContainer = document.createElement('div');
-    inputsContainer.style.marginTop = '10px';
-    
-    function createLabelInput(label, index) {
-      const inputGroup = document.createElement('div');
-      inputGroup.style.marginBottom = '8px';
-      inputGroup.style.display = 'flex';
-      inputGroup.style.alignItems = 'center';
-      inputGroup.style.gap = '8px';
-      
-      const labelElement = document.createElement('span');
-      labelElement.textContent = `${index + 1}.`;
-      labelElement.style.minWidth = '20px';
-      
-      const input = createStyledTextInput({
-        value: label,
-        datasetIndex: index,
-        styles: { flex: '1' }
-      });
-      
-      const removeButton = document.createElement('button');
-      removeButton.textContent = 'Remove';
-      removeButton.style.padding = '4px 8px';
-      removeButton.style.backgroundColor = '#dc3545';
-      removeButton.style.color = 'white';
-      removeButton.style.border = 'none';
-      removeButton.style.borderRadius = '3px';
-      removeButton.style.cursor = 'pointer';
-      removeButton.onclick = () => {
-        // Check if this would be the last label
-        if (inputsContainer.children.length <= 1) {
-          api.ui.components.createModal({
-            title: 'Cannot Remove',
-            content: '<p>You must have at least one setup label.</p>',
-            buttons: [{ text: 'OK', primary: true }]
-          });
-          return;
-        }
-        inputGroup.remove();
-        updateLabelNumbers();
-      };
-      
-      inputGroup.appendChild(labelElement);
-      inputGroup.appendChild(input);
-      inputGroup.appendChild(removeButton);
-      return inputGroup;
-    }
-    
-    function updateLabelNumbers() {
-      const inputGroups = inputsContainer.querySelectorAll('div');
-      inputGroups.forEach((group, index) => {
-        const labelElement = group.querySelector('span');
-        if (labelElement) {
-          labelElement.textContent = `${index + 1}.`;
-        }
-      });
-    }
-    
-    function addNewLabel() {
-      const newIndex = inputsContainer.children.length;
-      const newInputGroup = createLabelInput('New Label', newIndex);
-      inputsContainer.appendChild(newInputGroup);
-    }
-    
-    // Create existing labels
-    currentLabels.forEach((label, index) => {
-      const inputGroup = createLabelInput(label, index);
-      inputsContainer.appendChild(inputGroup);
-    });
-    
-    // Add "Add Label" button
-    const addButton = document.createElement('button');
-    addButton.textContent = 'Add Label';
-    addButton.style.marginTop = '10px';
-    addButton.style.padding = '8px 16px';
-    addButton.style.backgroundColor = '#28a745';
-    addButton.style.color = 'white';
-    addButton.style.border = 'none';
-    addButton.style.borderRadius = '3px';
-    addButton.style.cursor = 'pointer';
-    addButton.onclick = addNewLabel;
-    
-    labelsSection.appendChild(inputsContainer);
-    labelsSection.appendChild(addButton);
-    content.appendChild(labelsSection);
-    
-    // Show modal
-    api.ui.components.createModal({
-      title: 'Edit Setup Labels',
-      content: content,
-      buttons: [
-        {
-          text: 'Cancel',
-          primary: false,
-          onClick: () => {
-            console.log('[Better Setups] Edit labels cancelled');
-          }
-        },
-        {
-          text: 'Save',
-          primary: true,
-          onClick: () => {
-            console.log('[Better Setups] Saving edited labels');
-            
-            // Get values from inputs
-            const inputs = inputsContainer.querySelectorAll('input');
-            const newLabels = Array.from(inputs).map(input => input.value.trim()).filter(label => label.length > 0);
-            
-            if (newLabels.length === 0) {
-              api.ui.components.createModal({
-                title: 'Error',
-                content: '<p>Please enter at least one label.</p>',
-                buttons: [{ text: 'OK', primary: true }]
-              });
-              return;
-            }
-            
-            // Save new labels
-            console.log('[Better Setups] New labels:', newLabels);
-            window.localStorage.setItem('stored-setup-labels', JSON.stringify(newLabels));
-            
-            // Update game state
-            globalThis.state.menu.trigger.setState({
-              fn: (prev) => ({
-                ...prev,
-                flags: { ...prev.flags, storedSetups: true },
-              }),
-            });
-            
-            // Show success message
-            api.ui.components.createModal({
-              title: 'Success',
-              content: `<p>Setup labels updated successfully!</p><p>New labels: ${newLabels.join(', ')}</p>`,
-              buttons: [{ text: 'OK', primary: true }]
-            });
-            
-            // Trigger storage event to notify the game
-            window.dispatchEvent(new StorageEvent('storage', {
-              key: 'stored-setup-labels',
-              newValue: window.localStorage.getItem('stored-setup-labels'),
-              oldValue: null,
-              storageArea: window.localStorage
-            }));
-          }
-        }
-      ]
-    });
-  } catch (error) {
-    console.error('[Better Setups] Error showing edit labels modal:', error);
-    
-    api.ui.components.createModal({
-      title: 'Error',
-      content: '<p>Failed to open edit labels modal. Please try again.</p>',
-      buttons: [{ text: 'OK', primary: true }]
-    });
-  }
-}
-
 // =======================
 // 4. UI Injection & Button Management
 // =======================
@@ -1477,12 +1281,13 @@ function getMapSetupData(mapId) {
 // =======================
 
 // Export functionality
-exports = {
-  activate: activateSetups,
-  updateConfig: (newConfig) => {
-    Object.assign(config, newConfig);
-  },
-  cleanup: () => {
-    stopSetupInterfaceObserver();
-  }
-};
+  exports = {
+    activate: activateSetups,
+    updateConfig: (newConfig) => {
+      Object.assign(config, newConfig);
+    },
+    cleanup: () => {
+      stopSetupInterfaceObserver();
+    }
+  };
+}

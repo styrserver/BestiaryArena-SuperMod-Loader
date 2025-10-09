@@ -52,6 +52,32 @@ The system follows this exact order:
 4. **Maintainability**: Cleaner separation of concerns between background and content scripts
 5. **User Experience**: Automatic loading of user-generated scripts
 
+## Browser Compatibility & Limitations
+
+### Chrome Service Worker Restrictions
+
+**Important**: Chrome service workers have strict limitations that affect the mod loading system:
+
+- **Dynamic Imports**: Chrome service workers cannot use `import()` or `new Function()` (HTML spec restriction)
+- **Firefox Support**: Firefox background scripts can use dynamic imports normally
+- **Fallback Strategy**: Chrome uses hardcoded lists that must be kept in sync with `mod-registry.js`
+
+### Registry Loading Strategy
+
+The system uses different approaches for each browser:
+
+1. **Firefox**: Dynamically imports `mod-registry.js` to get `DEFAULT_ENABLED_MODS`
+2. **Chrome**: Uses hardcoded fallback list in `loadDefaultEnabledMods()` function
+3. **Error Handling**: Multiple fallback layers ensure the system works even if registry loading fails
+
+### Maintenance Requirements
+
+When adding new mods to `DEFAULT_ENABLED_MODS`:
+
+- **Firefox**: Automatically uses updated `mod-registry.js`
+- **Chrome**: Must manually update hardcoded list in `background.js` `loadDefaultEnabledMods()` function
+- **Documentation**: The limitation is clearly documented in the code for future maintainers
+
 ## User-Generated Scripts Support
 
 The system automatically loads user-generated scripts stored in localStorage:
