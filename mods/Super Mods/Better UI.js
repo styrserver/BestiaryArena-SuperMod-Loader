@@ -1785,13 +1785,11 @@ function filterEligibleShinies(visibleCreatures) {
     
     const elements = getCreatureElements(imgEl.parentElement);
     
-    // All shinies qualify, regardless of stats or level
-    if (elements.rarityDiv) {
-      eligibleShinies.push({
-        imgEl,
-        elements
-      });
-    }
+    // All shinies qualify, regardless of stats or level or DOM structure
+    eligibleShinies.push({
+      imgEl,
+      elements
+    });
   });
   
   return eligibleShinies;
@@ -1799,6 +1797,16 @@ function filterEligibleShinies(visibleCreatures) {
 
 function applyShinyStyling(shiny, colorKey) {
   const { elements, imgEl } = shiny;
+  
+  // Create .has-rarity element if missing
+  if (!elements.rarityDiv) {
+    const rarityDiv = document.createElement('div');
+    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityDiv.setAttribute('data-rarity', '5');
+    rarityDiv.setAttribute('data-dynamic-created', 'true'); // Mark as dynamically created
+    imgEl.parentElement.appendChild(rarityDiv);
+    elements.rarityDiv = rarityDiv;
+  }
   
   // Store original rarity
   const currentRarity = elements.rarityDiv.getAttribute('data-rarity') || '5';
@@ -1808,9 +1816,7 @@ function applyShinyStyling(shiny, colorKey) {
     { imgEl, rarityDiv: elements.rarityDiv, textRarityEl: elements.textRarityEl },
     'max-shinies',
     colorKey,
-    {
-      rarityDiv: { 'data-original-rarity': currentRarity }
-    }
+    { rarityDiv: { 'data-original-rarity': currentRarity } }
   );
 }
 
@@ -1878,6 +1884,13 @@ function removeMaxShinies() {
     
     // Reset all shiny borders
     document.querySelectorAll('.has-rarity[data-max-shinies="true"]').forEach((rarityDiv) => {
+      // If this was dynamically created, remove it completely
+      if (rarityDiv.hasAttribute('data-dynamic-created')) {
+        rarityDiv.remove();
+        return;
+      }
+      
+      // Otherwise, restore original state
       const originalRarity = rarityDiv.getAttribute('data-original-rarity') || '5';
       rarityDiv.setAttribute('data-rarity', originalRarity);
       rarityDiv.removeAttribute('data-max-shinies');
@@ -2466,6 +2479,36 @@ function initScrollLockObserver() {
   console.log('[Better UI] Scroll lock observer started');
 }
 
+// Handle page visibility changes (browser tab focus/unfocus)
+function initVisibilityChangeHandler() {
+  console.log('[Better UI] Setting up page visibility change handler...');
+  
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      console.log('[Better UI] Page became visible, re-applying all features...');
+      
+      // Re-apply all enabled features
+      if (config.enableMaxCreatures) {
+        scheduleTimeout(() => applyMaxCreatures(), 100);
+      }
+      
+      if (config.enableMaxShinies) {
+        scheduleTimeout(() => applyMaxShinies(), 100);
+      }
+      
+      if (config.enableShinyEnemies) {
+        scheduleTimeout(() => applyShinyEnemies(), 100);
+      }
+      
+      if (config.enableFavorites) {
+        scheduleTimeout(() => updateFavoriteHearts(), 100);
+      }
+    }
+  });
+  
+  console.log('[Better UI] Page visibility change handler initialized');
+}
+
 // Start observer for battle board changes (for shiny enemies)
 let battleBoardObserver = null;
 let boardStateUnsubscribe = null;
@@ -2842,6 +2885,9 @@ function initBetterUI() {
     // Start scroll lock observer to re-apply styles when unlocking
     initScrollLockObserver();
     
+    // Initialize page visibility change handler
+    initVisibilityChangeHandler();
+    
     // Initial update of favorite hearts if enabled
     if (config.enableFavorites) {
       scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_INIT);
@@ -3108,3 +3154,4 @@ exports = {
     }
   }
 };
+

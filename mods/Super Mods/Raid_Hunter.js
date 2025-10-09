@@ -3615,8 +3615,13 @@ function modifyQuestButtonForRaiding() {
             return false;
         }
         
-    return withControl(window.QuestButtonManager, 'Raid Hunter', () => {
-        
+    // Request control (don't use withControl - we need to keep control during the raid)
+    if (!window.QuestButtonManager.requestControl('Raid Hunter')) {
+        console.log('[Raid Hunter] Cannot modify quest button - controlled by another mod');
+        return false;
+    }
+    
+    try {
         // Find the quest button in the header navigation
         const questButton = findQuestButton();
         
@@ -3691,9 +3696,15 @@ function modifyQuestButtonForRaiding() {
         // Set green color for the button
         questButton.style.color = COLOR_GREEN; // Green color
         
-        console.log('[Raid Hunter] Quest button modified for raiding state');
+        console.log('[Raid Hunter] Quest button modified for raiding state (keeping control)');
         return true;
-    }, 'modify quest button for raiding');
+    } catch (error) {
+        console.error('[Raid Hunter] Error modifying quest button:', error);
+        // Release control on error
+        window.QuestButtonManager.releaseControl('Raid Hunter');
+        return false;
+    }
+    // NOTE: Do NOT release control here - we keep it during the raid
 }
 
 // Function to restore quest button to original appearance
