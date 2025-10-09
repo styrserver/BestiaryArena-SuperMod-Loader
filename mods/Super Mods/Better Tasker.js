@@ -1802,8 +1802,73 @@ function checkForPawAndFurContent(node) {
             ));
 }
 
-// Consolidated mutation processing
-function debouncedProcessAllMutations(mutations) {
+// Quest log detection handler - IMMEDIATE button insertion (like Raid Hunter)
+function handleQuestLogDetection(mutations) {
+    let hasQuestLogContent = false;
+    let hasPawAndFurContent = false;
+    
+    // Process mutations for quest log content
+    for (const mutation of mutations) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE && !document.getElementById(TASKER_BUTTON_ID)) {
+                    hasQuestLogContent = checkForQuestLogContent(node);
+                    if (hasQuestLogContent) break;
+                }
+            }
+        }
+        if (hasQuestLogContent) break;
+    }
+    
+    // Check for Paw and Fur Society content
+    for (const mutation of mutations) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE && !document.getElementById(TASKER_BUTTON_ID)) {
+                    hasPawAndFurContent = checkForPawAndFurContent(node);
+                    if (hasPawAndFurContent) break;
+                }
+            }
+        }
+        if (hasPawAndFurContent) break;
+    }
+    
+    // Handle quest log detection - insert buttons immediately
+    if (hasQuestLogContent || hasPawAndFurContent) {
+        console.log('[Better Tasker] Quest log content detected!');
+        
+        // Insert buttons immediately if they don't exist
+        if (!document.getElementById(TASKER_BUTTON_ID) || !document.getElementById(TASKER_TOGGLE_ID)) {
+            insertButtons();
+        }
+    }
+}
+
+// Task processing handler - DEBOUNCED for batching (like Raid Hunter's fight toast, but with delay)
+let mutationProcessTimer = null;
+function handleTaskProcessing(mutations) {
+    // Debounce task processing to batch rapid mutations
+    if (mutationProcessTimer) {
+        clearTimeout(mutationProcessTimer);
+    }
+    
+    mutationProcessTimer = setTimeout(() => {
+        processMutations(mutations);
+        mutationProcessTimer = null;
+    }, 100); // 100ms debounce delay for task processing
+}
+
+// Consolidated mutation processing (like Raid Hunter)
+function processAllMutations(mutations) {
+    // Handle quest log detection immediately (button insertion)
+    handleQuestLogDetection(mutations);
+    
+    // Handle task processing with debounce (task logic)
+    handleTaskProcessing(mutations);
+}
+
+// Actual mutation processing logic
+function processMutations(mutations) {
     let hasQuestLogContent = false;
     let hasPawAndFurContent = false;
     
@@ -1826,24 +1891,8 @@ function debouncedProcessAllMutations(mutations) {
         }
     }
     
-    // Handle quest log detection (always insert buttons for UI)
+    // Handle quest log detection (task processing logic only - buttons already inserted above)
     if (hasQuestLogContent) {
-        console.log('[Better Tasker] Quest log content detected!');
-        
-        // Only try to insert if buttons don't already exist (like Raid Hunter)
-        if (!document.getElementById(TASKER_BUTTON_ID) || !document.getElementById(TASKER_TOGGLE_ID)) {
-            // Try immediate insertion first (like Raid Hunter)
-            if (insertButtons()) {
-                console.log('[Better Tasker] Buttons inserted immediately!');
-                return;
-            }
-            
-            // Fallback with minimal delay (like Raid Hunter)
-            setTimeout(() => {
-                insertButtons();
-            }, 50);
-        }
-        
         // Only trigger task completion logic if we're not already processing a task
         // and we're not just inserting UI elements
         if (!taskOperationInProgress && !pendingTaskCompletion && !taskHuntingOngoing) {
@@ -1856,14 +1905,6 @@ function debouncedProcessAllMutations(mutations) {
             console.log('[Better Tasker] Quest log opened but task operation already in progress - skipping task check');
         }
     }
-    
-    // Handle Paw and Fur Society detection (only if tasker is enabled)
-    if (hasPawAndFurContent && taskerState === TASKER_STATES.ENABLED) {
-        console.log('[Better Tasker] Paw and Fur Society content detected!');
-        
-        // Try to insert buttons immediately
-        insertButtons();
-    }
 }
 
 // Monitors quest log visibility
@@ -1875,7 +1916,7 @@ function monitorQuestLogVisibility() {
     }
     
     // Consolidated MutationObserver for quest log and Paw and Fur Society detection
-    questLogObserver = new MutationObserver(debouncedProcessAllMutations);
+    questLogObserver = new MutationObserver(processAllMutations);
     
     questLogObserver.observe(document.body, {
         childList: true,

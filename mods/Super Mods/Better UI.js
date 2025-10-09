@@ -16,7 +16,8 @@ const defaultConfig = {
   maxShiniesColor: 'prismatic',
   enableFavorites: true,
   favoriteSymbol: 'heart',
-  showSetupLabels: true
+  showSetupLabels: true,
+  enableShinyEnemies: false
 };
 
 // Storage key for this mod
@@ -115,6 +116,8 @@ const TRANSLATIONS = {
     showStaminaTimer: 'Show Stamina Timer',
     showSetupLabels: 'Show Setup Labels',
     enableFavorites: 'Enable Favorites',
+    shinyEnemies: '⚠️ Shiny Enemies',
+    shinyEnemiesWarning: 'Warning: This feature may impact performance during battles due to continuous sprite monitoring. Disable if you experience lag.',
     enableMaxCreatures: 'Enable Max Creatures',
     color: 'Color:',
     enableShinies: 'Enable Shinies',
@@ -127,6 +130,8 @@ const TRANSLATIONS = {
     showStaminaTimer: 'Mostrar Temporizador de Stamina',
     showSetupLabels: 'Mostrar Rótulos de Times',
     enableFavorites: 'Ativar Favoritos',
+    shinyEnemies: '⚠️ Shiny Inimigos',
+    shinyEnemiesWarning: 'Aviso: Este recurso pode afetar o desempenho durante batalhas devido ao monitoramento contínuo de sprites. Desative se você experimentar lag.',
     enableMaxCreatures: 'Ativar Criaturas Máximas',
     color: 'Cor:',
     enableShinies: 'Ativar Shinies',
@@ -448,6 +453,49 @@ function createStyledElement(tagName, className, styles, parentSelector) {
   return element;
 }
 
+// Schedule timeout and track it for cleanup
+function scheduleTimeout(callback, delay) {
+  const timeoutId = setTimeout(callback, delay);
+  activeTimeouts.add(timeoutId);
+  return timeoutId;
+}
+
+// Create throttled MutationObserver with leading+trailing execution
+function createThrottledObserver(processCallback, throttleDelay = 50) {
+  let lastProcessTime = 0;
+  let pendingTimer = null;
+  let pendingMutations = [];
+  
+  return new MutationObserver((mutations) => {
+    const now = Date.now();
+    
+    pendingMutations.push(...mutations);
+    
+    // Leading edge: Execute immediately if enough time has passed
+    if (now - lastProcessTime >= throttleDelay) {
+      const mutationsToProcess = [...pendingMutations];
+      pendingMutations = [];
+      processCallback(mutationsToProcess);
+      lastProcessTime = now;
+    } else {
+      // Trailing edge: Schedule for later to catch final mutations
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        activeTimeouts.delete(pendingTimer);
+      }
+      
+      pendingTimer = scheduleTimeout(() => {
+        const mutationsToProcess = [...pendingMutations];
+        pendingMutations = [];
+        processCallback(mutationsToProcess);
+        lastProcessTime = Date.now();
+        activeTimeouts.delete(pendingTimer);
+        pendingTimer = null;
+      }, throttleDelay - (now - lastProcessTime));
+    }
+  });
+}
+
 // Save configuration
 function saveConfig() {
   try {
@@ -533,7 +581,7 @@ function updateLocalCreatureLock(uniqueId) {
     console.log('[Better UI] State update sent via setState');
     
     // Verify and close menu
-    const timeoutId = setTimeout(() => {
+    scheduleTimeout(() => {
       const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
       const creature = monsters.find(m => m.id === uniqueId);
       console.log('[Better UI] 🔍 Creature AFTER state update:', {
@@ -555,7 +603,6 @@ function updateLocalCreatureLock(uniqueId) {
         console.log('[Better UI] Context menu closed - right-click again to see updated state');
       }
     }, TIMEOUT_DELAYS.STATE_VERIFY);
-    activeTimeouts.add(timeoutId);
   } catch (e) {
     console.error('[Better UI] Failed to update state:', e);
     
@@ -680,6 +727,12 @@ function showSettingsModal() {
       </div>
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="shiny-enemies-toggle" ${config.enableShinyEnemies ? 'checked' : ''} style="transform: scale(1.2);">
+          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('shinyEnemiesWarning')}">${t('shinyEnemies')}</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="rainbow-tiers-toggle" ${config.enableMaxCreatures ? 'checked' : ''} style="transform: scale(1.2);">
           <span>${t('enableMaxCreatures')}</span>
         </label>
@@ -752,6 +805,15 @@ function showSettingsModal() {
         console.log('[Better UI] Setup labels hidden');
       }
     )(setupLabelsCheckbox);
+    
+    const shinyEnemiesCheckbox = content.querySelector('#shiny-enemies-toggle');
+    createSettingsCheckboxHandler('enableShinyEnemies',
+      () => {
+        startBattleBoardObserver();
+        applyShinyEnemies();
+      },
+      removeShinyEnemies
+    )(shinyEnemiesCheckbox);
     
     // Store modal reference for button handlers
     let modalRef = null;
@@ -860,33 +922,25 @@ function getCreatureNameFromMenu(menuElem) {
   return null;
 }
 
-// Inject favorite button into context menu
-function injectFavoriteButton(menuElem) {
-  // Check if favorites are enabled
+// Validate if context menu should receive favorite button
+function validateContextMenu(menuElem) {
   if (!config.enableFavorites) return false;
-  
-  // Skip if scroll is locked (e.g., Bestiary tab)
   if (isScrollLocked()) return false;
-  
-  // Mark this menu as processed to prevent duplicate processing
   if (menuElem.hasAttribute('data-favorite-processed')) return false;
-  menuElem.setAttribute('data-favorite-processed', 'true');
   
-  // Get creature name from menu
   const creatureName = getCreatureNameFromMenu(menuElem);
   if (!creatureName) return false;
   
-  // Check if menu is for equipment (contains "Tier: X" pattern)
   const menuText = menuElem.textContent || '';
-  const isEquipmentMenu = /\(Tier: \d+\)/.test(menuText);
-  if (isEquipmentMenu) return false;
+  if (/\(Tier: \d+\)/.test(menuText)) return false;
+  if (menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout')) return false;
+  if (menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual')) return false;
   
-  // Check if menu is for account/game mode
-  const isAccountMenu = menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout');
-  const isGameModeMenu = menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual');
-  if (isAccountMenu || isGameModeMenu) return false;
-  
-  // Parse percentage from the context menu
+  return true;
+}
+
+// Identify creature from context menu
+function identifyCreatureFromMenu(menuElem) {
   let contextMenuPercentage = null;
   const group = menuElem.querySelector('div[role="group"]');
   if (group) {
@@ -896,67 +950,44 @@ function injectFavoriteButton(menuElem) {
       const percentageMatch = text.match(/\((\d+)%\)/);
       if (percentageMatch) {
         contextMenuPercentage = parseInt(percentageMatch[1]);
-        console.log('[Better UI] injectFavoriteButton - Parsed percentage from menu:', contextMenuPercentage + '%');
       }
     }
   }
   
-  // Use the stored reference to the right-clicked creature
-  let gameId = null;
-  let uniqueId = null;
-  let creatureIndex = null;
+  if (!currentRightClickedCreature?.creatureImg) return null;
   
-  if (currentRightClickedCreature?.creatureImg) {
-    // Now identify the creature using the percentage from the context menu
-    const creatureInfo = getCreatureUniqueId(currentRightClickedCreature.creatureImg, contextMenuPercentage);
-    
-    if (creatureInfo) {
-      gameId = creatureInfo.gameId;
-      uniqueId = creatureInfo.uniqueId;
-      creatureIndex = creatureInfo.index;
-      
-      // Get creature's locked status
-      const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
-      const creature = monsters.find(m => m.id === uniqueId);
-      const isLocked = creature?.locked || false;
-      
-      // Update the stored reference with full info
-      currentRightClickedCreature = {
-        creatureImg: currentRightClickedCreature.creatureImg,
-        gameId,
-        uniqueId,
-        creatureIndex,
-        isLocked
-      };
-      
-      console.log('[Better UI] injectFavoriteButton - Identified creature:', {
-        gameId,
-        uniqueId,
-        percentage: contextMenuPercentage + '%',
-        isLocked
-      });
-    } else {
-      console.warn('[Better UI] injectFavoriteButton - Failed to identify creature');
-    }
-  }
+  const creatureInfo = getCreatureUniqueId(currentRightClickedCreature.creatureImg, contextMenuPercentage);
+  if (!creatureInfo) return null;
   
-  const isFavorite = uniqueId ? favoriteCreatures.has(uniqueId) : false;
-  const currentSymbol = uniqueId ? favoriteCreatures.get(uniqueId) : null;
+  const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
+  const creature = monsters.find(m => m.id === creatureInfo.uniqueId);
   
-  // Create main "Favorite" menu item using Radix UI submenu pattern
-  const favoriteMainItem = document.createElement('div');
-  favoriteMainItem.className = 'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none';
-  favoriteMainItem.setAttribute('role', 'menuitem');
-  favoriteMainItem.setAttribute('aria-haspopup', 'menu');
-  favoriteMainItem.setAttribute('aria-expanded', 'false');
-  favoriteMainItem.setAttribute('aria-controls', 'favorite-submenu');
-  favoriteMainItem.setAttribute('data-state', 'closed');
-  favoriteMainItem.setAttribute('tabindex', '-1');
-  favoriteMainItem.setAttribute('data-orientation', 'vertical');
-  favoriteMainItem.setAttribute('data-radix-collection-item', '');
-  favoriteMainItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
-  
-  // Create submenu container using Radix UI structure
+  return {
+    gameId: creatureInfo.gameId,
+    uniqueId: creatureInfo.uniqueId,
+    creatureIndex: creatureInfo.index,
+    isLocked: creature?.locked || false
+  };
+}
+
+// Create favorite main menu item
+function createFavoriteMainMenuItem() {
+  const item = document.createElement('div');
+  item.className = 'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none';
+  item.setAttribute('role', 'menuitem');
+  item.setAttribute('aria-haspopup', 'menu');
+  item.setAttribute('aria-expanded', 'false');
+  item.setAttribute('aria-controls', 'favorite-submenu');
+  item.setAttribute('data-state', 'closed');
+  item.setAttribute('tabindex', '-1');
+  item.setAttribute('data-orientation', 'vertical');
+  item.setAttribute('data-radix-collection-item', '');
+  item.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
+  return item;
+}
+
+// Create favorite submenu with symbol items
+function createFavoriteSubmenu(uniqueId, currentSymbol) {
   const submenu = document.createElement('div');
   submenu.id = 'favorite-submenu';
   submenu.className = 'pixel-font-16 frame-3 surface-regular z-modals min-w-[7rem] overflow-hidden py-1 text-whiteHighlight shadow-md';
@@ -964,36 +995,73 @@ function injectFavoriteButton(menuElem) {
   submenu.setAttribute('aria-orientation', 'vertical');
   submenu.setAttribute('data-state', 'closed');
   submenu.setAttribute('data-radix-menu-content', '');
-  submenu.style.cssText = `
-    position: absolute;
-    left: 100%;
-    top: 0;
-    display: none;
-    z-index: 1000;
-    min-width: 120px;
-  `;
+  submenu.style.cssText = `position: absolute; left: 100%; top: 0; display: none; z-index: 1000; min-width: 120px;`;
   
-  // Add hover events to show/hide submenu
-  favoriteMainItem.addEventListener('mouseenter', () => {
-    favoriteMainItem.style.background = 'rgba(255, 255, 255, 0.15)';
-    favoriteMainItem.setAttribute('data-state', 'open');
-    favoriteMainItem.setAttribute('aria-expanded', 'true');
+  const isFavorite = uniqueId ? favoriteCreatures.has(uniqueId) : false;
+  
+  Object.entries(FAVORITE_SYMBOLS).forEach(([symbolKey, symbol]) => {
+    const symbolItem = document.createElement('div');
+    symbolItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none';
+    symbolItem.setAttribute('role', 'menuitem');
+    symbolItem.setAttribute('tabindex', '-1');
+    symbolItem.setAttribute('data-orientation', 'vertical');
+    symbolItem.setAttribute('data-radix-collection-item', '');
+    symbolItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
+    
+    symbolItem.addEventListener('mouseenter', () => symbolItem.style.background = 'rgba(255, 255, 255, 0.15)');
+    symbolItem.addEventListener('mouseleave', () => symbolItem.style.background = 'transparent');
+    
+    const isCurrentSymbol = isFavorite && currentSymbol === symbolKey;
+    let iconElement = '';
+    if (!symbol.isNone) {
+      iconElement = symbolKey === 'heart' ? symbol.icon : `<img src="${symbol.icon}" width="24" height="24" style="image-rendering: pixelated;" alt="${symbol.name}">`;
+    }
+    
+    symbolItem.innerHTML = `${iconElement}${symbol.name}${isCurrentSymbol ? ' ✓' : ''}`;
+    
+    symbolItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (uniqueId) {
+        if (symbol.isNone) {
+          favoriteCreatures.delete(uniqueId);
+          saveFavorites();
+          updateFavoriteHearts(uniqueId);
+        } else {
+          toggleFavorite(uniqueId, symbolKey);
+        }
+      }
+      currentRightClickedCreature = null;
+      scheduleTimeout(() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      }, TIMEOUT_DELAYS.MENU_CLOSE);
+    });
+    
+    submenu.appendChild(symbolItem);
+  });
+  
+  return submenu;
+}
+
+// Attach submenu event handlers
+function attachSubmenuHandlers(mainItem, submenu) {
+  mainItem.addEventListener('mouseenter', () => {
+    mainItem.style.background = 'rgba(255, 255, 255, 0.15)';
+    mainItem.setAttribute('data-state', 'open');
+    mainItem.setAttribute('aria-expanded', 'true');
     submenu.setAttribute('data-state', 'open');
     submenu.style.display = 'block';
   });
   
-  favoriteMainItem.addEventListener('mouseleave', () => {
-    favoriteMainItem.style.background = 'transparent';
-    // Delay hiding to allow mouse to move to submenu
-    const timeoutId = setTimeout(() => {
-      if (!submenu.matches(':hover') && !favoriteMainItem.matches(':hover')) {
-        favoriteMainItem.setAttribute('data-state', 'closed');
-        favoriteMainItem.setAttribute('aria-expanded', 'false');
+  mainItem.addEventListener('mouseleave', () => {
+    mainItem.style.background = 'transparent';
+    scheduleTimeout(() => {
+      if (!submenu.matches(':hover') && !mainItem.matches(':hover')) {
+        mainItem.setAttribute('data-state', 'closed');
+        mainItem.setAttribute('aria-expanded', 'false');
         submenu.setAttribute('data-state', 'closed');
         submenu.style.display = 'none';
       }
     }, TIMEOUT_DELAYS.SUBMENU_HIDE);
-    activeTimeouts.add(timeoutId);
   });
   
   submenu.addEventListener('mouseenter', () => {
@@ -1004,90 +1072,40 @@ function injectFavoriteButton(menuElem) {
   submenu.addEventListener('mouseleave', () => {
     submenu.style.display = 'none';
     submenu.setAttribute('data-state', 'closed');
-    favoriteMainItem.setAttribute('data-state', 'closed');
-    favoriteMainItem.setAttribute('aria-expanded', 'false');
+    mainItem.setAttribute('data-state', 'closed');
+    mainItem.setAttribute('aria-expanded', 'false');
   });
+}
+
+// Inject favorite button into context menu
+function injectFavoriteButton(menuElem) {
+  if (!validateContextMenu(menuElem)) return false;
   
-  // Create submenu items for each symbol
-  Object.entries(FAVORITE_SYMBOLS).forEach(([symbolKey, symbol]) => {
-    const symbolItem = document.createElement('div');
-    symbolItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none';
-    symbolItem.setAttribute('role', 'menuitem');
-    symbolItem.setAttribute('tabindex', '-1');
-    symbolItem.setAttribute('data-orientation', 'vertical');
-    symbolItem.setAttribute('data-radix-collection-item', '');
-    symbolItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
-    
-    symbolItem.addEventListener('mouseenter', () => {
-      symbolItem.style.background = 'rgba(255, 255, 255, 0.15)';
-    });
-    symbolItem.addEventListener('mouseleave', () => {
-      symbolItem.style.background = 'transparent';
-    });
-    
-    const isCurrentSymbol = isFavorite && currentSymbol === symbolKey;
-    const isNone = symbol.isNone;
-    
-    // Create icon element
-    let iconElement;
-    if (isNone) {
-      // For "(none)" option, no icon
-      iconElement = '';
-    } else if (symbolKey === 'heart') {
-      // For heart, use emoji directly
-      iconElement = symbol.icon;
-    } else {
-      // For stat icons, use the actual game icons
-      iconElement = `<img src="${symbol.icon}" width="24" height="24" style="image-rendering: pixelated;" alt="${symbol.name}">`;
-    }
-    
-    symbolItem.innerHTML = `${iconElement}${symbol.name}${isCurrentSymbol ? ' ✓' : ''}`;
-    
-    symbolItem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (uniqueId) {
-        if (isNone) {
-          // Remove from favorites
-          favoriteCreatures.delete(uniqueId);
-          console.log('[Better UI] Removed from favorites:', uniqueId);
-          saveFavorites();
-          // Update the favorite hearts to remove the icon
-          updateFavoriteHearts(uniqueId);
-        } else {
-          // Add/change favorite symbol
-          toggleFavorite(uniqueId, symbolKey);
-        }
-      }
-      currentRightClickedCreature = null;
-      const timeoutId = setTimeout(() => {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
-      }, TIMEOUT_DELAYS.MENU_CLOSE);
-      activeTimeouts.add(timeoutId);
-    });
-    
-    submenu.appendChild(symbolItem);
-  });
+  menuElem.setAttribute('data-favorite-processed', 'true');
   
-  // Set main item content with chevron
+  const creatureData = identifyCreatureFromMenu(menuElem);
+  const uniqueId = creatureData?.uniqueId || null;
+  const currentSymbol = uniqueId ? favoriteCreatures.get(uniqueId) : null;
+  
+  const favoriteMainItem = createFavoriteMainMenuItem();
+  const submenu = createFavoriteSubmenu(uniqueId, currentSymbol);
+  
+  attachSubmenuHandlers(favoriteMainItem, submenu);
+  
   favoriteMainItem.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>Favorite<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ml-auto" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
   
-  // Add click handler to main favorite button to add heart emoji
   favoriteMainItem.addEventListener('click', (e) => {
     e.stopPropagation();
     if (uniqueId) {
       toggleFavorite(uniqueId, 'heart');
     }
     currentRightClickedCreature = null;
-    const timeoutId = setTimeout(() => {
+    scheduleTimeout(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
     }, TIMEOUT_DELAYS.MENU_CLOSE);
-    activeTimeouts.add(timeoutId);
   });
   
-  // Append submenu to main item
   favoriteMainItem.appendChild(submenu);
-  
-  // Append main item to menu
   menuElem.appendChild(favoriteMainItem);
   
   return true;
@@ -1096,73 +1114,28 @@ function injectFavoriteButton(menuElem) {
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
   console.log('[Better UI] updateFavoriteHearts called with targetUniqueId:', targetUniqueId);
-  // Check if favorites are enabled
+  
   if (!config.enableFavorites) {
     console.log('[Better UI] Favorites disabled, removing hearts');
-    // Remove all favorite hearts if disabled
     document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
     return;
   }
   
-  // Skip if scroll is locked (e.g., Bestiary tab)
   if (isScrollLocked()) return;
   
   const creatures = getVisibleCreatures();
   console.log('[Better UI] Found', creatures.length, 'visible creatures');
   
-  // Get all monsters from game state once
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   
-  // Track which creatures of each (gameId, level) we've seen
-  const creatureIndexMap = new Map();
+  resetCreatureMatchingIndex();
   
   let heartsAdded = 0;
   let creaturesChecked = 0;
   let targetFound = false;
   
   creatures.forEach((imgEl, idx) => {
-    const gameId = getCreatureGameId(imgEl);
-    if (!gameId) return;
-    
-    // Get displayed level
-    const button = imgEl.closest('button');
-    const levelSpan = button?.querySelector('span[translate="no"]');
-    const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
-    
-    // Create a unique key for this (gameId, level) combination
-    const indexKey = `${gameId}-${displayedLevel || 'unknown'}`;
-    
-    // Get or initialize the index for this (gameId, level) combination
-    if (!creatureIndexMap.has(indexKey)) {
-      creatureIndexMap.set(indexKey, 0);
-    }
-    const currentIndex = creatureIndexMap.get(indexKey);
-    
-    // Find all monsters with this gameId, sorted by stats (descending)
-    const matchingMonsters = monsters.filter(m => m.gameId === gameId).map(m => {
-      m._statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
-      return m;
-    }).sort((a, b) => {
-      const gameIdCompare = (a.gameId || 0) - (b.gameId || 0);
-      if (gameIdCompare !== 0) return gameIdCompare;
-      return b._statSum - a._statSum;
-    });
-    
-    // Filter by level to get candidates
-    let candidateMonsters = matchingMonsters;
-    if (displayedLevel && matchingMonsters.length > 1) {
-      const sameLevelMonsters = matchingMonsters.filter(m => getLevelFromExp(m.exp || 0) === displayedLevel);
-      if (sameLevelMonsters.length > 0) {
-        candidateMonsters = sameLevelMonsters;
-      }
-    }
-    
-    // Use the sequential index to pick the right one from the level-filtered candidates
-    const identifiedMonster = candidateMonsters[currentIndex] || matchingMonsters[currentIndex];
-    
-    // Increment the index for next creature with same (gameId, level)
-    creatureIndexMap.set(indexKey, currentIndex + 1);
-    
+    const identifiedMonster = matchCreatureBySequentialIndex(imgEl, monsters);
     const uniqueId = identifiedMonster?.id;
     if (!uniqueId) return;
     
@@ -1218,6 +1191,57 @@ function updateFavoriteHearts(targetUniqueId = null) {
   console.log('[Better UI] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
   if (targetUniqueId) {
     console.log('[Better UI] Target search result:', targetFound ? `Found ${targetUniqueId}` : `NOT FOUND: ${targetUniqueId}`);
+  }
+}
+
+// Match visible creature to game state using sequential indexing
+function matchCreatureBySequentialIndex(imgEl, monsters) {
+  const gameId = getCreatureGameId(imgEl);
+  if (!gameId) return null;
+  
+  const button = imgEl.closest('button');
+  const levelSpan = button?.querySelector('span[translate="no"]');
+  const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
+  
+  const indexKey = `${gameId}-${displayedLevel || 'unknown'}`;
+  
+  if (!matchCreatureBySequentialIndex.indexMap) {
+    matchCreatureBySequentialIndex.indexMap = new Map();
+  }
+  
+  if (!matchCreatureBySequentialIndex.indexMap.has(indexKey)) {
+    matchCreatureBySequentialIndex.indexMap.set(indexKey, 0);
+  }
+  
+  const currentIndex = matchCreatureBySequentialIndex.indexMap.get(indexKey);
+  
+  const matchingMonsters = monsters.filter(m => m.gameId === gameId).map(m => {
+    m._statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
+    return m;
+  }).sort((a, b) => {
+    const gameIdCompare = (a.gameId || 0) - (b.gameId || 0);
+    if (gameIdCompare !== 0) return gameIdCompare;
+    return b._statSum - a._statSum;
+  });
+  
+  let candidateMonsters = matchingMonsters;
+  if (displayedLevel && matchingMonsters.length > 1) {
+    const sameLevelMonsters = matchingMonsters.filter(m => getLevelFromExp(m.exp || 0) === displayedLevel);
+    if (sameLevelMonsters.length > 0) {
+      candidateMonsters = sameLevelMonsters;
+    }
+  }
+  
+  const identifiedMonster = candidateMonsters[currentIndex] || matchingMonsters[currentIndex];
+  matchCreatureBySequentialIndex.indexMap.set(indexKey, currentIndex + 1);
+  
+  return identifiedMonster;
+}
+
+// Reset creature matching index (call before each batch operation)
+function resetCreatureMatchingIndex() {
+  if (matchCreatureBySequentialIndex.indexMap) {
+    matchCreatureBySequentialIndex.indexMap.clear();
   }
 }
 
@@ -1458,48 +1482,28 @@ function startContextMenuObserver() {
     });
   }
   
-  // Throttle to avoid excessive processing during rapid DOM changes
-  let contextMenuThrottle = null;
-  
-  contextMenuObserver = new MutationObserver((mutations) => {
-    // Throttle the processing to reduce performance impact
-    if (contextMenuThrottle) return;
+  const processMenuMutations = (mutations) => {
+    addRightClickListeners();
     
-    contextMenuThrottle = setTimeout(() => {
-      activeTimeouts.delete(contextMenuThrottle);
-      contextMenuThrottle = null;
-      
-      // Add listeners to new creature buttons
-      addRightClickListeners();
-      
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          
-          // Check for context menu
-          const isMenu = node.getAttribute?.('role') === 'menu';
-          const hasMenu = node.querySelector?.('[role="menu"]');
-          const isDropdown = node.classList?.contains('dropdown-content') || node.querySelector?.('.dropdown-content');
-          
-          const menu = isMenu ? node : hasMenu;
-          if (menu) {
-            console.log('[Better UI] Context menu detected! Injecting favorite button...');
-            const timeoutId = setTimeout(() => {
-              injectFavoriteButton(menu);
-            }, TIMEOUT_DELAYS.MENU_CLOSE);
-            activeTimeouts.add(timeoutId);
-          } else if (isDropdown || node.querySelector?.('.dropdown-menu-item')) {
-            console.log('[Better UI] Dropdown menu detected! Injecting favorite button...');
-            const timeoutId = setTimeout(() => {
-              injectFavoriteButton(node);
-            }, TIMEOUT_DELAYS.MENU_CLOSE);
-            activeTimeouts.add(timeoutId);
-          }
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        
+        const isMenu = node.getAttribute?.('role') === 'menu';
+        const hasMenu = node.querySelector?.('[role="menu"]');
+        const isDropdown = node.classList?.contains('dropdown-content') || node.querySelector?.('.dropdown-content');
+        
+        const menu = isMenu ? node : hasMenu;
+        if (menu) {
+          scheduleTimeout(() => injectFavoriteButton(menu), TIMEOUT_DELAYS.MENU_CLOSE);
+        } else if (isDropdown || node.querySelector?.('.dropdown-menu-item')) {
+          scheduleTimeout(() => injectFavoriteButton(node), TIMEOUT_DELAYS.MENU_CLOSE);
         }
       }
-    }, 50); // 50ms throttle
-    activeTimeouts.add(contextMenuThrottle);
-  });
+    }
+  };
+  
+  contextMenuObserver = createThrottledObserver(processMenuMutations, 50);
   
   // Observe both document.body and document.documentElement to catch portals
   contextMenuObserver.observe(document.body, { childList: true, subtree: true });
@@ -1835,6 +1839,162 @@ function removeMaxShinies() {
 }
 
 // =======================
+// 7.5. Shiny Enemies
+// =======================
+
+// Helper: Get sprite ID from monster metadata (handles item-type monsters)
+function getSpriteIdForEnemy(enemy) {
+  let spriteId = enemy.gameId;
+  if (globalThis.state?.utils?.getMonster) {
+    const monster = globalThis.state.utils.getMonster(enemy.gameId);
+    if (monster?.metadata?.spriteId) {
+      spriteId = monster.metadata.spriteId;
+    }
+  }
+  return spriteId;
+}
+
+// Helper: Extract sprite ID from DOM element's class list
+function extractSpriteIdFromClasses(element) {
+  const classList = Array.from(element.classList);
+  const idClass = classList.find(cls => cls.startsWith('id-'));
+  return idClass ? idClass.replace('id-', '') : null;
+}
+
+// Helper: Check if creature is in the unobtainable list
+function isCreatureUnobtainable(creatureName) {
+  if (!creatureName) return false;
+  const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
+  return UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+}
+
+// Helper: Check if a battle container is an enemy (red health bar)
+function isEnemyByHealthBar(battleContainer) {
+  const healthBar = battleContainer.querySelector('.h-full.shrink-0');
+  return healthBar && healthBar.style.background && 
+         healthBar.style.background.includes('rgb(255, 102, 102)');
+}
+
+function applyShinyEnemies() {
+  try {
+    // Get board configuration from game state
+    const boardSnapshot = globalThis.state?.board?.getSnapshot();
+    const boardConfig = boardSnapshot?.context?.boardConfig;
+    
+    if (!boardConfig || !Array.isArray(boardConfig)) {
+      console.log('[Better UI] No board configuration available yet (not in a game)');
+      return;
+    }
+    
+    
+    // Filter for enemies (villain: true)
+    const enemies = boardConfig.filter(entity => entity.villain === true);
+    
+    if (enemies.length === 0) {
+      console.log('[Better UI] No enemies found on board - start a battle to see shiny enemies!');
+      return;
+    }
+    
+    let appliedCount = 0;
+    let skippedCount = 0;
+    
+    // Group enemies by spriteId to handle cases where multiple enemies or allies share the same sprite
+    const enemySpriteCount = new Map();
+    enemies.forEach(enemy => {
+      const spriteId = getSpriteIdForEnemy(enemy);
+      enemySpriteCount.set(spriteId, (enemySpriteCount.get(spriteId) || 0) + 1);
+    });
+    
+    enemies.forEach(enemy => {
+      // Get monster metadata and sprite ID
+      let creatureName = null;
+      let spriteId = getSpriteIdForEnemy(enemy);
+      
+      if (globalThis.state?.utils?.getMonster) {
+        const monster = globalThis.state.utils.getMonster(enemy.gameId);
+        creatureName = monster?.metadata?.name;
+      }
+      
+      // Skip unobtainable creatures
+      if (isCreatureUnobtainable(creatureName)) {
+        skippedCount++;
+        return;
+      }
+      
+      // Find the DOM element for this enemy using spriteId
+      const selector = `.sprite.id-${spriteId}`;
+      const allSprites = document.querySelectorAll(selector);
+      
+      // Only apply to the first N sprites where N = number of enemies with this spriteId
+      const numEnemiesWithThisSprite = enemySpriteCount.get(spriteId) || 0;
+      const spritesToMakeShiny = Array.from(allSprites).slice(0, numEnemiesWithThisSprite);
+      
+      spritesToMakeShiny.forEach(spriteDiv => {
+        const spriteImg = spriteDiv.querySelector('img.spritesheet[data-shiny]');
+        if (spriteImg && spriteImg.getAttribute('data-shiny') === 'false') {
+          spriteImg.setAttribute('data-shiny', 'true');
+          appliedCount++;
+        }
+      });
+    });
+    
+    // Also apply shiny to all item sprites in battle (e.g., sleeping Bear uses item sprite 7175)
+    // These are state-based sprite variations that don't match the creature's main spriteId
+    const itemSprites = document.querySelectorAll('.sprite.item img.spritesheet[data-shiny="false"]');
+    itemSprites.forEach(img => {
+      const battleContainer = img.closest('[data-name]');
+      if (battleContainer && isEnemyByHealthBar(battleContainer)) {
+        img.setAttribute('data-shiny', 'true');
+        appliedCount++;
+      }
+    });
+    
+    // Apply shiny to visual-only summons (e.g., War Wolf) not in boardConfig
+    const allBattleContainers = document.querySelectorAll('[data-name]');
+    
+    allBattleContainers.forEach(container => {
+      const creatureName = container.getAttribute('data-name');
+      
+      if (isEnemyByHealthBar(container)) {
+        const outfitSprites = container.querySelectorAll('.sprite.outfit img.spritesheet[data-shiny="false"]');
+        
+        outfitSprites.forEach(spriteImg => {
+          if (!isCreatureUnobtainable(creatureName)) {
+            spriteImg.setAttribute('data-shiny', 'true');
+            appliedCount++;
+          }
+        });
+      }
+    });
+    
+    // Only log when something actually happened
+    if (appliedCount > 0 || skippedCount > 0) {
+      console.log(`[Better UI] Shiny enemies applied to ${appliedCount} creatures (skipped ${skippedCount} unobtainable)`);
+    }
+  } catch (error) {
+    console.error('[Better UI] Error applying shiny enemies:', error);
+  }
+}
+
+function removeShinyEnemies() {
+  try {
+    // Reset all actor sprites to non-shiny (simpler approach for removal)
+    const allActorSprites = document.querySelectorAll('img.actor.spritesheet[data-shiny="true"]');
+    
+    allActorSprites.forEach(spriteImg => {
+      spriteImg.setAttribute('data-shiny', 'false');
+    });
+    
+    console.log('[Better UI] Shiny enemies removed from', allActorSprites.length, 'sprites');
+    
+    // Stop the battle board observer
+    stopBattleBoardObserver();
+  } catch (error) {
+    console.error('[Better UI] Error removing shiny enemies:', error);
+  }
+}
+
+// =======================
 // 8. Setup Labels Visibility Functions
 // =======================
 
@@ -1980,8 +2140,7 @@ function initStaminaTimer() {
     const staminaDiv = document.querySelector(SELECTORS.STAMINA_DIV);
     if (!staminaDiv) {
       console.log('[Better UI] Stamina button not found, retrying in 500ms');
-      const timeoutId = setTimeout(tryInit, TIMEOUT_DELAYS.INIT_RETRY);
-      activeTimeouts.add(timeoutId);
+      scheduleTimeout(tryInit, TIMEOUT_DELAYS.INIT_RETRY);
       return;
     }
     
@@ -2054,29 +2213,31 @@ function initTabObserver() {
             console.log('[Better UI] Bestiary tab activated, checking config...', { enableMaxCreatures: config.enableMaxCreatures, enableMaxShinies: config.enableMaxShinies });
             if (config.enableMaxCreatures) {
               console.log('[Better UI] Reapplying max creatures');
-              // Use setTimeout to ensure DOM has updated
-              const timeoutId = setTimeout(() => {
+              scheduleTimeout(() => {
                 applyMaxCreatures();
               }, TIMEOUT_DELAYS.TAB_REAPPLY);
-              activeTimeouts.add(timeoutId);
             } else {
               console.log('[Better UI] Max creatures disabled, skipping');
             }
             if (config.enableMaxShinies) {
               console.log('[Better UI] Reapplying max shinies');
-              const timeoutId = setTimeout(() => {
+              scheduleTimeout(() => {
                 applyMaxShinies();
               }, TIMEOUT_DELAYS.TAB_REAPPLY);
-              activeTimeouts.add(timeoutId);
             } else {
               console.log('[Better UI] Max shinies disabled, skipping');
             }
+            if (config.enableShinyEnemies) {
+              console.log('[Better UI] Reapplying shiny enemies');
+              scheduleTimeout(() => {
+                applyShinyEnemies();
+              }, TIMEOUT_DELAYS.TAB_REAPPLY);
+            }
             // Update favorite hearts if enabled
             if (config.enableFavorites) {
-              const timeoutId = setTimeout(() => {
+              scheduleTimeout(() => {
                 updateFavoriteHearts();
               }, TIMEOUT_DELAYS.TAB_REAPPLY);
-              activeTimeouts.add(timeoutId);
             }
           }
         }
@@ -2109,8 +2270,7 @@ function startCreatureContainerObserver() {
   
   if (!creatureContainer) {
     console.log('[Better UI] Creature container not found, retrying in 1 second...');
-    const timeoutId = setTimeout(startCreatureContainerObserver, TIMEOUT_DELAYS.OBSERVER_RETRY);
-    activeTimeouts.add(timeoutId);
+    scheduleTimeout(startCreatureContainerObserver, TIMEOUT_DELAYS.OBSERVER_RETRY);
     return;
   }
   
@@ -2132,7 +2292,6 @@ function startCreatureContainerObserver() {
     });
     
     if (shouldUpdate) {
-      console.log('[Better UI] Creature container changed, updating max creatures and favorites');
       
       // Debounce the updates to avoid excessive calls
       if (creatureObserver.updateTimeout) {
@@ -2145,28 +2304,37 @@ function startCreatureContainerObserver() {
           creatureObserver.disconnect();
         }
         
-        // Re-apply max creatures styling if enabled
-        if (config.enableMaxCreatures) {
-          applyMaxCreatures();
-        }
-        
-        // Re-apply max shinies styling if enabled
-        if (config.enableMaxShinies) {
-          applyMaxShinies();
-        }
-        
-        // Update favorite hearts if enabled
-        if (config.enableFavorites) {
-          updateFavoriteHearts();
-        }
-        
-        // Reconnect observer
-        if (creatureObserver && creatureContainer) {
-          creatureObserver.observe(creatureContainer, {
-            childList: true,
-            subtree: true
-          });
-        }
+        // Use requestIdleCallback for non-critical cosmetic updates (with fallback)
+        const scheduleUpdate = window.requestIdleCallback || requestAnimationFrame;
+        scheduleUpdate(() => {
+          // Re-apply max creatures styling if enabled
+          if (config.enableMaxCreatures) {
+            applyMaxCreatures();
+          }
+          
+          // Re-apply max shinies styling if enabled
+          if (config.enableMaxShinies) {
+            applyMaxShinies();
+          }
+          
+          // Re-apply shiny enemies if enabled
+          if (config.enableShinyEnemies) {
+            applyShinyEnemies();
+          }
+          
+          // Update favorite hearts if enabled
+          if (config.enableFavorites) {
+            updateFavoriteHearts();
+          }
+          
+          // Reconnect observer
+          if (creatureObserver && creatureContainer) {
+            creatureObserver.observe(creatureContainer, {
+              childList: true,
+              subtree: true
+            });
+          }
+        }, { timeout: 1000 }); // Fallback timeout for requestIdleCallback
         
         // Clean up the timeout reference
         activeTimeouts.delete(creatureObserver.updateTimeout);
@@ -2210,6 +2378,10 @@ function initScrollLockObserver() {
             applyMaxShinies();
           }
           
+          if (config.enableShinyEnemies) {
+            applyShinyEnemies();
+          }
+          
           if (config.enableFavorites) {
             updateFavoriteHearts();
           }
@@ -2227,6 +2399,315 @@ function initScrollLockObserver() {
   });
   
   console.log('[Better UI] Scroll lock observer started');
+}
+
+// Start observer for battle board changes (for shiny enemies)
+let battleBoardObserver = null;
+let boardStateUnsubscribe = null;
+
+function startBattleBoardObserver() {
+  if (!config.enableShinyEnemies) return;
+  
+  console.log('[Better UI] Starting battle board observer...');
+  
+  // Disconnect existing observer if any
+  if (battleBoardObserver) {
+    battleBoardObserver.disconnect();
+  }
+  
+  // Unsubscribe from existing board state listeners to prevent duplicates
+  if (boardStateUnsubscribe) {
+    try {
+      boardStateUnsubscribe();
+      boardStateUnsubscribe = null;
+    } catch (error) {
+      console.warn('[Better UI] Error unsubscribing previous board state listeners:', error);
+    }
+  }
+  
+  let shinyUpdateDebounce = null;
+  let attributeChangeDebounce = null;
+  
+  const processBattleMutations = (mutations) => {
+    let spritesChanged = false;
+    let attributesChanged = false;
+    
+    for (const mutation of mutations) {
+      if (mutation.type === 'childList') {
+        // Track removed nodes for sprite change detection
+        mutation.removedNodes.forEach(node => {
+          if (node.nodeType === 1) {
+            const spriteImg = node.querySelector?.('img.spritesheet[data-shiny="true"]');
+            if (spriteImg) {
+              spritesChanged = true;
+            }
+          }
+        });
+        
+        // Check if any added nodes contain actor sprites
+        mutation.addedNodes.forEach(node => {
+          if (node.nodeType === 1) { // Element node
+            // Check if node has data-name attribute (battle creature container)
+            const isCreatureContainer = node.getAttribute && node.getAttribute('data-name');
+            
+            // Also check if node contains a container with data-name (nested)
+            const nestedContainer = node.querySelector ? node.querySelector('[data-name]') : null;
+            
+            if (isCreatureContainer || nestedContainer) {
+              const containerNode = isCreatureContainer ? node : nestedContainer;
+              const creatureName = containerNode.getAttribute('data-name');
+              
+              // Wait for sprite to be added (they're added asynchronously)
+              const checkForSprite = (attempts = 0) => {
+                const spriteImg = containerNode.querySelector('img.spritesheet[data-shiny]');
+                
+                if (spriteImg) {
+                  const dataShiny = spriteImg.getAttribute('data-shiny');
+                  const spriteContainer = spriteImg.closest('.sprite');
+                  const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
+                  
+                  // Check if this sprite belongs to an enemy by checking boardConfig
+                  const boardConfig = globalThis.state?.board?.getSnapshot()?.context?.boardConfig;
+                  let isEnemy = false;
+                  
+                  if (boardConfig && spriteId) {
+                    isEnemy = boardConfig.some(entity => {
+                      if (!entity.villain) return false;
+                      const entitySpriteId = getSpriteIdForEnemy(entity);
+                      return entitySpriteId === spriteId;
+                    });
+                  }
+                  
+                  if (isEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
+                    spriteImg.setAttribute('data-shiny', 'true');
+                    console.log(`[Better UI] ✨ Summoned enemy: ${creatureName} - applied shiny`);
+                  } else if (!isEnemy) {
+                    // NOT in boardConfig as enemy - check if it's a visual summon by health bar
+                    const isVisualEnemy = isEnemyByHealthBar(containerNode);
+                    
+                    if (isVisualEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
+                      spriteImg.setAttribute('data-shiny', 'true');
+                      console.log(`[Better UI] ✨ Visual summon: ${creatureName} - applied shiny`);
+                    }
+                  }
+                  
+                  spritesChanged = true;
+                } else if (attempts < 3) {
+                  // Sprite not found yet - retry after delay
+                  setTimeout(() => checkForSprite(attempts + 1), 50);
+                }
+              };
+              
+              // Start checking for sprite
+              checkForSprite();
+            }
+            // Also check if it's a sprite or contains sprites (for other battle updates)
+            else if (node.matches && (node.matches('.sprite.outfit') || node.matches('.sprite.item') || node.matches('img.spritesheet'))) {
+              spritesChanged = true;
+            } else if (node.querySelectorAll) {
+              const sprites = node.querySelectorAll('.sprite.outfit, .sprite.item, img.spritesheet');
+              if (sprites.length > 0) {
+                spritesChanged = true;
+              }
+            }
+          }
+        });
+      } else if (mutation.type === 'attributes' && mutation.attributeName === 'data-shiny') {
+        // Detect when data-shiny attribute changes from true to false
+        const target = mutation.target;
+        const oldValue = mutation.oldAttributeValue;
+        const newValue = target.getAttribute('data-shiny');
+        
+        if (oldValue === 'true' && newValue === 'false') {
+          // Find the sprite outfit to get creature info
+          const spriteOutfit = target.closest('.sprite.outfit');
+          const classList = spriteOutfit ? Array.from(spriteOutfit.classList) : [];
+          const idClass = classList.find(cls => cls.startsWith('id-'));
+          const spriteId = idClass ? parseInt(idClass.replace('id-', ''), 10) : null;
+          
+          if (!spriteId) return;
+          
+          // Check if this sprite belongs to an enemy (villain)
+          const boardConfig = globalThis.state?.board?.getSnapshot()?.context?.boardConfig;
+          if (boardConfig) {
+            // Find the enemy entity that matches this spriteId
+            let matchedEnemy = null;
+            for (const entity of boardConfig) {
+              if (!entity.villain) continue;
+              
+              // Get spriteId from monster metadata
+              let entitySpriteId = entity.gameId;
+              if (globalThis.state?.utils?.getMonster) {
+                const monster = globalThis.state.utils.getMonster(entity.gameId);
+                if (monster?.metadata?.spriteId) {
+                  entitySpriteId = monster.metadata.spriteId;
+                }
+              }
+              
+              if (entitySpriteId === spriteId) {
+                matchedEnemy = entity;
+                break;
+              }
+            }
+            
+            if (matchedEnemy) {
+              // Check if creature is unobtainable (no shiny version)
+              const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
+              let creatureName = null;
+              
+              if (globalThis.state?.utils?.getMonster) {
+                const monster = globalThis.state.utils.getMonster(matchedEnemy.gameId);
+                creatureName = monster?.metadata?.name;
+              }
+              
+              const isUnobtainable = creatureName && UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+              
+              if (isUnobtainable) {
+                console.log(`[Better UI]    ⊘ Skipped ${creatureName} (unobtainable, no shiny sprite)`);
+              } else {
+                // Re-apply shiny immediately to enemy
+                target.setAttribute('data-shiny', 'true');
+                attributesChanged = true;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Handle attribute changes with minimal delay (fast re-injection)
+    if (attributesChanged) {
+      if (attributeChangeDebounce) {
+        clearTimeout(attributeChangeDebounce);
+        activeTimeouts.delete(attributeChangeDebounce);
+      }
+      
+      attributeChangeDebounce = scheduleTimeout(() => {
+        applyShinyEnemies();
+        attributeChangeDebounce = null;
+      }, 20); // Fast 20ms for attribute changes
+    }
+    
+    // Handle sprite/DOM changes with longer delay (batch new summons)
+    if (spritesChanged && !attributesChanged) {
+      if (shinyUpdateDebounce) {
+        clearTimeout(shinyUpdateDebounce);
+        activeTimeouts.delete(shinyUpdateDebounce);
+      }
+      
+      shinyUpdateDebounce = scheduleTimeout(() => {
+        const scheduleUpdate = window.requestIdleCallback || requestAnimationFrame;
+        scheduleUpdate(() => {
+          applyShinyEnemies();
+        }, { timeout: 500 });
+        shinyUpdateDebounce = null;
+      }, 100); // Reduced from 200ms to 100ms
+    }
+  };
+  
+  battleBoardObserver = createThrottledObserver(processBattleMutations, 100);
+  
+  // Observe the entire document body for changes
+  battleBoardObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-shiny'],
+    attributeOldValue: true
+  });
+  
+  console.log('[Better UI] Battle board observer started');
+  
+  // Variables to store unsubscribe functions
+  let newGameUnsubscribe, endGameUnsubscribe, autoSetupUnsubscribe, boardConfigUnsubscribe;
+  
+  // Listen for board state changes (new games, game end, and auto-setup)
+  if (globalThis.state?.board?.on) {
+    try {
+      newGameUnsubscribe = globalThis.state.board.on('emitNewGame', (event) => {
+        console.log('[Better UI] New game started, re-applying shiny enemies...');
+        scheduleTimeout(() => {
+          applyShinyEnemies();
+        }, 100);
+      });
+      
+      // Listen for game end event
+      endGameUnsubscribe = globalThis.state.board.on('emitEndGame', (event) => {
+        console.log('[Better UI] Game ended, re-applying shiny enemies...');
+        scheduleTimeout(() => {
+          applyShinyEnemies();
+        }, 100);
+      });
+      
+      // Listen for auto-setup board event
+      autoSetupUnsubscribe = globalThis.state.board.on('autoSetupBoard', (event) => {
+        console.log('[Better UI] Auto-setup detected, re-applying shiny enemies...');
+        scheduleTimeout(() => {
+          applyShinyEnemies();
+        }, 150);
+      });
+      
+      console.log('[Better UI] Board state listeners added');
+    } catch (error) {
+      console.error('[Better UI] Error setting up board state listeners:', error);
+    }
+  }
+  
+  // Subscribe to boardConfig changes to catch dynamically summoned enemies
+  if (globalThis.state?.board?.subscribe) {
+    try {
+      let lastEnemyCount = 0;
+      
+      boardConfigUnsubscribe = globalThis.state.board.subscribe((state) => {
+        const boardConfig = state.context?.boardConfig;
+        if (!boardConfig || !Array.isArray(boardConfig)) return;
+        
+        const enemies = boardConfig.filter(entity => entity.villain === true);
+        const currentEnemyCount = enemies.length;
+        
+        // Detect when new enemies are added (e.g., summoned by Trolls or Orc Riders)
+        if (currentEnemyCount > lastEnemyCount && lastEnemyCount > 0) {
+          console.log(`[Better UI] Enemy summoned - re-applying shiny`);
+          
+          scheduleTimeout(() => {
+            applyShinyEnemies();
+          }, 20);
+        }
+        
+        lastEnemyCount = currentEnemyCount;
+      });
+      
+      console.log('[Better UI] Board config subscription added for summoned enemies');
+    } catch (error) {
+      console.error('[Better UI] Error setting up board config subscription:', error);
+    }
+  }
+  
+  // Store all unsubscribe functions
+  boardStateUnsubscribe = () => {
+    if (typeof newGameUnsubscribe === 'function') newGameUnsubscribe();
+    if (typeof endGameUnsubscribe === 'function') endGameUnsubscribe();
+    if (typeof autoSetupUnsubscribe === 'function') autoSetupUnsubscribe();
+    if (typeof boardConfigUnsubscribe === 'function') boardConfigUnsubscribe();
+  };
+}
+
+function stopBattleBoardObserver() {
+  try {
+    if (battleBoardObserver) {
+      battleBoardObserver.disconnect();
+      battleBoardObserver = null;
+      console.log('[Better UI] Battle board observer stopped');
+    }
+    
+    if (boardStateUnsubscribe) {
+      boardStateUnsubscribe();
+      boardStateUnsubscribe = null;
+      console.log('[Better UI] Board state listener removed');
+    }
+  } catch (error) {
+    console.error('[Better UI] Error stopping battle board observer:', error);
+  }
 }
 
 // =======================
@@ -2267,6 +2748,13 @@ function initBetterUI() {
       applyMaxShinies();
     }
     
+    // Apply shiny enemies if enabled
+    if (config.enableShinyEnemies) {
+      console.log('[Better UI] Applying shiny enemies');
+      startBattleBoardObserver();
+      applyShinyEnemies();
+    }
+    
     // Always setup tab observer (it will check config.enableMaxCreatures internally)
     initTabObserver();
     
@@ -2281,17 +2769,15 @@ function initBetterUI() {
     
     // Initial update of favorite hearts if enabled
     if (config.enableFavorites) {
-      const timeoutId = setTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_INIT);
-      activeTimeouts.add(timeoutId);
+      scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_INIT);
     }
     
     // Apply initial setup labels visibility and start observer
-    const timeoutId = setTimeout(() => {
+    scheduleTimeout(() => {
       applySetupLabelsVisibility(config.showSetupLabels);
       setupLabelsObserver = startSetupLabelsObserver();
       console.log('[Better UI] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
-    activeTimeouts.add(timeoutId);
     
     console.log('[Better UI] Initialization completed');
   } catch (error) {
@@ -2381,6 +2867,28 @@ function cleanupBetterUI() {
         console.warn('[Better UI] Error disconnecting scroll lock MutationObserver:', error);
       }
       scrollLockObserver = null;
+    }
+    
+    // Disconnect battle board observer and board state listeners
+    if (battleBoardObserver) {
+      try {
+        battleBoardObserver.disconnect();
+        console.log('[Better UI] Battle board MutationObserver disconnected');
+      } catch (error) {
+        console.warn('[Better UI] Error disconnecting battle board MutationObserver:', error);
+      }
+      battleBoardObserver = null;
+    }
+    
+    // Unsubscribe from board state events
+    if (boardStateUnsubscribe) {
+      try {
+        boardStateUnsubscribe();
+        console.log('[Better UI] Board state listeners unsubscribed');
+      } catch (error) {
+        console.warn('[Better UI] Error unsubscribing board state listeners:', error);
+      }
+      boardStateUnsubscribe = null;
     }
     
     // Remove favorite hearts

@@ -1171,7 +1171,8 @@ function handleFightToastDetection(mutations) {
 }
 
 // Consolidated mutation processing for both quest log and fight toast detection
-function debouncedProcessAllMutations(mutations) {
+// NOTE: Processed immediately (no debounce) - both raid clock and fight toast need instant detection
+function processAllMutations(mutations) {
     // Handle quest log detection
     handleQuestLogDetection(mutations);
     
@@ -1205,7 +1206,7 @@ function monitorQuestLogVisibility() {
     }
     
     // Consolidated MutationObserver for quest log and fight toast detection
-    questLogObserver = new MutationObserver(debouncedProcessAllMutations);
+    questLogObserver = new MutationObserver(processAllMutations);
     
     questLogObserver.observe(document.body, {
         childList: true,
