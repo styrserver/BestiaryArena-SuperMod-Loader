@@ -350,12 +350,12 @@ function getCreatureLevel(levelElement) {
   return levelElement?.textContent.trim();
 }
 
-// Check if scroll is locked (e.g., Bestiary tab, modals)
-// Returns true when data-scroll-locked >= 1
+// Check if scroll is locked at level 2 or above (modals/dialogs)
+// Level 1 (context menus) should still allow favorite button injection
 // When unlocked, the attribute is removed (returns null), which evaluates to false
 function isScrollLocked() {
   const scrollLocked = document.body.getAttribute('data-scroll-locked');
-  return scrollLocked >= '1';
+  return scrollLocked >= '2';
 }
 
 // CSS template system
@@ -924,18 +924,40 @@ function getCreatureNameFromMenu(menuElem) {
 
 // Validate if context menu should receive favorite button
 function validateContextMenu(menuElem) {
-  if (!config.enableFavorites) return false;
-  if (isScrollLocked()) return false;
-  if (menuElem.hasAttribute('data-favorite-processed')) return false;
+  if (!config.enableFavorites) {
+    console.log('[Better UI] Validation failed: enableFavorites is false');
+    return false;
+  }
+  if (isScrollLocked()) {
+    console.log('[Better UI] Validation failed: scroll is locked');
+    return false;
+  }
+  if (menuElem.hasAttribute('data-favorite-processed')) {
+    console.log('[Better UI] Validation failed: already processed');
+    return false;
+  }
   
   const creatureName = getCreatureNameFromMenu(menuElem);
-  if (!creatureName) return false;
+  if (!creatureName) {
+    console.log('[Better UI] Validation failed: no creature name found');
+    return false;
+  }
   
   const menuText = menuElem.textContent || '';
-  if (/\(Tier: \d+\)/.test(menuText)) return false;
-  if (menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout')) return false;
-  if (menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual')) return false;
+  if (/\(Tier: \d+\)/.test(menuText)) {
+    console.log('[Better UI] Validation failed: tier list detected');
+    return false;
+  }
+  if (menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout')) {
+    console.log('[Better UI] Validation failed: account menu detected');
+    return false;
+  }
+  if (menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual')) {
+    console.log('[Better UI] Validation failed: game mode menu detected');
+    return false;
+  }
   
+  console.log('[Better UI] Validation passed for creature:', creatureName);
   return true;
 }
 
@@ -1079,8 +1101,13 @@ function attachSubmenuHandlers(mainItem, submenu) {
 
 // Inject favorite button into context menu
 function injectFavoriteButton(menuElem) {
-  if (!validateContextMenu(menuElem)) return false;
+  console.log('[Better UI] injectFavoriteButton called');
+  if (!validateContextMenu(menuElem)) {
+    console.log('[Better UI] validateContextMenu failed');
+    return false;
+  }
   
+  console.log('[Better UI] Validation passed, injecting favorite button');
   menuElem.setAttribute('data-favorite-processed', 'true');
   
   const creatureData = identifyCreatureFromMenu(menuElem);
@@ -1108,12 +1135,19 @@ function injectFavoriteButton(menuElem) {
   favoriteMainItem.appendChild(submenu);
   menuElem.appendChild(favoriteMainItem);
   
+  console.log('[Better UI] Favorite button injected successfully');
   return true;
 }
 
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
   console.log('[Better UI] updateFavoriteHearts called with targetUniqueId:', targetUniqueId);
+  
+  // Skip if Board Analyzer is running
+  if (window.__modCoordination?.boardAnalyzerRunning) {
+    console.log('[Better UI] Skipping updateFavoriteHearts - Board Analyzer active');
+    return;
+  }
   
   if (!config.enableFavorites) {
     console.log('[Better UI] Favorites disabled, removing hearts');
@@ -1680,6 +1714,12 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
 }
 
 function applyMaxCreatures() {
+  // Skip if Board Analyzer is running
+  if (window.__modCoordination?.boardAnalyzerRunning) {
+    console.log('[Better UI] Skipping applyMaxCreatures - Board Analyzer active');
+    return;
+  }
+  
   applySpecialStyling({
     name: 'max creatures',
     configColorKey: 'maxCreaturesColor',
@@ -1812,6 +1852,12 @@ function injectMaxShiniesCSS(colorOption, colorKey) {
 }
 
 function applyMaxShinies() {
+  // Skip if Board Analyzer is running
+  if (window.__modCoordination?.boardAnalyzerRunning) {
+    console.log('[Better UI] Skipping applyMaxShinies - Board Analyzer active');
+    return;
+  }
+  
   applySpecialStyling({
     name: 'max shinies',
     configColorKey: 'maxShiniesColor',
@@ -1889,6 +1935,12 @@ function isEnemyByHealthBar(battleContainer) {
 }
 
 function applyShinyEnemies() {
+  // Skip if Board Analyzer is running
+  if (window.__modCoordination?.boardAnalyzerRunning) {
+    console.log('[Better UI] Skipping applyShinyEnemies - Board Analyzer active');
+    return;
+  }
+  
   try {
     // Get board configuration from game state
     const boardSnapshot = globalThis.state?.board?.getSnapshot();
@@ -2442,6 +2494,11 @@ function startBattleBoardObserver() {
   let attributeChangeDebounce = null;
   
   const processBattleMutations = (mutations) => {
+    // Skip if Board Analyzer is running
+    if (window.__modCoordination?.boardAnalyzerRunning) {
+      return;
+    }
+    
     let spritesChanged = false;
     let attributesChanged = false;
     
@@ -2638,6 +2695,7 @@ function startBattleBoardObserver() {
   if (globalThis.state?.board?.on) {
     try {
       newGameUnsubscribe = globalThis.state.board.on('emitNewGame', (event) => {
+        if (window.__modCoordination?.boardAnalyzerRunning) return;
         console.log('[Better UI] New game started, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -2646,6 +2704,7 @@ function startBattleBoardObserver() {
       
       // Listen for game end event
       endGameUnsubscribe = globalThis.state.board.on('emitEndGame', (event) => {
+        if (window.__modCoordination?.boardAnalyzerRunning) return;
         console.log('[Better UI] Game ended, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -2654,6 +2713,7 @@ function startBattleBoardObserver() {
       
       // Listen for auto-setup board event
       autoSetupUnsubscribe = globalThis.state.board.on('autoSetupBoard', (event) => {
+        if (window.__modCoordination?.boardAnalyzerRunning) return;
         console.log('[Better UI] Auto-setup detected, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -2672,6 +2732,8 @@ function startBattleBoardObserver() {
       let lastEnemyCount = 0;
       
       boardConfigUnsubscribe = globalThis.state.board.subscribe((state) => {
+        if (window.__modCoordination?.boardAnalyzerRunning) return;
+        
         const boardConfig = state.context?.boardConfig;
         if (!boardConfig || !Array.isArray(boardConfig)) return;
         
