@@ -161,6 +161,7 @@ let tabObserver = null;
 let contextMenuObserver = null;
 let creatureObserver = null;
 let setupLabelsObserver = null;
+let scrollLockObserver = null;
 let creatureButtonListeners = new WeakMap(); // Track event listeners on creature buttons
 let favoriteCreatures = new Map(); // Maps uniqueId -> symbolKey
 
@@ -342,6 +343,14 @@ function getCreatureElements(parentElement) {
 
 function getCreatureLevel(levelElement) {
   return levelElement?.textContent.trim();
+}
+
+// Check if scroll is locked (e.g., Bestiary tab, modals)
+// Returns true when data-scroll-locked >= 2
+// When unlocked, the attribute is removed (returns null), which evaluates to false
+function isScrollLocked() {
+  const scrollLocked = document.body.getAttribute('data-scroll-locked');
+  return scrollLocked >= '2';
 }
 
 // CSS template system
@@ -857,8 +866,7 @@ function injectFavoriteButton(menuElem) {
   if (!config.enableFavorites) return false;
   
   // Skip if scroll is locked (e.g., Bestiary tab)
-  const scrollLocked = document.body.getAttribute('data-scroll-locked');
-  if (scrollLocked >= '2') return false;
+  if (isScrollLocked()) return false;
   
   // Mark this menu as processed to prevent duplicate processing
   if (menuElem.hasAttribute('data-favorite-processed')) return false;
@@ -1095,6 +1103,9 @@ function updateFavoriteHearts(targetUniqueId = null) {
     document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
     return;
   }
+  
+  // Skip if scroll is locked (e.g., Bestiary tab)
+  if (isScrollLocked()) return;
   
   const creatures = getVisibleCreatures();
   console.log('[Better UI] Found', creatures.length, 'visible creatures');
@@ -1573,6 +1584,9 @@ function applySpecialStyling(options) {
 // Apply max creatures styling to elite monsters
 // Helper functions for applyMaxCreatures
 function filterEligibleCreatures(visibleCreatures) {
+  // Skip if scroll is locked (e.g., Bestiary tab)
+  if (isScrollLocked()) return [];
+  
   const tier4Monsters = getTier4Monsters();
   const eligibleCreatures = [];
   
@@ -1704,6 +1718,9 @@ function removeMaxCreatures() {
 
 // Apply max shinies styling to shiny creatures
 function filterEligibleShinies(visibleCreatures) {
+  // Skip if scroll is locked (e.g., Bestiary tab)
+  if (isScrollLocked()) return [];
+  
   const eligibleShinies = [];
   
   visibleCreatures.forEach((imgEl) => {
@@ -2168,6 +2185,50 @@ function startCreatureContainerObserver() {
   console.log('[Better UI] Creature container observer started');
 }
 
+// Start observer for scroll lock state changes
+function initScrollLockObserver() {
+  console.log('[Better UI] Starting scroll lock observer...');
+  
+  // Track previous scroll lock state
+  let previouslyLocked = isScrollLocked();
+  
+  scrollLockObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'data-scroll-locked') {
+        const currentlyLocked = isScrollLocked();
+        
+        // Detect transition from locked to unlocked (attribute is removed when unlocked)
+        if (previouslyLocked && !currentlyLocked) {
+          console.log('[Better UI] Scroll unlocked, re-applying styles...');
+          
+          // Re-apply all enabled features
+          if (config.enableMaxCreatures) {
+            applyMaxCreatures();
+          }
+          
+          if (config.enableMaxShinies) {
+            applyMaxShinies();
+          }
+          
+          if (config.enableFavorites) {
+            updateFavoriteHearts();
+          }
+        }
+        
+        previouslyLocked = currentlyLocked;
+      }
+    });
+  });
+  
+  // Observe document.body for data-scroll-locked attribute changes
+  scrollLockObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['data-scroll-locked']
+  });
+  
+  console.log('[Better UI] Scroll lock observer started');
+}
+
 // =======================
 // 9. Initialization
 // =======================
@@ -2214,6 +2275,9 @@ function initBetterUI() {
     
     // Start creature container observer for search filtering
     startCreatureContainerObserver();
+    
+    // Start scroll lock observer to re-apply styles when unlocking
+    initScrollLockObserver();
     
     // Initial update of favorite hearts if enabled
     if (config.enableFavorites) {
@@ -2262,11 +2326,6 @@ function cleanupBetterUI() {
       updateThrottle = null;
     }
     
-    if (contextMenuThrottle) {
-      clearTimeout(contextMenuThrottle);
-      contextMenuThrottle = null;
-    }
-    
     // Disconnect MutationObservers
     if (staminaObserver) {
       try {
@@ -2311,6 +2370,17 @@ function cleanupBetterUI() {
         console.warn('[Better UI] Error disconnecting setup labels MutationObserver:', error);
       }
       setupLabelsObserver = null;
+    }
+    
+    // Disconnect scroll lock observer
+    if (scrollLockObserver) {
+      try {
+        scrollLockObserver.disconnect();
+        console.log('[Better UI] Scroll lock MutationObserver disconnected');
+      } catch (error) {
+        console.warn('[Better UI] Error disconnecting scroll lock MutationObserver:', error);
+      }
+      scrollLockObserver = null;
     }
     
     // Remove favorite hearts
