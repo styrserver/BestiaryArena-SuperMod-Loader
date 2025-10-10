@@ -789,7 +789,7 @@ function showSettingsModal() {
     const favoritesCheckbox = content.querySelector('#favorites-toggle');
     createSettingsCheckboxHandler('enableFavorites',
       updateFavoriteHearts,
-      () => document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove())
+      removeFavoriteHearts
     )(favoritesCheckbox);
     
     const setupLabelsCheckbox = content.querySelector('#setup-labels-toggle');
@@ -1139,6 +1139,12 @@ function injectFavoriteButton(menuElem) {
   return true;
 }
 
+// Remove all favorite hearts
+function removeFavoriteHearts() {
+  document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
+  console.log('[Better UI] All favorite hearts removed');
+}
+
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
   console.log('[Better UI] updateFavoriteHearts called with targetUniqueId:', targetUniqueId);
@@ -1151,11 +1157,15 @@ function updateFavoriteHearts(targetUniqueId = null) {
   
   if (!config.enableFavorites) {
     console.log('[Better UI] Favorites disabled, removing hearts');
-    document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
+    removeFavoriteHearts();
     return;
   }
   
-  if (isScrollLocked()) return;
+  if (isScrollLocked()) {
+    console.log('[Better UI] Scroll locked, clearing all hearts for clean state');
+    removeFavoriteHearts();
+    return;
+  }
   
   // Only process creatures in the main collection grid
   // This excludes creatures on the board, in menus, modals, etc.
@@ -1176,6 +1186,9 @@ function updateFavoriteHearts(targetUniqueId = null) {
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   
   resetCreatureMatchingIndex();
+  
+  // Remove all existing hearts first (global cleanup for clean state)
+  removeFavoriteHearts();
   
   let heartsAdded = 0;
   let creaturesChecked = 0;
@@ -1200,10 +1213,6 @@ function updateFavoriteHearts(targetUniqueId = null) {
     
     const isFavorite = favoriteCreatures.has(uniqueId);
     const container = imgEl.parentElement;
-    
-    // Remove existing heart
-    const existingHeart = container.querySelector('.favorite-heart');
-    if (existingHeart) existingHeart.remove();
     
     // Add favorite symbol if favorited
     if (isFavorite) {
