@@ -1834,6 +1834,41 @@ function updateToggleButton() {
 // 7. CORE LOGIC FUNCTIONS
 // ============================================================================
 
+// Check if it's safe to reload the page (won't interrupt user's active game)
+function isSafeToReload() {
+    try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        
+        // Don't reload if game state is unavailable
+        if (!boardContext) {
+            console.log('[Raid Hunter] Cannot verify game state - skipping reload for safety');
+            return false;
+        }
+        
+        // CRITICAL: Check if user is actively playing a game
+        if (boardContext.gameStarted) {
+            console.log('[Raid Hunter] User is in an active game - skipping reload to avoid interruption');
+            return false;
+        }
+        
+        // Check if user is in autoplay mode but this mod doesn't have control
+        // This means user manually enabled autoplay or another mod is controlling it
+        const currentOwner = window.AutoplayManager?.getCurrentOwner();
+        
+        if (boardContext.mode === 'autoplay' && currentOwner && currentOwner !== 'Raid Hunter') {
+            console.log(`[Raid Hunter] Another mod (${currentOwner}) is autoplaying - skipping reload`);
+            return false;
+        }
+        
+        // Safe to reload
+        return true;
+        
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking if safe to reload:', error);
+        return false; // Fail safe - don't reload on error
+    }
+}
+
 // Stops autoplay when raid ends
 function stopAutoplayOnRaidEnd() {
     try {
@@ -1854,7 +1889,13 @@ function stopAutoplayOnRaidEnd() {
                 }
             }, 2000); // Small delay before starting next raid
         } else {
-            console.log('[Raid Hunter] No more raids in queue');
+            console.log('[Raid Hunter] No more raids in queue - reloading page to reset cache and DOM');
+            
+            // Reload page after cleanup to reset all cache, DOMs, etc.
+            setTimeout(() => {
+                if (!isSafeToReload()) return;
+                location.reload();
+            }, 3000); // 3 second delay to allow cleanup and show message
         }
         
         // Reset raid state

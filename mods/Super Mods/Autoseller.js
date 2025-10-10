@@ -2685,6 +2685,7 @@
     
     let dragonPlantObserver = null;
     let dragonPlantObserverAttempts = 0;
+    let hasRestoredDragonPlantState = false; // Tracks if we've done initial restore after page load
     
     function setupDragonPlantObserver() {
         if (dragonPlantObserver || dragonPlantObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
@@ -2760,6 +2761,39 @@
                     const isCurrentlyChecked = settingsCheckbox.getAttribute('aria-checked') === 'true';
                     const currentSettings = getSettings();
                     
+                    // First time sync after page load - restore FROM localStorage TO game
+                    if (!hasRestoredDragonPlantState) {
+                        hasRestoredDragonPlantState = true;
+                        
+                        const savedState = currentSettings.autoplantChecked;
+                        console.log(`[${modName}] First sync after page load - saved state: ${savedState ? 'ENABLED' : 'DISABLED'}, game state: ${isCurrentlyChecked ? 'ENABLED' : 'DISABLED'}`);
+                        
+                        // If saved state doesn't match game UI, restore it
+                        if (savedState !== isCurrentlyChecked) {
+                            console.log(`[${modName}] Restoring Dragon Plant checkbox to saved state...`);
+                            syncToAutoplaySession(savedState);
+                            
+                            // Update mod checkbox
+                            const modCheckbox = document.querySelector('#autoplant-checkbox');
+                            if (modCheckbox) {
+                                modCheckbox.checked = savedState;
+                                window.autoplantCheckbox = modCheckbox;
+                            }
+                            
+                            // Update status and filter
+                            if (typeof updateAutoplantStatus === 'function') {
+                                updateAutoplantStatus();
+                            }
+                            updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                            createAutosellerSessionWidget();
+                            updateAutosellerSessionWidget();
+                        } else {
+                            console.log(`[${modName}] Dragon Plant state already matches saved state`);
+                        }
+                        return; // Don't continue with normal sync logic
+                    }
+                    
+                    // Normal sync - save FROM game TO localStorage (after first restore)
                     if (currentSettings.autoplantChecked !== isCurrentlyChecked) {
                         console.log(`[${modName}] Syncing mod settings from autoplay session: ${isCurrentlyChecked ? 'enabled' : 'disabled'}`);
                         setSettings({ autoplantChecked: isCurrentlyChecked });
