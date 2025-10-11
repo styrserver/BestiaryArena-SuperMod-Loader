@@ -17,7 +17,9 @@ const defaultConfig = {
   enableFavorites: true,
   favoriteSymbol: 'heart',
   showSetupLabels: true,
-  enableShinyEnemies: false
+  enableShinyEnemies: false,
+  enableAutoplayRefresh: false,
+  autoplayRefreshMinutes: 30
 };
 
 // Storage key for this mod
@@ -105,7 +107,8 @@ const TIMEOUT_DELAYS = {
   INIT_RETRY: 500,
   FAVORITES_INIT: 500,
   OBSERVER_RETRY: 1000,
-  CONTAINER_DEBOUNCE: 200
+  CONTAINER_DEBOUNCE: 200,
+  BROWSER_REFRESH: 1000
 };
 
 // Translations
@@ -118,6 +121,10 @@ const TRANSLATIONS = {
     enableFavorites: 'Enable Favorites',
     shinyEnemies: '⚠️ Shiny Enemies',
     shinyEnemiesWarning: 'Warning: This feature may impact performance during battles due to continuous sprite monitoring. Disable if you experience lag.',
+    autoplayRefresh: '⚠️ Autoplay Refresh Browser',
+    autoplayRefreshWarning: 'Refreshes browser after X minutes of autoplay time.',
+    autoplayRefreshMinutes: 'Minutes:',
+    autoplaySessionText: 'Autoplay session',
     enableMaxCreatures: 'Enable Max Creatures',
     color: 'Color:',
     enableShinies: 'Enable Shinies',
@@ -132,6 +139,10 @@ const TRANSLATIONS = {
     enableFavorites: 'Ativar Favoritos',
     shinyEnemies: '⚠️ Shiny Inimigos',
     shinyEnemiesWarning: 'Aviso: Este recurso pode afetar o desempenho durante batalhas devido ao monitoramento contínuo de sprites. Desative se você experimentar lag.',
+    autoplayRefresh: '⚠️ Atualizar Navegador no Autoplay',
+    autoplayRefreshWarning: 'Atualiza o navegador após X minutos de tempo de autoplay.',
+    autoplayRefreshMinutes: 'Minutos:',
+    autoplaySessionText: 'Sessão autoplay',
     enableMaxCreatures: 'Ativar Criaturas Máximas',
     color: 'Cor:',
     enableShinies: 'Ativar Shinies',
@@ -169,6 +180,8 @@ let setupLabelsObserver = null;
 let scrollLockObserver = null;
 let creatureButtonListeners = new WeakMap(); // Track event listeners on creature buttons
 let favoriteCreatures = new Map(); // Maps uniqueId -> symbolKey
+let autoplayRefreshGameSubscription = null;
+let autoplayRefreshSetPlayModeSubscription = null;
 
 // Color options for max creatures (Tibia-themed)
 const COLOR_OPTIONS = {
@@ -727,12 +740,6 @@ function showSettingsModal() {
       </div>
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="shiny-enemies-toggle" ${config.enableShinyEnemies ? 'checked' : ''} style="transform: scale(1.2);">
-          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('shinyEnemiesWarning')}">${t('shinyEnemies')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="rainbow-tiers-toggle" ${config.enableMaxCreatures ? 'checked' : ''} style="transform: scale(1.2);">
           <span>${t('enableMaxCreatures')}</span>
         </label>
@@ -750,6 +757,23 @@ function showSettingsModal() {
       <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
         <span style="color: #ccc;">${t('shinyColor')}</span>
         ${generateColorPickerHTML('shiny-color-picker', 'maxShiniesColor')}
+      </div>
+      <div class="separator my-2.5" role="none" style="margin: 10px 0px;"></div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="shiny-enemies-toggle" ${config.enableShinyEnemies ? 'checked' : ''} style="transform: scale(1.2);">
+          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('shinyEnemiesWarning')}">${t('shinyEnemies')}</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="autoplay-refresh-toggle" ${config.enableAutoplayRefresh ? 'checked' : ''} style="transform: scale(1.2);">
+          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('autoplayRefreshWarning')}">${t('autoplayRefresh')}</span>
+        </label>
+      </div>
+      <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+        <span style="color: #ccc;">${t('autoplayRefreshMinutes')}</span>
+        <input type="number" id="autoplay-refresh-minutes" value="${config.autoplayRefreshMinutes}" min="1" max="120" style="width: 80px; padding: 4px 8px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px;">
       </div>
     `;
     
@@ -814,6 +838,35 @@ function showSettingsModal() {
       },
       removeShinyEnemies
     )(shinyEnemiesCheckbox);
+    
+    const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
+    if (autoplayRefreshCheckbox) {
+      autoplayRefreshCheckbox.addEventListener('change', () => {
+        config.enableAutoplayRefresh = autoplayRefreshCheckbox.checked;
+        saveConfig();
+        
+        if (autoplayRefreshCheckbox.checked) {
+          console.log('[Better UI] Autoplay refresh enabled via settings');
+          startAutoplayRefreshMonitor();
+        } else {
+          console.log('[Better UI] Autoplay refresh disabled via settings');
+          stopAutoplayRefreshMonitor();
+        }
+      });
+    }
+    
+    const autoplayRefreshMinutesInput = content.querySelector('#autoplay-refresh-minutes');
+    if (autoplayRefreshMinutesInput) {
+      autoplayRefreshMinutesInput.addEventListener('input', () => {
+        const minutes = parseInt(autoplayRefreshMinutesInput.value) || 30;
+        config.autoplayRefreshMinutes = Math.max(1, Math.min(120, minutes));
+        saveConfig();
+        if (config.enableAutoplayRefresh) {
+          stopAutoplayRefreshMonitor();
+          startAutoplayRefreshMonitor();
+        }
+      });
+    }
     
     // Store modal reference for button handlers
     let modalRef = null;
@@ -1162,8 +1215,7 @@ function updateFavoriteHearts(targetUniqueId = null) {
   }
   
   if (isScrollLocked()) {
-    console.log('[Better UI] Scroll locked, clearing all hearts for clean state');
-    removeFavoriteHearts();
+    console.log('[Better UI] Scroll locked, skipping update (not removing hearts)');
     return;
   }
   
@@ -1173,7 +1225,7 @@ function updateFavoriteHearts(targetUniqueId = null) {
                              document.querySelector('.grid') ||
                              document.querySelector('[class*="grid"]');
   if (!creaturesContainer) {
-    console.log('[Better UI] Creatures container not found');
+    console.log('[Better UI] Creatures container not found, skipping update');
     return;
   }
   
@@ -1183,11 +1235,17 @@ function updateFavoriteHearts(targetUniqueId = null) {
   });
   console.log('[Better UI] Found', creatures.length, 'visible creatures in collection');
   
+  // If no creatures visible, don't remove existing hearts - collection might be transitioning
+  if (creatures.length === 0) {
+    console.log('[Better UI] No creatures visible, skipping update (not removing hearts)');
+    return;
+  }
+  
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   
   resetCreatureMatchingIndex();
   
-  // Remove all existing hearts first (global cleanup for clean state)
+  // Remove all existing hearts first (only when we have creatures to re-apply them)
   removeFavoriteHearts();
   
   let heartsAdded = 0;
@@ -2838,7 +2896,157 @@ function stopBattleBoardObserver() {
 }
 
 // =======================
-// 9. Initialization
+// 9. Autoplay Refresh Monitor
+// =======================
+
+// Parse autoplay time from text content (supports English and Portuguese)
+function parseAutoplayTime(textContent) {
+  // Build regex pattern using translation strings for both languages
+  const enText = TRANSLATIONS.en.autoplaySessionText;
+  const ptText = TRANSLATIONS.pt.autoplaySessionText;
+  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
+  
+  const match = textContent.match(pattern);
+  if (match) {
+    const minutes = parseInt(match[1]);
+    const seconds = parseInt(match[2]);
+    return minutes + (seconds / 60);
+  }
+  return null;
+}
+
+// Get the autoplay session timer from the DOM
+function getAutoplaySessionTime() {
+  try {
+    // Look for the autoplay session button directly
+    const autoplayButton = document.querySelector('button.widget-top-text img[alt="Autoplay"]');
+    if (autoplayButton) {
+      const button = autoplayButton.closest('button');
+      if (button) {
+        const time = parseAutoplayTime(button.textContent);
+        if (time !== null) return time;
+      }
+    }
+    
+    // Fallback: Look for the autoplay session button in the widget-top area
+    const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+    for (const session of autoplaySessions) {
+      const widgetTop = session.querySelector('.widget-top');
+      if (widgetTop) {
+        const time = parseAutoplayTime(widgetTop.textContent);
+        if (time !== null) return time;
+      }
+    }
+    return 0;
+  } catch (error) {
+    console.error('[Better UI] Error getting autoplay session time:', error);
+    return 0;
+  }
+}
+
+// Start monitoring the autoplay session timer
+function startAutoplayRefreshMonitor() {
+  try {
+    console.log('[Better UI] Starting autoplay refresh monitor');
+    
+    // Clear any existing monitoring
+    stopAutoplayRefreshMonitor();
+    
+    // Check if game state is available
+    if (!globalThis.state) {
+      console.log('[Better UI] Game state not available, cannot start autoplay refresh monitor');
+      return;
+    }
+    
+    console.log('[Better UI] Game state available:', !!globalThis.state);
+    console.log('[Better UI] Board state available:', !!globalThis.state.board);
+    console.log('[Better UI] Game timer available:', !!globalThis.state.gameTimer);
+    
+    // Listen for new game events to start monitoring autoplay session
+    if (globalThis.state.board) {
+      // Listen for newGame event as documented in game_state_api.md
+      autoplayRefreshGameSubscription = globalThis.state.board.on('newGame', (event) => {
+        console.log('[Better UI] New game event:', event);
+        
+        // Check autoplay session timer and refresh if needed on each new game
+        checkAutoplayRefreshThreshold();
+      });
+      
+      // Also listen for setPlayMode when switching to autoplay
+      autoplayRefreshSetPlayModeSubscription = globalThis.state.board.on('setPlayMode', (event) => {
+        console.log(`[Better UI] setPlayMode event - mode: ${event.mode}`);
+        if (event.mode === 'autoplay') {
+          console.log('[Better UI] Autoplay mode set - checking refresh threshold');
+          checkAutoplayRefreshThreshold();
+        }
+      });
+      
+      console.log('[Better UI] Game event listeners set up for newGame and setPlayMode');
+    }
+    
+    // Also check immediately if a game is already running
+    if (globalThis.state.gameTimer) {
+      const gameTimerState = globalThis.state.gameTimer.getSnapshot();
+      console.log('[Better UI] Current game timer state:', gameTimerState.context.state);
+      if (gameTimerState.context.state === 'playing') {
+        console.log('[Better UI] Game already running, checking autoplay refresh threshold');
+        checkAutoplayRefreshThreshold();
+      }
+    }
+    
+    console.log('[Better UI] Autoplay refresh monitor started - waiting for new game or monitoring current game');
+    
+    // Test the autoplay session timer detection
+    const testTime = getAutoplaySessionTime();
+    console.log(`[Better UI] Test autoplay session time: ${testTime.toFixed(1)} minutes`);
+  } catch (error) {
+    console.error('[Better UI] Error starting autoplay refresh monitor:', error);
+  }
+}
+
+// Check autoplay session timer and refresh if needed
+function checkAutoplayRefreshThreshold() {
+  try {
+    const currentMinutes = getAutoplaySessionTime();
+    console.log(`[Better UI] Autoplay refresh check: ${currentMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
+    
+    if (currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes) {
+      console.log(`[Better UI] Autoplay refresh threshold reached (${currentMinutes.toFixed(1)} >= ${config.autoplayRefreshMinutes} minutes). Refreshing page in 1 second...`);
+      
+      // Wait 1 second before refreshing
+      scheduleTimeout(() => {
+        console.log('[Better UI] Refreshing browser...');
+        location.reload();
+      }, TIMEOUT_DELAYS.BROWSER_REFRESH);
+    }
+  } catch (error) {
+    console.error('[Better UI] Error checking autoplay refresh threshold:', error);
+  }
+}
+
+// Stop monitoring the autoplay session timer
+function stopAutoplayRefreshMonitor() {
+  try {
+    if (autoplayRefreshGameSubscription && typeof autoplayRefreshGameSubscription === 'function') {
+      autoplayRefreshGameSubscription();
+      autoplayRefreshGameSubscription = null;
+      console.log('[Better UI] Autoplay refresh game subscription stopped');
+    }
+    
+    if (autoplayRefreshSetPlayModeSubscription && typeof autoplayRefreshSetPlayModeSubscription === 'function') {
+      autoplayRefreshSetPlayModeSubscription();
+      autoplayRefreshSetPlayModeSubscription = null;
+      console.log('[Better UI] Autoplay refresh setPlayMode subscription stopped');
+    }
+    
+    console.log('[Better UI] Autoplay refresh monitor stopped');
+  } catch (error) {
+    console.error('[Better UI] Error stopping autoplay refresh monitor:', error);
+  }
+}
+
+// =======================
+// 10. Initialization
 // =======================
 
 function initBetterUI() {
@@ -2880,6 +3088,14 @@ function initBetterUI() {
       console.log('[Better UI] Applying shiny enemies');
       startBattleBoardObserver();
       applyShinyEnemies();
+    }
+    
+    // Start autoplay refresh monitor if enabled
+    if (config.enableAutoplayRefresh) {
+      console.log('[Better UI] Autoplay refresh enabled in config, starting monitor');
+      startAutoplayRefreshMonitor();
+    } else {
+      console.log('[Better UI] Autoplay refresh disabled in config');
     }
     
     // Always setup tab observer (it will check config.enableMaxCreatures internally)
@@ -3020,6 +3236,9 @@ function cleanupBetterUI() {
       }
       boardStateUnsubscribe = null;
     }
+    
+    // Stop autoplay refresh monitor
+    stopAutoplayRefreshMonitor();
     
     // Remove favorite hearts
     document.querySelectorAll('.favorite-heart').forEach(heart => {
@@ -3163,4 +3382,3 @@ exports = {
     }
   }
 };
-

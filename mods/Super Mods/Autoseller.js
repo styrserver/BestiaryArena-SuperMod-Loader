@@ -99,7 +99,6 @@
     let boardSubscription1 = null;
     let boardSubscription2 = null;
     let debounceTimer = null;
-    let validationInterval = null;
     
     // Global references for cleanup
     let originalFetch = null;
@@ -3009,13 +3008,6 @@
                 dragonPlantButton.click();
             }, 100);
         }
-        // Click Dragon Plant to disable if there are no creatures and it's currently enabled
-        else if (!hasCreatures && isCurrentlyEnabled) {
-            console.log(`[${modName}] Auto-disabling Dragon Plant - no creatures detected`);
-            setTimeout(() => {
-                dragonPlantButton.click();
-            }, 100);
-        }
     }
     
     function stopAutoplantClickObserver() {
@@ -3027,73 +3019,7 @@
     }
     
     // =======================
-    // 12.2. Dragon Plant Validation (Desync Detection)
-    // =======================
-    
-    function setupDragonPlantValidation() {
-        // Clear existing interval
-        if (validationInterval) {
-            clearInterval(validationInterval);
-        }
-        
-        validationInterval = setInterval(() => {
-            const settings = getSettings();
-            
-            // Only validate when autoplant is enabled
-            if (!settings.autoplantChecked) return;
-            
-            // Only validate when in autoplay session
-            const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-            if (autoplaySessions.length === 0) return;
-            
-            // Find in-game Dragon Plant checkbox
-            let dragonPlantCheckbox = null;
-            for (const session of autoplaySessions) {
-                const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-                if (widgetBottom) {
-                    dragonPlantCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
-                    if (dragonPlantCheckbox) break;
-                }
-            }
-            
-            if (!dragonPlantCheckbox) return;
-            
-            const isGameChecked = dragonPlantCheckbox.getAttribute('aria-checked') === 'true';
-            const shouldBeChecked = settings.autoplantChecked;
-            
-            // Detect mismatch (desync)
-            if (shouldBeChecked && !isGameChecked) {
-                console.warn('[Autoseller] ⚠️ DESYNC DETECTED: Autoplant enabled but Dragon Plant unchecked');
-                console.warn('[Autoseller] Possible interference from another mod - auto-correcting...');
-                
-                dragonPlantCheckbox.click();
-                
-                // Verify after 200ms
-                setTimeout(() => {
-                    const verified = dragonPlantCheckbox.getAttribute('aria-checked') === 'true';
-                    if (!verified) {
-                        console.error('[Autoseller] ❌ Auto-correction FAILED - repeated interference detected');
-                        console.error('[Autoseller] Suggestion: Check for mod conflicts (Better Tasker, etc.)');
-                    } else {
-                        console.log('[Autoseller] ✅ Dragon Plant auto-correction successful');
-                    }
-                }, 200);
-            }
-        }, 10000); // Check every 10 seconds
-        
-        console.log('[Autoseller] Dragon Plant validation interval started (checks every 10s)');
-    }
-    
-    function stopDragonPlantValidation() {
-        if (validationInterval) {
-            clearInterval(validationInterval);
-            validationInterval = null;
-            console.log('[Autoseller] Dragon Plant validation interval stopped');
-        }
-    }
-    
-    // =======================
-    // 12.3. Game Start Listener for Dragon Plant
+    // 12.2. Game Start Listener for Dragon Plant
     // =======================
     
     function setupGameStartListener() {
@@ -3178,7 +3104,6 @@
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
-        setupDragonPlantValidation();
         // setupAutoplantClickObserver(); // Disabled - using game start listener instead
         setupGameStartListener();
         setupDragonPlantAPIMonitor();
@@ -3304,9 +3229,8 @@
                     if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
                     if (style && style.parentNode) style.parentNode.removeChild(style);
                     
-                    // 4. Stop observers and validation
+                    // 4. Stop observers
                     stopDragonPlantObserver();
-                    stopDragonPlantValidation();
                     stopAutoplantClickObserver();
                     
                     // 5. Remove game state event listeners and filters

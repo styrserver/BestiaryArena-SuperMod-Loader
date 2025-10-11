@@ -616,16 +616,14 @@ async function controlAutoplayWithButton(action) {
             ? [
                 'button:has(svg.lucide-pause)',
                 'button.frame-1-red[class*="pause"]',
-                'button[class*="pause"]',
-                'button[class*="surface-red"]:has(svg)', // Red button with icon (pause)
-                'div.flex button:nth-child(2)' // Second button in flex container (pause button)
+                'button.frame-1-red:has(svg.lucide-pause)', // Red button with pause icon (more specific)
+                'button[class*="surface-red"]:has(svg.lucide-pause)' // Red button with pause icon only
               ]
             : [
                 'button:has(svg.lucide-play)',
                 'button.frame-1-green[class*="play"]',
-                'button[class*="play"]',
-                'button[class*="surface-green"]:has(svg)', // Green button with icon (play)
-                'button:not([class*="pause"]):has(svg)' // Fallback for play button
+                'button.frame-1-green:has(svg.lucide-play)', // Green button with play icon (more specific)
+                'button[class*="surface-green"]:has(svg.lucide-play)' // Green button with play icon only
               ];
         
         // Find button using first matching selector
@@ -4611,11 +4609,12 @@ function startAutomation() {
         return;
     }
     
-    // Run immediately once
-    runAutomationTasks();
-    checkQuestLogForTasks(); // Also check quest log immediately
+    // CRITICAL: Check if raids are available at startup - if yes, delay to let Raid Hunter claim priority
+    const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
+    const raidState = globalThis.state?.raids?.getSnapshot?.();
+    const hasActiveRaids = raidState?.context?.list?.length > 0;
     
-    // Set up core automation interval
+    // Set up core automation interval (always set up, even during delay)
     automationInterval = setInterval(runAutomationTasks, 5000); // Core automation every 5s
     
     // Set up quest log check interval (respects raid status)
@@ -4623,6 +4622,26 @@ function startAutomation() {
     
     // Subscribe to game state for task completion
     subscribeToGameState();
+    
+    // Check if we should delay initial run to let Raid Hunter claim priority
+    if (raidHunterEnabled === 'true' && hasActiveRaids) {
+        console.log('[Better Tasker] Raids available at startup - delaying 5 seconds to let Raid Hunter claim priority');
+        setTimeout(() => {
+            // After delay, check if Raid Hunter is now processing raids
+            if (isRaidHunterRaiding()) {
+                console.log('[Better Tasker] Raid Hunter is now processing raids - automation will resume when raid ends');
+                return;
+            }
+            
+            console.log('[Better Tasker] Raid Hunter did not claim raids - proceeding with task automation');
+            runAutomationTasks();
+            checkQuestLogForTasks();
+        }, 5000);
+    } else {
+        // No raids available or Raid Hunter disabled - run immediately
+        runAutomationTasks();
+        checkQuestLogForTasks();
+    }
 }
 
 function stopAutomation() {
