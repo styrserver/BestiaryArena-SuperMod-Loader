@@ -357,6 +357,10 @@ let gameStateUnsubscribers = [];
 let automationInterval = null;
 let questLogInterval = null;
 
+// Board Analyzer coordination state
+let isBoardAnalyzerRunning = false;
+let boardAnalyzerCoordinationInterval = null;
+
 // Modal State
 let activeTaskerModal = null;
 let taskerModalInProgress = false;
@@ -810,6 +814,75 @@ function cleanupRaidHunterCoordination() {
         raidHunterCoordinationInterval = null;
     }
     isRaidHunterActive = false;
+}
+
+// ============================================================================
+// 4.1. BOARD ANALYZER COORDINATION
+// ============================================================================
+
+// Check if Board Analyzer is currently running
+function isBoardAnalyzerActive() {
+    try {
+        if (!window.__modCoordination) return false;
+        return window.__modCoordination.boardAnalyzerRunning === true;
+    } catch (error) {
+        console.error('[Better Tasker] Error checking Board Analyzer status:', error);
+        return false;
+    }
+}
+
+// Handle Board Analyzer coordination - pause Better Tasker when Board Analyzer runs
+function handleBoardAnalyzerCoordination() {
+    try {
+        if (!window.__modCoordination) return;
+        
+        const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
+        
+        if (boardAnalyzerRunning && !isBoardAnalyzerRunning) {
+            // Board Analyzer started - pause Better Tasker automation
+            console.log('[Better Tasker] Board Analyzer started - pausing task automation');
+            isBoardAnalyzerRunning = true;
+            
+            if (taskerState === TASKER_STATES.ENABLED) {
+                stopAutomation();
+            }
+        } else if (!boardAnalyzerRunning && isBoardAnalyzerRunning) {
+            // Board Analyzer finished - resume Better Tasker automation if enabled
+            console.log('[Better Tasker] Board Analyzer finished - checking if automation should resume');
+            isBoardAnalyzerRunning = false;
+            
+            if (taskerState === TASKER_STATES.ENABLED && !isRaidHunterRaiding()) {
+                console.log('[Better Tasker] Resuming task automation');
+                startAutomation();
+            }
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error in Board Analyzer coordination:', error);
+    }
+}
+
+// Setup Board Analyzer coordination
+function setupBoardAnalyzerCoordination() {
+    if (boardAnalyzerCoordinationInterval) {
+        clearInterval(boardAnalyzerCoordinationInterval);
+        boardAnalyzerCoordinationInterval = null;
+    }
+    
+    // Poll for Board Analyzer state changes every 2 seconds
+    boardAnalyzerCoordinationInterval = setInterval(() => {
+        handleBoardAnalyzerCoordination();
+    }, 2000);
+    
+    console.log('[Better Tasker] Board Analyzer coordination set up');
+}
+
+// Clean up Board Analyzer coordination
+function cleanupBoardAnalyzerCoordination() {
+    if (boardAnalyzerCoordinationInterval) {
+        clearInterval(boardAnalyzerCoordinationInterval);
+        boardAnalyzerCoordinationInterval = null;
+    }
+    isBoardAnalyzerRunning = false;
 }
 
 // ============================================================================
@@ -4088,6 +4161,12 @@ async function handleTaskFinishing() {
                     // Wait for the specified delay before proceeding
                     await new Promise(resolve => setTimeout(resolve, taskStartDelay * 1000));
                     
+                    // Check if Board Analyzer started during delay
+                    if (isBoardAnalyzerActive()) {
+                        console.log('[Better Tasker] Board Analyzer started during task start delay - aborting task operation');
+                        return;
+                    }
+                    
                     // Check if tasker is still enabled after delay
                     if (taskerState !== TASKER_STATES.ENABLED) {
                         console.log('[Better Tasker] Tasker disabled during task start delay');
@@ -4475,6 +4554,11 @@ function subscribeToGameState() {
         if (globalThis.state && globalThis.state.board) {
             // Consolidated new game handler with debouncing
             const handleNewGame = async (event) => {
+                // Skip during Board Analyzer runs
+                if (isBoardAnalyzerActive()) {
+                    return;
+                }
+                
                 const now = Date.now();
                 if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
                     console.log('[Better Tasker] Ignoring rapid new game event (debounced)');
@@ -4516,6 +4600,11 @@ function subscribeToGameState() {
             
             // Consolidated end game handler with debouncing
             const handleEndGame = async (event) => {
+                // Skip during Board Analyzer runs
+                if (isBoardAnalyzerActive()) {
+                    return;
+                }
+                
                 const now = Date.now();
                 if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
                     console.log('[Better Tasker] Ignoring rapid end game event (debounced)');
@@ -4603,6 +4692,9 @@ function startAutomation() {
     // Set up Raid Hunter coordination FIRST (monitoring only, doesn't interfere)
     setupRaidHunterCoordination();
     
+    // Set up Board Analyzer coordination (monitoring only)
+    setupBoardAnalyzerCoordination();
+    
     // Check if Raid Hunter is actively raiding
     if (isRaidHunterRaiding()) {
         console.log('[Better Tasker] Cannot start automation - Raid Hunter is actively raiding, monitoring for raid end');
@@ -4651,6 +4743,9 @@ function stopAutomation() {
     
     // Clean up Raid Hunter coordination
     cleanupRaidHunterCoordination();
+    
+    // Clean up Board Analyzer coordination
+    cleanupBoardAnalyzerCoordination();
     
     // Clear main intervals
     clearInterval(automationInterval);
@@ -4708,6 +4803,12 @@ function runAutomationTasks() {
     try {
         // Only run if tasker is enabled
         if (taskerState !== TASKER_STATES.ENABLED) {
+            return;
+        }
+        
+        // Check if Board Analyzer is running
+        if (isBoardAnalyzerActive()) {
+            console.log('[Better Tasker] Board Analyzer is running, skipping automation');
             return;
         }
         
@@ -5374,6 +5475,15 @@ function init() {
         isRaidHunterActive = isRaidHunterRaiding();
         if (isRaidHunterActive) {
             console.log('[Better Tasker] Raid Hunter is actively raiding - automation will be paused');
+        }
+        
+        // Set up Board Analyzer coordination
+        setupBoardAnalyzerCoordination();
+        
+        // Check Board Analyzer status immediately on startup
+        isBoardAnalyzerRunning = isBoardAnalyzerActive();
+        if (isBoardAnalyzerRunning) {
+            console.log('[Better Tasker] Board Analyzer is running - automation will be paused');
         }
     }
     

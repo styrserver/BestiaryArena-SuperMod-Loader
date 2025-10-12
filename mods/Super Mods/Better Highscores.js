@@ -1,24 +1,6 @@
 // =======================
 // Better Highscores.js - Bestiary Arena Leaderboard Display Mod
 // =======================
-// Version: 1.0.0
-// Features: 
-// - Display current map's tick and rank leaderboards in bottom left
-// - Real-time updates when switching maps
-// - Automatic data fetching from TRPC API
-// - Styled leaderboard display with medal colors
-// - Manual refresh capability
-// - Skips updates during sandbox mode runs (only updates in manual/autoplay mode)
-//
-// MODULE INDEX:
-// 1. Configuration & Constants
-// 2. State Management
-// 3. Error Handling
-// 4. API Functions
-// 5. Utility Functions
-// 6. UI Components & Rendering
-// 7. Initialization & Cleanup
-// =======================
 (function() {
 
 // =======================
@@ -27,28 +9,19 @@
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
-  const DEBUG = false;
-  
-  const log = DEBUG ? console.log : () => {};
-  
-  const PERFORMANCE = {
-    DOM_CACHE_TIMEOUT: 100, // Reduced for faster cache refresh
-    API_THROTTLE_MIN: 50,   // Reduced for faster API calls
-    API_THROTTLE_MAX: 1000, // Reduced max throttle
-    RATE_LIMIT_RETRY_DELAY: 1000, // Reduced retry delay
-    RATE_LIMIT_MAX_RETRIES: 3,
-    UPDATE_DELAY: 10,       // Reduced for faster updates
-    REFRESH_COOLDOWN: 100   // Reduced cooldown for faster re-applications
-  };
-
-  const ERROR_HANDLING = {
-    MAX_CONSECUTIVE_ERRORS: 3,
-    ERROR_RECOVERY_DELAY: 5000,
-    NETWORK_ERROR_RETRY_DELAY: 2000,
-    NETWORK_ERROR_MAX_RETRIES: 2
+  const DELAYS = {
+    RESTORE: 100,
+    UPDATE: 200,
+    BATTLE_REFRESH: 500,
+    MUTATION_RESTORE: 50,
+    RETRY: 1000,
+    MAP_CHANGE_THROTTLE: 1000,
+    CONTAINER_THROTTLE_NORMAL: 500,
+    CONTAINER_THROTTLE_AUTOPLAY: 200,
+    UPDATE_THROTTLE: 100
   };
   
-     const UI_CONFIG = {
+  const UI_CONFIG = {
          CONTAINER_POSITION: {
       position: 'absolute',
       top: '9px',
@@ -80,7 +53,6 @@
       TICK_TITLE: '#87ceeb',
       RANK_TITLE: '#98fb98',
       MAP_HEADER: '#ffd700',
-      SEPARATOR: '#555'
     },
     MEDAL_POSITIONS: {
       1: 'GOLD',
@@ -94,9 +66,6 @@
 // =======================
   const BetterHighscoresState = {
     // Core state
-    leaderboardContainer: null,
-    currentMapCode: null,
-    roomNames: null,
     lastUpdateTime: 0,
     isUpdating: false,
     
@@ -106,7 +75,6 @@
     
     // Board analysis detection
     isBoardAnalyzing: false,
-    lastAnalysisCheck: 0,
     
     // Update throttling
     lastMapChangeTime: 0,
@@ -128,45 +96,8 @@
     // Timeout tracking for cleanup
     timeouts: [],
     
-    // State validation
-    isValidMapCode(mapCode) {
-      return !mapCode || typeof mapCode === 'string';
-    },
-    
-    // State persistence
-    saveToStorage() {
-      try {
-        const stateToSave = {
-          currentMapCode: this.currentMapCode,
-          lastUpdateTime: this.lastUpdateTime
-        };
-        localStorage.setItem('better_highscores_state', JSON.stringify(stateToSave));
-      } catch (error) {
-        console.warn('[Better Highscores] Failed to save state:', error);
-      }
-    },
-    
-    loadFromStorage() {
-      try {
-        const saved = localStorage.getItem('better_highscores_state');
-        if (saved) {
-          const state = JSON.parse(saved);
-          
-          if (state.currentMapCode) this.currentMapCode = state.currentMapCode;
-          if (state.lastUpdateTime) this.lastUpdateTime = state.lastUpdateTime;
-          
-          log('[Better Highscores] State loaded from storage');
-        }
-      } catch (error) {
-        console.warn('[Better Highscores] Failed to load state:', error);
-      }
-    },
-    
     // State reset
     reset() {
-      this.leaderboardContainer = null;
-      this.currentMapCode = null;
-      this.roomNames = null;
       this.lastUpdateTime = 0;
       this.isUpdating = false;
       this.preservedContainer = null;
@@ -189,24 +120,40 @@
     clearTimeouts() {
       this.timeouts.forEach(id => clearTimeout(id));
       this.timeouts = [];
-    },
-    
-    // State update with validation
-    update(newState) {
-      if (newState.currentMapCode && !this.isValidMapCode(newState.currentMapCode)) {
-        console.warn('[Better Highscores] Invalid map code type');
-        return false;
-      }
-      
-      Object.assign(this, newState);
-      return true;
     }
   };
   
   // Local variables for state access
-  let leaderboardContainer = BetterHighscoresState.leaderboardContainer;
-  let currentMapCode = BetterHighscoresState.currentMapCode;
-  let roomNames = BetterHighscoresState.roomNames;
+  let leaderboardContainer = null;
+  let currentMapCode = null;
+  let roomNames = null;
+  
+  // Helper function to schedule a timeout and track it for cleanup
+  function scheduleTimeout(fn, delay) {
+    return BetterHighscoresState.trackTimeout(setTimeout(fn, delay));
+  }
+  
+  // Helper function to remove all leaderboard containers from DOM
+  function removeExistingContainers() {
+    const existingContainers = document.querySelectorAll('.better-highscores-container');
+    existingContainers.forEach(container => container.remove());
+    return existingContainers.length;
+  }
+  
+  // Helper function to check if action should be throttled
+  function shouldThrottle(lastTime, delay) {
+    return Date.now() - lastTime < delay;
+  }
+  
+  // Helper function to get player snapshot
+  function getPlayerSnapshot() {
+    try {
+      return globalThis.state?.player?.getSnapshot();
+    } catch (error) {
+      console.warn('[Better Highscores] Error getting player snapshot:', error);
+      return null;
+    }
+  }
 
 // =======================
 // MODULE 3: Error Handling
@@ -220,16 +167,12 @@
     console.error(`[Better Highscores] Error in ${context}:`, error);
     
     // Check if we should stop operations
-    if (BetterHighscoresState.consecutiveErrors >= ERROR_HANDLING.MAX_CONSECUTIVE_ERRORS) {
+    if (BetterHighscoresState.consecutiveErrors >= 3) {
       console.warn(`[Better Highscores] Stopping operations due to ${BetterHighscoresState.consecutiveErrors} consecutive errors`);
       return { shouldStop: true, reason: 'max_errors' };
     }
     
     return { shouldStop: false, reason: null };
-  }
-  
-  function resetErrorState() {
-    BetterHighscoresState.consecutiveErrors = 0;
   }
   
   function handleSuccess() {
@@ -239,8 +182,9 @@
 // =======================
 // MODULE 4: API Functions
 // =======================
-  // Helper function to fetch data from TRPC API (same as Highscore_Improvements.js)
+  // Helper function to fetch data from TRPC API
   async function fetchTRPC(method) {
+    console.log(`[Better Highscores] 🌐 API REQUEST: ${method}`);
     try {
       const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
       const res = await fetch(`/pt/api/trpc/${method}?batch=1&input=${inp}`, {
@@ -311,12 +255,6 @@
         }
       }
       
-      // Method 5: Try to get from page title or other DOM elements
-      const pageTitle = document.title;
-      
-      // Method 6: Look for map indicators in the DOM
-      const mapElements = document.querySelectorAll('[data-room], [data-map], .room-name, .map-name');
-      
       return null;
     } catch (error) {
       console.error('[Better Highscores] Error getting current map code:', error);
@@ -333,25 +271,24 @@
       return cached.data;
     }
     
-         try {
-       log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
-       
-               // Both endpoints return the same data structure with both rank and tick data
-        const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
-        
-        log('[Better Highscores] Leaderboard response:', leaderboardData);
-        
-        // Extract data from the correct structure
-        const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
-        const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
-        
-        log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
-        log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
-        
-        const data = {
-          tickData,
-          rankData
-        };
+    try {
+      console.log('[Better Highscores] Fetching leaderboard data for map:', mapCode);
+      
+      const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+      
+      console.log('[Better Highscores] Leaderboard response:', leaderboardData);
+      
+      // Extract data from the correct structure
+      const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
+      const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
+      
+      console.log('[Better Highscores] Extracted tick data for map', mapCode, ':', tickData);
+      console.log('[Better Highscores] Extracted rank data for map', mapCode, ':', rankData);
+      
+      const data = {
+        tickData,
+        rankData
+      };
       
       // Cache the data
       BetterHighscoresState.leaderboardCache.set(cacheKey, {
@@ -377,27 +314,27 @@
     // Detect playing -> initial transitions
     if (previousState === 'playing' && currentState === 'initial') {
       if (isSandboxMode()) {
-        log('[Better Highscores] Sandbox game ended, restoring container');
-        BetterHighscoresState.trackTimeout(setTimeout(() => restoreContainer(), 100));
+        console.log('[Better Highscores] Sandbox game ended, restoring container');
+        scheduleTimeout(() => restoreContainer(), DELAYS.RESTORE);
       } else if (isAutoplayMode()) {
-        log('[Better Highscores] Autoplay game ended, ensuring leaderboard is visible');
-        BetterHighscoresState.trackTimeout(setTimeout(() => updateLeaderboards(), 200));
+        console.log('[Better Highscores] Autoplay game ended, ensuring leaderboard is visible');
+        scheduleTimeout(() => updateLeaderboards(), DELAYS.UPDATE);
       }
     }
     
     // Detect initial -> playing transitions
     if (previousState === 'initial' && currentState === 'playing') {
       if (isSandboxMode()) {
-        log('[Better Highscores] Sandbox game started, preserving container');
-        BetterHighscoresState.trackTimeout(setTimeout(() => preserveContainer(), 100));
+        console.log('[Better Highscores] Sandbox game started, preserving container');
+        scheduleTimeout(() => preserveContainer(), DELAYS.RESTORE);
       } else if (isAutoplayMode()) {
-        log('[Better Highscores] Autoplay game started, ensuring leaderboard is visible');
-        BetterHighscoresState.trackTimeout(setTimeout(() => {
+        console.log('[Better Highscores] Autoplay game started, ensuring leaderboard is visible');
+        scheduleTimeout(() => {
           if (!leaderboardContainer || !document.contains(leaderboardContainer)) {
-            log('[Better Highscores] Leaderboard missing when autoplay started, restoring');
+            console.log('[Better Highscores] Leaderboard missing when autoplay started, restoring');
             updateLeaderboards();
           }
-        }, 200));
+        }, DELAYS.UPDATE);
       }
     }
   }
@@ -405,19 +342,19 @@
   // Helper to handle battle completion (victory/defeat states)
   async function handleBattleCompletion() {
     if (isSandboxMode()) {
-      log('[Better Highscores] Battle completed in sandbox mode, restoring container');
-      BetterHighscoresState.trackTimeout(setTimeout(() => restoreContainer(), 100));
+      console.log('[Better Highscores] Battle completed in sandbox mode, restoring container');
+      scheduleTimeout(() => restoreContainer(), DELAYS.RESTORE);
       return;
     }
     
     if (isAutoplayMode()) {
-      log('[Better Highscores] Battle completed in autoplay mode, ensuring leaderboard is visible');
-      BetterHighscoresState.trackTimeout(setTimeout(() => updateLeaderboards(), 200));
+      console.log('[Better Highscores] Battle completed in autoplay mode, ensuring leaderboard is visible');
+      scheduleTimeout(() => updateLeaderboards(), DELAYS.UPDATE);
       return;
     }
     
-    log('[Better Highscores] Battle completed, refreshing leaderboard data');
-    BetterHighscoresState.trackTimeout(setTimeout(async () => {
+    console.log('[Better Highscores] Battle completed, refreshing leaderboard data');
+    scheduleTimeout(async () => {
       const mapCode = getCurrentMapCode();
       if (mapCode) {
         try {
@@ -432,29 +369,27 @@
             leaderboardContainer.replaceWith(newContainer);
             leaderboardContainer = newContainer;
             
-            log('[Better Highscores] Leaderboard updated with fresh battle data');
+            console.log('[Better Highscores] Leaderboard updated with fresh battle data');
           }
         } catch (error) {
           console.warn('[Better Highscores] Failed to refresh leaderboard after battle:', error);
         }
       }
-    }, 500));
+    }, DELAYS.BATTLE_REFRESH);
   }
 
   // Shared handler for map changes and container updates
   function handleStateUpdate(detectedMapCode, mainContainer) {
     // Handle map changes
     if (detectedMapCode && detectedMapCode !== currentMapCode) {
-      const now = Date.now();
-      
       // Throttle map change updates to prevent spam
-      if (now - BetterHighscoresState.lastMapChangeTime < 1000) {
-        log(`[Better Highscores] Map change throttled: ${currentMapCode} to ${detectedMapCode}`);
+      if (shouldThrottle(BetterHighscoresState.lastMapChangeTime, DELAYS.MAP_CHANGE_THROTTLE)) {
+        console.log(`[Better Highscores] Map change throttled: ${currentMapCode} to ${detectedMapCode}`);
         return;
       }
       
-      log(`[Better Highscores] Map changed from ${currentMapCode} to ${detectedMapCode}`);
-      BetterHighscoresState.lastMapChangeTime = now;
+      console.log(`[Better Highscores] Map changed from ${currentMapCode} to ${detectedMapCode}`);
+      BetterHighscoresState.lastMapChangeTime = Date.now();
       
       // Update the current map code even in sandbox mode
       currentMapCode = detectedMapCode;
@@ -465,25 +400,23 @@
     
     // Handle container updates
     if (mainContainer && (!leaderboardContainer || !mainContainer.contains(leaderboardContainer))) {
-      const now = Date.now();
-      
       // More lenient throttling for autoplay mode
-      const throttleDelay = isAutoplayMode() ? 200 : 500;
+      const throttleDelay = isAutoplayMode() ? DELAYS.CONTAINER_THROTTLE_AUTOPLAY : DELAYS.CONTAINER_THROTTLE_NORMAL;
       
       // Throttle container updates to prevent spam
-      if (now - BetterHighscoresState.lastContainerUpdateTime < throttleDelay) {
-        log('[Better Highscores] Container update throttled');
+      if (shouldThrottle(BetterHighscoresState.lastContainerUpdateTime, throttleDelay)) {
+        console.log('[Better Highscores] Container update throttled');
         return;
       }
       
       // Skip container re-application if in sandbox mode
       if (isSandboxMode()) {
-        log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
+        console.log('[Better Highscores] Main container changed in sandbox mode, skipping leaderboard re-application');
         return;
       }
       
-      log('[Better Highscores] Main container changed, re-applying leaderboard');
-      BetterHighscoresState.lastContainerUpdateTime = now;
+      console.log('[Better Highscores] Main container changed, re-applying leaderboard');
+      BetterHighscoresState.lastContainerUpdateTime = Date.now();
       // Immediate re-application for fastest response
       updateLeaderboards();
     }
@@ -513,11 +446,10 @@
     }
   }
 
-  // NEW: Function to detect autoplay mode
   function isAutoplayMode() {
     try {
       // Method 1: Check player flags for autoplay
-      const playerSnapshot = globalThis.state?.player?.getSnapshot();
+      const playerSnapshot = getPlayerSnapshot();
       if (playerSnapshot?.context?.flags) {
         const flags = new globalThis.state.utils.Flags(playerSnapshot.context.flags);
         if (flags.isSet("autoplay")) {
@@ -546,44 +478,25 @@
 
   function isBoardAnalyzing() {
     try {
-      const now = Date.now();
+      // Use the global coordination flag set by Board Analyzer
+      const isAnalyzing = window.__modCoordination?.boardAnalyzerRunning || false;
       
-      // Check if we should update the analysis state (every 500ms to avoid spam)
-      if (now - BetterHighscoresState.lastAnalysisCheck > 500) {
-        BetterHighscoresState.lastAnalysisCheck = now;
+      // Track state changes and trigger restore when analysis ends
+      if (isAnalyzing !== BetterHighscoresState.isBoardAnalyzing) {
+        const wasAnalyzing = BetterHighscoresState.isBoardAnalyzing;
+        BetterHighscoresState.isBoardAnalyzing = isAnalyzing;
         
-        // Look for board analysis indicators in the DOM
-        const analysisIndicators = [
-          'Run 1', 'Run 2', 'Run 3', 'Run 4', 'Run 5', 'Run 6', 'Run 7', 'Run 8', 'Run 9', 'Run 10',
-          'Run 11', 'Run 12', 'Run 13', 'Run 14', 'Run 15', 'Run 16', 'Run 17', 'Run 18', 'Run 19', 'Run 20'
-        ];
-        
-        const pageText = document.body.textContent || '';
-        const isAnalyzing = analysisIndicators.some(indicator => pageText.includes(indicator));
-        
-        // NEW: Don't treat autoplay as board analysis
-        if (isAutoplayMode() && isAnalyzing) {
-          log('[Better Highscores] Autoplay mode detected, ignoring board analysis indicators');
-          return false;
-        }
-        
-        if (isAnalyzing !== BetterHighscoresState.isBoardAnalyzing) {
-          const wasAnalyzing = BetterHighscoresState.isBoardAnalyzing;
-          BetterHighscoresState.isBoardAnalyzing = isAnalyzing;
+        if (isAnalyzing) {
+          console.log('[Better Highscores] Board analysis detected, disabling updates');
+        } else if (wasAnalyzing) {
+          console.log('[Better Highscores] Board analysis ended, re-enabling updates');
           
-          if (isAnalyzing) {
-            log('[Better Highscores] Board analysis detected, disabling updates');
-          } else if (wasAnalyzing) {
-            // Only log and restore if we were actually analyzing before
-            log('[Better Highscores] Board analysis ended, re-enabling updates');
-            
-            // If we were analyzing and now we're not, restore the container if we have one
-            if (BetterHighscoresState.preservedContainer) {
-              log('[Better Highscores] Board analysis completed, restoring preserved container');
-              BetterHighscoresState.trackTimeout(setTimeout(() => {
-                restoreContainer();
-              }, 100));
-            }
+          // Restore container if we have one preserved
+          if (BetterHighscoresState.preservedContainer) {
+            console.log('[Better Highscores] Board analysis completed, restoring preserved container');
+            scheduleTimeout(() => {
+              restoreContainer();
+            }, DELAYS.RESTORE);
           }
         }
       }
@@ -598,14 +511,14 @@
   // Function to preserve the current container when entering sandbox mode
   function preserveContainer() {
     if (leaderboardContainer && !BetterHighscoresState.preservedContainer) {
-      log('[Better Highscores] Preserving container for sandbox mode');
+      console.log('[Better Highscores] Preserving container for sandbox mode');
       BetterHighscoresState.preservedContainer = leaderboardContainer.cloneNode(true);
       BetterHighscoresState.wasInSandboxMode = true;
-      log('[Better Highscores] Container preserved successfully');
+      console.log('[Better Highscores] Container preserved successfully');
     } else if (!leaderboardContainer) {
-      log('[Better Highscores] No container to preserve');
+      console.log('[Better Highscores] No container to preserve');
     } else if (BetterHighscoresState.preservedContainer) {
-      log('[Better Highscores] Container already preserved');
+      console.log('[Better Highscores] Container already preserved');
     }
   }
 
@@ -614,18 +527,17 @@
     if (!BetterHighscoresState.preservedContainer) {
       // Only log this once to avoid spam
       if (!BetterHighscoresState.lastNoContainerLog || Date.now() - BetterHighscoresState.lastNoContainerLog > 5000) {
-        log('[Better Highscores] No preserved container to restore');
+        console.log('[Better Highscores] No preserved container to restore');
         BetterHighscoresState.lastNoContainerLog = Date.now();
       }
       return;
     }
     
     const source = BetterHighscoresState.wasInSandboxMode ? 'sandbox mode' : 'board analysis';
-    log(`[Better Highscores] Restoring preserved container from ${source}`);
+    console.log(`[Better Highscores] Restoring preserved container from ${source}`);
     
     // Remove any existing containers first
-    const existingContainers = document.querySelectorAll('.better-highscores-container');
-    existingContainers.forEach(container => container.remove());
+    removeExistingContainers();
     
     // Restore the preserved container
     const restoredContainer = BetterHighscoresState.preservedContainer.cloneNode(true);
@@ -634,9 +546,9 @@
     if (mainContainer) {
       mainContainer.appendChild(restoredContainer);
       leaderboardContainer = restoredContainer;
-      log('[Better Highscores] Container restored successfully');
+      console.log('[Better Highscores] Container restored successfully');
     } else {
-      log('[Better Highscores] Could not find main container for restoration');
+      console.log('[Better Highscores] Could not find main container for restoration');
     }
     
     // Clear preserved state
@@ -644,7 +556,7 @@
     BetterHighscoresState.wasInSandboxMode = false;
     
     // Force update to ensure correct map data is displayed
-    BetterHighscoresState.trackTimeout(setTimeout(() => updateLeaderboards(), 100));
+    scheduleTimeout(() => updateLeaderboards(), DELAYS.RESTORE);
   }
 
   function getMedalColor(position) {
@@ -691,7 +603,7 @@
       }
       
       // Get player data
-      const playerSnapshot = globalThis.state.player.getSnapshot();
+      const playerSnapshot = getPlayerSnapshot();
       if (!playerSnapshot || !playerSnapshot.context || !playerSnapshot.context.rooms) {
         return null;
       }
@@ -714,10 +626,9 @@
 
   function formatLeaderboardEntry(entry, index, isRankLeaderboard = false) {
     const medalColor = getMedalColor(index + 1);
-    const isMedal = index < 3;
     
     // Check if this is the current user
-    const playerSnapshot = globalThis.state.player.getSnapshot();
+    const playerSnapshot = getPlayerSnapshot();
     const currentUserName = playerSnapshot?.context?.name;
     const isCurrentUser = currentUserName && entry.userName === currentUserName;
     
@@ -805,7 +716,7 @@
     
     // Get user data once
     const userScores = getUserBestScores();
-    const playerSnapshot = globalThis.state.player.getSnapshot();
+    const playerSnapshot = getPlayerSnapshot();
     const playerName = playerSnapshot?.context?.name;
     
     // Get current rank points record and max rank points
@@ -855,30 +766,27 @@
     return container;
   }
 
-
-
   // Function to update leaderboards
   async function updateLeaderboards() {
-    log('[Better Highscores] updateLeaderboards called');
+    console.log('[Better Highscores] updateLeaderboards called');
     
     // Don't update if we're already updating
     if (BetterHighscoresState.isUpdating) {
-      log('[Better Highscores] Update already in progress, skipping');
+      console.log('[Better Highscores] Update already in progress, skipping');
       return;
     }
     
     // Skip updates during board analysis to prevent spam
     if (isBoardAnalyzing()) {
-      log('[Better Highscores] Board analysis in progress, skipping update');
+      console.log('[Better Highscores] Board analysis in progress, skipping update');
       return;
     }
     
     const currentlyInSandbox = isSandboxMode();
-    const currentlyInAutoplay = isAutoplayMode();
     
     // Handle sandbox mode entry (preserve container when first entering)
     if (currentlyInSandbox && !BetterHighscoresState.wasInSandboxMode) {
-      log('[Better Highscores] Just entered sandbox mode, preserving container');
+      console.log('[Better Highscores] Just entered sandbox mode, preserving container');
       preserveContainer();
     }
 
@@ -886,26 +794,23 @@
       BetterHighscoresState.isUpdating = true;
       
       const mapCode = getCurrentMapCode();
-      log('[Better Highscores] Detected map code:', mapCode);
+      console.log('[Better Highscores] Detected map code:', mapCode);
       
       if (!mapCode) {
-        log('[Better Highscores] No current map code found');
+        console.log('[Better Highscores] No current map code found');
         return;
       }
       
-      // NEW: More lenient throttling for autoplay mode
-      const now = Date.now();
-      const throttleDelay = currentlyInAutoplay ? 100 : PERFORMANCE.REFRESH_COOLDOWN;
-      
+      // Throttle updates to prevent spam
       if (mapCode === currentMapCode && 
           leaderboardContainer && 
-          now - BetterHighscoresState.lastUpdateTime < throttleDelay) {
-        log('[Better Highscores] Skipping update - same map and recent data');
+          shouldThrottle(BetterHighscoresState.lastUpdateTime, DELAYS.UPDATE_THROTTLE)) {
+        console.log('[Better Highscores] Skipping update - same map and recent data');
         return;
       }
       
       currentMapCode = mapCode;
-      BetterHighscoresState.lastUpdateTime = now;
+      BetterHighscoresState.lastUpdateTime = Date.now();
       
       const mapName = getMapName(mapCode);
       
@@ -919,29 +824,28 @@
       }
       
       // Also remove any other containers with the same class to prevent duplicates
-      const existingContainers = document.querySelectorAll('.better-highscores-container');
-      if (existingContainers.length > 0) {
-        log(`[Better Highscores] Removing ${existingContainers.length} existing containers`);
-        existingContainers.forEach(container => container.remove());
+      const count = removeExistingContainers();
+      if (count > 0) {
+        console.log(`[Better Highscores] Removing ${count} existing containers`);
       }
       
       // Create new container
       leaderboardContainer = createLeaderboardDisplay(tickData, rankData, mapName);
-      log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
+      console.log('[Better Highscores] Created leaderboard container:', leaderboardContainer);
       
       // Find the main game container and append
       const mainContainer = getMainContainer();
-      log('[Better Highscores] Main container found:', mainContainer);
+      console.log('[Better Highscores] Main container found:', mainContainer);
       
       if (mainContainer) {
-        log('[Better Highscores] Appending leaderboard container to main container');
+        console.log('[Better Highscores] Appending leaderboard container to main container');
         mainContainer.appendChild(leaderboardContainer);
-        log('[Better Highscores] Leaderboard container appended successfully');
+        console.log('[Better Highscores] Leaderboard container appended successfully');
       } else {
         console.error('[Better Highscores] Could not find main container for leaderboard injection');
       }
       
-      log(`[Better Highscores] Updated leaderboards for map: ${mapName} (${mapCode})`);
+      console.log(`[Better Highscores] Updated leaderboards for map: ${mapName} (${mapCode})`);
       
       // Success - reset error state
       handleSuccess();
@@ -967,9 +871,6 @@
   // Function to initialize the mod
   function initBetterHighscores() {
     console.log('[Better Highscores] Initializing version 1.0.0');
-    
-    // Load saved state from storage
-    BetterHighscoresState.loadFromStorage();
     
     // Wait for game state to be available
     let checkGameStateTimeout = null;
@@ -998,14 +899,14 @@
           
           if (isInSandbox && !wasInSandbox) {
             // Just entered sandbox mode
-            log('[Better Highscores] Entered sandbox mode, preserving container');
+            console.log('[Better Highscores] Entered sandbox mode, preserving container');
             preserveContainer();
           } else if (!isInSandbox && wasInSandbox) {
             // Just exited sandbox mode
-            log('[Better Highscores] Exited sandbox mode');
+            console.log('[Better Highscores] Exited sandbox mode');
             
             // Always update leaderboards when exiting sandbox mode
-            log('[Better Highscores] Exiting sandbox mode, updating leaderboards with current map');
+            console.log('[Better Highscores] Exiting sandbox mode, updating leaderboards with current map');
             BetterHighscoresState.preservedContainer = null;
             BetterHighscoresState.wasInSandboxMode = false;
             updateLeaderboards();
@@ -1060,16 +961,8 @@
           BetterHighscoresState.subscriptions.push(gameTimerUnsubscribe);
         }
         
-        // NEW: Set up periodic check for autoplay mode to ensure leaderboard stays visible
+        // Set up MutationObserver to detect when leaderboard gets removed from DOM
         window.BetterHighscoresInternals = window.BetterHighscoresInternals || {};
-        window.BetterHighscoresInternals.interval = setInterval(() => {
-          if (isAutoplayMode() && (!leaderboardContainer || !document.contains(leaderboardContainer))) {
-            log('[Better Highscores] Periodic check: Leaderboard missing in autoplay mode, restoring');
-            updateLeaderboards();
-          }
-        }, 5000); // Check every 5 seconds
-        
-        // NEW: Set up MutationObserver to detect when leaderboard gets removed from DOM
         window.BetterHighscoresInternals.observer = new MutationObserver((mutations) => {
           if (!isAutoplayMode()) return;
           
@@ -1079,10 +972,10 @@
                 if (removedNode === leaderboardContainer || 
                     (removedNode.nodeType === Node.ELEMENT_NODE && 
                      removedNode.contains && removedNode.contains(leaderboardContainer))) {
-                  log('[Better Highscores] Leaderboard removed from DOM during autoplay, restoring');
-                  BetterHighscoresState.trackTimeout(setTimeout(() => {
+                  console.log('[Better Highscores] Leaderboard removed from DOM during autoplay, restoring');
+                  scheduleTimeout(() => {
                     updateLeaderboards();
-                  }, 100));
+                  }, DELAYS.MUTATION_RESTORE);
                   break;
                 }
               }
@@ -1096,10 +989,10 @@
           subtree: true 
         });
         
-        log('[Better Highscores] Initialization complete');
+        console.log('[Better Highscores] Initialization complete');
       } else {
         // Retry after a short delay
-        checkGameStateTimeout = BetterHighscoresState.trackTimeout(setTimeout(checkGameState, 1000));
+        checkGameStateTimeout = scheduleTimeout(checkGameState, DELAYS.RETRY);
         window.betterHighscoresCheckGameStateTimeout = checkGameStateTimeout;
       }
     };
@@ -1115,7 +1008,7 @@
   }
 
   function cleanup() {
-    log('[Better Highscores] Cleaning up...');
+    console.log('[Better Highscores] Cleaning up...');
     
     // Remove leaderboard container
     if (leaderboardContainer) {
@@ -1152,12 +1045,7 @@
       window.betterHighscoresCheckGameStateTimeout = null;
     }
     
-    // Clean up observers and intervals
-    if (window.BetterHighscoresInternals?.interval) {
-      clearInterval(window.BetterHighscoresInternals.interval);
-      window.BetterHighscoresInternals.interval = null;
-    }
-    
+    // Clean up observer
     if (window.BetterHighscoresInternals?.observer) {
       window.BetterHighscoresInternals.observer.disconnect();
       window.BetterHighscoresInternals.observer = null;
@@ -1172,19 +1060,19 @@
       delete window.BetterHighscoresInternals;
     }
     
-    log('[Better Highscores] Cleanup complete');
+    console.log('[Better Highscores] Cleanup complete');
   }
 
   // =======================
   // MODULE INITIALIZATION
   // =======================
   function initializeBetterHighscores() {
-    log('[Better Highscores] Starting initialization...');
+    console.log('[Better Highscores] Starting initialization...');
     
     if (config.enabled) {
       initBetterHighscores();
     } else {
-      log('[Better Highscores] Disabled in configuration');
+      console.log('[Better Highscores] Disabled in configuration');
     }
   }
   
@@ -1213,15 +1101,15 @@
       getMainContainer: getMainContainer,
       isSandboxMode: isSandboxMode,
       forceUpdate: () => {
-        log('[Better Highscores] Force update triggered');
+        console.log('[Better Highscores] Force update triggered');
         updateLeaderboards();
       },
       forceRestore: () => {
-        log('[Better Highscores] Force restore triggered');
+        console.log('[Better Highscores] Force restore triggered');
         restoreContainer();
       },
       forcePreserve: () => {
-        log('[Better Highscores] Force preserve triggered');
+        console.log('[Better Highscores] Force preserve triggered');
         preserveContainer();
       },
       getState: () => {
@@ -1234,38 +1122,6 @@
           currentMapCode: currentMapCode,
           detectedMapCode: getCurrentMapCode()
         };
-      },
-      debugMapDetection: () => {
-        console.log('[Better Highscores] Debug map detection:');
-        console.log('- Current map code:', currentMapCode);
-        console.log('- Detected map code:', getCurrentMapCode());
-        console.log('- Board state:', globalThis.state?.board?.getSnapshot());
-        console.log('- Game state:', globalThis.state?.game?.getSnapshot());
-        console.log('- URL:', window.location.href);
-        console.log('- Pathname:', window.location.pathname);
-        console.log('- Search params:', window.location.search);
-      },
-      debugAutoplay: () => {
-        console.log('[Better Highscores] Debug autoplay detection:');
-        console.log('- Is autoplay mode:', isAutoplayMode());
-        console.log('- Is sandbox mode:', isSandboxMode());
-        console.log('- Is board analyzing:', isBoardAnalyzing());
-        console.log('- Player flags:', globalThis.state?.player?.getSnapshot()?.context?.flags);
-        console.log('- Autoplay container:', !!document.querySelector(".widget-bottom[data-minimized='false']"));
-        console.log('- Autoplay controls:', !!document.querySelector('[data-autoplay], .autoplay-controls, .autoplay-panel'));
-        console.log('- Leaderboard container exists:', !!leaderboardContainer);
-        console.log('- Preserved container exists:', !!BetterHighscoresState.preservedContainer);
-        console.log('- Leaderboard in DOM:', !!document.contains(leaderboardContainer));
-        console.log('- Periodic check interval:', !!window.betterHighscoresInterval);
-        console.log('- DOM observer:', !!window.betterHighscoresObserver);
-      },
-      forceRestoreAutoplay: () => {
-        console.log('[Better Highscores] Force restoring leaderboard for autoplay');
-        if (isAutoplayMode()) {
-          updateLeaderboards();
-        } else {
-          console.log('[Better Highscores] Not in autoplay mode');
-        }
       }
     };
   }

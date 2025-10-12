@@ -3040,6 +3040,11 @@
         if (globalThis.state?.board?.on) {
             // Listen for game start events
             globalThis.state.board.on('emitNewGame', (event) => {
+                // Skip during Board Analyzer runs
+                if (window.__modCoordination?.boardAnalyzerRunning) {
+                    return;
+                }
+                
                 console.log(`[${modName}] Game started, checking for creatures to devour...`);
                 // Check if there are creatures that would be devoured (not in ignore list)
                 checkAndActivateDragonPlant();
@@ -3047,6 +3052,11 @@
             
             // Also listen for other game events to debug
             globalThis.state.board.on('newGame', (event) => {
+                // Skip during Board Analyzer runs
+                if (window.__modCoordination?.boardAnalyzerRunning) {
+                    return;
+                }
+                
                 checkAndActivateDragonPlant();
             });
             

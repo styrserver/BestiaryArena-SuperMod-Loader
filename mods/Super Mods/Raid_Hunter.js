@@ -1758,6 +1758,12 @@ function toggleAutomation() {
             console.log(`[Raid Hunter] Waiting ${raidStartDelay} seconds before checking for raids...`);
             
             setTimeout(() => {
+                // Check if Board Analyzer is running
+                if (isBoardAnalyzerRunning) {
+                    console.log('[Raid Hunter] Board Analyzer running during start delay - skipping');
+                    return;
+                }
+                
                 // Check if automation is still enabled after delay
                 if (isAutomationEnabled === AUTOMATION_ENABLED) {
                     console.log('[Raid Hunter] Raid start delay completed - checking for raids');
@@ -1881,6 +1887,12 @@ function stopAutoplayOnRaidEnd() {
         if (raidQueue.length > 0) {
             console.log(`[Raid Hunter] ${raidQueue.length} raids remaining in queue`);
             setTimeout(() => {
+                // Check if Board Analyzer is running
+                if (isBoardAnalyzerRunning) {
+                    console.log('[Raid Hunter] Board Analyzer running - skipping raid end processing');
+                    return;
+                }
+                
                 // Check if automation is still enabled before processing next raid
                 if (isAutomationEnabled === AUTOMATION_ENABLED) {
                     processNextRaid();
@@ -2422,6 +2434,12 @@ function handleRaidFailure(reason) {
         stopQuestButtonValidation();
         
         retryTimeout = setTimeout(() => {
+            // Check if Board Analyzer is running
+            if (isBoardAnalyzerRunning) {
+                console.log('[Raid Hunter] Board Analyzer running during retry - cancelling retry');
+                return;
+            }
+            
             // Check if automation is still enabled before retrying
             if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
                 console.log('[Raid Hunter] Retrying raid after failure...');
@@ -2448,6 +2466,12 @@ function handleRaidFailure(reason) {
         // Process next raid if available
         if (raidQueue.length > 0) {
             setTimeout(() => {
+                // Check if Board Analyzer is running
+                if (isBoardAnalyzerRunning) {
+                    console.log('[Raid Hunter] Board Analyzer running - skipping next raid processing');
+                    return;
+                }
+                
                 // Check if automation is still enabled before processing next raid
                 if (isAutomationEnabled === AUTOMATION_ENABLED) {
                     processNextRaid();
@@ -2560,16 +2584,22 @@ async function checkForExistingRaids() {
             if (raidStartDelay > 0) {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
-                setTimeout(() => {
-                    // Check if automation is still enabled after delay
-                    // Remove the !isCurrentlyRaiding check here since raids should have priority over current autoplay
-                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
-                        console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
-                        processNextRaid();
-                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                        console.log('[Raid Hunter] Automation disabled during existing raid delay');
-                    }
-                }, raidStartDelay * 1000);
+            setTimeout(() => {
+                // Check if Board Analyzer is running
+                if (isBoardAnalyzerRunning) {
+                    console.log('[Raid Hunter] Board Analyzer running during existing raid delay - skipping');
+                    return;
+                }
+                
+                // Check if automation is still enabled after delay
+                // Remove the !isCurrentlyRaiding check here since raids should have priority over current autoplay
+                if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
+                    console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
+                    processNextRaid();
+                } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
+                    console.log('[Raid Hunter] Automation disabled during existing raid delay');
+                }
+            }, raidStartDelay * 1000);
             } else {
                 // No delay, process immediately
                 processNextRaid();
@@ -2670,6 +2700,12 @@ async function handleNewRaid(raid) {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
+                    // Check if Board Analyzer is running
+                    if (isBoardAnalyzerRunning) {
+                        console.log('[Raid Hunter] Board Analyzer running during new raid delay - skipping');
+                        return;
+                    }
+                    
                     // Check if automation is still enabled after delay
                     // Remove !isCurrentlyRaiding check - raids have priority over current autoplay
                     if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
