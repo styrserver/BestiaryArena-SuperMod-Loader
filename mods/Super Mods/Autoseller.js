@@ -1346,6 +1346,9 @@
         statusArea.appendChild(summary);
         placeholder.appendChild(statusArea);
 
+        // Store summary element globally for status updates
+        window.autoplantStatusSummary = summary;
+        
         // Update status function
         function updateAutoplantStatus() {
             const ignoredCount = selectedCreatures.length;
@@ -1360,6 +1363,9 @@
             summary.textContent = statusText;
             summary.style.color = isEnabled ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
         }
+        
+        // Store function globally so it can be called from sync logic
+        window.updateAutoplantStatus = updateAutoplantStatus;
 
         // Update status when creatures are moved
         const originalRender = renderCreatureColumns;
@@ -2686,6 +2692,14 @@
     let dragonPlantObserverAttempts = 0;
     let hasRestoredDragonPlantState = false; // Tracks if we've done initial restore after page load
     
+    // Reset the restoration flag when user returns from idling
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            console.log(`[${modName}] Tab became visible, resetting Dragon Plant restoration flag`);
+            hasRestoredDragonPlantState = false;
+        }
+    });
+    
     function setupDragonPlantObserver() {
         if (dragonPlantObserver || dragonPlantObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
         
@@ -2780,8 +2794,8 @@
                             }
                             
                             // Update status and filter
-                            if (typeof updateAutoplantStatus === 'function') {
-                                updateAutoplantStatus();
+                            if (typeof window.updateAutoplantStatus === 'function') {
+                                window.updateAutoplantStatus();
                             }
                             updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
                             createAutosellerSessionWidget();
@@ -2821,8 +2835,8 @@
                         }
                         
                         // Update status and filter
-                        if (typeof updateAutoplantStatus === 'function') {
-                            updateAutoplantStatus();
+                        if (typeof window.updateAutoplantStatus === 'function') {
+                            window.updateAutoplantStatus();
                         }
                         updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
                         createAutosellerSessionWidget();
@@ -3275,6 +3289,8 @@
                     }
                     delete window.autoplantCheckbox;
                     delete window.autosellCheckbox;
+                    delete window.updateAutoplantStatus;
+                    delete window.autoplantStatusSummary;
                     delete window.__autosellerLoaded;
                     
                     // 9. Verify cleanup was successful
