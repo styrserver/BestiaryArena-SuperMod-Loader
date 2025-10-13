@@ -532,6 +532,7 @@ function renderLocalMods(mods) {
     'Autoseller.js',
     'Autoscroller.js',
     'Better Analytics.js',
+    'Better Boosted Maps.js',
     'Better Cauldron.js',
     'Better Exaltation Chest.js',
     'Better Forge.js',

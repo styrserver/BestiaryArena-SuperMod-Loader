@@ -182,6 +182,9 @@ let creatureButtonListeners = new WeakMap(); // Track event listeners on creatur
 let favoriteCreatures = new Map(); // Maps uniqueId -> symbolKey
 let autoplayRefreshGameSubscription = null;
 let autoplayRefreshSetPlayModeSubscription = null;
+let lastOptimizedFavoriteUpdate = 0; // Track last optimized favorite update to prevent double-refresh
+let lastGlobalUpdate = 0; // Track last global update across all observers
+const GLOBAL_UPDATE_DEBOUNCE = 300; // Global debounce for all styling updates (ms)
 
 // Color options for max creatures (Tibia-themed)
 const COLOR_OPTIONS = {
@@ -328,21 +331,10 @@ function isShinyCreature(imgElement) {
   return imgElement.src.includes('-shiny.png');
 }
 
-// Get creature unique ID from the monster data (simple lookup by gameId)
-function getCreatureIdFromGameId(gameId) {
-  const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
-  const monster = monsters.find(m => m.gameId === gameId);
-  return monster ? monster.id : null;
-}
-
 function getTier4Monsters() {
   return globalThis.state.player.getSnapshot().context.monsters.filter(
     (m) => m.tier === GAME_CONSTANTS.MAX_TIER
   );
-}
-
-function getEliteMonsters() {
-  return globalThis.state.player.getSnapshot().context.monsters.filter(isEliteMonster);
 }
 
 // DOM utility functions
@@ -447,6 +439,20 @@ function shouldThrottleUpdate() {
   return false;
 }
 
+// Check if global styling update should be skipped (prevents redundant observer triggers)
+function shouldSkipGlobalUpdate(source = 'unknown') {
+  const now = Date.now();
+  const timeSinceLastUpdate = now - lastGlobalUpdate;
+  
+  if (timeSinceLastUpdate < GLOBAL_UPDATE_DEBOUNCE) {
+    console.log(`[Better UI] Skipping ${source} update - recent global update ${timeSinceLastUpdate}ms ago`);
+    return true;
+  }
+  
+  lastGlobalUpdate = now;
+  return false;
+}
+
 // Create and style DOM element
 function createStyledElement(tagName, className, styles, parentSelector) {
   const element = document.createElement(tagName);
@@ -509,7 +515,6 @@ function createThrottledObserver(processCallback, throttleDelay = 50) {
   });
 }
 
-// Save configuration
 function saveConfig() {
   try {
     // Save to localStorage
@@ -520,7 +525,6 @@ function saveConfig() {
   }
 }
 
-// Load favorites from localStorage
 function loadFavorites() {
   try {
     const saved = localStorage.getItem(FAVORITES_STORAGE_KEY);
@@ -539,7 +543,6 @@ function loadFavorites() {
   }
 }
 
-// Save favorites to localStorage
 function saveFavorites() {
   try {
     const data = Object.fromEntries(favoriteCreatures);
@@ -1219,20 +1222,8 @@ function updateFavoriteHearts(targetUniqueId = null) {
     return;
   }
   
-  // Only process creatures in the main collection grid
-  // This excludes creatures on the board, in menus, modals, etc.
-  const creaturesContainer = document.querySelector('[data-testid="monster-grid"]') || 
-                             document.querySelector('.grid') ||
-                             document.querySelector('[class*="grid"]');
-  if (!creaturesContainer) {
-    console.log('[Better UI] Creatures container not found, skipping update');
-    return;
-  }
-  
-  const allCreatures = getVisibleCreatures();
-  const creatures = Array.from(allCreatures).filter(img => {
-    return creaturesContainer.contains(img);
-  });
+  // Get all creatures (don't filter by container like max creatures/shinies)
+  const creatures = Array.from(getVisibleCreatures());
   console.log('[Better UI] Found', creatures.length, 'visible creatures in collection');
   
   // If no creatures visible, don't remove existing hearts - collection might be transitioning
@@ -1243,6 +1234,15 @@ function updateFavoriteHearts(targetUniqueId = null) {
   
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
   
+  // OPTIMIZATION: If updating a specific creature, only update that one
+  if (targetUniqueId) {
+    console.log('[Better UI] Optimized update: only updating creature', targetUniqueId);
+    updateSingleFavoriteHeart(targetUniqueId, creatures, monsters);
+    lastOptimizedFavoriteUpdate = Date.now(); // Track time to prevent observer double-refresh
+    return;
+  }
+  
+  // Full update: reset index and process all creatures
   resetCreatureMatchingIndex();
   
   // Remove all existing hearts first (only when we have creatures to re-apply them)
@@ -1250,7 +1250,6 @@ function updateFavoriteHearts(targetUniqueId = null) {
   
   let heartsAdded = 0;
   let creaturesChecked = 0;
-  let targetFound = false;
   
   creatures.forEach((imgEl, idx) => {
     const identifiedMonster = matchCreatureBySequentialIndex(imgEl, monsters);
@@ -1258,16 +1257,6 @@ function updateFavoriteHearts(targetUniqueId = null) {
     if (!uniqueId) return;
     
     creaturesChecked++;
-    
-    // Skip if we're only updating a specific creature
-    if (targetUniqueId && uniqueId !== targetUniqueId) {
-      return;
-    }
-    
-    if (targetUniqueId && uniqueId === targetUniqueId) {
-      targetFound = true;
-      console.log('[Better UI] Found target creature at DOM index:', idx, 'gameId:', gameId, 'uniqueId:', uniqueId);
-    }
     
     const isFavorite = favoriteCreatures.has(uniqueId);
     const container = imgEl.parentElement;
@@ -1279,23 +1268,7 @@ function updateFavoriteHearts(targetUniqueId = null) {
       
       console.log('[Better UI] Adding favorite heart for:', uniqueId, 'symbolKey:', symbolKey);
       
-      const heart = document.createElement('div');
-      heart.className = 'favorite-heart pixelated';
-      heart.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 16px; height: 16px; pointer-events: none;';
-      
-      // Use the appropriate icon for the favorite marker
-      if (symbolKey === 'heart') {
-        // For heart, use emoji directly with proper alignment
-        heart.innerHTML = symbol.icon;
-        heart.style.fontSize = '16px';
-        heart.style.display = 'flex';
-        heart.style.alignItems = 'center';
-        heart.style.justifyContent = 'center';
-        heart.style.lineHeight = '1';
-      } else {
-        // For stat icons, use the actual game icons
-        heart.innerHTML = `<img src="${symbol.icon}" width="16" height="16" style="image-rendering: pixelated;" alt="${symbol.name}">`;
-      }
+      const heart = createFavoriteHeartElement(symbolKey, symbol);
       container.appendChild(heart);
       heartsAdded++;
       console.log('[Better UI] Heart added successfully for:', uniqueId);
@@ -1303,9 +1276,77 @@ function updateFavoriteHearts(targetUniqueId = null) {
   });
   
   console.log('[Better UI] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
-  if (targetUniqueId) {
-    console.log('[Better UI] Target search result:', targetFound ? `Found ${targetUniqueId}` : `NOT FOUND: ${targetUniqueId}`);
+}
+
+// Helper: Update a single creature's favorite heart (optimized for single-creature updates)
+function updateSingleFavoriteHeart(targetUniqueId, creatures, monsters) {
+  resetCreatureMatchingIndex();
+  
+  let targetFound = false;
+  
+  for (let idx = 0; idx < creatures.length; idx++) {
+    const imgEl = creatures[idx];
+    const identifiedMonster = matchCreatureBySequentialIndex(imgEl, monsters);
+    const uniqueId = identifiedMonster?.id;
+    
+    if (!uniqueId) continue;
+    
+    // Only process the target creature
+    if (uniqueId === targetUniqueId) {
+      targetFound = true;
+      const container = imgEl.parentElement;
+      
+      // Remove existing heart for this creature
+      const existingHeart = container.querySelector('.favorite-heart');
+      if (existingHeart) {
+        existingHeart.remove();
+      }
+      
+      // Add heart if favorited
+      const isFavorite = favoriteCreatures.has(uniqueId);
+      if (isFavorite) {
+        const symbolKey = favoriteCreatures.get(uniqueId) || 'heart';
+        const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
+        
+        console.log('[Better UI] Adding favorite heart for:', uniqueId, 'symbolKey:', symbolKey);
+        
+        const heart = createFavoriteHeartElement(symbolKey, symbol);
+        container.appendChild(heart);
+        console.log('[Better UI] Heart added successfully for:', uniqueId);
+      } else {
+        console.log('[Better UI] Removed favorite heart for:', uniqueId);
+      }
+      
+      break; // Found and updated, exit early
+    }
   }
+  
+  if (!targetFound) {
+    console.warn('[Better UI] Target creature not found in visible creatures:', targetUniqueId);
+  }
+}
+
+// Helper: Create favorite heart element
+function createFavoriteHeartElement(symbolKey, symbol) {
+  const heart = document.createElement('div');
+  heart.className = 'favorite-heart pixelated';
+  heart.style.cssText = 'position: absolute; bottom: 1px; right: 0; z-index: 3; width: 16px; height: 16px; pointer-events: none;';
+  
+  // Use the appropriate icon for the favorite marker
+  if (symbolKey === 'heart') {
+    // For heart, use emoji directly with proper alignment
+    heart.innerHTML = symbol.icon;
+    heart.style.fontSize = '16px';
+    heart.style.display = 'flex';
+    heart.style.alignItems = 'center';
+    heart.style.justifyContent = 'center';
+    heart.style.lineHeight = '1';
+  } else {
+    // For stat icons, use the actual game icons
+    heart.innerHTML = `<img src="${symbol.icon}" width="16" height="16" style="image-rendering: pixelated;" alt="${symbol.name}">`;
+  }
+  
+  return heart;
 }
 
 // Match visible creature to game state using sequential indexing
@@ -1329,14 +1370,8 @@ function matchCreatureBySequentialIndex(imgEl, monsters) {
   
   const currentIndex = matchCreatureBySequentialIndex.indexMap.get(indexKey);
   
-  const matchingMonsters = monsters.filter(m => m.gameId === gameId).map(m => {
-    m._statSum = (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
-    return m;
-  }).sort((a, b) => {
-    const gameIdCompare = (a.gameId || 0) - (b.gameId || 0);
-    if (gameIdCompare !== 0) return gameIdCompare;
-    return b._statSum - a._statSum;
-  });
+  // Get all monsters with this gameId, sorted by game's visual order
+  const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
   
   let candidateMonsters = matchingMonsters;
   if (displayedLevel && matchingMonsters.length > 1) {
@@ -1359,21 +1394,26 @@ function resetCreatureMatchingIndex() {
   }
 }
 
-// Sort monsters by visual grid order: Level (desc) → Tier (desc) → GameID (asc) → Stats (desc)
+// Sort monsters to match game's visual order: EXP (desc) → Name (asc) → CreatedAt (asc)
 function sortMonstersByVisualOrder(monsters) {
-  return monsters.map(m => ({
-    ...m,
-    _level: getLevelFromExp(m.exp),
-    _statSum: (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0)
-  })).sort((a, b) => {
-    if (a._level !== b._level) return b._level - a._level;
-    const tierA = a.tier || 0;
-    const tierB = b.tier || 0;
-    if (tierA !== tierB) return tierB - tierA;
-    const gameIdCompare = String(a.gameId).localeCompare(String(b.gameId));
-    if (gameIdCompare !== 0) return gameIdCompare;
-    return b._statSum - a._statSum;
+  return monsters.slice().sort((a, b) => {
+    // Primary: EXP (descending)
+    if (b.exp !== a.exp) return b.exp - a.exp;
+    
+    // Secondary: Name (ascending) - with safe fallback
+    if (a.metadata?.name && b.metadata?.name) {
+      const nameCompare = a.metadata.name.localeCompare(b.metadata.name);
+      if (nameCompare !== 0) return nameCompare;
+    }
+    
+    // Tertiary: CreatedAt (ascending)
+    return (a.createdAt || 0) - (b.createdAt || 0);
   });
+}
+
+// Helper: Get sorted monsters filtered by gameId
+function getSortedMonstersByGameId(monsters, gameId) {
+  return sortMonstersByVisualOrder(monsters.filter(m => m.gameId === gameId));
 }
 
 // Match monster by stat percentage
@@ -1451,7 +1491,7 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
   
   // Get all monsters from game state
   const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
-  const matchingMonsters = sortMonstersByVisualOrder(monsters.filter(m => m.gameId === gameId));
+  const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
   
   console.log('[Better UI] getCreatureUniqueId - Found', matchingMonsters.length, 'monsters in game state with gameId', gameId);
   console.log('[Better UI] getCreatureUniqueId - Monster IDs in SORTED order:', matchingMonsters.map(m => {
@@ -2355,7 +2395,13 @@ function initTabObserver() {
           
           // If Bestiary tab became active, check if we need to reapply
           if (newState === 'active' && tabId && tabId.includes('monster')) {
-            console.log('[Better UI] Bestiary tab activated, checking config...', { enableMaxCreatures: config.enableMaxCreatures, enableMaxShinies: config.enableMaxShinies });
+            console.log('[Better UI] Bestiary tab activated, checking if update needed...');
+            
+            // Check global debounce to prevent redundant updates
+            if (shouldSkipGlobalUpdate('tab-change')) {
+              return;
+            }
+            
             if (config.enableMaxCreatures) {
               console.log('[Better UI] Reapplying max creatures');
               scheduleTimeout(() => {
@@ -2444,6 +2490,20 @@ function startCreatureContainerObserver() {
         activeTimeouts.delete(creatureObserver.updateTimeout);
       }
       creatureObserver.updateTimeout = setTimeout(() => {
+        // Check global debounce to prevent redundant updates from other observers
+        if (shouldSkipGlobalUpdate('creature-observer')) {
+          // Reconnect observer even if skipping
+          if (creatureObserver && creatureContainer) {
+            creatureObserver.observe(creatureContainer, {
+              childList: true,
+              subtree: true
+            });
+          }
+          activeTimeouts.delete(creatureObserver.updateTimeout);
+          creatureObserver.updateTimeout = null;
+          return;
+        }
+        
         // Temporarily disconnect observer to prevent infinite loop
         if (creatureObserver) {
           creatureObserver.disconnect();
@@ -2468,8 +2528,14 @@ function startCreatureContainerObserver() {
           }
           
           // Update favorite hearts if enabled
+          // Skip if we just did an optimized update (within 500ms) to prevent double-refresh
           if (config.enableFavorites) {
-            updateFavoriteHearts();
+            const timeSinceOptimizedUpdate = Date.now() - lastOptimizedFavoriteUpdate;
+            if (timeSinceOptimizedUpdate > 500) {
+              updateFavoriteHearts();
+            } else {
+              console.log('[Better UI] Skipping full favorite refresh - recent optimized update:', timeSinceOptimizedUpdate + 'ms ago');
+            }
           }
           
           // Reconnect observer
@@ -2512,7 +2578,13 @@ function initScrollLockObserver() {
         
         // Detect transition from locked to unlocked (attribute is removed when unlocked)
         if (previouslyLocked && !currentlyLocked) {
-          console.log('[Better UI] Scroll unlocked, re-applying styles...');
+          console.log('[Better UI] Scroll unlocked, checking if update needed...');
+          
+          // Check global debounce to prevent redundant updates
+          if (shouldSkipGlobalUpdate('scroll-unlock')) {
+            previouslyLocked = currentlyLocked;
+            return;
+          }
           
           // Re-apply all enabled features
           if (config.enableMaxCreatures) {
@@ -2546,35 +2618,11 @@ function initScrollLockObserver() {
   console.log('[Better UI] Scroll lock observer started');
 }
 
-// Handle page visibility changes (browser tab focus/unfocus)
-function initVisibilityChangeHandler() {
-  console.log('[Better UI] Setting up page visibility change handler...');
-  
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      console.log('[Better UI] Page became visible, re-applying all features...');
-      
-      // Re-apply all enabled features
-      if (config.enableMaxCreatures) {
-        scheduleTimeout(() => applyMaxCreatures(), 100);
-      }
-      
-      if (config.enableMaxShinies) {
-        scheduleTimeout(() => applyMaxShinies(), 100);
-      }
-      
-      if (config.enableShinyEnemies) {
-        scheduleTimeout(() => applyShinyEnemies(), 100);
-      }
-      
-      if (config.enableFavorites) {
-        scheduleTimeout(() => updateFavoriteHearts(), 100);
-      }
-    }
-  });
-  
-  console.log('[Better UI] Page visibility change handler initialized');
-}
+// Note: Visibility change handler removed - unnecessary for Better UI
+// Styling persists when tab is backgrounded, and all DOM changes are caught by:
+// - Creature observer (DOM mutations)
+// - Scroll lock observer (modal state)
+// - Tab observer (tab switching)
 
 // Start observer for battle board changes (for shiny enemies)
 let battleBoardObserver = null;
@@ -3109,9 +3157,6 @@ function initBetterUI() {
     
     // Start scroll lock observer to re-apply styles when unlocking
     initScrollLockObserver();
-    
-    // Initialize page visibility change handler
-    initVisibilityChangeHandler();
     
     // Initial update of favorite hearts if enabled
     if (config.enableFavorites) {

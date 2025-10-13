@@ -131,65 +131,33 @@
         return context.querySelectorAll(selector);
     }
     
-    let settingsCache = null;
-    
     function getSettings() {
-        if (settingsCache) return settingsCache;
-        
-        if (typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0) {
-            settingsCache = { ...DEFAULT_SETTINGS, ...context.config };
-            return settingsCache;
-        }
-        
         try {
             const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
-            settingsCache = { ...DEFAULT_SETTINGS, ...stored };
+            return { ...DEFAULT_SETTINGS, ...stored };
         } catch (e) { 
             console.warn(`[${modName}][WARN][getSettings] Failed to parse settings from localStorage`, e);
-            settingsCache = { ...DEFAULT_SETTINGS };
+            return { ...DEFAULT_SETTINGS };
         }
-        
-        return settingsCache;
-    }
-    
-    function clearSettingsCache() {
-        settingsCache = null;
     }
     
     function setSettings(newSettings) {
-        settingsCache = { ...getSettings(), ...newSettings };
+        const updatedSettings = { ...getSettings(), ...newSettings };
         
-        debouncedSaveSettings();
-        
-        if (typeof api !== 'undefined' && api.service && typeof context !== 'undefined' && context.hash) {
-            api.service.updateScriptConfig(context.hash, settingsCache);
+        // Save directly to localStorage (single source of truth)
+        try {
+            localStorage.setItem('autoseller-settings', JSON.stringify(updatedSettings));
+        } catch (e) {
+            console.warn(`[${modName}][WARN][setSettings] Failed to save settings to localStorage`, e);
         }
         
         updateAutosellerNavButtonColor();
         updateAutosellerSessionWidget();
     }
     
-    function debounce(fn, delay) {
-        let timer;
-        return function(...args) {
-            clearTimeout(timer);
-            timer = setTimeout(() => fn.apply(this, args), delay);
-        };
-    }
-    
-    const debouncedSaveSettings = debounce(() => {
-        try {
-            localStorage.setItem('autoseller-settings', JSON.stringify(settingsCache));
-        } catch (e) {
-            console.warn(`[${modName}][WARN][debouncedSaveSettings] Failed to save settings from localStorage`, e);
-        }
-    }, SETTINGS_SAVE_DELAY_MS);
-    
-    if (!localStorage.getItem('autoseller-settings') && !(typeof context !== 'undefined' && context.config && Object.keys(context.config).length > 0)) {
-        settingsCache = { ...DEFAULT_SETTINGS };
-        localStorage.setItem('autoseller-settings', JSON.stringify(settingsCache));
-    } else {
-        getSettings();
+    // Initialize localStorage with defaults if not exists
+    if (!localStorage.getItem('autoseller-settings')) {
+        localStorage.setItem('autoseller-settings', JSON.stringify(DEFAULT_SETTINGS));
     }
 
     // =======================
@@ -1147,11 +1115,11 @@
         // Store reference to this checkbox globally for mutual exclusivity
         window.autoplantCheckbox = checkbox;
         
-        // Add change handler for mutual exclusivity and saving settings
+        // Add change handler for localStorage-first approach
         checkbox.addEventListener('change', () => {
             console.log('[Autoplant] Checkbox changed, checked:', checkbox.checked);
             
-            // Save the setting
+            // Save to localStorage
             setSettings({ autoplantChecked: checkbox.checked });
             
             // Update status text
@@ -1163,10 +1131,10 @@
             // Update widget label if it exists
             updateAutosellerSessionWidget();
             
-            // Sync to autoplay session checkbox immediately
-            syncToAutoplaySession(checkbox.checked);
+            // Apply localStorage to game checkbox
+            applyLocalStorageToGameCheckbox();
             
-            // If Autoplant is being checked, uncheck Autosell
+            // Handle mutual exclusivity
             if (checkbox.checked) {
                 console.log('[Autoplant] Being checked, looking for Autosell checkbox...');
                 setTimeout(() => {
@@ -1476,60 +1444,6 @@
         return box;
     }
 
-    // Helper function to re-render creature boxes for Autoplant
-    function renderAutoplantCreatureBox(box, items, selectedCreature, onSelectCreature) {
-        // Find the scroll container more reliably - it's the second div child
-        const scrollContainer = box.children[1]; // First child is title, second is scroll container
-        if (!scrollContainer) {
-            return;
-        }
-        
-        scrollContainer.innerHTML = '';
-        
-        items.forEach(name => {
-            const item = document.createElement('div');
-            item.textContent = name;
-            item.className = 'pixel-font-14 autoplant-creature-item';
-            item.style.color = 'rgb(230, 215, 176)';
-            item.style.cursor = 'pointer';
-            item.style.padding = '2px 4px';
-            item.style.borderRadius = '2px';
-            item.style.textAlign = 'left';
-            item.style.marginBottom = '1px';
-            
-            const handleMouseEnter = () => {
-                item.style.background = 'rgba(255,255,255,0.08)';
-            };
-            
-            const handleMouseLeave = () => {
-                item.style.background = 'none';
-            };
-            
-            const handleMouseDown = () => {
-                item.style.background = 'rgba(255,255,255,0.18)';
-            };
-            
-            const handleMouseUp = () => {
-                item.style.background = 'rgba(255,255,255,0.08)';
-            };
-            
-            const handleClick = () => {
-                // Call the onSelectCreature function immediately to move the creature
-                if (onSelectCreature) {
-                    onSelectCreature(name);
-                }
-            };
-            
-            item.addEventListener('mouseenter', handleMouseEnter);
-            item.addEventListener('mouseleave', handleMouseLeave);
-            item.addEventListener('mousedown', handleMouseDown);
-            item.addEventListener('mouseup', handleMouseUp);
-            item.addEventListener('click', handleClick);
-            
-            scrollContainer.appendChild(item);
-        });
-    }
-
     // =======================
     // Plant Monster Filter Functions
     // =======================
@@ -1671,7 +1585,6 @@
         summary.style.color = '#ffe066';
         summary.style.fontSize = '13px';
         summary.style.margin = '8px 0 0 0';
-        section.appendChild(descWrapper);
         const separator = document.createElement('div');
         separator.className = 'separator my-2.5';
         separator.setAttribute('role', 'none');
@@ -2121,7 +2034,6 @@
     
     function openAutosellerModal() {
         console.log('[Autoseller] Opening settings modal...');
-        clearSettingsCache();
         
         // Ensure mutual exclusivity on initialization
         const settings = getSettings();
@@ -2285,6 +2197,9 @@
                         contentElem.style.flexDirection = 'column';
                         contentElem.style.justifyContent = 'flex-start';
                     }
+                    
+                    // Apply localStorage to mod checkbox when modal opens
+                    applyLocalStorageToModCheckbox();
                     
                     // Ensure mutual exclusivity after modal is rendered
                     const currentSettings = getSettings();
@@ -2568,7 +2483,6 @@
         
         // Reset session stats when widget is created
         stateManager.resetSession();
-        forceWidgetUpdate = true;
         
         // Store references to stat elements for updates
         widget._statEls = {
@@ -2641,6 +2555,9 @@
                             updateAutosellerSessionWidget();
                             console.log('[Autoseller] Widget created - autoplay mode started');
                         }
+                        
+                        // Apply localStorage to game checkbox when autoplay starts
+                        applyLocalStorageToGameCheckbox();
                     }, 100);
                 } else if (mode !== 'autoplay') {
                     // Remove widget when not in autoplay mode
@@ -2690,15 +2607,46 @@
     
     let dragonPlantObserver = null;
     let dragonPlantObserverAttempts = 0;
-    let hasRestoredDragonPlantState = false; // Tracks if we've done initial restore after page load
     
-    // Reset the restoration flag when user returns from idling
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            console.log(`[${modName}] Tab became visible, resetting Dragon Plant restoration flag`);
-            hasRestoredDragonPlantState = false;
+    // Apply localStorage state to game checkbox
+    function applyLocalStorageToGameCheckbox() {
+        const settings = getSettings();
+        const savedState = settings.autoplantChecked;
+        
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) {
+                const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+                if (gameCheckbox) {
+                    const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
+                    if (savedState !== isCurrentlyChecked) {
+                        console.log(`[${modName}] Applying localStorage (${savedState}) to game checkbox`);
+                        gameCheckbox.click();
+                    }
+                    break;
+                }
+            }
         }
-    });
+    }
+    
+    // Apply localStorage state to mod checkbox
+    function applyLocalStorageToModCheckbox() {
+        const settings = getSettings();
+        const savedState = settings.autoplantChecked;
+        
+        const modCheckbox = document.querySelector('#autoplant-checkbox');
+        if (modCheckbox && modCheckbox.checked !== savedState) {
+            console.log(`[${modName}] Applying localStorage (${savedState}) to mod checkbox`);
+            modCheckbox.checked = savedState;
+            window.autoplantCheckbox = modCheckbox;
+            
+            // Update UI elements
+            if (typeof window.updateAutoplantStatus === 'function') {
+                window.updateAutoplantStatus();
+            }
+        }
+    }
     
     function setupDragonPlantObserver() {
         if (dragonPlantObserver || dragonPlantObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
@@ -2723,7 +2671,8 @@
                 }
                 
                 debounceTimer = setTimeout(() => {
-                    syncFromAutoplaySession();
+                    // When autoplay session appears/changes, apply localStorage to it
+                    applyLocalStorageToGameCheckbox();
                 }, OBSERVER_DEBOUNCE_MS);
             });
             
@@ -2743,111 +2692,6 @@
         }
     }
     
-    // Simple sync functions that read/write directly to localStorage
-    function syncToAutoplaySession(shouldBeEnabled) {
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                const settingsCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
-                if (settingsCheckbox) {
-                    const isCurrentlyChecked = settingsCheckbox.getAttribute('aria-checked') === 'true';
-                    if (shouldBeEnabled !== isCurrentlyChecked) {
-                        console.log(`[${modName}] Syncing autoplay session to ${shouldBeEnabled ? 'enabled' : 'disabled'}`);
-                        settingsCheckbox.click();
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    
-    function syncFromAutoplaySession() {
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                const settingsCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
-                if (settingsCheckbox) {
-                    const isCurrentlyChecked = settingsCheckbox.getAttribute('aria-checked') === 'true';
-                    const currentSettings = getSettings();
-                    
-                    // First time sync after page load - restore FROM localStorage TO game
-                    if (!hasRestoredDragonPlantState) {
-                        hasRestoredDragonPlantState = true;
-                        
-                        const savedState = currentSettings.autoplantChecked;
-                        console.log(`[${modName}] First sync after page load - saved state: ${savedState ? 'ENABLED' : 'DISABLED'}, game state: ${isCurrentlyChecked ? 'ENABLED' : 'DISABLED'}`);
-                        
-                        // If saved state doesn't match game UI, restore it
-                        if (savedState !== isCurrentlyChecked) {
-                            console.log(`[${modName}] Restoring Dragon Plant checkbox to saved state...`);
-                            syncToAutoplaySession(savedState);
-                            
-                            // Update mod checkbox
-                            const modCheckbox = document.querySelector('#autoplant-checkbox');
-                            if (modCheckbox) {
-                                modCheckbox.checked = savedState;
-                                window.autoplantCheckbox = modCheckbox;
-                            }
-                            
-                            // Update status and filter
-                            if (typeof window.updateAutoplantStatus === 'function') {
-                                window.updateAutoplantStatus();
-                            }
-                            updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
-                            createAutosellerSessionWidget();
-                            updateAutosellerSessionWidget();
-                        } else {
-                            console.log(`[${modName}] Dragon Plant state already matches saved state`);
-                        }
-                        return; // Don't continue with normal sync logic
-                    }
-                    
-                    // Normal sync - save FROM game TO localStorage (after first restore)
-                    if (currentSettings.autoplantChecked !== isCurrentlyChecked) {
-                        console.log(`[${modName}] Syncing mod settings from autoplay session: ${isCurrentlyChecked ? 'enabled' : 'disabled'}`);
-                        setSettings({ autoplantChecked: isCurrentlyChecked });
-                        
-                        // Update mod checkbox
-                        const modCheckbox = document.querySelector('#autoplant-checkbox');
-                        if (modCheckbox) {
-                            modCheckbox.checked = isCurrentlyChecked;
-                            window.autoplantCheckbox = modCheckbox;
-                        }
-                        
-                        // Handle mutual exclusivity when autoplant is enabled
-                        if (isCurrentlyChecked) {
-                            // If autoplant is being enabled, disable autosell
-                            const currentSettings = getSettings();
-                            if (currentSettings.autosellChecked) {
-                                console.log('[Autoseller] Autoplant enabled via autoplay session, disabling Autosell');
-                                setSettings({ autosellChecked: false });
-                                
-                                // Also update the DOM checkbox if it exists (when settings modal is open)
-                                const autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
-                                if (autosellCheckbox) {
-                                    autosellCheckbox.checked = false;
-                                }
-                            }
-                        }
-                        
-                        // Update status and filter
-                        if (typeof window.updateAutoplantStatus === 'function') {
-                            window.updateAutoplantStatus();
-                        }
-                        updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
-                        createAutosellerSessionWidget();
-                        updateAutosellerSessionWidget();
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    
     function handleDragonPlantClick(event) {
         // Check if the clicked element is a Dragon Plant checkbox in autoplay session
         const target = event.target.closest('button[role="checkbox"]');
@@ -2863,9 +2707,38 @@
         
         console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
         
-        // Use a small delay to let the game update the checkbox state first, then sync
+        // Use a small delay to let the game update the checkbox state first
         setTimeout(() => {
-            syncFromAutoplaySession();
+            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            if (gameCheckbox) {
+                const newState = gameCheckbox.getAttribute('aria-checked') === 'true';
+                console.log(`[${modName}] Game checkbox clicked, saving to localStorage: ${newState}`);
+                
+                // Save to localStorage
+                setSettings({ autoplantChecked: newState });
+                
+                // Apply to mod checkbox (if settings modal is open)
+                applyLocalStorageToModCheckbox();
+                
+                // Handle mutual exclusivity
+                if (newState) {
+                    const currentSettings = getSettings();
+                    if (currentSettings.autosellChecked) {
+                        console.log('[Autoseller] Autoplant enabled, disabling Autosell');
+                        setSettings({ autosellChecked: false });
+                        
+                        const autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
+                        if (autosellCheckbox) {
+                            autosellCheckbox.checked = false;
+                        }
+                    }
+                }
+                
+                // Update filter and widget
+                updatePlantMonsterFilter(getSettings().autoplantIgnoreList || []);
+                createAutosellerSessionWidget();
+                updateAutosellerSessionWidget();
+            }
         }, 50);
     }
     
@@ -2881,159 +2754,7 @@
     }
     
     // =======================
-    // 12.1. Autoplant Auto-Click for 5+ Creatures
-    // =======================
-    
-    let autoplantClickObserver = null;
-    let autoplantClickObserverAttempts = 0;
-    
-    function setupAutoplantClickObserver() {
-        if (autoplantClickObserver || autoplantClickObserverAttempts >= MAX_OBSERVER_ATTEMPTS) return;
-        
-        autoplantClickObserverAttempts++;
-        
-        if (typeof MutationObserver !== 'undefined') {
-            let debounceTimer = null;
-            
-            autoplantClickObserver = new MutationObserver((mutations) => {
-                const hasRelevantMutations = mutations.some(mutation => {
-                    return mutation.type === 'childList' || 
-                           (mutation.type === 'attributes' && 
-                            (mutation.attributeName === 'data-state' || 
-                             mutation.attributeName === 'aria-checked'));
-                });
-                
-                if (!hasRelevantMutations) return;
-                
-                if (debounceTimer) {
-                    clearTimeout(debounceTimer);
-                }
-                
-                debounceTimer = setTimeout(() => {
-                    checkAndClickDragonPlant();
-                }, OBSERVER_DEBOUNCE_MS);
-            });
-            
-            // Only observe autoplay sessions, not the entire document
-            const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-            if (autoplaySessions.length > 0) {
-                autoplaySessions.forEach(session => {
-                    autoplantClickObserver.observe(session, {
-                        childList: true,
-                        subtree: true,
-                        attributes: true,
-                        attributeFilter: ['data-state', 'aria-checked']
-                    });
-                });
-            } else {
-                // Fallback to document body if no autoplay sessions found yet
-                autoplantClickObserver.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    attributeFilter: ['data-state', 'aria-checked']
-                });
-            }
-            
-            console.log(`[${modName}] Autoplant click observer setup complete`);
-        } else {
-            console.warn(`[${modName}][WARN][setupAutoplantClickObserver] MutationObserver not available`);
-        }
-    }
-    
-    function checkAndClickDragonPlant() {
-        const settings = getSettings();
-        
-        // Only proceed if autoplant is enabled in mod settings
-        if (!settings.autoplantChecked) return;
-        
-        // Only proceed if we're actually in an autoplay session
-        const autoplaySessionsCheck = document.querySelectorAll('div[data-autosetup]');
-        if (autoplaySessionsCheck.length === 0) return;
-        
-        // Check if there are any creatures in the autoplay session
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        let hasCreatures = false;
-        
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                const creatureDropsSection = widgetBottom.querySelector('#drop-widget-bottom-element');
-                if (creatureDropsSection) {
-                    // Check if there are any creature buttons
-                    const creatureButtons = creatureDropsSection.querySelectorAll('button:not([disabled])');
-                    hasCreatures = Array.from(creatureButtons).some(button => {
-                        const img = button.querySelector('img[alt]');
-                        if (!img) return false;
-                        const alt = img.getAttribute('alt');
-                        return alt === 'creature';
-                    });
-                    if (hasCreatures) break; // Found creatures, no need to check other sessions
-                }
-            }
-        }
-        
-        // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
-        let dragonPlantButton = null;
-        
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                
-                // Find the Dragon Plant game button (not the settings checkbox)
-                const allButtons = widgetBottom.querySelectorAll('button');
-                for (const button of allButtons) {
-                    // Look for the Dragon Plant game button with specific item ID
-                    // Exclude the settings checkbox by checking it doesn't have role="checkbox"
-                    const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
-                    
-                    // First try Dragon Plant (ID 37022)
-                    let img = button.querySelector('img[alt="37022"]');
-                    if (img && isNotCheckbox) {
-                        dragonPlantButton = button;
-                        break;
-                    }
-                    
-                    // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
-                    if (!dragonPlantButton) {
-                        img = button.querySelector('img[alt="28689"]');
-                        if (img && isNotCheckbox) {
-                            dragonPlantButton = button;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Only proceed if we found the Dragon Plant button
-        if (!dragonPlantButton) return;
-        
-        // Check if Dragon Plant is currently enabled
-        const isCurrentlyEnabled = dragonPlantButton.getAttribute('data-state') === 'open' && 
-                                 !dragonPlantButton.hasAttribute('disabled');
-        
-        console.log(`[${modName}] Dragon Plant decision: hasCreatures=${hasCreatures}, enabled=${isCurrentlyEnabled}`);
-        
-        // Click Dragon Plant if there are creatures and it's not already enabled
-        if (hasCreatures && !isCurrentlyEnabled) {
-            console.log(`[${modName}] Auto-clicking Dragon Plant - creatures detected`);
-            setTimeout(() => {
-                dragonPlantButton.click();
-            }, 100);
-        }
-    }
-    
-    function stopAutoplantClickObserver() {
-        if (autoplantClickObserver) {
-            autoplantClickObserver.disconnect();
-            autoplantClickObserver = null;
-            console.log(`[${modName}] Autoplant click observer stopped`);
-        }
-    }
-    
-    // =======================
-    // 12.2. Game Start Listener for Dragon Plant
+    // 12.1. Game Start Listener for Dragon Plant
     // =======================
     
     function setupGameStartListener() {
@@ -3128,7 +2849,6 @@
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
-        // setupAutoplantClickObserver(); // Disabled - using game start listener instead
         setupGameStartListener();
         setupDragonPlantAPIMonitor();
         
@@ -3213,7 +2933,16 @@
                 serverMonsterCache.clear();
                 daycareCache.clear();
                 stateManager.clearProcessedIds();
-                clearSettingsCache();
+            },
+            enableDragonPlant: () => {
+                console.log('[Autoseller] enableDragonPlant() called - updating settings');
+                setSettings({ autoplantChecked: true });
+                return true;
+            },
+            disableDragonPlant: () => {
+                console.log('[Autoseller] disableDragonPlant() called - updating settings');
+                setSettings({ autoplantChecked: false });
+                return true;
             },
             cleanup: function() {
                 console.log('[Autoseller] Starting cleanup...');
@@ -3255,7 +2984,6 @@
                     
                     // 4. Stop observers
                     stopDragonPlantObserver();
-                    stopAutoplantClickObserver();
                     
                     // 5. Remove game state event listeners and filters
                     if (globalThis.state?.board?.off) {
@@ -3283,7 +3011,6 @@
                     serverMonsterCache.clear();
                     daycareCache.clear();
                     stateManager.resetSession();
-                    clearSettingsCache();
                     
                     // 7. Clear rate limiter state
                     apiRateLimiter.requestTimes = [];
@@ -3308,8 +3035,7 @@
                         boardSubscription1,
                         boardSubscription2,
                         debounceTimer,
-                        dragonPlantObserver,
-                        autoplantClickObserver
+                        dragonPlantObserver
                     ].filter(Boolean);
                     
                     if (remainingReferences.length > 0) {
@@ -3323,7 +3049,9 @@
                 }
             }
         };
+        
+        // Expose Autoseller API globally for other mods
+        window.autoseller = exports;
     }
 
 })();
-

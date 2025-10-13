@@ -2190,6 +2190,37 @@ function openTaskerSettingsModal() {
                                     loadAndApplySettings();
                                 }
                             }, 50);
+                            
+                            // Inject auto-save indicator into the existing modal footer
+                            setTimeout(() => {
+                                const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+                                if (modalElement) {
+                                    const footer = modalElement.querySelector('.flex.justify-end.gap-2');
+                                    if (footer) {
+                                        // Create auto-save indicator
+                                        const autoSaveIndicator = document.createElement('div');
+                                        autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
+                                        autoSaveIndicator.className = 'pixel-font-16';
+                                        autoSaveIndicator.style.cssText = `
+                                            font-size: 11px;
+                                            color: #4ade80;
+                                            font-style: italic;
+                                            margin-right: auto;
+                                        `;
+                                        
+                                        // Modify footer to use space-between layout
+                                        footer.style.cssText = `
+                                            display: flex;
+                                            justify-content: space-between;
+                                            align-items: center;
+                                            gap: 2px;
+                                        `;
+                                        
+                                        // Insert auto-save indicator at the beginning
+                                        footer.insertBefore(autoSaveIndicator, footer.firstChild);
+                                    }
+                                }
+                            }, 100);
                         } catch (error) {
                             console.error('[Better Tasker] Error creating modal:', error);
                             try {
@@ -2396,6 +2427,15 @@ function createGeneralSettings() {
         true
     );
     settingsWrapper.appendChild(autoCompleteSetting);
+    
+    // Enable Autoplant setting
+    const dragonPlantSetting = createCheckboxSetting(
+        'enableDragonPlant',
+        'Enable Autoplant',
+        'Enable Autoplant (Autoseller) during tasks',
+        false
+    );
+    settingsWrapper.appendChild(dragonPlantSetting);
     
     // Add settings wrapper to container
     container.appendChild(settingsWrapper);
@@ -2643,6 +2683,7 @@ function loadSettings() {
         autoCompleteTasks: true,
         autoRefillStamina: false,
         fasterAutoplay: false,
+        enableDragonPlant: false,
         // Default all creatures to enabled
         ...Object.fromEntries(
             (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
@@ -2671,7 +2712,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Better Tasker settings
-            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'taskStartDelay' || input.id.startsWith('creature-')) {
+            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'taskStartDelay' || input.id.startsWith('creature-')) {
                 if (input.type === 'checkbox') {
                     settings[input.id] = input.checked;
                 } else {
@@ -2713,6 +2754,14 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('autoCompleteTasks');
             if (checkbox) {
                 checkbox.checked = settings.autoCompleteTasks;
+                // Event listener already added by createCheckboxSetting
+            }
+        }
+        
+        if (settings.enableDragonPlant !== undefined) {
+            const checkbox = document.getElementById('enableDragonPlant');
+            if (checkbox) {
+                checkbox.checked = settings.enableDragonPlant;
                 // Event listener already added by createCheckboxSetting
             }
         }
@@ -2809,6 +2858,11 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
                 }, BESTIARY_AUTOMATOR_RETRY_DELAY);
             }
         }, BESTIARY_AUTOMATOR_INIT_DELAY);
+    }
+    
+    if (settings.enableDragonPlant) {
+        console.log('[Better Tasker] Dragon Plant enabled - enabling via Autoseller...');
+        enableAutosellerDragonPlant();
     }
     
     // Return success status if requested (for functions that need it)
@@ -3303,6 +3357,52 @@ function enableBestiaryAutomatorFasterAutoplay() {
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
     return toggleBestiaryAutomatorSetting('fasterAutoplay', false);
+}
+
+// Enable Autoseller's Dragon Plant setting
+function enableAutosellerDragonPlant() {
+    try {
+        // Try to find Autoseller's exported function
+        let autoseller = null;
+        
+        // Method 1: Check window scope
+        if (window.autoseller && window.autoseller.enableDragonPlant) {
+            autoseller = window.autoseller;
+            console.log('[Better Tasker] Found Autoseller via window object');
+        }
+        // Method 2: Check context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.enableDragonPlant) {
+            autoseller = context.exports;
+            console.log('[Better Tasker] Found Autoseller via context exports');
+        }
+        // Method 3: Try mod loader
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const autosellerContext = window.modLoader.getModContext('autoseller');
+            if (autosellerContext && autosellerContext.exports && autosellerContext.exports.enableDragonPlant) {
+                autoseller = autosellerContext.exports;
+                console.log('[Better Tasker] Found Autoseller via mod loader');
+            }
+        }
+        
+        if (autoseller) {
+            console.log('[Better Tasker] Enabling Dragon Plant via Autoseller...');
+            autoseller.enableDragonPlant();
+            console.log('[Better Tasker] Dragon Plant enabled');
+            return true;
+        } else {
+            console.log('[Better Tasker] Autoseller not available - trying direct approach');
+            // Fallback: try to access via global exports
+            if (typeof exports !== 'undefined' && exports.enableDragonPlant) {
+                exports.enableDragonPlant();
+                console.log('[Better Tasker] Dragon Plant enabled via exports');
+                return true;
+            }
+            return false;
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error enabling Dragon Plant:', error);
+        return false;
+    }
 }
 
 // Finds button by text content - supports both English and Portuguese

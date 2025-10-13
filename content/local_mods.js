@@ -369,6 +369,34 @@ async function initLocalMods() {
       
       const modFiles = await listAllModFiles();
       const enabledByDefault = await getDefaultEnabledMods();
+      
+      // Get saved mod states from storage to preserve user toggles
+      let savedModStates = {};
+      try {
+        // Try sync storage first
+        if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.sync) {
+          const syncData = await window.browserAPI.storage.sync.get('localMods');
+          if (syncData.localMods && syncData.localMods.length > 0) {
+            syncData.localMods.forEach(mod => {
+              savedModStates[mod.name] = mod.enabled;
+            });
+            console.log('[Local Mods] Loaded saved states from sync storage:', Object.keys(savedModStates).length, 'mods');
+          }
+        }
+        // Fallback to local storage
+        if (Object.keys(savedModStates).length === 0 && window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+          const localData = await window.browserAPI.storage.local.get('localMods');
+          if (localData.localMods && localData.localMods.length > 0) {
+            localData.localMods.forEach(mod => {
+              savedModStates[mod.name] = mod.enabled;
+            });
+            console.log('[Local Mods] Loaded saved states from local storage:', Object.keys(savedModStates).length, 'mods');
+          }
+        }
+      } catch (error) {
+        console.warn('[Local Mods] Could not load saved mod states:', error);
+      }
+      
       let validMods = [];
       
       // Process file-based mods (Official and Super Mods)
@@ -377,10 +405,11 @@ async function initLocalMods() {
         const exists = await checkFileExists(file);
         console.log(`File ${file} exists: ${exists}`);
         if (exists) {
-          // Enable only if in defaultEnabledMods (Super Mods are no longer auto-enabled)
-          const isDatabaseMod = file.startsWith('database/');
-          const enabled = enabledByDefault.includes(file);
-          console.log(`Mod ${file} enabled: ${enabled} (isDatabaseMod: ${isDatabaseMod})`);
+          // Use saved state if available, otherwise check defaultEnabledMods
+          const enabled = savedModStates.hasOwnProperty(file) 
+            ? savedModStates[file] 
+            : enabledByDefault.includes(file);
+          console.log(`Mod ${file} enabled: ${enabled} (saved: ${savedModStates.hasOwnProperty(file)}, default: ${enabledByDefault.includes(file)})`);
           
           validMods.push({
             name: file,

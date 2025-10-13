@@ -918,6 +918,10 @@ let panelState = {
     size: { width: 350, height: 820 }
 };
 
+// Throttle for highlight checks to prevent spam
+let lastHighlightCheck = 0;
+const HIGHLIGHT_CHECK_THROTTLE = 1000; // 1 second
+
 
 // Create a hash for board setup comparison with improved normalization
 function createBoardSetupHash(boardSetup) {
@@ -4508,6 +4512,23 @@ class DataCollector {
 
 // Check if a new run is better than current best and update highlights immediately
 async function checkForNewBestRunAndUpdateHighlights(newRun) {
+  // Skip during Board Analyzer execution to avoid performance issues
+  if (window.__modCoordination?.boardAnalyzerRunning) {
+    return;
+  }
+  
+  // Throttle checks to prevent spam during rapid completions
+  const now = Date.now();
+  if (now - lastHighlightCheck < HIGHLIGHT_CHECK_THROTTLE) {
+    return;
+  }
+  lastHighlightCheck = now;
+  
+  // Skip if panel is closed - no need to update highlights user can't see
+  if (!panelState.isOpen) {
+    return;
+  }
+  
   try {
     console.log('[Board Advisor] Checking if new run is better than current best...', {
       roomId: newRun.roomId,
@@ -4533,11 +4554,15 @@ async function checkForNewBestRunAndUpdateHighlights(newRun) {
       console.warn('[Board Advisor] Could not get IndexedDB runs for best run check:', error);
     }
     
-    // Combine both sources and remove duplicates
+    // Combine both sources and remove duplicates (O(n) optimization)
     const allRuns = [...currentRoomRuns, ...indexedDBRuns];
-    const uniqueRuns = allRuns.filter((run, index, self) => 
-      index === self.findIndex(r => r.id === run.id || (r.ticks === run.ticks && r.timestamp === run.timestamp))
-    );
+    const seen = new Set();
+    const uniqueRuns = allRuns.filter(run => {
+      const key = run.id || `${run.ticks}_${run.timestamp}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     
     if (uniqueRuns.length === 0) {
       console.log('[Board Advisor] No previous runs for this room, this is the first best run');

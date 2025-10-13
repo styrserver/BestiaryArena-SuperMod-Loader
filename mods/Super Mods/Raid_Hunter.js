@@ -21,6 +21,15 @@ const RAID_CLOCK_UPDATE_INTERVAL = 1000;
 const RAID_START_DELAY = 1000;
 const MODAL_OPEN_DELAY = 1000;
 const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
+const AUTOMATION_CHECK_DELAY = 1000;
+const BESTIARY_INTEGRATION_DELAY = 500;
+const BESTIARY_VERIFICATION_DELAY = 1000;
+const RAID_FAILURE_RETRY_DELAY = 5000;
+const NEXT_RAID_DELAY = 2000;
+const QUEST_BUTTON_VALIDATION_INTERVAL = 30000;
+const STAMINA_MONITOR_INTERVAL = 30000;
+const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
+const RAID_END_CHECK_INTERVAL = 30000;
 
 // Count
 const MAX_RETRY_ATTEMPTS = 3;
@@ -43,6 +52,29 @@ const COLOR_SUCCESS = '#4ade80';
 // Helper function for automation state checks
 function isAutomationActive() {
     return isAutomationEnabled === AUTOMATION_ENABLED;
+}
+
+// Helper function to check if raid processing can proceed
+function canProcessRaid(context = 'raid processing') {
+    if (isBoardAnalyzerRunning) {
+        console.log(`[Raid Hunter] Board Analyzer running during ${context} - skipping`);
+        return false;
+    }
+    if (!isAutomationActive()) {
+        console.log(`[Raid Hunter] Automation disabled during ${context} - skipping`);
+        return false;
+    }
+    return true;
+}
+
+// Helper function to cancel current raid and cleanup
+function cancelCurrentRaid(reason = 'unknown') {
+    console.log(`[Raid Hunter] Cancelling raid: ${reason}`);
+    isCurrentlyRaiding = false;
+    currentRaidInfo = null;
+    restoreQuestButtonAppearance();
+    stopAutoplayStateMonitoring();
+    stopQuestButtonValidation();
 }
 
 const EVENT_TEXTS = [
@@ -616,17 +648,12 @@ function handleFightToast() {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
-                    // Check if automation is still enabled after delay and Board Analyzer is not running
-                    // Remove !isCurrentlyRaiding check - raids have priority over current autoplay
-                    if (isAutomationEnabled === AUTOMATION_ENABLED && !isBoardAnalyzerRunning && raidQueue.length > 0) {
+                    // Check if raid processing can proceed
+                    if (canProcessRaid('fight toast delay') && raidQueue.length > 0) {
                         console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
                         processNextRaid();
-                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                        console.log('[Raid Hunter] Automation disabled');
-                    } else if (isBoardAnalyzerRunning) {
-                        console.log('[Raid Hunter] Board Analyzer running during fight toast delay - skipping');
-                    } else {
-                        console.log(`[Raid Hunter] Raid start delay completed but conditions not met - raidQueue.length: ${raidQueue.length}`);
+                    } else if (raidQueue.length === 0) {
+                        console.log(`[Raid Hunter] Raid start delay completed but no raids in queue`);
                     }
                 }, raidStartDelay * 1000);
             } else {
@@ -695,7 +722,7 @@ function pauseRaidHunterMonitoring() {
 function resumeRaidHunterMonitoring() {
     try {
         // Only resume if automation is enabled
-        if (isAutomationEnabled === AUTOMATION_ENABLED) {
+        if (isAutomationActive()) {
             // Resume ALL monitoring
             setupRaidMonitoring(); // This restores raid monitoring
             
@@ -1380,7 +1407,7 @@ function startStaminaMonitoring() {
     
     console.log('[Raid Hunter] Starting stamina monitoring - checking every 30 seconds');
     
-    // Check stamina every 30 seconds
+    // Check stamina every configured interval
     window.staminaMonitorInterval = setInterval(async () => {
         try {
             console.log('[Raid Hunter] Checking stamina...');
@@ -1408,7 +1435,7 @@ function startStaminaMonitoring() {
         } catch (error) {
             console.error('[Raid Hunter] Error during stamina monitoring:', error);
         }
-    }, 30 * 1000); // Every 30 seconds
+    }, STAMINA_MONITOR_INTERVAL);
 }
 
 // Stop stamina monitoring
@@ -1420,115 +1447,84 @@ function stopStaminaMonitoring() {
     }
 }
 
+// Helper function to find Bestiary Automator
+function findBestiaryAutomator() {
+    // Method 1: Check if Bestiary Automator is available in global scope
+    if (window.bestiaryAutomator?.updateConfig) {
+        return window.bestiaryAutomator;
+    }
+    // Method 2: Check if it's available in context exports
+    if (typeof context !== 'undefined' && context.exports?.updateConfig) {
+        return context.exports;
+    }
+    // Method 3: Try to find it in the mod loader's context
+    if (window.modLoader?.getModContext) {
+        const automatorContext = window.modLoader.getModContext('bestiary-automator');
+        if (automatorContext?.exports?.updateConfig) {
+            return automatorContext.exports;
+        }
+    }
+    return null;
+}
+
+// Helper function to update Bestiary Automator config with retry
+function updateBestiaryAutomatorConfig(configUpdate, settingName, verifyProperty) {
+    const automator = findBestiaryAutomator();
+    
+    if (automator) {
+        console.log(`[Raid Hunter] Enabling Bestiary Automator ${settingName}...`);
+        automator.updateConfig(configUpdate);
+        console.log(`[Raid Hunter] Bestiary Automator ${settingName} enabled`);
+        
+        // Additional verification for Chrome
+        setTimeout(() => {
+            if (window.bestiaryAutomator?.config) {
+                console.log(`[Raid Hunter] Verifying ${settingName}:`, window.bestiaryAutomator.config[verifyProperty]);
+            }
+        }, BESTIARY_VERIFICATION_DELAY);
+        
+        return true;
+    } else {
+        console.log(`[Raid Hunter] Bestiary Automator not available for ${settingName}`);
+        // Retry in 2 seconds
+        setTimeout(() => {
+            const retryAutomator = findBestiaryAutomator();
+            if (retryAutomator) {
+                console.log(`[Raid Hunter] Retrying Bestiary Automator ${settingName}...`);
+                retryAutomator.updateConfig(configUpdate);
+                console.log(`[Raid Hunter] Bestiary Automator ${settingName} enabled (retry)`);
+                
+                setTimeout(() => {
+                    if (window.bestiaryAutomator?.config) {
+                        console.log(`[Raid Hunter] Verifying ${settingName} (retry):`, window.bestiaryAutomator.config[verifyProperty]);
+                    }
+                }, BESTIARY_VERIFICATION_DELAY);
+            } else {
+                console.log(`[Raid Hunter] Bestiary Automator still not available - you may need to enable ${settingName} manually`);
+            }
+        }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+        return false;
+    }
+}
+
 // Enable Bestiary Automator's autorefill stamina setting
 function enableBestiaryAutomatorStaminaRefill() {
     return withControl(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-            console.log('[Raid Hunter] Found Bestiary Automator via global window object');
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-            console.log('[Raid Hunter] Found Bestiary Automator via context exports');
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-                console.log('[Raid Hunter] Found Bestiary Automator via mod loader');
-            }
-        }
-        
-        if (bestiaryAutomator) {
-            console.log('[Raid Hunter] Enabling Bestiary Automator autorefill stamina...');
-            bestiaryAutomator.updateConfig({
-                autoRefillStamina: true
-            });
-            console.log('[Raid Hunter] Bestiary Automator autorefill stamina enabled');
-            
-            // Additional verification for Chrome - check if the setting actually took effect
-            setTimeout(() => {
-                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                    console.log('[Raid Hunter] Verifying stamina refill setting:', window.bestiaryAutomator.config.autoRefillStamina);
-                }
-            }, 1000);
-            
-            return true;
-        } else {
-            console.log('[Raid Hunter] Bestiary Automator not available for autorefill stamina');
-            // Try again in 2 seconds
-            setTimeout(() => {
-                // Retry the same methods
-                let retryAutomator = null;
-                
-                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-                    retryAutomator = window.bestiaryAutomator;
-                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-                    retryAutomator = context.exports;
-                } else if (window.modLoader && window.modLoader.getModContext) {
-                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
-                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                        retryAutomator = automatorContext.exports;
-                    }
-                }
-                
-                if (retryAutomator) {
-                    console.log('[Raid Hunter] Retrying Bestiary Automator autorefill stamina...');
-                    retryAutomator.updateConfig({
-                        autoRefillStamina: true
-                    });
-                    console.log('[Raid Hunter] Bestiary Automator autorefill stamina enabled (retry)');
-                    
-                    // Additional verification for Chrome - check if the setting actually took effect
-                    setTimeout(() => {
-                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                            console.log('[Raid Hunter] Verifying stamina refill setting (retry):', window.bestiaryAutomator.config.autoRefillStamina);
-                        }
-                    }, 1000);
-                } else {
-                    console.log('[Raid Hunter] Bestiary Automator still not available - you may need to enable autorefill stamina manually');
-                }
-            }, 2000);
-            return false;
-        }
+        return updateBestiaryAutomatorConfig(
+            { autoRefillStamina: true },
+            'autorefill stamina',
+            'autoRefillStamina'
+        );
     }, 'enable Bestiary Automator autorefill stamina');
 }
 
 // Disable Bestiary Automator's autorefill stamina setting
 function disableBestiaryAutomatorStaminaRefill() {
     return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-            }
-        }
-        
-        if (bestiaryAutomator) {
+        const automator = findBestiaryAutomator();
+        if (automator) {
             console.log('[Raid Hunter] Disabling Bestiary Automator autorefill stamina...');
-            bestiaryAutomator.updateConfig({
-                autoRefillStamina: false
-            });
+            automator.updateConfig({ autoRefillStamina: false });
             console.log('[Raid Hunter] Bestiary Automator autorefill stamina disabled');
             return true;
         } else {
@@ -1541,112 +1537,21 @@ function disableBestiaryAutomatorStaminaRefill() {
 // Enable Bestiary Automator's faster autoplay setting
 function enableBestiaryAutomatorFasterAutoplay() {
     return withControl(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-            console.log('[Raid Hunter] Found Bestiary Automator via global window object');
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-            console.log('[Raid Hunter] Found Bestiary Automator via context exports');
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-                console.log('[Raid Hunter] Found Bestiary Automator via mod loader');
-            }
-        }
-        
-        if (bestiaryAutomator) {
-            console.log('[Raid Hunter] Enabling Bestiary Automator faster autoplay...');
-            bestiaryAutomator.updateConfig({
-                fasterAutoplay: true
-            });
-            console.log('[Raid Hunter] Bestiary Automator faster autoplay enabled');
-            
-            // Additional verification for Chrome - check if the setting actually took effect
-            setTimeout(() => {
-                if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                    console.log('[Raid Hunter] Verifying faster autoplay setting:', window.bestiaryAutomator.config.fasterAutoplay);
-                }
-            }, 1000);
-            
-            return true;
-        } else {
-            console.log('[Raid Hunter] Bestiary Automator not available for faster autoplay');
-            // Try again in 2 seconds
-            setTimeout(() => {
-                // Retry the same methods
-                let retryAutomator = null;
-                
-                if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-                    retryAutomator = window.bestiaryAutomator;
-                } else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-                    retryAutomator = context.exports;
-                } else if (window.modLoader && window.modLoader.getModContext) {
-                    const automatorContext = window.modLoader.getModContext('bestiary-automator');
-                    if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                        retryAutomator = automatorContext.exports;
-                    }
-                }
-                
-                if (retryAutomator) {
-                    console.log('[Raid Hunter] Retrying Bestiary Automator faster autoplay...');
-                    retryAutomator.updateConfig({
-                        fasterAutoplay: true
-                    });
-                    console.log('[Raid Hunter] Bestiary Automator faster autoplay enabled (retry)');
-                    
-                    // Additional verification for Chrome - check if the setting actually took effect
-                    setTimeout(() => {
-                        if (window.bestiaryAutomator && window.bestiaryAutomator.config) {
-                            console.log('[Raid Hunter] Verifying faster autoplay setting (retry):', window.bestiaryAutomator.config.fasterAutoplay);
-                        }
-                    }, 1000);
-                } else {
-                    console.log('[Raid Hunter] Bestiary Automator still not available - you may need to enable faster autoplay manually');
-                }
-            }, 2000);
-            return false;
-        }
+        return updateBestiaryAutomatorConfig(
+            { fasterAutoplay: true },
+            'faster autoplay',
+            'fasterAutoplay'
+        );
     }, 'enable Bestiary Automator faster autoplay');
 }
 
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
     return withControlCheck(window.BestiaryAutomatorSettingsManager, 'Raid Hunter', () => {
-        
-        // Try multiple ways to access Bestiary Automator
-        let bestiaryAutomator = null;
-        
-        // Method 1: Check if Bestiary Automator is available in global scope
-        if (window.bestiaryAutomator && window.bestiaryAutomator.updateConfig) {
-            bestiaryAutomator = window.bestiaryAutomator;
-        }
-        // Method 2: Check if it's available in context exports
-        else if (typeof context !== 'undefined' && context.exports && context.exports.updateConfig) {
-            bestiaryAutomator = context.exports;
-        }
-        // Method 3: Try to find it in the mod loader's context
-        else if (window.modLoader && window.modLoader.getModContext) {
-            const automatorContext = window.modLoader.getModContext('bestiary-automator');
-            if (automatorContext && automatorContext.exports && automatorContext.exports.updateConfig) {
-                bestiaryAutomator = automatorContext.exports;
-            }
-        }
-        
-        if (bestiaryAutomator) {
+        const automator = findBestiaryAutomator();
+        if (automator) {
             console.log('[Raid Hunter] Disabling Bestiary Automator faster autoplay...');
-            bestiaryAutomator.updateConfig({
-                fasterAutoplay: false
-            });
+            automator.updateConfig({ fasterAutoplay: false });
             console.log('[Raid Hunter] Bestiary Automator faster autoplay disabled');
             return true;
         } else {
@@ -1654,6 +1559,52 @@ function disableBestiaryAutomatorFasterAutoplay() {
             return false;
         }
     }, 'disable Bestiary Automator faster autoplay');
+}
+
+// Enable Autoseller's Dragon Plant setting
+function enableAutosellerDragonPlant() {
+    try {
+        // Try to find Autoseller's exported function
+        let autoseller = null;
+        
+        // Method 1: Check window scope
+        if (window.autoseller && window.autoseller.enableDragonPlant) {
+            autoseller = window.autoseller;
+            console.log('[Raid Hunter] Found Autoseller via window object');
+        }
+        // Method 2: Check context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.enableDragonPlant) {
+            autoseller = context.exports;
+            console.log('[Raid Hunter] Found Autoseller via context exports');
+        }
+        // Method 3: Try mod loader
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const autosellerContext = window.modLoader.getModContext('autoseller');
+            if (autosellerContext && autosellerContext.exports && autosellerContext.exports.enableDragonPlant) {
+                autoseller = autosellerContext.exports;
+                console.log('[Raid Hunter] Found Autoseller via mod loader');
+            }
+        }
+        
+        if (autoseller) {
+            console.log('[Raid Hunter] Enabling Dragon Plant via Autoseller...');
+            autoseller.enableDragonPlant();
+            console.log('[Raid Hunter] Dragon Plant enabled');
+            return true;
+        } else {
+            console.log('[Raid Hunter] Autoseller not available - trying direct approach');
+            // Fallback: try to access via global exports
+            if (typeof exports !== 'undefined' && exports.enableDragonPlant) {
+                exports.enableDragonPlant();
+                console.log('[Raid Hunter] Dragon Plant enabled via exports');
+                return true;
+            }
+            return false;
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error enabling Dragon Plant:', error);
+        return false;
+    }
 }
 
 /**
@@ -1758,18 +1709,10 @@ function toggleAutomation() {
             console.log(`[Raid Hunter] Waiting ${raidStartDelay} seconds before checking for raids...`);
             
             setTimeout(() => {
-                // Check if Board Analyzer is running
-                if (isBoardAnalyzerRunning) {
-                    console.log('[Raid Hunter] Board Analyzer running during start delay - skipping');
-                    return;
-                }
-                
-                // Check if automation is still enabled after delay
-                if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                // Check if raid processing can proceed
+                if (canProcessRaid('start delay')) {
                     console.log('[Raid Hunter] Raid start delay completed - checking for raids');
                     checkForExistingRaids();
-                } else {
-                    console.log('[Raid Hunter] Automation disabled during start delay');
                 }
             }, raidStartDelay * 1000);
         } else {
@@ -1827,7 +1770,7 @@ function updateToggleButton() {
     const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
     if (!toggleButton) return;
     
-    if (isAutomationEnabled === AUTOMATION_ENABLED) {
+    if (isAutomationActive()) {
         toggleButton.textContent = 'Enabled';
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     } else {
@@ -1878,37 +1821,7 @@ function isSafeToReload() {
 // Stops autoplay when raid ends
 function stopAutoplayOnRaidEnd() {
     try {
-        console.log('[Raid Hunter] Raid ended');
-        
-        // Update state and check for next raid first
-        updateRaidState();
-        
-        // If there are more raids available, process the next one
-        if (raidQueue.length > 0) {
-            console.log(`[Raid Hunter] ${raidQueue.length} raids remaining in queue`);
-            setTimeout(() => {
-                // Check if Board Analyzer is running
-                if (isBoardAnalyzerRunning) {
-                    console.log('[Raid Hunter] Board Analyzer running - skipping raid end processing');
-                    return;
-                }
-                
-                // Check if automation is still enabled before processing next raid
-                if (isAutomationEnabled === AUTOMATION_ENABLED) {
-                    processNextRaid();
-                } else {
-                    console.log('[Raid Hunter] Automation disabled during raid end processing');
-                }
-            }, 2000); // Small delay before starting next raid
-        } else {
-            console.log('[Raid Hunter] No more raids in queue - reloading page to reset cache and DOM');
-            
-            // Reload page after cleanup to reset all cache, DOMs, etc.
-            setTimeout(() => {
-                if (!isSafeToReload()) return;
-                location.reload();
-            }, 3000); // 3 second delay to allow cleanup and show message
-        }
+        console.log('[Raid Hunter] Raid ended - reloading to check for more raids');
         
         // Reset raid state
         resetState('raid');
@@ -1935,6 +1848,12 @@ function stopAutoplayOnRaidEnd() {
                 disableBestiaryAutomatorFasterAutoplay();
             }
         }
+        
+        // Always reload page after cleanup to reset cache, DOM, and check for more raids
+        setTimeout(() => {
+            if (!isSafeToReload()) return;
+            location.reload();
+        }, 2000); // 2 second delay to allow cleanup
         
     } catch (error) {
         console.error('[Raid Hunter] Error stopping autoplay on raid end:', error);
@@ -2042,11 +1961,11 @@ function startRaidEndChecking() {
                     return;
                 }
                 
-            } catch (error) {
-                console.error('[Raid Hunter] Error in raid end checking:', error);
-            }
-        });
-    }, 30000); // Reduced from 10s to 30s - raids last hours, so less frequent checking is fine
+        } catch (error) {
+            console.error('[Raid Hunter] Error in raid end checking:', error);
+        }
+    });
+}, RAID_END_CHECK_INTERVAL);
 }
 
 // Stops the periodic raid end checking
@@ -2073,17 +1992,8 @@ async function handleEventOrRaid(roomId) {
     }
 
     // Check if automation is still enabled before starting
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
-        console.log('[Raid Hunter] Automation disabled - stopping raid automation');
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        
-        // Restore quest button appearance when automation is disabled
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
+    if (!isAutomationActive()) {
+        cancelCurrentRaid('automation disabled before starting');
         return;
     }
 
@@ -2095,16 +2005,8 @@ async function handleEventOrRaid(roomId) {
         await new Promise(resolve => setTimeout(resolve, RAID_START_DELAY));
         
         // Check automation status after initial delay
-        if (isAutomationEnabled === AUTOMATION_DISABLED) {
-            console.log('[Raid Hunter] Automation disabled during navigation delay - stopping raid');
-            isCurrentlyRaiding = false;
-            currentRaidInfo = null;
-            
-            // Restore quest button appearance when automation is disabled
-            restoreQuestButtonAppearance();
-            
-            // Stop quest button validation monitoring
-            stopQuestButtonValidation();
+        if (!isAutomationActive()) {
+            cancelCurrentRaid('automation disabled during navigation delay');
             return;
         }
         
@@ -2118,16 +2020,8 @@ async function handleEventOrRaid(roomId) {
         console.log('[Raid Hunter] Navigation completed');
         
         // Check automation status after navigation
-        if (isAutomationEnabled === AUTOMATION_DISABLED) {
-            console.log('[Raid Hunter] Automation disabled after navigation - stopping raid');
-            isCurrentlyRaiding = false;
-            currentRaidInfo = null;
-            
-            // Restore quest button appearance when automation is disabled
-            restoreQuestButtonAppearance();
-            
-            // Stop quest button validation monitoring
-            stopQuestButtonValidation();
+        if (!isAutomationActive()) {
+            cancelCurrentRaid('automation disabled after navigation');
             return;
         }
     } catch (error) {
@@ -2147,40 +2041,25 @@ async function handleEventOrRaid(roomId) {
     
     console.log('[Raid Hunter] Clicking Auto-setup button...');
     autoSetupButton.click();
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     
     // Check automation status after auto-setup
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
-        console.log('[Raid Hunter] Automation disabled after auto-setup - stopping raid');
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        
-        // Restore quest button appearance when automation is disabled
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
+    if (!isAutomationActive()) {
+        cancelCurrentRaid('automation disabled after auto-setup');
         return;
     }
+    
+    // Load settings once for all raid configuration
+    const settings = loadSettings();
 
     // Enable autoplay mode
     console.log('[Raid Hunter] Enabling autoplay mode...');
     ensureAutoplayMode();
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     
     // Check automation status after enabling autoplay
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
-        console.log('[Raid Hunter] Automation disabled after enabling autoplay - stopping raid');
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        
-        // Restore quest button appearance when automation is disabled
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
+    if (!isAutomationActive()) {
+        cancelCurrentRaid('automation disabled after enabling autoplay');
         return;
     }
     
@@ -2212,7 +2091,6 @@ async function handleEventOrRaid(roomId) {
     }
 
     // Enable Bestiary Automator's autorefill stamina if Raid Hunter setting is enabled
-    const settings = loadSettings();
     if (settings.autoRefillStamina) {
         console.log('[Raid Hunter] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
@@ -2241,6 +2119,10 @@ async function handleEventOrRaid(roomId) {
             }
         }, 500);
     }
+    if (settings.enableDragonPlant) {
+        console.log('[Raid Hunter] Dragon Plant enabled - enabling via Autoseller...');
+        enableAutosellerDragonPlant();
+    }
     
     // Check stamina before attempting to start raid
     console.log('[Raid Hunter] Checking stamina before starting raid...');
@@ -2254,17 +2136,8 @@ async function handleEventOrRaid(roomId) {
     console.log('[Raid Hunter] Stamina check passed');
     
     // Check automation status before clicking Start button
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
-        console.log('[Raid Hunter] Automation disabled before starting raid - stopping raid');
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        
-        // Restore quest button appearance when automation is disabled
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
+    if (!isAutomationActive()) {
+        cancelCurrentRaid('automation disabled before starting raid');
         return;
     }
 
@@ -2279,20 +2152,11 @@ async function handleEventOrRaid(roomId) {
     
     console.log('[Raid Hunter] Clicking Start button...');
     startButton.click();
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     
     // Final check after clicking Start button
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
-        console.log('[Raid Hunter] Automation disabled after clicking Start - stopping raid');
-        isCurrentlyRaiding = false;
-        currentRaidInfo = null;
-        
-        // Restore quest button appearance when automation is disabled
-        restoreQuestButtonAppearance();
-        
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
+    if (!isAutomationActive()) {
+        cancelCurrentRaid('automation disabled after clicking Start');
         return;
     }
     
@@ -2434,20 +2298,12 @@ function handleRaidFailure(reason) {
         stopQuestButtonValidation();
         
         retryTimeout = setTimeout(() => {
-            // Check if Board Analyzer is running
-            if (isBoardAnalyzerRunning) {
-                console.log('[Raid Hunter] Board Analyzer running during retry - cancelling retry');
-                return;
-            }
-            
-            // Check if automation is still enabled before retrying
-            if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
+            // Check if raid processing can proceed
+            if (canProcessRaid('retry') && raidQueue.length > 0) {
                 console.log('[Raid Hunter] Retrying raid after failure...');
                 processNextRaid();
-            } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                console.log('[Raid Hunter] Automation disabled during retry - cancelling retry');
             }
-        }, 5000);
+        }, RAID_FAILURE_RETRY_DELAY);
     } else {
         console.log('[Raid Hunter] Max retry attempts reached - giving up on this raid');
         
@@ -2466,19 +2322,11 @@ function handleRaidFailure(reason) {
         // Process next raid if available
         if (raidQueue.length > 0) {
             setTimeout(() => {
-                // Check if Board Analyzer is running
-                if (isBoardAnalyzerRunning) {
-                    console.log('[Raid Hunter] Board Analyzer running - skipping next raid processing');
-                    return;
-                }
-                
-                // Check if automation is still enabled before processing next raid
-                if (isAutomationEnabled === AUTOMATION_ENABLED) {
+                // Check if raid processing can proceed
+                if (canProcessRaid('next raid processing')) {
                     processNextRaid();
-                } else {
-                    console.log('[Raid Hunter] Automation disabled during next raid processing');
                 }
-            }, 2000);
+            }, NEXT_RAID_DELAY);
         }
     }
 }
@@ -2509,7 +2357,7 @@ function ensureAutoplayMode() {
 async function checkForExistingRaids() {
     try {
         // Check if automation is enabled
-        if (isAutomationEnabled === AUTOMATION_DISABLED) {
+        if (!isAutomationActive()) {
             console.log('[Raid Hunter] Automation is disabled - skipping existing raid check');
             return;
         }
@@ -2585,19 +2433,10 @@ async function checkForExistingRaids() {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
             setTimeout(() => {
-                // Check if Board Analyzer is running
-                if (isBoardAnalyzerRunning) {
-                    console.log('[Raid Hunter] Board Analyzer running during existing raid delay - skipping');
-                    return;
-                }
-                
-                // Check if automation is still enabled after delay
-                // Remove the !isCurrentlyRaiding check here since raids should have priority over current autoplay
-                if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
+                // Check if raid processing can proceed
+                if (canProcessRaid('existing raid delay') && raidQueue.length > 0) {
                     console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
                     processNextRaid();
-                } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                    console.log('[Raid Hunter] Automation disabled during existing raid delay');
                 }
             }, raidStartDelay * 1000);
             } else {
@@ -2662,7 +2501,7 @@ function setupFightToastMonitoring() {
 // Handles new raid detection.
 async function handleNewRaid(raid) {
     // Check if automation is enabled
-    if (isAutomationEnabled === AUTOMATION_DISABLED) {
+    if (!isAutomationActive()) {
         console.log('[Raid Hunter] New raid detected but automation is disabled');
         return;
     }
@@ -2700,19 +2539,10 @@ async function handleNewRaid(raid) {
                 console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
-                    // Check if Board Analyzer is running
-                    if (isBoardAnalyzerRunning) {
-                        console.log('[Raid Hunter] Board Analyzer running during new raid delay - skipping');
-                        return;
-                    }
-                    
-                    // Check if automation is still enabled after delay
-                    // Remove !isCurrentlyRaiding check - raids have priority over current autoplay
-                    if (isAutomationEnabled === AUTOMATION_ENABLED && raidQueue.length > 0) {
+                    // Check if raid processing can proceed
+                    if (canProcessRaid('new raid delay') && raidQueue.length > 0) {
                         console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
                         processNextRaid();
-                    } else if (isAutomationEnabled === AUTOMATION_DISABLED) {
-                        console.log('[Raid Hunter] Automation disabled during new raid delay');
                     }
                 }, raidStartDelay * 1000);
             } else {
@@ -3105,6 +2935,19 @@ function createAutoRaidSettings() {
     fasterAutoplayDiv.appendChild(fasterAutoplaySetting);
     settingsWrapper.appendChild(fasterAutoplayDiv);
     
+    // Dragon Plant setting
+    const dragonPlantDiv = document.createElement('div');
+    dragonPlantDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    const dragonPlantSetting = createCheckboxSetting('enableDragonPlant', 'Enable Autoplant', 'Enable Autoplant (Autoseller) during raids', false);
+    dragonPlantDiv.appendChild(dragonPlantSetting);
+    settingsWrapper.appendChild(dragonPlantDiv);
+    
     // Add settings wrapper to container
     container.appendChild(settingsWrapper);
     
@@ -3323,6 +3166,7 @@ const DEFAULT_SETTINGS = {
     raidDelay: DEFAULT_RAID_START_DELAY,
     autoRefillStamina: false,
     fasterAutoplay: false,
+    enableDragonPlant: false,
     enabledRaidMaps: []
 };
 
@@ -3355,6 +3199,7 @@ function sanitizeSettings(settings) {
     // Validate and sanitize boolean settings
     sanitized.autoRefillStamina = validateBoolean(settings.autoRefillStamina) ? settings.autoRefillStamina : false;
     sanitized.fasterAutoplay = validateBoolean(settings.fasterAutoplay) ? settings.fasterAutoplay : false;
+    sanitized.enableDragonPlant = validateBoolean(settings.enableDragonPlant) ? settings.enableDragonPlant : false;
     
     // Validate and sanitize raid maps
     if (validateRaidMaps(settings.enabledRaidMaps)) {
@@ -3392,7 +3237,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id.startsWith('raid-')) {
+            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id.startsWith('raid-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -3478,6 +3323,16 @@ function loadAndApplySettings() {
             const checkbox = document.getElementById('fasterAutoplay');
             if (checkbox) {
                 checkbox.checked = settings.fasterAutoplay;
+                // Add auto-save listener
+                checkbox.addEventListener('change', autoSaveSettings);
+            }
+        }
+        
+        // Load Dragon Plant setting from Raid Hunter settings
+        if (settings.enableDragonPlant !== undefined) {
+            const checkbox = document.getElementById('enableDragonPlant');
+            if (checkbox) {
+                checkbox.checked = settings.enableDragonPlant;
                 // Add auto-save listener
                 checkbox.addEventListener('change', autoSaveSettings);
             }
@@ -3583,7 +3438,7 @@ function init() {
     setupBoardAnalyzerCoordination();
     
     // Check for existing raids immediately and after a delay (only if automation is enabled)
-    if (isAutomationEnabled === AUTOMATION_ENABLED) {
+    if (isAutomationActive()) {
         checkForExistingRaids();
         setTimeout(checkForExistingRaids, MODAL_OPEN_DELAY);
     } else {
@@ -3626,39 +3481,25 @@ function getCurrentRoomId() {
 
 // Function to find quest button with multiple fallback selectors
 function findQuestButton() {
-    // First, try to find by quest icon (normal state) - check both selected and unselected
-    const questIconButton = document.querySelector('button img[src*="quest.png"]')?.closest('button');
-    if (questIconButton) {
-        return questIconButton;
+    // Try image-based selectors first
+    const imageSelectors = [
+        'button img[src*="quest.png"]',
+        'button img[src*="enemy.png"]', // For raiding state
+        'button img[alt="Quests"]'
+    ];
+    
+    for (const selector of imageSelectors) {
+        const button = document.querySelector(selector)?.closest('button');
+        if (button) return button;
     }
     
-    // Then, look for any button with "Raiding" text - check both selected and unselected
-    const allButtons = document.querySelectorAll('button');
-    for (const button of allButtons) {
+    // Try text-based selectors
+    const textMatches = ['Raiding', 'Quest Log', 'Quests'];
+    const buttons = document.querySelectorAll('button');
+    
+    for (const button of buttons) {
         const span = button.querySelector('span');
-        if (span && span.textContent === 'Raiding') {
-            return button;
-        }
-    }
-    
-    // Look for any button with "Quest Log" text - check both selected and unselected
-    for (const button of allButtons) {
-        const span = button.querySelector('span');
-        if (span && span.textContent === 'Quest Log') {
-            return button;
-        }
-    }
-    
-    // Fallback: look for any button with quest-related alt text - check both selected and unselected
-    const questAltButton = document.querySelector('button img[alt="Quests"]')?.closest('button');
-    if (questAltButton) {
-        return questAltButton;
-    }
-    
-    // Additional fallback: look for any button with "Quests" text
-    for (const button of allButtons) {
-        const span = button.querySelector('span');
-        if (span && span.textContent === 'Quests') {
+        if (span && textMatches.includes(span.textContent)) {
             return button;
         }
     }
@@ -4019,7 +3860,7 @@ function startQuestButtonValidation() {
         } catch (error) {
             console.error('[Raid Hunter] Error in quest button validation:', error);
         }
-    }, 30000); // Check every 30 seconds
+    }, QUEST_BUTTON_VALIDATION_INTERVAL);
 }
 
 // Function to stop monitoring autoplay state changes
