@@ -385,12 +385,36 @@ function cleanupCoordination() {
 // 4. DOM Functions
 // =======================
 
+function isInQuestLog(element) {
+    // Check if we're inside a Quest Log widget
+    let current = element;
+    while (current && current !== document.body) {
+        // Look for the widget header with "Quest Log" text
+        const widgetTop = current.querySelector?.('.widget-top-text p');
+        if (widgetTop && widgetTop.textContent === 'Quest Log') {
+            return true;
+        }
+        // Also check if current element is the widget top
+        if (current.classList?.contains('widget-top-text')) {
+            const p = current.querySelector('p');
+            if (p && p.textContent === 'Quest Log') {
+                return true;
+            }
+        }
+        current = current.parentElement;
+    }
+    return false;
+}
+
 function findBoostedMapSection() {
     const allSections = document.querySelectorAll('.frame-1.surface-regular');
     for (const section of allSections) {
         const titleElement = section.querySelector('p.text-whiteHighlight');
         if (titleElement && titleElement.textContent === 'Daily boosted map') {
-            return section;
+            // Only return if we're in the Quest Log
+            if (isInQuestLog(section)) {
+                return section;
+            }
         }
     }
     return null;
@@ -415,6 +439,9 @@ function insertButtons() {
         const titleContainer = titleElement.parentElement;
         
         if (titleContainer) {
+            // Find the map name element (span with the action-link class)
+            const mapNameElement = titleContainer.querySelector('span.action-link');
+            
             const buttonContainer = document.createElement('div');
             buttonContainer.style.cssText = `display: flex; gap: 4px; margin-top: 4px;`;
             
@@ -424,7 +451,12 @@ function insertButtons() {
             const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, 'Settings', 'blue', openSettingsModal);
             buttonContainer.appendChild(settingsButton);
             
-            titleElement.parentNode.insertBefore(buttonContainer, titleElement.nextSibling);
+            // Insert after map name if found, otherwise after title
+            if (mapNameElement) {
+                mapNameElement.parentNode.insertBefore(buttonContainer, mapNameElement.nextSibling);
+            } else {
+                titleElement.parentNode.insertBefore(buttonContainer, titleElement.nextSibling);
+            }
             
             updateToggleButton();
             
@@ -1590,8 +1622,11 @@ function monitorQuestLog() {
                             node.querySelector?.('*')?.textContent?.includes('Daily boosted map');
                         
                         if (hasBoostedMap && !document.getElementById(TOGGLE_BUTTON_ID)) {
-                            insertButtons();
-                            break;
+                            // Check if this is in Quest Log before injecting
+                            if (isInQuestLog(node)) {
+                                insertButtons();
+                                break;
+                            }
                         }
                     }
                 }

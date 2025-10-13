@@ -776,7 +776,7 @@ function showSettingsModal() {
       </div>
       <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
         <span style="color: #ccc;">${t('autoplayRefreshMinutes')}</span>
-        <input type="number" id="autoplay-refresh-minutes" value="${config.autoplayRefreshMinutes}" min="1" max="120" style="width: 80px; padding: 4px 8px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px;">
+        <input type="number" id="autoplay-refresh-minutes" value="${config.autoplayRefreshMinutes}" min="1" max="120" style="width: 60px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center;">
       </div>
     `;
     
