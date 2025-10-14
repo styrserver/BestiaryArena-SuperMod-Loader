@@ -10167,59 +10167,46 @@ async function updatePanelWithAnalysis(analysis) {
         });
       }
       
-      // Equipment and creature suggestions (based on top 10 runs from IndexedDB)
+      // Popular creature-equipment combinations (based on top 50 runs from IndexedDB)
       const equipmentSuggestions = [];
-      const creatureSuggestions = [];
       
-      // Get top 10 runs for this room from IndexedDB (same source as Best Available Setup)
+      // Get top 50 runs for this room from IndexedDB (same source as Best Available Setup)
       const currentRoomId = analysis.roomId || analysis.currentBoard?.roomId || dataCollector.getCurrentBoardData()?.roomId;
       if (!currentRoomId) {
-        console.log('[Board Advisor] No room ID found for equipment/creature suggestions');
+        console.log('[Board Advisor] No room ID found for popular combinations');
         return;
       }
       
       // Use IndexedDB data instead of performanceTracker.runs for consistent monster names
       const currentRoomRuns = analysis.runs || [];
-      console.log('[Board Advisor] Equipment/creature suggestions - room runs data:', {
+      console.log('[Board Advisor] Popular combinations - room runs data:', {
         currentRoomId,
         currentRoomRunsLength: currentRoomRuns.length,
         analysisRuns: analysis.runs?.length || 0
       });
       
-      const top10Runs = currentRoomRuns.sort((a, b) => {
+      const topRuns = currentRoomRuns.sort((a, b) => {
         if (config.focusArea === 'ticks') {
           return a.ticks - b.ticks;
         } else {
           return b.rankPoints - a.rankPoints;
         }
-      }).slice(0, 10);
+      }).slice(0, 50);
       
-      if (top10Runs.length > 0) {
-        // Analyze equipment patterns in top 10 runs
-        const equipmentPatterns = new Map();
-        const creaturePatterns = new Map();
+      if (topRuns.length > 0) {
+        // Analyze creature-equipment combinations in top 50 runs
+        const combinationPatterns = new Map();
         
-        top10Runs.forEach(run => {
+        topRuns.forEach(run => {
           if (run.boardSetup) {
             run.boardSetup.forEach(piece => {
-              // Equipment analysis
-              if (piece.equipId) {
-                const key = piece.equipId;
-                if (!equipmentPatterns.has(key)) {
-                  equipmentPatterns.set(key, { count: 0, equipmentName: piece.equipmentName || getEquipmentName(piece.equipId) });
-                }
-                equipmentPatterns.get(key).count++;
-              }
-              
-              // Creature analysis - prioritize existing monster name from piece data
-              if (piece.monsterId) {
-                const key = piece.monsterId;
+              // Only track pieces that have both a creature and equipment
+              if (piece.monsterId && piece.equipId) {
                 let monsterName = piece.monsterName;
                 
-                // Only try to resolve name if we don't have one or it's the same as monsterId
+                // Resolve monster name if needed
                 if (!monsterName || monsterName === piece.monsterId) {
                   try {
-                    // Try to get from player context
                     const playerContext = globalThis.state?.player?.getSnapshot()?.context;
                     if (playerContext?.monsters) {
                       const monster = playerContext.monsters.find(m => m.id === piece.monsterId);
@@ -10228,7 +10215,6 @@ async function updatePanelWithAnalysis(analysis) {
                       }
                     }
                     
-                    // Try to get from game state utils
                     if (!monsterName && globalThis.state?.utils?.getMonster) {
                       try {
                         const monsterData = globalThis.state.utils.getMonster(piece.monsterId);
@@ -10236,7 +10222,6 @@ async function updatePanelWithAnalysis(analysis) {
                           monsterName = monsterData.metadata.name;
                         }
                       } catch (e) {
-                        // Try as numeric ID
                         const numericId = parseInt(piece.monsterId);
                         if (!isNaN(numericId)) {
                           const monsterData = globalThis.state.utils.getMonster(numericId);
@@ -10251,49 +10236,49 @@ async function updatePanelWithAnalysis(analysis) {
                   }
                 }
                 
-                // Final fallback to monster ID if no name found
                 if (!monsterName) {
                   monsterName = piece.monsterId;
                 }
                 
-                if (!creaturePatterns.has(key)) {
-                  creaturePatterns.set(key, { count: 0, monsterName: monsterName });
+                const equipmentName = piece.equipmentName || getEquipmentName(piece.equipId);
+                const key = `${piece.monsterId}|${piece.equipId}`;
+                
+                if (!combinationPatterns.has(key)) {
+                  combinationPatterns.set(key, { 
+                    count: 0, 
+                    monsterName: monsterName,
+                    equipmentName: equipmentName
+                  });
                 }
-                creaturePatterns.get(key).count++;
+                combinationPatterns.get(key).count++;
               }
             });
           }
         });
         
-        // Get most popular equipment (appearing in 60%+ of top runs)
-        for (const [equipId, pattern] of equipmentPatterns) {
-          const frequency = pattern.count / top10Runs.length;
-          if (frequency >= 0.6) {
-            equipmentSuggestions.push(`${pattern.equipmentName} (${Math.round(frequency * 100)}%)`);
-          }
+        // Get all combinations from top runs (sorted by frequency)
+        for (const [key, pattern] of combinationPatterns) {
+          const frequency = pattern.count / topRuns.length;
+          equipmentSuggestions.push(`${pattern.monsterName} + ${pattern.equipmentName} (${Math.round(frequency * 100)}%)`);
         }
         
-        // Get most popular creatures (appearing in 60%+ of top runs)
-        for (const [monsterId, pattern] of creaturePatterns) {
-          const frequency = pattern.count / top10Runs.length;
-          if (frequency >= 0.6) {
-            creatureSuggestions.push(`${pattern.monsterName} (${Math.round(frequency * 100)}%)`);
-          }
-        }
+        // Sort by frequency (descending)
+        equipmentSuggestions.sort((a, b) => {
+          const freqA = parseInt(a.match(/\((\d+)%\)/)[1]);
+          const freqB = parseInt(b.match(/\((\d+)%\)/)[1]);
+          return freqB - freqA;
+        });
       }
       
-      console.log('[Board Advisor] Equipment/creature suggestions generated:', {
-        equipmentSuggestions: equipmentSuggestions.length,
-        creatureSuggestions: creatureSuggestions.length,
-        equipmentList: equipmentSuggestions,
-        creatureList: creatureSuggestions
+      console.log('[Board Advisor] Popular combinations generated:', {
+        combinationCount: equipmentSuggestions.length,
+        combinations: equipmentSuggestions
       });
       
-      if (equipmentSuggestions.length > 0 || creatureSuggestions.length > 0) {
+      if (equipmentSuggestions.length > 0) {
         recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px; border: 1px solid #61AFEF;">
-          <div style="font-weight: 600; color: #61AFEF; font-size: 11px;">⚔️ Popular Choices</div>
-          ${equipmentSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Equipment: ${equipmentSuggestions.join(', ')}</div>` : ''}
-          ${creatureSuggestions.length > 0 ? `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">Creatures: ${creatureSuggestions.join(', ')}</div>` : ''}
+          <div style="font-weight: 600; color: #61AFEF; font-size: 11px;">⚔️ Popular Combinations (top ${topRuns.length} runs)</div>
+          ${equipmentSuggestions.map(combo => `<div style="font-size: 10px; color: #ABB2BF; margin-top: 2px;">• ${combo}</div>`).join('')}
         </div>`;
       }
       

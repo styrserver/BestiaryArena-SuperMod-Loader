@@ -109,6 +109,7 @@
         autoplantChecked: false,
         autosellChecked: false,
         autosqueezeChecked: false,
+        lastActiveMode: 'autosell', // Track last active mode ('autosell' or 'autoplant')
         autosellGenesMin: UI_CONSTANTS.SELL_GENE_MIN,
         autosellGenesMax: UI_CONSTANTS.SELL_GENE_MAX,
         autosqueezeGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
@@ -1119,8 +1120,12 @@
         checkbox.addEventListener('change', () => {
             console.log('[Autoplant] Checkbox changed, checked:', checkbox.checked);
             
-            // Save to localStorage
-            setSettings({ autoplantChecked: checkbox.checked });
+            // Save to localStorage and track last active mode
+            if (checkbox.checked) {
+                setSettings({ autoplantChecked: checkbox.checked, lastActiveMode: 'autoplant' });
+            } else {
+                setSettings({ autoplantChecked: checkbox.checked });
+            }
             
             // Update status text
             updateAutoplantStatus();
@@ -1637,12 +1642,19 @@
         if (typeof saved[opts.persistKey + 'GenesMax'] === 'number') inputMax.value = saved[opts.persistKey + 'GenesMax'];
         if (typeof saved[opts.persistKey + 'MinCount'] === 'number') minCountInput.value = saved[opts.persistKey + 'MinCount'];
         function saveSettings() {
-            setSettings({
+            const settingsUpdate = {
                 [opts.persistKey + 'Checked']: checkbox.checked,
                 [opts.persistKey + 'GenesMin']: parseInt(inputMin.value, 10),
                 [opts.persistKey + 'GenesMax']: parseInt(inputMax.value, 10),
                 [opts.persistKey + 'MinCount']: parseInt(minCountInput.value, 10)
-            });
+            };
+            
+            // Track last active mode when autosell is checked
+            if (opts.persistKey === 'autosell' && checkbox.checked) {
+                settingsUpdate.lastActiveMode = 'autosell';
+            }
+            
+            setSettings(settingsUpdate);
             
             // Update widget visibility when checkbox state changes
             createAutosellerSessionWidget();
@@ -2456,7 +2468,13 @@
         widget.id = UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET;
         
         // Create widget using the same structure that worked in manual injection
-        const soldLabel = settings.autoplantChecked ? 'Devoured:' : 'Sold:';
+        // Determine label: if autoplant is ON -> 'Devoured', if autosell is ON -> 'Sold', 
+        // if both OFF -> use last active mode
+        const soldLabel = settings.autoplantChecked 
+            ? 'Devoured:' 
+            : (settings.autosellChecked 
+                ? 'Sold:' 
+                : (settings.lastActiveMode === 'autoplant' ? 'Devoured:' : 'Sold:'));
         widget.innerHTML = `
             <div class="widget-top">Autoseller session</div>
             <div class="widget-bottom p-0">
@@ -2509,22 +2527,30 @@
         
         const currentValues = stateManager.getSessionStats();
         
-        // Update the sold/devoured label based on autoplant setting
+        // Update the sold/devoured label based on current or last active mode
         const settings = getSettings();
-        const soldLabel = settings.autoplantChecked ? 'Devoured:' : 'Sold:';
+        // Determine label: if autoplant is ON -> 'Devoured', if autosell is ON -> 'Sold',
+        // if both OFF -> use last active mode
+        const soldLabel = settings.autoplantChecked 
+            ? 'Devoured:' 
+            : (settings.autosellChecked 
+                ? 'Sold:' 
+                : (settings.lastActiveMode === 'autoplant' ? 'Devoured:' : 'Sold:'));
+        const isShowingDevoured = soldLabel === 'Devoured:';
+        
         if (statEls.soldLabel) {
             statEls.soldLabel.textContent = soldLabel;
         }
         
-        // Update stats directly - show devoured stats when autoplant is enabled, sold stats otherwise
+        // Update stats directly - show devoured stats when showing "Devoured", sold stats when showing "Sold"
         if (statEls.soldCount) {
-            const count = settings.autoplantChecked ? currentValues.devouredCount : currentValues.soldCount;
+            const count = isShowingDevoured ? currentValues.devouredCount : currentValues.soldCount;
             statEls.soldCount.textContent = `${count}`;
         }
         if (statEls.soldGold) {
             const goldText = statEls.soldGold.querySelector('span');
             if (goldText) {
-                const gold = settings.autoplantChecked ? currentValues.devouredGold : currentValues.soldGold;
+                const gold = isShowingDevoured ? currentValues.devouredGold : currentValues.soldGold;
                 goldText.textContent = `${gold}`;
             }
         }
@@ -2714,8 +2740,12 @@
                 const newState = gameCheckbox.getAttribute('aria-checked') === 'true';
                 console.log(`[${modName}] Game checkbox clicked, saving to localStorage: ${newState}`);
                 
-                // Save to localStorage
-                setSettings({ autoplantChecked: newState });
+                // Save to localStorage and track last active mode
+                if (newState) {
+                    setSettings({ autoplantChecked: newState, lastActiveMode: 'autoplant' });
+                } else {
+                    setSettings({ autoplantChecked: newState });
+                }
                 
                 // Apply to mod checkbox (if settings modal is open)
                 applyLocalStorageToModCheckbox();
@@ -2936,7 +2966,7 @@
             },
             enableDragonPlant: () => {
                 console.log('[Autoseller] enableDragonPlant() called - updating settings');
-                setSettings({ autoplantChecked: true });
+                setSettings({ autoplantChecked: true, lastActiveMode: 'autoplant' });
                 return true;
             },
             disableDragonPlant: () => {

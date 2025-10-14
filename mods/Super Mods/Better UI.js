@@ -1222,9 +1222,15 @@ function updateFavoriteHearts(targetUniqueId = null) {
     return;
   }
   
-  // Get all creatures (don't filter by container like max creatures/shinies)
-  const creatures = Array.from(getVisibleCreatures());
-  console.log('[Better UI] Found', creatures.length, 'visible creatures in collection');
+  // Get all creatures, but exclude those inside the Impact Analyzer
+  const allCreatures = Array.from(getVisibleCreatures());
+  const creatures = allCreatures.filter(imgEl => {
+    // Exclude creatures inside the Impact Analyzer panel
+    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
+                         imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
+    return !isInAnalyzer;
+  });
+  console.log('[Better UI] Found', creatures.length, 'visible creatures in collection (excluded', allCreatures.length - creatures.length, 'analyzer creatures)');
   
   // If no creatures visible, don't remove existing hearts - collection might be transitioning
   if (creatures.length === 0) {
@@ -1279,7 +1285,14 @@ function updateFavoriteHearts(targetUniqueId = null) {
 }
 
 // Helper: Update a single creature's favorite heart (optimized for single-creature updates)
-function updateSingleFavoriteHeart(targetUniqueId, creatures, monsters) {
+function updateSingleFavoriteHeart(targetUniqueId, allCreatures, monsters) {
+  // Filter out analyzer creatures
+  const creatures = allCreatures.filter(imgEl => {
+    const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
+                         imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
+    return !isInAnalyzer;
+  });
+  
   resetCreatureMatchingIndex();
   
   let targetFound = false;
