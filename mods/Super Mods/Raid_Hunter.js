@@ -3039,7 +3039,7 @@ function createRaidMapSelection() {
         flex-direction: column;
         gap: 8px;
         flex: 1;
-        max-height: 250px;
+        max-height: 255px;
         overflow-y: auto;
         border: 1px solid ${COLOR_BORDER_DARK};
         border-radius: 3px;

@@ -7185,7 +7185,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           'yasir-trading-contract': () => ({ key: 'yasirTradingContract', name: 'Yasir\'s Trading Contract' }),
           'boosted-map': () => ({ key: 'dailyBoostedMap', name: 'Daily Boosted Map' }),
           'outfit-bag': () => ({ key: 'outfitBag1', name: 'Outfit Bag' }),
-          'nickname-monster': () => ({ key: 'nicknameMonster', name: 'Nickname Creature' })
+          'nickname-monster': () => ({ key: 'nicknameMonster', name: 'Nickname Creature' }),
+          'rune-blank': () => ({ key: 'runeBlank', name: 'Blank Rune' }),
+          'rune-hp': () => ({ key: 'runeHp', name: 'Hitpoints Rune' }),
+          'rune-ap': () => ({ key: 'runeAp', name: 'Ability Power Rune' }),
+          'rune-ad': () => ({ key: 'runeAd', name: 'Attack Damage Rune' }),
+          'rune-ar': () => ({ key: 'runeAr', name: 'Armor Rune' }),
+          'rune-mr': () => ({ key: 'runeMr', name: 'Magic Resist Rune' })
         };
 
         for (const [pattern, mapper] of Object.entries(imageMapping)) {

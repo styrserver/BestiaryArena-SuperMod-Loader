@@ -30,6 +30,21 @@ const FALLBACK_RAID_ROOM_IDS = [
     'vbank', 'vdhar'
 ];
 
+// Equipment that cannot be on boosted maps
+const EXCLUDED_EQUIPMENT = [
+    'Amazon Armor',
+    'Amazon Helmet',
+    'Amazon Shield',
+    'Earthborn Titan Armor',
+    'Fireborn Giant Armor',
+    'Hailstorm Rod',
+    'Jester Hat',
+    'Paladin Armor',
+    'Rubber Cap',
+    'Steel Boots',
+    'Windborn Colossus Armor'
+];
+
 // Get raid room IDs dynamically (raids cannot be boosted)
 function getRaidRoomIds() {
     try {
@@ -220,8 +235,14 @@ function shouldFarmBoostedMap() {
             return { shouldFarm: false, reason: `Map "${roomName}" not enabled` };
         }
         
-        // Check if equipment is enabled
+        // Check if equipment is excluded
         const equipmentName = getEquipmentName(boostedData.equipId);
+        if (EXCLUDED_EQUIPMENT.includes(equipmentName)) {
+            console.log(`[Better Boosted Maps] Equipment "${equipmentName}" is excluded from boosted maps`);
+            return { shouldFarm: false, reason: `Equipment "${equipmentName}" is excluded` };
+        }
+        
+        // Check if equipment is enabled
         const equipId = equipmentName.toLowerCase().replace(/[^a-z0-9]/g, '-');
         const isEquipmentEnabled = settings.equipment?.[equipId] !== false;
         
@@ -861,7 +882,7 @@ function createMapsTab(settings) {
         flex-direction: column;
         gap: 2px;
         flex: 1;
-        max-height: 260px;
+        max-height: 250px;
         overflow-y: auto;
         border: 1px solid #555;
         border-radius: 3px;
@@ -901,7 +922,8 @@ function createMapsTab(settings) {
                     `boosted-maps-map-${id}`,
                     name,
                     '',
-                    settings.maps?.[id] !== false
+                    settings.maps?.[id] !== false,
+                    '14px'
                 );
                 scrollContainer.appendChild(mapDiv);
             });
@@ -1049,7 +1071,7 @@ function createEquipmentTab(settings) {
         flex-direction: column;
         gap: 2px;
         flex: 1;
-        max-height: 260px;
+        max-height: 250px;
         overflow-y: auto;
         border: 1px solid #555;
         border-radius: 3px;
@@ -1059,20 +1081,24 @@ function createEquipmentTab(settings) {
     
     const allEquipment = window.equipmentDatabase?.ALL_EQUIPMENT || [];
     
-    if (allEquipment.length === 0) {
+    // Filter out excluded equipment
+    const availableEquipment = allEquipment.filter(equipName => !EXCLUDED_EQUIPMENT.includes(equipName));
+    
+    if (availableEquipment.length === 0) {
         const noEquipment = document.createElement('div');
         noEquipment.textContent = 'No equipment available';
         noEquipment.className = 'pixel-font-14';
         noEquipment.style.color = '#888';
         scrollContainer.appendChild(noEquipment);
     } else {
-        allEquipment.forEach(equipName => {
+        availableEquipment.forEach(equipName => {
             const equipId = equipName.toLowerCase().replace(/[^a-z0-9]/g, '-');
             const equipDiv = createCheckboxSetting(
                 `boosted-maps-equipment-${equipId}`,
                 equipName,
                 '',
-                settings.equipment?.[equipId] !== false
+                settings.equipment?.[equipId] !== false,
+                '14px'
             );
             scrollContainer.appendChild(equipDiv);
         });
@@ -1119,7 +1145,7 @@ function createEquipmentTab(settings) {
     return wrapper;
 }
 
-function createCheckboxSetting(id, label, description, checked = false) {
+function createCheckboxSetting(id, label, description, checked = false, fontSize = null) {
     const settingDiv = document.createElement('div');
     settingDiv.style.cssText = `
         margin-bottom: 0px;
@@ -1156,6 +1182,7 @@ function createCheckboxSetting(id, label, description, checked = false) {
         font-weight: bold;
         color: #fff;
         cursor: pointer;
+        ${fontSize ? `font-size: ${fontSize};` : ''}
     `;
     
     checkboxContainer.appendChild(checkbox);

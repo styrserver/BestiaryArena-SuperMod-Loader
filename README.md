@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 21 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -157,6 +157,14 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Support for all game modes (manual, autoplay, sandbox)
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
+
+##### Better Boosted Maps
+Automates daily boosted map farming with intelligent coordination:
+- Automatically farms the daily boosted map when conditions are met
+- Coordinates with Raid Hunter and Better Tasker to prevent automation conflicts
+- Customizable map and equipment selection for targeted farming
+- Auto-setup and autoplay integration for seamless execution
+- Configurable settings including stamina refill, faster autoplay, and autoplant
 
 ##### Better Exaltation Chest
 Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
