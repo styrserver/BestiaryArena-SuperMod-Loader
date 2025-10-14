@@ -98,15 +98,38 @@
     // Cleanup references
     let boardSubscription1 = null;
     let boardSubscription2 = null;
+    let playerSubscription = null;
     let debounceTimer = null;
+    
+    // Event handler references for cleanup
+    let emitNewGameHandler1 = null;
+    let emitEndGameHandler1 = null;
+    let emitNewGameHandler2 = null;
+    let newGameHandler = null;
     
     // Global references for cleanup
     let originalFetch = null;
     let messageListener = null;
 
+    // Dragon Plant Autocollect Constants
+    const DRAGON_PLANT_CONFIG = {
+        GOLD_THRESHOLD: 100000,        // Collect when >= 100k gold
+        ITEM_ID: '37021',              // Dragon Plant item ID
+        MAX_COLLECT_ITERATIONS: 100,   // Safety limit for collect loop (can collect up to 10M gold)
+        COOLDOWN_MS: 10000,            // 10 seconds cooldown between collections
+        TIMINGS: {
+            INVENTORY_OPEN: 400,       // Wait for inventory to open
+            ITEM_DETAILS_OPEN: 300,    // Wait for item details modal to open
+            AFTER_COLLECT: 500,        // Wait after clicking Collect (API rate limit: min 400ms)
+            ESC_BETWEEN: 150,          // Wait between ESC key presses
+            VERIFY_SUCCESS: 200        // Wait before verifying collection success
+        }
+    };
+
     // Default Settings
     const DEFAULT_SETTINGS = {
         autoplantChecked: false,
+        autoplantAutocollectChecked: false,
         autosellChecked: false,
         autosqueezeChecked: false,
         lastActiveMode: 'autosell', // Track last active mode ('autosell' or 'autoplant')
@@ -168,6 +191,43 @@
     function getGenes(m) {
         return (m.hp || 0) + (m.ad || 0) + (m.ap || 0) + (m.armor || 0) + (m.magicResist || 0);
     }
+    
+    // Dragon Plant Helper Functions
+    const getPlantGold = () => globalThis.state?.player?.getSnapshot?.()?.context?.questLog?.plant?.gold;
+    
+    const sendEscKey = () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { 
+            key: 'Escape', 
+            code: 'Escape', 
+            keyCode: 27, 
+            bubbles: true 
+        }));
+    };
+    
+    const findButtonByText = (text, selector = 'button') => {
+        const buttons = document.querySelectorAll(selector);
+        for (const button of buttons) {
+            if (button.textContent.includes(text)) {
+                return button;
+            }
+        }
+        return null;
+    };
+    
+    const findDragonPlantCollectButton = () => {
+        // Find the Collect button with the plant SVG icon (more specific than just text)
+        const buttons = document.querySelectorAll('button.surface-green');
+        for (const button of buttons) {
+            const hasPlantIcon = button.querySelector('svg.lucide-sprout');
+            const hasCollectText = button.textContent.includes('Collect');
+            const isNotDisabled = !button.hasAttribute('disabled');
+            
+            if (hasPlantIcon && hasCollectText && isNotDisabled) {
+                return button;
+            }
+        }
+        return null;
+    };
     
     function createLabel(text, options = {}) {
         return createElement('span', {
@@ -1088,8 +1148,8 @@
         placeholder.style.alignItems = 'flex-start';
         placeholder.style.justifyContent = 'flex-start';
         placeholder.style.height = '100%';
-        placeholder.style.padding = '10px';
-        placeholder.style.gap = '16px';
+        placeholder.style.padding = '4px';
+        placeholder.style.gap = '6px';
         
         // Add the checkbox at the top
         const checkboxContainer = document.createElement('div');
@@ -1176,6 +1236,40 @@
         
         checkboxContainer.appendChild(checkboxLabel);
         placeholder.appendChild(checkboxContainer);
+
+        // Autocollect Dragon Plant checkbox
+        const autocollectCheckboxContainer = document.createElement('div');
+        autocollectCheckboxContainer.className = 'mt-0.5 px-0.5';
+        
+        const autocollectCheckboxLabel = document.createElement('label');
+        autocollectCheckboxLabel.className = 'pixel-font-16 flex text-whiteBrightest items-center gap-1.5';
+        autocollectCheckboxLabel.style.color = '#ffffff';
+        autocollectCheckboxLabel.style.display = 'flex';
+        autocollectCheckboxLabel.style.alignItems = 'center';
+        autocollectCheckboxLabel.style.gap = '6px';
+        
+        const autocollectCheckbox = document.createElement('input');
+        autocollectCheckbox.type = 'checkbox';
+        autocollectCheckbox.id = 'autoplant-autocollect-checkbox';
+        autocollectCheckbox.className = 'pixel-font-16';
+        autocollectCheckbox.tabIndex = 2;
+        autocollectCheckbox.style.marginRight = '8px';
+        
+        // Set initial state from saved settings
+        autocollectCheckbox.checked = initialSettings.autoplantAutocollectChecked !== undefined ? initialSettings.autoplantAutocollectChecked : false;
+        
+        autocollectCheckbox.addEventListener('change', () => {
+            setSettings({ autoplantAutocollectChecked: autocollectCheckbox.checked });
+        });
+        
+        autocollectCheckboxLabel.appendChild(autocollectCheckbox);
+        
+        const autocollectLabelText = document.createElement('span');
+        autocollectLabelText.textContent = 'Autocollect Dragon Plant';
+        autocollectCheckboxLabel.appendChild(autocollectLabelText);
+        
+        autocollectCheckboxContainer.appendChild(autocollectCheckboxLabel);
+        placeholder.appendChild(autocollectCheckboxContainer);
 
         // Creature selection state
         let availableCreatures = [...getAllAutoplantCreatures()];
@@ -1797,9 +1891,13 @@
                                     }
                                     
                                     const goldReceived = result.goldValue;
+                                    const currentPlantGold = getPlantGold();
                                     
-                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold`);
+                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold | Plant total: ${currentPlantGold || 'unknown'} gold`);
                                     stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
+                                    
+                                    // Check if we should autocollect now that plant gold has increased
+                                    checkDragonPlantAutocollect();
                                 }
                             }
                         } catch (e) {
@@ -2596,21 +2694,23 @@
             });
             
             // Listen for game start/end events for additional widget updates
-            globalThis.state.board.on('emitNewGame', () => {
+            emitNewGameHandler1 = () => {
                 if (shouldShowAutosellerWidget()) {
                     setTimeout(() => {
                         updateAutosellerSessionWidget();
                     }, 100);
                 }
-            });
+            };
+            globalThis.state.board.on('emitNewGame', emitNewGameHandler1);
             
-            globalThis.state.board.on('emitEndGame', () => {
+            emitEndGameHandler1 = () => {
                 if (shouldShowAutosellerWidget()) {
                     setTimeout(() => {
                         updateAutosellerSessionWidget();
                     }, 100);
                 }
-            });
+            };
+            globalThis.state.board.on('emitEndGame', emitEndGameHandler1);
         } else {
             console.warn(`[${modName}][WARN] Game state API not available for widget management`);
         }
@@ -2790,7 +2890,7 @@
     function setupGameStartListener() {
         if (globalThis.state?.board?.on) {
             // Listen for game start events
-            globalThis.state.board.on('emitNewGame', (event) => {
+            emitNewGameHandler2 = (event) => {
                 // Skip during Board Analyzer runs
                 if (window.__modCoordination?.boardAnalyzerRunning) {
                     return;
@@ -2799,17 +2899,19 @@
                 console.log(`[${modName}] Game started, checking for creatures to devour...`);
                 // Check if there are creatures that would be devoured (not in ignore list)
                 checkAndActivateDragonPlant();
-            });
+            };
+            globalThis.state.board.on('emitNewGame', emitNewGameHandler2);
             
             // Also listen for other game events to debug
-            globalThis.state.board.on('newGame', (event) => {
+            newGameHandler = (event) => {
                 // Skip during Board Analyzer runs
                 if (window.__modCoordination?.boardAnalyzerRunning) {
                     return;
                 }
                 
                 checkAndActivateDragonPlant();
-            });
+            };
+            globalThis.state.board.on('newGame', newGameHandler);
             
             console.log(`[${modName}] Game start listener setup complete`);
         } else {
@@ -2822,6 +2924,12 @@
         
         // Only proceed if autoplant is enabled
         if (!settings.autoplantChecked) return;
+        
+        // Log current plant gold
+        const plantGold = getPlantGold();
+        if (plantGold !== undefined && plantGold !== null) {
+            console.log(`[Autoseller] Dragon Plant current gold: ${plantGold}`);
+        }
         
         // Check if we're in an autoplay session
         const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
@@ -2871,6 +2979,238 @@
         }
     }
 
+    // Dragon Plant Autocollect State
+    let lastAutocollectTime = 0;
+    let isCollecting = false; // Flag to prevent concurrent collection
+    
+    function checkDragonPlantAutocollect() {
+        const settings = getSettings();
+        
+        // Only proceed if autocollect is enabled
+        if (!settings.autoplantAutocollectChecked) return;
+        
+        // Skip if already collecting
+        if (isCollecting) {
+            console.log('[Autoseller] Collection already in progress, skipping');
+            return;
+        }
+        
+        // Skip if Board Analyzer is running
+        if (window.__modCoordination?.boardAnalyzerRunning) {
+            console.log('[Autoseller] Board Analyzer is running, skipping autocollect');
+            return;
+        }
+        
+        // Check cooldown
+        const now = Date.now();
+        if (now - lastAutocollectTime < DRAGON_PLANT_CONFIG.COOLDOWN_MS) {
+            console.log('[Autoseller] Autocollect on cooldown');
+            return;
+        }
+        
+    // Get current plant gold from game state
+    const plantGold = getPlantGold();
+    
+    if (plantGold === undefined || plantGold === null) {
+        console.log('[Autoseller] Could not get plant gold from game state');
+        return;
+    }
+        
+        // Check if gold is over threshold
+        if (plantGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+            console.log(`[Autoseller] Dragon Plant ready to collect: ${plantGold} gold (threshold: ${DRAGON_PLANT_CONFIG.GOLD_THRESHOLD})`);
+            collectDragonPlant();
+        } else {
+            console.log(`[Autoseller] Dragon Plant gold: ${plantGold} / ${DRAGON_PLANT_CONFIG.GOLD_THRESHOLD} (${Math.round((plantGold / DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) * 100)}% to threshold)`);
+        }
+    }
+    
+    // Helper: Open inventory via API or button click
+    const openInventory = () => {
+        // Check if inventory is already open
+        try {
+            const currentMode = globalThis.state?.menu?.getSnapshot?.()?.context?.mode;
+            if (currentMode === 'inventory') {
+                console.log('[Autoseller] Inventory already open');
+                return true;
+            }
+        } catch (error) {
+            // Continue to opening logic
+        }
+        
+        try {
+            if (globalThis.state?.menu?.send) {
+                console.log('[Autoseller] Opening inventory via Game State API');
+                globalThis.state.menu.send({
+                    type: 'setState',
+                    fn: (prev) => ({ ...prev, mode: 'inventory' })
+                });
+                return true;
+            }
+        } catch (error) {
+            console.log('[Autoseller] API method failed, using fallback:', error);
+        }
+        
+        // Fallback: Click inventory button
+        const inventoryButton = document.querySelector('button[data-selected="false"] img[alt="Inventory"]');
+        if (!inventoryButton) {
+            console.log('[Autoseller] Inventory button not found');
+            return false;
+        }
+        inventoryButton.closest('button').click();
+        return true;
+    };
+    
+    // Helper: Close dialogs with ESC keys
+    const closeDialogs = (onComplete) => {
+        sendEscKey();
+        console.log('[Autoseller] Pressed ESC to close item details');
+        
+        setTimeout(() => {
+            sendEscKey();
+            console.log('[Autoseller] Pressed ESC to close inventory');
+            if (onComplete) {
+                setTimeout(onComplete, DRAGON_PLANT_CONFIG.TIMINGS.VERIFY_SUCCESS);
+            }
+        }, DRAGON_PLANT_CONFIG.TIMINGS.ESC_BETWEEN);
+    };
+    
+    function collectDragonPlant() {
+        console.log('[Autoseller] Attempting to collect Dragon Plant...');
+        
+        // Set collecting flag
+        isCollecting = true;
+        
+        const initialGold = getPlantGold();
+        
+        // Step 1: Open inventory
+        if (!openInventory()) {
+            console.log('[Autoseller] Failed to open inventory');
+            isCollecting = false; // Reset flag on error
+            return;
+        }
+        
+        // Step 2: Wait for inventory to open, then click Dragon Plant
+        setTimeout(() => {
+            const dragonPlantItem = document.querySelector(`.sprite.item.id-${DRAGON_PLANT_CONFIG.ITEM_ID}`);
+            if (!dragonPlantItem) {
+                console.log('[Autoseller] Dragon Plant item not found in inventory');
+                sendEscKey();
+                isCollecting = false; // Reset flag on error
+                return;
+            }
+            
+            const itemButton = dragonPlantItem.closest('button');
+            if (!itemButton) {
+                console.log('[Autoseller] Dragon Plant item button not found');
+                sendEscKey();
+                isCollecting = false; // Reset flag on error
+                return;
+            }
+            
+            itemButton.click();
+            console.log('[Autoseller] Clicked Dragon Plant item');
+            
+            // Step 3: Wait for item details, then start collect loop
+            setTimeout(() => {
+                let collectCount = 0;
+                let retryCount = 0;
+                const MAX_RETRIES = 3;
+                
+                // Recursive function to collect multiple times
+                const collectLoop = () => {
+                    // Safety check: prevent infinite loops
+                    if (collectCount >= DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS) {
+                        console.log('[Autoseller] Max collect iterations reached, stopping');
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                        return;
+                    }
+                    
+                    const collectButton = findDragonPlantCollectButton();
+                    
+                    if (!collectButton) {
+                        if (retryCount < MAX_RETRIES) {
+                            retryCount++;
+                            console.log(`[Autoseller] Collect button not ready (disabled or not found), retrying (${retryCount}/${MAX_RETRIES})...`);
+                            setTimeout(collectLoop, 200);
+                            return;
+                        }
+                        console.log('[Autoseller] Collect button not ready after retries');
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                        return;
+                    }
+                    
+                    // Reset retry count on successful button find
+                    retryCount = 0;
+                    
+                    collectButton.click();
+                    collectCount++;
+                    console.log(`[Autoseller] Clicked Collect button (${collectCount}/${DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS})`);
+                    
+                    // Step 4: Wait then check if we should collect again
+                    setTimeout(() => {
+                        const currentGold = getPlantGold();
+                        
+                        if (currentGold !== undefined && currentGold !== null && currentGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+                            console.log(`[Autoseller] Plant still has ${currentGold} gold, collecting again...`);
+                            collectLoop(); // Collect again
+                        } else {
+                            console.log(`[Autoseller] Collection complete, final gold: ${currentGold}`);
+                            closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                        }
+                    }, DRAGON_PLANT_CONFIG.TIMINGS.AFTER_COLLECT);
+                };
+                
+                // Start the collect loop
+                collectLoop();
+            }, DRAGON_PLANT_CONFIG.TIMINGS.ITEM_DETAILS_OPEN);
+        }, DRAGON_PLANT_CONFIG.TIMINGS.INVENTORY_OPEN);
+    }
+    
+    // Helper: Verify collection success and update cooldown
+    const verifyAndUpdateCooldown = (initialGold) => {
+        const finalGold = getPlantGold();
+        
+        if (finalGold !== undefined && finalGold < initialGold) {
+            console.log(`[Autoseller] Dragon Plant collected successfully! Gold: ${initialGold} → ${finalGold}`);
+            lastAutocollectTime = Date.now();
+        } else {
+            console.log('[Autoseller] Collection may have failed - gold did not decrease');
+        }
+        
+        // Reset collecting flag
+        isCollecting = false;
+        console.log('[Autoseller] Collection process complete, ready for next collection');
+    };
+
+    function setupDragonPlantAutocollect() {
+        if (!globalThis.state || !globalThis.state.player || !globalThis.state.player.subscribe) {
+            console.log('[Autoseller] Player state not available for autocollect setup');
+            return;
+        }
+        
+        // Subscribe to player state changes as a backup check (in case plant gold increases from other sources)
+        playerSubscription = globalThis.state.player.subscribe(({ context }) => {
+            const settings = getSettings();
+            
+            // Only proceed if autocollect is enabled
+            if (!settings.autoplantAutocollectChecked) return;
+            
+            // Check if plant data exists
+            if (!context.questLog || !context.questLog.plant) return;
+            
+            const plantGold = context.questLog.plant.gold;
+            
+            // Check if gold is over threshold
+            if (plantGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
+                // Use the shared check function which has cooldown logic
+                checkDragonPlantAutocollect();
+            }
+        });
+        
+        console.log('[Autoseller] Dragon Plant autocollect monitoring initialized');
+    }
+
     // =======================
     // 13. Initialization & Event Handlers
     // =======================
@@ -2881,6 +3221,7 @@
         setupDragonPlantObserver();
         setupGameStartListener();
         setupDragonPlantAPIMonitor();
+        setupDragonPlantAutocollect();
         
         // Initialize plant monster filter with saved ignore list
         updatePlantMonsterFilter();
@@ -2978,7 +3319,7 @@
                 console.log('[Autoseller] Starting cleanup...');
                 
                 try {
-                    // 1. Unsubscribe from board subscriptions
+                    // 1. Unsubscribe from board and player subscriptions
                     if (boardSubscription1) {
                         try {
                             boardSubscription1.unsubscribe();
@@ -2997,6 +3338,15 @@
                         }
                     }
                     
+                    if (playerSubscription) {
+                        try {
+                            playerSubscription.unsubscribe();
+                            playerSubscription = null;
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unsubscribing player:', error);
+                        }
+                    }
+                    
                     // 2. Clear timers
                     if (debounceTimer) {
                         clearTimeout(debounceTimer);
@@ -3006,11 +3356,13 @@
                     // 3. Remove DOM elements
                     const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
                     const navBtn = document.querySelector(`.${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN}`);
-                    const style = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
+                    const responsiveStyle = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_RESPONSIVE_STYLE);
+                    const widgetStyle = document.getElementById('autoseller-widget-css');
                     
                     if (widget && widget.parentNode) widget.parentNode.removeChild(widget);
                     if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
-                    if (style && style.parentNode) style.parentNode.removeChild(style);
+                    if (responsiveStyle && responsiveStyle.parentNode) responsiveStyle.parentNode.removeChild(responsiveStyle);
+                    if (widgetStyle && widgetStyle.parentNode) widgetStyle.parentNode.removeChild(widgetStyle);
                     
                     // 4. Stop observers
                     stopDragonPlantObserver();
@@ -3018,9 +3370,22 @@
                     // 5. Remove game state event listeners and filters
                     if (globalThis.state?.board?.off) {
                         try {
-                            globalThis.state.board.off('emitNewGame');
-                            globalThis.state.board.off('emitEndGame');
-                            globalThis.state.board.off('newGame');
+                            if (emitNewGameHandler1) {
+                                globalThis.state.board.off('emitNewGame', emitNewGameHandler1);
+                                emitNewGameHandler1 = null;
+                            }
+                            if (emitEndGameHandler1) {
+                                globalThis.state.board.off('emitEndGame', emitEndGameHandler1);
+                                emitEndGameHandler1 = null;
+                            }
+                            if (emitNewGameHandler2) {
+                                globalThis.state.board.off('emitNewGame', emitNewGameHandler2);
+                                emitNewGameHandler2 = null;
+                            }
+                            if (newGameHandler) {
+                                globalThis.state.board.off('newGame', newGameHandler);
+                                newGameHandler = null;
+                            }
                         } catch (error) {
                             console.warn('[Autoseller] Error removing game state event listeners:', error);
                         }
@@ -3045,6 +3410,10 @@
                     // 7. Clear rate limiter state
                     apiRateLimiter.requestTimes = [];
                     
+                    // 7.5. Reset autocollect cooldown and flags
+                    lastAutocollectTime = 0;
+                    isCollecting = false;
+                    
                     // 8. Restore global state
                     if (originalFetch) {
                         window.fetch = originalFetch;
@@ -3064,8 +3433,13 @@
                     const remainingReferences = [
                         boardSubscription1,
                         boardSubscription2,
+                        playerSubscription,
                         debounceTimer,
-                        dragonPlantObserver
+                        dragonPlantObserver,
+                        emitNewGameHandler1,
+                        emitEndGameHandler1,
+                        emitNewGameHandler2,
+                        newGameHandler
                     ].filter(Boolean);
                     
                     if (remainingReferences.length > 0) {
