@@ -219,7 +219,7 @@
         const buttons = document.querySelectorAll('button.surface-green');
         for (const button of buttons) {
             const hasPlantIcon = button.querySelector('svg.lucide-sprout');
-            const hasCollectText = button.textContent.includes('Collect');
+            const hasCollectText = button.textContent.includes('Collect') || button.textContent.includes('Coletar');
             const isNotDisabled = !button.hasAttribute('disabled');
             
             if (hasPlantIcon && hasCollectText && isNotDisabled) {

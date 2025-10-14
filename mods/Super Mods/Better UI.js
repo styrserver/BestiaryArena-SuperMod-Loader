@@ -1051,7 +1051,7 @@ function identifyCreatureFromMenu(menuElem) {
 // Create favorite main menu item
 function createFavoriteMainMenuItem() {
   const item = document.createElement('div');
-  item.className = 'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none';
+  item.className = 'focus-style dropdown-menu-item flex cursor-default select-none items-center gap-2 outline-none data-[state=open]:bg-whiteDarkest data-[state=open]:text-whiteBrightest';
   item.setAttribute('role', 'menuitem');
   item.setAttribute('aria-haspopup', 'menu');
   item.setAttribute('aria-expanded', 'false');
@@ -1060,7 +1060,6 @@ function createFavoriteMainMenuItem() {
   item.setAttribute('tabindex', '-1');
   item.setAttribute('data-orientation', 'vertical');
   item.setAttribute('data-radix-collection-item', '');
-  item.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
   return item;
 }
 
@@ -1079,12 +1078,12 @@ function createFavoriteSubmenu(uniqueId, currentSymbol) {
   
   Object.entries(FAVORITE_SYMBOLS).forEach(([symbolKey, symbol]) => {
     const symbolItem = document.createElement('div');
-    symbolItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none';
+    symbolItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-1 outline-none';
     symbolItem.setAttribute('role', 'menuitem');
     symbolItem.setAttribute('tabindex', '-1');
     symbolItem.setAttribute('data-orientation', 'vertical');
     symbolItem.setAttribute('data-radix-collection-item', '');
-    symbolItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 16px; font-weight: 400; line-height: 1;';
+    symbolItem.style.cssText = 'color: white; background: transparent; padding: 4px 8px; font-size: 14px; font-weight: 400; line-height: 1.2;';
     
     symbolItem.addEventListener('mouseenter', () => symbolItem.style.background = 'rgba(255, 255, 255, 0.15)');
     symbolItem.addEventListener('mouseleave', () => symbolItem.style.background = 'transparent');
@@ -1092,7 +1091,7 @@ function createFavoriteSubmenu(uniqueId, currentSymbol) {
     const isCurrentSymbol = isFavorite && currentSymbol === symbolKey;
     let iconElement = '';
     if (!symbol.isNone) {
-      iconElement = symbolKey === 'heart' ? symbol.icon : `<img src="${symbol.icon}" width="24" height="24" style="image-rendering: pixelated;" alt="${symbol.name}">`;
+      iconElement = symbolKey === 'heart' ? `<span style="font-size: 14px; line-height: 1;">${symbol.icon}</span>` : `<img src="${symbol.icon}" width="14" height="14" style="image-rendering: pixelated;" alt="${symbol.name}">`;
     }
     
     symbolItem.innerHTML = `${iconElement}${symbol.name}${isCurrentSymbol ? ' ✓' : ''}`;
