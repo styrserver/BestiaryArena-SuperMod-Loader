@@ -13,6 +13,7 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
+  persistAutoRefillOnRefresh: false,
   currentLocale: document.documentElement.lang === 'pt' || 
     document.querySelector('html[lang="pt"]') || 
     window.location.href.includes('/pt/') ? 'pt' : 'en'
@@ -46,8 +47,14 @@ const loadConfig = () => {
 };
 
 config = loadConfig();
-// Always force autoRefillStamina to false on every page load for safety
-config.autoRefillStamina = false;
+
+// Force autoRefillStamina to false on every page load for safety (unless user enabled persistence)
+if (!config.persistAutoRefillOnRefresh) {
+  console.log('[Bestiary Automator] Resetting autoRefillStamina to false (persistAutoRefillOnRefresh is disabled)');
+  config.autoRefillStamina = false;
+} else {
+  console.log('[Bestiary Automator] Keeping autoRefillStamina value (persistAutoRefillOnRefresh is enabled):', config.autoRefillStamina);
+}
 
 // Constants
 const MOD_ID = 'bestiary-automator';
@@ -2419,7 +2426,8 @@ const createConfigPanel = () => {
             autoCollectRewards: config.autoCollectRewards,
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
-            fasterAutoplay: config.fasterAutoplay
+            fasterAutoplay: config.fasterAutoplay,
+            persistAutoRefillOnRefresh: config.persistAutoRefillOnRefresh
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);

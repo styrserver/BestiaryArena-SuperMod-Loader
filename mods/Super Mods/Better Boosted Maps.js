@@ -718,7 +718,7 @@ function createBoostedMapSettings(settings) {
     const startDelayDiv = createNumberSetting(
         'boosted-maps-startDelay',
         'Start Delay (seconds)',
-        'Delay before starting a task after detection',
+        'Delay before starting a run after detection',
         settings.startDelay,
         1, 30
     );
@@ -737,7 +737,7 @@ function createBoostedMapSettings(settings) {
     const fasterAutoplayDiv = createCheckboxSetting(
         'boosted-maps-fasterAutoplay',
         'Faster Autoplay',
-        'Enable faster autoplay speed during tasks',
+        'Enable faster autoplay speed during runs',
         settings.fasterAutoplay
     );
     settingsWrapper.appendChild(fasterAutoplayDiv);
@@ -746,7 +746,7 @@ function createBoostedMapSettings(settings) {
     const enableAutoplantDiv = createCheckboxSetting(
         'boosted-maps-enableAutoplant',
         'Enable Autoplant',
-        'Enable Autoplant (Autoseller) during tasks',
+        'Enable Autoplant (Autoseller) during runs',
         settings.enableAutoplant
     );
     settingsWrapper.appendChild(enableAutoplantDiv);

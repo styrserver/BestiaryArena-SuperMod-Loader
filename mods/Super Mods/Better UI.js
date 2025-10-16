@@ -129,6 +129,8 @@ const TRANSLATIONS = {
     color: 'Color:',
     enableShinies: 'Enable Shinies',
     shinyColor: 'Color:',
+    persistAutomatorAutoRefill: '⚠️ Persist Autorefill Stamina',
+    persistAutomatorAutoRefillWarning: 'When enabled, Bestiary Automator\'s Autorefill Stamina setting will persist across page refreshes. Use with caution.',
     close: 'Close'
   },
   pt: {
@@ -147,6 +149,8 @@ const TRANSLATIONS = {
     color: 'Cor:',
     enableShinies: 'Ativar Shinies',
     shinyColor: 'Cor:',
+    persistAutomatorAutoRefill: '⚠️ Manter Reabastecimento de Stamina',
+    persistAutomatorAutoRefillWarning: 'Quando ativado, a configuração de Reabastecimento Automático de Stamina do Bestiary Automator persistirá após atualizar a página. Use com cuidado.',
     close: 'Fechar'
   }
 };
@@ -720,9 +724,27 @@ function createSettingsDropdownHandler(configKey, onChangeCallback) {
 // Show settings modal
 function showSettingsModal() {
   try {
-    // Create content element with settings
+    // Create main content container with tabs
     const content = document.createElement('div');
-    content.innerHTML = `
+    
+    // Create tab headers
+    const tabHeaders = document.createElement('div');
+    tabHeaders.style.cssText = 'display: flex; gap: 0px; margin-bottom: 15px;';
+    tabHeaders.innerHTML = `
+      <h2 class="settings-tab active widget-top widget-top-text pixel-font-16" data-tab="general" style="flex: 1; margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; border: 2px solid #4CAF50;"><p class="pixel-font-16" style="margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);">General</p></h2>
+      <h2 class="settings-tab widget-top widget-top-text pixel-font-16" data-tab="advanced" style="flex: 1; margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; opacity: 0.6;"><p class="pixel-font-16" style="margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);">Advanced</p></h2>
+    `;
+    content.appendChild(tabHeaders);
+    
+    // Create tab content containers
+    const tabContents = document.createElement('div');
+    
+    // General tab content
+    const generalTab = document.createElement('div');
+    generalTab.className = 'tab-content';
+    generalTab.dataset.tab = 'general';
+    generalTab.style.display = 'block';
+    generalTab.innerHTML = `
       <div style="margin-bottom: 15px;">
         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
           <input type="checkbox" id="stamina-timer-toggle" ${config.showStaminaTimer ? 'checked' : ''} style="transform: scale(1.2);">
@@ -779,6 +801,65 @@ function showSettingsModal() {
         <input type="number" id="autoplay-refresh-minutes" value="${config.autoplayRefreshMinutes}" min="1" max="120" style="width: 60px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center;">
       </div>
     `;
+    tabContents.appendChild(generalTab);
+    
+    // Advanced tab content
+    const advancedTab = document.createElement('div');
+    advancedTab.className = 'tab-content';
+    advancedTab.dataset.tab = 'advanced';
+    advancedTab.style.display = 'none';
+    
+    // Load Bestiary Automator's config to get the current value
+    let automatorPersistValue = false;
+    try {
+      const automatorConfig = localStorage.getItem('bestiary-automator-config');
+      if (automatorConfig) {
+        const parsed = JSON.parse(automatorConfig);
+        automatorPersistValue = parsed.persistAutoRefillOnRefresh || false;
+      }
+    } catch (error) {
+      console.warn('[Better UI] Could not load Bestiary Automator config:', error);
+    }
+    
+    advancedTab.innerHTML = `
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="persist-automator-autorefill-toggle" ${automatorPersistValue ? 'checked' : ''} style="transform: scale(1.2);">
+          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('persistAutomatorAutoRefillWarning')}">${t('persistAutomatorAutoRefill')}</span>
+        </label>
+      </div>
+    `;
+    tabContents.appendChild(advancedTab);
+    
+    content.appendChild(tabContents);
+    
+    // Setup tab switching
+    const tabs = tabHeaders.querySelectorAll('.settings-tab');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
+        
+        // Update tab headers
+        tabs.forEach(t => {
+          if (t.dataset.tab === targetTab) {
+            t.classList.add('active');
+            t.style.opacity = '1';
+            t.style.border = '2px solid #4CAF50';
+          } else {
+            t.classList.remove('active');
+            t.style.opacity = '0.6';
+            t.style.border = '';
+          }
+        });
+        
+        // Update tab content
+        const contents = tabContents.querySelectorAll('.tab-content');
+        contents.forEach(c => {
+          c.style.display = c.dataset.tab === targetTab ? 'block' : 'none';
+        });
+      });
+    });
+    
     
     // Setup event handlers using factories
     const staminaCheckbox = content.querySelector('#stamina-timer-toggle');
@@ -867,6 +948,32 @@ function showSettingsModal() {
         if (config.enableAutoplayRefresh) {
           stopAutoplayRefreshMonitor();
           startAutoplayRefreshMonitor();
+        }
+      });
+    }
+    
+    const persistAutomatorAutoRefillCheckbox = content.querySelector('#persist-automator-autorefill-toggle');
+    if (persistAutomatorAutoRefillCheckbox) {
+      persistAutomatorAutoRefillCheckbox.addEventListener('change', () => {
+        const newValue = persistAutomatorAutoRefillCheckbox.checked;
+        
+        // Write directly to Bestiary Automator's localStorage
+        try {
+          const automatorConfig = localStorage.getItem('bestiary-automator-config');
+          const config = automatorConfig ? JSON.parse(automatorConfig) : {};
+          config.persistAutoRefillOnRefresh = newValue;
+          localStorage.setItem('bestiary-automator-config', JSON.stringify(config));
+          console.log('[Better UI] Updated Bestiary Automator localStorage persistAutoRefillOnRefresh:', newValue);
+        } catch (error) {
+          console.error('[Better UI] Error updating Bestiary Automator config:', error);
+        }
+        
+        // Also update runtime if Bestiary Automator is loaded
+        if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
+          window.bestiaryAutomator.updateConfig({
+            persistAutoRefillOnRefresh: newValue
+          });
+          console.log('[Better UI] Updated Bestiary Automator runtime config');
         }
       });
     }
