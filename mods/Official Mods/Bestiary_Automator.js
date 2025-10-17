@@ -475,7 +475,7 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   }
   
   // Use ESC key for foreground tabs (more reliable when tab is active)
-  const escEvent = new KeyboardEvent('keydown', {
+  const escEvent1 = new KeyboardEvent('keydown', {
     key: 'Escape',
     code: 'Escape',
     keyCode: 27,
@@ -483,8 +483,20 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
     bubbles: true,
     cancelable: true
   });
+  document.dispatchEvent(escEvent1);
   
-  document.dispatchEvent(escEvent);
+  await sleep(200);
+  
+  const escEvent2 = new KeyboardEvent('keydown', {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    which: 27,
+    bubbles: true,
+    cancelable: true
+  });
+  document.dispatchEvent(escEvent2);
+  
   await sleep(300);
 };
 
@@ -1237,6 +1249,7 @@ const handleDayCare = async () => {
         // Look for daycare slot containers that contain maxed creatures
         const daycareSlots = document.querySelectorAll('div.relative.flex.items-center.gap-2');
         let foundMaxedCreatureInModal = false;
+        let maxedCreatureWithdrawButton = null;
         
         console.log(`[Bestiary Automator] Checking ${daycareSlots.length} daycare slots for maxed creatures...`);
         
@@ -1253,48 +1266,19 @@ const handleDayCare = async () => {
           if (maxLevelText?.textContent?.includes('Max') && withdrawButton) {
             console.log(`[Bestiary Automator] Daycare slot ${i + 1} has maxed creature, ejecting!`);
             foundMaxedCreatureInModal = true;
+            maxedCreatureWithdrawButton = withdrawButton;
             break; // Found one to eject, break and process it
           }
         }
         
-        if (!foundMaxedCreatureInModal) {
+        if (!foundMaxedCreatureInModal || !maxedCreatureWithdrawButton) {
           console.log('[Bestiary Automator] No more maxed creatures to eject, stopping');
           break;
         }
         
-        // Click the withdraw button for the maxed creature
-        console.log('[Bestiary Automator] Attempting to click withdraw button...');
-        
-        // Try multiple methods to find and click the withdraw button
-        let withdrawClicked = false;
-        
-        // Method 1: Try the text-based button finder
-        withdrawClicked = clickButtonWithText('withdraw');
-        
-        // Method 2: If that fails, look for button by title attribute
-        if (!withdrawClicked) {
-          const withdrawButton = document.querySelector('button[title="Withdraw"]');
-          if (withdrawButton) {
-            console.log('[Bestiary Automator] Found withdraw button by title attribute, clicking...');
-            withdrawButton.click();
-            withdrawClicked = true;
-          }
-        }
-        
-        // Method 3: If that fails, look for button by aria-label
-        if (!withdrawClicked) {
-          const withdrawButton = document.querySelector('button[aria-label="Withdraw"]');
-          if (withdrawButton) {
-            console.log('[Bestiary Automator] Found withdraw button by aria-label, clicking...');
-            withdrawButton.click();
-            withdrawClicked = true;
-          }
-        }
-        
-        if (!withdrawClicked) {
-          console.log('[Bestiary Automator] Withdraw button not found by any method, stopping ejection process');
-          break;
-        }
+        // Click the withdraw button for the specific maxed creature
+        console.log('[Bestiary Automator] Clicking withdraw button for maxed creature...');
+        maxedCreatureWithdrawButton.click();
         
         ejectionCount++;
         console.log(`[Bestiary Automator] Successfully ejected creature ${ejectionCount}`);
