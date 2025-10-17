@@ -1598,13 +1598,46 @@ function enableBestiaryAutomatorFasterAutoplay() {
 
 function enableAutosellerDragonPlant() {
     try {
-        const autoseller = window.autoseller || context?.exports;
-        if (autoseller?.enableDragonPlant) {
+        // Try to find Autoseller's exported function
+        let autoseller = null;
+        
+        // Method 1: Check window scope
+        if (window.autoseller && window.autoseller.enableDragonPlant) {
+            autoseller = window.autoseller;
+            console.log('[Better Boosted Maps] Found Autoseller via window object');
+        }
+        // Method 2: Check context exports
+        else if (typeof context !== 'undefined' && context.exports && context.exports.enableDragonPlant) {
+            autoseller = context.exports;
+            console.log('[Better Boosted Maps] Found Autoseller via context exports');
+        }
+        // Method 3: Try mod loader
+        else if (window.modLoader && window.modLoader.getModContext) {
+            const autosellerContext = window.modLoader.getModContext('autoseller');
+            if (autosellerContext && autosellerContext.exports && autosellerContext.exports.enableDragonPlant) {
+                autoseller = autosellerContext.exports;
+                console.log('[Better Boosted Maps] Found Autoseller via mod loader');
+            }
+        }
+        
+        if (autoseller) {
+            console.log('[Better Boosted Maps] Enabling Dragon Plant via Autoseller...');
             autoseller.enableDragonPlant();
-            console.log('[Better Boosted Maps] Enabled Autoplant');
+            console.log('[Better Boosted Maps] Dragon Plant enabled');
+            return true;
+        } else {
+            console.log('[Better Boosted Maps] Autoseller not available - trying direct approach');
+            // Fallback: try to access via global exports
+            if (typeof exports !== 'undefined' && exports.enableDragonPlant) {
+                exports.enableDragonPlant();
+                console.log('[Better Boosted Maps] Dragon Plant enabled via exports');
+                return true;
+            }
+            return false;
         }
     } catch (error) {
-        console.error('[Better Boosted Maps] Error enabling autoplant:', error);
+        console.error('[Better Boosted Maps] Error enabling Dragon Plant:', error);
+        return false;
     }
 }
 

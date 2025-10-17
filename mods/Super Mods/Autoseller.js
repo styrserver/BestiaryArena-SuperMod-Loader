@@ -3306,13 +3306,53 @@
                 stateManager.clearProcessedIds();
             },
             enableDragonPlant: () => {
-                console.log('[Autoseller] enableDragonPlant() called - updating settings');
-                setSettings({ autoplantChecked: true, lastActiveMode: 'autoplant' });
+                console.log('[Autoseller] enableDragonPlant() called');
+                const currentSettings = getSettings();
+                
+                // Check if already enabled - don't toggle it
+                if (currentSettings.autoplantChecked) {
+                    console.log('[Autoseller] Dragon Plant already enabled, skipping');
+                    return true;
+                }
+                
+                console.log('[Autoseller] Enabling Dragon Plant');
+                
+                // Handle mutual exclusivity - disable Autosell if enabled
+                const settingsUpdate = { autoplantChecked: true, lastActiveMode: 'autoplant' };
+                if (currentSettings.autosellChecked) {
+                    console.log('[Autoseller] Disabling Autosell to enable Autoplant (mutual exclusivity)');
+                    settingsUpdate.autosellChecked = false;
+                }
+                
+                setSettings(settingsUpdate);
+                
+                // Apply to game checkbox if in autoplay
+                applyLocalStorageToGameCheckbox();
+                
+                // Update plant monster filter
+                updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                
                 return true;
             },
             disableDragonPlant: () => {
-                console.log('[Autoseller] disableDragonPlant() called - updating settings');
+                console.log('[Autoseller] disableDragonPlant() called');
+                const currentSettings = getSettings();
+                
+                // Check if already disabled - don't toggle it
+                if (!currentSettings.autoplantChecked) {
+                    console.log('[Autoseller] Dragon Plant already disabled, skipping');
+                    return true;
+                }
+                
+                console.log('[Autoseller] Disabling Dragon Plant');
                 setSettings({ autoplantChecked: false });
+                
+                // Apply to game checkbox if in autoplay
+                applyLocalStorageToGameCheckbox();
+                
+                // Remove plant monster filter
+                removePlantMonsterFilter();
+                
                 return true;
             },
             cleanup: function() {
