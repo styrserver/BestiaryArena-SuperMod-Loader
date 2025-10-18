@@ -225,6 +225,20 @@ const inventoryTooltips = {
     rarity: '1',
     obtain: 'Paw and Fur Society, Dragon Plant'
   },
+  runeAvarice: {
+    displayName: "Avarice Rune",
+    text: 'This rune can be transmuted into 2,000gp.',
+    icon: '/assets/icons/rune-avarice.png',
+    rarity: '2',
+    obtain: 'Rookgaard'
+  },
+  runeRecycle: {
+    displayName: "Recycle Rune",
+    text: 'Recycle 3 runes into a different random rune.',
+    icon: '/assets/icons/rune-recycle.png',
+    rarity: '3',
+    obtain: 'Runemaking'
+  },
   runeHp: {
     displayName: "Hitpoints Rune",
     text: 'Raise a creature hitpoints genes by +1.',
@@ -259,13 +273,6 @@ const inventoryTooltips = {
     icon: '/assets/icons/rune-mr.png',
     rarity: '5',
     obtain: 'Folda'
-  },
-  runeRecycle: {
-    displayName: "Recycle Rune",
-    text: 'Recycle 3 runes into a different random rune.',
-    icon: '/assets/icons/rune-recycle.png',
-    rarity: '3',
-    obtain: 'Runemaking'
   },
 
   // =======================
@@ -393,7 +400,7 @@ const inventoryTooltips = {
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-  'Runes': ['Blank Rune', 'Hitpoints Rune', 'Ability Power Rune', 'Attack Damage Rune', 'Armor Rune', 'Magic Resist Rune', 'Recycle Rune'],
+  'Runes': ['Blank Rune', 'Avarice Rune', 'Recycle Rune', 'Hitpoints Rune', 'Ability Power Rune', 'Attack Damage Rune', 'Armor Rune', 'Magic Resist Rune'],
   'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
@@ -406,7 +413,7 @@ const INVENTORY_VARIANTS = {
   'Summon Scrolls': ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
-  'Blank Rune': ['runeBlank'], 'Hitpoints Rune': ['runeHp'], 'Ability Power Rune': ['runeAp'], 'Attack Damage Rune': ['runeAd'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'], 'Recycle Rune': ['runeRecycle'],
+  'Blank Rune': ['runeBlank'], 'Avarice Rune': ['runeAvarice'], 'Recycle Rune': ['runeRecycle'], 'Hitpoints Rune': ['runeHp'], 'Ability Power Rune': ['runeAp'], 'Attack Damage Rune': ['runeAd'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
@@ -415,8 +422,8 @@ const INVENTORY_VARIANTS = {
 const INVENTORY_STATIC_ITEMS = {
   'beastCoins': { name: 'Beast Coins', rarity: '1' }, 'dust': { name: 'Dust', rarity: '2' },
   'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
-  'runeBlank': { name: 'Blank Rune', rarity: '1' }, 'runeHp': { name: 'Hitpoints Rune', rarity: '5' }, 'runeAp': { name: 'Ability Power Rune', rarity: '5' }, 
-  'runeAd': { name: 'Attack Damage Rune', rarity: '5' }, 'runeAr': { name: 'Armor Rune', rarity: '5' }, 'runeMr': { name: 'Magic Resist Rune', rarity: '5' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '3' },
+  'runeBlank': { name: 'Blank Rune', rarity: '1' }, 'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '3' }, 'runeHp': { name: 'Hitpoints Rune', rarity: '5' }, 'runeAp': { name: 'Ability Power Rune', rarity: '5' }, 
+  'runeAd': { name: 'Attack Damage Rune', rarity: '5' }, 'runeAr': { name: 'Armor Rune', rarity: '5' }, 'runeMr': { name: 'Magic Resist Rune', rarity: '5' },
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },

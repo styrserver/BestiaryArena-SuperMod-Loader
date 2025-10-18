@@ -1283,8 +1283,9 @@
             availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
         }
         
-        // Ensure available creatures are sorted alphabetically
+        // Ensure both lists are sorted alphabetically
         availableCreatures.sort();
+        selectedCreatures.sort();
         
         // Function to save ignore list to settings
         function saveIgnoreList() {
@@ -1334,6 +1335,9 @@
                     // Move creature from available to selected
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
                     selectedCreatures.push(creatureName);
+                    
+                    // Sort ignore list to maintain alphabetical order
+                    selectedCreatures.sort();
                     
                     console.log('[Autoseller] After - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
                     

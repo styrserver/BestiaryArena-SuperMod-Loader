@@ -441,6 +441,8 @@ const refillStaminaSimple = async (elStamina) => {
 const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   console.log('[Bestiary Automator] Using retry refill method (foreground tab)');
   
+  const initialStamina = Number(staminaElement.textContent);
+  
   elStamina.click();
   await sleep(500);
   clickButtonWithText('usePotion');
@@ -472,6 +474,21 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   
   if (retryCount >= maxRetries) {
     console.log(`[Bestiary Automator] Max retries (${maxRetries}) reached for stamina refill`);
+    
+    // Check if stamina didn't increase at all - likely means no potions
+    const finalStaminaElement = document.querySelector('[title="Stamina"] span span');
+    if (finalStaminaElement) {
+      const finalStamina = Number(finalStaminaElement.textContent);
+      if (finalStamina === initialStamina) {
+        console.log('[Bestiary Automator] Stamina unchanged after max retries - checking if user has potions...');
+        
+        // Wait a bit for inventory to update, then check
+        await sleep(1000);
+        if (!hasStaminaPotions()) {
+          disableAutoRefillDueToNoPotions();
+        }
+      }
+    }
   }
   
   // Use ESC key for foreground tabs (more reliable when tab is active)
@@ -514,6 +531,13 @@ const refillStaminaIfNeeded = async () => {
     const stamina = Number(staminaElement.textContent);
     if (stamina >= config.minimumStaminaWithoutRefill) return;
     
+    // Check if user has potions before attempting refill
+    if (!hasStaminaPotions()) {
+      console.log('[Bestiary Automator] No stamina potions available - disabling autoRefill');
+      disableAutoRefillDueToNoPotions();
+      return;
+    }
+    
     console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
     
     // Choose method based on tab visibility
@@ -541,6 +565,52 @@ let lastSeashellReadyAt = null;
 // Track if Faster Autoplay is currently running
 let fasterAutoplayRunning = false;
 
+
+// Check if user has any stamina potions in inventory
+const hasStaminaPotions = () => {
+  try {
+    if (!globalThis.state || !globalThis.state.player) {
+      return false;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const inventory = playerContext.inventory || {};
+    
+    // Check all potion tiers (1-4)
+    for (let tier = 1; tier <= 4; tier++) {
+      const potionKey = `stamina${tier}`;
+      if (inventory[potionKey] && inventory[potionKey] > 0) {
+        return true;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error checking stamina potions:', error);
+    return false;
+  }
+};
+
+// Disable autoRefillStamina when user has no potions
+const disableAutoRefillDueToNoPotions = () => {
+  if (!config.autoRefillStamina) return;
+  
+  console.log('[Bestiary Automator] Disabling autoRefillStamina - no stamina potions available');
+  config.autoRefillStamina = false;
+  
+  // Save to localStorage
+  try {
+    const savedData = localStorage.getItem(STORAGE_KEY);
+    const savedConfig = savedData ? JSON.parse(savedData) : {};
+    savedConfig.autoRefillStamina = false;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedConfig));
+  } catch (error) {
+    console.error('[Bestiary Automator] Error saving to localStorage:', error);
+  }
+  
+  // Update button styling
+  updateAutomatorButton();
+};
 
 // Remove stamina potion from local inventory when 403 error occurs
 const removeStaminaPotionFromInventory = (potionTier = 1) => {
@@ -574,6 +644,13 @@ const removeStaminaPotionFromInventory = (potionTier = 1) => {
         return newState;
       }
     });
+    
+    // Check if user now has 0 potions and disable autoRefill if needed
+    setTimeout(() => {
+      if (!hasStaminaPotions()) {
+        disableAutoRefillDueToNoPotions();
+      }
+    }, 500);
     
     return true;
   } catch (error) {
