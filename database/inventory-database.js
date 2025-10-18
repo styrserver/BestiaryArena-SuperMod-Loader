@@ -444,9 +444,10 @@ const inventoryDatabase = {
 };
 
 // Export for use in other mods
-if (typeof window !== 'undefined') {
-  window.inventoryTooltips = inventoryTooltips; // Keep for backward compatibility
-  window.inventoryDatabase = inventoryDatabase;
+const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);
+if (globalWindow) {
+  globalWindow.inventoryTooltips = inventoryTooltips; // Keep for backward compatibility
+  globalWindow.inventoryDatabase = inventoryDatabase;
   console.log(`[inventory-database.js] Loaded ${Object.keys(inventoryTooltips).length} inventory tooltip entries`);
   console.log(`[inventory-database.js] Loaded inventory database with categories, variants, and static items`);
 }

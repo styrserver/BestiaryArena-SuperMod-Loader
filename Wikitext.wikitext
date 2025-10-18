@@ -109,6 +109,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 ** <code>inventory-database.js</code> - Inventory tooltip data
 ** <code>creature-database.js</code> - Creature database
 ** <code>equipment-database.js</code> - Equipment database
+** <code>maps-database.js</code> - Maps database
 ** <code>Welcome.js</code> - Welcome screen data
 * <code>mods/</code> - Local mod files, organized as follows:
 ** <code>Official Mods/</code> - Core mods that provide essential gameplay enhancements and are included by default.

@@ -815,8 +815,20 @@
       console.log(`[Better Forge] 🆔 IDs: ${step.equipA} + ${step.equipB}`);
       console.log(`[Better Forge] 📊 Queue remaining: ${forgeState.forgeQueue.length} steps`);
 
+      // Immediately reset progress bar to 0% (no transition) before starting animation
+      const progressFill = document.getElementById('auto-upgrade-progress-fill');
+      const progressText = document.getElementById('auto-upgrade-progress-text');
+      if (progressFill && progressText) {
+        progressFill.style.transition = 'none'; // Disable transition for instant reset
+        progressFill.style.width = '0%';
+        progressText.textContent = '0%';
+        progressFill.style.background = 'linear-gradient(90deg, #2196F3, #1976D2)';
+        // Force reflow to ensure instant update
+        progressFill.offsetHeight;
+        progressFill.style.transition = ''; // Re-enable transition
+      }
+      
       // Start progress bar animation from 0-100 for this step
-      updateForgeProgressBar(0, 1);
       animateProgressBar(0, 100, 500); // 500ms animation
 
       // Execute the forge step after animation completes
@@ -905,22 +917,15 @@
                 }
               }, 100);
               
-              // Fresh inventory fetch and delay to ensure inventory is properly updated before checking next tier steps
-              setTimeout(async () => {
+              // Small delay to allow intermediate results to be processed
+              setTimeout(() => {
                 // Set refreshing state to prevent premature step creation
                 forgeState.isRefreshingInventory = true;
-                console.log(`[Better Forge] 🔄 Starting inventory refresh after successful forge...`);
+                console.log(`[Better Forge] 🔄 Processing next tier steps after successful forge...`);
                 
                 try {
-                  // Force refresh of user inventory to get the latest state
-                  console.log(`[Better Forge] 🔄 Refreshing inventory after successful forge...`);
-                  
-                  // Use the enhanced state refresh function
-                  await forceRefreshPlayerState();
-                  
-                  // Verify inventory was updated
-                  const freshInventory = getUserOwnedEquipment();
-                  console.log(`[Better Forge] 🔄 Inventory verified: ${freshInventory.length} items`);
+                  // No need to wait for server state - we track everything locally via intermediateResults
+                  console.log(`[Better Forge] 📊 Intermediate results tracked: T${step.toTier} has ${forgeState.intermediateResults.get(step.toTier)?.length || 0} items`);
                   
                   // Check if we need to create additional forging steps for the next tier
                   const nextTier = step.toTier;
@@ -967,13 +972,13 @@
                     }
                   }
                 } catch (error) {
-                  console.error(`[Better Forge] 💥 Error refreshing inventory:`, error);
+                  console.error(`[Better Forge] 💥 Error processing next tier steps:`, error);
                 } finally {
                   // Clear refreshing state
                   forgeState.isRefreshingInventory = false;
-                  console.log(`[Better Forge] ✅ Inventory refresh completed`);
+                  console.log(`[Better Forge] ✅ Next tier processing completed`);
                 }
-              }, 200); // Reduced delay for faster operation
+              }, 50); // Minimal delay to allow intermediate results to be recorded
             }
             
             // Next tier step creation is now handled in the setTimeout above to ensure inventory is properly updated
@@ -1018,11 +1023,8 @@
 
             updateAutoUpgradeStatus(`Forged ${step.equipment} T${step.fromTier} → T${step.toTier}`);
             
-            // Reset progress bar to 0% after animation completes
-            setTimeout(() => {
-              resetForgeProgressBar();
-              console.log(`[Better Forge] 🔄 Progress bar reset to 0% after animation completed`);
-            }, 500); // Wait for animation to complete
+            // Don't reset progress bar here - let next step's animation overwrite it
+            // This prevents flickering and ensures smooth transitions between steps
             
                   // Check if this was the final step and complete forging
       if (forgeState.isFinalStep) {
@@ -4030,11 +4032,57 @@
                });
              }
              
-             setTimeout(() => {
-               injectDustDisplayIntoModal();
-             }, 100);
-             
-             setTimeout(() => {
+            setTimeout(() => {
+              injectDustDisplayIntoModal();
+            }, 100);
+            
+            // Watch for modal removal to ensure cleanup even if onClose isn't triggered
+            setTimeout(() => {
+              const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+              if (dialog && dialog.parentNode) {
+                const modalCleanupObserver = new MutationObserver((mutations) => {
+                  for (const mutation of mutations) {
+                    for (const node of mutation.removedNodes) {
+                      if (node === dialog || (node.nodeType === Node.ELEMENT_NODE && node.contains(dialog))) {
+                        console.log('[Better Forge] 🔄 Modal forcibly removed from DOM, stopping forging...');
+                        
+                        // Stop forging if in progress
+                        if (forgeState.isForging || forgeState.isForgingInProgress) {
+                          console.log('[Better Forge] ⏹️ Stopping forge process due to modal removal');
+                          stopForging();
+                        }
+                        
+                        // Stop disenchanting if in progress
+                        if (forgeState.isDisenchanting || forgeState.isDisenchantingInProgress) {
+                          console.log('[Better Forge] ⏹️ Stopping disenchant process due to modal removal');
+                          forgeState.isDisenchanting = false;
+                          forgeState.isDisenchantingInProgress = false;
+                          clearAllIntervals();
+                        }
+                        
+                        // Reset forge confirmation mode
+                        if (forgeState.isForgeConfirmationMode) {
+                          resetForgeConfirmationModeIfActive();
+                        }
+                        
+                        // Clear global search term and tier filter
+                        forgeState.globalSearchTerm = '';
+                        forgeState.globalTierFilter = 'all';
+                        
+                        cleanupDustDisplay();
+                        modalCleanupObserver.disconnect();
+                        break;
+                      }
+                    }
+                  }
+                });
+                
+                modalCleanupObserver.observe(dialog.parentNode, { childList: true });
+                console.log('[Better Forge] 🔍 Modal cleanup observer activated');
+              }
+            }, 150);
+            
+            setTimeout(() => {
                try {
                  const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
                  if (dialog) {
@@ -6015,35 +6063,6 @@
     window.BetterForge.cleanup = cleanup;
     window.BetterForge.showModal = showBetterForgeModal;
   }
-  
-  // Force refresh player state to ensure latest inventory data
-  const forceRefreshPlayerState = async () => {
-    try {
-      console.log(`[Better Forge] 🔄 Forcing player state refresh...`);
-      
-      // Clear any cached data
-      if (typeof clearInventoryCache === 'function') {
-        clearInventoryCache();
-      }
-      
-      // Force multiple state snapshots to ensure fresh data
-      if (globalThis.state?.player?.getSnapshot) {
-        for (let i = 0; i < 5; i++) {
-          globalThis.state.player.getSnapshot();
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-      }
-      
-      // Additional delay to ensure state is fully updated
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      console.log(`[Better Forge] ✅ Player state refresh completed`);
-      return true;
-    } catch (error) {
-      console.error(`[Better Forge] 💥 Error forcing player state refresh:`, error);
-      return false;
-    }
-  };
   
 })();
 

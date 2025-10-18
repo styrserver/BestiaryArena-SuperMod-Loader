@@ -1890,12 +1890,17 @@ function setupRaidListMonitoring() {
                     const raidsAdded = currentList.length > lastRaidList.length;
                     const raidsRemoved = currentList.length < lastRaidList.length;
                     
+                    // Check if current raid we're playing is still in the list
+                    const currentRaidStillExists = isCurrentlyRaiding && currentRaidInfo && 
+                        currentList.some(raid => raid.roomId === currentRaidInfo.roomId);
+                    
                     // Update state consistently (this updates lastRaidList)
                     updateRaidState();
                     
                     // If raids were removed and we were currently raiding, stop autoplay
-                    if (raidsRemoved && isCurrentlyRaiding) {
-                        console.log('[Raid Hunter] Raid ended');
+                    // OR if our specific raid is no longer in the list (even if new raids appeared)
+                    if ((raidsRemoved && isCurrentlyRaiding) || (isCurrentlyRaiding && !currentRaidStillExists)) {
+                        console.log('[Raid Hunter] Raid ended (current raid no longer in list)');
                         stopAutoplayOnRaidEnd();
                     }
                     

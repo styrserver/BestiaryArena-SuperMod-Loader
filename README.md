@@ -110,7 +110,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
   - `injector.js` - Injects the client code into the game page
   - `local_mods.js` - Manages local mods
 - `docs/` - Documentation for mod developers
-- `database/` - Stores persistent data and tooltips used by mods (e.g., `media.txt`, `inventory-database.js`)
+- `database/` - Stores persistent data and tooltips used by mods (e.g., `media.txt`, `inventory-database.js`, `maps-database.js`)
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).

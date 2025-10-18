@@ -251,6 +251,7 @@ let defaultEnabledMods = [
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',
+  'database/maps-database.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Custom_Display.js',

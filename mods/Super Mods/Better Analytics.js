@@ -64,6 +64,7 @@
     let autoOpenObserver = null;
     let serverResultsSubscription = null;
     let currentGameMode = null;
+    let worldEventSubscriptions = [];
     
     // Simplified conflict prevention
     let isProcessing = false;
@@ -137,6 +138,7 @@
             if (globalThis.state && globalThis.state.board && globalThis.state.gameTimer) {
                 setupBoardStateMonitoring();
                 setupServerResultsMonitoring();
+                setupWorldEventTracking();
                 setupAnalyzerObserver();
                 setupAutoOpenImpactAnalyzer();
                 
@@ -168,6 +170,8 @@
         }
         
         serverResultsSubscription = globalThis.state.board.subscribe((state) => {
+            if (!state.context) return; // Skip if context not initialized yet
+            
             const { serverResults, mode } = state.context;
             currentGameMode = mode;
             
@@ -289,18 +293,23 @@
             boardSubscription.unsubscribe();
         }
         
-        boardSubscription = globalThis.state.board.subscribe((state) => {
-            const context = state.context;
-            currentGameMode = context.mode;
+        const boardState = globalThis.state.board.select((state) => ({
+            gameStarted: state.context?.gameStarted,
+            mode: state.context?.mode
+        }));
+        
+        boardSubscription = boardState.subscribe((data) => {
+            if (!data.mode) return; // Skip if context not initialized yet
+            currentGameMode = data.mode;
             
             if (isProcessing) return;
             
             // Only reset tracking session if we don't have a gameStartTick (truly new game)
-            if (context.gameStarted && !isTracking && (gameStartTick === null || gameStartTick === 0)) {
+            if (data.gameStarted && !isTracking && (gameStartTick === null || gameStartTick === 0)) {
                 resetTrackingSession();
             }
             
-            if (!context.gameStarted && isTracking) {
+            if (!data.gameStarted && isTracking) {
                 stopDamageTracking();
             }
         });
@@ -327,6 +336,51 @@
             if (isProcessing) return;
             stopDamageTracking();
         });
+    }
+    
+    function setupWorldEventTracking() {
+        // Clean up previous world subscriptions
+        worldEventSubscriptions.forEach(sub => {
+            if (sub && typeof sub.unsubscribe === 'function') {
+                sub.unsubscribe();
+            }
+        });
+        worldEventSubscriptions = [];
+        
+        const listener = globalThis.state.board.on('newGame', (event) => {
+            const world = event.world;
+            
+            if (!world) return;
+            
+            // Track actor deaths for more accurate damage tracking (only when actively tracking)
+            const deathSub = world.grid.onActorDeath.subscribe((deathEvent) => {
+                // Only update if we're actively tracking and analyzer panel is available
+                if (isTracking && getAnalyzerPanel()) {
+                    updateDamageData();
+                }
+            });
+            
+            worldEventSubscriptions.push(deathSub);
+            
+            // Clean up when game ends
+            const endSub = world.onGameEnd.once(() => {
+                // Final damage update on actual game end
+                const boardState = globalThis.state.board.getSnapshot();
+                const gameMode = boardState.context?.mode;
+                
+                // Only update for sandbox mode; autoplay/manual rely on server results
+                if (gameMode === 'sandbox') {
+                    setTimeout(() => {
+                        updateDamageData();
+                        restoreFrozenDPSDisplays();
+                    }, 100);
+                }
+            });
+            
+            worldEventSubscriptions.push(endSub);
+        });
+        
+        worldEventSubscriptions.push(listener);
     }
     
     function resetTrackingSession() {
@@ -1088,6 +1142,14 @@
                 serverResultsSubscription.unsubscribe();
                 serverResultsSubscription = null;
             }
+            
+            // Clean up world event subscriptions
+            worldEventSubscriptions.forEach(sub => {
+                if (sub && typeof sub.unsubscribe === 'function') {
+                    sub.unsubscribe();
+                }
+            });
+            worldEventSubscriptions = [];
             
             // Clear all DPS displays
             cleanupAllDPSDisplays();

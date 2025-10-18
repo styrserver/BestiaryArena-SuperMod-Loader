@@ -691,6 +691,11 @@
         return SearchMatcher.matchesStatsSearch(creature, condition);
       }
       
+      // Check for shiny search
+      if (condition === 'shiny') {
+        return creature.shiny === true;
+      }
+      
       // Regular name search (partial matching)
       const creatureName = creature.creatureName || creature.name || creature.gameId || '';
       const name = creatureName.toLowerCase();
@@ -933,7 +938,8 @@
       
       // Trigger a custom event that the parent can listen for
       const event = new CustomEvent('creatureSelected', {
-        detail: { creatureId: creature.id, creature: creature }
+        detail: { creatureId: creature.id, creature: creature },
+        bubbles: true
       });
       btn.dispatchEvent(event);
     };
@@ -1000,16 +1006,15 @@
     
     // Add shiny star overlay if creature is shiny
     if (creature.shiny === true) {
-      console.log('[Dice Roller] Adding shiny star to creature:', creature);
       const shinyIcon = document.createElement('img');
-      shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
       shinyIcon.alt = 'shiny';
-      shinyIcon.title = 'Shiny';
+      shinyIcon.className = 'pixelated mr-[3px] inline-block -translate-y-0.5';
+      shinyIcon.width = 9;
+      shinyIcon.height = 10;
+      shinyIcon.src = '/assets/icons/shiny-star.png';
       shinyIcon.style.position = 'absolute';
-      shinyIcon.style.top = '2px';
-      shinyIcon.style.left = '2px';
-      shinyIcon.style.width = '8px';
-      shinyIcon.style.height = '8px';
+      shinyIcon.style.bottom = '0px';
+      shinyIcon.style.right = '0px';
       shinyIcon.style.pointerEvents = 'none';
       shinyIcon.style.zIndex = '10';
       slot.appendChild(shinyIcon);
@@ -1220,6 +1225,7 @@
 • Stat search: /HP 20, /AD >15, /AP <=10, /ARM >=5, /MR <8
 • Any stat: /20 (any stat equals 20), />15 (any stat > 15)
 • Count stats: /3x20 (exactly 3 stats = 20), />3x20 (more than 3 stats = 20), /<2x>15 (less than 2 stats > 15)
+• Shiny: show only shiny creatures
 • Combined: dragon AND /HP >15, /AD 20 OR /AP 20
 • Operators: AND, OR (case insensitive)`;
     searchInput.style.cssText = `
@@ -1661,35 +1667,15 @@
         return b._statSum - a._statSum;
       });
       
-      // Re-create all creature buttons
+      // Re-create all creature buttons using the helper function
       for (const creature of sortedMonsters) {
-        // Create button
-        const btn = document.createElement('button');
-        btn.className = 'focus-style-visible active:opacity-70';
-        btn.setAttribute('data-state', 'closed');
-        btn.setAttribute('data-gameid', creature.gameId);
-        // Constrain button size to match inner content
-        btn.style.width = '34px';
-        btn.style.height = '34px';
-        btn.style.minWidth = '34px';
-        btn.style.minHeight = '34px';
-        btn.style.maxWidth = '34px';
-        btn.style.maxHeight = '34px';
-        btn.style.display = 'flex';
-        btn.style.alignItems = 'center';
-        btn.style.justifyContent = 'center';
-        btn.style.padding = '0';
-        btn.style.margin = '0';
-        btn.style.border = 'none';
-        btn.style.background = 'none';
-        btn.style.cursor = 'pointer';
-        btn.onclick = () => {
-          const isNewCreature = selectedGameId !== creature.id;
+        const btn = createCreatureButton(creature, (creatureId) => {
+          const isNewCreature = selectedGameId !== creatureId;
           
-          if (onSelect) onSelect(creature.id);
+          if (onSelect) onSelect(creatureId);
           
           if (typeof updateDetailsOnly === 'function') {
-            updateDetailsOnly(creature.id, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+            updateDetailsOnly(creatureId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
           }
           
           // Update status displays when creature changes
@@ -1700,74 +1686,8 @@
               window.resetRollCount();
             }
           }, 0);
-        };
+        });
         
-        // Container slot
-        const slot = document.createElement('div');
-        slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
-        slot.setAttribute('data-highlighted', 'false');
-        slot.setAttribute('data-recent', 'false');
-        slot.setAttribute('data-multiselected', 'false');
-        slot.style.width = '34px';
-        slot.style.height = '34px';
-        slot.style.minWidth = '34px';
-        slot.style.minHeight = '34px';
-        slot.style.maxWidth = '34px';
-        slot.style.maxHeight = '34px';
-        
-        // Rarity border/background
-        const rarity = getRarityFromStats(creature);
-        const rarityDiv = document.createElement('div');
-        rarityDiv.setAttribute('role', 'none');
-        rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-        rarityDiv.setAttribute('data-rarity', rarity);
-        slot.appendChild(rarityDiv);
-        
-        // Star tier icon
-        if (creature.tier) {
-          const starImg = document.createElement('img');
-          starImg.alt = 'star tier';
-          starImg.src = `/assets/icons/star-tier-${creature.tier}.png`;
-          starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-          slot.appendChild(starImg);
-        }
-        
-        // Level badge
-        const levelDiv = document.createElement('div');
-        levelDiv.className = 'creature-level-badge';
-        levelDiv.style.position = 'absolute';
-        levelDiv.style.bottom = '2px';
-        levelDiv.style.left = '2px';
-        levelDiv.style.zIndex = '3';
-        levelDiv.style.fontSize = '16px';
-        levelDiv.style.color = '#fff';
-        levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
-        levelDiv.style.letterSpacing = '0.5px';
-        levelDiv.textContent = getLevelFromExp(creature.exp);
-        slot.appendChild(levelDiv);
-        
-        // Portrait image
-        const img = document.createElement('img');
-        img.className = 'pixelated ml-auto';
-        img.alt = 'creature';
-        img.width = 34;
-        img.height = 34;
-        img.style.width = '34px';
-        img.style.height = '34px';
-        img.style.minWidth = '34px';
-        img.style.minHeight = '34px';
-        img.style.maxWidth = '34px';
-        img.style.maxHeight = '34px';
-        img.style.objectFit = 'contain';
-        img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
-        slot.appendChild(img);
-        
-        // Tooltip
-        const creatureName = getCreatureDisplayName(creature);
-        btn.title = creatureName;
-        
-        // Assemble
-        btn.appendChild(slot);
         scrollArea.appendChild(btn);
       }
     });
@@ -1847,109 +1767,9 @@
           noResultsMsg.textContent = `No creatures found matching "${searchValue}"`;
           scrollArea.appendChild(noResultsMsg);
         } else {
-          // Re-render only matching creatures
+          // Re-render only matching creatures using the helper function
           matchingMonsters.forEach(creature => {
-            // Create button
-            const btn = document.createElement('button');
-            btn.className = 'focus-style-visible active:opacity-70';
-            btn.setAttribute('data-state', 'closed');
-            btn.setAttribute('data-gameid', creature.gameId);
-            // Constrain button size to match inner content
-            btn.style.width = '34px';
-            btn.style.height = '34px';
-            btn.style.minWidth = '34px';
-            btn.style.minHeight = '34px';
-            btn.style.maxWidth = '34px';
-            btn.style.maxHeight = '34px';
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.padding = '0';
-            btn.style.margin = '0';
-            btn.style.border = 'none';
-            btn.style.background = 'none';
-            btn.style.cursor = 'pointer';
-            
-            // Store the original click handler parameters for later use
-            const originalOnClick = btn.onclick;
-            
-            btn.onclick = () => {
-              // This will be set up by the parent function that calls getCreatureList
-              // For now, we'll store the creature ID for the parent to handle
-              btn.setAttribute('data-creature-id', creature.id);
-              
-              // Trigger a custom event that the parent can listen for
-              const event = new CustomEvent('creatureSelected', {
-                detail: { creatureId: creature.id, creature: creature }
-              });
-              scrollArea.dispatchEvent(event);
-            };
-            
-            // Container slot
-            const slot = document.createElement('div');
-            slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
-            slot.setAttribute('data-highlighted', 'false');
-            slot.setAttribute('data-recent', 'false');
-            slot.setAttribute('data-multiselected', 'false');
-            slot.style.width = '34px';
-            slot.style.height = '34px';
-            slot.style.minWidth = '34px';
-            slot.style.minHeight = '34px';
-            slot.style.maxWidth = '34px';
-            slot.style.maxHeight = '34px';
-            
-            // Rarity border/background
-            const rarity = getRarityFromStats(creature);
-            const rarityDiv = document.createElement('div');
-            rarityDiv.setAttribute('role', 'none');
-            rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-            rarityDiv.setAttribute('data-rarity', rarity);
-            slot.appendChild(rarityDiv);
-            
-            // Star tier icon
-            if (creature.tier) {
-              const starImg = document.createElement('img');
-              starImg.alt = 'star tier';
-              starImg.src = `/assets/icons/star-tier-${creature.tier}.png`;
-              starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-              slot.appendChild(starImg);
-            }
-            
-            // Level badge
-            const levelDiv = document.createElement('div');
-            levelDiv.className = 'creature-level-badge';
-            levelDiv.style.position = 'absolute';
-            levelDiv.style.bottom = '2px';
-            levelDiv.style.left = '2px';
-            levelDiv.style.zIndex = '3';
-            levelDiv.style.fontSize = '16px';
-            levelDiv.style.color = '#fff';
-            levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
-            levelDiv.style.letterSpacing = '0.5px';
-            levelDiv.textContent = getLevelFromExp(creature.exp);
-            slot.appendChild(levelDiv);
-            
-            // Portrait image
-            const img = document.createElement('img');
-            img.className = 'pixelated ml-auto';
-            img.alt = 'creature';
-            img.width = 34;
-            img.height = 34;
-            img.style.width = '34px';
-            img.style.height = '34px';
-            img.style.minWidth = '34px';
-            img.style.minHeight = '34px';
-            img.style.maxWidth = '34px';
-            img.style.maxHeight = '34px';
-            img.style.objectFit = 'contain';
-            img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
-            slot.appendChild(img);
-            
-            // Tooltip
-            btn.title = creature.creatureName;
-            
-            // Assemble
-            btn.appendChild(slot);
+            const btn = createCreatureButton(creature, null);
             fragment.appendChild(btn);
           });
         }
@@ -2043,103 +1863,9 @@
           noResultsMsg.textContent = message;
           scrollArea.appendChild(noResultsMsg);
         } else {
-          // Re-render only matching creatures
+          // Re-render only matching creatures using the helper function
           matchingMonsters.forEach(creature => {
-            // Create button
-            const btn = document.createElement('button');
-            btn.className = 'focus-style-visible active:opacity-70';
-            btn.setAttribute('data-state', 'closed');
-            btn.setAttribute('data-gameid', creature.gameId);
-            // Constrain button size to match inner content
-            btn.style.width = '34px';
-            btn.style.height = '34px';
-            btn.style.minWidth = '34px';
-            btn.style.minHeight = '34px';
-            btn.style.maxWidth = '34px';
-            btn.style.maxHeight = '34px';
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.padding = '0';
-            btn.style.margin = '0';
-            btn.style.border = 'medium';
-            btn.style.background = 'none';
-            btn.style.cursor = 'pointer';
-            
-            // Add click handler
-            btn.addEventListener('click', () => {
-              const event = new CustomEvent('creatureSelected', {
-                detail: { creatureId: creature.id, creature: creature }
-              });
-              scrollArea.dispatchEvent(event);
-            });
-            
-            // Create slot container
-            const slot = document.createElement('div');
-            slot.className = 'container-slot surface-darker relative flex items-center justify-center overflow-hidden';
-            slot.setAttribute('data-highlighted', 'false');
-            slot.setAttribute('data-recent', 'false');
-            slot.setAttribute('data-multiselected', 'false');
-            slot.style.width = '34px';
-            slot.style.height = '34px';
-            slot.style.minWidth = '34px';
-            slot.style.minHeight = '34px';
-            slot.style.maxWidth = '34px';
-            slot.style.maxHeight = '34px';
-            
-            // Rarity border/background
-            const rarity = getRarityFromStats(creature);
-            const rarityDiv = document.createElement('div');
-            rarityDiv.setAttribute('role', 'none');
-            rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-            rarityDiv.setAttribute('data-rarity', rarity);
-            slot.appendChild(rarityDiv);
-            
-            // Star tier icon
-            if (creature.tier) {
-              const starImg = document.createElement('img');
-              starImg.alt = 'star tier';
-              starImg.src = `/assets/icons/star-tier-${creature.tier}.png`;
-              starImg.className = 'tier-stars pixelated absolute right-0 top-0 z-2 opacity-75';
-              slot.appendChild(starImg);
-            }
-            
-            // Level badge
-            const levelDiv = document.createElement('div');
-            levelDiv.className = 'creature-level-badge';
-            levelDiv.style.position = 'absolute';
-            levelDiv.style.bottom = '2px';
-            levelDiv.style.left = '2px';
-            levelDiv.style.zIndex = '3';
-            levelDiv.style.fontSize = '16px';
-            levelDiv.style.color = '#fff';
-            levelDiv.style.textShadow = '0 1px 2px #000, 0 0 2px #000';
-            levelDiv.style.letterSpacing = '0.5px';
-            levelDiv.textContent = getLevelFromExp(creature.exp);
-            slot.appendChild(levelDiv);
-            
-            // Portrait image
-            const img = document.createElement('img');
-            img.className = 'pixelated ml-auto';
-            img.alt = 'creature';
-            img.width = 34;
-            img.height = 34;
-            img.style.width = '34px';
-            img.style.height = '34px';
-            img.style.minWidth = '34px';
-            img.style.minHeight = '34px';
-            img.style.maxWidth = '34px';
-            img.style.maxHeight = '34px';
-            img.style.objectFit = 'contain';
-            img.src = creature.shiny === true ? `/assets/portraits/${creature.gameId}-shiny.png` : `/assets/portraits/${creature.gameId}.png`;
-            slot.appendChild(img);
-            
-            // Tooltip
-            const creatureName = getCreatureDisplayName(creature);
-            btn.title = creatureName;
-            
-            // Assemble
-            btn.appendChild(slot);
+            const btn = createCreatureButton(creature, null);
             fragment.appendChild(btn);
           });
           

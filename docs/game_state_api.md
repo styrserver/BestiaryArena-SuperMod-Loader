@@ -137,6 +137,20 @@ Key properties include:
 }
 ```
 
+#### Tracking Menu State Changes
+
+You can use `select()` to subscribe to specific parts of the menu state:
+
+```javascript
+// select a piece of the state
+const menuState = globalThis.state.menu.select((state) => state.mode);
+
+// react to menu mode changes
+menuState.subscribe((mode) => {
+  console.log(mode);
+});
+```
+
 ### Player Context
 
 The player context contains comprehensive player data including inventory, monsters, equipment, and progress.
@@ -325,6 +339,20 @@ const playerState = globalThis.state.player.getSnapshot();
 const { monsters, equips } = playerState.context;
 ```
 
+#### Getting Quest Reset Time
+
+You can find out when a new hunting task will be available:
+
+```javascript
+const getTaskResetAt = () => {
+  const task = globalThis.state.player.get().context.questLog.task;
+  if (!task) return null;
+  return task.resetAt;
+};
+
+getTaskResetAt() // returns null or a timestamp
+```
+
 ### Modifying Equipment
 
 ```javascript
@@ -361,6 +389,17 @@ const nextMonsters = monsters.map((monster) =>
 globalThis.state.player.send({
   type: "setState",
   fn: (prev) => ({ ...prev, monsters: nextMonsters }),
+});
+```
+
+### Subscribing to Player State Changes
+
+You can subscribe to player state changes to react to updates:
+
+```javascript
+globalThis.state.player.subscribe((playerState) => {
+  // react to player state changes
+  console.log(playerState);
 });
 ```
 
@@ -736,6 +775,22 @@ globalThis.state.board.send({
 globalThis.state.board.on('newGame', (event) => {
     console.log('New game started with seed:', event.world.RNG.seed);
     console.log('World object:', event.world);
+});
+```
+
+You can also listen to game events and subscribe to world events:
+
+```javascript
+const listener = globalThis.state.board.on("newGame", (game) => {
+  console.log(game.world); // this is the game object
+
+  game.world.grid.onActorDeath.subscribe((event) => {
+    console.log(`Actor died: ${event.killedActor.name}`);
+  });
+
+  game.world.onGameEnd.once(() => {
+    listener.unsubscribe(); // unsubscribe
+  });
 });
 ```
 

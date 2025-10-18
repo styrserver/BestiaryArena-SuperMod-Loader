@@ -2018,6 +2018,18 @@
                 return;
             }
             
+            // Check if Monster Squeezer is unlocked before attempting to squeeze
+            if (type === 'squeeze') {
+                const playerFlags = globalThis.state?.player?.getSnapshot?.()?.context?.flags;
+                if (playerFlags !== undefined) {
+                    const flags = new globalThis.state.utils.Flags(playerFlags);
+                    if (!flags.isSet("monsterSqueezer")) {
+                        console.log('[Autoseller] ℹ️ Monster Squeezer not unlocked. Visit the store to unlock it!');
+                        return;
+                    }
+                }
+            }
+            
             console.log(`[Autoseller] Processing ${type} for ${monsters?.length || 0} monsters...`);
             
             if (!monsters) {

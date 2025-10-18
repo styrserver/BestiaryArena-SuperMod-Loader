@@ -557,6 +557,7 @@ function renderLocalMods(mods) {
     'creature-database.js',
     'Welcome.js',
     'equipment-database.js',
+    'maps-database.js',
     'RunTracker.js',
     'Outfiter.js',
     'Playercount.js'

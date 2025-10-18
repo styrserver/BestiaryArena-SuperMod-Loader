@@ -34,6 +34,11 @@
     NETWORK_ERROR_MAX_RETRIES: 3
   };
   
+  // Import official inventory data from centralized database
+  const inventoryDB = (typeof window !== 'undefined' && window.inventoryDatabase) || {};
+  const SCROLL_KEYS = inventoryDB.variants?.['Summon Scrolls'] || 
+    ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'];
+  
   const SCROLL_CONFIG = {
     SUMMON_SCROLL_API_URL: 'https://bestiaryarena.com/api/trpc/inventory.summonScroll?batch=1',
     FRAME_IMAGE_URL: 'https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png',
@@ -44,6 +49,8 @@
       PURPLE: 4,
       YELLOW: 5
     },
+    // Custom UI colors optimized for Autoscroller interface readability
+    // Official game rarity colors: inventoryDB.rarityColors = {'1': '#9d9d9d', '2': '#1eff00', '3': '#0070dd', '4': '#a335ee', '5': '#ff8000'}
     TIER_COLORS: ['#888888', '#4ade80', '#60a5fa', '#a78bfa', '#fbbf24'],
     TIER_NAMES: ['grey', 'green', 'blue', 'purple', 'yellow'],
     DEFAULT_TIER_TARGETS: [0, 5, 4, 3, 2]
@@ -176,7 +183,7 @@
   const STRING_CACHE = {
     tierNames: SCROLL_CONFIG.TIER_NAMES,
     tierColors: SCROLL_CONFIG.TIER_COLORS,
-    scrollKeys: ['summonScroll1', 'summonScroll2', 'summonScroll3', 'summonScroll4', 'summonScroll5'],
+    scrollKeys: SCROLL_KEYS, // From inventory database
     commonMessages: {
       noScrolls: 'No scrolls available',
       selectCreatures: 'Select creatures first',
@@ -257,6 +264,10 @@
   let selectedScrollTier = 1;
   let selectedCreatures = [];
   let autoscrolling = false;
+  
+  // Player state cache (updated reactively via subscription)
+  let cachedPlayerState = null;
+  let playerStateSubscription = null;
   
   // Configuration state
   let stopConditions = {
@@ -934,7 +945,7 @@
 
   function updateSummonScrollCounts() {
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      const playerContext = cachedPlayerState?.context;
       if (!playerContext) return;
       
       const inventory = playerContext.inventory || {};
@@ -1271,7 +1282,7 @@
   
   function shouldStopAutoscroll() {
           if (stopConditions.useTotalCreatures) {
-        const gameState = globalThis.state?.player?.getSnapshot()?.context;
+        const gameState = cachedPlayerState?.context;
         const monsters = gameState?.monsters || [];
         
         for (const creatureName of selectedCreatures) {
@@ -1291,7 +1302,7 @@
       }
     
           if (stopConditions.useTierSystem) {
-        const gameState = globalThis.state?.player?.getSnapshot()?.context;
+        const gameState = cachedPlayerState?.context;
         const monsters = gameState?.monsters || [];
         
         function calculateTierFromStats(monster) {
@@ -1565,7 +1576,7 @@
           const tierName = tierNames[selectedScrollTier - 1] || 'unknown';
           
           // Find which creature reached the target
-          const gameState = globalThis.state?.player?.getSnapshot()?.context;
+          const gameState = cachedPlayerState?.context;
           const monsters = gameState?.monsters || [];
           let reachedCreature = null;
           
@@ -1610,8 +1621,8 @@
         return;
       }
       
-      const playerContext = globalThis.state.player.getSnapshot().context;
-      const inventory = playerContext.inventory || {};
+      const playerContext = cachedPlayerState?.context;
+      const inventory = playerContext?.inventory || {};
       const scrollKey = `summonScroll${selectedScrollTier}`;
       const availableScrolls = inventory[scrollKey] || 0;
       
@@ -1885,7 +1896,7 @@
       const tierName = tierNames[selectedScrollTier - 1] || 'unknown';
       const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
       
-      const gameState = globalThis.state?.player?.getSnapshot()?.context;
+      const gameState = cachedPlayerState?.context;
       const monsters = gameState?.monsters || [];
       let reachedCreature = null;
       
@@ -2699,7 +2710,7 @@
             creatureRow.style.width = '100%';
             creatureRow.style.maxWidth = '100%';
             
-            const gameState = globalThis.state?.player?.getSnapshot()?.context;
+            const gameState = cachedPlayerState?.context;
             const monsters = gameState?.monsters || [];
             
             function calculateTierFromStats(monster) {
@@ -2938,8 +2949,8 @@
               return;
             }
             
-            const playerContext = globalThis.state.player.getSnapshot().context;
-            const inventory = playerContext.inventory || {};
+            const playerContext = cachedPlayerState?.context;
+            const inventory = playerContext?.inventory || {};
             const scrollKey = `summonScroll${selectedScrollTier}`;
             const availableScrolls = inventory[scrollKey] || 0;
             
@@ -3002,8 +3013,8 @@
       }
       
       function getSummonScrollManipulatorsRow() {
-        const playerContext = globalThis.state.player.getSnapshot().context;
-        const inventory = playerContext.inventory || {};
+        const playerContext = cachedPlayerState?.context;
+        const inventory = playerContext?.inventory || {};
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.flexDirection = 'row';
@@ -3433,6 +3444,17 @@
     failedAttempts = 0;
     hasLoggedInventoryNotFound = false;
     
+    // Unsubscribe from player state
+    if (playerStateSubscription) {
+      try {
+        playerStateSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Autoscroller] Error unsubscribing from player state:', e);
+      }
+      playerStateSubscription = null;
+      cachedPlayerState = null;
+    }
+    
     if (inventoryObserver) {
       try { 
         inventoryObserver.disconnect(); 
@@ -3477,10 +3499,30 @@
   function initializeAutoscroller() {
     console.log('[Autoscroller] Initializing version 2.0 (Optimized)');
     
+    // Log database integration status
+    if (window.inventoryDatabase) {
+      console.log('[Autoscroller] Using centralized inventory database for scroll keys');
+    } else {
+      console.warn('[Autoscroller] Inventory database not found, using fallback scroll keys');
+    }
+    
     // Initialize modules
     resetAutoscrollState();
     DOMCache.clear();
     clearApiQueue();
+    
+    // Set up reactive player state subscription
+    if (globalThis.state?.player) {
+      playerStateSubscription = globalThis.state.player.subscribe((playerState) => {
+        cachedPlayerState = playerState;
+        // Automatically update scroll counts when inventory changes
+        if (autoscrolling || DOM_ELEMENTS.isModalOpen()) {
+          updateSummonScrollCounts();
+        }
+      });
+      // Get initial state
+      cachedPlayerState = globalThis.state.player.getSnapshot();
+    }
     
     if (config.enabled) {
       observeInventory();
@@ -3567,7 +3609,7 @@
       const tierName = STRING_CACHE.tierNames[selectedScrollTier - 1] || 'unknown';
       const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
       
-      const gameState = globalThis.state?.player?.getSnapshot()?.context;
+      const gameState = cachedPlayerState?.context;
       const monsters = gameState?.monsters || [];
       let reachedCreature = null;
       

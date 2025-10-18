@@ -1022,11 +1022,30 @@
             if (result.success) {
               console.log('[Better Exaltation Chest] ✅ Equipment auto-disenchanted successfully');
               
-              // Update dust display with animation if dust was gained
+              // Update stats tracking, logs, and dust display
               if (result.dustGained && result.dustGained > 0) {
                 console.log('[Better Exaltation Chest] 💰 Dust gained from disenchanting:', result.dustGained);
                 equipmentStats.dustGained += result.dustGained;
                 updateStatusDisplay();
+                
+                // Update player state with new dust amount
+                try {
+                  const player = globalThis.state?.player;
+                  if (player) {
+                    player.send({
+                      type: "setState",
+                      fn: (prev) => ({
+                        ...prev,
+                        dust: (prev.dust || 0) + result.dustGained
+                      }),
+                    });
+                    console.log('[Better Exaltation Chest] Player state updated with dust gain:', result.dustGained);
+                  }
+                } catch (e) {
+                  console.warn('[Better Exaltation Chest] Failed to update player state:', e);
+                }
+                
+                // Manually update dust display with animation (state updates don't reliably trigger subscription)
                 updateDustDisplayWithAnimation(result.dustGained);
                 
                 // Update the log entry with dust gained
@@ -2202,26 +2221,40 @@
       // Insert dust display at the beginning of the footer
       footer.insertBefore(dustDisplay, footer.firstChild);
       
-      // Subscribe to dust changes
-      if (globalThis.state?.player?.subscribe) {
+      // Subscribe to dust changes only (optimized with select)
+      if (globalThis.state?.player?.select) {
         let previousDust = currentDust;
-        const unsubscribe = globalThis.state.player.subscribe((state) => {
-          const newDust = Number(state.context?.dust) || 0;
-          const dustChange = newDust - previousDust;
-          
-          if (dustChange > 0) {
-            updateDustDisplayWithAnimation(dustChange);
-          } else {
-            const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
-            if (dustAmountElement) {
-              dustAmountElement.textContent = newDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-            }
-          }
-          
-          previousDust = newDust;
-        });
+        let isFirstCallback = true;
         
-        dustDisplay._unsubscribe = unsubscribe;
+        // Create a targeted subscription that only watches dust
+        const subscription = globalThis.state.player
+          .select((state) => state.context?.dust)
+          .subscribe((newDust) => {
+            const numericDust = Number(newDust) || 0;
+            
+            // Skip the initial callback that fires immediately on subscribe
+            if (isFirstCallback) {
+              isFirstCallback = false;
+              previousDust = numericDust;
+              return;
+            }
+            
+            const dustChange = numericDust - previousDust;
+            
+            if (dustChange > 0) {
+              updateDustDisplayWithAnimation(dustChange);
+            } else if (dustChange < 0 || numericDust !== previousDust) {
+              // Update display for dust decreases or other changes
+              const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
+              if (dustAmountElement) {
+                dustAmountElement.textContent = numericDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+              }
+            }
+            
+            previousDust = numericDust;
+          });
+        
+        dustDisplay._unsubscribe = subscription.unsubscribe;
       }
       
       console.log('Dust display injected successfully');

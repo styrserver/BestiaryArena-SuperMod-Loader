@@ -15,6 +15,17 @@ const AUTOMATION_CHECK_DELAY = 1000;
 const BESTIARY_INTEGRATION_DELAY = 500;
 const BESTIARY_RETRY_DELAY = 2000;
 
+// UI Class name constants
+const BASE_BUTTON_CLASSES = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50';
+const TAB_BUTTON_CLASSES = `${BASE_BUTTON_CLASSES} gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight`;
+const ACTION_BUTTON_CLASSES = `${BASE_BUTTON_CLASSES} gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight`;
+
+const BUTTON_STYLES = {
+    GREEN: 'frame-1-green active:frame-pressed-1-green surface-green',
+    RED: 'frame-1-red active:frame-pressed-1-red surface-red',
+    REGULAR: 'frame-1-regular active:frame-pressed-1-regular surface-regular'
+};
+
 const REGION_NAME_MAP = {
     'rook': 'Rookgaard',
     'carlin': 'Carlin',
@@ -23,12 +34,6 @@ const REGION_NAME_MAP = {
     'kazordoon': 'Kazordoon',
     'venore': 'Venore'
 };
-
-const FALLBACK_RAID_ROOM_IDS = [
-    'rkcent', 'crwasp', 'crcat', 'crghst4', 'fhole', 'fbox', 'fscave',
-    'abmazet', 'aborca', 'aborcb', 'aborcc', 'ofbar', 'kpob', 'kpow',
-    'vbank', 'vdhar'
-];
 
 // Equipment that cannot be on boosted maps
 const EXCLUDED_EQUIPMENT = [
@@ -45,29 +50,22 @@ const EXCLUDED_EQUIPMENT = [
     'Windborn Colossus Armor'
 ];
 
-// Get raid room IDs dynamically (raids cannot be boosted)
-function getRaidRoomIds() {
-    try {
-        const raidsState = globalThis.state.raids.get();
-        console.log('[Better Boosted Maps] Full raids state:', raidsState);
-        console.log('[Better Boosted Maps] Raids context:', raidsState?.context);
-        
-        const currentList = raidsState?.context?.list;
-        console.log('[Better Boosted Maps] Dynamic raid list from state:', currentList);
-        
-        // If list is empty or undefined, use fallback
-        if (!currentList || currentList.length === 0) {
-            console.log('[Better Boosted Maps] Using fallback raid list');
-            return FALLBACK_RAID_ROOM_IDS;
-        }
-        
-        return currentList;
-    } catch (error) {
-        console.error('[Better Boosted Maps] Error getting raid list from state:', error);
-        console.log('[Better Boosted Maps] Using fallback raid list');
-        return FALLBACK_RAID_ROOM_IDS;
-    }
-}
+// Maps that cannot have boosted equipment (grey out in settings)
+const MAPS_WITHOUT_BOOSTED_EQUIPMENT = [
+    'Lonesome Dragon',
+    'Shore Camp',
+    'Orcsmith Orcshop',
+    'Mine Hub',
+    'Emperor Kruzak\'s Treasure Room',
+    'Mad Technomancer\'s Lab',
+    'Eclipse',
+    'Dwarven Bridge',
+    'A Secluded Herb',
+    'Amazon Camp',
+    'Black Knight Villa',
+    'Dragon Lair',
+    'Corym Base Lounge'
+];
 
 // =======================
 // 2. State Management
@@ -89,7 +87,9 @@ const modState = {
     farming: {
         isActive: false,
         currentMapInfo: null
-    }
+    },
+    dailySubscription: null,
+    lastBoostedMap: null
 };
 
 // =======================
@@ -128,6 +128,44 @@ function clearModalsWithEsc(count = 1) {
         });
         document.dispatchEvent(escEvent);
     }
+}
+
+function createSelectAllNoneButtons(idPrefix, scrollContainer) {
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.cssText = `
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+    `;
+    
+    const selectAllBtn = createCustomStyledButton(
+        `select-all-${idPrefix}`,
+        'Select All',
+        `${ACTION_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`,
+        'flex: 1;',
+        () => {
+            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
+            checkboxes.forEach(cb => cb.checked = true);
+            saveSettings();
+        }
+    );
+    
+    const selectNoneBtn = createCustomStyledButton(
+        `select-none-${idPrefix}`,
+        'Select None',
+        `${ACTION_BUTTON_CLASSES} ${BUTTON_STYLES.RED}`,
+        'flex: 1;',
+        () => {
+            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
+            checkboxes.forEach(cb => cb.checked = false);
+            saveSettings();
+        }
+    );
+    
+    buttonContainer.appendChild(selectAllBtn);
+    buttonContainer.appendChild(selectNoneBtn);
+    
+    return buttonContainer;
 }
 
 // =======================
@@ -403,6 +441,76 @@ function cleanupCoordination() {
 }
 
 // =======================
+// 3.3. Daily State Monitoring
+// =======================
+
+function setupDailyStateMonitoring() {
+    // Unsubscribe if already monitoring
+    if (modState.dailySubscription) {
+        modState.dailySubscription.unsubscribe();
+    }
+    
+    // Store initial boosted map
+    const initialData = getBoostedMapData();
+    if (initialData) {
+        modState.lastBoostedMap = {
+            roomId: initialData.roomId,
+            equipId: initialData.equipId,
+            equipStat: initialData.equipStat
+        };
+        console.log('[Better Boosted Maps] Initial boosted map tracked:', modState.lastBoostedMap);
+    }
+    
+    // Subscribe to daily state changes
+    modState.dailySubscription = globalThis.state.daily.subscribe((dailyState) => {
+        const newBoostedMap = dailyState.context?.boostedMap;
+        
+        if (!newBoostedMap) return;
+        
+        // Check if boosted map changed
+        const hasChanged = !modState.lastBoostedMap || 
+            modState.lastBoostedMap.roomId !== newBoostedMap.roomId ||
+            modState.lastBoostedMap.equipId !== newBoostedMap.equipId ||
+            modState.lastBoostedMap.equipStat !== newBoostedMap.equipStat;
+        
+        if (hasChanged) {
+            console.log('[Better Boosted Maps] Boosted map changed!');
+            console.log('  Old:', modState.lastBoostedMap);
+            console.log('  New:', newBoostedMap);
+            
+            // Update tracked map
+            modState.lastBoostedMap = {
+                roomId: newBoostedMap.roomId,
+                equipId: newBoostedMap.equipId,
+                equipStat: newBoostedMap.equipStat
+            };
+            
+            // If mod is enabled, handle the change
+            if (modState.enabled) {
+                handleBoostedMapChange();
+            }
+        }
+    });
+    
+    console.log('[Better Boosted Maps] Daily state monitoring enabled');
+}
+
+function handleBoostedMapChange() {
+    console.log('[Better Boosted Maps] Handling boosted map change...');
+    
+    // Stop current farming if active
+    if (modState.farming.isActive) {
+        console.log('[Better Boosted Maps] Stopping current farming session');
+        cancelBoostedMapFarming('Boosted map changed');
+    }
+    
+    // Wait a bit for game state to stabilize, then check new map
+    setTimeout(() => {
+        checkAndStartBoostedMapFarming();
+    }, 3000);
+}
+
+// =======================
 // 4. DOM Functions
 // =======================
 
@@ -502,6 +610,7 @@ function toggleBoostedMaps() {
         console.log('[Better Boosted Maps] Enabled - setting up mod coordination');
         setupRaidHunterCoordination();
         setupBetterTaskerCoordination();
+        setupDailyStateMonitoring();
         
         // Check and start boosted map farming after delay
         setTimeout(() => {
@@ -510,6 +619,12 @@ function toggleBoostedMaps() {
     } else {
         console.log('[Better Boosted Maps] Disabled - cleaning up coordination');
         cleanupCoordination();
+        
+        // Cleanup daily subscription
+        if (modState.dailySubscription) {
+            modState.dailySubscription.unsubscribe();
+            modState.dailySubscription = null;
+        }
         
         // Reset farming state
         modState.farming.isActive = false;
@@ -845,13 +960,13 @@ function switchTab(tabName) {
     const equipmentBtn = document.getElementById('equipment-tab-btn');
     
     if (tabName === 'maps') {
-        mapsBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-        equipmentBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-regular active:frame-pressed-1-regular surface-regular gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
+        mapsBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`;
+        equipmentBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.REGULAR}`;
         document.getElementById('maps-tab').style.display = 'block';
         document.getElementById('equipment-tab').style.display = 'none';
     } else {
-        mapsBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-regular active:frame-pressed-1-regular surface-regular gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-        equipmentBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
+        mapsBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.REGULAR}`;
+        equipmentBtn.className = `${TAB_BUTTON_CLASSES} ${BUTTON_STYLES.GREEN}`;
         document.getElementById('maps-tab').style.display = 'none';
         document.getElementById('equipment-tab').style.display = 'block';
     }
@@ -917,13 +1032,15 @@ function createMapsTab(settings) {
             scrollContainer.appendChild(regionHeader);
             
             // Maps in this region
-            maps.forEach(({ id, name }) => {
+            maps.forEach(({ id, name, isRaid }) => {
+                const isDisabled = MAPS_WITHOUT_BOOSTED_EQUIPMENT.includes(name) || isRaid;
                 const mapDiv = createCheckboxSetting(
                     `boosted-maps-map-${id}`,
                     name,
                     '',
                     settings.maps?.[id] !== false,
-                    '14px'
+                    '14px',
+                    isDisabled
                 );
                 scrollContainer.appendChild(mapDiv);
             });
@@ -933,39 +1050,7 @@ function createMapsTab(settings) {
     wrapper.appendChild(scrollContainer);
     
     // Add select all/none buttons
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = `
-        display: flex;
-        gap: 10px;
-        margin-top: 10px;
-    `;
-    
-    const selectAllBtn = createCustomStyledButton(
-        'select-all-maps',
-        'Select All',
-        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
-        'flex: 1;',
-        () => {
-            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = true);
-            saveSettings(); // Auto-save after selecting all
-        }
-    );
-    
-    const selectNoneBtn = createCustomStyledButton(
-        'select-none-maps',
-        'Select None',
-        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
-        'flex: 1;',
-        () => {
-            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = false);
-            saveSettings(); // Auto-save after selecting none
-        }
-    );
-    
-    buttonContainer.appendChild(selectAllBtn);
-    buttonContainer.appendChild(selectNoneBtn);
+    const buttonContainer = createSelectAllNoneButtons('maps', scrollContainer);
     wrapper.appendChild(buttonContainer);
     
     return wrapper;
@@ -992,12 +1077,14 @@ function organizeMapsByRegion() {
     const roomsData = globalThis.state?.utils?.ROOMS || {};
     
     if (!regions || regions.length === 0) {
-        // No region data - return all maps unsorted (excluding raids)
-        const raidRoomIds = getRaidRoomIds();
+        // No region data - return all maps unsorted (mark raids)
         return {
             'All Maps': Object.entries(roomNames)
-                .filter(([id]) => !raidRoomIds.includes(id))
-                .map(([id, name]) => ({ id, name }))
+                .map(([id, name]) => ({ 
+                    id, 
+                    name,
+                    isRaid: window.mapsDatabase?.isRaid(id) || false
+                }))
                 .sort((a, b) => a.name.localeCompare(b.name))
         };
     }
@@ -1005,7 +1092,6 @@ function organizeMapsByRegion() {
     const organizedMaps = {};
     
     // Organize maps by region
-    const raidRoomIds = getRaidRoomIds();
     regions.forEach(region => {
         if (!region.rooms || !Array.isArray(region.rooms)) return;
         
@@ -1013,11 +1099,12 @@ function organizeMapsByRegion() {
         
         region.rooms.forEach(room => {
             const roomCode = room.id;
-            // Exclude raid maps (raids cannot be boosted)
-            if (roomNames[roomCode] && !raidRoomIds.includes(roomCode)) {
+            // Include all maps, mark raids as disabled
+            if (roomNames[roomCode]) {
                 regionMaps.push({
                     id: roomCode,
-                    name: roomNames[roomCode]
+                    name: roomNames[roomCode],
+                    isRaid: window.mapsDatabase?.isRaid(roomCode) || false
                 });
             }
         });
@@ -1035,8 +1122,12 @@ function organizeMapsByRegion() {
     });
     
     const remainingMaps = Object.entries(roomNames)
-        .filter(([id]) => !processedRoomCodes.has(id) && !raidRoomIds.includes(id))
-        .map(([id, name]) => ({ id, name }))
+        .filter(([id]) => !processedRoomCodes.has(id))
+        .map(([id, name]) => ({ 
+            id, 
+            name,
+            isRaid: window.mapsDatabase?.isRaid(id) || false
+        }))
         .sort((a, b) => a.name.localeCompare(b.name));
     
     if (remainingMaps.length > 0) {
@@ -1081,24 +1172,23 @@ function createEquipmentTab(settings) {
     
     const allEquipment = window.equipmentDatabase?.ALL_EQUIPMENT || [];
     
-    // Filter out excluded equipment
-    const availableEquipment = allEquipment.filter(equipName => !EXCLUDED_EQUIPMENT.includes(equipName));
-    
-    if (availableEquipment.length === 0) {
+    if (allEquipment.length === 0) {
         const noEquipment = document.createElement('div');
         noEquipment.textContent = 'No equipment available';
         noEquipment.className = 'pixel-font-14';
         noEquipment.style.color = '#888';
         scrollContainer.appendChild(noEquipment);
     } else {
-        availableEquipment.forEach(equipName => {
+        allEquipment.forEach(equipName => {
             const equipId = equipName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const isExcluded = EXCLUDED_EQUIPMENT.includes(equipName);
             const equipDiv = createCheckboxSetting(
                 `boosted-maps-equipment-${equipId}`,
                 equipName,
                 '',
                 settings.equipment?.[equipId] !== false,
-                '14px'
+                '14px',
+                isExcluded
             );
             scrollContainer.appendChild(equipDiv);
         });
@@ -1107,51 +1197,20 @@ function createEquipmentTab(settings) {
     wrapper.appendChild(scrollContainer);
     
     // Add select all/none buttons
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = `
-        display: flex;
-        gap: 10px;
-        margin-top: 10px;
-    `;
-    
-    const selectAllBtn = createCustomStyledButton(
-        'select-all-equipment',
-        'Select All',
-        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
-        'flex: 1;',
-        () => {
-            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = true);
-            saveSettings(); // Auto-save after selecting all
-        }
-    );
-    
-    const selectNoneBtn = createCustomStyledButton(
-        'select-none-equipment',
-        'Select None',
-        'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
-        'flex: 1;',
-        () => {
-            const checkboxes = scrollContainer.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = false);
-            saveSettings(); // Auto-save after selecting none
-        }
-    );
-    
-    buttonContainer.appendChild(selectAllBtn);
-    buttonContainer.appendChild(selectNoneBtn);
+    const buttonContainer = createSelectAllNoneButtons('equipment', scrollContainer);
     wrapper.appendChild(buttonContainer);
     
     return wrapper;
 }
 
-function createCheckboxSetting(id, label, description, checked = false, fontSize = null) {
+function createCheckboxSetting(id, label, description, checked = false, fontSize = null, disabled = false) {
     const settingDiv = document.createElement('div');
     settingDiv.style.cssText = `
         margin-bottom: 0px;
         display: flex;
         flex-direction: column;
         gap: 6px;
+        ${disabled ? 'opacity: 0.4;' : ''}
     `;
     
     const checkboxContainer = document.createElement('div');
@@ -1165,14 +1224,17 @@ function createCheckboxSetting(id, label, description, checked = false, fontSize
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.id = id;
-    checkbox.checked = checked;
+    checkbox.checked = disabled ? false : checked;
+    checkbox.disabled = disabled;
     checkbox.style.cssText = `
         width: 16px;
         height: 16px;
         accent-color: #ffe066;
-        cursor: pointer;
+        cursor: ${disabled ? 'not-allowed' : 'pointer'};
     `;
-    checkbox.addEventListener('change', saveSettings);
+    if (!disabled) {
+        checkbox.addEventListener('change', saveSettings);
+    }
     
     const labelElement = document.createElement('label');
     labelElement.textContent = label;
@@ -1180,8 +1242,8 @@ function createCheckboxSetting(id, label, description, checked = false, fontSize
     labelElement.setAttribute('for', id);
     labelElement.style.cssText = `
         font-weight: bold;
-        color: #fff;
-        cursor: pointer;
+        color: ${disabled ? '#666' : '#fff'};
+        cursor: ${disabled ? 'not-allowed' : 'pointer'};
         ${fontSize ? `font-size: ${fontSize};` : ''}
     `;
     
@@ -1717,6 +1779,7 @@ function init() {
         console.log('[Better Boosted Maps] Mod is enabled - setting up coordination');
         setupRaidHunterCoordination();
         setupBetterTaskerCoordination();
+        setupDailyStateMonitoring();
         
         // Check and start boosted map farming after delay
         setTimeout(() => {
@@ -1760,6 +1823,12 @@ context.exports = {
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
         cleanupCoordination();
+        
+        // Cleanup daily subscription
+        if (modState.dailySubscription) {
+            modState.dailySubscription.unsubscribe();
+            modState.dailySubscription = null;
+        }
         
         if (modState.questLogObserver) {
             modState.questLogObserver.disconnect();
