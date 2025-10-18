@@ -757,10 +757,10 @@ function setupRaidHunterCoordination() {
         const wasRaidHunterActive = isRaidHunterActive;
         isRaidHunterActive = isRaidHunterRaiding();
         
-        // If Raid Hunter just became active and we're running automation, stop it
+        // If Raid Hunter just became active and we're running automation, pause it (but keep game state monitoring for new tasks)
         if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
-            console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation');
-            stopAutomation();
+            console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation (keeping game state monitoring for new tasks)');
+            pauseAutomationDuringRaid();
         }
         
         // If Raid Hunter stopped raiding and we were enabled, resume automation
@@ -1244,29 +1244,17 @@ async function handleNewTaskOnly() {
             console.log('[Better Tasker] Quest blip clicked, waiting for quest log to open...');
         }
         
-        // 2. Look for and click "New Task" button
-        console.log('[Better Tasker] Looking for New Task button...');
-        let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
-        if (!newTaskButton) {
-            // Use localization system to find New Task button
-            newTaskButton = findButtonByText('New task');
-        }
+        // 2. Accept new task without creature filtering (New Task+ always accepts any task)
+        console.log('[Better Tasker] New Task+ mode - accepting task without filtering...');
+        const taskAccepted = await acceptNewTaskFromQuestLog(true); // Skip filtering
         
-        if (newTaskButton) {
-            console.log('[Better Tasker] New Task button found, clicking...');
-            newTaskButton.click();
-            await sleep(200);
-            console.log('[Better Tasker] New Task button clicked');
-            
-            // 3. Close quest log with ESC key
-            await sleep(500); // Wait for task selection to load
-            await clearModalsWithEsc(3);
-            
-            console.log('[Better Tasker] Quest log closed - New Task Only mode complete');
+        // 3. Close quest log with ESC key
+        await clearModalsWithEsc(3);
+        
+        if (taskAccepted) {
+            console.log('[Better Tasker] Quest log closed - New Task+ mode complete (task accepted)');
         } else {
-            console.log('[Better Tasker] New Task button not found');
-            // Close quest log anyway
-            await clearModalsWithEsc(3);
+            console.log('[Better Tasker] Quest log closed - New Task+ mode complete (no task found)');
         }
         
     } catch (error) {
@@ -1288,17 +1276,21 @@ function toggleTasker() {
     switch (taskerState) {
         case TASKER_STATES.DISABLED:
             taskerState = TASKER_STATES.ENABLED;
-            stopQuestBlipMonitoring();
             startAutomation();
             break;
         case TASKER_STATES.ENABLED:
             taskerState = TASKER_STATES.NEW_TASK_ONLY;
             stopAutomation();
-            setupQuestBlipMonitoring();
+            // New Task+ mode: Only run scheduler for task acceptance (no full automation)
+            scheduleTaskCheck();
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
             taskerState = TASKER_STATES.DISABLED;
-            stopQuestBlipMonitoring();
+            // Clear scheduler when disabling
+            if (taskCheckTimeout) {
+                clearTimeout(taskCheckTimeout);
+                taskCheckTimeout = null;
+            }
             resetState('navigation');
             updateExposedState();
             break;
@@ -2924,15 +2916,25 @@ function isGameActive() {
 // Check if new task is available based on resetAt timestamp
 function isQuestBlipAvailable() {
     try {
+        console.log('[Better Tasker] isQuestBlipAvailable: Checking via game state API...');
         const task = globalThis.state.player.get().context.questLog.task;
+        
         if (!task) {
-            console.log('[Better Tasker] No task object found');
+            console.log('[Better Tasker] isQuestBlipAvailable: No task object found');
             return false;
         }
         
+        console.log('[Better Tasker] isQuestBlipAvailable: Task data:', {
+            gameId: task.gameId,
+            ready: task.ready,
+            resetAt: task.resetAt,
+            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null',
+            killCount: task.killCount
+        });
+        
         // If resetAt is null, a new task is available
         if (!task.resetAt) {
-            console.log('[Better Tasker] New task available (resetAt is null)');
+            console.log('[Better Tasker] isQuestBlipAvailable: ✓ New task available (resetAt is null)');
             return true;
         }
         
@@ -2941,15 +2943,15 @@ function isQuestBlipAvailable() {
         const resetTime = task.resetAt;
         
         if (now >= resetTime) {
-            console.log('[Better Tasker] Task cooldown expired, new task available');
+            console.log('[Better Tasker] isQuestBlipAvailable: ✓ Task cooldown expired, new task available');
             return true;
         }
         
         const timeRemaining = Math.ceil((resetTime - now) / 1000);
-        console.log(`[Better Tasker] Task cooldown active, ${timeRemaining}s remaining`);
+        console.log(`[Better Tasker] isQuestBlipAvailable: ✗ Task cooldown active, ${timeRemaining}s remaining`);
         return false;
     } catch (error) {
-        console.error('[Better Tasker] Error checking task availability:', error);
+        console.error('[Better Tasker] isQuestBlipAvailable: Error checking task availability:', error);
         return false;
     }
 }
@@ -4670,6 +4672,13 @@ function subscribeToGameState() {
                 }
                 lastGameStateChange = now;
                 
+                // Skip session reset during raids to avoid quest button control conflicts
+                // Use cached flag for reliability during game transitions
+                if (isRaidHunterActive || isRaidHunterRaiding()) {
+                    console.log('[Better Tasker] Raid Hunter is actively raiding - skipping session reset to avoid control conflicts');
+                    return;
+                }
+                
                 console.log('[Better Tasker] New game detected via game state API, resetting session flags');
                 console.log('[Better Tasker] New game event details:', event);
                 resetState('session');
@@ -4739,7 +4748,28 @@ function subscribeToGameState() {
                     console.error('[Better Tasker] Error logging task status:', error);
                 }
                 
-                // Check and finish tasks immediately after game ends
+                // ALWAYS check for new tasks (even during raids) - this is non-invasive
+                console.log('[Better Tasker] Checking if new task is available via game state API...');
+                const newTaskAvailable = isQuestBlipAvailable();
+                console.log('[Better Tasker] New task available check result:', newTaskAvailable);
+                
+                if (newTaskAvailable) {
+                    console.log('[Better Tasker] New task available - accepting task (works during raids)');
+                    await openQuestLogAndAcceptTask();
+                    return;
+                }
+                
+                // Check if Raid Hunter is currently raiding - skip task COMPLETION during raids
+                // Use cached flag for reliability during game transitions
+                const raidActive = isRaidHunterActive || isRaidHunterRaiding();
+                console.log('[Better Tasker] Raid Hunter active check:', raidActive);
+                
+                if (raidActive) {
+                    console.log('[Better Tasker] Raid Hunter is actively raiding - skipping task completion (already checked for new tasks)');
+                    return;
+                }
+                
+                // Check and finish tasks immediately after game ends (only when not raiding)
                 await handlePostGameTaskCompletion();
             };
             
@@ -4799,9 +4829,12 @@ function startAutomation() {
     // Set up Board Analyzer coordination (monitoring only)
     setupBoardAnalyzerCoordination();
     
+    // Subscribe to game state for task completion (always set up, even during raids for new task acceptance)
+    subscribeToGameState();
+    
     // Check if Raid Hunter is actively raiding
     if (isRaidHunterRaiding()) {
-        console.log('[Better Tasker] Cannot start automation - Raid Hunter is actively raiding, monitoring for raid end');
+        console.log('[Better Tasker] Raid Hunter is actively raiding - game state monitoring active for new tasks, waiting for raid to end for full automation');
         return;
     }
     
@@ -4813,20 +4846,19 @@ function startAutomation() {
     // Set up core automation interval (always set up, even during delay)
     automationInterval = setInterval(runAutomationTasks, 5000); // Core automation every 5s
     
-    // Subscribe to game state for task completion
-    subscribeToGameState();
-    
     // Check if we should delay initial run to let Raid Hunter claim priority
     if (raidHunterEnabled === 'true' && hasActiveRaids) {
         console.log('[Better Tasker] Raids available at startup - delaying 5 seconds to let Raid Hunter claim priority');
         setTimeout(() => {
             // After delay, check if Raid Hunter is now processing raids
             if (isRaidHunterRaiding()) {
-                console.log('[Better Tasker] Raid Hunter is now processing raids - automation will resume when raid ends');
+                console.log('[Better Tasker] Raid Hunter is now processing raids - skipping full automation but starting scheduler for new tasks');
+                // ALWAYS start scheduler for new task acceptance, even during raids
+                scheduleTaskCheck();
                 return;
             }
             
-            console.log('[Better Tasker] Raid Hunter did not claim raids - proceeding with task automation');
+            console.log('[Better Tasker] Raid Hunter did not claim raids - proceeding with full task automation');
             runAutomationTasks();
             scheduleTaskCheck();
         }, 5000);
@@ -4835,6 +4867,31 @@ function startAutomation() {
         runAutomationTasks();
         scheduleTaskCheck();
     }
+}
+
+// Pause automation during raids (keeps game state monitoring AND scheduler for new tasks)
+function pauseAutomationDuringRaid() {
+    if (!automationInterval) return;
+    
+    console.log('[Better Tasker] Pausing automation during raid (keeping game state monitoring and scheduler for new task acceptance)');
+    
+    // Clear main automation intervals (but keep game state monitoring)
+    clearInterval(automationInterval);
+    automationInterval = null;
+    
+    // Clear quest log interval (legacy)
+    if (questLogInterval) {
+        clearInterval(questLogInterval);
+        questLogInterval = null;
+    }
+    
+    // DON'T clear task check timeout - we need it to wake up for new tasks during raids
+    // DON'T unsubscribe from game state - we need it to accept new tasks during raids
+    // DON'T clean up coordinators - they need to keep monitoring
+    // DON'T pause autoplay - Raid Hunter is controlling that
+    // DON'T touch Bestiary Automator settings - Raid Hunter is controlling those
+    
+    console.log('[Better Tasker] Automation paused - game state monitoring and scheduler active for new task acceptance');
 }
 
 function stopAutomation() {
@@ -5357,57 +5414,72 @@ function isCreatureAllowed(creatureName) {
 // Schedule next task check based on resetAt timestamp (max 10 minutes between checks)
 function scheduleTaskCheck() {
     try {
+        console.log('[Better Tasker] === SCHEDULER CHECK START ===');
+        
         // Clear any existing timeout
         if (taskCheckTimeout) {
+            console.log('[Better Tasker] Clearing existing task check timeout');
             clearTimeout(taskCheckTimeout);
             taskCheckTimeout = null;
         }
         
-        // Only schedule if tasker is enabled
-        if (taskerState !== TASKER_STATES.ENABLED) {
+        // Only schedule if tasker is enabled OR in New Task+ mode
+        if (taskerState !== TASKER_STATES.ENABLED && taskerState !== TASKER_STATES.NEW_TASK_ONLY) {
+            console.log('[Better Tasker] Scheduler: Tasker not in active mode (disabled), exiting');
             return;
         }
+        console.log('[Better Tasker] Scheduler: Tasker is active (mode:', taskerState, ') ✓');
         
         // Don't schedule if task hunting is ongoing
         if (taskHuntingOngoing) {
-            console.log('[Better Tasker] Task hunting ongoing - skipping task check scheduling');
+            console.log('[Better Tasker] Scheduler: Task hunting ongoing, exiting');
             return;
         }
+        console.log('[Better Tasker] Scheduler: Not task hunting ✓');
         
         // Check if game is active
         if (!isGameActive()) {
-            console.log('[Better Tasker] Game not active - skipping task check scheduling');
+            console.log('[Better Tasker] Scheduler: Game not active, exiting');
             return;
         }
+        console.log('[Better Tasker] Scheduler: Game is active ✓');
         
         // Get task info from game state
         const playerContext = globalThis.state.player.getSnapshot().context;
         if (!playerContext.questLog || !playerContext.questLog.task) {
-            console.log('[Better Tasker] No task info available - retrying in 10 minutes');
+            console.log('[Better Tasker] Scheduler: No task info available - retrying in 10 minutes');
             taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 600000);
             return;
         }
         
         const task = playerContext.questLog.task;
+        console.log('[Better Tasker] Scheduler: Task state:', {
+            gameId: task.gameId,
+            ready: task.ready,
+            resetAt: task.resetAt,
+            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null'
+        });
         
         // Only check if there's no active task
         if (task.gameId) {
-            console.log('[Better Tasker] Active task in progress - no need to schedule new task check');
+            console.log('[Better Tasker] Scheduler: Active task in progress (gameId:', task.gameId, ') - no need to schedule new task check');
             return;
         }
+        console.log('[Better Tasker] Scheduler: No active task (gameId is null/undefined) ✓');
         
         // Check if new task is available now
         if (!task.resetAt) {
-            console.log('[Better Tasker] New task available now - accepting immediately');
+            console.log('[Better Tasker] Scheduler: New task available NOW (resetAt is null) - accepting immediately');
             openQuestLogAndAcceptTask();
             return;
         }
         
         // Calculate time until task is available
         const timeRemaining = task.resetAt - Date.now();
+        console.log('[Better Tasker] Scheduler: Time remaining until task available:', Math.ceil(timeRemaining / 1000), 'seconds');
         
         if (timeRemaining <= 0) {
-            console.log('[Better Tasker] Task cooldown expired - accepting task now');
+            console.log('[Better Tasker] Scheduler: Task cooldown EXPIRED - accepting task now');
             openQuestLogAndAcceptTask();
             return;
         }
@@ -5416,15 +5488,17 @@ function scheduleTaskCheck() {
         const delay = Math.min(timeRemaining, 600000);
         const delaySeconds = Math.ceil(delay / 1000);
         
-        console.log(`[Better Tasker] Next task check scheduled in ${delaySeconds}s (${Math.ceil(timeRemaining / 1000)}s total remaining)`);
+        console.log(`[Better Tasker] Scheduler: Next task check scheduled in ${delaySeconds}s (total remaining: ${Math.ceil(timeRemaining / 1000)}s)`);
+        console.log('[Better Tasker] === SCHEDULER CHECK END (scheduled) ===');
         
         // Schedule next check
         taskCheckTimeout = setTimeout(() => {
+            console.log('[Better Tasker] Scheduler: Timeout fired, rechecking...');
             scheduleTaskCheck(); // Rechain
         }, delay);
         
     } catch (error) {
-        console.error('[Better Tasker] Error scheduling task check:', error);
+        console.error('[Better Tasker] Scheduler: Error during check:', error);
         // Retry in 10 minutes on error
         taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 600000);
     }
@@ -5435,9 +5509,72 @@ function checkQuestLogForTasks() {
     scheduleTaskCheck();
 }
 
+// Shared function to accept new task (used by both Enabled and New Task+ modes)
+async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
+    try {
+        console.log(`[Better Tasker] Accepting new task (skip filtering: ${skipCreatureFiltering})...`);
+        
+        // Look for and click "New Task" button
+        console.log('[Better Tasker] Looking for New Task button...');
+        let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
+        if (!newTaskButton) {
+            // Use localization system to find New Task button
+            newTaskButton = findButtonByText('New task');
+        }
+        
+        if (!newTaskButton) {
+            console.log('[Better Tasker] New Task button not found');
+            return false;
+        }
+        
+        console.log('[Better Tasker] New Task button found, clicking...');
+        newTaskButton.click();
+        await sleep(200);
+        console.log('[Better Tasker] New Task button clicked');
+        
+        // Wait for task selection to load
+        await sleep(500);
+        
+        // Check creature filtering if not skipped
+        if (!skipCreatureFiltering) {
+            console.log('[Better Tasker] Checking creature filtering...');
+            const creatureName = extractCreatureFromTask();
+            console.log('[Better Tasker] Extracted creature name:', creatureName);
+            
+            if (creatureName && !isCreatureAllowed(creatureName)) {
+                console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
+                
+                // Remove the task directly while quest log is open
+                console.log('[Better Tasker] Removing rejected task directly from quest log...');
+                const taskRemoved = await removeTaskDirectlyFromQuestLog();
+                if (taskRemoved) {
+                    console.log('[Better Tasker] Rejected task successfully removed from game');
+                } else {
+                    console.log('[Better Tasker] Failed to remove rejected task from game');
+                }
+                
+                return false; // Task rejected
+            }
+        }
+        
+        console.log('[Better Tasker] Task accepted successfully');
+        return true; // Task accepted
+        
+    } catch (error) {
+        console.error('[Better Tasker] Error accepting new task:', error);
+        return false;
+    }
+}
+
 // Open quest log and accept new task (extracted from handleTaskFinishing)
 async function openQuestLogAndAcceptTask() {
     try {
+        console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK START ===');
+        console.log('[Better Tasker] Current raid state:', {
+            isRaidHunterActive: isRaidHunterActive,
+            isRaidHunterRaiding: isRaidHunterRaiding()
+        });
+        
         // Don't set task operation in progress flag here - only set it when actually processing a task
         console.log('[Better Tasker] Opening quest log to check for tasks...');
         
@@ -5524,89 +5661,68 @@ async function openQuestLogAndAcceptTask() {
             // Wait for quest log to fully load
             await sleep(300);
             
-            // Look for and click "New Task" button
-            console.log('[Better Tasker] Looking for New Task button...');
-            let newTaskButton = document.querySelector('button:has(svg.lucide-plus)');
-            if (!newTaskButton) {
-                // Use localization system to find New Task button
-                newTaskButton = findButtonByText('New task');
+            // Set task operation in progress flag when actually accepting a new task
+            taskOperationInProgress = true;
+            updateExposedState();
+            console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
+            
+            // Safety timeout to reset the flag if operation gets stuck (30 seconds)
+            const safetyTimeout = setTimeout(() => {
+                if (taskOperationInProgress) {
+                    console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
+                    taskOperationInProgress = false;
+                    updateExposedState();
+                }
+            }, 30000);
+            safetyTimeouts.push(safetyTimeout);
+            
+            // Check if Raid Hunter is actively raiding OR if in New Task+ mode - both skip creature filtering
+            const isRaiding = isRaidHunterRaiding();
+            const isNewTaskMode = taskerState === TASKER_STATES.NEW_TASK_ONLY;
+            const skipFiltering = isRaiding || isNewTaskMode;
+            
+            if (skipFiltering) {
+                const reason = isNewTaskMode ? 'New Task+ mode' : 'Raid Hunter active';
+                console.log(`[Better Tasker] ${reason} - accepting task without filtering`);
             }
             
-            if (newTaskButton) {
-                console.log('[Better Tasker] New Task button found, clicking...');
-                // Set task operation in progress flag when actually accepting a new task
-                taskOperationInProgress = true;
+            // Accept new task using shared function
+            const taskAccepted = await acceptNewTaskFromQuestLog(skipFiltering);
+            
+            if (!taskAccepted) {
+                console.log('[Better Tasker] Task not accepted (filtered or not found)');
+                // Clear task operation in progress flag and reschedule next check
+                taskOperationInProgress = false;
                 updateExposedState();
-                console.log('[Better Tasker] Task operation in progress flag set - accepting new task');
-                
-                // Safety timeout to reset the flag if operation gets stuck (30 seconds)
-                const safetyTimeout = setTimeout(() => {
-                    if (taskOperationInProgress) {
-                        console.log('[Better Tasker] Safety timeout: Resetting taskOperationInProgress flag after 30 seconds');
-                        taskOperationInProgress = false;
-                        updateExposedState();
-                    }
-                }, 30000);
-                safetyTimeouts.push(safetyTimeout);
-                
-                newTaskButton.click();
-                await sleep(200);
-                console.log('[Better Tasker] New Task button clicked');
-                
-                // Wait for task selection to load
-                await sleep(500);
-                
-                // Check if the task creature is allowed before proceeding
-                console.log('[Better Tasker] Checking creature filtering in main path...');
-                const creatureName = extractCreatureFromTask();
-                console.log('[Better Tasker] Extracted creature name:', creatureName);
-                if (creatureName && !isCreatureAllowed(creatureName)) {
-                    console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
-                    
-                    // Remove the task directly while quest log is open
-                    console.log('[Better Tasker] Removing rejected task directly from quest log...');
-                    const taskRemoved = await removeTaskDirectlyFromQuestLog();
-                    if (taskRemoved) {
-                        console.log('[Better Tasker] Rejected task successfully removed from game');
-                    } else {
-                        console.log('[Better Tasker] Failed to remove rejected task from game');
-                    }
-                    
-                    // Clear task operation in progress flag and reschedule next check
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                    scheduleTaskCheck(); // Schedule next task check
-                    return;
-                }
-                
-                console.log('[Better Tasker] Task creature is allowed, checking Raid Hunter status...');
-                
-                // If Raid Hunter is actively raiding, only claim the task (New Task+ behavior)
-                if (isRaidHunterRaiding()) {
-                    console.log('[Better Tasker] Raid Hunter active - claiming task only, not navigating');
-                    await clearModalsWithEsc(3); // Close quest log like New Task+
-                    taskOperationInProgress = false;
-                    updateExposedState();
-                    console.log('[Better Tasker] Task claimed successfully - returning control to Raid Hunter');
-                    scheduleTaskCheck(); // Schedule next task check
-                    return;
-                }
-                
-                // Otherwise proceed with full automation (navigate to map and start autoplay)
-                console.log('[Better Tasker] No active raids - proceeding with navigation...');
-                await navigateToSuggestedMapAndStartAutoplay();
-            } else {
-                console.log('[Better Tasker] New Task button not found');
-                cleanupTaskCompletionFailure('no new task button found');
+                await clearModalsWithEsc(3); // Close quest log
+                scheduleTaskCheck(); // Schedule next task check
+                return;
             }
+            
+            // If in New Task+ mode OR raiding, just close quest log and return (no navigation)
+            if (isNewTaskMode || isRaiding) {
+                const mode = isNewTaskMode ? 'New Task+ mode' : 'raid active';
+                console.log(`[Better Tasker] Task accepted (${mode}) - closing quest log, no navigation`);
+                await clearModalsWithEsc(3); // Close quest log
+                taskOperationInProgress = false;
+                updateExposedState();
+                console.log('[Better Tasker] Task claimed successfully');
+                scheduleTaskCheck(); // Schedule next task check
+                return;
+            }
+            
+            // Otherwise proceed with full automation (Enabled mode, no raid - navigate to map and start autoplay)
+            console.log('[Better Tasker] Enabled mode, no raid - proceeding with navigation and autoplay...');
+            await navigateToSuggestedMapAndStartAutoplay();
         } else {
             console.log('[Better Tasker] Could not open quest log - neither quest blip nor Quests button found');
         }
         
-        console.log('[Better Tasker] Quest log check completed');
+        console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK END ===');
         
     } catch (error) {
         console.error('[Better Tasker] Error opening quest log and accepting task:', error);
+        console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK END (error) ===');
         cleanupTaskCompletionFailure('error opening quest log and accepting task');
     }
 }
@@ -5652,9 +5768,9 @@ function init() {
         startAutomation();
     }
     
-    // Start quest blip monitoring if in New Task Only mode
+    // Start scheduler if in New Task+ mode (uses same logic as Enabled mode for task acceptance)
     if (taskerState === TASKER_STATES.NEW_TASK_ONLY) {
-        setupQuestBlipMonitoring();
+        scheduleTaskCheck();
     }
     
     console.log('[Better Tasker] Better Tasker Mod initialized.');
