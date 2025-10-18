@@ -19,7 +19,8 @@ const defaultConfig = {
   showSetupLabels: true,
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
-  autoplayRefreshMinutes: 30
+  autoplayRefreshMinutes: 30,
+  disableAutoReload: false
 };
 
 // Storage key for this mod
@@ -523,6 +524,8 @@ function saveConfig() {
   try {
     // Save to localStorage
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    // Update global exposure
+    window.betterUIConfig = config;
     console.log('[Better UI] Configuration saved to localStorage:', config);
   } catch (error) {
     console.error('[Better UI] Error saving config:', error);
@@ -828,6 +831,12 @@ function showSettingsModal() {
           <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('persistAutomatorAutoRefillWarning')}">${t('persistAutomatorAutoRefill')}</span>
         </label>
       </div>
+      <div style="margin-bottom: 15px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input type="checkbox" id="disable-auto-reload-toggle" ${config.disableAutoReload ? 'checked' : ''} style="transform: scale(1.2);">
+          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Prevents automatic page reloads from Raid Hunter and Better Tasker">⚠️ Disable Auto-Reload</span>
+        </label>
+      </div>
     `;
     tabContents.appendChild(advancedTab);
     
@@ -975,6 +984,15 @@ function showSettingsModal() {
           });
           console.log('[Better UI] Updated Bestiary Automator runtime config');
         }
+      });
+    }
+    
+    const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
+    if (disableAutoReloadCheckbox) {
+      disableAutoReloadCheckbox.addEventListener('change', () => {
+        config.disableAutoReload = disableAutoReloadCheckbox.checked;
+        saveConfig();
+        console.log('[Better UI] Auto-reload disabled:', config.disableAutoReload);
       });
     }
     
@@ -3182,6 +3200,11 @@ function checkAutoplayRefreshThreshold() {
       
       // Wait 1 second before refreshing
       scheduleTimeout(() => {
+        // Check if auto-reload is disabled
+        if (config.disableAutoReload) {
+          console.log('[Better UI] Auto-reload disabled - skipping autoplay refresh');
+          return;
+        }
         console.log('[Better UI] Refreshing browser...');
         location.reload();
       }, TIMEOUT_DELAYS.BROWSER_REFRESH);
@@ -3297,6 +3320,9 @@ function initBetterUI() {
 
 // Initialize the mod immediately
 initBetterUI();
+
+// Expose config globally for other mods to access
+window.betterUIConfig = config;
 
 // =======================
 // 10. Cleanup

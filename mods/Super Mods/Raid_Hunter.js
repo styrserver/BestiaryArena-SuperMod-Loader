@@ -1852,6 +1852,11 @@ function stopAutoplayOnRaidEnd() {
         // Always reload page after cleanup to reset cache, DOM, and check for more raids
         setTimeout(() => {
             if (!isSafeToReload()) return;
+            // Check if Better UI has disabled auto-reload
+            if (window.betterUIConfig?.disableAutoReload) {
+                console.log('[Raid Hunter] Auto-reload disabled by Better UI - skipping page refresh');
+                return;
+            }
             location.reload();
         }, 2000); // 2 second delay to allow cleanup
         

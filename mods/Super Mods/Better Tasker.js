@@ -557,6 +557,11 @@ function trackFailureAndCheckRefresh(failureType, shouldRefresh = true) {
             // Give user a moment to see the warning
             setTimeout(() => {
                 if (!isSafeToReload()) return;
+                // Check if Better UI has disabled auto-reload
+                if (window.betterUIConfig?.disableAutoReload) {
+                    console.log('[Better Tasker] Auto-reload disabled by Better UI - skipping page refresh');
+                    return;
+                }
                 console.log('[Better Tasker] Refreshing page to recover from stuck state...');
                 location.reload();
             }, 3000);
@@ -3953,6 +3958,14 @@ async function clickFinishAndVerify(finishButton) {
         resetFailureCounter(); // Success - reset failure counter
         
         if (!isSafeToReload()) return false;
+        
+        // Check if Better UI has disabled auto-reload
+        if (window.betterUIConfig?.disableAutoReload) {
+            console.log('[Better Tasker] Auto-reload disabled by Better UI - skipping page refresh');
+            // Clear flags manually since we're not reloading
+            taskNavigationCompleted = false;
+            return true;
+        }
         
         // Reload page to refresh DOM and cache (no need to clear flags - reload handles it)
         console.log('[Better Tasker] Reloading page for fresh state...');
