@@ -5585,9 +5585,27 @@ async function openQuestLogAndAcceptTask() {
         await sleep(200);
         console.log('[Better Tasker] Modal clearing completed');
         
-        // Find and click quest blip or use "Quests" button as fallback
+        // Find and click quest blip or use "Quests/Raiding" button as fallback
         let questLogOpened = false;
-        const questBlip = document.querySelector('img[src*="quest-blip.png"]');
+        
+        // Use comprehensive quest blip selectors (like elsewhere in the code)
+        const questBlipSelectors = [
+            '#header-slot img[src*="quest-blip.png"]',
+            '#header-slot img[src*="/assets/icons/quest-blip.png"]',
+            '#header-slot img[alt="Quests"][src*="quest-blip"]',
+            '#header-slot img[alt="Tasking"][src*="quest-blip"]',
+            'img[src*="quest-blip.png"]',  // Fallback
+            'img[src*="/assets/icons/quest-blip.png"]'  // Fallback
+        ];
+        
+        let questBlip = null;
+        for (const selector of questBlipSelectors) {
+            questBlip = document.querySelector(selector);
+            if (questBlip) {
+                console.log(`[Better Tasker] Found quest blip with selector: ${selector}`);
+                break;
+            }
+        }
         
         if (questBlip) {
             questBlip.click();
@@ -5595,9 +5613,10 @@ async function openQuestLogAndAcceptTask() {
             console.log('[Better Tasker] Quest log opened via quest blip');
             questLogOpened = true;
         } else {
-            // Fallback: Look for "Quests" button
-            console.log('[Better Tasker] No quest blip found, looking for Quests button...');
-            const questsButton = document.querySelector('button img[src*="quest.png"]');
+            // Fallback: Look for "Quests" button (normal) or "Raiding" button (during raids)
+            console.log('[Better Tasker] No quest blip found, looking for Quests/Raiding button...');
+            const questsButton = document.querySelector('button img[src*="quest.png"]') ||
+                                document.querySelector('button img[src*="enemy.png"]');  // Raiding button during raids
             if (questsButton) {
                 const questButton = questsButton.closest('button');
                 if (questButton) {

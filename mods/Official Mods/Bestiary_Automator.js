@@ -531,13 +531,6 @@ const refillStaminaIfNeeded = async () => {
     const stamina = Number(staminaElement.textContent);
     if (stamina >= config.minimumStaminaWithoutRefill) return;
     
-    // Check if user has potions before attempting refill
-    if (!hasStaminaPotions()) {
-      console.log('[Bestiary Automator] No stamina potions available - disabling autoRefill');
-      disableAutoRefillDueToNoPotions();
-      return;
-    }
-    
     console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
     
     // Choose method based on tab visibility
@@ -644,13 +637,6 @@ const removeStaminaPotionFromInventory = (potionTier = 1) => {
         return newState;
       }
     });
-    
-    // Check if user now has 0 potions and disable autoRefill if needed
-    setTimeout(() => {
-      if (!hasStaminaPotions()) {
-        disableAutoRefillDueToNoPotions();
-      }
-    }, 500);
     
     return true;
   } catch (error) {
