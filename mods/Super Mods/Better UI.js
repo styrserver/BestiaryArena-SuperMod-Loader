@@ -2427,6 +2427,9 @@ function applyShinyEnemies() {
       const spritesToMakeShiny = Array.from(allSprites).slice(0, numEnemiesWithThisSprite);
       
       spritesToMakeShiny.forEach(spriteDiv => {
+        // Skip sprites inside modals/dialogs (e.g., Bestiary)
+        if (spriteDiv.closest('[role="dialog"]')) return;
+        
         const spriteImg = spriteDiv.querySelector('img.spritesheet[data-shiny]');
         if (spriteImg && spriteImg.getAttribute('data-shiny') === 'false') {
           spriteImg.setAttribute('data-shiny', 'true');
@@ -2439,6 +2442,9 @@ function applyShinyEnemies() {
     // These are state-based sprite variations that don't match the creature's main spriteId
     const itemSprites = document.querySelectorAll('.sprite.item img.spritesheet[data-shiny="false"]');
     itemSprites.forEach(img => {
+      // Skip sprites inside modals/dialogs (e.g., Bestiary)
+      if (img.closest('[role="dialog"]')) return;
+      
       const battleContainer = img.closest('[data-name]');
       if (battleContainer && isEnemyByHealthBar(battleContainer)) {
         img.setAttribute('data-shiny', 'true');
@@ -2450,6 +2456,9 @@ function applyShinyEnemies() {
     const allBattleContainers = document.querySelectorAll('[data-name]');
     
     allBattleContainers.forEach(container => {
+      // Skip containers inside modals/dialogs (e.g., Bestiary)
+      if (container.closest('[role="dialog"]')) return;
+      
       const creatureName = container.getAttribute('data-name');
       
       if (isEnemyByHealthBar(container)) {
@@ -3024,6 +3033,11 @@ function startBattleBoardObserver() {
                 const spriteImg = containerNode.querySelector('img.spritesheet[data-shiny]');
                 
                 if (spriteImg) {
+                  // Skip sprites inside modals/dialogs (e.g., Bestiary)
+                  if (spriteImg.closest('[role="dialog"]')) {
+                    return;
+                  }
+                  
                   const dataShiny = spriteImg.getAttribute('data-shiny');
                   const spriteContainer = spriteImg.closest('.sprite');
                   const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
@@ -3081,6 +3095,11 @@ function startBattleBoardObserver() {
         const newValue = target.getAttribute('data-shiny');
         
         if (oldValue === 'true' && newValue === 'false') {
+          // Skip sprites inside modals/dialogs (e.g., Bestiary) - even during transformations
+          if (target.closest('[role="dialog"]')) {
+            return;
+          }
+          
           // Find the sprite outfit to get creature info
           const spriteOutfit = target.closest('.sprite.outfit');
           const classList = spriteOutfit ? Array.from(spriteOutfit.classList) : [];

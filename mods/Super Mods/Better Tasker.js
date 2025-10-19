@@ -4165,6 +4165,20 @@ async function handleTaskFinishing() {
         return;
     }
     
+    // EARLY CHECK: If no active task and cooldown is active, let scheduler handle it
+    try {
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const task = playerContext?.questLog?.task;
+        
+        // If no active task (no gameId) and cooldown is active, skip expensive checks
+        if (task && !task.gameId && task.resetAt && task.resetAt > Date.now()) {
+            // Cooldown is active, scheduler will handle waking up
+            return;
+        }
+    } catch (error) {
+        // If check fails, continue with normal flow
+    }
+    
     // Check if new task is available (based on resetAt timestamp)
     const isQuestBlipReady = isQuestBlipAvailable();
     
@@ -4236,7 +4250,7 @@ async function handleTaskFinishing() {
                     console.log('[Better Tasker] New task available - opening quest log to start task...');
                     // Continue with quest log opening logic below
                 } else {
-                    console.log('[Better Tasker] No new task available yet (cooldown active)');
+                    console.log('[Better Tasker] No new task available yet (cooldown active) - letting scheduler handle it');
                     return;
                 }
             } else {
