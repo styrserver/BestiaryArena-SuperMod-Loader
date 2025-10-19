@@ -1,6 +1,9 @@
 // DOM Improved Highscore mod for Bestiary Arena
 if (window.DEBUG) console.log('Improved Highscore Mod initializing...');
 
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
 // Create the Highscore button using the API
 if (api) {
   if (window.DEBUG) console.log('BestiaryModAPI available in Improved Highscore Mod');
@@ -8,8 +11,8 @@ if (api) {
   // Create button to show highscore modal
   window.highscoreButton = api.ui.addButton({
     id: 'highscore-button',
-    text: 'Highscore Improvements',
-    tooltip: 'Show potential tick and rank improvements',
+    text: t('mods.highscore.buttonText'),
+    tooltip: t('mods.highscore.buttonTooltip'),
     primary: false,
     onClick: showImprovementsModal
   });

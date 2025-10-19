@@ -1264,19 +1264,12 @@ async function handleNewTaskOnly() {
 
 // Toggle tasker through the 3 states
 function toggleTasker() {
-    // Check if Raid Hunter is actively raiding before enabling full automation
-    if (taskerState === TASKER_STATES.DISABLED && isRaidHunterRaiding()) {
-        console.log('[Better Tasker] Cannot enable Tasker - Raid Hunter is actively raiding');
-        // Show user feedback that Tasker cannot be enabled due to Raid Hunter
-        updateToggleButtonWithRaidHunterStatus();
-        return;
-    }
-    
     // Rotate through states: Enable → New Task+ → Disabled
     switch (taskerState) {
         case TASKER_STATES.DISABLED:
             taskerState = TASKER_STATES.ENABLED;
             startAutomation();
+            scheduleTaskCheck(); // Check resetAt and schedule next task check
             break;
         case TASKER_STATES.ENABLED:
             taskerState = TASKER_STATES.NEW_TASK_ONLY;
@@ -5624,52 +5617,6 @@ async function openQuestLogAndAcceptTask() {
                     await sleep(200);
                     console.log('[Better Tasker] Quest log opened via Quests button');
                     questLogOpened = true;
-                    
-                    // Wait for quest log to fully load
-                    await sleep(300);
-                    
-                    // 1. Find Paw and Fur Society section first (section-first approach)
-                    console.log('[Better Tasker] Using section-first approach - finding Paw and Fur Society section...');
-                    const pawAndFurSection = findPawAndFurSection();
-                    if (!pawAndFurSection) {
-                        console.log('[Better Tasker] Paw and Fur Society section not found');
-                        taskOperationInProgress = false;
-                        updateExposedState();
-                        return;
-                    }
-                    
-                    // 2. Extract & validate creature from that specific section
-                    console.log('[Better Tasker] Extracting creature from Paw and Fur Society section...');
-                    const creatureName = extractCreatureFromSection(pawAndFurSection);
-                    console.log('[Better Tasker] Extracted creature name:', creatureName);
-                    if (!creatureName || !isCreatureAllowed(creatureName)) {
-                        console.log(`[Better Tasker] Task rejected - creature "${creatureName}" is not in allowed list`);
-                        
-                        // Remove the task directly while quest log is open
-                        console.log('[Better Tasker] Removing rejected task directly from quest log...');
-                        const taskRemoved = await removeTaskDirectlyFromQuestLog();
-                        if (taskRemoved) {
-                            console.log('[Better Tasker] Rejected task successfully removed from game');
-                        } else {
-                            console.log('[Better Tasker] Failed to remove rejected task from game');
-                        }
-                        
-                        // Clear flags and return
-                        taskOperationInProgress = false;
-                        updateExposedState();
-                        return;
-                    }
-                    
-                    // 3. Extract suggested map from that same section and navigate
-                    console.log('[Better Tasker] Extracting suggested map from Paw and Fur Society section...');
-                    const suggestedMapElement = extractSuggestedMapFromSection(pawAndFurSection);
-                    
-                    if (suggestedMapElement) {
-                        console.log('[Better Tasker] Suggested map found, navigating...');
-                        await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement);
-                    } else {
-                        console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
-                    }
                 }
             } else {
                 console.log('[Better Tasker] Neither quest blip nor Quests button found');
@@ -5785,6 +5732,7 @@ function init() {
     // Start automation if enabled (will check for Raid Hunter internally)
     if (taskerState === TASKER_STATES.ENABLED) {
         startAutomation();
+        scheduleTaskCheck(); // Check resetAt and schedule next task check
     }
     
     // Start scheduler if in New Task+ mode (uses same logic as Enabled mode for task acceptance)

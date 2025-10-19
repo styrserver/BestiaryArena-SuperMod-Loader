@@ -4,7 +4,6 @@ console.log('Setup Manager Mod initializing...');
 // Configuration with defaults
 const defaultConfig = {
   savedSetups: {},  // This will store all saved team setups by map ID
-  autoAttachToButton: true, // Whether to hijack the auto-configure button
   setupNameMaxLength: 20, // Maximum character length for setup names
   maxSetupsPerMap: 10, // Maximum number of setups per map
 };
@@ -25,8 +24,6 @@ if (!config.savedSetups) {
 
 // We'll hold references to active UI components here for cleanup
 let activeButtonElement = null;
-let originalButtonElement = null;
-let originalButtonClickHandler = null;
 
 // Add a reference to track active modals
 let activeModal = null;
@@ -36,72 +33,16 @@ const safeAccess = (obj, path) => {
   return path.split('.').reduce((acc, part) => acc && acc[part], obj);
 };
 
-// Translations
-const TRANSLATIONS = {
-  en: {
-    setupManager: 'Setup Manager',
-    saveTeam: 'Save Team',
-    loadTeam: 'Load Team',
-    deleteTeam: 'Delete',
-    originalSetup: 'Original',
-    newSetup: 'New Setup',
-    setupName: 'Setup Name',
-    save: 'Save',
-    cancel: 'Cancel',
-    noTeamsFound: 'No saved teams for this map',
-    saveCurrentSetup: 'Save Current Setup',
-    teamSaved: 'Team setup saved successfully!',
-    teamLoaded: 'Team setup loaded successfully!',
-    teamDeleted: 'Team setup deleted',
-    confirmDelete: 'Delete this team setup?',
-    yes: 'Yes',
-    no: 'No',
-    error: 'Error',
-    nameTooLong: `Name cannot exceed ${config.setupNameMaxLength} characters`,
-    noMapSelected: 'No map selected',
-    maxTeamsReached: `Maximum of ${config.maxSetupsPerMap} teams per map reached`,
-    invalidSetup: 'Invalid team setup',
-    noMonstersInSetup: 'No monsters in this setup',
-    autosetupRequired: 'Autosetup Required',
-    autosetupMessage: 'Setup Manager requires Autosetup Mode to be enabled.'
-  },
-  pt: {
-    setupManager: 'Gerenciador de Times',
-    saveTeam: 'Salvar Time',
-    loadTeam: 'Carregar',
-    deleteTeam: 'Deletar',
-    originalSetup: 'Original',
-    newSetup: 'Novo Time',
-    setupName: 'Nome do Time',
-    save: 'Salvar',
-    cancel: 'Cancelar',
-    noTeamsFound: 'Nenhum time salvo para este mapa',
-    saveCurrentSetup: 'Salvar Time Atual',
-    teamSaved: 'Time salvo com sucesso!',
-    teamLoaded: 'Time carregado com sucesso!',
-    teamDeleted: 'Time deletado',
-    confirmDelete: 'Deletar este time?',
-    yes: 'Sim',
-    no: 'Não',
-    error: 'Erro',
-    nameTooLong: `Nome não pode exceder ${config.setupNameMaxLength} caracteres`,
-    noMapSelected: 'Nenhum mapa selecionado',
-    maxTeamsReached: `Máximo de ${config.maxSetupsPerMap} times por mapa atingido`,
-    invalidSetup: 'Time inválido',
-    noMonstersInSetup: 'Nenhum monstro neste time',
-    autosetupRequired: 'Modo Autosetup Necessário',
-    autosetupMessage: 'O Gerenciador de Times requer que o modo Autosetup esteja ativado.'
-  }
-};
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
-// Language detection
-const currentLocale = document.documentElement.lang === 'pt' || 
-  document.querySelector('html[lang="pt"]') || 
-  window.location.href.includes('/pt/') ? 'pt' : 'en';
-
-// Translate function
-const t = (key) => {
-  return TRANSLATIONS[currentLocale][key] || TRANSLATIONS.en[key] || key;
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+  let text = t(key);
+  Object.entries(replacements).forEach(([placeholder, value]) => {
+    text = text.replace(`{${placeholder}}`, value);
+  });
+  return text;
 };
 
 // Calculate tier from monster stats
@@ -262,7 +203,7 @@ function saveTeamSetup(mapId, name, setup) {
   
   // Check if we've reached the maximum number of setups for this map
   if (config.savedSetups[mapId].length >= config.maxSetupsPerMap) {
-    showNotification(t('maxTeamsReached'), 'error');
+    showNotification(tReplace('mods.setupManager.maxTeamsReached', { max: config.maxSetupsPerMap }), 'error');
     return false;
   }
   
@@ -333,8 +274,8 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
     const flags = new globalThis.state.utils.Flags(playerFlags);
     if (!flags.isSet("autosetup")) {
       api.ui.components.createModal({
-        title: t('autosetupRequired'),
-        content: t('autosetupMessage'),
+        title: t('mods.setupManager.autosetupRequired'),
+        content: t('mods.setupManager.autosetupMessage'),
         buttons: [{ text: 'OK', primary: true }]
       });
       return false;
@@ -355,24 +296,6 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
             type: "autoSetupBoard",
             setup: originalSetup
           });
-          
-          // Wait a short time and check if button still exists, if not - recreate it
-          setTimeout(() => {
-            if (keepModalOpen) {
-              return;
-            }
-            
-            // Check if our button is still there
-            const existingButton = document.querySelector(`#${BUTTON_ID}`);
-            if (!existingButton) {
-              console.log('Auto-configure button disappeared after loading Original setup, recreating it');
-              if (config.autoAttachToButton) {
-                attachToAutoconfigureButton();
-              } else {
-                createSetupManagerButton();
-              }
-            }
-          }, 200);
           
           return true;
         } else {
@@ -423,7 +346,7 @@ function loadTeamAndNotify(mapId, setupName) {
   
   // Load the team setup
   if (loadTeamSetup(mapId, setupName, isOriginalTeam)) {
-    showNotification(t('teamLoaded'), 'success');
+    showNotification(t('mods.setupManager.teamLoaded'), 'success');
     
     // For Original team, reshow the modal after a short delay
     if (isOriginalTeam) {
@@ -437,7 +360,7 @@ function loadTeamAndNotify(mapId, setupName) {
     
     return true;
   } else {
-    showNotification(t('error'), 'error');
+    showNotification(t('common.error'), 'error');
     return false;
   }
 }
@@ -617,7 +540,7 @@ function createSetupCard(mapId, setupName, setupData) {
   
   // Load button
   const loadButton = createActionButton(
-    t('loadTeam'), 
+    t('mods.setupManager.loadTeam'), 
     () => loadTeamAndNotify(mapId, setupName), 
     true,
     null,
@@ -708,8 +631,8 @@ function showSetupManagerModal() {
     const flags = new globalThis.state.utils.Flags(playerFlags);
     if (!flags.isSet("autosetup")) {
       api.ui.components.createModal({
-        title: t('autosetupRequired'),
-        content: t('autosetupMessage'),
+        title: t('mods.setupManager.autosetupRequired'),
+        content: t('mods.setupManager.autosetupMessage'),
         buttons: [{ text: 'OK', primary: true }]
       });
       return;
@@ -717,7 +640,7 @@ function showSetupManagerModal() {
     
     const mapId = getCurrentMapId();
     if (!mapId) {
-      showNotification(t('noMapSelected'), 'error');
+      showNotification(t('mods.setupManager.noMapSelected'), 'error');
       return;
     }
     
@@ -758,7 +681,7 @@ function showSetupManagerModal() {
     if (!hasSavedSetups) {
       const noSetupsMessage = document.createElement('p');
       noSetupsMessage.className = 'text-whiteRegular italic mt-2';
-      noSetupsMessage.textContent = t('noTeamsFound');
+      noSetupsMessage.textContent = t('mods.setupManager.noTeamsFound');
       scrollContainer.addContent(noSetupsMessage);
     }
     
@@ -766,7 +689,7 @@ function showSetupManagerModal() {
     
     // Add save button
     const saveButton = createActionButton(
-      t('saveCurrentSetup'),
+      t('mods.setupManager.saveCurrentSetup'),
       () => showSaveSetupModal(mapId),
       true
     );
@@ -775,12 +698,12 @@ function showSetupManagerModal() {
     
     // Create the modal
     activeModal = api.ui.components.createModal({
-      title: `${t('setupManager')} - ${mapName}`,
+      title: `${t('mods.setupManager.setupManager')} - ${mapName}`,
       width: 360,
       content: content,
       buttons: [
         {
-          text: t('cancel'),
+          text: t('common.cancel'),
           primary: false,
           closeOnClick: true
         }
@@ -788,7 +711,7 @@ function showSetupManagerModal() {
     });
   } catch (error) {
     console.error('Error showing setup manager modal:', error);
-    showNotification(t('error'), 'error');
+    showNotification(t('common.error'), 'error');
   }
 }
 
@@ -808,8 +731,8 @@ function showSaveSetupModal(mapId) {
     const flags = new globalThis.state.utils.Flags(playerFlags);
     if (!flags.isSet("autosetup")) {
       api.ui.components.createModal({
-        title: t('autosetupRequired'),
-        content: t('autosetupMessage'),
+        title: t('mods.setupManager.autosetupRequired'),
+        content: t('mods.setupManager.autosetupMessage'),
         buttons: [{ text: 'OK', primary: true }]
       });
       return;
@@ -822,7 +745,7 @@ function showSaveSetupModal(mapId) {
     const currentSetup = getCurrentTeamSetup();
     
     if (!currentSetup || currentSetup.length === 0) {
-      showNotification(t('invalidSetup'), 'error');
+      showNotification(t('mods.setupManager.invalidSetup'), 'error');
       return;
     }
     
@@ -836,14 +759,14 @@ function showSaveSetupModal(mapId) {
     const inputLabel = document.createElement('label');
     inputLabel.htmlFor = 'setup-name-input';
     inputLabel.className = 'block text-whiteRegular mb-1';
-    inputLabel.textContent = t('setupName');
+    inputLabel.textContent = t('mods.setupManager.setupName');
     
     const nameInput = document.createElement('input');
     nameInput.type = 'text';
     nameInput.id = 'setup-name-input';
     nameInput.className = 'frame-pressed-1 surface-dark w-full p-2 text-whiteRegular';
     nameInput.maxLength = config.setupNameMaxLength;
-    nameInput.value = t('newSetup');
+    nameInput.value = t('mods.setupManager.newSetup');
     
     inputContainer.appendChild(inputLabel);
     inputContainer.appendChild(nameInput);
@@ -876,23 +799,23 @@ function showSaveSetupModal(mapId) {
     
     // Create the modal
     activeModal = api.ui.components.createModal({
-      title: t('saveTeam'),
+      title: t('mods.setupManager.saveTeam'),
       width: 320,
       content: content,
       buttons: [
         {
-          text: t('save'),
+          text: t('common.save'),
           primary: true,
           onClick: () => {
             // Validate name
             const name = nameInput.value.trim();
             if (!name) {
-              showNotification(t('error'), 'error');
+              showNotification(t('common.error'), 'error');
               return;
             }
             
             if (name.length > config.setupNameMaxLength) {
-              showNotification(t('nameTooLong'), 'error');
+              showNotification(tReplace('mods.setupManager.nameTooLong', { max: config.setupNameMaxLength }), 'error');
               return;
             }
             
@@ -900,16 +823,16 @@ function showSaveSetupModal(mapId) {
             const saveResult = saveTeamSetup(mapId, name, currentSetup);
             
             if (saveResult) {
-              showNotification(t('teamSaved'), 'success');
+              showNotification(t('mods.setupManager.teamSaved'), 'success');
               // Reopen the setup manager with updated data
               showSetupManagerModal();
             } else {
-              showNotification(t('error'), 'error');
+              showNotification(t('common.error'), 'error');
             }
           }
         },
         {
-          text: t('cancel'),
+          text: t('common.cancel'),
           primary: false,
           closeOnClick: true
         }
@@ -924,7 +847,7 @@ function showSaveSetupModal(mapId) {
     
   } catch (error) {
     console.error('Error showing save setup modal:', error);
-    showNotification(t('error'), 'error');
+    showNotification(t('common.error'), 'error');
   }
 }
 
@@ -939,8 +862,8 @@ function showDeleteConfirmation(mapId, setupName) {
     const flags = new globalThis.state.utils.Flags(playerFlags);
     if (!flags.isSet("autosetup")) {
       api.ui.components.createModal({
-        title: t('autosetupRequired'),
-        content: t('autosetupMessage'),
+        title: t('mods.setupManager.autosetupRequired'),
+        content: t('mods.setupManager.autosetupMessage'),
         buttons: [{ text: 'OK', primary: true }]
       });
       return;
@@ -953,7 +876,7 @@ function showDeleteConfirmation(mapId, setupName) {
     const content = document.createElement('div');
     const message = document.createElement('p');
     message.className = 'text-whiteRegular mb-4';
-    message.textContent = t('confirmDelete');
+    message.textContent = t('mods.setupManager.confirmDelete');
     content.appendChild(message);
     
     const setupPreview = document.createElement('div');
@@ -968,27 +891,27 @@ function showDeleteConfirmation(mapId, setupName) {
     
     // Create the modal
     activeModal = api.ui.components.createModal({
-      title: t('deleteTeam'),
+      title: t('mods.setupManager.deleteTeam'),
       width: 300,
       content: content,
       buttons: [
         {
-          text: t('yes'),
+          text: t('common.yes'),
           primary: true,
           onClick: () => {
             const deleteResult = deleteTeamSetup(mapId, setupName);
             
             if (deleteResult) {
-              showNotification(t('teamDeleted'), 'success');
+              showNotification(t('mods.setupManager.teamDeleted'), 'success');
               // Reopen the setup manager with updated data
               showSetupManagerModal();
             } else {
-              showNotification(t('error'), 'error');
+              showNotification(t('common.error'), 'error');
             }
           }
         },
         {
-          text: t('no'),
+          text: t('common.no'),
           primary: false,
           closeOnClick: true
         }
@@ -996,7 +919,7 @@ function showDeleteConfirmation(mapId, setupName) {
     });
   } catch (error) {
     console.error('Error showing delete confirmation:', error);
-    showNotification(t('error'), 'error');
+    showNotification(t('common.error'), 'error');
   }
 }
 
@@ -1012,8 +935,8 @@ function createSetupManagerButton() {
   try {
     const button = api.ui.addButton({
       id: BUTTON_ID,
-      text: t('setupManager'),
-      tooltip: t('setupManager'),
+      text: t('mods.setupManager.setupManager'),
+      tooltip: t('mods.setupManager.setupManager'),
       modId: MOD_ID,
       primary: false,
       onClick: showSetupManagerModal
@@ -1022,81 +945,6 @@ function createSetupManagerButton() {
     activeButtonElement = button;
   } catch (error) {
     console.error('Error creating setup manager button:', error);
-  }
-}
-
-// Find and modify the existing autoconfigure button
-function attachToAutoconfigureButton() {
-  try {
-    // Wait for the button to exist in the DOM
-    const findButton = () => {
-      // Look for the autoconfigure button by its unique characteristics
-      const buttonElement = document.querySelector('button.frame-1-blue.surface-blue');
-      
-      if (buttonElement && buttonElement.textContent && buttonElement.textContent.includes('Autoconfigurar')) {
-        console.log('Found autoconfigure button');
-        
-        // Store the original button
-        originalButtonElement = buttonElement;
-        
-        // Store the original click handler
-        const originalClickHandler = buttonElement.onclick;
-        originalButtonClickHandler = originalClickHandler;
-        
-        // Override the click handler
-        buttonElement.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          showSetupManagerModal();
-        };
-        
-        // Update button text
-        const svgContent = buttonElement.innerHTML.split('</svg>')[0] + '</svg>';
-        buttonElement.innerHTML = svgContent + ' ' + t('setupManager');
-        
-                  console.log('Autoconfigure button modified');
-      } else {
-        // Button not found, try again in a moment
-        setTimeout(findButton, 1000);
-      }
-    };
-    
-    // Start looking for the button
-    findButton();
-  } catch (error) {
-    console.error('Error attaching to autoconfigure button:', error);
-  }
-}
-
-// Restore the original autoconfigure button
-function restoreAutoconfigureButton() {
-  if (originalButtonElement && originalButtonClickHandler) {
-    originalButtonElement.onclick = originalButtonClickHandler;
-    
-    // Update button text
-    const svgContent = originalButtonElement.innerHTML.split('</svg>')[0] + '</svg>';
-    originalButtonElement.innerHTML = svgContent + ' Autoconfigurar';
-    
-    console.log('Restored original autoconfigure button');
-  }
-}
-
-// Add a dedicated extension button for Team Manager
-function createExtensionButton() {
-  try {
-    // Add a button to the UI through the extension API
-    api.ui.addButton({
-      id: 'extension-setup-manager-button',
-      text: t('setupManager'), // Will show "Setup Manager" in English or "Gerenciador de Times" in Portuguese
-      modId: MOD_ID,
-      tooltip: t('setupManager'),
-      onClick: () => {
-        showSetupManagerModal();
-      }
-    });
-    console.log('Created extension button for Setup Manager');
-  } catch (error) {
-    console.error('Error creating extension button:', error);
   }
 }
 
@@ -1125,17 +973,10 @@ function init() {
     saveConfigToStorage();
   }
   
-  // Create our button or attach to existing button based on config
-  if (config.autoAttachToButton) {
-    attachToAutoconfigureButton();
-  } else {
-    createSetupManagerButton();
-  }
+  // Create the setup manager button
+  createSetupManagerButton();
   
-  // Always create the extension button
-  createExtensionButton();
-  
-      console.log('Setup Manager initialized');
+  console.log('Setup Manager initialized');
 }
 
 // Wait for the game to be ready before initializing
@@ -1157,8 +998,6 @@ function cleanup() {
     api.ui.removeButton(BUTTON_ID);
     activeButtonElement = null;
   }
-  
-  restoreAutoconfigureButton();
   
   const notificationContainer = document.getElementById('setup-manager-notification-container');
   if (notificationContainer) {
@@ -1267,13 +1106,6 @@ context.exports.cleanup = function() {
   if (activeButtonElement) {
     activeButtonElement.remove();
     activeButtonElement = null;
-  }
-  
-  // Restore original button if it was hijacked
-  if (originalButtonElement && originalButtonClickHandler) {
-    originalButtonElement.onclick = originalButtonClickHandler;
-    originalButtonElement = null;
-    originalButtonClickHandler = null;
   }
   
   // Remove any existing modals

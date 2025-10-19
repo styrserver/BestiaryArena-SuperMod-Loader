@@ -516,17 +516,18 @@ function handleBoostedMapChange() {
 
 function isInQuestLog(element) {
     // Check if we're inside a Quest Log widget
+    const questLogTexts = ['Quest Log', 'Diário de Missões'];
     let current = element;
     while (current && current !== document.body) {
         // Look for the widget header with "Quest Log" text
         const widgetTop = current.querySelector?.('.widget-top-text p');
-        if (widgetTop && widgetTop.textContent === 'Quest Log') {
+        if (widgetTop && questLogTexts.includes(widgetTop.textContent)) {
             return true;
         }
         // Also check if current element is the widget top
         if (current.classList?.contains('widget-top-text')) {
             const p = current.querySelector('p');
-            if (p && p.textContent === 'Quest Log') {
+            if (p && questLogTexts.includes(p.textContent)) {
                 return true;
             }
         }
@@ -537,9 +538,11 @@ function isInQuestLog(element) {
 
 function findBoostedMapSection() {
     const allSections = document.querySelectorAll('.frame-1.surface-regular');
+    const boostedMapTexts = ['Daily boosted map', 'Mapa boostado diário'];
+    
     for (const section of allSections) {
         const titleElement = section.querySelector('p.text-whiteHighlight');
-        if (titleElement && titleElement.textContent === 'Daily boosted map') {
+        if (titleElement && boostedMapTexts.includes(titleElement.textContent)) {
             // Only return if we're in the Quest Log
             if (isInQuestLog(section)) {
                 return section;
@@ -564,13 +567,11 @@ function insertButtons() {
     console.log('[Better Boosted Maps] Found Daily boosted map section, inserting buttons');
     
     const titleElement = boostedMapSection.querySelector('p.text-whiteHighlight');
-    if (titleElement && titleElement.textContent === 'Daily boosted map') {
+    const boostedMapTexts = ['Daily boosted map', 'Mapa boostado diário'];
+    if (titleElement && boostedMapTexts.includes(titleElement.textContent)) {
         const titleContainer = titleElement.parentElement;
         
         if (titleContainer) {
-            // Find the map name element (span with the action-link class)
-            const mapNameElement = titleContainer.querySelector('span.action-link');
-            
             const buttonContainer = document.createElement('div');
             buttonContainer.style.cssText = `display: flex; gap: 4px; margin-top: 4px;`;
             
@@ -580,11 +581,14 @@ function insertButtons() {
             const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, 'Settings', 'blue', openSettingsModal);
             buttonContainer.appendChild(settingsButton);
             
-            // Insert after map name if found, otherwise after title
-            if (mapNameElement) {
-                mapNameElement.parentNode.insertBefore(buttonContainer, mapNameElement.nextSibling);
+            // Find the timer element (has clock icon and time)
+            const timerElement = titleContainer.querySelector('p.pixel-font-14.text-right');
+            
+            // Insert before timer if found, otherwise append to titleContainer
+            if (timerElement) {
+                titleContainer.insertBefore(buttonContainer, timerElement);
             } else {
-                titleElement.parentNode.insertBefore(buttonContainer, titleElement.nextSibling);
+                titleContainer.appendChild(buttonContainer);
             }
             
             updateToggleButton();
@@ -1741,7 +1745,9 @@ function monitorQuestLog() {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         const hasBoostedMap = node.textContent?.includes('Daily boosted map') || 
-                            node.querySelector?.('*')?.textContent?.includes('Daily boosted map');
+                            node.textContent?.includes('Mapa boostado diário') ||
+                            node.querySelector?.('*')?.textContent?.includes('Daily boosted map') ||
+                            node.querySelector?.('*')?.textContent?.includes('Mapa boostado diário');
                         
                         if (hasBoostedMap && !document.getElementById(TOGGLE_BUTTON_ID)) {
                             // Check if this is in Quest Log before injecting

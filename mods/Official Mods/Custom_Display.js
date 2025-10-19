@@ -21,11 +21,7 @@ const defaultConfig = {
     labelColor: '#00ff99',
     borderThickness: 1,
     fontSize: 12
-  },
-  // Global settings
-  currentLocale: document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en'
+  }
 };
 
 // Initialize with saved config or defaults
@@ -48,71 +44,8 @@ let lastGameStarted = false;
 let gridOverlay = null;
 
 // Translations
-const TRANSLATIONS = {
-  en: {
-    modName: 'Custom Display',
-    configButtonTooltip: 'Custom Display Settings',
-    configTitle: 'Custom Display Settings',
-    // Performance section
-    perfSectionTitle: 'Performance Mode',
-    perfButtonText: 'Performance Mode',
-    perfButtonTooltipEnabled: 'Disable Performance Mode',
-    perfButtonTooltipDisabled: 'Enable Performance Mode',
-    showNamesLabel: 'Show character names',
-    showHPLabel: 'Show HP bars',
-    showHitboxesLabel: 'Show hitboxes (non-walkable areas)',
-    showWalkablePathsLabel: 'Show walkable paths',
-    tileColorLabel: 'Background tile color:',
-    hitboxColorLabel: 'Hitbox color:',
-    walkableColorLabel: 'Walkable path color:',
-    // Grid section
-    gridSectionTitle: 'Map Grid',
-    gridButtonText: 'Toggle Grid',
-    gridButtonTooltipEnabled: 'Hide Grid',
-    gridButtonTooltipDisabled: 'Show Grid',
-    gridColorLabel: 'Grid Color:',
-    labelColorLabel: 'Label Color:',
-    fontSizeLabel: 'Font Size:',
-    // Buttons
-    saveButton: 'Save',
-    cancelButton: 'Cancel'
-  },
-  pt: {
-    modName: 'Exibição Personalizada',
-    configButtonTooltip: 'Configurações de Exibição',
-    configTitle: 'Configurações de Exibição',
-    // Performance section
-    perfSectionTitle: 'Modo de Desempenho',
-    perfButtonText: 'Modo de Desempenho',
-    perfButtonTooltipEnabled: 'Desativar Modo de Desempenho',
-    perfButtonTooltipDisabled: 'Ativar Modo de Desempenho',
-    showNamesLabel: 'Mostrar nomes dos personagens',
-    showHPLabel: 'Mostrar barras de HP',
-    showHitboxesLabel: 'Mostrar hitboxes (áreas não andáveis)',
-    showWalkablePathsLabel: 'Mostrar caminhos andáveis',
-    tileColorLabel: 'Cor de fundo dos tiles:',
-    hitboxColorLabel: 'Cor dos hitboxes:',
-    walkableColorLabel: 'Cor dos caminhos andáveis:',
-    // Grid section
-    gridSectionTitle: 'Grade do Mapa',
-    gridButtonText: 'Alternar Grade',
-    gridButtonTooltipEnabled: 'Esconder Grade',
-    gridButtonTooltipDisabled: 'Mostrar Grade',
-    gridColorLabel: 'Cor da Grade:',
-    labelColorLabel: 'Cor dos Rótulos:',
-    fontSizeLabel: 'Tamanho da Fonte:',
-    // Buttons
-    saveButton: 'Salvar',
-    cancelButton: 'Cancelar'
-  }
-};
-
-// Get translation based on current locale
-function t(key) {
-  const locale = config.currentLocale;
-  const translations = TRANSLATIONS[locale] || TRANSLATIONS.en;
-  return translations[key] || key;
-}
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // PERFORMANCE MODE FUNCTIONALITY (FORMER LITE MODE)
 
@@ -478,15 +411,20 @@ function togglePerformanceMode() {
 // Update the toggle button text and style
 function updatePerformanceButton() {
   api.ui.updateButton(PERF_TOGGLE_ID, {
-    text: t('perfButtonText'),
+    text: t('mods.customDisplay.perfButtonText'),
     primary: config.performance.enabled,
-    tooltip: config.performance.enabled ? t('perfButtonTooltipEnabled') : t('perfButtonTooltipDisabled')
+    tooltip: config.performance.enabled ? t('mods.customDisplay.perfButtonTooltipEnabled') : t('mods.customDisplay.perfButtonTooltipDisabled')
   });
-  // Restore custom background and color when not enabled
+  // Apply green background when enabled, regular when not
   const btn = document.getElementById(PERF_TOGGLE_ID);
-  if (btn && !config.performance.enabled) {
-    btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-    btn.style.color = "#ffe066";
+  if (btn) {
+    if (config.performance.enabled) {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      btn.style.backgroundSize = "auto";
+    } else {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      btn.style.color = "#ffe066";
+    }
   }
 }
 
@@ -596,27 +534,32 @@ function toggleGrid() {
     if (config.mapGrid.enabled) {
         gridOverlay = createGridOverlay();
         api.ui.updateButton(GRID_TOGGLE_ID, {
-            text: t('gridButtonText'),
+            text: t('mods.customDisplay.gridButtonText'),
             primary: true,
-            tooltip: t('gridButtonTooltipEnabled')
+            tooltip: t('mods.customDisplay.gridButtonTooltipEnabled')
         });
     } else {
         cleanupGrid();
         api.ui.updateButton(GRID_TOGGLE_ID, {
-            text: t('gridButtonText'),
+            text: t('mods.customDisplay.gridButtonText'),
             primary: false,
-            tooltip: t('gridButtonTooltipDisabled')
+            tooltip: t('mods.customDisplay.gridButtonTooltipDisabled')
         });
     }
 
     // Save config
     api.service.updateScriptConfig(context.hash, config);
 
-    // Restore custom background and color when not enabled
+    // Apply green background when enabled, regular when not
     const btn = document.getElementById(GRID_TOGGLE_ID);
-    if (btn && !config.mapGrid.enabled) {
-        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-        btn.style.color = "#ffe066";
+    if (btn) {
+        if (config.mapGrid.enabled) {
+            btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+            btn.style.backgroundSize = "auto";
+        } else {
+            btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+            btn.style.color = "#ffe066";
+        }
     }
 }
 
@@ -645,7 +588,7 @@ function createConfigPanel() {
   perfSection.style.cssText = 'border: 1px solid #666; border-radius: 5px; padding: 10px; margin: 0;';
   
   const perfLegend = document.createElement('legend');
-  perfLegend.textContent = t('perfSectionTitle');
+  perfLegend.textContent = t('mods.customDisplay.perfSectionTitle');
   perfLegend.style.cssText = 'font-weight: bold; color: #0c6;';
   perfSection.appendChild(perfLegend);
   
@@ -663,7 +606,7 @@ function createConfigPanel() {
   
   const namesLabel = document.createElement('label');
   namesLabel.htmlFor = 'names-input';
-  namesLabel.textContent = t('showNamesLabel');
+  namesLabel.textContent = t('mods.customDisplay.showNamesLabel');
   
   namesContainer.appendChild(namesInput);
   namesContainer.appendChild(namesLabel);
@@ -680,7 +623,7 @@ function createConfigPanel() {
   
   const hpLabel = document.createElement('label');
   hpLabel.htmlFor = 'hp-input';
-  hpLabel.textContent = t('showHPLabel');
+  hpLabel.textContent = t('mods.customDisplay.showHPLabel');
   
   hpContainer.appendChild(hpInput);
   hpContainer.appendChild(hpLabel);
@@ -697,7 +640,7 @@ function createConfigPanel() {
   
   const hitboxLabel = document.createElement('label');
   hitboxLabel.htmlFor = 'hitbox-input';
-  hitboxLabel.textContent = t('showHitboxesLabel');
+  hitboxLabel.textContent = t('mods.customDisplay.showHitboxesLabel');
   
   hitboxContainer.appendChild(hitboxInput);
   hitboxContainer.appendChild(hitboxLabel);
@@ -714,7 +657,7 @@ function createConfigPanel() {
   
   const walkableLabel = document.createElement('label');
   walkableLabel.htmlFor = 'walkable-input';
-  walkableLabel.textContent = t('showWalkablePathsLabel');
+  walkableLabel.textContent = t('mods.customDisplay.showWalkablePathsLabel');
   
   walkableContainer.appendChild(walkableInput);
   walkableContainer.appendChild(walkableLabel);
@@ -726,7 +669,7 @@ function createConfigPanel() {
   
   const colorLabel = document.createElement('label');
   colorLabel.htmlFor = 'color-input';
-  colorLabel.textContent = t('tileColorLabel');
+  colorLabel.textContent = t('mods.customDisplay.tileColorLabel');
   
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
@@ -743,7 +686,7 @@ function createConfigPanel() {
   
   const hitboxColorLabel = document.createElement('label');
   hitboxColorLabel.htmlFor = 'hitbox-color-input';
-  hitboxColorLabel.textContent = t('hitboxColorLabel');
+  hitboxColorLabel.textContent = t('mods.customDisplay.hitboxColorLabel');
   
   const hitboxColorInput = document.createElement('input');
   hitboxColorInput.type = 'color';
@@ -760,7 +703,7 @@ function createConfigPanel() {
   
   const walkableColorLabel = document.createElement('label');
   walkableColorLabel.htmlFor = 'walkable-color-input';
-  walkableColorLabel.textContent = t('walkableColorLabel');
+  walkableColorLabel.textContent = t('mods.customDisplay.walkableColorLabel');
   
   const walkableColorInput = document.createElement('input');
   walkableColorInput.type = 'color';
@@ -779,7 +722,7 @@ function createConfigPanel() {
   gridSection.style.cssText = 'border: 1px solid #666; border-radius: 5px; padding: 10px; margin: 0;';
   
   const gridLegend = document.createElement('legend');
-  gridLegend.textContent = t('gridSectionTitle');
+  gridLegend.textContent = t('mods.customDisplay.gridSectionTitle');
   gridLegend.style.cssText = 'font-weight: bold; color: #0c6;';
   gridSection.appendChild(gridLegend);
   
@@ -791,7 +734,7 @@ function createConfigPanel() {
   labelColorRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
   const labelColorLabel = document.createElement('label');
-  labelColorLabel.textContent = t('labelColorLabel');
+  labelColorLabel.textContent = t('mods.customDisplay.labelColorLabel');
   labelColorLabel.htmlFor = 'grid-label-color';
 
   const labelColorInput = document.createElement('input');
@@ -808,7 +751,7 @@ function createConfigPanel() {
   gridColorRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
 
   const gridColorLabel = document.createElement('label');
-  gridColorLabel.textContent = t('gridColorLabel');
+  gridColorLabel.textContent = t('mods.customDisplay.gridColorLabel');
   gridColorLabel.htmlFor = 'grid-color';
 
   const gridColorInput = document.createElement('input');
@@ -825,7 +768,7 @@ function createConfigPanel() {
   fontSizeRow.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-top: 8px;';
 
   const fontSizeLabel = document.createElement('label');
-  fontSizeLabel.textContent = t('fontSizeLabel');
+  fontSizeLabel.textContent = t('mods.customDisplay.fontSizeLabel');
   fontSizeLabel.htmlFor = 'grid-font-size';
 
   const fontSizeValue = document.createElement('span');
@@ -881,7 +824,7 @@ function createConfigPanel() {
   // Create buttons array
   const buttons = [
     {
-      text: t('saveButton'),
+      text: t('mods.customDisplay.saveButton'),
       primary: true,
       onClick: () => {
         // Update performance configuration with form values
@@ -918,7 +861,7 @@ function createConfigPanel() {
       }
     },
     {
-      text: t('cancelButton'),
+      text: t('mods.customDisplay.cancelButton'),
       primary: false
     }
   ];
@@ -926,7 +869,7 @@ function createConfigPanel() {
   // Create and return the config panel
   return api.ui.createConfigPanel({
     id: CONFIG_PANEL_ID,
-    title: t('configTitle'),
+    title: t('mods.customDisplay.configTitle'),
     modId: MOD_ID,
     content: content,
     buttons: buttons
@@ -940,9 +883,9 @@ function init() {
   // Add the performance mode toggle button
   api.ui.addButton({
     id: PERF_TOGGLE_ID,
-    text: t('perfButtonText'),
+    text: t('mods.customDisplay.perfButtonText'),
     modId: MOD_ID,
-    tooltip: config.performance.enabled ? t('perfButtonTooltipEnabled') : t('perfButtonTooltipDisabled'),
+    tooltip: config.performance.enabled ? t('mods.customDisplay.perfButtonTooltipEnabled') : t('mods.customDisplay.perfButtonTooltipDisabled'),
     primary: config.performance.enabled,
     onClick: togglePerformanceMode
   });
@@ -950,19 +893,34 @@ function init() {
   // Add the grid toggle button
   api.ui.addButton({
     id: GRID_TOGGLE_ID,
-    text: t('gridButtonText'),
+    text: t('mods.customDisplay.gridButtonText'),
     modId: MOD_ID,
-    tooltip: config.mapGrid.enabled ? t('gridButtonTooltipEnabled') : t('gridButtonTooltipDisabled'),
+    tooltip: config.mapGrid.enabled ? t('mods.customDisplay.gridButtonTooltipEnabled') : t('mods.customDisplay.gridButtonTooltipDisabled'),
     primary: config.mapGrid.enabled,
     onClick: toggleGrid
   });
+  
+  // Apply green backgrounds if enabled
+  setTimeout(() => {
+    const perfBtn = document.getElementById(PERF_TOGGLE_ID);
+    if (perfBtn && config.performance.enabled) {
+      perfBtn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      perfBtn.style.backgroundSize = "auto";
+    }
+    
+    const gridBtn = document.getElementById(GRID_TOGGLE_ID);
+    if (gridBtn && config.mapGrid.enabled) {
+      gridBtn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      gridBtn.style.backgroundSize = "auto";
+    }
+  }, 100);
   
   // Add the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
     icon: '⚙️',
     modId: MOD_ID,
-    tooltip: t('configButtonTooltip'),
+    tooltip: t('mods.customDisplay.configButtonTooltip'),
     onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
   });
   

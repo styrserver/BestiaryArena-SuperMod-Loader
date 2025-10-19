@@ -1,5 +1,8 @@
 // Hunt Analyzer Mod for Bestiary Arena
 
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
 // =======================
 // 0. Version
 // =======================
@@ -2188,8 +2191,8 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.ga
 if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
     api.ui.addButton({
         id: BUTTON_ID,
-        text: "Hunt Analyzer",
-        tooltip: "Click to open hunt analyzer panel",
+        text: t('mods.huntAnalyzer.buttonText'),
+        tooltip: t('mods.huntAnalyzer.buttonTooltip'),
         primary: false,
         onClick: createAutoplayAnalyzerPanel
     });

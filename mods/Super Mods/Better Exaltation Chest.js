@@ -317,7 +317,7 @@
   function findExaltationChestModal() {
     const modalTitles = document.querySelectorAll('h2.widget-top-text p');
     for (const title of modalTitles) {
-      if (title.textContent.includes('Open Exaltation Chest')) {
+      if (title.textContent.includes('Exaltation Chest')) {
         return title;
       }
     }
@@ -350,7 +350,7 @@
     let modalTitle = null;
     
     for (const title of modalTitles) {
-      if (title.textContent.includes('Open Exaltation Chest')) {
+      if (title.textContent.includes('Exaltation Chest')) {
         modalTitle = title;
         break;
       }
@@ -471,7 +471,7 @@
     let modalTitle = null;
     
     for (const title of modalTitles) {
-      if (title.textContent.includes('Open Exaltation Chest')) {
+      if (title.textContent.includes('Exaltation Chest')) {
         modalTitle = title;
         break;
       }
@@ -1293,7 +1293,7 @@
       
       for (const modal of allOpenModals) {
         const titleElement = modal.querySelector('h2.widget-top-text p');
-        if (titleElement && titleElement.textContent.includes('Open Exaltation Chest')) {
+        if (titleElement && titleElement.textContent.includes('Exaltation Chest')) {
           exaltationModal = modal;
           break;
         }
@@ -2454,10 +2454,10 @@
         mutation.addedNodes.length > 0 && 
         Array.from(mutation.addedNodes).some(node => 
           node.nodeType === Node.ELEMENT_NODE && 
-          (node.textContent?.includes('Open Exaltation Chest') || 
+          (node.textContent?.includes('Exaltation Chest') || 
            node.querySelector?.('*') && 
            Array.from(node.querySelectorAll('*')).some(el => 
-             el.textContent?.includes('Open Exaltation Chest')
+             el.textContent?.includes('Exaltation Chest')
            ))
         )
       );

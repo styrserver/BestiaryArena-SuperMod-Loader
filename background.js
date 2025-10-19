@@ -1146,14 +1146,20 @@ async function getTranslations() {
   const localeData = await browserAPI.storage.local.get('locale');
   const currentLocale = localeData.locale || 'en-US';
   const translations = {};
-  try {
-    const enResponse = await fetch(getAssetUrl('assets/locales/en-US.json'));
-    if (enResponse.ok) {
-      translations['en-US'] = await enResponse.json();
+  
+  // Load all supported locale files
+  const locales = ['en-US', 'pt-BR'];
+  for (const locale of locales) {
+    try {
+      const response = await fetch(getAssetUrl(`assets/locales/${locale}.json`));
+      if (response.ok) {
+        translations[locale] = await response.json();
+      }
+    } catch (error) {
+      console.error(`Error loading ${locale} translations:`, error);
     }
-  } catch (error) {
-    console.error('Error loading translations:', error);
   }
+  
   return { currentLocale, translations };
 }
 

@@ -1,6 +1,9 @@
 // DOM Turbo with Ticks mod for Bestiary Arena
 console.log('Turbo Mod initializing...');
 
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
 // Constants
 const DEFAULT_TICK_INTERVAL_MS = 62.5;
 
@@ -504,7 +507,7 @@ function createConfigPanel() {
     api.ui.addButton({
       id: 'turbo-config-button',
       text: '⚙️',
-      tooltip: 'Turbo Settings',
+      tooltip: t('mods.turbo.configButtonTooltip'),
       onClick: () => api.ui.toggleConfigPanel('turbo-config-panel')
     });
   }
@@ -537,8 +540,8 @@ if (api) {
       // Create button with correct initial text
       window.turboButton = api.ui.addButton({
         id: 'turbo-mod-button',
-        text: turboState.active ? 'Disable Turbo' : 'Enable Turbo',
-        tooltip: 'Toggle Turbo mode to speed up game ticks',
+        text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
+        tooltip: t('mods.turbo.buttonTooltip'),
         primary: turboState.active,
         onClick: toggleTurbo
       });
@@ -554,8 +557,8 @@ if (api) {
       // Fallback - just create the button and config panel
       window.turboButton = api.ui.addButton({
         id: 'turbo-mod-button',
-        text: turboState.active ? 'Disable Turbo' : 'Enable Turbo',
-        tooltip: 'Toggle Turbo mode to speed up game ticks',
+        text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
+        tooltip: t('mods.turbo.buttonTooltip'),
         primary: turboState.active,
         onClick: toggleTurbo
       });
@@ -638,15 +641,20 @@ exports = {
 function updateTurboButton() {
   if (api && api.ui && window.turboButton) {
     api.ui.updateButton('turbo-mod-button', {
-      text: turboState.active ? 'Disable Turbo' : 'Enable Turbo',
+      text: turboState.active ? t('mods.turbo.buttonDisable') : t('mods.turbo.buttonEnable'),
       primary: turboState.active,
-      tooltip: 'Toggle Turbo mode to speed up game ticks'
+      tooltip: t('mods.turbo.buttonTooltip')
     });
-    // Restore custom background and color when not active
+    // Apply green background when active, regular when not
     const btn = document.getElementById('turbo-mod-button');
-    if (btn && !turboState.active) {
-      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
-      btn.style.color = "#ffe066";
+    if (btn) {
+      if (turboState.active) {
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+        btn.style.backgroundSize = "auto";
+      } else {
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+        btn.style.color = "#ffe066";
+      }
     }
   }
 }

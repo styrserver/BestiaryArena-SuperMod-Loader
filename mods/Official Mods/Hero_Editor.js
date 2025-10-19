@@ -1,6 +1,9 @@
 // Hero Editor Mod for Bestiary Arena
 console.log('Hero Editor Mod initializing...');
 
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
 // Configuration
 const defaultConfig = {
   enabled: true
@@ -27,8 +30,8 @@ document.addEventListener('utility-api-ready', () => {
 // Create UI button using the API
 api.ui.addButton({
   id: 'hero-editor-button',
-  text: 'Edit Heroes',
-  tooltip: 'Edit hero stats and equipment',
+  text: t('mods.heroEditor.buttonText'),
+  tooltip: t('mods.heroEditor.buttonTooltip'),
   icon: '✏️',
   primary: false,
   onClick: showHeroEditorModal

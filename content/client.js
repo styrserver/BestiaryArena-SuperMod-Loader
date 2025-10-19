@@ -278,6 +278,7 @@ if (typeof browserAPI === 'undefined') {
   
   let currentLocale = 'en-US';
   let translations = {};
+  let translationsLoaded = false;
   
   async function loadTranslations() {
     try {
@@ -286,18 +287,54 @@ if (typeof browserAPI === 'undefined') {
       });
       
       if (response.success) {
-        currentLocale = response.locale || 'en-US';
+        // Always auto-detect from game language to match Better UI behavior
+        const htmlLang = document.documentElement.lang;
+        const htmlLangQuery = document.querySelector('html[lang="pt"]');
+        const urlCheck = window.location.href.includes('/pt/');
+        
+        console.log('[BestiaryModAPI] Language detection:', {
+          htmlLang,
+          hasPortugueseAttr: !!htmlLangQuery,
+          url: window.location.href,
+          urlHasPt: urlCheck,
+          storedLocale: response.locale
+        });
+        
+        const isPortuguese = htmlLang === 'pt' || htmlLangQuery || urlCheck;
+        
+        // Use detected language, fallback to stored preference, fallback to en-US
+        currentLocale = isPortuguese ? 'pt-BR' : (response.locale || 'en-US');
+        
         translations = response.translations || {};
+        translationsLoaded = true;
+        console.log('[BestiaryModAPI] Final locale:', currentLocale, 'Portuguese detected:', isPortuguese);
+        console.log('[BestiaryModAPI] Translations loaded with', Object.keys(translations).length, 'locales');
+        
+        // Dispatch event so mods know translations are ready
+        document.dispatchEvent(new CustomEvent('bestiary-translations-loaded', { 
+          detail: { locale: currentLocale, translations } 
+        }));
       }
     } catch (error) {
       // Silent error handling
+      console.error('[BestiaryModAPI] Error loading translations:', error);
     }
   }
   
+  // Load translations immediately when client.js loads (before mods initialize)
+  loadTranslations();
+  
   function translateKey(key, locale = null) {
+    // If translations aren't loaded yet, wait a bit and retry
+    if (!translationsLoaded) {
+      console.log('[BestiaryModAPI] Translations not loaded yet, returning key:', key);
+      return key; // Return key temporarily, will update when translations load
+    }
+    
     const useLocale = locale || currentLocale;
     
     if (!translations[useLocale]) {
+      console.warn('[BestiaryModAPI] No translations for locale:', useLocale, 'Available:', Object.keys(translations));
       return key;
     }
     
@@ -306,6 +343,7 @@ if (typeof browserAPI === 'undefined') {
     
     for (const k of keys) {
       if (!translation || !translation[k]) {
+        console.warn('[BestiaryModAPI] Translation key not found:', key, 'at segment:', k, 'locale:', useLocale);
         return key;
       }
       translation = translation[k];
@@ -1773,7 +1811,11 @@ if (typeof browserAPI === 'undefined') {
         window.BestiaryModAPI.ui.cleanupAllModButtons();
       }
       
-      await loadTranslations();
+      // Wait for translations to load (already started earlier)
+      while (!translationsLoaded) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
       await loadUIComponents();
       
       // Now that UI components are loaded, inject the createModal method directly

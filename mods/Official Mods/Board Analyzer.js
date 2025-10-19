@@ -13,10 +13,7 @@ const defaultConfig = {
   enableTurboAutomatically: true,
   stopOnSPlus: false,
   stopAfterTicks: 0, // 0 means no limit
-  stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
-  currentLocale: document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en'
+  stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
 };
 
 // Initialize with saved config or defaults
@@ -326,7 +323,7 @@ class ChartRenderer {
       
       // Create all chart elements
       const chartClickableNote = document.createElement('div');
-      chartClickableNote.textContent = '💡 Tip: Click on any bar in the chart below to copy replay data for that specific run';
+      chartClickableNote.textContent = t('mods.boardAnalyzer.chartTipMessage');
       chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
       
       // Create sorting buttons and scrollable chart area
@@ -350,9 +347,9 @@ class ChartRenderer {
     sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
     
     const buttons = [
-      { text: 'All Runs', sortType: 'runs' },
-      { text: 'Sort Time', sortType: 'time' },
-      { text: 'Sort Ranks', sortType: 'splus' }
+      { text: t('mods.boardAnalyzer.allRunsButton'), sortType: 'runs' },
+      { text: t('mods.boardAnalyzer.sortTimeButton'), sortType: 'time' },
+      { text: t('mods.boardAnalyzer.sortRanksButton'), sortType: 'splus' }
     ];
     
     buttons.forEach(({ text, sortType }) => {
@@ -593,7 +590,7 @@ class ChartRenderer {
     if (result.seed) {
       tooltipText += `, Seed: ${result.seed}`;
     }
-    tooltipText += '\nClick to copy replay data';
+    tooltipText += `\n${t('mods.boardAnalyzer.clickToCopyReplay')}`;
     
     return tooltipText;
   }
@@ -1035,109 +1032,6 @@ const serializeBoard = () => {
   return result;
 };
 
-const TRANSLATIONS = {
-  en: {
-    buttonText: 'Analyze Board',
-    buttonTooltip: 'Analyze current board performance',
-    configButtonTooltip: 'Analyzer Settings',
-    configTitle: 'Board Analyzer Settings',
-    runsLabel: 'Number of runs:',
-    speedFactorLabel: 'Speed factor:',
-    hideGameBoardLabel: 'Hide game board during analysis',
-    autoTurboLabel: 'Enable turbo mode automatically',
-    stopOnSPlusLabel: 'Stop when reaching S+ grade',
-    stopAfterTicksLabel: 'Stop after ticks (0 for no limit):',
-    stopWhenTicksReachedLabel: 'Stop when reaching ticks or below (0 to disable):',
-    copyTargetTicksReplayButton: 'Replay Target',
-    saveButton: 'Save',
-    cancelButton: 'Cancel',
-    startAnalysisButton: 'Start Analysis',
-    modalTitle: 'Board Analysis',
-    runningTitle: 'Running Analysis',
-    runningText: 'Analyzing board performance...',
-    progressText: 'Run {current} of {total}',
-    resultTitle: 'Analysis Results',
-    sPlusRateLabel: 'S+ Rate:',
-    completionRateLabel: 'Completion Rate:',
-    bestTimeLabel: 'Best Time:',
-    maxPointsLabel: 'Max Rank Points:',
-    minTimeLabel: 'Min Win Time:',
-    maxTimeLabel: 'Max Win Time:',
-    minDefeatTimeLabel: 'Min Defeat Time:',
-    maxDefeatTimeLabel: 'Max Defeat Time:',
-    medianTimeLabel: 'Median Time:',
-    averageTimeLabel: 'Average Time:',
-    closeButton: 'Close',
-    errorTitle: 'Error',
-    errorText: 'An error occurred during analysis. Please try again.',
-    ticksSuffix: 'ticks',
-    startButton: 'Start',
-    stopButton: 'Stop',
-    forceStopButton: 'Stop Analysis',
-    partialResultsNote: 'Partial results (analysis stopped early)',
-    sandboxModeEnabled: 'Sandbox mode enabled for analysis',
-    copyReplayButton: 'Copy Replay',
-    replayCopiedMessage: 'Copied!',
-    totalTimeLabel: 'Total Time:',
-    avgRunTimeLabel: 'Avg Run Time:',
-    estimatedTimeRemainingLabel: 'Est. Remaining:',
-    fastestRunTimeLabel: 'Fastest Run:',
-    slowestRunTimeLabel: 'Slowest Run:',
-    maxPointsSuffix: 'max points',
-    sPlusMaxPointsRateLabel: 'S+{points} Rate:'
-  },
-  pt: {
-    buttonText: 'Analisar Tabuleiro',
-    buttonTooltip: 'Analisar desempenho do tabuleiro atual',
-    configButtonTooltip: 'Configurações do Analisador',
-    configTitle: 'Configurações do Analisador',
-    runsLabel: 'Número de execuções:',
-    speedFactorLabel: 'Fator de velocidade:',
-    hideGameBoardLabel: 'Ocultar tabuleiro durante análise',
-    autoTurboLabel: 'Ativar modo turbo automaticamente',
-    stopOnSPlusLabel: 'Parar ao atingir classificação S+',
-    stopAfterTicksLabel: 'Parar após ticks (0 para sem limite):',
-    stopWhenTicksReachedLabel: 'Parar ao atingir ticks ou abaixo (0 para desabilitar):',
-    copyTargetTicksReplayButton: 'Replay Alvo',
-    saveButton: 'Salvar',
-    cancelButton: 'Cancelar',
-    startAnalysisButton: 'Iniciar Análise',
-    modalTitle: 'Análise do Tabuleiro',
-    runningTitle: 'Executando Análise',
-    runningText: 'Analisando desempenho do tabuleiro...',
-    progressText: 'Execução {current} de {total}',
-    resultTitle: 'Resultados da Análise',
-    sPlusRateLabel: 'Taxa de S+:',
-    completionRateLabel: 'Taxa de Conclusão:',
-    bestTimeLabel: 'Melhor Tempo:',
-    maxPointsLabel: 'Pontos Máximos:',
-    minTimeLabel: 'Tempo Mínimo Vitória:',
-    maxTimeLabel: 'Tempo Máximo Vitória:',
-    minDefeatTimeLabel: 'Tempo Mínimo Derrota:',
-    maxDefeatTimeLabel: 'Tempo Máximo Derrota:',
-    medianTimeLabel: 'Tempo Mediana:',
-    averageTimeLabel: 'Tempo Médio:',
-    closeButton: 'Fechar',
-    errorTitle: 'Erro',
-    errorText: 'Ocorreu um erro durante a análise. Por favor, tente novamente.',
-    ticksSuffix: 'ticks',
-    startButton: 'Iniciar',
-    stopButton: 'Parar',
-    forceStopButton: 'Interromper Análise',
-    partialResultsNote: 'Resultados parciais (análise interrompida)',
-    sandboxModeEnabled: 'Modo sandbox ativado para análise',
-    copyReplayButton: 'Copiar Replay',
-    replayCopiedMessage: 'Copiado!',
-    totalTimeLabel: 'Tempo Total:',
-    avgRunTimeLabel: 'Tempo Médio/run:',
-    estimatedTimeRemainingLabel: 'Tempo Restante Est.:',
-    fastestRunTimeLabel: 'Execução Mais Rápida:',
-    slowestRunTimeLabel: 'Execução Mais Lenta:',
-    maxPointsSuffix: 'pontos máximos',
-    sPlusMaxPointsRateLabel: 'Taxa S+{points}:'
-  }
-};
-
 // Inject custom CSS for inputs to ensure better readability
 function injectCustomStyles() {
   const styleElement = document.createElement('style');
@@ -1165,12 +1059,8 @@ function injectCustomStyles() {
   document.head.appendChild(styleElement);
 }
 
-// Get translation based on current locale
-function t(key) {
-  const locale = config.currentLocale;
-  const translations = TRANSLATIONS[locale] || TRANSLATIONS.en;
-  return translations[key] || key;
-}
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // Sleep function for async operations
 function sleep(ms) {
@@ -2452,7 +2342,7 @@ function createCopyReplayButton(replayData) {
   const replayText = `$replay(${JSON.stringify(replayData)})`;
   
   const button = document.createElement('button');
-  button.textContent = t('copyReplayButton');
+  button.textContent = t('mods.boardAnalyzer.copyReplayButton');
   button.style.cssText = `
     background-color: #3498db;
     color: white;
@@ -2470,7 +2360,7 @@ function createCopyReplayButton(replayData) {
     const success = copyToClipboard(replayText);
     if (success) {
       const originalText = button.textContent;
-      button.textContent = t('replayCopiedMessage');
+      button.textContent = t('mods.boardAnalyzer.replayCopiedMessage');
       button.style.backgroundColor = '#2ecc71';
       setTimeout(() => {
         button.textContent = originalText;
@@ -2496,7 +2386,7 @@ function createConfigPanel(startAnalysisCallback) {
   runsContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const runsLabel = document.createElement('label');
-  runsLabel.textContent = t('runsLabel');
+  runsLabel.textContent = t('mods.boardAnalyzer.runsLabel');
   
   const runsInput = document.createElement('input');
   runsInput.type = 'number';
@@ -2515,7 +2405,7 @@ function createConfigPanel(startAnalysisCallback) {
   speedContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const speedLabel = document.createElement('label');
-  speedLabel.textContent = t('speedFactorLabel');
+  speedLabel.textContent = t('mods.boardAnalyzer.speedFactorLabel');
   
   const speedInput = document.createElement('input');
   speedInput.type = 'number';
@@ -2540,7 +2430,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   const hideLabel = document.createElement('label');
   hideLabel.htmlFor = 'hide-input';
-  hideLabel.textContent = t('hideGameBoardLabel');
+  hideLabel.textContent = t('mods.boardAnalyzer.hideGameBoardLabel');
   
   hideContainer.appendChild(hideInput);
   hideContainer.appendChild(hideLabel);
@@ -2557,7 +2447,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   const turboLabel = document.createElement('label');
   turboLabel.htmlFor = 'turbo-input';
-  turboLabel.textContent = t('autoTurboLabel');
+  turboLabel.textContent = t('mods.boardAnalyzer.autoTurboLabel');
   
   turboContainer.appendChild(turboInput);
   turboContainer.appendChild(turboLabel);
@@ -2574,7 +2464,7 @@ function createConfigPanel(startAnalysisCallback) {
   
   const stopSPlusLabel = document.createElement('label');
   stopSPlusLabel.htmlFor = 'stop-splus-input';
-  stopSPlusLabel.textContent = t('stopOnSPlusLabel');
+  stopSPlusLabel.textContent = t('mods.boardAnalyzer.stopOnSPlusLabel');
   
   stopSPlusContainer.appendChild(stopSPlusInput);
   stopSPlusContainer.appendChild(stopSPlusLabel);
@@ -2585,7 +2475,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const stopTicksLabel = document.createElement('label');
-  stopTicksLabel.textContent = t('stopAfterTicksLabel');
+  stopTicksLabel.textContent = t('mods.boardAnalyzer.stopAfterTicksLabel');
   
   const stopTicksInput = document.createElement('input');
   stopTicksInput.type = 'number';
@@ -2604,7 +2494,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
 
   const stopWhenTicksLabel = document.createElement('label');
-  stopWhenTicksLabel.textContent = t('stopWhenTicksReachedLabel');
+  stopWhenTicksLabel.textContent = t('mods.boardAnalyzer.stopWhenTicksReachedLabel');
 
   const stopWhenTicksInput = document.createElement('input');
   stopWhenTicksInput.type = 'number';
@@ -2621,7 +2511,7 @@ function createConfigPanel(startAnalysisCallback) {
   // Create buttons array
   const buttons = [
     {
-      text: t('startAnalysisButton'),
+      text: t('mods.boardAnalyzer.startAnalysisButton'),
       primary: true,
       onClick: () => {
         // Check if analysis is already running
@@ -2649,7 +2539,7 @@ function createConfigPanel(startAnalysisCallback) {
       }
     },
     {
-      text: t('saveButton'),
+      text: t('mods.boardAnalyzer.saveButton'),
       primary: false,
       onClick: () => {
         // Just update and save configuration
@@ -2657,7 +2547,7 @@ function createConfigPanel(startAnalysisCallback) {
       }
     },
     {
-      text: t('cancelButton'),
+      text: t('mods.boardAnalyzer.cancelButton'),
       primary: false
     }
   ];
@@ -2680,7 +2570,7 @@ function createConfigPanel(startAnalysisCallback) {
   // Create and return the config panel
   const panel = api.ui.createConfigPanel({
     id: CONFIG_PANEL_ID,
-    title: t('configTitle'),
+    title: t('mods.boardAnalyzer.configTitle'),
     modId: MOD_ID,
     content: content,
     buttons: buttons
@@ -2720,12 +2610,12 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
   content.style.cssText = 'text-align: center;';
   
   const message = document.createElement('p');
-  message.textContent = t('runningText');
+  message.textContent = t('mods.boardAnalyzer.runningText');
   content.appendChild(message);
   
   const progress = document.createElement('p');
   progress.id = 'analysis-progress';
-  progress.textContent = t('progressText')
+  progress.textContent = t('mods.boardAnalyzer.progressText')
     .replace('{current}', currentRun)
     .replace('{total}', totalRuns);
   progress.style.cssText = 'margin-top: 12px;';
@@ -2736,21 +2626,21 @@ function showRunningAnalysisModal(currentRun, totalRuns, avgRunTime = null, esti
     const timingInfo = document.createElement('p');
     timingInfo.id = 'analysis-timing';
     timingInfo.style.cssText = 'margin-top: 8px; font-size: 0.9em; color: #aaa;';
-    timingInfo.textContent = `${t('avgRunTimeLabel')} ${avgRunTime}ms`;
+    timingInfo.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${avgRunTime}ms`;
     
     if (estimatedTimeRemaining) {
-      timingInfo.textContent += ` • ${t('estimatedTimeRemainingLabel')} ${estimatedTimeRemaining}`;
+      timingInfo.textContent += ` • ${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${estimatedTimeRemaining}`;
     }
     
     content.appendChild(timingInfo);
   }
   
   const modal = api.ui.components.createModal({
-    title: t('runningTitle'),
+    title: t('mods.boardAnalyzer.runningTitle'),
     content: content,
     buttons: [
       {
-        text: t('forceStopButton'),
+        text: t('mods.boardAnalyzer.forceStopButton'),
         primary: false,
         onClick: () => {
           // Reset analysis state - this will stop everything immediately
@@ -2813,7 +2703,7 @@ function showResultsModal(results) {
     // Add a partial results note if the analysis was forcefully stopped
     if (results.summary.forceStopped) {
       const partialNote = document.createElement('div');
-      partialNote.textContent = t('partialResultsNote');
+      partialNote.textContent = t('mods.boardAnalyzer.partialResultsNote');
       partialNote.style.cssText = 'text-align: center; color: #e74c3c; margin-bottom: 15px;';
       content.appendChild(partialNote);
     }
@@ -2821,7 +2711,7 @@ function showResultsModal(results) {
     // Indicate if the mode was switched to sandbox
     if (results.summary.modeSwitched) {
       const sandboxNote = document.createElement('div');
-      sandboxNote.textContent = t('sandboxModeEnabled');
+      sandboxNote.textContent = t('mods.boardAnalyzer.sandboxModeEnabled');
       sandboxNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px;';
       content.appendChild(sandboxNote);
     }
@@ -2832,7 +2722,7 @@ function showResultsModal(results) {
     
     // S+ Rate
     const sPlusRateLabel = document.createElement('div');
-    sPlusRateLabel.textContent = t('sPlusRateLabel');
+    sPlusRateLabel.textContent = t('mods.boardAnalyzer.sPlusRateLabel');
     sPlusRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const sPlusRateValue = document.createElement('div');
@@ -2864,7 +2754,7 @@ function showResultsModal(results) {
         
         const label = document.createElement('div');
         label.textContent = rankPoints === results.summary.maxRankPoints ? 
-          t('sPlusMaxPointsRateLabel').replace('{points}', rankPoints) : 
+          t('mods.boardAnalyzer.sPlusMaxPointsRateLabel').replace('{points}', rankPoints) : 
           `S+${rankPoints} Rate:`;
         label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
         
@@ -2897,7 +2787,7 @@ function showResultsModal(results) {
     
     // Completion Rate
     const completionRateLabel = document.createElement('div');
-    completionRateLabel.textContent = t('completionRateLabel');
+    completionRateLabel.textContent = t('mods.boardAnalyzer.completionRateLabel');
     completionRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const completionRateValue = document.createElement('div');
@@ -2907,31 +2797,31 @@ function showResultsModal(results) {
     // Best Time (Min Time) - Dynamic label based on completion status
     const minTimeLabel = document.createElement('div');
     const hasWins = results.summary.completedRuns > 0;
-    minTimeLabel.textContent = hasWins ? t('minTimeLabel') : t('minDefeatTimeLabel');
+    minTimeLabel.textContent = hasWins ? t('mods.boardAnalyzer.minTimeLabel') : t('mods.boardAnalyzer.minDefeatTimeLabel');
     minTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const minTimeValue = document.createElement('div');
     const minTimeToShow = hasWins ? results.summary.minTicks : results.summary.minDefeatTicks;
-    minTimeValue.textContent = `${minTimeToShow} ${t('ticksSuffix')}`;
+    minTimeValue.textContent = `${minTimeToShow} ${t('mods.boardAnalyzer.ticksSuffix')}`;
     minTimeValue.style.cssText = 'text-align: right;';
     
     // Max Time - Dynamic label based on completion status
     const maxTimeLabel = document.createElement('div');
-    maxTimeLabel.textContent = hasWins ? t('maxTimeLabel') : t('maxDefeatTimeLabel');
+    maxTimeLabel.textContent = hasWins ? t('mods.boardAnalyzer.maxTimeLabel') : t('mods.boardAnalyzer.maxDefeatTimeLabel');
     maxTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const maxTimeValue = document.createElement('div');
     const maxTimeToShow = hasWins ? results.summary.maxTicks : results.summary.maxDefeatTicks;
-    maxTimeValue.textContent = `${maxTimeToShow} ${t('ticksSuffix')}`;
+    maxTimeValue.textContent = `${maxTimeToShow} ${t('mods.boardAnalyzer.ticksSuffix')}`;
     maxTimeValue.style.cssText = 'text-align: right;';
     
     // Median Time
     const medianTimeLabel = document.createElement('div');
-    medianTimeLabel.textContent = t('medianTimeLabel');
+    medianTimeLabel.textContent = t('mods.boardAnalyzer.medianTimeLabel');
     medianTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const medianTimeValue = document.createElement('div');
-    medianTimeValue.textContent = `${Math.round(results.summary.medianTicks)} ${t('ticksSuffix')}`;
+    medianTimeValue.textContent = `${Math.round(results.summary.medianTicks)} ${t('mods.boardAnalyzer.ticksSuffix')}`;
     medianTimeValue.style.cssText = 'text-align: right;';
     
     // Max Rank Points - Removed as redundant since we show S+ breakdown above
@@ -2940,7 +2830,7 @@ function showResultsModal(results) {
     
     // Total time
     const totalTimeLabel = document.createElement('div');
-    totalTimeLabel.textContent = t('totalTimeLabel') || 'Total Time:';
+    totalTimeLabel.textContent = t('mods.boardAnalyzer.totalTimeLabel') || 'Total Time:';
     totalTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const totalTimeValue = document.createElement('div');
@@ -2949,7 +2839,7 @@ function showResultsModal(results) {
     
     // Average run time
     const avgRunTimeLabel = document.createElement('div');
-    avgRunTimeLabel.textContent = t('avgRunTimeLabel') || 'Avg Run Time:';
+    avgRunTimeLabel.textContent = t('mods.boardAnalyzer.avgRunTimeLabel') || 'Avg Run Time:';
     avgRunTimeLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     
     const avgRunTimeValue = document.createElement('div');
@@ -2992,7 +2882,7 @@ function showResultsModal(results) {
     // Add target ticks replay button if available (only useful replay button)
     if (hasTargetTicksReplay) {
       const copyTargetTicksButton = document.createElement('button');
-      copyTargetTicksButton.textContent = t('copyTargetTicksReplayButton');
+      copyTargetTicksButton.textContent = t('mods.boardAnalyzer.copyTargetTicksReplayButton');
       copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
       copyTargetTicksButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 20px;';
       
@@ -3021,7 +2911,7 @@ function showResultsModal(results) {
         const success = copyToClipboard(replayText);
         if (success) {
           const originalText = copyTargetTicksButton.textContent;
-          copyTargetTicksButton.textContent = t('replayCopiedMessage');
+          copyTargetTicksButton.textContent = t('mods.boardAnalyzer.replayCopiedMessage');
           setTimeout(() => {
             copyTargetTicksButton.textContent = originalText;
           }, 2000);
@@ -3064,12 +2954,12 @@ function showResultsModal(results) {
     
     // Show the results modal with a callback to clean up when closed
     const resultsModal = api.ui.components.createModal({
-      title: t('resultTitle'),
+      title: t('mods.boardAnalyzer.resultTitle'),
       width: 400,
       content: content,
       buttons: [
         {
-          text: t('closeButton'),
+          text: t('mods.boardAnalyzer.closeButton'),
           primary: true,
           onClick: () => {
             // One more check for lingering modals when user closes results
@@ -3322,7 +3212,7 @@ async function runAnalysis() {
     const results = await analyzeBoard(config.runs, (status) => {
       const progressEl = document.getElementById('analysis-progress');
       if (progressEl) {
-        progressEl.textContent = t('progressText')
+        progressEl.textContent = t('mods.boardAnalyzer.progressText')
           .replace('{current}', status.current)
           .replace('{total}', status.total);
       }
@@ -3331,7 +3221,7 @@ async function runAnalysis() {
       if (status.avgRunTime && status.estimatedTimeRemaining) {
         const timingEl = document.getElementById('analysis-timing');
         if (timingEl) {
-          timingEl.textContent = `${t('avgRunTimeLabel')} ${status.avgRunTime}ms • ${t('estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
+          timingEl.textContent = `${t('mods.boardAnalyzer.avgRunTimeLabel')} ${status.avgRunTime}ms • ${t('mods.boardAnalyzer.estimatedTimeRemainingLabel')} ${status.estimatedTimeRemaining}`;
         } else {
           if (runningModal && runningModal.close) {
             runningModal.close();
@@ -3419,9 +3309,9 @@ function init() {
   // Add the main analyzer button - opens config panel with analysis callback
   api.ui.addButton({
     id: BUTTON_ID,
-    text: t('buttonText'),
+    text: t('mods.boardAnalyzer.buttonText'),
     modId: MOD_ID,
-    tooltip: t('buttonTooltip'),
+    tooltip: t('mods.boardAnalyzer.buttonTooltip'),
     primary: false,
     onClick: showConfigAndPrepareAnalysis,
     style: {

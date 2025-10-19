@@ -7,10 +7,7 @@ const defaultConfig = {
   includeSeed: false,
   useCompression: true,
   lastUsedSeeds: [],
-  maxSavedSeeds: 5,
-  currentLocale: document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en'
+  maxSavedSeeds: 5
 };
 
 // Initialize with saved config or defaults
@@ -21,67 +18,8 @@ const MOD_ID = 'team-copier';
 const BUTTON_ID = `${MOD_ID}-button`;
 
 // Translations
-const TRANSLATIONS = {
-  en: {
-    buttonTooltip: 'Team Copier',
-    successMessage: 'Team setup copied!',
-    errorMessage: 'Error copying team setup',
-    teamSetupCopied: 'Team setup copied to clipboard!',
-    linkCopied: 'Sharable link copied to clipboard!',
-    linkOpened: 'Opening shared configuration in new window!',
-    modalTitle: 'Team Copier',
-    copyTeamSetup: 'Copy Team Setup',
-    copyStandard: 'Copy as Command',
-    shareSetup: 'Share Team Setup',
-    settings: 'Settings',
-    includeSeedLabel: 'Include seed (for exact replay)',
-    useCompressionLabel: 'Use compression for shorter URLs',
-    seedSectionTitle: 'Last Used Seeds',
-    noSeedsFound: 'No previously used seeds found',
-    copyCompressedLink: 'Copy Compact Link (Shortest)',
-    copyReadableLink: 'Copy Readable Link (Longer)',
-    openInNewWindow: 'Open in New Window',
-    closeButton: 'Close',
-    saveButton: 'Save Settings',
-    loadTeam: 'Load Team Configuration',
-    pasteCommand: 'Paste team configuration command here...',
-    applyTeam: 'Apply Team Configuration',
-    teamApplied: 'Team configuration applied successfully!'
-  },
-  pt: {
-    buttonTooltip: 'Copiador de Equipe',
-    successMessage: 'Configuração copiada!',
-    errorMessage: 'Erro ao copiar configuração',
-    teamSetupCopied: 'Configuração da equipe copiada para a área de transferência!',
-    linkCopied: 'Link compartilhável copiado para a área de transferência!',
-    linkOpened: 'Abrindo configuração compartilhada em nova janela!',
-    modalTitle: 'Copiador de Equipe',
-    copyTeamSetup: 'Copiar Configuração',
-    copyStandard: 'Copiar como Comando',
-    shareSetup: 'Compartilhar Configuração',
-    settings: 'Configurações',
-    includeSeedLabel: 'Incluir seed (para replay exato)',
-    useCompressionLabel: 'Usar compressão para URLs mais curtas',
-    seedSectionTitle: 'Seeds Usados Recentemente',
-    noSeedsFound: 'Nenhum seed usado anteriormente encontrado',
-    copyCompressedLink: 'Copiar Link Compacto (Mais Curto)',
-    copyReadableLink: 'Copiar Link Legível (Mais Longo)',
-    openInNewWindow: 'Abrir em Nova Janela',
-    closeButton: 'Fechar',
-    saveButton: 'Salvar Configurações',
-    loadTeam: 'Carregar Configuração de Equipe',
-    pasteCommand: 'Cole o comando de configuração da equipe aqui...',
-    applyTeam: 'Aplicar Configuração da Equipe',
-    teamApplied: 'Configuração da equipe aplicada com sucesso!'
-  }
-};
-
-// Get translation based on current locale
-function t(key) {
-  const locale = config.currentLocale;
-  const translations = TRANSLATIONS[locale] || TRANSLATIONS.en;
-  return translations[key] || key;
-}
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // Use a clipboard emoji instead of SVG
 const clipboardIcon = "📋"; // Unicode clipboard icon
@@ -361,7 +299,7 @@ function copyTeamSetup() {
     
     if (!boardData) {
       console.error('Failed to serialize board data');
-      showNotification(t('errorMessage'), 'error');
+      showNotification(t('mods.teamCopier.errorMessage'), 'error');
       return;
     }
     
@@ -379,15 +317,15 @@ function copyTeamSetup() {
     const success = copyToClipboard(replayText);
     
     if (success) {
-      showNotification(t('teamSetupCopied'), 'success');
+      showNotification(t('mods.teamCopier.teamSetupCopied'), 'success');
     } else {
-      showNotification(t('errorMessage'), 'error');
+      showNotification(t('mods.teamCopier.errorMessage'), 'error');
     }
     
     console.log('Team setup copied to clipboard:', boardData);
   } catch (error) {
     console.error('Error copying team setup:', error);
-    showNotification(t('errorMessage'), 'error');
+    showNotification(t('mods.teamCopier.errorMessage'), 'error');
   }
 }
 
@@ -397,7 +335,7 @@ function createCompressedLink(boardData) {
   
   if (!boardData) {
     console.error('Failed to serialize board data');
-    showNotification(t('errorMessage'), 'error');
+    showNotification(t('mods.teamCopier.errorMessage'), 'error');
     return null;
   }
   
@@ -424,7 +362,7 @@ function createCompressedLink(boardData) {
   }
   
   if (!compressedData) {
-    showNotification(t('errorMessage'), 'error');
+    showNotification(t('mods.teamCopier.errorMessage'), 'error');
     return null;
   }
   
@@ -437,7 +375,7 @@ function createReadableLink(boardData) {
   
   if (!boardData) {
     console.error('Failed to serialize board data');
-    showNotification(t('errorMessage'), 'error');
+    showNotification(t('mods.teamCopier.errorMessage'), 'error');
     return null;
   }
   
@@ -563,15 +501,15 @@ function showTeamCopierModal() {
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 15px; padding: 10px;';
   
   // SECTION: LOAD TEAM CONFIGURATION - Always show this section
-  const loadTeamSection = createSection(t('loadTeam'));
+  const loadTeamSection = createSection(t('mods.teamCopier.loadTeam'));
   
   // Create a textarea for pasting team configuration command
   const commandTextarea = document.createElement('textarea');
-  commandTextarea.placeholder = t('pasteCommand');
+  commandTextarea.placeholder = t('mods.teamCopier.pasteCommand');
   commandTextarea.style.cssText = 'width: 100%; min-height: 80px; background-color: #222; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 8px; font-family: monospace; resize: vertical;';
   
   // Create button to apply the configuration
-  const applyButton = createActionButton(t('applyTeam'), () => {
+  const applyButton = createActionButton(t('mods.teamCopier.applyTeam'), () => {
     // Get the command text from the textarea
     const commandText = commandTextarea.value.trim();
     
@@ -609,7 +547,7 @@ function showTeamCopierModal() {
       applySharedTeamData(boardData);
       
       // Show success notification
-      showNotification(t('teamApplied'), 'success');
+      showNotification(t('mods.teamCopier.teamApplied'), 'success');
       
       // Close the modal
       api.ui.closeModal();
@@ -629,15 +567,15 @@ function showTeamCopierModal() {
   // Only add other sections if we have valid board data
   if (hasValidBoardData) {
     // SECTION: Copy Team Setup
-    const copySection = createSection(t('copyTeamSetup'));
+    const copySection = createSection(t('mods.teamCopier.copyTeamSetup'));
     
     // Button to copy standard command
-    const copyButton = createActionButton(t('copyStandard'), () => {
+    const copyButton = createActionButton(t('mods.teamCopier.copyStandard'), () => {
       const success = copyToClipboard(`$configureBoard(${JSON.stringify(boardData)})`);
       if (success) {
-        showNotification(t('teamSetupCopied'), 'success');
+        showNotification(t('mods.teamCopier.teamSetupCopied'), 'success');
       } else {
-        showNotification(t('errorMessage'), 'error');
+        showNotification(t('mods.teamCopier.errorMessage'), 'error');
       }
     });
     
@@ -646,7 +584,7 @@ function showTeamCopierModal() {
     // Add seed selection section if we have any saved seeds
     if (config.lastUsedSeeds && config.lastUsedSeeds.length > 0) {
       const seedTitle = document.createElement('h4');
-      seedTitle.textContent = t('seedSectionTitle');
+      seedTitle.textContent = t('mods.teamCopier.seedSectionTitle');
       seedTitle.style.cssText = 'margin-top: 15px; margin-bottom: 10px; color: #bbb; font-size: 14px;';
       
       copySection.appendChild(seedTitle);
@@ -659,10 +597,10 @@ function showTeamCopierModal() {
     }
     
     // SECTION: Share Setup
-    const shareSection = createSection(t('shareSetup'));
+    const shareSection = createSection(t('mods.teamCopier.shareSetup'));
     
     // Button to copy compressed link
-    const copyCompressedButton = createActionButton(t('copyCompressedLink'), () => {
+    const copyCompressedButton = createActionButton(t('mods.teamCopier.copyCompressedLink'), () => {
       // Always use compression for the compressed link
       const useOriginalSetting = config.useCompression;
       config.useCompression = true;
@@ -671,9 +609,9 @@ function showTeamCopierModal() {
       if (link) {
         const success = copyToClipboard(link);
         if (success) {
-          showNotification(t('linkCopied'), 'success');
+          showNotification(t('mods.teamCopier.linkCopied'), 'success');
         } else {
-          showNotification(t('errorMessage'), 'error');
+          showNotification(t('mods.teamCopier.errorMessage'), 'error');
         }
       }
       
@@ -682,20 +620,20 @@ function showTeamCopierModal() {
     });
     
     // Button to copy readable link
-    const copyReadableButton = createActionButton(t('copyReadableLink'), () => {
+    const copyReadableButton = createActionButton(t('mods.teamCopier.copyReadableLink'), () => {
       const link = createReadableLink(boardData);
       if (link) {
         const success = copyToClipboard(link);
         if (success) {
-          showNotification(t('linkCopied'), 'success');
+          showNotification(t('mods.teamCopier.linkCopied'), 'success');
         } else {
-          showNotification(t('errorMessage'), 'error');
+          showNotification(t('mods.teamCopier.errorMessage'), 'error');
         }
       }
     });
     
     // Button to open in new window
-    const openWindowButton = createActionButton(t('openInNewWindow'), () => {
+    const openWindowButton = createActionButton(t('mods.teamCopier.openInNewWindow'), () => {
       let link;
       if (config.useCompression) {
         link = createCompressedLink(boardData);
@@ -705,7 +643,7 @@ function showTeamCopierModal() {
       
       if (link) {
         window.open(link, '_blank');
-        showNotification(t('linkOpened'), 'success');
+        showNotification(t('mods.teamCopier.linkOpened'), 'success');
       }
     });
     
@@ -714,7 +652,7 @@ function showTeamCopierModal() {
     shareSection.appendChild(openWindowButton);
     
     // SECTION: Settings
-    const settingsSection = createSection(t('settings'));
+    const settingsSection = createSection(t('mods.teamCopier.settings'));
     
     // Include seed checkbox
     const seedContainer = createCheckboxContainer();
@@ -727,7 +665,7 @@ function showTeamCopierModal() {
     
     const seedLabel = document.createElement('label');
     seedLabel.htmlFor = 'include-seed-checkbox';
-    seedLabel.textContent = t('includeSeedLabel');
+    seedLabel.textContent = t('mods.teamCopier.includeSeedLabel');
     
     seedContainer.appendChild(seedCheckbox);
     seedContainer.appendChild(seedLabel);
@@ -743,13 +681,13 @@ function showTeamCopierModal() {
     
     const compressionLabel = document.createElement('label');
     compressionLabel.htmlFor = 'use-compression-checkbox';
-    compressionLabel.textContent = t('useCompressionLabel');
+    compressionLabel.textContent = t('mods.teamCopier.useCompressionLabel');
     
     compressionContainer.appendChild(compressionCheckbox);
     compressionContainer.appendChild(compressionLabel);
     
     // Save settings button
-    const saveSettingsButton = createActionButton(t('saveButton'), () => {
+    const saveSettingsButton = createActionButton(t('mods.teamCopier.saveButton'), () => {
       // Update config with form values
       config.includeSeed = document.getElementById('include-seed-checkbox').checked;
       config.useCompression = document.getElementById('use-compression-checkbox').checked;
@@ -790,11 +728,11 @@ function showTeamCopierModal() {
   
   // Create and show the modal
   return api.ui.components.createModal({
-    title: t('modalTitle'),
+    title: t('mods.teamCopier.modalTitle'),
     content: content,
     buttons: [
       {
-        text: t('closeButton'),
+        text: t('mods.teamCopier.closeButton'),
         primary: true
       }
     ],
@@ -852,7 +790,7 @@ function showTeamCopierModal() {
       if (success) {
         showNotification(`Copied setup with seed ${seed}!`, 'success');
       } else {
-        showNotification(t('errorMessage'), 'error');
+        showNotification(t('mods.teamCopier.errorMessage'), 'error');
       }
     });
     
@@ -866,7 +804,7 @@ function createButton() {
     id: BUTTON_ID,
     icon: clipboardIcon,
     modId: MOD_ID,
-    tooltip: t('buttonTooltip'),
+    tooltip: t('mods.teamCopier.buttonTooltip'),
     primary: false,
     onClick: showTeamCopierModal
   });

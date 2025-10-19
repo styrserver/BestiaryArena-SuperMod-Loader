@@ -13,10 +13,7 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
-  persistAutoRefillOnRefresh: false,
-  currentLocale: document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en'
+  persistAutoRefillOnRefresh: false
 };
 
 // Storage key for localStorage
@@ -84,65 +81,8 @@ const AUTOMATION_STATES = {
 let currentState = null;
 
 // Translations
-const TRANSLATIONS = {
-  en: {
-    buttonTooltip: 'Bestiary Automator',
-    configButtonTooltip: 'Automator Settings',
-    modalTitle: 'Bestiary Automator Settings',
-    enabled: 'Enable Automation',
-    autoRefillStamina: 'Autorefill Stamina',
-    minimumStaminaLabel: 'Minimum Stamina Without Refill',
-    autoCollectRewards: 'Autocollect Rewards',
-    autoDayCare: 'Autohandle Daycare',
-    autoPlayAfterDefeat: 'Autoplay after Defeat and Network Issues',
-    fasterAutoplay: 'Faster Autoplay',
-    saveButton: 'Save Settings',
-    closeButton: 'Close',
-    statusEnabled: 'Automator Enabled',
-    statusDisabled: 'Automator Disabled',
-    settingsSaved: 'Settings saved successfully!',
-    // Game-specific translations
-    usePotion: 'Use potion (1)',
-    close: 'Close',
-    collect: 'Collect',
-    inventory: 'Inventory',
-    levelUp: 'Level up',
-    // Toast detection text
-    defeatToastText: 'Autoplay stopped because your creatures were defeated'
-  },
-  pt: {
-    buttonTooltip: 'Automatizador do Bestiário',
-    configButtonTooltip: 'Configurações do Automatizador',
-    modalTitle: 'Configurações do Automatizador',
-    enabled: 'Ativar Automação',
-    autoRefillStamina: 'Reabastecimento Automático de Stamina',
-    minimumStaminaLabel: 'Stamina Mínima Sem Reabastecimento',
-    autoCollectRewards: 'Coletar Recompensas Automaticamente',
-    autoDayCare: 'Cuidar Automaticamente da Creche',
-    autoPlayAfterDefeat: 'Jogar automaticamente após derrota e problemas de rede',
-    fasterAutoplay: 'Faster Autoplay',
-    saveButton: 'Salvar Configurações',
-    closeButton: 'Fechar',
-    statusEnabled: 'Automatizador Ativado',
-    statusDisabled: 'Automatizador Desativado',
-    settingsSaved: 'Configurações salvas com sucesso!',
-    // Game-specific translations
-    usePotion: 'Usar poção (1)',
-    close: 'Fechar',
-    collect: 'Resgatar',
-    inventory: 'Inventário',
-    levelUp: 'Level up',
-    // Toast detection text
-    defeatToastText: 'Autoplay parou porque suas criaturas foram derrotadas'
-  }
-};
-
-// Get translation based on current locale
-function t(key) {
-  const locale = config.currentLocale;
-  const translations = TRANSLATIONS[locale] || TRANSLATIONS.en;
-  return translations[key] || key;
-}
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // State machine helper functions
 const setState = (newState) => {
@@ -355,7 +295,7 @@ function showNotification(message, type = 'info', duration = 3000) {
   api.ui.components.createModal({
     title: type.charAt(0).toUpperCase() + type.slice(1),
     content: message,
-    buttons: [{ text: t('closeButton'), primary: true }]
+    buttons: [{ text: t('common.close'), primary: true }]
   });
 }
 
@@ -431,9 +371,9 @@ const refillStaminaSimple = async (elStamina) => {
   
   elStamina.click();
   await sleep(500);
-  clickButtonWithText('usePotion');
+  clickButtonWithText('mods.automator.usePotion');
   await sleep(500);
-  clickButtonWithText('close');
+  clickButtonWithText('common.close');
   await sleep(500);
 };
 
@@ -445,7 +385,7 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   
   elStamina.click();
   await sleep(500);
-  clickButtonWithText('usePotion');
+  clickButtonWithText('mods.automator.usePotion');
   await sleep(500);
   
   // Retry logic for foreground tabs
@@ -464,7 +404,7 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
       retryCount++;
       console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, retry ${retryCount}/${maxRetries}`);
       
-      clickButtonWithText('usePotion');
+      clickButtonWithText('mods.automator.usePotion');
       await sleep(500);
     } else {
       console.log(`[Bestiary Automator] Could not find stamina element for retry ${retryCount + 1}`);
@@ -765,7 +705,7 @@ const takeRewardsIfAvailable = async () => {
       },
     });
     await sleep(500);
-    clickButtonWithText('collect');
+    clickButtonWithText('mods.automator.collect');
     await sleep(500);
     clickAllCloseButtons();
     await sleep(500);
@@ -1222,7 +1162,7 @@ const handleDayCare = async () => {
     
     console.log('[Bestiary Automator] Handling day care');
     
-    clickButtonWithText('inventory');
+    clickButtonWithText('mods.automator.inventory');
     await sleep(500);
     
     // Double-check after opening inventory
@@ -1279,7 +1219,7 @@ const handleDayCare = async () => {
       
       // Click level up
       console.log('[Bestiary Automator] Attempting to click level up button...');
-      const levelUpClicked = clickButtonWithText('levelUp');
+      const levelUpClicked = clickButtonWithText('mods.automator.levelUp');
       
       if (!levelUpClicked) {
         console.log('[Bestiary Automator] Level up button not found, stopping');
@@ -2332,10 +2272,10 @@ const toggleAutomation = () => {
   
   if (config.enabled) {
     startAutomation();
-    showNotification(t('statusEnabled'), 'success');
+    showNotification(t('mods.automator.statusEnabled'), 'success');
   } else {
     stopAutomation();
-    showNotification(t('statusDisabled'), 'info');
+    showNotification(t('mods.automator.statusDisabled'), 'info');
   }
   
   // Save the enabled state
@@ -2348,28 +2288,28 @@ const createConfigPanel = () => {
   content.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
   
   // Auto refill stamina checkbox
-  const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('autoRefillStamina'), config.autoRefillStamina);
+  const refillContainer = createCheckboxContainer('auto-refill-checkbox', t('mods.automator.autoRefillStamina'), config.autoRefillStamina);
   
   // Minimum stamina input
-  const staminaContainer = createNumberInputContainer('min-stamina-input', t('minimumStaminaLabel'), config.minimumStaminaWithoutRefill, 1, 360);
+  const staminaContainer = createNumberInputContainer('min-stamina-input', t('mods.automator.minimumStaminaLabel'), config.minimumStaminaWithoutRefill, 1, 360);
   
   // Auto collect rewards checkbox with info icon
-  const rewardsContainer = createCheckboxContainerWithInfo('auto-rewards-checkbox', t('autoCollectRewards'), config.autoCollectRewards, 
+  const rewardsContainer = createCheckboxContainerWithInfo('auto-rewards-checkbox', t('mods.automator.autoCollectRewards'), config.autoCollectRewards, 
     'Automatically collects level up rewards and Daily Seashell when ready');
   
   // Auto day care checkbox
-  const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('autoDayCare'), config.autoDayCare);
+  const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
   
   
   // Auto play after defeat checkbox
-  const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
+  const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('mods.automator.autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
   // Faster autoplay checkbox with warning
   const fasterAutoplayWarningText = config.currentLocale === 'pt' 
     ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay. Pode causar comportamento inesperado ou conflitos com outros mods.'
     : '⚠️ Removes the 3-second delay between autoplay actions. May cause unexpected behavior or conflicts with other mods.';
   
-  const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
+  const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('mods.automator.fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   
   
   // Add all elements to content
@@ -2407,7 +2347,7 @@ const createConfigPanel = () => {
   // Create the config panel
   return api.ui.createConfigPanel({
     id: CONFIG_PANEL_ID,
-    title: t('modalTitle'),
+    title: t('mods.automator.modalTitle'),
     modId: MOD_ID,
     content: content,
     onOpen: () => {
@@ -2417,7 +2357,7 @@ const createConfigPanel = () => {
     },
     buttons: [
       {
-        text: t('saveButton'),
+        text: t('mods.automator.saveButton'),
         primary: true,
         onClick: () => {
           // Update configuration from form values
@@ -2505,11 +2445,11 @@ const createConfigPanel = () => {
           // Only update button styling if configuration actually changed
           updateAutomatorButton();
           
-          showNotification(t('settingsSaved'), 'success');
+          showNotification(t('mods.automator.settingsSaved'), 'success');
         }
       },
       {
-        text: t('closeButton'),
+        text: t('mods.automator.closeButton'),
         primary: false
       }
     ]
@@ -2654,9 +2594,9 @@ const createButtons = () => {
   // Create only the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
-    text: 'Automator',
+    text: t('mods.automator.buttonText'),
     modId: MOD_ID,
-    tooltip: t('configButtonTooltip'),
+    tooltip: t('mods.automator.configButtonTooltip'),
     primary: false, // Never use primary to avoid solid green color
     onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
   });
@@ -2741,11 +2681,11 @@ const applyButtonStyling = (btn) => {
   
   // Update tooltip to show Faster Autoplay status
   if (fasterAutoplayRunning) {
-    btn.title = t('configButtonTooltip') + ' - Faster Autoplay Running';
+    btn.title = t('mods.automator.configButtonTooltip') + ' - Faster Autoplay Running';
   } else if (config.fasterAutoplay) {
-    btn.title = t('configButtonTooltip') + ' - Faster Autoplay Enabled';
+    btn.title = t('mods.automator.configButtonTooltip') + ' - Faster Autoplay Enabled';
   } else {
-    btn.title = t('configButtonTooltip');
+    btn.title = t('mods.automator.configButtonTooltip');
   }
 };
 

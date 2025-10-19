@@ -9,6 +9,10 @@
       const defaultConfig = { enabled: true };
       const config = Object.assign({}, defaultConfig, context?.config);
       
+      // Use shared translation system via API
+      const api = context?.api || window.BestiaryModAPI;
+      const t = (key) => api?.i18n?.t(key) || key;
+      
       // Performance constants
       const CONSTANTS = {
         DEBOUNCE_DELAY: 50, // Reduced from 100ms for faster response
@@ -270,8 +274,12 @@
         getTableContext(container) {
           const tableRow = container.closest('tr');
           const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-          const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || 
-                                   tableHeader?.textContent?.includes('Sell');
+          const headerText = tableHeader?.textContent || '';
+          const exchangeText = t('mods.betterYasir.exchangeItems');
+          const sellText = t('mods.betterYasir.sell');
+          const isExchangeSection = headerText.includes('Exchange') || 
+                                   headerText.includes(sellText) ||
+                                   headerText.includes(exchangeText);
           
           return { tableRow, tableHeader, isExchangeSection };
         }
@@ -629,11 +637,12 @@
           return priceMatch ? parseInt(priceMatch[1]) : 0;
         },
         
-        // Check if button indicates out of stock
-        isOutOfStock(button) {
-          const text = button.textContent.trim();
-          return text === '' || text.includes('Out of stock') || button.disabled;
-        },
+      // Check if button indicates out of stock
+      isOutOfStock(button) {
+        const text = button.textContent.trim();
+        const outOfStockText = t('mods.betterYasir.outOfStock');
+        return text === '' || text.includes(outOfStockText) || button.disabled;
+      },
         
         // Format number with commas for thousands separators (cross-browser compatible)
         formatNumberWithCommas(number) {
@@ -672,7 +681,9 @@
       // Check if item is out of stock
       function isItemOutOfStock(shopRow) {
         return safeExecute(() => {
-          return shopRow.textContent.includes('Out of stock');
+          const text = shopRow.textContent;
+          const outOfStockText = t('mods.betterYasir.outOfStock');
+          return text.includes(outOfStockText);
         }, 'Error checking if item is out of stock', false);
       }
       
@@ -835,7 +846,7 @@
           });
     
           const itemName = getItemDisplayName(itemKey);
-          const actionText = actionType === 'buy' ? 'buy' : 'sell';
+          const actionText = actionType === 'buy' ? t('mods.betterYasir.buy').toLowerCase() : t('mods.betterYasir.sell').toLowerCase();
           
           // Calculate the total cost
           let totalCost = 0;
@@ -871,8 +882,14 @@
             currency = 'dust';
           }
           
-          const costText = totalCost > 0 ? ` for ${priceUtils.formatNumberWithCommas(totalCost)} ${currency}` : '';
-          msgElem.textContent = `Are you sure you want to ${actionText} ${quantity} ${itemName}${costText}?`;
+          const forText = t('mods.betterYasir.for');
+          const costText = totalCost > 0 ? ` ${forText} ${priceUtils.formatNumberWithCommas(totalCost)} ${currency}` : '';
+          const confirmKey = actionType === 'buy' ? 'mods.betterYasir.confirmBuy' : 'mods.betterYasir.confirmSell';
+          const confirmText = t(confirmKey)
+            .replace('{quantity}', quantity)
+            .replace('{itemName}', itemName)
+            .replace('{costText}', costText);
+          msgElem.textContent = confirmText;
           msgElem.style.color = '#ff4d4d';
           actionButton.dataset.confirm = 'pending';
           actionButton.classList.add('confirm');
@@ -1173,7 +1190,10 @@
               if (actionButton) {
                 // More reliable way to determine action type: check the table section first
                 const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                const headerText = tableHeader?.textContent || '';
+                const exchangeText = t('mods.betterYasir.exchangeItems');
+                const sellText = t('mods.betterYasir.sell');
+                const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                 
                 if (isExchangeSection) {
                   // If we're in the exchange/sell section, it's definitely a sell action
@@ -1185,7 +1205,10 @@
               } else {
                 // Fallback: determine action type by looking at the table header
                 const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                const headerText = tableHeader?.textContent || '';
+                const exchangeText = t('mods.betterYasir.exchangeItems');
+                const sellText = t('mods.betterYasir.sell');
+                const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                 isBuyAction = !isExchangeSection;
               }
             }
@@ -1246,7 +1269,10 @@
             // Check if this slot is in the Buy section or Sell section
             const tableRow = slot.closest('tr');
             const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-            const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+            const headerText = tableHeader?.textContent || '';
+            const exchangeText = t('mods.betterYasir.exchangeItems');
+            const sellText = t('mods.betterYasir.sell');
+            const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
             
             // Only update quantities for items in the Sell section
             // For Buy section items (like dice manipulators), preserve the original quantity display
@@ -1288,7 +1314,10 @@
               // Check if this slot is in the Sell section
               const tableRow = slot.closest('tr');
               const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-              const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+              const headerText = tableHeader?.textContent || '';
+              const exchangeText = t('mods.betterYasir.exchangeItems');
+              const sellText = t('mods.betterYasir.sell');
+              const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
               
               if (isSellSection) {
                 const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1311,7 +1340,10 @@
                   // Check if this slot is in the Sell section
                   const tableRow = slot.closest('tr');
                   const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-                  const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+                  const headerText = tableHeader?.textContent || '';
+                  const exchangeText = t('mods.betterYasir.exchangeItems');
+                  const sellText = t('mods.betterYasir.sell');
+                  const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
                   
                   if (isSellSection) {
                     const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1337,7 +1369,10 @@
                 // Check if this slot is in the Sell section
                 const tableRow = slot.closest('tr');
                 const tableHeader = tableRow?.closest('table')?.querySelector('thead th');
-                const isSellSection = tableHeader?.textContent?.includes('Sell') || tableHeader?.textContent?.includes('Exchange');
+                const headerText = tableHeader?.textContent || '';
+                const exchangeText = t('mods.betterYasir.exchangeItems');
+                const sellText = t('mods.betterYasir.sell');
+                const isSellSection = headerText.includes(sellText) || headerText.includes('Exchange') || headerText.includes(exchangeText);
                 
                 if (isSellSection) {
                   const quantitySpan = slot.querySelector('.revert-pixel-font-spacing span');
@@ -1545,12 +1580,14 @@
             
             // Show success message
             removeConfirmationPrompt();
-            const actionText = actionType === 'buy' ? 'purchased' : 'traded for';
-            // Ensure quantity is a safe number
             const safeQuantity = parseInt(quantity) || 1;
             const itemName = getItemDisplayName(itemKey);
+            const successKey = actionType === 'buy' ? 'mods.betterYasir.successBuy' : 'mods.betterYasir.successSell';
+            const successText = t(successKey)
+              .replace('{quantity}', safeQuantity)
+              .replace('{itemName}', itemName);
             
-            showTooltipMessage(`Successfully ${actionText} ${safeQuantity} ${itemName}!`, '#32cd32', 5000);
+            showTooltipMessage(successText, '#32cd32', 5000);
             
             // Clear caches immediately after successful action to get fresh state
             clearCaches();
@@ -1596,7 +1633,10 @@
                   const tableRow = container.closest('tr');
                   if (tableRow) {
                     const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                    const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                    const headerText = tableHeader?.textContent || '';
+                    const exchangeText = t('mods.betterYasir.exchangeItems');
+                    const sellText = t('mods.betterYasir.sell');
+                    const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                     isBuyAction = !isExchangeSection;
                   } else {
                     // Fallback: determine by item type (Exaltation Chest is always buy)
@@ -1607,7 +1647,10 @@
                   const tableRow = container.closest('tr');
                   if (tableRow) {
                     const tableHeader = tableRow.closest('table')?.querySelector('thead th');
-                    const isExchangeSection = tableHeader?.textContent?.includes('Exchange') || tableHeader?.textContent?.includes('Sell');
+                    const headerText = tableHeader?.textContent || '';
+                    const exchangeText = t('mods.betterYasir.exchangeItems');
+                    const sellText = t('mods.betterYasir.sell');
+                    const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                     isBuyAction = !isExchangeSection;
                   } else {
                     // Second fallback: determine by item type (Exaltation Chest is always buy)
@@ -1656,11 +1699,11 @@
             handleError(error, `${actionType} action failed`);
             
             // Show user-friendly error message
-            let errorMessage = `${actionType} failed. Please try again.`;
+            let errorMessage = `${actionType} ${t('mods.betterYasir.failedRetry')}`;
             if (error.message.includes('Insufficient')) {
               errorMessage = error.message;
             } else if (error.message.includes('HTTP error! Status: 403')) {
-              errorMessage = 'Not enough resources for this action.';
+              errorMessage = t('mods.betterYasir.notEnoughResources');
             }
             
             // Show error state briefly
@@ -1777,14 +1820,16 @@
         // Check if item is out of stock
         isItemOutOfStock(container) {
           const containerText = container.textContent || '';
-          if (containerText.includes('Out of stock')) return true;
+          const outOfStockText = t('mods.betterYasir.outOfStock');
+          if (containerText.includes(outOfStockText)) return true;
           
           const currentCell = container.closest('td');
           if (currentCell) {
             const nextCell = currentCell.nextElementSibling;
             if (nextCell) {
               const nextCellText = nextCell.textContent || '';
-              if (nextCellText.includes('Out of stock')) return true;
+              const outOfStockText = t('mods.betterYasir.outOfStock');
+              if (nextCellText.includes(outOfStockText)) return true;
             }
           }
           
@@ -2340,7 +2385,8 @@
           
           // Show loading state and disable button
           const originalText = actionButton.innerHTML;
-          actionButton.innerHTML = actionType === 'buy' ? 'Buying...' : 'Exchanging...';
+          const loadingText = actionType === 'buy' ? t('mods.betterYasir.buying') : t('mods.betterYasir.selling');
+          actionButton.innerHTML = loadingText;
           removeConfirmationPrompt();
           actionButton.disabled = true;
           
@@ -2351,8 +2397,8 @@
             handleError(error, `${itemKey} ${actionType} failed`);
             
             // Show error state briefly
-            actionButton.innerHTML = 'Error!';
-            showTooltipMessage(`${actionType} failed. Please try again.`);
+            actionButton.innerHTML = t('mods.betterYasir.error');
+            showTooltipMessage(`${actionType} ${t('mods.betterYasir.failedRetry')}`);
             setTimeout(() => {
               actionButton.innerHTML = originalText;
               actionButton.disabled = false;
@@ -2391,17 +2437,25 @@
         if (yasirTitle && yasirTitle.textContent.includes('Yasir')) {
           // Look for the widget-bottom that contains both the title and the tables
           const widgetBottom = yasirTitle.closest('.widget-bottom');
-          if (widgetBottom && widgetBottom.textContent.includes('Current stock')) {
+          const widgetText = widgetBottom?.textContent || '';
+          const currentStockText = t('mods.betterYasir.currentStock');
+          if (widgetBottom && (widgetText.includes('Current stock') || widgetText.includes(currentStockText))) {
             modal = widgetBottom;
           }
         }
         
-        // Method 2: Look for any widget-bottom containing both "Yasir" and the tables
+        // Method 2: Look for any widget-bottom containing both "Yasir" and the tables (English or Portuguese)
         if (!modal) {
           const widgetBottoms = document.querySelectorAll('.widget-bottom');
           for (const widget of widgetBottoms) {
             const text = widget.textContent || '';
-            if (text.includes('Yasir') && text.includes('Current stock') && text.includes('Exchange your items for dust')) {
+            const hasYasir = text.includes('Yasir');
+            const currentStockText = t('mods.betterYasir.currentStock');
+            const exchangeText = t('mods.betterYasir.exchangeItems');
+            const hasBuySection = text.includes('Current stock') || text.includes(currentStockText);
+            const hasSellSection = text.includes('Exchange your items for dust') || text.includes(exchangeText);
+            
+            if (hasYasir && hasBuySection && hasSellSection) {
               modal = widget;
               break;
             }
@@ -2450,12 +2504,18 @@
           sectionHeaders.forEach((header, index) => {
             const text = header.textContent?.trim();
             
-            if (text === 'Current stock') {
-              header.textContent = 'Buy';
+            const currentStockText = t('mods.betterYasir.currentStock');
+            const exchangeText = t('mods.betterYasir.exchangeItems');
+            
+            // Check for buy section
+            if (text === 'Current stock' || text === currentStockText) {
+              header.textContent = t('mods.betterYasir.buy');
               header.style.textAlign = 'center';
               header.style.color = '#32cd32'; // Green color
-            } else if (text === 'Exchange your items for dust') {
-              header.textContent = 'Sell';
+            } 
+            // Check for sell section
+            else if (text === 'Exchange your items for dust' || text === exchangeText) {
+              header.textContent = t('mods.betterYasir.sell');
               header.style.textAlign = 'center';
               header.style.color = '#ff4d4d'; // Red color
             }
@@ -2492,7 +2552,7 @@
                   
                   // Add price column header
                   const priceHeader = document.createElement('th');
-                  priceHeader.textContent = 'Price';
+                  priceHeader.textContent = t('mods.betterYasir.price');
                   priceHeader.className = 'bg-grayRegular px-1 font-normal first:table-frame-bottom [&:not(:first-child)]:table-frame-bottom-left text-left better-yasir-price-header';
                   priceHeader.style.textAlign = 'center';
                   headerRow.appendChild(priceHeader);
@@ -2511,8 +2571,9 @@
           const tooltip = document.querySelector('.tooltip-prose');
           if (!tooltip) return;
           const titleElem = tooltip.querySelector('p'); // first <p> is title
-          if (titleElem && titleElem.textContent.includes("Yasir") && titleElem.textContent !== "Better Yasir activated!") {
-            titleElem.textContent = "Better Yasir activated!";
+          const activatedText = t('mods.betterYasir.activated');
+          if (titleElem && titleElem.textContent.includes("Yasir") && titleElem.textContent !== activatedText) {
+            titleElem.textContent = activatedText;
             titleElem.style.color = '#32cd32';
           }
         } catch (e) { /* silent */ }

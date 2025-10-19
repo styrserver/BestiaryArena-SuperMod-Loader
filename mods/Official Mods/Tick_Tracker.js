@@ -3,16 +3,16 @@ console.log('Tick Tracker Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
-  enabled: true,
+  enabled: false,
   maxEntries: 20,
-  showMilliseconds: true,
-  currentLocale: document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en'
+  showMilliseconds: true
 };
 
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
+
+// Force enabled to always start false (don't persist this setting)
+config.enabled = false;
 
 // Constants
 const MOD_ID = 'tick-tracker';
@@ -30,51 +30,8 @@ let activeWidget = null;
 let widgetObserver = null;
 
 // Translations
-const TRANSLATIONS = {
-  en: {
-    buttonText: 'Tick Tracker',
-    buttonTooltip: 'Toggle tick tracking',
-    configButtonTooltip: 'Tick Tracker Settings',
-    configTitle: 'Tick Tracker Settings',
-    enabledLabel: 'Enable tick tracking',
-    maxEntriesLabel: 'Maximum entries to show:',
-    showMillisecondsLabel: 'Show milliseconds conversion',
-    saveButton: 'Save',
-    cancelButton: 'Cancel',
-    widgetTitle: 'Game Ticks',
-    copyButtonTooltip: 'Copy tick value',
-    clearButtonTooltip: 'Clear history',
-    noDataMessage: 'No data.',
-    millisecondsSuffix: 'ms',
-    completed: 'Completed',
-    failed: 'Failed'
-  },
-  pt: {
-    buttonText: 'Rastreador de Ticks',
-    buttonTooltip: 'Ativar/desativar rastreamento de ticks',
-    configButtonTooltip: 'Configurações do Rastreador',
-    configTitle: 'Configurações do Rastreador de Ticks',
-    enabledLabel: 'Ativar rastreamento de ticks',
-    maxEntriesLabel: 'Número máximo de entradas:',
-    showMillisecondsLabel: 'Mostrar conversão em milissegundos',
-    saveButton: 'Salvar',
-    cancelButton: 'Cancelar',
-    widgetTitle: 'Ticks das Partidas',
-    copyButtonTooltip: 'Copiar valor de ticks',
-    clearButtonTooltip: 'Limpar histórico',
-    noDataMessage: 'Sem dados.',
-    millisecondsSuffix: 'ms',
-    completed: 'Completado',
-    failed: 'Falhou'
-  }
-};
-
-// Get translation based on current locale
-function t(key) {
-  const locale = config.currentLocale;
-  const translations = TRANSLATIONS[locale] || TRANSLATIONS.en;
-  return translations[key] || key;
-}
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // Function to copy text to clipboard
 function copyToClipboard(text) {
@@ -128,13 +85,13 @@ function createTickWidget() {
   header.appendChild(iconImg);
   
   // Add the title text
-  const titleText = document.createTextNode(t('widgetTitle'));
+  const titleText = document.createTextNode(t('mods.tickTracker.widgetTitle'));
   header.appendChild(titleText);
   
   // Add a clear button
   const clearButton = document.createElement("button");
   clearButton.className = "ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-black/40";
-  clearButton.title = t('clearButtonTooltip');
+  clearButton.title = t('mods.tickTracker.clearButtonTooltip');
   clearButton.innerHTML = "×";
   clearButton.onclick = () => {
     tickHistory = [];
@@ -178,7 +135,7 @@ function createTickWidget() {
     // Show a message if no tick data is available
     const noDataMsg = document.createElement("div");
     noDataMsg.className = "text-center p-2 text-whiteDark/60";
-    noDataMsg.textContent = t('noDataMessage');
+    noDataMsg.textContent = t('mods.tickTracker.noDataMessage');
     inventoryContainer.appendChild(noDataMsg);
   }
   
@@ -205,12 +162,12 @@ function createTickItem(tickData) {
   // Format tooltip based on grade, completion and seed
   let tooltipText = `${tickData.ticks} ticks`;
   if (config.showMilliseconds) {
-    tooltipText += ` = ${Math.floor(milliseconds).toLocaleString()} ${t('millisecondsSuffix')}`;
+    tooltipText += ` = ${Math.floor(milliseconds).toLocaleString()} ${t('mods.tickTracker.millisecondsSuffix')}`;
   }
   if (tickData.grade) {
     tooltipText += `\nGrade: ${tickData.grade}`;
   }
-  tooltipText += `\n${tickData.completed ? t('completed') : t('failed')}`;
+  tooltipText += `\n${tickData.completed ? t('mods.tickTracker.completed') : t('mods.tickTracker.failed')}`;
   
   // Add seed information if available
   if (tickData.seed !== undefined) {
@@ -313,7 +270,7 @@ function updateTickWidget() {
     // Show a message if no tick data is available
     const noDataMsg = document.createElement("div");
     noDataMsg.className = "text-center p-2 text-whiteDark/60";
-    noDataMsg.textContent = t('noDataMessage');
+    noDataMsg.textContent = t('mods.tickTracker.noDataMessage');
     container.appendChild(noDataMsg);
   }
 }
@@ -448,8 +405,19 @@ function toggleTracking() {
   // Update the button appearance
   api.ui.updateButton(BUTTON_ID, {
     primary: config.enabled,
-    text: t('buttonText')
+    text: t('mods.tickTracker.buttonText')
   });
+  
+  // Apply green background when enabled, regular when disabled
+  const btn = document.getElementById(BUTTON_ID);
+  if (btn) {
+    if (config.enabled) {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+      btn.style.backgroundSize = "auto";
+    } else {
+      btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+    }
+  }
   
   // Start or stop tracking
   if (config.enabled) {
@@ -519,7 +487,7 @@ function createConfigPanel() {
   
   const enabledLabel = document.createElement('label');
   enabledLabel.htmlFor = 'enabled-input';
-  enabledLabel.textContent = t('enabledLabel');
+  enabledLabel.textContent = t('mods.tickTracker.enabledLabel');
   
   enabledContainer.appendChild(enabledInput);
   enabledContainer.appendChild(enabledLabel);
@@ -530,7 +498,7 @@ function createConfigPanel() {
   maxEntriesContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
   
   const maxEntriesLabel = document.createElement('label');
-  maxEntriesLabel.textContent = t('maxEntriesLabel');
+  maxEntriesLabel.textContent = t('mods.tickTracker.maxEntriesLabel');
   
   const maxEntriesInput = document.createElement('input');
   maxEntriesInput.type = 'number';
@@ -555,7 +523,7 @@ function createConfigPanel() {
   
   const msLabel = document.createElement('label');
   msLabel.htmlFor = 'ms-input';
-  msLabel.textContent = t('showMillisecondsLabel');
+  msLabel.textContent = t('mods.tickTracker.showMillisecondsLabel');
   
   msContainer.appendChild(msInput);
   msContainer.appendChild(msLabel);
@@ -564,12 +532,12 @@ function createConfigPanel() {
   // Create the config panel
   return api.ui.createConfigPanel({
     id: CONFIG_PANEL_ID,
-    title: t('configTitle'),
+    title: t('mods.tickTracker.configTitle'),
     modId: MOD_ID,
     content: content,
     buttons: [
       {
-        text: t('saveButton'),
+        text: t('mods.tickTracker.saveButton'),
         primary: true,
         onClick: () => {
           // Update configuration with form values
@@ -590,8 +558,19 @@ function createConfigPanel() {
           // Update button appearance
           api.ui.updateButton(BUTTON_ID, {
             primary: config.enabled,
-            text: t('buttonText')
+            text: t('mods.tickTracker.buttonText')
           });
+          
+          // Apply green background when enabled, regular when disabled
+          const btn = document.getElementById(BUTTON_ID);
+          if (btn) {
+            if (config.enabled) {
+              btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+              btn.style.backgroundSize = "auto";
+            } else {
+              btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+            }
+          }
           
           // Update widget if needed
           if (activeWidget) {
@@ -600,7 +579,7 @@ function createConfigPanel() {
         }
       },
       {
-        text: t('cancelButton'),
+        text: t('mods.tickTracker.cancelButton'),
         primary: false
       }
     ]
@@ -656,19 +635,32 @@ function init() {
   // Add the main button
   api.ui.addButton({
     id: BUTTON_ID,
-    text: t('buttonText'),
+    text: t('mods.tickTracker.buttonText'),
     modId: MOD_ID,
-    tooltip: t('buttonTooltip'),
+    tooltip: t('mods.tickTracker.buttonTooltip'),
     primary: config.enabled,
     onClick: toggleTracking
   });
+  
+  // Apply green background if enabled, regular if disabled
+  setTimeout(() => {
+    const btn = document.getElementById(BUTTON_ID);
+    if (btn) {
+      if (config.enabled) {
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+        btn.style.backgroundSize = "auto";
+      } else {
+        btn.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
+      }
+    }
+  }, 100);
   
   // Add the configuration button
   api.ui.addButton({
     id: CONFIG_BUTTON_ID,
     icon: '⚙️',
     modId: MOD_ID,
-    tooltip: t('configButtonTooltip'),
+    tooltip: t('mods.tickTracker.configButtonTooltip'),
     onClick: () => api.ui.toggleConfigPanel(CONFIG_PANEL_ID)
   });
   

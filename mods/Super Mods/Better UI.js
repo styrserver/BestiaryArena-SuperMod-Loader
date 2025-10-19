@@ -53,7 +53,6 @@ const SELECTORS = {
   STAMINA_PARENT_SPAN: 'span[data-full]',
   STAMINA_CHILD_SPANS: 'span',
   HEADER_SLOT: '#header-slot',
-  NAVIGATION_UL: 'nav ul',
   CURRENCY_CONTAINER: '#header-slot > div > div:first-child',
   CREATURE_IMG: 'img[alt="creature"]',
   STAR_TIER_4: 'img[src*="star-tier-4.png"]',
@@ -69,6 +68,14 @@ const GAME_CONSTANTS = {
   MAX_TIER: 4,
   ELITE_RARITY_LEVEL: 6,
   STAMINA_REGEN_MINUTES: 1
+};
+
+// Modal dimensions
+const MODAL_CONFIG = {
+  width: 450,
+  height: 300,
+  leftColumnWidth: 150,
+  rightColumnWidth: 260
 };
 
 // Experience table for level calculation
@@ -112,57 +119,8 @@ const TIMEOUT_DELAYS = {
   BROWSER_REFRESH: 1000
 };
 
-// Translations
-const TRANSLATIONS = {
-  en: {
-    settingsTitle: 'Better UI Settings',
-    settingsTooltip: 'Better UI Settings',
-    showStaminaTimer: 'Show Stamina Timer',
-    showSetupLabels: 'Show Setup Labels',
-    enableFavorites: 'Enable Favorites',
-    shinyEnemies: '⚠️ Shiny Enemies',
-    shinyEnemiesWarning: 'Warning: This feature may impact performance during battles due to continuous sprite monitoring. Disable if you experience lag.',
-    autoplayRefresh: '⚠️ Autoplay Refresh Browser',
-    autoplayRefreshWarning: 'Refreshes browser after X minutes of autoplay time.',
-    autoplayRefreshMinutes: 'Minutes:',
-    autoplaySessionText: 'Autoplay session',
-    enableMaxCreatures: 'Enable Max Creatures',
-    color: 'Color:',
-    enableShinies: 'Enable Shinies',
-    shinyColor: 'Color:',
-    persistAutomatorAutoRefill: '⚠️ Persist Autorefill Stamina',
-    persistAutomatorAutoRefillWarning: 'When enabled, Bestiary Automator\'s Autorefill Stamina setting will persist across page refreshes. Use with caution.',
-    close: 'Close'
-  },
-  pt: {
-    settingsTitle: 'Configurações do Better UI',
-    settingsTooltip: 'Configurações do Better UI',
-    showStaminaTimer: 'Mostrar Temporizador de Stamina',
-    showSetupLabels: 'Mostrar Rótulos de Times',
-    enableFavorites: 'Ativar Favoritos',
-    shinyEnemies: '⚠️ Shiny Inimigos',
-    shinyEnemiesWarning: 'Aviso: Este recurso pode afetar o desempenho durante batalhas devido ao monitoramento contínuo de sprites. Desative se você experimentar lag.',
-    autoplayRefresh: '⚠️ Atualizar Navegador no Autoplay',
-    autoplayRefreshWarning: 'Atualiza o navegador após X minutos de tempo de autoplay.',
-    autoplayRefreshMinutes: 'Minutos:',
-    autoplaySessionText: 'Sessão autoplay',
-    enableMaxCreatures: 'Ativar Criaturas Máximas',
-    color: 'Cor:',
-    enableShinies: 'Ativar Shinies',
-    shinyColor: 'Cor:',
-    persistAutomatorAutoRefill: '⚠️ Manter Reabastecimento de Stamina',
-    persistAutomatorAutoRefillWarning: 'Quando ativado, a configuração de Reabastecimento Automático de Stamina do Bestiary Automator persistirá após atualizar a página. Use com cuidado.',
-    close: 'Fechar'
-  }
-};
-
-// Translate function (dynamically detects current language)
-const t = (key) => {
-  const currentLocale = document.documentElement.lang === 'pt' || 
-    document.querySelector('html[lang="pt"]') || 
-    window.location.href.includes('/pt/') ? 'pt' : 'en';
-  return TRANSLATIONS[currentLocale][key] || TRANSLATIONS.en[key] || key;
-};
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
 
 // =======================
 // 3. Global State
@@ -730,207 +688,316 @@ function showSettingsModal() {
     // Create main content container with tabs
     const content = document.createElement('div');
     
-    // Create tab headers
-    const tabHeaders = document.createElement('div');
-    tabHeaders.style.cssText = 'display: flex; gap: 0px; margin-bottom: 15px;';
-    tabHeaders.innerHTML = `
-      <h2 class="settings-tab active widget-top widget-top-text pixel-font-16" data-tab="general" style="flex: 1; margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; border: 2px solid #4CAF50;"><p class="pixel-font-16" style="margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);">General</p></h2>
-      <h2 class="settings-tab widget-top widget-top-text pixel-font-16" data-tab="advanced" style="flex: 1; margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255); cursor: pointer; opacity: 0.6;"><p class="pixel-font-16" style="margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);">Advanced</p></h2>
-    `;
-    content.appendChild(tabHeaders);
+    // Apply sizing and layout styles to content (matching Autoscroller pattern)
+    const contentWidth = MODAL_CONFIG.leftColumnWidth + MODAL_CONFIG.rightColumnWidth;
+    Object.assign(content.style, {
+      width: '100%',
+      height: '100%',
+      minWidth: `${contentWidth}px`,
+      maxWidth: `${contentWidth}px`,
+      minHeight: `${MODAL_CONFIG.height}px`,
+      maxHeight: `${MODAL_CONFIG.height}px`,
+      boxSizing: 'border-box',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      flex: '1 1 0'
+    });
     
-    // Create tab content containers
-    const tabContents = document.createElement('div');
+    // Create main content container with 2-column layout
+    const mainContent = document.createElement('div');
+    Object.assign(mainContent.style, {
+      display: 'flex',
+      flexDirection: 'row',
+      gap: '8px',
+      height: '100%',
+      flex: '1 1 0'
+    });
     
-    // General tab content
-    const generalTab = document.createElement('div');
-    generalTab.className = 'tab-content';
-    generalTab.dataset.tab = 'general';
-    generalTab.style.display = 'block';
-    generalTab.innerHTML = `
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="stamina-timer-toggle" ${config.showStaminaTimer ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>${t('showStaminaTimer')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="setup-labels-toggle" ${config.showSetupLabels ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>${t('showSetupLabels')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="favorites-toggle" ${config.enableFavorites ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>${t('enableFavorites')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="rainbow-tiers-toggle" ${config.enableMaxCreatures ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>${t('enableMaxCreatures')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-        <span style="color: #ccc;">${t('color')}</span>
-        ${generateColorPickerHTML('color-picker', 'maxCreaturesColor')}
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="shinies-toggle" ${config.enableMaxShinies ? 'checked' : ''} style="transform: scale(1.2);">
-          <span>${t('enableShinies')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-        <span style="color: #ccc;">${t('shinyColor')}</span>
-        ${generateColorPickerHTML('shiny-color-picker', 'maxShiniesColor')}
-      </div>
-      <div class="separator my-2.5" role="none" style="margin: 10px 0px;"></div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="shiny-enemies-toggle" ${config.enableShinyEnemies ? 'checked' : ''} style="transform: scale(1.2);">
-          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('shinyEnemiesWarning')}">${t('shinyEnemies')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="autoplay-refresh-toggle" ${config.enableAutoplayRefresh ? 'checked' : ''} style="transform: scale(1.2);">
-          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('autoplayRefreshWarning')}">${t('autoplayRefresh')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-        <span style="color: #ccc;">${t('autoplayRefreshMinutes')}</span>
-        <input type="number" id="autoplay-refresh-minutes" value="${config.autoplayRefreshMinutes}" min="1" max="120" style="width: 60px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center;">
-      </div>
-    `;
-    tabContents.appendChild(generalTab);
+    // Left column - Options
+    const leftColumn = document.createElement('div');
+    Object.assign(leftColumn.style, {
+      width: `${MODAL_CONFIG.leftColumnWidth}px`,
+      minWidth: `${MODAL_CONFIG.leftColumnWidth}px`,
+      maxWidth: `${MODAL_CONFIG.leftColumnWidth}px`,
+      height: '100%',
+      flex: `0 0 ${MODAL_CONFIG.leftColumnWidth}px`,
+      display: 'flex',
+      flexDirection: 'column',
+      padding: '0px',
+      margin: '0px',
+      borderRight: '6px solid transparent',
+      borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+      overflowY: 'auto',
+      minHeight: '0px'
+    });
     
-    // Advanced tab content
-    const advancedTab = document.createElement('div');
-    advancedTab.className = 'tab-content';
-    advancedTab.dataset.tab = 'advanced';
-    advancedTab.style.display = 'none';
+    // Right column - Checkboxes
+    const rightColumn = document.createElement('div');
+    Object.assign(rightColumn.style, {
+      width: `${MODAL_CONFIG.rightColumnWidth}px`,
+      minWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
+      maxWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
+      flex: `0 0 ${MODAL_CONFIG.rightColumnWidth}px`,
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+      overflowY: 'auto'
+    });
     
-    // Load Bestiary Automator's config to get the current value
-    let automatorPersistValue = false;
-    try {
-      const automatorConfig = localStorage.getItem('bestiary-automator-config');
-      if (automatorConfig) {
-        const parsed = JSON.parse(automatorConfig);
-        automatorPersistValue = parsed.persistAutoRefillOnRefresh || false;
-      }
-    } catch (error) {
-      console.warn('[Better UI] Could not load Bestiary Automator config:', error);
+    // Helper function to apply menu item styling
+    function applyMenuItemStyle(element, selected) {
+      element.style.backgroundColor = selected ? 'rgba(255,255,255,0.1)' : 'transparent';
     }
     
-    advancedTab.innerHTML = `
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="persist-automator-autorefill-toggle" ${automatorPersistValue ? 'checked' : ''} style="transform: scale(1.2);">
-          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('persistAutomatorAutoRefillWarning')}">${t('persistAutomatorAutoRefill')}</span>
-        </label>
-      </div>
-      <div style="margin-bottom: 15px;">
-        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-          <input type="checkbox" id="disable-auto-reload-toggle" ${config.disableAutoReload ? 'checked' : ''} style="transform: scale(1.2);">
-          <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Prevents automatic page reloads from Raid Hunter and Better Tasker">⚠️ Disable Auto-Reload</span>
-        </label>
-      </div>
-    `;
-    tabContents.appendChild(advancedTab);
+    // Create menu items for left column
+    const menuItems = [
+      { id: 'creatures', label: 'Creatures', selected: true },
+      { id: 'ui', label: 'UI', selected: false },
+      { id: 'advanced', label: 'Advanced', selected: false }
+    ];
     
-    content.appendChild(tabContents);
-    
-    // Setup tab switching
-    const tabs = tabHeaders.querySelectorAll('.settings-tab');
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        const targetTab = tab.dataset.tab;
-        
-        // Update tab headers
-        tabs.forEach(t => {
-          if (t.dataset.tab === targetTab) {
-            t.classList.add('active');
-            t.style.opacity = '1';
-            t.style.border = '2px solid #4CAF50';
-          } else {
-            t.classList.remove('active');
-            t.style.opacity = '0.6';
-            t.style.border = '';
+    menuItems.forEach(item => {
+      const menuItem = document.createElement('div');
+      menuItem.className = 'menu-item pixel-font-16';
+      menuItem.dataset.category = item.id;
+      Object.assign(menuItem.style, {
+        cursor: 'pointer',
+        padding: '2px 4px',
+        borderRadius: '2px',
+        textAlign: 'left',
+        color: 'rgb(255, 255, 255)',
+        background: 'none',
+        filter: 'none'
+      });
+      
+      // Create inner flex container
+      const innerDiv = document.createElement('div');
+      Object.assign(innerDiv.style, {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px'
+      });
+      
+      const span = document.createElement('span');
+      span.textContent = item.label;
+      innerDiv.appendChild(span);
+      menuItem.appendChild(innerDiv);
+      
+      applyMenuItemStyle(menuItem, item.selected);
+      
+      menuItem.addEventListener('click', () => {
+        // Update menu selection
+        menuItems.forEach(mi => {
+          const miElement = leftColumn.querySelector(`[data-category="${mi.id}"]`);
+          if (miElement) {
+            applyMenuItemStyle(miElement, mi.id === item.id);
           }
         });
         
-        // Update tab content
-        const contents = tabContents.querySelectorAll('.tab-content');
-        contents.forEach(c => {
-          c.style.display = c.dataset.tab === targetTab ? 'block' : 'none';
-        });
+        // Update right column content
+        updateRightColumn(item.id);
       });
+      
+      leftColumn.appendChild(menuItem);
     });
     
-    
-    // Setup event handlers using factories
-    const staminaCheckbox = content.querySelector('#stamina-timer-toggle');
-    createSettingsCheckboxHandler('showStaminaTimer',
-      () => {
-        if (staminaTimerElement) {
-          staminaTimerElement.style.display = 'inline';
-        } else {
-          updateStaminaTimer();
-        }
-      },
-      () => {
-        if (staminaTimerElement) {
-          staminaTimerElement.style.display = 'none';
-        }
+    // Function to update right column content based on selected category
+    function updateRightColumn(categoryId) {
+      rightColumn.innerHTML = '';
+      
+      if (categoryId === 'ui') {
+        const uiContent = document.createElement('div');
+        uiContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="stamina-timer-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showStaminaTimer')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="setup-labels-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showSetupLabels')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="favorites-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableFavorites')}</span>
+            </label>
+          </div>
+        `;
+        rightColumn.appendChild(uiContent);
+      } else if (categoryId === 'creatures') {
+        const creaturesContent = document.createElement('div');
+        creaturesContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="rainbow-tiers-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableMaxCreatures')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('common.color')}</span>
+            <select id="color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
+              <option value="prismatic">Prismatic</option>
+              <option value="demon" selected="">Demonic</option>
+              <option value="ice">Frosty</option>
+              <option value="poison">Venomous</option>
+              <option value="gold">Divine</option>
+              <option value="undead">Undead</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="shinies-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableShinies')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('common.color')}</span>
+            <select id="shiny-color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
+              <option value="prismatic">Prismatic</option>
+              <option value="demon">Demonic</option>
+              <option value="ice">Frosty</option>
+              <option value="poison">Venomous</option>
+              <option value="gold" selected="">Divine</option>
+              <option value="undead">Undead</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="shiny-enemies-toggle" checked="" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.shinyEnemiesWarning')}">${t('mods.betterUI.shinyEnemies')}</span>
+            </label>
+          </div>
+        `;
+        rightColumn.appendChild(creaturesContent);
+      } else if (categoryId === 'advanced') {
+        const advancedContent = document.createElement('div');
+        advancedContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="autoplay-refresh-toggle" checked="" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoplayRefreshWarning')}">${t('mods.betterUI.autoplayRefresh')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.autoplayRefreshMinutes')}</span>
+            <input type="number" id="autoplay-refresh-minutes" value="30" min="1" max="120" style="width: 60px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center;">
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="persist-automator-autorefill-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.persistAutomatorAutoRefillWarning')}">${t('mods.betterUI.persistAutomatorAutoRefill')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="disable-auto-reload-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
+            </label>
+          </div>
+        `;
+        rightColumn.appendChild(advancedContent);
       }
-    )(staminaCheckbox);
+      
+      // Re-attach event handlers for the new content
+      setTimeout(() => {
+        attachEventHandlers(content);
+      }, 0);
+    }
     
-    const rainbowCheckbox = content.querySelector('#rainbow-tiers-toggle');
-    createSettingsCheckboxHandler('enableMaxCreatures', applyMaxCreatures, removeMaxCreatures)(rainbowCheckbox);
+    // Initialize with Creatures category selected
+    updateRightColumn('creatures');
     
-    const colorPicker = content.querySelector('#color-picker');
-    createSettingsDropdownHandler('maxCreaturesColor', () => {
-      if (config.enableMaxCreatures) applyMaxCreatures();
-    })(colorPicker);
+    // Add columns to main content
+    mainContent.appendChild(leftColumn);
+    mainContent.appendChild(rightColumn);
     
-    const shiniesCheckbox = content.querySelector('#shinies-toggle');
-    createSettingsCheckboxHandler('enableMaxShinies', applyMaxShinies, removeMaxShinies)(shiniesCheckbox);
+    // Add main content to content
+    content.appendChild(mainContent);
     
-    const shinyColorPicker = content.querySelector('#shiny-color-picker');
-    createSettingsDropdownHandler('maxShiniesColor', () => {
-      if (config.enableMaxShinies) applyMaxShinies();
-    })(shinyColorPicker);
-    
-    const favoritesCheckbox = content.querySelector('#favorites-toggle');
-    createSettingsCheckboxHandler('enableFavorites',
-      updateFavoriteHearts,
-      removeFavoriteHearts
-    )(favoritesCheckbox);
-    
-    const setupLabelsCheckbox = content.querySelector('#setup-labels-toggle');
-    createSettingsCheckboxHandler('showSetupLabels',
-      () => {
-        // Show setup labels
-        applySetupLabelsVisibility(true);
-        console.log('[Better UI] Setup labels shown');
-      },
-      () => {
-        // Hide setup labels
-        applySetupLabelsVisibility(false);
-        console.log('[Better UI] Setup labels hidden');
+    // Function to attach event handlers to dynamically loaded content
+    function attachEventHandlers(content) {
+      const staminaCheckbox = content.querySelector('#stamina-timer-toggle');
+      if (staminaCheckbox) {
+        createSettingsCheckboxHandler('showStaminaTimer',
+          () => {
+            if (staminaTimerElement) {
+              staminaTimerElement.style.display = 'inline';
+            } else {
+              updateStaminaTimer();
+            }
+          },
+          () => {
+            if (staminaTimerElement) {
+              staminaTimerElement.style.display = 'none';
+            }
+          }
+        )(staminaCheckbox);
       }
-    )(setupLabelsCheckbox);
     
-    const shinyEnemiesCheckbox = content.querySelector('#shiny-enemies-toggle');
-    createSettingsCheckboxHandler('enableShinyEnemies',
-      () => {
-        startBattleBoardObserver();
-        applyShinyEnemies();
-      },
-      removeShinyEnemies
-    )(shinyEnemiesCheckbox);
+      const rainbowCheckbox = content.querySelector('#rainbow-tiers-toggle');
+      if (rainbowCheckbox) {
+        createSettingsCheckboxHandler('enableMaxCreatures', applyMaxCreatures, removeMaxCreatures)(rainbowCheckbox);
+      }
+      
+      const colorPicker = content.querySelector('#color-picker');
+      if (colorPicker) {
+        createSettingsDropdownHandler('maxCreaturesColor', () => {
+          if (config.enableMaxCreatures) applyMaxCreatures();
+        })(colorPicker);
+      }
+      
+      const shiniesCheckbox = content.querySelector('#shinies-toggle');
+      if (shiniesCheckbox) {
+        createSettingsCheckboxHandler('enableMaxShinies', applyMaxShinies, removeMaxShinies)(shiniesCheckbox);
+      }
+      
+      const shinyColorPicker = content.querySelector('#shiny-color-picker');
+      if (shinyColorPicker) {
+        createSettingsDropdownHandler('maxShiniesColor', () => {
+          if (config.enableMaxShinies) applyMaxShinies();
+        })(shinyColorPicker);
+      }
+      
+      const favoritesCheckbox = content.querySelector('#favorites-toggle');
+      if (favoritesCheckbox) {
+        createSettingsCheckboxHandler('enableFavorites',
+          updateFavoriteHearts,
+          removeFavoriteHearts
+        )(favoritesCheckbox);
+      }
+      
+      const setupLabelsCheckbox = content.querySelector('#setup-labels-toggle');
+      if (setupLabelsCheckbox) {
+        createSettingsCheckboxHandler('showSetupLabels',
+          () => {
+            // Show setup labels
+            applySetupLabelsVisibility(true);
+            console.log('[Better UI] Setup labels shown');
+          },
+          () => {
+            // Hide setup labels
+            applySetupLabelsVisibility(false);
+            console.log('[Better UI] Setup labels hidden');
+          }
+        )(setupLabelsCheckbox);
+      }
+      
+      const shinyEnemiesCheckbox = content.querySelector('#shiny-enemies-toggle');
+      if (shinyEnemiesCheckbox) {
+        createSettingsCheckboxHandler('enableShinyEnemies',
+          () => {
+            startBattleBoardObserver();
+            applyShinyEnemies();
+          },
+          removeShinyEnemies
+        )(shinyEnemiesCheckbox);
+      }
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
     if (autoplayRefreshCheckbox) {
@@ -985,28 +1052,33 @@ function showSettingsModal() {
           console.log('[Better UI] Updated Bestiary Automator runtime config');
         }
       });
+      }
+      
+      const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
+      if (disableAutoReloadCheckbox) {
+        disableAutoReloadCheckbox.addEventListener('change', () => {
+          config.disableAutoReload = disableAutoReloadCheckbox.checked;
+          saveConfig();
+          console.log('[Better UI] Auto-reload disabled:', config.disableAutoReload);
+        });
+      }
     }
     
-    const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
-    if (disableAutoReloadCheckbox) {
-      disableAutoReloadCheckbox.addEventListener('change', () => {
-        config.disableAutoReload = disableAutoReloadCheckbox.checked;
-        saveConfig();
-        console.log('[Better UI] Auto-reload disabled:', config.disableAutoReload);
-      });
-    }
+    // Attach event handlers to the initial content
+    attachEventHandlers(content);
     
     // Store modal reference for button handlers
     let modalRef = null;
     
     // Create modal using the API
     modalRef = api.ui.components.createModal({
-      title: t('settingsTitle'),
-      width: 300,
+      title: t('mods.betterUI.settingsTitle'),
+      width: MODAL_CONFIG.width,
+      height: MODAL_CONFIG.height,
       content: content,
       buttons: [
         {
-          text: t('close'),
+          text: t('common.close'),
           primary: true,
           closeOnClick: true,
           onClick: () => {
@@ -1015,6 +1087,70 @@ function showSettingsModal() {
         }
       ]
     });
+    
+    // Set static size for the modal dialog (non-resizable)
+    setTimeout(() => {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (dialog) {
+        dialog.style.width = `${MODAL_CONFIG.width}px`;
+        dialog.style.minWidth = `${MODAL_CONFIG.width}px`;
+        dialog.style.maxWidth = `${MODAL_CONFIG.width}px`;
+        dialog.style.height = `${MODAL_CONFIG.height}px`;
+        dialog.style.minHeight = `${MODAL_CONFIG.height}px`;
+        dialog.style.maxHeight = `${MODAL_CONFIG.height}px`;
+        dialog.classList.remove('max-w-[300px]');
+        
+        // Style the content wrapper for proper flexbox layout
+        let contentWrapper = null;
+        const children = Array.from(dialog.children);
+        for (const child of children) {
+          if (child !== dialog.firstChild && child.tagName === 'DIV') {
+            contentWrapper = child;
+            break;
+          }
+        }
+        if (!contentWrapper) {
+          contentWrapper = dialog.querySelector(':scope > div');
+        }
+        if (contentWrapper) {
+          contentWrapper.style.height = '100%';
+          contentWrapper.style.display = 'flex';
+          contentWrapper.style.flexDirection = 'column';
+          contentWrapper.style.flex = '1 1 0';
+        }
+      }
+    }, 0);
+    
+    // Inject auto-save indicator into the modal footer
+    setTimeout(() => {
+      const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (modalElement) {
+        const footer = modalElement.querySelector('.flex.justify-end.gap-2');
+        if (footer) {
+          // Create auto-save indicator
+          const autoSaveIndicator = document.createElement('div');
+          autoSaveIndicator.className = 'pixel-font-16';
+          autoSaveIndicator.style.cssText = `
+            font-size: 11px;
+            color: rgb(74, 222, 128);
+            font-style: italic;
+            margin-right: auto;
+          `;
+          autoSaveIndicator.textContent = t('mods.betterUI.settingsAutoSave');
+          
+          // Modify footer to use space-between layout
+          footer.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 2px;
+          `;
+          
+          // Insert auto-save indicator at the beginning
+          footer.insertBefore(autoSaveIndicator, footer.firstChild);
+        }
+      }
+    }, 100);
     
   } catch (error) {
     console.error('[Better UI] Error showing settings modal:', error);
@@ -1036,7 +1172,7 @@ function createSettingsButton() {
     // Create settings button matching the currency button style
     const settingsButtonElement = document.createElement('button');
     settingsButtonElement.className = 'focus-style-visible';
-    settingsButtonElement.title = t('settingsTooltip');
+    settingsButtonElement.title = t('mods.betterUI.settingsTooltip');
     settingsButtonElement.innerHTML = `
       <div class="pixel-font-16 frame-pressed-1 surface-darker flex items-center justify-end gap-1 px-1.5 pb-px text-right text-whiteRegular">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -3087,8 +3223,8 @@ function stopBattleBoardObserver() {
 // Parse autoplay time from text content (supports English and Portuguese)
 function parseAutoplayTime(textContent) {
   // Build regex pattern using translation strings for both languages
-  const enText = TRANSLATIONS.en.autoplaySessionText;
-  const ptText = TRANSLATIONS.pt.autoplaySessionText;
+  const enText = "Autoplay session";
+  const ptText = "Sessão autoplay";
   const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
   
   const match = textContent.match(pattern);
@@ -3572,3 +3708,4 @@ exports = {
     }
   }
 };
+

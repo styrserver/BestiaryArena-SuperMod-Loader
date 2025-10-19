@@ -1,6 +1,9 @@
 // DOM Item Tier List mod for Bestiary Arena
 console.log('Item Tier List Pretty Mod initializing...');
 
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
 // Create the Tier List button using the API
 if (api) {
   console.log('BestiaryModAPI available in Item Tier List Pretty Mod');
@@ -8,8 +11,8 @@ if (api) {
   // Create button to show tier list modal
   window.tierListButton = api.ui.addButton({
     id: 'item-tier-list-button',
-    text: 'Item Tier List',
-    tooltip: 'Show item usage tier list',
+    text: t('mods.itemTierList.buttonText'),
+    tooltip: t('mods.itemTierList.buttonTooltip'),
     primary: false,
     onClick: showItemTierListModal
   });
