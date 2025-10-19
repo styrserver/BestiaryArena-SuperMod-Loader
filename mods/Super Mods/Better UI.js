@@ -73,10 +73,10 @@ const GAME_CONSTANTS = {
 
 // Modal dimensions
 const MODAL_CONFIG = {
-  width: 450,
+  width: 500,
   height: 300,
   leftColumnWidth: 150,
-  rightColumnWidth: 260
+  rightColumnWidth: 310
 };
 
 // Experience table for level calculation
@@ -708,7 +708,11 @@ function showSettingsModal() {
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
-      flex: '1 1 0'
+      flex: '1 1 0',
+      border: '6px solid transparent',
+      borderImage: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+      backgroundImage: 'url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png")',
+      padding: '8px'
     });
     
     // Create main content container with 2-column layout
@@ -755,7 +759,15 @@ function showSettingsModal() {
     
     // Helper function to apply menu item styling
     function applyMenuItemStyle(element, selected) {
-      element.style.backgroundColor = selected ? 'rgba(255,255,255,0.1)' : 'transparent';
+      if (selected) {
+        element.style.border = '6px solid transparent';
+        element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 6 fill';
+        element.style.backgroundColor = 'transparent';
+      } else {
+        element.style.border = '6px solid transparent';
+        element.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 6 fill';
+        element.style.backgroundColor = 'transparent';
+      }
     }
     
     // Create menu items for left column
@@ -807,6 +819,20 @@ function showSettingsModal() {
         updateRightColumn(item.id);
       });
       
+      // Add hover effect
+      menuItem.addEventListener('mouseenter', () => {
+        const isSelected = menuItem.style.borderImage && menuItem.style.borderImage.includes('pressed');
+        if (!isSelected) {
+          menuItem.style.background = 'rgba(255,255,255,0.08)';
+        }
+      });
+      menuItem.addEventListener('mouseleave', () => {
+        const isSelected = menuItem.style.borderImage && menuItem.style.borderImage.includes('pressed');
+        if (!isSelected) {
+          menuItem.style.background = 'none';
+        }
+      });
+      
       leftColumn.appendChild(menuItem);
     });
     
@@ -831,12 +857,6 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="favorites-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.enableFavorites')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
             </label>
@@ -846,6 +866,12 @@ function showSettingsModal() {
       } else if (categoryId === 'creatures') {
         const creaturesContent = document.createElement('div');
         creaturesContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="favorites-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableFavorites')}</span>
+            </label>
+          </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="rainbow-tiers-toggle" checked="" style="transform: scale(1.2);">
