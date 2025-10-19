@@ -72,6 +72,7 @@
       "persistAutomatorAutoRefillWarning": "When enabled, Bestiary Automator's Autorefill Stamina setting will persist across page refreshes. Use with caution.",
       "disableAutoReload": "⚠️ Disable Auto-Reload",
       "disableAutoReloadWarning": "Prevents automatic page reloads from Raid Hunter and Better Tasker.",
+      "hideWebsiteFooter": "Hide Website Footer",
       "settingsAutoSave": "✓ Settings auto-save when changed"
     },
     "automator": {

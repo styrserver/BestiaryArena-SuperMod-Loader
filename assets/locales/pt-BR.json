@@ -72,6 +72,7 @@
       "persistAutomatorAutoRefillWarning": "Quando ativado, a configuração de Reabastecimento Automático de Stamina do Bestiary Automator persistirá após atualizar a página. Use com cuidado.",
       "disableAutoReload": "⚠️ Desativar Recarregamento Automático",
       "disableAutoReloadWarning": "Impede recarregamentos automáticos de página do Raid Hunter e Better Tasker.",
+      "hideWebsiteFooter": "Ocultar Rodapé do Site",
       "settingsAutoSave": "✓ As configurações salvam automaticamente quando alteradas"
     },
     "automator": {

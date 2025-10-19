@@ -20,7 +20,8 @@ const defaultConfig = {
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
   autoplayRefreshMinutes: 30,
-  disableAutoReload: false
+  disableAutoReload: false,
+  removeWebsiteFooter: false
 };
 
 // Storage key for this mod
@@ -655,6 +656,9 @@ function generateColorPickerHTML(id, configKey) {
 // Create settings event handler for checkboxes
 function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
   return (checkbox) => {
+    // Set initial state from config
+    checkbox.checked = config[configKey];
+    
     checkbox.addEventListener('change', () => {
       config[configKey] = checkbox.checked;
       saveConfig();
@@ -673,6 +677,9 @@ function createSettingsCheckboxHandler(configKey, onEnable, onDisable) {
 // Create settings event handler for dropdowns
 function createSettingsDropdownHandler(configKey, onChangeCallback) {
   return (dropdown) => {
+    // Set initial state from config
+    dropdown.value = config[configKey];
+    
     dropdown.addEventListener('change', () => {
       config[configKey] = dropdown.value;
       saveConfig();
@@ -826,6 +833,12 @@ function showSettingsModal() {
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="favorites-toggle" checked="" style="transform: scale(1.2);">
               <span>${t('mods.betterUI.enableFavorites')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="remove-footer-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
             </label>
           </div>
         `;
@@ -998,9 +1011,20 @@ function showSettingsModal() {
           removeShinyEnemies
         )(shinyEnemiesCheckbox);
       }
+      
+      const removeFooterCheckbox = content.querySelector('#remove-footer-toggle');
+      if (removeFooterCheckbox) {
+        createSettingsCheckboxHandler('removeWebsiteFooter',
+          hideWebsiteFooter,
+          showWebsiteFooter
+        )(removeFooterCheckbox);
+      }
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
     if (autoplayRefreshCheckbox) {
+      // Set initial state from config
+      autoplayRefreshCheckbox.checked = config.enableAutoplayRefresh;
+      
       autoplayRefreshCheckbox.addEventListener('change', () => {
         config.enableAutoplayRefresh = autoplayRefreshCheckbox.checked;
         saveConfig();
@@ -1017,6 +1041,9 @@ function showSettingsModal() {
     
     const autoplayRefreshMinutesInput = content.querySelector('#autoplay-refresh-minutes');
     if (autoplayRefreshMinutesInput) {
+      // Set initial value from config
+      autoplayRefreshMinutesInput.value = config.autoplayRefreshMinutes;
+      
       autoplayRefreshMinutesInput.addEventListener('input', () => {
         const minutes = parseInt(autoplayRefreshMinutesInput.value) || 30;
         config.autoplayRefreshMinutes = Math.max(1, Math.min(120, minutes));
@@ -1030,6 +1057,15 @@ function showSettingsModal() {
     
     const persistAutomatorAutoRefillCheckbox = content.querySelector('#persist-automator-autorefill-toggle');
     if (persistAutomatorAutoRefillCheckbox) {
+      // Set initial state from Bestiary Automator's config
+      try {
+        const automatorConfig = localStorage.getItem('bestiary-automator-config');
+        const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
+        persistAutomatorAutoRefillCheckbox.checked = parsedConfig.persistAutoRefillOnRefresh || false;
+      } catch (error) {
+        console.error('[Better UI] Error reading Bestiary Automator config:', error);
+      }
+      
       persistAutomatorAutoRefillCheckbox.addEventListener('change', () => {
         const newValue = persistAutomatorAutoRefillCheckbox.checked;
         
@@ -1056,6 +1092,9 @@ function showSettingsModal() {
       
       const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
       if (disableAutoReloadCheckbox) {
+        // Set initial state from config
+        disableAutoReloadCheckbox.checked = config.disableAutoReload;
+        
         disableAutoReloadCheckbox.addEventListener('change', () => {
           config.disableAutoReload = disableAutoReloadCheckbox.checked;
           saveConfig();
@@ -2491,7 +2530,29 @@ function startSetupLabelsObserver() {
 }
 
 // =======================
-// 9. Stamina Timer Functions
+// 9. Website Footer Functions
+// =======================
+
+// Hide website footer
+function hideWebsiteFooter() {
+  const footer = document.querySelector('footer.mt-5');
+  if (footer) {
+    footer.style.display = 'none';
+    console.log('[Better UI] Website footer hidden');
+  }
+}
+
+// Show website footer
+function showWebsiteFooter() {
+  const footer = document.querySelector('footer.mt-5');
+  if (footer) {
+    footer.style.display = '';
+    console.log('[Better UI] Website footer shown');
+  }
+}
+
+// =======================
+// 10. Stamina Timer Functions
 // =======================
 
 // Update stamina timer display
@@ -3448,6 +3509,14 @@ function initBetterUI() {
       console.log('[Better UI] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
     
+    // Hide website footer if enabled
+    if (config.removeWebsiteFooter) {
+      scheduleTimeout(() => {
+        hideWebsiteFooter();
+        console.log('[Better UI] Website footer hidden on init');
+      }, 1000); // Delay to ensure DOM is ready
+    }
+    
     console.log('[Better UI] Initialization completed');
   } catch (error) {
     console.error('[Better UI] Initialization error:', error);
@@ -3626,6 +3695,14 @@ function cleanupBetterUI() {
       console.log('[Better UI] Max shinies styles removed');
     } catch (error) {
       console.warn('[Better UI] Error cleaning up max shinies:', error);
+    }
+    
+    // Restore website footer
+    try {
+      showWebsiteFooter();
+      console.log('[Better UI] Website footer restored');
+    } catch (error) {
+      console.warn('[Better UI] Error restoring website footer:', error);
     }
     
     // Reset header container styles
