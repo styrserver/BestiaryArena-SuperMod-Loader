@@ -104,8 +104,6 @@
     // Event handler references for cleanup
     let emitNewGameHandler1 = null;
     let emitEndGameHandler1 = null;
-    let emitNewGameHandler2 = null;
-    let newGameHandler = null;
     
     // Global references for cleanup
     let originalFetch = null;
@@ -3061,38 +3059,32 @@
     }
     
     // =======================
-    // 12.1. Game Start Listener for Dragon Plant
+    // 12.1. Game End Listener for Dragon Plant
     // =======================
     
-    function setupGameStartListener() {
+    function setupGameEndListener() {
         if (globalThis.state?.board?.on) {
-            // Listen for game start events
-            emitNewGameHandler2 = (event) => {
+            // Listen for new game events to access the world object
+            emitNewGameHandler1 = (game) => {
                 // Skip during Board Analyzer runs
                 if (window.__modCoordination?.boardAnalyzerRunning) {
                     return;
                 }
                 
-                console.log(`[${modName}] Game started, checking for creatures to devour...`);
-                // Check if there are creatures that would be devoured (not in ignore list)
-                checkAndActivateDragonPlant();
+                // Subscribe to world.onGameEnd which fires when battle animation completes
+                game.world.onGameEnd.once(() => {
+                    console.log(`[${modName}] Battle animation completed, creatures dropped - checking Dragon Plant...`);
+                    // Wait 100ms for UI to settle before activating Dragon Plant
+                    setTimeout(() => {
+                        checkAndActivateDragonPlant();
+                    }, 100);
+                });
             };
-            globalThis.state.board.on('emitNewGame', emitNewGameHandler2);
+            globalThis.state.board.on('newGame', emitNewGameHandler1);
             
-            // Also listen for other game events to debug
-            newGameHandler = (event) => {
-                // Skip during Board Analyzer runs
-                if (window.__modCoordination?.boardAnalyzerRunning) {
-                    return;
-                }
-                
-                checkAndActivateDragonPlant();
-            };
-            globalThis.state.board.on('newGame', newGameHandler);
-            
-            console.log(`[${modName}] Game start listener setup complete`);
+            console.log(`[${modName}] Game end listener setup complete`);
         } else {
-            console.warn(`[${modName}] Board state not available for game start listener`);
+            console.warn(`[${modName}] Board state not available for game end listener`);
         }
     }
     
@@ -3396,7 +3388,7 @@
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
-        setupGameStartListener();
+        setupGameEndListener();
         setupDragonPlantAPIMonitor();
         setupDragonPlantAutocollect();
         
@@ -3589,20 +3581,12 @@
                     if (globalThis.state?.board?.off) {
                         try {
                             if (emitNewGameHandler1) {
-                                globalThis.state.board.off('emitNewGame', emitNewGameHandler1);
+                                globalThis.state.board.off('newGame', emitNewGameHandler1);
                                 emitNewGameHandler1 = null;
                             }
                             if (emitEndGameHandler1) {
                                 globalThis.state.board.off('emitEndGame', emitEndGameHandler1);
                                 emitEndGameHandler1 = null;
-                            }
-                            if (emitNewGameHandler2) {
-                                globalThis.state.board.off('emitNewGame', emitNewGameHandler2);
-                                emitNewGameHandler2 = null;
-                            }
-                            if (newGameHandler) {
-                                globalThis.state.board.off('newGame', newGameHandler);
-                                newGameHandler = null;
                             }
                         } catch (error) {
                             console.warn('[Autoseller] Error removing game state event listeners:', error);
@@ -3655,9 +3639,7 @@
                         debounceTimer,
                         dragonPlantObserver,
                         emitNewGameHandler1,
-                        emitEndGameHandler1,
-                        emitNewGameHandler2,
-                        newGameHandler
+                        emitEndGameHandler1
                     ].filter(Boolean);
                     
                     if (remainingReferences.length > 0) {

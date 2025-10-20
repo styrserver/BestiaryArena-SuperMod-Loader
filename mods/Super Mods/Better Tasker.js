@@ -277,6 +277,199 @@ function clearModalsWithEscSync(count = 3) {
 }
 
 // ============================================================================
+// 1.2. STAMINA MONITORING FUNCTIONS
+// ============================================================================
+
+// Stamina tooltip monitoring state
+let staminaTooltipObserver = null;
+let staminaRecoveryCallback = null;
+
+/**
+ * Calculate current stamina using game state API
+ * @returns {number} Current stamina amount
+ */
+function getCurrentStamina() {
+    try {
+        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const elStamina = document.querySelector('[title="Stamina"]');
+        if (!elStamina) {
+            console.log('[Better Tasker] Stamina element not found');
+            return 0;
+        }
+        
+        const staminaElement = elStamina.querySelector('span span');
+        if (!staminaElement) {
+            console.log('[Better Tasker] Stamina text element not found');
+            return 0;
+        }
+        
+        const stamina = Number(staminaElement.textContent);
+        console.log('[Better Tasker] Current stamina from DOM:', stamina);
+        return stamina;
+    } catch (error) {
+        console.error('[Better Tasker] Error reading stamina:', error);
+        return 0;
+    }
+}
+
+/**
+ * Get stamina cost for current map
+ * @returns {number} Stamina cost (defaults to 6 if unknown)
+ */
+function getCurrentMapStaminaCost() {
+    try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+        
+        if (selectedRoom && selectedRoom.staminaCost) {
+            return selectedRoom.staminaCost;
+        }
+        
+        return 6; // Default to 6 if unknown
+    } catch (error) {
+        console.error('[Better Tasker] Error getting stamina cost:', error);
+        return 6;
+    }
+}
+
+/**
+ * Check if stamina tooltip is visible (ONLY method - tooltip is source of truth)
+ * @returns {Object} { insufficient: boolean, cost: number|null }
+ */
+function hasInsufficientStamina() {
+    // Look for stamina tooltip (icon-based, language-independent)
+    const staminaTooltip = document.querySelector(
+        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+    );
+    
+    if (staminaTooltip) {
+        // Found stamina icon in tooltip = insufficient stamina
+        const tooltipElement = staminaTooltip.closest('[role="tooltip"]') || 
+                              staminaTooltip.closest('[data-state="instant-open"]');
+        
+        const tooltipText = tooltipElement?.textContent || '';
+        
+        // Extract stamina cost from format: "Not enough stamina (6)" or "Falta stamina (6)"
+        const staminaMatch = tooltipText.match(/\(.*?(\d+)\)/);
+        const cost = staminaMatch ? parseInt(staminaMatch[1]) : null;
+        
+        console.log(`[Better Tasker] Tooltip check: Insufficient (needs ${cost})`);
+        return { insufficient: true, cost };
+    }
+    
+    // No tooltip = sufficient stamina (trust the game)
+    return { insufficient: false, cost: null };
+}
+
+/**
+ * Set up hybrid stamina monitoring (tooltip watching + API for progress)
+ * Uses tooltip as truth for recovery, API for progress tracking
+ * @param {Function} onRecovered - Callback when stamina recovers
+ * @param {number} requiredStamina - Stamina cost for this map (optional for continuous monitoring)
+ */
+function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
+    // Clean up any existing monitoring
+    if (staminaTooltipObserver) {
+        stopStaminaTooltipMonitoring();
+    }
+    
+    console.log('[Better Tasker] Starting stamina recovery monitoring...');
+    
+    staminaRecoveryCallback = onRecovered;
+    let hasStaminaIssue = true;
+    
+    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
+    const staminaCheckInterval = setInterval(() => {
+        const currentStamina = getCurrentStamina();
+        
+        // Also check if tooltip disappeared (double-check)
+        const tooltipStillExists = document.querySelector(
+            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+        );
+        
+        if (!tooltipStillExists && hasStaminaIssue) {
+            console.log(`[Better Tasker] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
+            hasStaminaIssue = false;
+            
+            // Save callback before cleanup (cleanup clears the callback)
+            const callback = staminaRecoveryCallback;
+            
+            clearInterval(staminaCheckInterval);
+            stopStaminaTooltipMonitoring();
+            
+            // Execute saved callback
+            if (typeof callback === 'function') {
+                callback();
+            }
+        } else if (tooltipStillExists && requiredStamina) {
+            // Show progress if we know required stamina
+            const timeRemaining = Math.max(0, requiredStamina - currentStamina);
+            console.log(`[Better Tasker] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+        }
+    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
+    
+    // Store interval for cleanup
+    window.betterTaskerStaminaInterval = staminaCheckInterval;
+    
+    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+    staminaTooltipObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            mutation.removedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const wasStaminaTooltip = 
+                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                        node.querySelector?.('img[alt="stamina"]');
+                    
+                    if (wasStaminaTooltip && hasStaminaIssue) {
+                        const currentStamina = getCurrentStamina();
+                        console.log(`[Better Tasker] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
+                        hasStaminaIssue = false;
+                        
+                        // Save callback before cleanup (cleanup clears the callback)
+                        const callback = staminaRecoveryCallback;
+                        
+                        clearInterval(staminaCheckInterval);
+                        stopStaminaTooltipMonitoring();
+                        
+                        // Execute saved callback
+                        if (typeof callback === 'function') {
+                            callback();
+                        }
+                    }
+                }
+            });
+        }
+    });
+    
+    staminaTooltipObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Better Tasker] Stamina monitoring active (tooltip watching + API progress)');
+}
+
+/**
+ * Stop stamina tooltip monitoring
+ */
+function stopStaminaTooltipMonitoring() {
+    // Clear interval-based API checking
+    if (window.betterTaskerStaminaInterval) {
+        clearInterval(window.betterTaskerStaminaInterval);
+        window.betterTaskerStaminaInterval = null;
+    }
+    
+    // Disconnect MutationObserver
+    if (staminaTooltipObserver) {
+        staminaTooltipObserver.disconnect();
+        staminaTooltipObserver = null;
+        staminaRecoveryCallback = null;
+    }
+    
+    console.log('[Better Tasker] Stamina monitoring stopped');
+}
+
+// ============================================================================
 // 2. STATE MANAGEMENT
 // ============================================================================
 
@@ -3041,12 +3234,75 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Enable Bestiary Automator settings if configured
                 enableBestiaryAutomatorSettings();
                 
-                // Set flag BEFORE clicking Start to prevent rechecking during ongoing task
+                // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                await sleep(3000);
+                
+                // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
                 taskNavigationCompleted = true;
                 console.log('[Better Tasker] Task navigation flag set - will not repeat quest log navigation during ongoing task');
                 
-                // Find and click Start button
-                console.log('[Better Tasker] Looking for Start button...');
+                // Check stamina before clicking Start button
+                console.log('[Better Tasker] Checking stamina status...');
+                const staminaCheck = hasInsufficientStamina();
+                
+                if (staminaCheck.insufficient) {
+                    console.log(`[Better Tasker] Insufficient stamina (needs ${staminaCheck.cost}) - starting monitoring`);
+                    
+                    // Start stamina recovery monitoring (tooltip + API for progress) with continuous monitoring
+                    const continuousStaminaMonitoring = () => {
+                        console.log('[Better Tasker] Stamina recovered - clicking Start button');
+                        
+                        // Check if still valid to continue
+                        if (!taskHuntingOngoing) {
+                            console.log('[Better Tasker] Task no longer active during stamina recovery');
+                            stopStaminaTooltipMonitoring();
+                            return;
+                        }
+                        
+                        // Check if user is still on correct tasking map
+                        if (!isOnCorrectTaskingMap()) {
+                            console.log('[Better Tasker] User changed map - stopping stamina monitoring');
+                            stopStaminaTooltipMonitoring();
+                            resetState('navigation');
+                            return;
+                        }
+                        
+                        const startButton = findButtonByText('Start');
+                        if (startButton && !startButton.disabled) {
+                            startButton.click();
+                            
+                            // Complete the setup flow
+                            const currentMapId = getCurrentRoomId();
+                            if (currentMapId) {
+                                taskingMapId = currentMapId;
+                                console.log(`[Better Tasker] Saved tasking map ID: ${taskingMapId}`);
+                            }
+                            
+                            taskHuntingOngoing = true;
+                            updateExposedState();
+                            resetFailureCounter();
+                            modifyQuestButtonForTasking();
+                            questButtonModifiedForTasking = true;
+                            startQuestButtonValidation();
+                            
+                            console.log('[Better Tasker] Task started successfully after stamina recovery');
+                            
+                            // Continue monitoring for future depletion (recursive)
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        } else {
+                            console.log('[Better Tasker] Start button not available after stamina recovery');
+                            resetState('navigation');
+                        }
+                    };
+                    
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring, staminaCheck.cost); // Pass required stamina
+                    
+                    return; // Exit - monitoring will handle the rest
+                }
+                
+                // Stamina is sufficient - proceed with Start button
+                console.log('[Better Tasker] Stamina sufficient - finding Start button...');
                 const startButton = findButtonByText('Start');
                 if (!startButton) {
                     console.log('[Better Tasker] Start button not found');
@@ -3081,6 +3337,39 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Start quest button validation monitoring for task hunting
                 startQuestButtonValidation();
+                
+                // Start continuous stamina monitoring for depletion during autoplay (recursive)
+                const continuousStaminaMonitoring = () => {
+                    console.log('[Better Tasker] Stamina depleted during autoplay - restarting');
+                    
+                    // Check if still valid to continue
+                    if (!taskHuntingOngoing) {
+                        console.log('[Better Tasker] Task no longer active during stamina recovery');
+                        stopStaminaTooltipMonitoring();
+                        return;
+                    }
+                    
+                    // Check if user is still on correct tasking map
+                    if (!isOnCorrectTaskingMap()) {
+                        console.log('[Better Tasker] User changed map - stopping stamina monitoring');
+                        stopStaminaTooltipMonitoring();
+                        return;
+                    }
+                    
+                    // Click Start button again
+                    const restartButton = findButtonByText('Start');
+                    if (restartButton && !restartButton.disabled) {
+                        restartButton.click();
+                        console.log('[Better Tasker] Autoplay restarted after stamina recovery');
+                        
+                        // Restart monitoring for next depletion (recursive)
+                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                    } else {
+                        console.log('[Better Tasker] Start button unavailable for restart');
+                    }
+                };
+                
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                 
                 await sleep(TASK_START_DELAY);
                 
@@ -4931,6 +5220,9 @@ function stopAutomation() {
     // Unsubscribe from game state changes
     unsubscribeFromGameState();
     
+    // Stop stamina tooltip monitoring
+    stopStaminaTooltipMonitoring();
+    
     // Pause autoplay if we have control (using pause button)
     try {
         if (window.AutoplayManager.hasControl('Better Tasker')) {
@@ -5791,6 +6083,9 @@ function cleanupBetterTasker() {
         // Clean up quest button validation and restore appearance
         stopQuestButtonValidation();
         restoreQuestButtonAppearance();
+        
+        // Clean up stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         // Clean up board state subscription
         if (boardStateUnsubscribe && typeof boardStateUnsubscribe === 'function') {

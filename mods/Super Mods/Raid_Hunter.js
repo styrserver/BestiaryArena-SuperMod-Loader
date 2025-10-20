@@ -75,6 +75,7 @@ function cancelCurrentRaid(reason = 'unknown') {
     restoreQuestButtonAppearance();
     stopAutoplayStateMonitoring();
     stopQuestButtonValidation();
+    stopStaminaTooltipMonitoring();
 }
 
 const EVENT_TEXTS = [
@@ -115,6 +116,199 @@ const EVENT_TO_ROOM_MAPPING = {
     'Dwarven Bank Heist': 'vbank',
     'An Arcanist Ritual': 'vdhar'
 };
+
+// ============================================================================
+// 1.1. STAMINA MONITORING FUNCTIONS
+// ============================================================================
+
+// Stamina tooltip monitoring state
+let staminaTooltipObserver = null;
+let staminaRecoveryCallback = null;
+
+/**
+ * Calculate current stamina using game state API
+ * @returns {number} Current stamina amount
+ */
+function getCurrentStamina() {
+    try {
+        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const elStamina = document.querySelector('[title="Stamina"]');
+        if (!elStamina) {
+            console.log('[Raid Hunter] Stamina element not found');
+            return 0;
+        }
+        
+        const staminaElement = elStamina.querySelector('span span');
+        if (!staminaElement) {
+            console.log('[Raid Hunter] Stamina text element not found');
+            return 0;
+        }
+        
+        const stamina = Number(staminaElement.textContent);
+        console.log('[Raid Hunter] Current stamina from DOM:', stamina);
+        return stamina;
+    } catch (error) {
+        console.error('[Raid Hunter] Error reading stamina:', error);
+        return 0;
+    }
+}
+
+/**
+ * Get stamina cost for current map
+ * @returns {number} Stamina cost (defaults to 6 if unknown)
+ */
+function getCurrentMapStaminaCost() {
+    try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+        
+        if (selectedRoom && selectedRoom.staminaCost) {
+            return selectedRoom.staminaCost;
+        }
+        
+        return 6; // Default to 6 if unknown
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting stamina cost:', error);
+        return 6;
+    }
+}
+
+/**
+ * Check if stamina tooltip is visible (ONLY method - tooltip is source of truth)
+ * @returns {Object} { insufficient: boolean, cost: number|null }
+ */
+function hasInsufficientStamina() {
+    // Look for stamina tooltip (icon-based, language-independent)
+    const staminaTooltip = document.querySelector(
+        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+    );
+    
+    if (staminaTooltip) {
+        // Found stamina icon in tooltip = insufficient stamina
+        const tooltipElement = staminaTooltip.closest('[role="tooltip"]') || 
+                              staminaTooltip.closest('[data-state="instant-open"]');
+        
+        const tooltipText = tooltipElement?.textContent || '';
+        
+        // Extract stamina cost from format: "Not enough stamina (6)" or "Falta stamina (6)"
+        const staminaMatch = tooltipText.match(/\(.*?(\d+)\)/);
+        const cost = staminaMatch ? parseInt(staminaMatch[1]) : null;
+        
+        console.log(`[Raid Hunter] Tooltip check: Insufficient (needs ${cost})`);
+        return { insufficient: true, cost };
+    }
+    
+    // No tooltip = sufficient stamina (trust the game)
+    return { insufficient: false, cost: null };
+}
+
+/**
+ * Set up hybrid stamina monitoring (tooltip watching + API for progress)
+ * Uses tooltip as truth for recovery, API for progress tracking
+ * @param {Function} onRecovered - Callback when stamina recovers
+ * @param {number} requiredStamina - Stamina cost for this map (optional for continuous monitoring)
+ */
+function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
+    // Clean up any existing monitoring
+    if (staminaTooltipObserver) {
+        stopStaminaTooltipMonitoring();
+    }
+    
+    console.log('[Raid Hunter] Starting stamina recovery monitoring...');
+    
+    staminaRecoveryCallback = onRecovered;
+    let hasStaminaIssue = true;
+    
+    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
+    const staminaCheckInterval = setInterval(() => {
+        const currentStamina = getCurrentStamina();
+        
+        // Also check if tooltip disappeared (double-check)
+        const tooltipStillExists = document.querySelector(
+            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+        );
+        
+        if (!tooltipStillExists && hasStaminaIssue) {
+            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
+            hasStaminaIssue = false;
+            
+            // Save callback before cleanup (cleanup clears the callback)
+            const callback = staminaRecoveryCallback;
+            
+            clearInterval(staminaCheckInterval);
+            stopStaminaTooltipMonitoring();
+            
+            // Execute saved callback
+            if (typeof callback === 'function') {
+                callback();
+            }
+        } else if (tooltipStillExists && requiredStamina) {
+            // Show progress if we know required stamina
+            const timeRemaining = Math.max(0, requiredStamina - currentStamina);
+            console.log(`[Raid Hunter] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
+        }
+    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
+    
+    // Store interval for cleanup
+    window.raidHunterStaminaInterval = staminaCheckInterval;
+    
+    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+    staminaTooltipObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            mutation.removedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const wasStaminaTooltip = 
+                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                        node.querySelector?.('img[alt="stamina"]');
+                    
+                    if (wasStaminaTooltip && hasStaminaIssue) {
+                        const currentStamina = getCurrentStamina();
+                        console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
+                        hasStaminaIssue = false;
+                        
+                        // Save callback before cleanup (cleanup clears the callback)
+                        const callback = staminaRecoveryCallback;
+                        
+                        clearInterval(staminaCheckInterval);
+                        stopStaminaTooltipMonitoring();
+                        
+                        // Execute saved callback
+                        if (typeof callback === 'function') {
+                            callback();
+                        }
+                    }
+                }
+            });
+        }
+    });
+    
+    staminaTooltipObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Raid Hunter] Stamina monitoring active (tooltip watching + API progress)');
+}
+
+/**
+ * Stop stamina tooltip monitoring
+ */
+function stopStaminaTooltipMonitoring() {
+    // Clear interval-based API checking
+    if (window.raidHunterStaminaInterval) {
+        clearInterval(window.raidHunterStaminaInterval);
+        window.raidHunterStaminaInterval = null;
+    }
+    
+    // Disconnect MutationObserver
+    if (staminaTooltipObserver) {
+        staminaTooltipObserver.disconnect();
+        staminaTooltipObserver = null;
+        staminaRecoveryCallback = null;
+    }
+    
+    console.log('[Raid Hunter] Stamina monitoring stopped');
+}
 
 // ============================================================================
 // 2. STATE MANAGEMENT
@@ -1365,88 +1559,6 @@ function stopRaidClock() {
 // 5. AUTOMATION CONTROL FUNCTIONS
 // ============================================================================
 
-// Check if we can start the raid (stamina/raid availability)
-async function checkStamina() {
-    // Look for disabled Start button - if disabled, we either don't have enough stamina or raid is inactive
-    const startButton = findButtonByText('Start');
-    if (!startButton || startButton.disabled) {
-        console.log('[Raid Hunter] Start button not found or disabled - insufficient stamina or raid inactive');
-        return {
-            hasEnough: false
-        };
-    }
-    
-    console.log('[Raid Hunter] Start button enabled - can start raid');
-    return {
-        hasEnough: true
-    };
-}
-
-// Handle insufficient stamina gracefully
-function handleInsufficientStamina() {
-    console.log('[Raid Hunter] Insufficient stamina detected');
-    console.log('[Raid Hunter] Starting 3-minute stamina monitoring...');
-    
-    // Reset raid state
-    isCurrentlyRaiding = false;
-    currentRaidInfo = null;
-    
-    // Start continuous stamina monitoring every 3 minutes
-    startStaminaMonitoring();
-    
-    // Update status
-    // Status messages removed - only countdown clock shown
-}
-
-// Start continuous stamina monitoring every 3 minutes
-function startStaminaMonitoring() {
-    // Clear any existing stamina monitoring
-    if (window.staminaMonitorInterval) {
-        clearInterval(window.staminaMonitorInterval);
-    }
-    
-    console.log('[Raid Hunter] Starting stamina monitoring - checking every 30 seconds');
-    
-    // Check stamina every configured interval
-    window.staminaMonitorInterval = setInterval(async () => {
-        try {
-            console.log('[Raid Hunter] Checking stamina...');
-            const staminaCheck = await checkStamina();
-            
-            if (staminaCheck.hasEnough) {
-                console.log('[Raid Hunter] Stamina available! - Checking for raids...');
-                clearInterval(window.staminaMonitorInterval);
-                window.staminaMonitorInterval = null;
-                
-                // Check if there are active raids to continue with
-                const raidState = globalThis.state.raids.getSnapshot();
-                const currentRaidList = raidState.context.list || [];
-                
-                if (currentRaidList.length > 0) {
-                    console.log('[Raid Hunter] Active raids found - resuming automation');
-                    updateRaidState();
-                    checkForExistingRaids();
-                } else {
-                    console.log('[Raid Hunter] No active raids - waiting for new raids');
-                }
-            } else {
-                console.log('[Raid Hunter] Still waiting for stamina');
-            }
-        } catch (error) {
-            console.error('[Raid Hunter] Error during stamina monitoring:', error);
-        }
-    }, STAMINA_MONITOR_INTERVAL);
-}
-
-// Stop stamina monitoring
-function stopStaminaMonitoring() {
-    if (window.staminaMonitorInterval) {
-        clearInterval(window.staminaMonitorInterval);
-        window.staminaMonitorInterval = null;
-        console.log('[Raid Hunter] Stamina monitoring stopped');
-    }
-}
-
 // Helper function to find Bestiary Automator
 function findBestiaryAutomator() {
     // Method 1: Check if Bestiary Automator is available in global scope
@@ -1722,6 +1834,9 @@ function toggleAutomation() {
     } else {
         console.log('[Raid Hunter] Automation disabled');
         
+        // Stop stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
+        
         // Disable Bestiary Automator's autorefill stamina when Raid Hunter is disabled
         const settings = loadSettings();
         if (settings.autoRefillStamina) {
@@ -1832,6 +1947,9 @@ function stopAutoplayOnRaidEnd() {
         // Stop quest button validation monitoring
         stopAutoplayStateMonitoring();
         stopQuestButtonValidation();
+        
+        // Stop stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         // Check if Better Tasker is active before disabling Bestiary Automator settings
         if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
@@ -2134,16 +2252,64 @@ async function handleEventOrRaid(roomId) {
         enableAutosellerDragonPlant();
     }
     
+    // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+    console.log('[Raid Hunter] Waiting for Bestiary Automator to initialize...');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
     // Check stamina before attempting to start raid
-    console.log('[Raid Hunter] Checking stamina before starting raid...');
-    const staminaCheck = await checkStamina();
-    if (!staminaCheck.hasEnough) {
-        console.log('[Raid Hunter] Insufficient stamina detected');
-        console.log('[Raid Hunter] Waiting for stamina to regenerate...');
-        handleInsufficientStamina();
-        return;
+    console.log('[Raid Hunter] Checking stamina status...');
+    const staminaCheck = hasInsufficientStamina();
+    
+    if (staminaCheck.insufficient) {
+        console.log(`[Raid Hunter] Insufficient stamina (needs ${staminaCheck.cost}) - starting monitoring`);
+        
+        // Start stamina recovery monitoring (tooltip + API for progress) with continuous monitoring
+        const continuousStaminaMonitoring = () => {
+            console.log('[Raid Hunter] Stamina recovered - clicking Start button');
+            
+            // Check if still valid to continue
+            if (!isAutomationActive() || !isCurrentlyRaiding) {
+                console.log('[Raid Hunter] Raid cancelled during stamina wait');
+                stopStaminaTooltipMonitoring();
+                return;
+            }
+            
+            // Check if user is still on correct raid map
+            if (!isOnCorrectRaidMap()) {
+                console.log('[Raid Hunter] User changed map - stopping stamina monitoring');
+                stopStaminaTooltipMonitoring();
+                handleRaidFailure('User changed map during stamina wait');
+                return;
+            }
+            
+            const startButton = findButtonByText('Start');
+            if (startButton && !startButton.disabled) {
+                startButton.click();
+                
+                // Continue with existing verification flow
+                setTimeout(() => {
+                    modifyQuestButtonForRaiding();
+                    startAutoplayStateMonitoring();
+                    verifyRaidStarted();
+                    startRaidSleepTimer(roomId);
+                    
+                    console.log('[Raid Hunter] Raid started successfully after stamina recovery');
+                    
+                    // Continue monitoring for future depletion (recursive)
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                }, 1000);
+            } else {
+                console.log('[Raid Hunter] Start button unavailable after stamina recovery');
+                handleRaidFailure('Start button unavailable after stamina wait');
+            }
+        };
+        
+        startStaminaTooltipMonitoring(continuousStaminaMonitoring, staminaCheck.cost); // Pass required stamina
+        
+        return; // Exit - monitoring will handle the rest
     }
-    console.log('[Raid Hunter] Stamina check passed');
+    
+    console.log('[Raid Hunter] Stamina sufficient - checking automation status...');
     
     // Check automation status before clicking Start button
     if (!isAutomationActive()) {
@@ -2175,6 +2341,39 @@ async function handleEventOrRaid(roomId) {
     
     // Start monitoring autoplay state changes
     startAutoplayStateMonitoring();
+    
+    // Start continuous stamina monitoring for depletion during autoplay (recursive)
+    const continuousStaminaMonitoring = () => {
+        console.log('[Raid Hunter] Stamina depleted during autoplay - restarting');
+        
+        // Check if still valid to continue
+        if (!isAutomationActive() || !isCurrentlyRaiding) {
+            console.log('[Raid Hunter] Raid no longer active during stamina recovery');
+            stopStaminaTooltipMonitoring();
+            return;
+        }
+        
+        // Check if user is still on correct raid map
+        if (!isOnCorrectRaidMap()) {
+            console.log('[Raid Hunter] User changed map - stopping stamina monitoring');
+            stopStaminaTooltipMonitoring();
+            return;
+        }
+        
+        // Click Start button again
+        const restartButton = findButtonByText('Start');
+        if (restartButton && !restartButton.disabled) {
+            restartButton.click();
+            console.log('[Raid Hunter] Autoplay restarted after stamina recovery');
+            
+            // Restart monitoring for next depletion (recursive)
+            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+        } else {
+            console.log('[Raid Hunter] Start button unavailable for restart');
+        }
+    };
+    
+    startStaminaTooltipMonitoring(continuousStaminaMonitoring);
     
     console.log('[Raid Hunter] Raid automation sequence completed');
     
@@ -2235,14 +2434,13 @@ function startRaidSleepTimer(roomId) {
                     clearInterval(questLogMonitorInterval);
                     questLogMonitorInterval = null;
                 }
-                stopStaminaMonitoring();
                 if (raidListMonitor) {
                     raidListMonitor.unsubscribe();
                     raidListMonitor = null;
                 }
                 setupRaidListMonitoring();
                 
-                // NOTE: We intentionally keep autoplay state monitoring running to detect map switches
+                // NOTE: We intentionally keep autoplay state monitoring AND stamina tooltip monitoring running
                 
                 // Set up the sleep timer
                 setTimeout(() => {
@@ -2307,6 +2505,9 @@ function handleRaidFailure(reason) {
         stopAutoplayStateMonitoring();
         stopQuestButtonValidation();
         
+        // Stop stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
+        
         retryTimeout = setTimeout(() => {
             // Check if raid processing can proceed
             if (canProcessRaid('retry') && raidQueue.length > 0) {
@@ -2328,6 +2529,9 @@ function handleRaidFailure(reason) {
         // Stop quest button validation monitoring
         stopAutoplayStateMonitoring();
         stopQuestButtonValidation();
+        
+        // Stop stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         // Process next raid if available
         if (raidQueue.length > 0) {
@@ -3905,6 +4109,9 @@ function cleanupRaidHunter() {
         
         // Clean up raid clock
         stopRaidClock();
+        
+        // Clean up stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         // Clean up CSS styles
         const raidShimmerCSS = document.getElementById('raidShimmerCSS');

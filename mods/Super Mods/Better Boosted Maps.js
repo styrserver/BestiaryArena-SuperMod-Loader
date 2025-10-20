@@ -68,6 +68,226 @@ const MAPS_WITHOUT_BOOSTED_EQUIPMENT = [
 ];
 
 // =======================
+// 1.1. Stamina Monitoring Functions
+// =======================
+
+// Stamina tooltip monitoring state
+let staminaTooltipObserver = null;
+let staminaRecoveryCallback = null;
+
+/**
+ * Calculate current stamina using game state API
+ * @returns {number} Current stamina amount
+ */
+function getCurrentStamina() {
+    try {
+        // Read stamina directly from DOM (same approach as Bestiary Automator)
+        const elStamina = document.querySelector('[title="Stamina"]');
+        if (!elStamina) {
+            console.log('[Better Boosted Maps] Stamina element not found');
+            return 0;
+        }
+        
+        const staminaElement = elStamina.querySelector('span span');
+        if (!staminaElement) {
+            console.log('[Better Boosted Maps] Stamina text element not found');
+            return 0;
+        }
+        
+        const stamina = Number(staminaElement.textContent);
+        console.log('[Better Boosted Maps] Current stamina from DOM:', stamina);
+        return stamina;
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error reading stamina:', error);
+        return 0;
+    }
+}
+
+/**
+ * Get stamina cost for current map
+ * @returns {number} Stamina cost (defaults to 6 if unknown)
+ */
+function getCurrentMapStaminaCost() {
+    try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        const selectedRoom = boardContext?.selectedMap?.selectedRoom;
+        
+        if (selectedRoom && selectedRoom.staminaCost) {
+            return selectedRoom.staminaCost;
+        }
+        
+        return 6; // Default to 6 if unknown
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error getting stamina cost:', error);
+        return 6;
+    }
+}
+
+/**
+ * Check if stamina tooltip is visible (ONLY method - tooltip is source of truth)
+ * @returns {Object} { insufficient: boolean, cost: number|null }
+ */
+function hasInsufficientStamina() {
+    // Look for stamina tooltip (icon-based, language-independent)
+    const staminaTooltip = document.querySelector(
+        '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+    );
+    
+    if (staminaTooltip) {
+        // Found stamina icon in tooltip = insufficient stamina
+        const tooltipElement = staminaTooltip.closest('[role="tooltip"]') || 
+                              staminaTooltip.closest('[data-state="instant-open"]');
+        
+        const tooltipText = tooltipElement?.textContent || '';
+        
+        // Extract stamina cost from format: "Not enough stamina (6)" or "Falta stamina (6)"
+        const staminaMatch = tooltipText.match(/\(.*?(\d+)\)/);
+        const cost = staminaMatch ? parseInt(staminaMatch[1]) : null;
+        
+        console.log(`[Better Boosted Maps] Tooltip check: Insufficient (needs ${cost})`);
+        return { insufficient: true, cost };
+    }
+    
+    // No tooltip = sufficient stamina (trust the game)
+    return { insufficient: false, cost: null };
+}
+
+/**
+ * Set up hybrid stamina monitoring (API polling + tooltip watching)
+ * Uses tooltip as truth for recovery, API for progress tracking
+ * @param {Function} onRecovered - Callback when stamina recovers
+ * @param {number} requiredStamina - Stamina cost for this map
+ */
+function startStaminaTooltipMonitoring(onRecovered, requiredStamina) {
+    // Clean up any existing monitoring
+    if (staminaTooltipObserver) {
+        stopStaminaTooltipMonitoring();
+    }
+    
+    console.log('[Better Boosted Maps] Starting stamina recovery monitoring...');
+    
+    staminaRecoveryCallback = onRecovered;
+    let hasStaminaIssue = true;
+    
+    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
+    const staminaCheckInterval = setInterval(() => {
+        const currentStamina = getCurrentStamina();
+        const timeRemaining = Math.max(0, (requiredStamina || 6) - currentStamina);
+        console.log(`[Better Boosted Maps] Waiting for stamina (${currentStamina}/${requiredStamina || 6}) - ~${timeRemaining} min remaining`);
+        
+        // Also check if tooltip disappeared (double-check)
+        const tooltipStillExists = document.querySelector(
+            '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
+        );
+        
+        if (!tooltipStillExists && hasStaminaIssue) {
+            console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
+            hasStaminaIssue = false;
+            
+            // Save callback before cleanup (cleanup clears the callback)
+            const callback = staminaRecoveryCallback;
+            
+            clearInterval(staminaCheckInterval);
+            stopStaminaTooltipMonitoring();
+            
+            // Execute saved callback
+            if (typeof callback === 'function') {
+                callback();
+            }
+        }
+    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
+    
+    // Store interval for cleanup
+    window.betterBoostedMapsStaminaInterval = staminaCheckInterval;
+    
+    // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
+    staminaTooltipObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            mutation.removedNodes.forEach((node) => {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const wasStaminaTooltip = 
+                        (node.matches?.('[role="tooltip"]') || node.matches?.('[data-state="instant-open"]')) &&
+                        node.querySelector?.('img[alt="stamina"]');
+                    
+                    if (wasStaminaTooltip && hasStaminaIssue) {
+                        const currentStamina = getCurrentStamina();
+                        console.log(`[Better Boosted Maps] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
+                        hasStaminaIssue = false;
+                        
+                        // Save callback before cleanup (cleanup clears the callback)
+                        const callback = staminaRecoveryCallback;
+                        
+                        clearInterval(staminaCheckInterval);
+                        stopStaminaTooltipMonitoring();
+                        
+                        // Execute saved callback
+                        if (typeof callback === 'function') {
+                            callback();
+                        }
+                    }
+                }
+            });
+        }
+    });
+    
+    staminaTooltipObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    console.log('[Better Boosted Maps] Stamina monitoring active (tooltip watching + API progress)');
+}
+
+/**
+ * Stop stamina tooltip monitoring
+ */
+function stopStaminaTooltipMonitoring() {
+    // Clear interval-based API checking
+    if (window.betterBoostedMapsStaminaInterval) {
+        clearInterval(window.betterBoostedMapsStaminaInterval);
+        window.betterBoostedMapsStaminaInterval = null;
+    }
+    
+    // Disconnect MutationObserver
+    if (staminaTooltipObserver) {
+        staminaTooltipObserver.disconnect();
+        staminaTooltipObserver = null;
+        staminaRecoveryCallback = null;
+    }
+    
+    console.log('[Better Boosted Maps] Stamina monitoring stopped');
+}
+
+/**
+ * Check if user is still on correct boosted map
+ * @returns {boolean} True if on correct map
+ */
+function isOnCorrectBoostedMap() {
+    try {
+        if (!modState.farming.currentMapInfo) {
+            console.log('[Better Boosted Maps] No current map info stored');
+            return false;
+        }
+        
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        const currentRoomId = boardContext?.selectedMap?.selectedRoom?.id;
+        
+        if (!currentRoomId) {
+            console.log('[Better Boosted Maps] Could not determine current room ID');
+            return false;
+        }
+        
+        const isCorrectMap = currentRoomId === modState.farming.currentMapInfo.roomId;
+        console.log(`[Better Boosted Maps] Map validation: current=${currentRoomId}, expected=${modState.farming.currentMapInfo.roomId}, correct=${isCorrectMap}`);
+        
+        return isCorrectMap;
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error checking map:', error);
+        return false;
+    }
+}
+
+// =======================
 // 2. State Management
 // =======================
 
@@ -629,6 +849,9 @@ function toggleBoostedMaps() {
             modState.dailySubscription.unsubscribe();
             modState.dailySubscription = null;
         }
+        
+        // Stop stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         // Reset farming state
         modState.farming.isActive = false;
@@ -1462,22 +1685,14 @@ function findButtonByText(text) {
     return buttons.find(button => possibleTexts.includes(button.textContent.trim()));
 }
 
-// Check stamina availability
-async function checkStamina() {
-    const startButton = findButtonByText('Start');
-    if (!startButton || startButton.disabled) {
-        console.log('[Better Boosted Maps] Start button not found or disabled - insufficient stamina');
-        return { hasEnough: false };
-    }
-    console.log('[Better Boosted Maps] Start button enabled - can start');
-    return { hasEnough: true };
-}
-
 // Cancel boosted map farming
 function cancelBoostedMapFarming(reason = 'unknown') {
     console.log(`[Better Boosted Maps] Cancelling farming: ${reason}`);
     modState.farming.isActive = false;
     modState.farming.currentMapInfo = null;
+    
+    // Stop stamina tooltip monitoring
+    stopStaminaTooltipMonitoring();
 }
 
 // Helper: Check automation enabled and cancel if not
@@ -1591,15 +1806,55 @@ async function startBoostedMapFarming() {
             enableAutosellerDragonPlant();
         }
         
+        // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+        console.log('[Better Boosted Maps] Waiting for Bestiary Automator to initialize...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
         // Check stamina before attempting to start
-        console.log('[Better Boosted Maps] Checking stamina before starting...');
-        const staminaCheck = await checkStamina();
-        if (!staminaCheck.hasEnough) {
-            console.log('[Better Boosted Maps] Insufficient stamina - cannot start');
-            cancelBoostedMapFarming('Insufficient stamina');
-            return;
+        console.log('[Better Boosted Maps] Checking stamina status...');
+        const staminaCheck = hasInsufficientStamina();
+        
+        if (staminaCheck.insufficient) {
+            console.log(`[Better Boosted Maps] Insufficient stamina (needs ${staminaCheck.cost}) - starting monitoring`);
+            
+            // Start stamina recovery monitoring (tooltip + API for progress) with continuous monitoring
+            const continuousStaminaMonitoring = () => {
+                console.log('[Better Boosted Maps] Stamina recovered - clicking Start button');
+                
+                // Check if still valid to continue
+                if (!modState.enabled) {
+                    console.log('[Better Boosted Maps] Farming cancelled during stamina wait');
+                    stopStaminaTooltipMonitoring();
+                    return;
+                }
+                
+                // Check if user is still on correct boosted map
+                if (!isOnCorrectBoostedMap()) {
+                    console.log('[Better Boosted Maps] User changed map - stopping stamina monitoring');
+                    stopStaminaTooltipMonitoring();
+                    cancelBoostedMapFarming('User changed map during stamina wait');
+                    return;
+                }
+                
+                const startButton = findButtonByText('Start');
+                if (startButton && !startButton.disabled) {
+                    startButton.click();
+                    console.log('[Better Boosted Maps] Boosted map farming started successfully after stamina recovery');
+                    
+                    // Continue monitoring for future depletion (recursive)
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                } else {
+                    console.log('[Better Boosted Maps] Start button unavailable after stamina recovery');
+                    cancelBoostedMapFarming('Start button unavailable after stamina wait');
+                }
+            };
+            
+            startStaminaTooltipMonitoring(continuousStaminaMonitoring, staminaCheck.cost || 6); // Pass required stamina
+            
+            return; // Exit - monitoring will handle the rest
         }
-        console.log('[Better Boosted Maps] Stamina check passed');
+        
+        console.log('[Better Boosted Maps] Stamina sufficient - checking automation status...');
         
         // Check automation status before clicking Start button
         if (!checkAutomationEnabled('before clicking Start')) return;
@@ -1619,6 +1874,39 @@ async function startBoostedMapFarming() {
         
         // Final check after clicking Start button
         if (!checkAutomationEnabled('after clicking Start')) return;
+        
+        // Start continuous stamina monitoring for depletion during autoplay (recursive)
+        const continuousStaminaMonitoring = () => {
+            console.log('[Better Boosted Maps] Stamina depleted during autoplay - restarting');
+            
+            // Check if still valid to continue
+            if (!modState.enabled) {
+                console.log('[Better Boosted Maps] Farming cancelled during stamina recovery');
+                stopStaminaTooltipMonitoring();
+                return;
+            }
+            
+            // Check if user is still on correct boosted map
+            if (!isOnCorrectBoostedMap()) {
+                console.log('[Better Boosted Maps] User changed map - stopping stamina monitoring');
+                stopStaminaTooltipMonitoring();
+                return;
+            }
+            
+            // Click Start button again
+            const restartButton = findButtonByText('Start');
+            if (restartButton && !restartButton.disabled) {
+                restartButton.click();
+                console.log('[Better Boosted Maps] Autoplay restarted after stamina recovery');
+                
+                // Restart monitoring for next depletion (recursive)
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+            } else {
+                console.log('[Better Boosted Maps] Start button unavailable for restart');
+            }
+        };
+        
+        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
         
         console.log('[Better Boosted Maps] Boosted map farming started successfully');
     } catch (error) {
@@ -1840,6 +2128,9 @@ context.exports = {
             modState.questLogObserver.disconnect();
             modState.questLogObserver = null;
         }
+        
+        // Clean up stamina tooltip monitoring
+        stopStaminaTooltipMonitoring();
         
         if (modState.activeModal) {
             cleanupModal();
