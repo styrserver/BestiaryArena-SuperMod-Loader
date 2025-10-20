@@ -473,10 +473,14 @@ if (typeof browserAPI === 'undefined') {
     showModal: function(options) {
       // Remove all existing overlays and modals before creating a new one
       document.querySelectorAll('div[style*="position: fixed"][style*="top: 0"][style*="left: 0"][style*="right: 0"][style*="bottom: 0"][style*="background: rgba(0, 0, 0, 0.5)"]').forEach(overlay => {
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        try {
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        } catch (e) { /* Ignore removal errors */ }
       });
       document.querySelectorAll('div[role="dialog"][data-state="open"]').forEach(dialog => {
-        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        try {
+          if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        } catch (e) { /* Ignore removal errors */ }
       });
 
       if (window.BestiaryUIComponents) {

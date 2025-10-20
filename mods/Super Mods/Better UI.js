@@ -2939,6 +2939,7 @@ function initScrollLockObserver() {
   
   // Track previous scroll lock state
   let previouslyLocked = isScrollLocked();
+  let scrollUnlockDebounce = null;
   
   scrollLockObserver = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
@@ -2947,30 +2948,35 @@ function initScrollLockObserver() {
         
         // Detect transition from locked to unlocked (attribute is removed when unlocked)
         if (previouslyLocked && !currentlyLocked) {
-          console.log('[Better UI] Scroll unlocked, checking if update needed...');
-          
-          // Check global debounce to prevent redundant updates
-          if (shouldSkipGlobalUpdate('scroll-unlock')) {
-            previouslyLocked = currentlyLocked;
-            return;
+          // Clear any pending update
+          if (scrollUnlockDebounce) {
+            clearTimeout(scrollUnlockDebounce);
+            activeTimeouts.delete(scrollUnlockDebounce);
           }
           
-          // Re-apply all enabled features
-          if (config.enableMaxCreatures) {
-            applyMaxCreatures();
-          }
-          
-          if (config.enableMaxShinies) {
-            applyMaxShinies();
-          }
-          
-          if (config.enableShinyEnemies) {
-            applyShinyEnemies();
-          }
-          
-          if (config.enableFavorites) {
-            updateFavoriteHearts();
-          }
+          // Debounce the update to handle multiple rapid unlock events
+          scrollUnlockDebounce = scheduleTimeout(() => {
+            console.log('[Better UI] Scroll unlocked, applying updates...');
+            
+            // Re-apply all enabled features
+            if (config.enableMaxCreatures) {
+              applyMaxCreatures();
+            }
+            
+            if (config.enableMaxShinies) {
+              applyMaxShinies();
+            }
+            
+            if (config.enableShinyEnemies) {
+              applyShinyEnemies();
+            }
+            
+            if (config.enableFavorites) {
+              updateFavoriteHearts();
+            }
+            
+            scrollUnlockDebounce = null;
+          }, GLOBAL_UPDATE_DEBOUNCE);
         }
         
         previouslyLocked = currentlyLocked;
