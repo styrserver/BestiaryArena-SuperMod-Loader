@@ -780,20 +780,54 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'getLocalModConfig') {
-    browserAPI.storage.local.get('localModsConfig', (data) => {
-      const configs = data.localModsConfig || {};
-      const config = configs[message.modName] || {};
-      sendResponse({ success: true, config });
-    });
-    return true;
+    // For mods that use context.config, read from game localStorage instead of extension storage
+    // This ensures mods get the actual current settings, not stale defaults
+    if (message.modName === 'Super Mods/Autoseller.js') {
+      // Request actual localStorage from content script
+      browserAPI.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+          browserAPI.tabs.sendMessage(tabs[0].id, {
+            action: 'getGameLocalStorage',
+            key: 'autoseller-settings'
+          }, (response) => {
+            if (response && response.success && response.value) {
+              try {
+                const settings = JSON.parse(response.value);
+                sendResponse({ success: true, config: settings });
+              } catch (e) {
+                sendResponse({ success: true, config: {} });
+              }
+            } else {
+              sendResponse({ success: true, config: {} });
+            }
+          });
+        } else {
+          sendResponse({ success: true, config: {} });
+        }
+      });
+      return true; // Keep the message channel open for async response
+    } else {
+      // For other mods, use the existing extension storage system
+      browserAPI.storage.local.get('localModsConfig', (data) => {
+        const configs = data.localModsConfig || {};
+        const config = configs[message.modName] || {};
+        sendResponse({ success: true, config });
+      });
+      return true;
+    }
   }
 
   // Handle localStorage responses from content script
   if (message.action === 'gameLocalStorageResponse') {
     // This is a response from the content script about localStorage operations
-    // We don't need to send a response back, just log the result
     if (message.success) {
-      console.log('Game localStorage operation successful:', message.data);
+      if (message.value !== undefined) {
+        // This is a response for a specific key request (from getLocalModConfig)
+        // The response is handled by the Promise in getLocalModConfig
+        return true;
+      } else {
+        console.log('Game localStorage operation successful:', message.data);
+      }
     } else {
       console.error('Game localStorage operation failed:', message.error);
     }

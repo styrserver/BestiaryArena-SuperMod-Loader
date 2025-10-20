@@ -194,29 +194,43 @@ if (typeof browserAPI === 'undefined') {
       // Handle localStorage export/import for game data
       if (message.action === 'getGameLocalStorage') {
         try {
-          const gameData = {};
-          // Get all localStorage items
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key) {
-              try {
-                const value = localStorage.getItem(key);
-                gameData[key] = value;
-              } catch (e) {
-                console.warn(`Could not read localStorage key: ${key}`, e);
+          if (message.key) {
+            // Get specific key
+            const value = localStorage.getItem(message.key);
+            // Send response back to extension
+            window.postMessage({
+              from: 'BESTIARY_CLIENT',
+              message: {
+                action: 'gameLocalStorageResponse',
+                success: true,
+                value: value
+              }
+            }, '*');
+          } else {
+            // Get all localStorage items
+            const gameData = {};
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key) {
+                try {
+                  const value = localStorage.getItem(key);
+                  gameData[key] = value;
+                } catch (e) {
+                  console.warn(`Could not read localStorage key: ${key}`, e);
+                }
               }
             }
+            
+            // Send response back to extension
+            window.postMessage({
+              from: 'BESTIARY_CLIENT',
+              message: {
+                action: 'gameLocalStorageResponse',
+                success: true,
+                data: gameData
+              }
+            }, '*');
           }
-          
-          // Send response back to extension
-          window.postMessage({
-            from: 'BESTIARY_CLIENT',
-            message: {
-              action: 'gameLocalStorageResponse',
-              success: true,
-              data: gameData
-            }
-          }, '*');
         } catch (error) {
           console.error('Error getting game localStorage:', error);
           window.postMessage({

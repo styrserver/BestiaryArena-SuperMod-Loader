@@ -34,8 +34,8 @@
     // UI Constants
     const UI_CONSTANTS = {
         MODAL_WIDTH: 650,
-        MODAL_HEIGHT: 440,
-        MODAL_CONTENT_HEIGHT: 360,
+        MODAL_HEIGHT: 490,
+        MODAL_CONTENT_HEIGHT: 410,
         COLUMN_WIDTH: 240,
         COLUMN_MIN_WIDTH: 220,
         RESPONSIVE_BREAKPOINT: 600,
@@ -140,7 +140,11 @@
         autosellMinCount: 1,
         autosqueezeMinCount: 1,
         autosellMaxExp: UI_CONSTANTS.MAX_EXP_DEFAULT,
-        autoplantIgnoreList: []
+        autoplantIgnoreList: [],
+        autoplantGenesMin: 80,
+        autoplantKeepGenesEnabled: true,
+        autoplantAlwaysDevourBelow: 49,
+        autoplantAlwaysDevourEnabled: false
     };
     
     // =======================
@@ -713,7 +717,7 @@
         });
     }
     
-    function createBox({title, content, icon = null, tabs = null}) {
+    function createBox({title, content, icon = null, tabs = null, verticalAlign = 'space-between'}) {
         const box = document.createElement('div');
         box.style.flex = '1 1 0';
         box.style.display = 'flex';
@@ -798,6 +802,10 @@
                     const contentWrapper = box.querySelector('.column-content-wrapper');
                     if (contentWrapper) {
                         contentWrapper.innerHTML = '';
+                        // Apply tab-specific vertical alignment
+                        if (tab.verticalAlign) {
+                            contentWrapper.style.justifyContent = tab.verticalAlign;
+                        }
                         if (tab.content instanceof HTMLElement) {
                             contentWrapper.appendChild(tab.content);
                         } else if (typeof tab.content === 'string') {
@@ -850,12 +858,16 @@
         contentWrapper.style.display = 'flex';
         contentWrapper.style.flexDirection = 'column';
         contentWrapper.style.alignItems = 'flex-start';
-        contentWrapper.style.justifyContent = 'space-between';
+        contentWrapper.style.justifyContent = verticalAlign;
         contentWrapper.style.padding = '10px';
         
         // Handle content based on whether it's tabbed or not
         if (tabs && tabs.length > 0) {
             // For tabbed content, show the first tab by default
+            // Apply first tab's vertical alignment if specified
+            if (tabs[0].verticalAlign) {
+                contentWrapper.style.justifyContent = tabs[0].verticalAlign;
+            }
             if (tabs[0].content instanceof HTMLElement) {
                 contentWrapper.appendChild(tabs[0].content);
             } else if (typeof tabs[0].content === 'string') {
@@ -1304,7 +1316,10 @@
                 columnsContainer.style.display = 'flex';
                 columnsContainer.style.gap = '8px';
                 columnsContainer.style.justifyContent = 'center';
-                columnsContainer.style.minHeight = '0';
+                columnsContainer.style.height = '140px';
+                columnsContainer.style.minHeight = '140px';
+                columnsContainer.style.maxHeight = '140px';
+                columnsContainer.style.flexShrink = '0';
                 columnsContainer.style.width = '100%';
                 
                 // Insert before the status area to maintain DOM order (if it exists)
@@ -1392,6 +1407,137 @@
         // Initial render
         renderCreatureColumns();
 
+        // Gene threshold inputs container
+        const genesMainContainer = document.createElement('div');
+        genesMainContainer.style.display = 'flex';
+        genesMainContainer.style.flexDirection = 'column';
+        genesMainContainer.style.gap = '6px';
+        genesMainContainer.style.marginTop = '4px';
+
+        // Min Genes input
+        const genesContainer = document.createElement('div');
+        genesContainer.style.display = 'flex';
+        genesContainer.style.alignItems = 'center';
+        genesContainer.style.justifyContent = 'flex-start';
+        genesContainer.style.gap = '6px';
+
+        const keepGenesCheckbox = document.createElement('input');
+        keepGenesCheckbox.type = 'checkbox';
+        keepGenesCheckbox.id = 'autoplant-keep-genes-checkbox';
+        keepGenesCheckbox.checked = initialSettings.autoplantKeepGenesEnabled !== undefined ? initialSettings.autoplantKeepGenesEnabled : true;
+        keepGenesCheckbox.style.cursor = 'pointer';
+
+        keepGenesCheckbox.addEventListener('change', () => {
+            setSettings({ autoplantKeepGenesEnabled: keepGenesCheckbox.checked });
+            updatePlantMonsterFilter(selectedCreatures);
+        });
+
+        const genesLabel = document.createElement('label');
+        genesLabel.className = 'pixel-font-14';
+        genesLabel.textContent = 'Keep genes';
+        genesLabel.style.fontSize = '12px';
+        genesLabel.style.color = '#ffe066';
+        genesLabel.style.cursor = 'pointer';
+        genesLabel.htmlFor = 'autoplant-keep-genes-checkbox';
+
+        const genesInput = document.createElement('input');
+        genesInput.type = 'number';
+        genesInput.min = '5';
+        genesInput.max = '100';
+        genesInput.step = '1';
+        genesInput.value = initialSettings.autoplantGenesMin !== undefined ? initialSettings.autoplantGenesMin : 80;
+        genesInput.style.width = '48px';
+        genesInput.style.padding = '2px 4px';
+        genesInput.style.fontSize = '12px';
+        genesInput.style.textAlign = 'center';
+        genesInput.style.backgroundColor = '#2a2a2a';
+        genesInput.style.color = '#ffe066';
+        genesInput.style.border = '1px solid #555';
+        genesInput.style.borderRadius = '3px';
+
+        genesInput.addEventListener('change', () => {
+            const value = parseInt(genesInput.value) || 80;
+            const clampedValue = Math.max(5, Math.min(100, value));
+            genesInput.value = clampedValue;
+            setSettings({ autoplantGenesMin: clampedValue });
+            updatePlantMonsterFilter(selectedCreatures);
+        });
+
+        const genesPercent = document.createElement('span');
+        genesPercent.className = 'pixel-font-14';
+        genesPercent.textContent = '% and above.';
+        genesPercent.style.fontSize = '12px';
+        genesPercent.style.color = '#ffe066';
+
+        genesContainer.appendChild(keepGenesCheckbox);
+        genesContainer.appendChild(genesLabel);
+        genesContainer.appendChild(genesInput);
+        genesContainer.appendChild(genesPercent);
+
+        // Always devour below input
+        const devourContainer = document.createElement('div');
+        devourContainer.style.display = 'flex';
+        devourContainer.style.alignItems = 'center';
+        devourContainer.style.justifyContent = 'flex-start';
+        devourContainer.style.gap = '6px';
+
+        const devourCheckbox = document.createElement('input');
+        devourCheckbox.type = 'checkbox';
+        devourCheckbox.id = 'autoplant-devour-checkbox';
+        devourCheckbox.checked = initialSettings.autoplantAlwaysDevourEnabled !== undefined ? initialSettings.autoplantAlwaysDevourEnabled : false;
+        devourCheckbox.style.cursor = 'pointer';
+
+        devourCheckbox.addEventListener('change', () => {
+            setSettings({ autoplantAlwaysDevourEnabled: devourCheckbox.checked });
+            updatePlantMonsterFilter(selectedCreatures);
+        });
+
+        const devourLabel = document.createElement('label');
+        devourLabel.className = 'pixel-font-14';
+        devourLabel.textContent = 'Devour genes';
+        devourLabel.style.fontSize = '12px';
+        devourLabel.style.color = '#ffe066';
+        devourLabel.style.cursor = 'pointer';
+        devourLabel.htmlFor = 'autoplant-devour-checkbox';
+
+        const devourInput = document.createElement('input');
+        devourInput.type = 'number';
+        devourInput.min = '5';
+        devourInput.max = '79';
+        devourInput.step = '1';
+        devourInput.value = initialSettings.autoplantAlwaysDevourBelow !== undefined ? initialSettings.autoplantAlwaysDevourBelow : 49;
+        devourInput.style.width = '48px';
+        devourInput.style.padding = '2px 4px';
+        devourInput.style.fontSize = '12px';
+        devourInput.style.textAlign = 'center';
+        devourInput.style.backgroundColor = '#2a2a2a';
+        devourInput.style.color = '#ffe066';
+        devourInput.style.border = '1px solid #555';
+        devourInput.style.borderRadius = '3px';
+
+        devourInput.addEventListener('change', () => {
+            const value = parseInt(devourInput.value) || 49;
+            const clampedValue = Math.max(5, Math.min(79, value));
+            devourInput.value = clampedValue;
+            setSettings({ autoplantAlwaysDevourBelow: clampedValue });
+            updatePlantMonsterFilter(selectedCreatures);
+        });
+
+        const devourPercent = document.createElement('span');
+        devourPercent.className = 'pixel-font-14';
+        devourPercent.textContent = '% and below.';
+        devourPercent.style.fontSize = '12px';
+        devourPercent.style.color = '#ffe066';
+
+        devourContainer.appendChild(devourCheckbox);
+        devourContainer.appendChild(devourLabel);
+        devourContainer.appendChild(devourInput);
+        devourContainer.appendChild(devourPercent);
+
+        genesMainContainer.appendChild(genesContainer);
+        genesMainContainer.appendChild(devourContainer);
+        placeholder.appendChild(genesMainContainer);
+
         // Add status bar under the columns
         const statusArea = document.createElement('div');
         statusArea.style.display = 'flex';
@@ -1410,7 +1556,7 @@
         summary.className = 'pixel-font-16';
         summary.style.color = '#ffe066';
         summary.style.fontSize = '13px';
-        summary.style.margin = '8px 0 0 0';
+        summary.style.margin = '2px 0 0 0';
         summary.id = 'autoplant-status';
 
         statusArea.appendChild(separator);
@@ -1562,6 +1708,12 @@
             return;
         }
         
+        const settings = getSettings();
+        const minGenes = settings.autoplantGenesMin !== undefined ? settings.autoplantGenesMin : 80;
+        const keepGenesEnabled = settings.autoplantKeepGenesEnabled !== undefined ? settings.autoplantKeepGenesEnabled : true;
+        const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow !== undefined ? settings.autoplantAlwaysDevourBelow : 49;
+        const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
+        
         try {
             globalThis.state.clientConfig.trigger.setState({
                 fn: (prev) => {
@@ -1580,26 +1732,32 @@
                             // Get monster name for logging
                             const monsterName = monster?.metadata?.name || monster?.name;
                             
-                            // Keep creatures with high genes (80+)
-                            if (monster.totalGenes >= 80) {
-                                console.log('[Autoseller] Keeping monster (high genes):', monster.totalGenes);
-                                return false; // Keep creatures with 80+ genes
-                            }
-                            
                             // Never devour shiny creatures
                             if (monster.shiny === true) {
                                 console.log('[Autoseller] Keeping monster (shiny):', monsterName);
                                 return false; // Keep shiny creatures (DON'T devour them)
                             }
                             
-                            // Check if monster is in ignore list
-                            if (monsterName && ignoreList.includes(monsterName)) {
-                                console.log('[Autoseller] Keeping monster (in ignore list):', monsterName);
-                                return false; // Keep creatures in ignore list (DON'T devour them)
+                            // Always devour creatures below absolute threshold (ignores ignore list) - only if enabled
+                            if (alwaysDevourEnabled && monster.totalGenes < alwaysDevourBelow) {
+                                console.log('[Autoseller] Devouring monster (below absolute threshold):', monsterName, 'genes:', monster.totalGenes, 'threshold:', alwaysDevourBelow);
+                                return true; // Devour creatures below absolute threshold
                             }
                             
-                            console.log('[Autoseller] Devouring monster (low genes and not in ignore list):', monsterName, 'genes:', monster.totalGenes);
-                            return true; // Devour creatures with low genes and not in ignore list
+                            // Keep creatures with minGenes or higher - only if enabled
+                            if (keepGenesEnabled && monster.totalGenes >= minGenes) {
+                                console.log('[Autoseller] Keeping monster (high genes):', monsterName, 'genes:', monster.totalGenes, 'min:', minGenes);
+                                return false; // Keep creatures with genes >= minGenes
+                            }
+                            
+                            // For creatures between thresholds (or all if keep genes disabled), check ignore list
+                            if (monsterName && ignoreList.includes(monsterName)) {
+                                console.log('[Autoseller] Keeping monster (in ignore list):', monsterName, 'genes:', monster.totalGenes);
+                                return false; // Keep creatures in ignore list
+                            }
+                            
+                            console.log('[Autoseller] Devouring monster:', monsterName, 'genes:', monster.totalGenes);
+                            return true; // Devour everything else
                         },
                     };
                 },
@@ -2208,12 +2366,14 @@
                     {
                         title: 'Autoplant',
                         icon: 'https://bestiaryarena.com/assets/icons/plant.png',
-                        content: createAutplantPlaceholder()
+                        content: createAutplantPlaceholder(),
+                        verticalAlign: 'space-between'
                     },
                     {
                         title: 'Autosell',
                         icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
-                        content: autosellSection
+                        content: autosellSection,
+                        verticalAlign: 'center'
                     }
                 ]
             });
@@ -2226,7 +2386,8 @@
             const col2 = createBox({ 
                 title: 'Autosqueeze', 
                 content: autosqueezeSection, 
-                icon: 'https://bestiaryarena.com/assets/icons/dust.png' 
+                icon: 'https://bestiaryarena.com/assets/icons/dust.png',
+                verticalAlign: 'center'
             });
             col2.style.width = '240px';
             col2.style.minWidth = '240px';
@@ -3239,7 +3400,8 @@
         setupDragonPlantAPIMonitor();
         setupDragonPlantAutocollect();
         
-        // Initialize plant monster filter with saved ignore list
+        // Initialize plant monster filter with saved ignore list from localStorage
+        // (ignore mod loader config, use localStorage as single source of truth)
         updatePlantMonsterFilter();
         
         setTimeout(() => {

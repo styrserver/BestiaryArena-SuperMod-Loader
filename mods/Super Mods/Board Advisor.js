@@ -322,8 +322,8 @@ console.log('Board Advisor Mod initializing...');
         }
         
         // Brief delay to ensure IndexedDB operations complete
-        console.log(`[Board Advisor] Waiting 200ms for IndexedDB operations to complete...`);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log(`[Board Advisor] Waiting 100ms for IndexedDB operations to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Step 2: Delete from RunTracker
         console.log(`[Board Advisor] Step 2: Deleting from RunTracker...`);
@@ -383,8 +383,8 @@ console.log('Board Advisor Mod initializing...');
         }
         
         // Brief delay to ensure RunTracker operations complete
-        console.log(`[Board Advisor] Waiting 200ms for RunTracker operations to complete...`);
-        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log(`[Board Advisor] Waiting 100ms for RunTracker operations to complete...`);
+        await new Promise(resolve => setTimeout(resolve, 100));
         
         // Step 3: Validation - Verify deletion consistency
         console.log(`[Board Advisor] Step 3: Validating deletion consistency...`);
@@ -700,7 +700,7 @@ console.log('Board Advisor Mod initializing...');
 const MOD_ID = 'board-advisor';
 const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 const ANALYSIS_DEBOUNCE_TIME = 1000;
-const BOARD_CHANGE_DEBOUNCE_TIME = 2000; // Increased debounce for board changes
+const BOARD_CHANGE_DEBOUNCE_TIME = 1000; // Balanced debounce for board changes
 const SANDBOX_DB_NAME = 'BestiaryArena_SandboxRuns';
 const ROOM_METADATA_STORE = 'roomMetadata';
 const MAX_RUNS_PER_ROOM = 500;
@@ -855,6 +855,7 @@ let previousRoomId = null;
 let previousBoardPieceCount = 0;
 let isDeleting = false;
 let deletionAnalysisTimeout = null;
+let highlightDebounceTimeout = null; // Debounce timer for tile highlighting
 
 let analysisState = {
   isAnalyzing: false,
@@ -879,7 +880,8 @@ let performanceCache = {
 let stateRefreshSystem = {
   lastRefreshTime: 0,
   subscriptions: [],
-  isEnabled: false
+  isEnabled: false,
+  lastSelectedMapId: null // Track last selected map to detect actual changes
 };
 
 let activeSubscriptions = [];
@@ -1751,7 +1753,22 @@ function getEquipmentName(equipId) {
 // =======================
 
 // Highlight recommended tiles on empty board
+// Debounced wrapper to prevent redundant highlight calls
 function highlightRecommendedTiles(recommendedSetup) {
+  // Clear any pending highlight
+  if (highlightDebounceTimeout) {
+    clearTimeout(highlightDebounceTimeout);
+  }
+  
+  // Debounce to prevent rapid redundant calls
+  highlightDebounceTimeout = setTimeout(() => {
+    highlightDebounceTimeout = null;
+    executeHighlightRecommendedTiles(recommendedSetup);
+  }, 100);
+}
+
+// Execute the actual highlighting logic
+function executeHighlightRecommendedTiles(recommendedSetup) {
   // Check if game is running or in cooldown
   if (isGameRunning || gameEndCooldownTimeout) {
     console.log('[Board Advisor] Skipping highlight - game running or in cooldown');
@@ -1782,8 +1799,11 @@ function highlightRecommendedTiles(recommendedSetup) {
   
   if (isSameFullSetup) {
     console.log('[Board Advisor] Same full setup already highlighted, checking if pieces are placed');
-    // Even if it's the same setup, check if pieces are actually placed and clean up accordingly
-    smartCleanupTileHighlights();
+    // Only call cleanup if board actually has pieces that might need checking
+    const currentBoard = dataCollector.getCurrentBoardData();
+    if (currentBoard?.boardSetup?.length > 0) {
+      smartCleanupTileHighlights();
+    }
     return;
   }
   
@@ -10955,6 +10975,14 @@ function startStateRefresh() {
   if (config.autoRefreshPanel && panelState.isOpen) {
     stateRefreshSystem.isEnabled = true;
     
+    // Initialize tracking with current map
+    try {
+      const boardContext = globalThis.state.board.getSnapshot().context;
+      stateRefreshSystem.lastSelectedMapId = boardContext?.selectedMap?.selectedRoom?.id || boardContext?.selectedMap?.id;
+    } catch (error) {
+      console.warn('[Board Advisor] Could not initialize map tracking:', error);
+    }
+    
     // Subscribe to board state changes (game setup, mode changes, etc.)
     const boardSubscription = globalThis.state.board.subscribe((state) => {
       handleStateChange('board', state);
@@ -10997,6 +11025,7 @@ function stopStateRefresh() {
   });
   stateRefreshSystem.subscriptions = [];
   stateRefreshSystem.isEnabled = false;
+  stateRefreshSystem.lastSelectedMapId = null; // Reset map tracking
   console.log('[Board Advisor] State-based refresh stopped');
 }
 
@@ -11010,7 +11039,22 @@ function handleStateChange(source, state) {
     return;
   }
   
-  // Process all board state changes - no map picker detection
+  // For board state changes, only refresh on actual map changes (not map picker UI changes)
+  if (source === 'board') {
+    // Skip if map picker is open (user browsing)
+    if (state.context?.openMapPicker === true) {
+      return;
+    }
+    
+    // Check if the selected map actually changed
+    const currentMapId = state.context?.selectedMap?.selectedRoom?.id || state.context?.selectedMap?.id;
+    if (currentMapId === stateRefreshSystem.lastSelectedMapId) {
+      return; // Same map, skip refresh (map picker opened/closed without selection)
+    }
+    
+    // Map changed, update tracking
+    stateRefreshSystem.lastSelectedMapId = currentMapId;
+  }
   
   const now = Date.now();
   const timeSinceLastRefresh = now - stateRefreshSystem.lastRefreshTime;
@@ -11206,7 +11250,7 @@ if (config.enabled) {
     console.log('[Board Advisor] Starting initialization data loading...');
     await loadAllDataSources(true); // Trigger analysis after loading
     analysisState.isInitializing = false; // Clear initialization flag
-  }, 2000); // Wait 2 seconds for RunTracker to initialize
+  }, 1000); // Wait 1 second for RunTracker to initialize
 }
 
 // =======================
