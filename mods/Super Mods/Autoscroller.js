@@ -291,6 +291,9 @@
   let autosqueezeGenesMin = 80;
   let autosqueezeGenesMax = 100;
   
+  // Scroll limit state
+  let scrollLimit = 0; // 0 = unlimited, 1-999 = limit
+  
   // Rate limiting state
   let rateLimitedSales = new Set();
   let rateLimitedSalesRetryCount = new Map();
@@ -1136,10 +1139,11 @@
    * @param {Object} options Configuration for message building
    * @param {boolean} options.includeStats - Include autosell/squeeze stats (default: false)
    * @param {boolean} options.includeRateLimitInfo - Include rate limit info (default: false)
+   * @param {boolean} options.scrollLimitReached - Scroll limit was reached (default: false)
    * @returns {string} The formatted status message
    */
   function buildStatusMessage(options = {}) {
-    const { includeStats = false, includeRateLimitInfo = false } = options;
+    const { includeStats = false, includeRateLimitInfo = false, scrollLimitReached = false } = options;
     
     const tierName = STRING_CACHE.tierNames[selectedScrollTier - 1] || 'unknown';
     const totalFound = Array.from(autoscrollStats.foundCreatures.values()).reduce((sum, count) => sum + count, 0);
@@ -1147,8 +1151,18 @@
     
     const messageParts = [];
     
-    // Base message
-    if (reachedCreature && autoscrollStats.totalScrolls === 0) {
+    // Check if scroll limit was reached
+    if (scrollLimitReached) {
+      messageParts.push(`Scroll limit reached (${scrollLimit} scrolls)! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
+      if (isShinyHuntMode()) {
+        messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+      } else {
+        messageParts.push(` Found ${totalFound} selected creatures in this session.`);
+        if (selectedScrollTier === 5) {
+          messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+        }
+      }
+    } else if (reachedCreature && autoscrollStats.totalScrolls === 0) {
       // Target was already reached before any scrolls were rolled
       messageParts.push(`Target already reached: Found ${stopConditions.totalCreaturesTarget} ${reachedCreature} in inventory.`);
     } else if (reachedCreature) {
@@ -1268,6 +1282,9 @@
     autosellGenesMax = 79;
     autosqueezeGenesMin = 80;
     autosqueezeGenesMax = 100;
+    
+    // Reset scroll limit state
+    scrollLimit = 0;
     
     // Reset rate limiting state
     rateLimitedSales.clear();
@@ -1648,6 +1665,16 @@
       // Update UI first to ensure we have the latest inventory state
       if (window.AutoscrollerRenderSelectedCreatures) {
         window.AutoscrollerRenderSelectedCreatures();
+      }
+      
+      // Check scroll limit
+      if (scrollLimit > 0 && autoscrollStats.totalScrolls >= scrollLimit) {
+        const statusElement = document.getElementById('autoscroll-status');
+        if (statusElement) {
+          statusElement.textContent = buildStatusMessage({ scrollLimitReached: true });
+        }
+        stopAutoscroll();
+        return;
       }
       
       if (shouldStopAutoscroll()) {
@@ -2357,6 +2384,7 @@
           content: getRulesColumn()
         });
         DOMUtils.applyModalColumnStyles(col2, '250px');
+        col2.style.justifyContent = 'center';
         
         const col3 = createBox({
           title: 'Autoscrolling',
@@ -2374,7 +2402,7 @@
         div.style.padding = '10px';
         div.style.display = 'flex';
         div.style.flexDirection = 'column';
-        div.style.gap = '12px';
+        div.style.gap = '10px';
         
         const totalOptionDiv = document.createElement('div');
         totalOptionDiv.style.display = 'flex';
@@ -2547,11 +2575,44 @@
         
         tierInputs.forEach(input => input.disabled = !stopConditions.useTierSystem);
         
+        // Add autosell checkbox
+        const autosellDiv = document.createElement('div');
+        autosellDiv.style.display = 'flex';
+        autosellDiv.style.alignItems = 'center';
+        autosellDiv.style.gap = '8px';
+        autosellDiv.style.marginTop = '4px';
+        StyleUtils.applySectionStyles(autosellDiv);
+        
+        const autosellCheckbox = DOMUtils.createCheckbox();
+        autosellCheckbox.type = 'checkbox';
+        autosellCheckbox.id = 'autosell-checkbox';
+        autosellCheckbox.checked = autosellNonSelected; // Use the preserved state
+        
+        const autosellLabel = document.createElement('label');
+        autosellLabel.htmlFor = 'autosell-checkbox';
+        autosellLabel.textContent = 'Autosell and autosqueeze non-selected (ignores shiny)';
+        StyleUtils.applyLabelStyles(autosellLabel);
+        autosellLabel.style.cursor = 'pointer';
+        
+        autosellDiv.appendChild(autosellCheckbox);
+        autosellDiv.appendChild(autosellLabel);
+        div.appendChild(autosellDiv);
+        
+        // Add event listener for autosell checkbox
+        autosellCheckbox.addEventListener('change', () => {
+          autosellNonSelected = autosellCheckbox.checked;
+          // Autosell setting updated
+          // Update button appearance when autosell setting changes
+          if (window.updateAutoscrollButtonAppearance) {
+            window.updateAutoscrollButtonAppearance();
+          }
+        });
+        
         const speedWrapper = document.createElement('div');
         speedWrapper.style.display = 'flex';
         speedWrapper.style.alignItems = 'center';
         speedWrapper.style.gap = '6px';
-        speedWrapper.style.marginTop = '8px';
+        speedWrapper.style.marginTop = '4px';
         speedWrapper.style.marginBottom = '5px';
         
         const speedLabel = document.createElement('span');
@@ -2605,38 +2666,40 @@
         
         div.appendChild(speedWrapper);
         
-        // Add autosell checkbox below warning text
-        const autosellDiv = document.createElement('div');
-        autosellDiv.style.display = 'flex';
-        autosellDiv.style.alignItems = 'center';
-        autosellDiv.style.gap = '8px';
-        autosellDiv.style.marginTop = '8px';
-        StyleUtils.applySectionStyles(autosellDiv);
+        // Scroll Limit section
+        const scrollLimitWrapper = document.createElement('div');
+        scrollLimitWrapper.style.display = 'flex';
+        scrollLimitWrapper.style.alignItems = 'center';
+        scrollLimitWrapper.style.gap = '6px';
+        scrollLimitWrapper.style.marginTop = '4px';
         
-        const autosellCheckbox = DOMUtils.createCheckbox();
-        autosellCheckbox.type = 'checkbox';
-        autosellCheckbox.id = 'autosell-checkbox';
-        autosellCheckbox.checked = autosellNonSelected; // Use the preserved state
+        const scrollLimitLabel = document.createElement('span');
+        scrollLimitLabel.textContent = 'Scroll Limit:';
+        StyleUtils.applyLabelStyles(scrollLimitLabel);
+        scrollLimitWrapper.appendChild(scrollLimitLabel);
         
-        const autosellLabel = document.createElement('label');
-        autosellLabel.htmlFor = 'autosell-checkbox';
-        autosellLabel.textContent = 'Autosell and autosqueeze non-selected (ignores shiny)';
-        StyleUtils.applyLabelStyles(autosellLabel);
-        autosellLabel.style.cursor = 'pointer';
-        
-        autosellDiv.appendChild(autosellCheckbox);
-        autosellDiv.appendChild(autosellLabel);
-        div.appendChild(autosellDiv);
-        
-        // Add event listener for autosell checkbox
-        autosellCheckbox.addEventListener('change', () => {
-          autosellNonSelected = autosellCheckbox.checked;
-          // Autosell setting updated
-          // Update button appearance when autosell setting changes
-          if (window.updateAutoscrollButtonAppearance) {
-            window.updateAutoscrollButtonAppearance();
-          }
+        const scrollLimitInput = DOMUtils.createInput('number', {
+          width: '60px',
+          height: '20px',
+          textAlign: 'center'
         });
+        scrollLimitInput.id = 'scroll-limit-input';
+        scrollLimitInput.min = '0';
+        scrollLimitInput.max = '999';
+        scrollLimitInput.value = scrollLimit || '0';
+        scrollLimitInput.onchange = () => {
+          scrollLimit = Math.max(0, Math.min(999, parseInt(scrollLimitInput.value) || 0));
+          scrollLimitInput.value = scrollLimit;
+        };
+        scrollLimitWrapper.appendChild(scrollLimitInput);
+        
+        const scrollLimitHint = document.createElement('span');
+        scrollLimitHint.textContent = '(0 = unlimited)';
+        scrollLimitHint.style.fontSize = '11px';
+        StyleUtils.applyThemeColor(scrollLimitHint, 'primary');
+        scrollLimitWrapper.appendChild(scrollLimitHint);
+        
+        div.appendChild(scrollLimitWrapper);
         
         return div;
       }

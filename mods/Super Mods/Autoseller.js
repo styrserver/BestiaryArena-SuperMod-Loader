@@ -1737,9 +1737,9 @@
                             }
                             
                             // Always devour creatures below absolute threshold (ignores ignore list) - only if enabled
-                            if (alwaysDevourEnabled && monster.totalGenes < alwaysDevourBelow) {
-                                console.log('[Autoseller] Devouring monster (below absolute threshold):', monsterName, 'genes:', monster.totalGenes, 'threshold:', alwaysDevourBelow);
-                                return true; // Devour creatures below absolute threshold
+                            if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
+                                console.log('[Autoseller] Devouring monster (at or below absolute threshold):', monsterName, 'genes:', monster.totalGenes, 'threshold:', alwaysDevourBelow);
+                                return true; // Devour creatures at or below absolute threshold
                             }
                             
                             // Keep creatures with minGenes or higher - only if enabled
