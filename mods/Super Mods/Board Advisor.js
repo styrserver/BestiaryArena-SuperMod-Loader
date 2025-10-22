@@ -594,20 +594,16 @@ console.log('Board Advisor Mod initializing...');
       for (let i = speedrunRuns.length - 1; i >= 0; i--) {
         const run = speedrunRuns[i];
         if (run.setup && run.setup.pieces) {
-          console.log(`[Board Advisor] Speedrun run ${i} setup:`, run.setup);
           const convertedSetup = convertRunTrackerSetup(run.setup);
-          console.log(`[Board Advisor] Speedrun run ${i} converted setup:`, convertedSetup);
           
           if (targetSetupHash) {
             // Delete specific setup if target hash provided
             const runSetupHash = createBoardSetupHash(convertedSetup);
-            console.log(`[Board Advisor] Speedrun run ${i} setup hash: ${runSetupHash}, target hash: ${targetSetupHash}, matches: ${runSetupHash === targetSetupHash}`);
             if (runSetupHash === targetSetupHash) {
               matchingSpeedrunIndices.push(i);
             }
           } else {
             // Delete all runs if no target hash provided
-            console.log(`[Board Advisor] Speedrun run ${i} - deleting all runs (no target hash)`);
             matchingSpeedrunIndices.push(i);
           }
         }
@@ -618,26 +614,24 @@ console.log('Board Advisor Mod initializing...');
       for (let i = rankRuns.length - 1; i >= 0; i--) {
         const run = rankRuns[i];
         if (run.setup && run.setup.pieces) {
-          console.log(`[Board Advisor] Rank run ${i} setup:`, run.setup);
           const convertedSetup = convertRunTrackerSetup(run.setup);
-          console.log(`[Board Advisor] Rank run ${i} converted setup:`, convertedSetup);
           
           if (targetSetupHash) {
             // Delete specific setup if target hash provided
             const runSetupHash = createBoardSetupHash(convertedSetup);
-            console.log(`[Board Advisor] Rank run ${i} setup hash: ${runSetupHash}, target hash: ${targetSetupHash}, matches: ${runSetupHash === targetSetupHash}`);
             if (runSetupHash === targetSetupHash) {
               matchingRankIndices.push(i);
             }
           } else {
             // Delete all runs if no target hash provided
-            console.log(`[Board Advisor] Rank run ${i} - deleting all runs (no target hash)`);
             matchingRankIndices.push(i);
           }
         }
       }
       
-      console.log(`[Board Advisor] Found ${matchingSpeedrunIndices.length} matching speedrun indices and ${matchingRankIndices.length} matching rank indices`);
+      if (matchingSpeedrunIndices.length > 0 || matchingRankIndices.length > 0) {
+        console.log(`[Board Advisor] Found ${matchingSpeedrunIndices.length} speedrun + ${matchingRankIndices.length} rank runs to delete for ${mapKey}${targetSetupHash ? ' (specific setup)' : ' (all runs)'}`);
+      }
       
       // Helper function to delete with retry logic
       const deleteWithRetry = async (mapKey, type, index, maxRetries) => {
@@ -737,20 +731,25 @@ function checkForCheating(currentBoard) {
     // Check board configuration for modified monster stats (Hero Editor changes)
     const boardContext = globalThis.state?.board?.getSnapshot()?.context;
     if (boardContext?.boardConfig) {
-      console.log('[Board Advisor] Checking boardConfig:', boardContext.boardConfig);
+      let skippedPieces = 0;
+      let playerPieces = 0;
+      let customPieces = 0;
+      let piecesWithStats = 0;
       
       for (const piece of boardContext.boardConfig) {
-        console.log('[Board Advisor] Checking boardConfig piece:', piece);
-        
         // Check both player pieces and custom pieces (Hero Editor creates custom pieces)
         if (!piece || (piece.type !== 'player' && piece.type !== 'custom')) {
-          console.log('[Board Advisor] Skipping piece - not player or custom:', { type: piece?.type });
+          skippedPieces++;
           continue;
         }
+
+        if (piece.type === 'player') playerPieces++;
+        if (piece.type === 'custom') customPieces++;
 
         // Check monster stats - custom pieces store stats in piece.genes
         const stats = ['hp', 'ad', 'ap', 'armor', 'magicResist'];
         let hasStats = false;
+        const statsCheck = {};
         
         for (const stat of stats) {
           let value;
@@ -758,12 +757,12 @@ function checkForCheating(currentBoard) {
           if (piece.type === 'custom' && piece.genes) {
             // Custom pieces (Hero Editor) store stats in piece.genes
             value = piece.genes[stat];
-            console.log(`[Board Advisor] Checking custom piece genes.${stat}: ${value}`);
           } else if (piece.type === 'player') {
             // Player pieces might have stats directly on the piece
             value = piece[stat];
-            console.log(`[Board Advisor] Checking player piece ${stat}: ${value}`);
           }
+          
+          statsCheck[stat] = value;
           
           if (value !== undefined && value !== null) {
             hasStats = true;
@@ -775,10 +774,12 @@ function checkForCheating(currentBoard) {
           }
         }
         
-        if (!hasStats) {
-          console.log('[Board Advisor] Piece has no stats to check');
+        if (hasStats) {
+          piecesWithStats++;
         }
       }
+      
+      console.log(`[Board Advisor] Checked ${boardContext.boardConfig.length} boardConfig pieces: ${skippedPieces} skipped, ${playerPieces} player, ${customPieces} custom, ${piecesWithStats} with stats`);
     } else {
       console.log('[Board Advisor] No boardConfig found');
     }
@@ -894,6 +895,8 @@ let storedRecommendedSetup = null;
 let isGameRunning = false;
 let gameEndCooldownTimeout = null;
 const GAME_END_COOLDOWN_MS = 2000; // 2 second cooldown after game ends
+let lastSkipLogTime = 0;
+const SKIP_LOG_DEBOUNCE_MS = 5000; // Only log skip message once per 5 seconds
 
 let documentListeners = [];
 
@@ -2325,23 +2328,21 @@ function setupGameStateHighlightManager() {
     const gameStarted = context.gameStarted;
     const currentMode = context.mode; // "manual", "autoplay", "sandbox"
     
-    console.log('[Board Advisor] Game state changed:', { gameStarted, mode: currentMode, isGameRunning });
-    
     if (gameStarted && !isGameRunning) {
       // Game started - set flag and clean up highlights
       isGameRunning = true;
-      console.log('[Board Advisor] Game started, cleaning up highlights');
+      const storedCount = (currentRecommendedSetup && currentRecommendedSetup.length > 0) ? currentRecommendedSetup.length : 0;
+      console.log(`[Board Advisor] Game started (${currentMode}): cleaning highlights, stored ${storedCount} pieces for restoration`);
       cleanupTileHighlights();
       
       // Store current recommended setup for later restoration
-      if (currentRecommendedSetup && currentRecommendedSetup.length > 0) {
+      if (storedCount > 0) {
         storedRecommendedSetup = [...currentRecommendedSetup];
-        console.log('[Board Advisor] Stored recommended setup for restoration:', storedRecommendedSetup.length, 'pieces');
       }
     } else if (!gameStarted && isGameRunning) {
       // Game ended - set cooldown period
       isGameRunning = false;
-      console.log('[Board Advisor] Game ended, starting cooldown period');
+      console.log(`[Board Advisor] Game ended: starting ${GAME_END_COOLDOWN_MS}ms cooldown before allowing highlight restoration`);
       
       // Clear any existing cooldown
       if (gameEndCooldownTimeout) {
@@ -2350,14 +2351,15 @@ function setupGameStateHighlightManager() {
       
       // Set cooldown before allowing highlight restoration
       gameEndCooldownTimeout = setTimeout(() => {
-        console.log('[Board Advisor] Cooldown period ended, allowing highlight restoration');
         gameEndCooldownTimeout = null;
         
         // Restore highlights if we have stored recommendations
         if (storedRecommendedSetup && storedRecommendedSetup.length > 0) {
-          console.log('[Board Advisor] Restoring highlights with stored setup:', storedRecommendedSetup.length, 'pieces');
+          console.log(`[Board Advisor] Cooldown ended: restoring highlights for ${storedRecommendedSetup.length} pieces`);
           highlightRecommendedTiles(storedRecommendedSetup);
           storedRecommendedSetup = null; // Clear stored data
+        } else {
+          console.log('[Board Advisor] Cooldown ended: no highlights to restore');
         }
       }, GAME_END_COOLDOWN_MS);
     }
@@ -3009,15 +3011,22 @@ async function addBoardAnalyzerRun(runData) {
       completed: runData.completed,
       playerMonsters: runData.playerMonsters || [],
       playerEquipment: runData.playerEquipment || [],
-      boardSetup: runData.boardSetup ? runData.boardSetup.map(piece => {
-        console.log('[Board Advisor] Processing piece for storage:', piece);
-        const resolvedName = piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null);
-        console.log('[Board Advisor] Resolved name for storage:', resolvedName);
-        return {
-          ...piece,
-          monsterName: resolvedName
-        };
-      }) : [],
+      boardSetup: runData.boardSetup ? (() => {
+        const processedPieces = [];
+        const resolvedNames = [];
+        
+        runData.boardSetup.forEach(piece => {
+          const resolvedName = piece.monsterName || (piece.monsterId ? getMonsterName(piece.monsterId) : null);
+          resolvedNames.push(resolvedName || 'Unknown');
+          processedPieces.push({
+            ...piece,
+            monsterName: resolvedName
+          });
+        });
+        
+        console.log(`[Board Advisor] Processed ${processedPieces.length} pieces for storage: ${resolvedNames.join(', ')}`);
+        return processedPieces;
+      })() : [],
       date: new Date().toISOString().split('T')[0],
       source: 'board_analyzer' // Keep the source as board_analyzer
     };
@@ -3185,12 +3194,17 @@ function convertRunTrackerData() {
     if (targetMapKey && runTrackerData.runs[targetMapKey]) {
       const mapData = runTrackerData.runs[targetMapKey];
       
+      let speedrunCount = 0;
+      let rankCount = 0;
+      let totalMonstersProcessed = 0;
+      
       // Process speedrun data
       if (mapData.speedrun && Array.isArray(mapData.speedrun)) {
         mapData.speedrun.forEach(run => {
           if (run.time && run.setup) {
             const convertedSetup = convertRunTrackerSetup(run.setup);
-            console.log(`[Board Advisor] Converted RunTracker speedrun setup:`, convertedSetup);
+            totalMonstersProcessed += convertedSetup.length;
+            speedrunCount++;
             
             const convertedRun = {
               id: run.timestamp || Date.now(),
@@ -3214,7 +3228,8 @@ function convertRunTrackerData() {
         mapData.rank.forEach(run => {
           if (run.points > 0 && run.setup) {
             const convertedSetup = convertRunTrackerSetup(run.setup);
-            console.log(`[Board Advisor] Converted RunTracker rank setup:`, convertedSetup);
+            totalMonstersProcessed += convertedSetup.length;
+            rankCount++;
             
             const convertedRun = {
               id: run.timestamp || Date.now(),
@@ -3231,6 +3246,10 @@ function convertRunTrackerData() {
             addRunToTracker(convertedRun);
           }
         });
+      }
+      
+      if (speedrunCount > 0 || rankCount > 0) {
+        console.log(`[Board Advisor] Converted ${speedrunCount + rankCount} RunTracker setups for ${currentRoomId}: ${speedrunCount} speedrun, ${rankCount} rank (${totalMonstersProcessed} monsters processed)`);
       }
     } else {
       console.log(`[Board Advisor] No RunTracker data found for current room: ${currentMapName} (${currentRoomId})`);
@@ -3282,7 +3301,6 @@ function convertRunTrackerSetup(setup) {
           armor: Number(piece.monsterStats.armor) || 0,
           magicResist: Number(piece.monsterStats.magicResist) || 0
         };
-        console.log(`[Board Advisor] Extracted monster stats from RunTracker for ${piece.monsterName}:`, monsterStats);
       }
       // Fallback: try to get from monster object if available
       else if (piece.monster && typeof piece.monster === 'object') {
@@ -3293,7 +3311,6 @@ function convertRunTrackerSetup(setup) {
           armor: Number(piece.monster.armor) || 0,
           magicResist: Number(piece.monster.magicResist) || 0
         };
-        console.log(`[Board Advisor] Extracted monster stats from piece.monster for ${piece.monster.name}:`, monsterStats);
       }
       
       // Helper function to properly capitalize names
@@ -3788,7 +3805,11 @@ class DataCollector {
       
       // Skip highlight operations if game is running or in cooldown
       if (isGameRunning || gameEndCooldownTimeout) {
-        console.log('[Board Advisor] Skipping board change highlight operations - game running or in cooldown');
+        // Debounce skip message - only log once per 5 seconds
+        if (now - lastSkipLogTime > SKIP_LOG_DEBOUNCE_MS) {
+          console.log('[Board Advisor] Skipping board change highlight operations - game running or in cooldown');
+          lastSkipLogTime = now;
+        }
         return;
       }
       
@@ -6894,25 +6915,12 @@ class AnalysisEngine {
       });
     }
     
-    console.log(`[Board Advisor] Generating recommendations based on ${boardAnalyzerRuns.length} board_analyzer runs and ${sandboxRuns.length} sandbox runs`);
-    console.log(`[Board Advisor] Total runs in performance tracker: ${performanceTracker.runs.length}`);
-    console.log(`[Board Advisor] Run sources in performance tracker:`, [...new Set(performanceTracker.runs.map(r => r.source))]);
-    
     // Analyze performance patterns from all available data
     const completedRuns = allRuns.filter(r => r.completed);
     const failedRuns = boardAnalyzerRuns.filter(r => !r.completed);
+    const sources = [...new Set(performanceTracker.runs.map(r => r.source))].join(', ');
     
-    // Generate recommendations based on selected focus area
-    console.log('[Board Advisor] About to generate recommendations:', {
-      focusArea: config.focusArea,
-      completedRunsLength: completedRuns.length,
-      allRunsLength: allRuns.length,
-      sampleCompletedRuns: completedRuns.slice(0, 2).map(r => ({ 
-        completed: r.completed, 
-        rankPoints: r.rankPoints, 
-        ticks: r.ticks 
-      }))
-    });
+    console.log(`[Board Advisor] Generating recommendations: ${boardAnalyzerRuns.length} BA + ${sandboxRuns.length} sandbox = ${performanceTracker.runs.length} total runs (sources: ${sources}), ${completedRuns.length} completed, focus: ${config.focusArea}`);
     
     if (config.focusArea === 'ticks') {
       const ticksRecommendations = await this.generateTicksRecommendations(completedRuns, similarSetups, currentBoard, leaderboardComparison);
@@ -9741,8 +9749,7 @@ function clearRecommendationsInstantly() {
 
 
 async function updatePanelWithAnalysis(analysis) {
-  console.log('[Board Advisor] updatePanelWithAnalysis called with:', analysis);
-  console.log('[Board Advisor] Recommendations in analysis:', analysis.recommendations?.length || 0);
+  console.log(`[Board Advisor] updatePanelWithAnalysis: ${analysis.recommendations?.length || 0} recommendations, room: ${analysis.roomId}, hasData: ${!!analysis.hasData}`);
   
   // Check if data is still loading
   if (analysisState.isDataLoading) {
@@ -9980,24 +9987,22 @@ async function updatePanelWithAnalysis(analysis) {
   if (resetButton && !resetButton.hasAttribute('data-listener-attached')) {
     resetButton.setAttribute('data-listener-attached', 'true');
     resetButton.addEventListener("click", async (e) => {
-      console.log('[Board Advisor] Reset button clicked!');
       e.stopPropagation();
+      console.log('[Board Advisor] Reset button clicked - starting reset process...');
       
-      console.log('[Board Advisor] About to enter try block...');
       try {
-        console.log('[Board Advisor] Starting reset process...');
         resetButton.textContent = "⏳";
         resetButton.disabled = true;
         
-        console.log('[Board Advisor] About to call resetInvalidRuns...');
         let result;
         try {
           result = await resetInvalidRuns(); // Will use current room automatically
-          console.log('[Board Advisor] resetInvalidRuns completed, result:', result);
         } catch (error) {
           console.error('[Board Advisor] Error in resetInvalidRuns:', error);
           throw error;
         }
+        
+        console.log('[Board Advisor] Reset completed:', { success: result.success, removed: result.removed, runTrackerRemoved: result.runTrackerRemoved });
         
         if (result.success) {
           // Show "Resetted" feedback in green
@@ -10036,12 +10041,6 @@ async function updatePanelWithAnalysis(analysis) {
   
   // Update recommendations section with enhanced display (filtered by focus area)
   if (analysis.recommendations && analysis.recommendations.length > 0) {
-    console.log('[Board Advisor] Filtering recommendations:', {
-      totalRecommendations: analysis.recommendations.length,
-      currentFocusArea: config.focusArea,
-      recommendationTypes: analysis.recommendations.map(r => ({ type: r.type, focusArea: r.focusArea }))
-    });
-    
     // Filter recommendations by focus area
     const filteredRecommendations = analysis.recommendations.filter(rec => {
       // Always show leaderboard recommendations
@@ -10051,12 +10050,6 @@ async function updatePanelWithAnalysis(analysis) {
       // Show recommendations that match the current focus area or are for both
       return rec.focusArea === config.focusArea || rec.focusArea === 'both' || !rec.focusArea;
     });
-    
-    console.log('[Board Advisor] Filtered recommendations:', {
-      filteredCount: filteredRecommendations.length,
-      filteredTypes: filteredRecommendations.map(r => ({ type: r.type, focusArea: r.focusArea }))
-    });
-    
     
     // Group recommendations by type for better organization
     const groupedRecs = {
@@ -10084,6 +10077,8 @@ async function updatePanelWithAnalysis(analysis) {
       }
     });
     
+    console.log(`[Board Advisor] Recommendations: ${analysis.recommendations.length} total → ${filteredRecommendations.length} filtered (${config.focusArea}) → grouped: LB:${groupedRecs.leaderboard.length} Imp:${groupedRecs.improvement.length} Pos:${groupedRecs.positioning.length} Eq:${groupedRecs.equipment.length} Cr:${groupedRecs.creature.length} Oth:${groupedRecs.other.length}`);
+    
     let recsHTML = '';
     
     // Leaderboard recommendations (highest priority)
@@ -10103,18 +10098,7 @@ async function updatePanelWithAnalysis(analysis) {
     }
     
     // Compact Tips & Strategies section
-    console.log('[Board Advisor] Grouped recommendations:', {
-      leaderboard: groupedRecs.leaderboard.length,
-      improvement: groupedRecs.improvement.length,
-      positioning: groupedRecs.positioning.length,
-      equipment: groupedRecs.equipment.length,
-      creature: groupedRecs.creature.length,
-      other: groupedRecs.other.length
-    });
-    
     const hasRecommendations = groupedRecs.leaderboard.length > 0 || groupedRecs.improvement.length > 0 || groupedRecs.equipment.length > 0 || groupedRecs.creature.length > 0 || groupedRecs.other.length > 0;
-    
-    console.log('[Board Advisor] Has recommendations check:', hasRecommendations);
     
     if (hasRecommendations) {
       recsHTML += '<div style="margin-bottom: 8px;">';
@@ -10199,11 +10183,6 @@ async function updatePanelWithAnalysis(analysis) {
       
       // Use IndexedDB data instead of performanceTracker.runs for consistent monster names
       const currentRoomRuns = analysis.runs || [];
-      console.log('[Board Advisor] Popular combinations - room runs data:', {
-        currentRoomId,
-        currentRoomRunsLength: currentRoomRuns.length,
-        analysisRuns: analysis.runs?.length || 0
-      });
       
       const topRuns = currentRoomRuns.sort((a, b) => {
         if (config.focusArea === 'ticks') {
@@ -10290,10 +10269,7 @@ async function updatePanelWithAnalysis(analysis) {
         });
       }
       
-      console.log('[Board Advisor] Popular combinations generated:', {
-        combinationCount: equipmentSuggestions.length,
-        combinations: equipmentSuggestions
-      });
+      console.log(`[Board Advisor] Popular combinations: analyzed ${currentRoomRuns.length} runs (top ${topRuns.length}) → generated ${equipmentSuggestions.length} combinations for ${currentRoomId}`);
       
       if (equipmentSuggestions.length > 0) {
         recsHTML += `<div style="margin: 3px 0; padding: 6px; background-image: url(/_next/static/media/background-dark.95edca67.png); background-repeat: repeat; background-color: #323234; border: 1px solid #3A404A; border-radius: 4px; border: 1px solid #61AFEF;">
@@ -10324,11 +10300,8 @@ async function updatePanelWithAnalysis(analysis) {
       
       // Add event listeners for delete buttons
       const deleteButtons = recommendationsDisplay.querySelectorAll('.board-advisor-delete-btn');
-      console.log(`[Board Advisor] Found ${deleteButtons.length} delete buttons to attach listeners to`);
-      
-      // Attach listeners directly to each delete button
       const roomId = analysis.roomId || analysis.currentBoard?.roomId || (window.analysis?.currentBoard?.roomId);
-      console.log('[Board Advisor] Room ID for delete buttons:', roomId);
+      console.log(`[Board Advisor] Delete buttons: found ${deleteButtons.length} buttons for room ${roomId}`);
       deleteButtons.forEach(deleteBtn => {
         // Remove any existing listeners first
         deleteBtn.removeEventListener('click', deleteBtn._boardAdvisorClickHandler);
@@ -10470,9 +10443,7 @@ async function updatePanelWithAnalysis(analysis) {
   scheduleAutoFit();
   
   // Update reset button visibility based on invalid runs
-  console.log('[Board Advisor] About to call updateResetButtonVisibility...');
   try {
-    // Call the function directly instead of through exports
     await updateResetButtonVisibility();
   } catch (error) {
     console.error('[Board Advisor] Error calling updateResetButtonVisibility:', error);
@@ -10717,24 +10688,22 @@ async function updatePanelWithNoDataAnalysis(analysis) {
   if (resetButton && !resetButton.hasAttribute('data-listener-attached')) {
     resetButton.setAttribute('data-listener-attached', 'true');
     resetButton.addEventListener("click", async (e) => {
-      console.log('[Board Advisor] Reset button clicked!');
       e.stopPropagation();
+      console.log('[Board Advisor] Reset button clicked - starting reset process...');
       
-      console.log('[Board Advisor] About to enter try block...');
       try {
-        console.log('[Board Advisor] Starting reset process...');
         resetButton.textContent = "⏳";
         resetButton.disabled = true;
         
-        console.log('[Board Advisor] About to call resetInvalidRuns...');
         let result;
         try {
           result = await resetInvalidRuns(); // Will use current room automatically
-          console.log('[Board Advisor] resetInvalidRuns completed, result:', result);
         } catch (error) {
           console.error('[Board Advisor] Error in resetInvalidRuns:', error);
           throw error;
         }
+        
+        console.log('[Board Advisor] Reset completed:', { success: result.success, removed: result.removed, runTrackerRemoved: result.runTrackerRemoved });
         
         if (result.success) {
           // Show "Resetted" feedback in green
@@ -11176,8 +11145,6 @@ async function fetchLeaderboardWRData(mapCode) {
     // Extract data from the correct structure - same as Better Highscores mod
     const tickData = leaderboardData?.ticks?.[mapCode] ? [leaderboardData.ticks[mapCode]] : [];
     const rankData = leaderboardData?.rank?.[mapCode] ? [leaderboardData.rank[mapCode]] : [];
-    
-    console.log(`[Board Advisor] Fetched leaderboard data for ${mapCode}:`, { tickData, rankData });
     
     return {
       tickData,
@@ -11936,40 +11903,32 @@ exports = {
 // Helper function to check for invalid runs
 async function hasInvalidRuns(roomId = null) {
   try {
-    console.log('[Board Advisor] hasInvalidRuns called with roomId:', roomId);
-    
     // Get current room ID if not provided
     if (!roomId) {
       const currentBoard = dataCollector.getCurrentBoardData();
       if (!currentBoard || !currentBoard.roomId) {
-        console.log('[Board Advisor] No current board or room ID found');
+        console.log('[Board Advisor] Invalid runs check: No current board or room ID found');
         return false;
       }
       roomId = currentBoard.roomId;
-      console.log('[Board Advisor] Using current room ID:', roomId);
     }
     
     // Get current world record for this room
-    console.log('[Board Advisor] Fetching leaderboard data for room:', roomId);
     const leaderboardData = await fetchLeaderboardWRData(roomId);
     if (!leaderboardData || !leaderboardData.tickData || leaderboardData.tickData.length === 0) {
-      console.log('[Board Advisor] No leaderboard data available for room:', roomId);
+      console.log(`[Board Advisor] Invalid runs check: No leaderboard data for room ${roomId}`);
       return false;
     }
     
     const worldRecordTime = leaderboardData.tickData[0].ticks;
-    console.log(`[Board Advisor] World record for room ${roomId}: ${worldRecordTime} ticks`);
     
     // Check Board Advisor runs
     const boardAdvisorRuns = performanceTracker.runs.filter(run => run.roomId === roomId);
     const invalidBoardAdvisorRuns = boardAdvisorRuns.filter(run => run.ticks < worldRecordTime);
-    console.log(`[Board Advisor] Found ${boardAdvisorRuns.length} Board Advisor runs for room ${roomId}`);
-    console.log(`[Board Advisor] Board Advisor runs with ticks:`, boardAdvisorRuns.map(run => ({ ticks: run.ticks, source: run.source })));
-    console.log(`[Board Advisor] Found ${invalidBoardAdvisorRuns.length} invalid Board Advisor runs (better than WR ${worldRecordTime})`);
-    console.log(`[Board Advisor] Invalid Board Advisor runs:`, invalidBoardAdvisorRuns.map(run => ({ ticks: run.ticks, source: run.source })));
     
     // Check RunTracker runs
     let invalidRunTrackerRuns = 0;
+    let runTrackerSummary = 'API not available';
     if (window.RunTrackerAPI && window.RunTrackerAPI._initialized) {
       try {
         const allRuns = window.RunTrackerAPI.getAllRuns();
@@ -12005,24 +11964,32 @@ async function hasInvalidRuns(roomId = null) {
           );
           
           invalidRunTrackerRuns = invalidSpeedrunRuns.length + invalidRankRuns.length;
-          console.log(`[Board Advisor] Found ${speedrunRuns.length} speedrun + ${rankRuns.length} rank RunTracker runs for room ${roomId}`);
-          console.log(`[Board Advisor] RunTracker speedrun runs with time:`, speedrunRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
-          console.log(`[Board Advisor] RunTracker rank runs with time:`, rankRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
-          console.log(`[Board Advisor] Found ${invalidRunTrackerRuns} invalid RunTracker runs (better than WR ${worldRecordTime})`);
-          console.log(`[Board Advisor] Invalid RunTracker speedrun runs:`, invalidSpeedrunRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
-          console.log(`[Board Advisor] Invalid RunTracker rank runs:`, invalidRankRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })));
+          runTrackerSummary = `${speedrunRuns.length}+${rankRuns.length} runs, ${invalidRunTrackerRuns} invalid`;
+          
+          // Log details only if invalid runs found
+          if (invalidSpeedrunRuns.length > 0 || invalidRankRuns.length > 0) {
+            console.log(`[Board Advisor] Invalid RunTracker runs found:`, {
+              speedrun: invalidSpeedrunRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId })),
+              rank: invalidRankRuns.map(run => ({ time: run.time, mapId: run.setup?.mapId }))
+            });
+          }
         } else {
-          console.log(`[Board Advisor] Could not find correct map key for room ${roomId} in RunTracker`);
+          runTrackerSummary = 'No matching map key found';
         }
       } catch (error) {
         console.error('[Board Advisor] Error checking RunTracker for invalid runs:', error);
+        runTrackerSummary = 'Error checking';
       }
-    } else {
-      console.log('[Board Advisor] RunTracker API not available');
     }
     
     const totalInvalidRuns = invalidBoardAdvisorRuns.length + invalidRunTrackerRuns;
-    console.log(`[Board Advisor] Total invalid runs: ${totalInvalidRuns} (${invalidBoardAdvisorRuns.length} from Board Advisor, ${invalidRunTrackerRuns} from RunTracker)`);
+    
+    console.log(`[Board Advisor] Invalid runs check for ${roomId}: WR=${worldRecordTime}, BA=${boardAdvisorRuns.length} runs (${invalidBoardAdvisorRuns.length} invalid), RT=${runTrackerSummary}, Total invalid=${totalInvalidRuns}`);
+    
+    // Log invalid Board Advisor runs if any found
+    if (invalidBoardAdvisorRuns.length > 0) {
+      console.log(`[Board Advisor] Invalid BA runs:`, invalidBoardAdvisorRuns.map(run => ({ ticks: run.ticks, source: run.source })));
+    }
     
     return totalInvalidRuns > 0;
   } catch (error) {
@@ -12034,20 +12001,14 @@ async function hasInvalidRuns(roomId = null) {
 // Helper function for reset button visibility
 async function updateResetButtonVisibility() {
   try {
-    console.log('[Board Advisor] updateResetButtonVisibility called');
     const resetButton = document.getElementById('reset-invalid-runs-button');
     if (!resetButton) {
-      console.log('[Board Advisor] Reset button not found in DOM');
       return;
     }
     
-    console.log('[Board Advisor] Reset button found, checking for invalid runs...');
     const hasInvalid = await hasInvalidRuns();
-    console.log(`[Board Advisor] Has invalid runs: ${hasInvalid}`);
-    
     resetButton.style.display = hasInvalid ? 'block' : 'none';
-    
-    console.log(`[Board Advisor] Reset button visibility updated: ${hasInvalid ? 'visible' : 'hidden'}`);
+    console.log(`[Board Advisor] Reset button visibility: ${hasInvalid ? 'visible' : 'hidden'} (${hasInvalid} invalid runs)`);
   } catch (error) {
     console.error('[Board Advisor] Error updating reset button visibility:', error);
   }

@@ -20,7 +20,6 @@
     const AUTOSELLER_MIN_DELAY_MS = 5000;
     const MAX_OBSERVER_ATTEMPTS = 10;
     const OBSERVER_DEBOUNCE_MS = 100;
-    const SETTINGS_SAVE_DELAY_MS = 300;
     
     // Rate limiting constants for all API operations
     const SELL_RATE_LIMIT = {
@@ -36,15 +35,8 @@
         MODAL_WIDTH: 650,
         MODAL_HEIGHT: 490,
         MODAL_CONTENT_HEIGHT: 410,
-        COLUMN_WIDTH: 240,
-        COLUMN_MIN_WIDTH: 220,
-        RESPONSIVE_BREAKPOINT: 600,
         INPUT_WIDTH: 48,
         INPUT_STEP: 1,
-        MIN_COUNT_MIN: 1,
-        MIN_COUNT_MAX: 20,
-        GENE_MIN: 5,
-        GENE_MAX: 100,
         SQUEEZE_GENE_MIN: 80,
         SQUEEZE_GENE_MAX: 100,
         SELL_GENE_MIN: 5,
@@ -59,31 +51,17 @@
             BORDER_RADIUS: '3px',
             INPUT_BORDER: '1px solid #ffe066'
         },
-        // CSS Classes and Selectors
+        // CSS Classes
         CSS_CLASSES: {
             AUTOSELLER_NAV_BTN: 'autoseller-nav-btn',
             AUTOSELLER_WIDGET: 'autoseller-session-widget',
-            AUTOSELLER_RESPONSIVE_STYLE: 'autoseller-responsive-style',
-            WIDGET_TOP: 'widget-top',
-            WIDGET_BOTTOM: 'widget-bottom',
-            PIXEL_FONT_16: 'pixel-font-16',
-            SEPARATOR: 'separator',
-            STAT_ROW: 'stat-row',
-            STAT_LABEL: 'stat-label',
-            STAT_VALUE: 'stat-value',
-            STAT_ICON: 'stat-icon',
-            MINIMIZE_BTN: 'minimize-btn'
+            AUTOSELLER_RESPONSIVE_STYLE: 'autoseller-responsive-style'
         },
         // DOM Selectors
         SELECTORS: {
-            NAV_SHRINK: 'nav.shrink-0',
-            NAV_UL: 'ul.flex.items-center',
-            AUTOPLAY_CONTAINER: '.widget-bottom[data-minimized="false"]',
-            AUTOPLAY_SESSION: 'div[data-autosetup] .widget-bottom[data-minimized="false"]',
             CREATURE_SLOTS: '[data-blip]',
             DAYCARE_ICON: 'img[alt="daycare"][src="/assets/icons/atdaycare.png"]',
-            CREATURE_IMG: 'img[alt="creature"]',
-            DIALOG_OPEN: 'div[role="dialog"][data-state="open"]'
+            CREATURE_IMG: 'img[alt="creature"]'
         }
     };
     
@@ -292,17 +270,15 @@
             const genes = hp + ad + ap + armor + magicResist;
             
             if (squeezeEnabled && genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
-                // Never squeeze shiny creatures
                 if (monster.shiny === true) {
-                    console.log(`[Autoseller] Skipping shiny creature for squeeze: ${monster.name || 'unknown'}`);
+                    console.log(`[Autoseller] Skipping shiny creature: ${monster.name || 'unknown'}`);
                     continue;
                 }
                 toSqueeze.push(monster);
             }
             else if (sellEnabled && genes >= sellMinGenes && genes <= sellMaxGenes) {
-                // Never sell shiny creatures
                 if (monster.shiny === true) {
-                    console.log(`[Autoseller] Skipping shiny creature for sell: ${monster.name || 'unknown'}`);
+                    console.log(`[Autoseller] Skipping shiny creature: ${monster.name || 'unknown'}`);
                     continue;
                 }
                 
@@ -1188,8 +1164,6 @@
         
         // Add change handler for localStorage-first approach
         checkbox.addEventListener('change', () => {
-            console.log('[Autoplant] Checkbox changed, checked:', checkbox.checked);
-            
             // Save to localStorage and track last active mode
             if (checkbox.checked) {
                 setSettings({ autoplantChecked: checkbox.checked, lastActiveMode: 'autoplant' });
@@ -1211,7 +1185,6 @@
             
             // Handle mutual exclusivity
             if (checkbox.checked) {
-                console.log('[Autoplant] Being checked, looking for Autosell checkbox...');
                 setTimeout(() => {
                     // Try to find the Autosell checkbox using stored reference or DOM search
                     let autosellCheckbox = window.autosellCheckbox;
@@ -1219,22 +1192,13 @@
                         // Fallback to DOM search
                         autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
                     }
-                    console.log('[Autoplant] Found Autosell checkbox:', autosellCheckbox);
-                    if (autosellCheckbox) {
-                        console.log('[Autoplant] Autosell checkbox checked state:', autosellCheckbox.checked);
-                        if (autosellCheckbox.checked) {
-                            console.log('[Autoplant] Unchecking Autosell checkbox');
-                            autosellCheckbox.checked = false;
-                            autosellCheckbox.dispatchEvent(new Event('change'));
-                        } else {
-                            console.log('[Autoplant] Autosell checkbox already unchecked');
-                        }
-                    } else {
-                        console.log('[Autoplant] Autosell checkbox not found');
+                    
+                    if (autosellCheckbox && autosellCheckbox.checked) {
+                        console.log('[Autoseller] Autoplant enabled, disabling Autosell (mutual exclusivity)');
+                        autosellCheckbox.checked = false;
+                        autosellCheckbox.dispatchEvent(new Event('change'));
                     }
                 }, 0);
-            } else {
-                console.log('[Autoplant] Being unchecked, no action needed');
             }
         });
         
@@ -1332,9 +1296,6 @@
                 // Clear existing content but keep the container
                 columnsContainer.innerHTML = '';
             }
-            
-            // Debug: Log current state
-            console.log('[Autoseller] Rendering creature columns - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
 
             // Available creatures column
             const availableBox = createAutoplantCreaturesBox({
@@ -1342,8 +1303,7 @@
                 items: availableCreatures,
                 selectedCreature: null,
                 onSelectCreature: (creatureName) => {
-                    console.log('[Autoseller] Moving creature to ignore list:', creatureName);
-                    console.log('[Autoseller] Before - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    console.log('[Autoseller] Added to ignore list:', creatureName);
                     
                     // Move creature from available to selected
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
@@ -1351,8 +1311,6 @@
                     
                     // Sort ignore list to maintain alphabetical order
                     selectedCreatures.sort();
-                    
-                    console.log('[Autoseller] After - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
                     
                     renderCreatureColumns();
                     
@@ -1373,8 +1331,7 @@
                 items: selectedCreatures,
                 selectedCreature: null,
                 onSelectCreature: (creatureName) => {
-                    console.log('[Autoseller] Moving creature back to available list:', creatureName);
-                    console.log('[Autoseller] Before - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
+                    console.log('[Autoseller] Removed from ignore list:', creatureName);
                     
                     // Move creature from selected back to available
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
@@ -1382,8 +1339,6 @@
                     
                     // Sort available creatures to maintain alphabetical order
                     availableCreatures.sort();
-                    
-                    console.log('[Autoseller] After - Available:', availableCreatures.length, 'Selected:', selectedCreatures.length);
                     
                     renderCreatureColumns();
                     
@@ -1599,10 +1554,7 @@
     }
 
     // Helper function to get all creatures for Autoplant
-    function     getAllAutoplantCreatures() {
-        console.log('[Autoseller] Checking creature database...');
-        console.log('[Autoseller] window.creatureDatabase:', window.creatureDatabase);
-        console.log('[Autoseller] ALL_CREATURES:', window.creatureDatabase?.ALL_CREATURES);
+    function getAllAutoplantCreatures() {
         return window.creatureDatabase?.ALL_CREATURES || [];
     }
 
@@ -1696,13 +1648,8 @@
     // =======================
     
     function setPlantMonsterFilter(ignoreList) {
-        console.log('[Autoseller] Setting plantMonsterFilter with ignore list:', ignoreList);
-        console.log('[Autoseller] globalThis.state:', globalThis.state);
-        console.log('[Autoseller] clientConfig:', globalThis.state?.clientConfig);
-        
         if (!globalThis.state?.clientConfig?.trigger?.setState) {
             console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
-            console.log('[Autoseller] Available state keys:', Object.keys(globalThis.state || {}));
             return;
         }
         
@@ -1715,57 +1662,44 @@
         try {
             globalThis.state.clientConfig.trigger.setState({
                 fn: (prev) => {
-                    console.log('[Autoseller] Setting plantMonsterFilter in clientConfig, prev state:', prev);
                     return {
                         ...prev,
                         plantMonsterFilter: (monster) => {
-                            // if you want to sell the creature, return TRUE
-                            // if you want to keep it, return FALSE
-                            
-                            // Debug: Log monster object structure
-                            console.log('[Autoseller] plantMonsterFilter called with monster:', monster);
-                            console.log('[Autoseller] Monster name:', monster?.metadata?.name || monster?.name || 'unknown');
-                            console.log('[Autoseller] Ignore list:', ignoreList);
-                            
-                            // Get monster name for logging
                             const monsterName = monster?.metadata?.name || monster?.name;
                             
-                            // Never devour shiny creatures
                             if (monster.shiny === true) {
-                                console.log('[Autoseller] Keeping monster (shiny):', monsterName);
-                                return false; // Keep shiny creatures (DON'T devour them)
+                                console.log('[Autoseller] Keeping shiny creature:', monsterName);
+                                return false;
                             }
                             
                             // Always devour creatures below absolute threshold (ignores ignore list) - only if enabled
                             if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
-                                console.log('[Autoseller] Devouring monster (at or below absolute threshold):', monsterName, 'genes:', monster.totalGenes, 'threshold:', alwaysDevourBelow);
-                                return true; // Devour creatures at or below absolute threshold
+                                console.log('[Autoseller] Devouring creature (genes ≤', alwaysDevourBelow + '):', monsterName, monster.totalGenes + '%');
+                                return true;
                             }
                             
                             // Keep creatures with minGenes or higher - only if enabled
                             if (keepGenesEnabled && monster.totalGenes >= minGenes) {
-                                console.log('[Autoseller] Keeping monster (high genes):', monsterName, 'genes:', monster.totalGenes, 'min:', minGenes);
-                                return false; // Keep creatures with genes >= minGenes
+                                console.log('[Autoseller] Keeping creature (genes ≥', minGenes + '):', monsterName, monster.totalGenes + '%');
+                                return false;
                             }
                             
                             // For creatures between thresholds (or all if keep genes disabled), check ignore list
                             if (monsterName && ignoreList.includes(monsterName)) {
-                                console.log('[Autoseller] Keeping monster (in ignore list):', monsterName, 'genes:', monster.totalGenes);
-                                return false; // Keep creatures in ignore list
+                                console.log('[Autoseller] Keeping ignored creature:', monsterName);
+                                return false;
                             }
                             
-                            console.log('[Autoseller] Devouring monster:', monsterName, 'genes:', monster.totalGenes);
-                            return true; // Devour everything else
+                            console.log('[Autoseller] Devouring creature:', monsterName, monster.totalGenes + '%');
+                            return true;
                         },
                     };
                 },
             });
-            console.log('[Autoseller] Successfully set plantMonsterFilter');
+            console.log(`[Autoseller] Plant monster filter set (ignoring ${ignoreList.length} creatures)`);
         } catch (error) {
             console.error('[Autoseller] Error setting plantMonsterFilter:', error);
         }
-        
-        console.log('[Autoseller] Plant monster filter set with ignore list:', ignoreList);
     }
     
     function removePlantMonsterFilter() {
@@ -1915,7 +1849,6 @@
             
             // If Autosell is being checked, uncheck Autoplant
             if (opts.persistKey === 'autosell' && checkbox.checked) {
-                console.log('[Autosell] Being checked, looking for Autoplant checkbox...');
                 setTimeout(() => {
                     // Try to find the Autoplant checkbox using stored reference or DOM search
                     let autoplantCheckbox = window.autoplantCheckbox;
@@ -1923,22 +1856,13 @@
                         // Fallback to DOM search
                         autoplantCheckbox = document.querySelector('input[id="autoplant-checkbox"]');
                     }
-                    console.log('[Autosell] Found Autoplant checkbox:', autoplantCheckbox);
-                    if (autoplantCheckbox) {
-                        console.log('[Autosell] Autoplant checkbox checked state:', autoplantCheckbox.checked);
-                        if (autoplantCheckbox.checked) {
-                            console.log('[Autosell] Unchecking Autoplant checkbox');
-                            autoplantCheckbox.checked = false;
-                            autoplantCheckbox.dispatchEvent(new Event('change'));
-                        } else {
-                            console.log('[Autosell] Autoplant checkbox already unchecked');
-                        }
-                    } else {
-                        console.log('[Autosell] Autoplant checkbox not found');
+                    
+                    if (autoplantCheckbox && autoplantCheckbox.checked) {
+                        console.log('[Autoseller] Autosell enabled, disabling Autoplant (mutual exclusivity)');
+                        autoplantCheckbox.checked = false;
+                        autoplantCheckbox.dispatchEvent(new Event('change'));
                     }
                 }, 0);
-            } else if (opts.persistKey === 'autosell') {
-                console.log('[Autosell] Checkbox changed, checked:', checkbox.checked, 'persistKey:', opts.persistKey);
             }
         }
         [checkbox, inputMin, inputMax, minCountInput].forEach(el => {
@@ -2315,12 +2239,9 @@
     // =======================
     
     function openAutosellerModal() {
-        console.log('[Autoseller] Opening settings modal...');
-        
         // Ensure mutual exclusivity on initialization
         const settings = getSettings();
         if (settings.autoplantChecked && settings.autosellChecked) {
-            console.log('[Autoseller] Both Autoplant and Autosell are checked, prioritizing Autoplant');
             setSettings({ autosellChecked: false });
         }
         
@@ -2492,11 +2413,8 @@
                     const autosellCheckbox = document.querySelector('input[id*="autosell"][type="checkbox"]');
                     
                     if (autoplantCheckbox && autosellCheckbox) {
-                        console.log('[Autoseller] Initializing checkbox states - Autoplant:', currentSettings.autoplantChecked, 'Autosell:', currentSettings.autosellChecked);
-                        
                         // If both are checked, prioritize Autoplant
                         if (currentSettings.autoplantChecked && currentSettings.autosellChecked) {
-                            console.log('[Autoseller] Both checked on init, unchecking Autosell');
                             autosellCheckbox.checked = false;
                             setSettings({ autosellChecked: false });
                         }
@@ -2706,8 +2624,6 @@
         const settings = getSettings();
         const shouldShowWidget = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
         
-        console.log(`[Autoseller] Widget creation - autosell: ${settings.autosellChecked}, autosqueeze: ${settings.autosqueezeChecked}`);
-        
         const existingWidget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
         if (!shouldShowWidget) {
             if (existingWidget && existingWidget.parentNode) {
@@ -2852,7 +2768,6 @@
                         if (!getAutosellerWidget()) {
                             createAutosellerSessionWidget();
                             updateAutosellerSessionWidget();
-                            console.log('[Autoseller] Widget created - autoplay mode started');
                         }
                         
                         // Apply localStorage to game checkbox when autoplay starts
@@ -3141,7 +3056,7 @@
         
         // Only activate if not already enabled
         if (!isCurrentlyEnabled) {
-            console.log(`[${modName}] Auto-clicking Dragon Plant on game start`);
+            console.log(`[${modName}] Auto-clicking Dragon Plant after battle`);
             setTimeout(() => {
                 dragonPlantButton.click();
             }, 100);
@@ -3233,11 +3148,9 @@
     // Helper: Close dialogs with ESC keys
     const closeDialogs = (onComplete) => {
         sendEscKey();
-        console.log('[Autoseller] Pressed ESC to close item details');
         
         setTimeout(() => {
             sendEscKey();
-            console.log('[Autoseller] Pressed ESC to close inventory');
             if (onComplete) {
                 setTimeout(onComplete, DRAGON_PLANT_CONFIG.TIMINGS.VERIFY_SUCCESS);
             }
@@ -3245,12 +3158,11 @@
     };
     
     function collectDragonPlant() {
-        console.log('[Autoseller] Attempting to collect Dragon Plant...');
-        
         // Set collecting flag
         isCollecting = true;
         
         const initialGold = getPlantGold();
+        console.log('[Autoseller] Collecting Dragon Plant...', initialGold, 'gold');
         
         // Step 1: Open inventory
         if (!openInventory()) {
@@ -3278,7 +3190,6 @@
             }
             
             itemButton.click();
-            console.log('[Autoseller] Clicked Dragon Plant item');
             
             // Step 3: Wait for item details, then start collect loop
             setTimeout(() => {
@@ -3290,8 +3201,7 @@
                 const collectLoop = () => {
                     // Safety check: prevent infinite loops
                     if (collectCount >= DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS) {
-                        console.log('[Autoseller] Max collect iterations reached, stopping');
-                        closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
                         return;
                     }
                     
@@ -3300,12 +3210,10 @@
                     if (!collectButton) {
                         if (retryCount < MAX_RETRIES) {
                             retryCount++;
-                            console.log(`[Autoseller] Collect button not ready (disabled or not found), retrying (${retryCount}/${MAX_RETRIES})...`);
                             setTimeout(collectLoop, 200);
                             return;
                         }
-                        console.log('[Autoseller] Collect button not ready after retries');
-                        closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                        closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
                         return;
                     }
                     
@@ -3314,18 +3222,15 @@
                     
                     collectButton.click();
                     collectCount++;
-                    console.log(`[Autoseller] Clicked Collect button (${collectCount}/${DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS})`);
                     
                     // Step 4: Wait then check if we should collect again
                     setTimeout(() => {
                         const currentGold = getPlantGold();
                         
                         if (currentGold !== undefined && currentGold !== null && currentGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
-                            console.log(`[Autoseller] Plant still has ${currentGold} gold, collecting again...`);
                             collectLoop(); // Collect again
                         } else {
-                            console.log(`[Autoseller] Collection complete, final gold: ${currentGold}`);
-                            closeDialogs(() => verifyAndUpdateCooldown(initialGold));
+                            closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
                         }
                     }, DRAGON_PLANT_CONFIG.TIMINGS.AFTER_COLLECT);
                 };
@@ -3337,11 +3242,11 @@
     }
     
     // Helper: Verify collection success and update cooldown
-    const verifyAndUpdateCooldown = (initialGold) => {
+    const verifyAndUpdateCooldown = (initialGold, collectCount) => {
         const finalGold = getPlantGold();
         
         if (finalGold !== undefined && finalGold < initialGold) {
-            console.log(`[Autoseller] Dragon Plant collected successfully! Gold: ${initialGold} → ${finalGold}`);
+            console.log(`[Autoseller] Collection complete: ${initialGold} → ${finalGold} gold (${collectCount} collections)`);
             lastAutocollectTime = Date.now();
         } else {
             console.log('[Autoseller] Collection may have failed - gold did not decrease');
@@ -3349,7 +3254,6 @@
         
         // Reset collecting flag
         isCollecting = false;
-        console.log('[Autoseller] Collection process complete, ready for next collection');
     };
 
     function setupDragonPlantAutocollect() {
@@ -3430,7 +3334,6 @@
                         return;
                     }
                     
-                    console.log('[Autoseller] Processing inventory after battle completion...');
                     await processEligibleMonsters(inventorySnapshot, 'squeeze');
                     await processEligibleMonsters(inventorySnapshot, 'sell');
                 }, (waitSeconds + 5) * 1000);

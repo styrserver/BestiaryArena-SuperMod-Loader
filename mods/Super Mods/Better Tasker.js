@@ -67,6 +67,9 @@ const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 
+// Stamina constants
+const DEFAULT_STAMINA_COST = 30;
+
 // ============================================================================
 // 1.1. DOM UTILITY FUNCTIONS
 // ============================================================================
@@ -276,6 +279,94 @@ function clearModalsWithEscSync(count = 3) {
     }
 }
 
+// Show toast notification
+function showToast(message, duration = 5000) {
+    try {
+        // Use custom toast implementation (same as Welcome.js)
+        // Get or create the main toast container
+        let mainContainer = document.getElementById('bt-toast-container');
+        if (!mainContainer) {
+            mainContainer = document.createElement('div');
+            mainContainer.id = 'bt-toast-container';
+            mainContainer.style.cssText = `
+                position: fixed;
+                z-index: 9999;
+                inset: 16px 16px 64px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(mainContainer);
+        }
+        
+        // Count existing toasts to calculate stacking position
+        const existingToasts = mainContainer.querySelectorAll('.toast-item');
+        const stackOffset = existingToasts.length * 46;
+        
+        // Create the flex container for this specific toast
+        const flexContainer = document.createElement('div');
+        flexContainer.className = 'toast-item';
+        flexContainer.style.cssText = `
+            left: 0px;
+            right: 0px;
+            display: flex;
+            position: absolute;
+            transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+            transform: translateY(-${stackOffset}px);
+            bottom: 0px;
+            justify-content: flex-end;
+        `;
+        
+        // Create toast button
+        const toast = document.createElement('button');
+        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+        
+        // Create widget structure
+        const widgetTop = document.createElement('div');
+        widgetTop.className = 'widget-top h-2.5';
+        
+        const widgetBottom = document.createElement('div');
+        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+        
+        // Add icon (taskrank icon for tasks)
+        const iconImg = document.createElement('img');
+        iconImg.alt = 'task';
+        iconImg.src = 'https://bestiaryarena.com/assets/icons/taskrank.png';
+        iconImg.className = 'pixelated';
+        iconImg.style.cssText = 'width: 16px; height: 16px;';
+        widgetBottom.appendChild(iconImg);
+        
+        // Add message
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'text-left';
+        messageDiv.textContent = message;
+        widgetBottom.appendChild(messageDiv);
+        
+        // Assemble toast
+        toast.appendChild(widgetTop);
+        toast.appendChild(widgetBottom);
+        flexContainer.appendChild(toast);
+        mainContainer.appendChild(flexContainer);
+        
+        console.log(`[Better Tasker] Toast shown: ${message}`);
+        
+        // Auto-remove after duration
+        setTimeout(() => {
+            if (flexContainer && flexContainer.parentNode) {
+                flexContainer.parentNode.removeChild(flexContainer);
+                
+                // Update positions of remaining toasts
+                const toasts = mainContainer.querySelectorAll('.toast-item');
+                toasts.forEach((toast, index) => {
+                    const offset = index * 46;
+                    toast.style.transform = `translateY(-${offset}px)`;
+                });
+            }
+        }, duration);
+        
+    } catch (error) {
+        console.error('[Better Tasker] Error showing toast:', error);
+    }
+}
+
 // ============================================================================
 // 1.2. STAMINA MONITORING FUNCTIONS
 // ============================================================================
@@ -313,8 +404,8 @@ function getCurrentStamina() {
 }
 
 /**
- * Get stamina cost for current map
- * @returns {number} Stamina cost (defaults to 6 if unknown)
+ * Get stamina cost for current map from game API
+ * @returns {number} Stamina cost (defaults to DEFAULT_STAMINA_COST if unknown)
  */
 function getCurrentMapStaminaCost() {
     try {
@@ -325,16 +416,16 @@ function getCurrentMapStaminaCost() {
             return selectedRoom.staminaCost;
         }
         
-        return 6; // Default to 6 if unknown
+        return DEFAULT_STAMINA_COST;
     } catch (error) {
         console.error('[Better Tasker] Error getting stamina cost:', error);
-        return 6;
+        return DEFAULT_STAMINA_COST;
     }
 }
 
 /**
- * Check if stamina tooltip is visible (ONLY method - tooltip is source of truth)
- * @returns {Object} { insufficient: boolean, cost: number|null }
+ * Check if stamina tooltip is visible (insufficient stamina indicator)
+ * @returns {Object} { insufficient: boolean, cost: number }
  */
 function hasInsufficientStamina() {
     // Look for stamina tooltip (icon-based, language-independent)
@@ -342,23 +433,17 @@ function hasInsufficientStamina() {
         '[role="tooltip"] img[alt="stamina"], [data-state="instant-open"] img[alt="stamina"]'
     );
     
+    // Get stamina cost from game API
+    const cost = getCurrentMapStaminaCost();
+    
     if (staminaTooltip) {
         // Found stamina icon in tooltip = insufficient stamina
-        const tooltipElement = staminaTooltip.closest('[role="tooltip"]') || 
-                              staminaTooltip.closest('[data-state="instant-open"]');
-        
-        const tooltipText = tooltipElement?.textContent || '';
-        
-        // Extract stamina cost from format: "Not enough stamina (6)" or "Falta stamina (6)"
-        const staminaMatch = tooltipText.match(/\(.*?(\d+)\)/);
-        const cost = staminaMatch ? parseInt(staminaMatch[1]) : null;
-        
         console.log(`[Better Tasker] Tooltip check: Insufficient (needs ${cost})`);
         return { insufficient: true, cost };
     }
     
     // No tooltip = sufficient stamina (trust the game)
-    return { insufficient: false, cost: null };
+    return { insufficient: false, cost };
 }
 
 /**
@@ -3211,6 +3296,9 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             if (roomId) {
                 console.log('[Better Tasker] Found room ID for map:', mapName, '->', roomId);
                 
+                // Show toast notification
+                showToast('Starting Better Tasker');
+                
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId);
                 
@@ -3251,7 +3339,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     
                     // Start stamina recovery monitoring (tooltip + API for progress) with continuous monitoring
                     const continuousStaminaMonitoring = () => {
-                        console.log('[Better Tasker] Stamina recovered - clicking Start button');
+                        console.log('[Better Tasker] Stamina recovered - checking autoplay state');
                         
                         // Check if still valid to continue
                         if (!taskHuntingOngoing) {
@@ -3268,30 +3356,18 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                             return;
                         }
                         
-                        const startButton = findButtonByText('Start');
-                        if (startButton && !startButton.disabled) {
-                            startButton.click();
-                            
-                            // Complete the setup flow
-                            const currentMapId = getCurrentRoomId();
-                            if (currentMapId) {
-                                taskingMapId = currentMapId;
-                                console.log(`[Better Tasker] Saved tasking map ID: ${taskingMapId}`);
-                            }
-                            
-                            taskHuntingOngoing = true;
-                            updateExposedState();
-                            resetFailureCounter();
-                            modifyQuestButtonForTasking();
-                            questButtonModifiedForTasking = true;
-                            startQuestButtonValidation();
-                            
-                            console.log('[Better Tasker] Task started successfully after stamina recovery');
-                            
-                            // Continue monitoring for future depletion (recursive)
+                        // Check if autoplay is still running
+                        const boardContext = globalThis.state.board.getSnapshot().context;
+                        const isAutoplay = boardContext.mode === 'autoplay';
+                        
+                        if (isAutoplay) {
+                            // Autoplay is still running (auto-refill working) - just continue monitoring
+                            console.log('[Better Tasker] Autoplay still running - continuing stamina monitoring');
                             startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                         } else {
-                            console.log('[Better Tasker] Start button not available after stamina recovery');
+                            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
+                            console.log(`[Better Tasker] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
+                            stopStaminaTooltipMonitoring();
                             resetState('navigation');
                         }
                     };
@@ -3340,7 +3416,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Start continuous stamina monitoring for depletion during autoplay (recursive)
                 const continuousStaminaMonitoring = () => {
-                    console.log('[Better Tasker] Stamina depleted during autoplay - restarting');
+                    console.log('[Better Tasker] Stamina recovered - checking autoplay state');
                     
                     // Check if still valid to continue
                     if (!taskHuntingOngoing) {
@@ -3356,16 +3432,19 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                         return;
                     }
                     
-                    // Click Start button again
-                    const restartButton = findButtonByText('Start');
-                    if (restartButton && !restartButton.disabled) {
-                        restartButton.click();
-                        console.log('[Better Tasker] Autoplay restarted after stamina recovery');
-                        
-                        // Restart monitoring for next depletion (recursive)
+                    // Check if autoplay is still running
+                    const boardContext = globalThis.state.board.getSnapshot().context;
+                    const isAutoplay = boardContext.mode === 'autoplay';
+                    
+                    if (isAutoplay) {
+                        // Autoplay is still running (auto-refill working) - just continue monitoring
+                        console.log('[Better Tasker] Autoplay still running - continuing stamina monitoring');
                         startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                     } else {
-                        console.log('[Better Tasker] Start button unavailable for restart');
+                        // User changed mode (manual or sandbox) - respect their choice and stop monitoring
+                        console.log(`[Better Tasker] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
+                        stopStaminaTooltipMonitoring();
+                        resetState('navigation');
                     }
                 };
                 

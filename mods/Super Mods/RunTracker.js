@@ -151,38 +151,31 @@ function resolveMapName(mapId) {
 // Get monster name from database ID by looking up in player's monster inventory
 function getMonsterNameFromDatabaseId(databaseId) {
   try {
-    console.log(`[RunTracker] getMonsterNameFromDatabaseId called with: ${databaseId}`);
-    
-    // First try to get from player's monster inventory
     const { monsters } = globalThis.state.player.getSnapshot().context;
-    console.log(`[RunTracker] Found ${monsters ? monsters.length : 0} monsters in inventory`);
     
     if (Array.isArray(monsters)) {
       const monster = monsters.find(m => String(m.id) === String(databaseId));
-      console.log(`[RunTracker] Found monster for databaseId ${databaseId}:`, monster);
       
       if (monster) {
-        // Use the monster's gameId to get the proper name from utils
         try {
           const monsterData = globalThis.state.utils.getMonster(monster.gameId);
           const name = monsterData && monsterData.metadata ? monsterData.metadata.name : null;
-          console.log(`[RunTracker] Resolved name for gameId ${monster.gameId}: ${name}`);
+          if (name) {
+            console.log(`[RunTracker] Resolved monster: ${name} (databaseId: ${databaseId}, gameId: ${monster.gameId})`);
+          }
           return name;
         } catch (utilsError) {
-          console.error(`[RunTracker] Error getting monster data for gameId ${monster.gameId}:`, utilsError);
-          // Fallback to monster's own name property
+          console.error(`[RunTracker] Error resolving monster gameId ${monster.gameId}:`, utilsError);
           return monster.name || null;
         }
       }
     }
     
-    // Fallback: try to use the databaseId directly as a gameId (unlikely to work)
-    console.log(`[RunTracker] Trying databaseId as gameId: ${databaseId}`);
+    // Fallback: try to use the databaseId directly as a gameId
     try {
       const monsterData = globalThis.state.utils.getMonster(databaseId);
       return monsterData && monsterData.metadata ? monsterData.metadata.name : null;
     } catch (utilsError) {
-      console.error(`[RunTracker] Error getting monster data for databaseId as gameId:`, utilsError);
       return null;
     }
   } catch (e) {
@@ -194,20 +187,13 @@ function getMonsterNameFromDatabaseId(databaseId) {
 // Get monster name from monster ID (helper function)
 function getMonsterNameFromId(monsterId) {
   try {
-    console.log(`[RunTracker] getMonsterNameFromId called with: ${monsterId}`);
-    
-    // Try to get monster data directly from utils
-    try {
-      const monsterData = globalThis.state.utils.getMonster(monsterId);
-      const name = monsterData && monsterData.metadata ? monsterData.metadata.name : null;
-      console.log(`[RunTracker] Resolved name for monsterId ${monsterId}: ${name}`);
-      return name;
-    } catch (utilsError) {
-      console.error(`[RunTracker] Error getting monster data for monsterId ${monsterId}:`, utilsError);
-      return null;
+    const monsterData = globalThis.state.utils.getMonster(monsterId);
+    const name = monsterData && monsterData.metadata ? monsterData.metadata.name : null;
+    if (name) {
+      console.log(`[RunTracker] Resolved monster: ${name} (monsterId: ${monsterId})`);
     }
+    return name;
   } catch (e) {
-    console.error('[RunTracker] Error getting monster name from ID:', e);
     return null;
   }
 }
@@ -215,38 +201,31 @@ function getMonsterNameFromId(monsterId) {
 // Get equipment name from equipment ID
 function getEquipmentNameFromId(equipId) {
   try {
-    console.log(`[RunTracker] getEquipmentNameFromId called with: ${equipId}`);
-    
-    // First try to get from player's equipment inventory
     const { equips } = globalThis.state.player.getSnapshot().context;
-    console.log(`[RunTracker] Found ${equips ? equips.length : 0} equipment in inventory`);
     
     if (Array.isArray(equips)) {
       const equip = equips.find(e => String(e.id) === String(equipId));
-      console.log(`[RunTracker] Found equipment for equipId ${equipId}:`, equip);
       
       if (equip) {
-        // Use the equipment's gameId to get the proper name from utils
         try {
           const equipmentData = globalThis.state.utils.getEquipment(equip.gameId);
           const name = equipmentData && equipmentData.metadata ? equipmentData.metadata.name : null;
-          console.log(`[RunTracker] Resolved equipment name for gameId ${equip.gameId}: ${name}`);
+          if (name) {
+            console.log(`[RunTracker] Resolved equipment: ${name} (equipId: ${equipId}, gameId: ${equip.gameId}, tier: ${equip.tier}, stat: ${equip.stat})`);
+          }
           return name;
         } catch (utilsError) {
-          console.error(`[RunTracker] Error getting equipment data for gameId ${equip.gameId}:`, utilsError);
-          // Fallback: try to construct a name from the equipment data
+          console.error(`[RunTracker] Error resolving equipment gameId ${equip.gameId}:`, utilsError);
           return `Equipment ${equip.gameId}`;
         }
       }
     }
     
-    // Fallback: try to use the equipId directly as a gameId (unlikely to work)
-    console.log(`[RunTracker] Trying equipId as gameId: ${equipId}`);
+    // Fallback: try to use the equipId directly as a gameId
     try {
       const equipmentData = globalThis.state.utils.getEquipment(equipId);
       return equipmentData && equipmentData.metadata ? equipmentData.metadata.name : null;
     } catch (utilsError) {
-      console.error(`[RunTracker] Error getting equipment data for equipId as gameId:`, utilsError);
       return null;
     }
   } catch (e) {
@@ -396,22 +375,13 @@ function getCurrentBoardSetup() {
   try {
     const boardContext = globalThis.state?.board?.getSnapshot()?.context;
     if (!boardContext || !boardContext.boardConfig) {
-      console.log('[RunTracker] No board context or boardConfig available');
       return null;
     }
-    
-    console.log('[RunTracker] Board context:', boardContext);
-    console.log('[RunTracker] Board config:', boardContext.boardConfig);
     
     // Extract player pieces (monsters and equipment)
     const playerPieces = boardContext.boardConfig
       .filter(piece => piece.type === 'player' || piece.type === 'custom')
       .map(piece => {
-        console.log('[RunTracker] Processing piece:', piece);
-        console.log('[RunTracker] Piece keys:', Object.keys(piece));
-        if (piece.monster) console.log('[RunTracker] Piece monster:', piece.monster);
-        if (piece.equip) console.log('[RunTracker] Piece equip:', piece.equip);
-        
         const boardPiece = {
           tile: piece.tileIndex,
           monsterId: piece.monsterId || piece.gameId || piece.databaseId,
@@ -435,11 +405,9 @@ function getCurrentBoardSetup() {
           boardPiece.monsterName = piece.name;
         } else if (piece.databaseId) {
           // Try to get monster name from databaseId using the new helper function
-          console.log(`[RunTracker] Attempting to resolve monster name for databaseId: ${piece.databaseId}`);
           const resolvedName = getMonsterNameFromDatabaseId(piece.databaseId);
           // Convert to lowercase for replay compatibility
           boardPiece.monsterName = resolvedName ? resolvedName.toLowerCase() : piece.databaseId;
-          console.log(`[RunTracker] Resolved monster name from databaseId ${piece.databaseId}: ${resolvedName}`);
         } else if (piece.monsterId) {
           // Try to get monster name from monsterId
           const resolvedName = getMonsterNameFromId(piece.monsterId);
@@ -481,8 +449,6 @@ function getCurrentBoardSetup() {
                 if (monster.genes) {
                   boardPiece.genes = monster.genes;
                 }
-                
-                console.log(`[RunTracker] Got actual stats for ${boardPiece.monsterName}: Level ${actualLevel}, HP ${monster.hp}, AD ${monster.ad}, AP ${monster.ap}, Armor ${monster.armor}, MR ${monster.magicResist}`);
               }
             }
           } catch (error) {
@@ -504,7 +470,6 @@ function getCurrentBoardSetup() {
         } else if (piece.equipId) {
           boardPiece.equipId = piece.equipId;
           // Try to get equipment name from equipId using the new helper function
-          console.log(`[RunTracker] Attempting to resolve equipment name for equipId: ${piece.equipId}`);
           const resolvedName = getEquipmentNameFromId(piece.equipId);
           // Convert to lowercase for replay compatibility
           boardPiece.equipmentName = resolvedName ? resolvedName.toLowerCase() : piece.equipId;
@@ -520,12 +485,16 @@ function getCurrentBoardSetup() {
               boardPiece.equipmentTier = equipment.tier;
             }
           }
-          console.log(`[RunTracker] Resolved equipment name from equipId ${piece.equipId}: ${resolvedName}`);
         } else if (piece.equipmentName) {
           boardPiece.equipmentName = piece.equipmentName;
         }
         
-        console.log('[RunTracker] Processed board piece:', boardPiece);
+        // Consolidated log: show key info only
+        const monName = boardPiece.monsterName || 'unknown';
+        const equipName = boardPiece.equipmentName || 'none';
+        const tier = boardPiece.equipmentTier || '?';
+        const stat = boardPiece.equipmentStat || '?';
+        console.log(`[RunTracker] Board piece [tile ${boardPiece.tile}]: ${monName} (lvl ${boardPiece.level}) + ${equipName} (T${tier} ${stat.toUpperCase()})`);
         return boardPiece;
       })
       .sort((a, b) => a.tile - b.tile); // Sort by tile position for consistency
@@ -590,46 +559,31 @@ function parseServerResults(serverResults) {
         const roomNames = globalThis.state.utils.ROOM_NAME;
         const roomIds = globalThis.state.utils.ROOM_ID;
         
-        console.log('[RunTracker] Region resolution debug:', {
-          mapName: runData.mapName,
-          rooms: rooms ? Object.keys(rooms).slice(0, 5) : 'undefined',
-          regions: regions ? (Array.isArray(regions) ? regions.length : Object.keys(regions).slice(0, 5)) : 'undefined',
-          roomNames: roomNames ? Object.keys(roomNames).slice(0, 5) : 'undefined',
-          roomIds: roomIds ? Object.keys(roomIds).slice(0, 5) : 'undefined'
-        });
-        
         // Try to find room entry by name first, then by ID
         let roomEntry = rooms[runData.mapName];
         
         // If not found by name, try to find the room ID first
         if (!roomEntry && roomIds && roomIds[runData.mapName]) {
-          const roomId = roomIds[runData.mapName];
-          console.log('[RunTracker] Found room ID for fentr:', roomId);
-          roomEntry = rooms[roomId];
+          roomEntry = rooms[roomIds[runData.mapName]];
         }
         
         // If still not found, try to find by searching through roomNames
         if (!roomEntry && roomNames) {
           const roomId = Object.keys(roomNames).find(id => roomNames[id] === runData.mapName);
           if (roomId) {
-            console.log('[RunTracker] Found room ID through roomNames search:', roomId);
             roomEntry = rooms[roomId];
           }
         }
         
         // If still not found, try to search through all rooms for a matching ID
         if (!roomEntry && rooms) {
-          console.log('[RunTracker] Searching through all rooms for fentr...');
           for (const [key, room] of Object.entries(rooms)) {
             if (room && room.id === runData.mapName) {
-              console.log('[RunTracker] Found room by ID search:', key, room);
               roomEntry = room;
               break;
             }
           }
         }
-        
-        console.log('[RunTracker] Room entry found:', roomEntry);
         
         // Find which region contains this room
         if (roomEntry && regions) {
@@ -637,7 +591,6 @@ function parseServerResults(serverResults) {
           
           // Search through regions to find which one contains this room
           if (Array.isArray(regions)) {
-            // Regions is an array, search through each region's rooms
             for (const region of regions) {
               if (region.rooms && Array.isArray(region.rooms)) {
                 const roomInRegion = region.rooms.find(room => room.id === roomEntry.id);
@@ -648,7 +601,6 @@ function parseServerResults(serverResults) {
               }
             }
           } else if (typeof regions === 'object') {
-            // Regions is an object, search through each region's rooms
             for (const [regionId, region] of Object.entries(regions)) {
               if (region.rooms && Array.isArray(region.rooms)) {
                 const roomInRegion = region.rooms.find(room => room.id === roomEntry.id);
@@ -671,16 +623,12 @@ function parseServerResults(serverResults) {
             // Capitalize region name
             if (runData.regionName) {
               runData.regionName = runData.regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-              console.log('[RunTracker] Resolved region name:', runData.regionName);
+              console.log(`[RunTracker] Resolved region: ${runData.regionName} (map: ${runData.mapName})`);
             }
-          } else {
-            console.log('[RunTracker] No region found containing room:', roomEntry.id);
           }
-        } else {
-          console.log('[RunTracker] No room entry or regions available for region resolution');
         }
       } catch (error) {
-        console.warn('[RunTracker] Error resolving region name:', error);
+        // Silently fail region resolution - it's optional metadata
       }
     
 
@@ -849,40 +797,27 @@ async function addRun(runData) {
     // Check if this map is currently boosted - SKIP BOOSTED MAPS
     try {
       const dailyContext = globalThis.state?.daily?.getSnapshot()?.context;
-      console.log('[RunTracker] Daily context for boosted map check:', dailyContext);
       
       if (dailyContext?.boostedMap?.roomId) {
-        console.log(`[RunTracker] Current boosted map: ${dailyContext.boostedMap.roomId}`);
-        console.log(`[RunTracker] Current run map ID: ${runData.setup?.mapId}`);
-        
         // Check if the current map matches the boosted map (compare map IDs)
         if (runData.setup?.mapId && dailyContext.boostedMap.roomId.toLowerCase() === runData.setup.mapId.toLowerCase()) {
-          console.log(`[RunTracker] Skipping boosted map run: ${runData.mapName} (ID: ${runData.setup.mapId})`);
+          console.log(`[RunTracker] Skipping boosted map: ${runData.mapName}`);
           return false; // Don't track runs on boosted maps
-        } else {
-          console.log(`[RunTracker] Map is not boosted: ${runData.mapName} (ID: ${runData.setup?.mapId})`);
         }
-      } else {
-        console.log('[RunTracker] No boosted map found in daily context');
       }
     } catch (error) {
       // If we can't check boosted status, continue with the run
-      console.log('[RunTracker] Could not check boosted map status, continuing with run:', error);
     }
     
     // Fallback: Check if we can get boosted map info from other sources
     try {
-      // Try to get boosted map from board context
       const boardContext = globalThis.state?.board?.getSnapshot()?.context;
-      if (boardContext?.selectedMap?.boosted) {
-        console.log('[RunTracker] Found boosted map in board context');
-        if (runData.setup?.mapId && boardContext.selectedMap.id === runData.setup.mapId) {
-          console.log(`[RunTracker] Skipping boosted map run (board context): ${runData.mapName} (ID: ${runData.setup.mapId})`);
-          return false;
-        }
+      if (boardContext?.selectedMap?.boosted && runData.setup?.mapId && boardContext.selectedMap.id === runData.setup.mapId) {
+        console.log(`[RunTracker] Skipping boosted map (board context): ${runData.mapName}`);
+        return false;
       }
     } catch (fallbackError) {
-      console.log('[RunTracker] Fallback boosted map check failed:', fallbackError);
+      // Silently continue if fallback check fails
     }
     
     // Check if we have an existing run with the same setup
@@ -1610,7 +1545,7 @@ exports = {
   hidden: true, // This prevents it from showing in the UI
   
   // Cleanup function to prevent memory leaks
-  cleanup: () => {
+  cleanup: async () => {
     try {
       console.log('[RunTracker] Cleaning up mod resources...');
       
@@ -1634,17 +1569,17 @@ exports = {
         console.log('[RunTracker] Cleared retry interval');
       }
       
-      // Restore original global functions
+      // Restore original global functions (log before restoring)
       if (originalFetch) {
+        console.log('[RunTracker] Restoring original fetch function');
         window.fetch = originalFetch;
         originalFetch = null;
-        console.log('[RunTracker] Restored original fetch function');
       }
       
       if (originalConsoleLog) {
+        console.log('[RunTracker] Restoring original console.log function');
         console.log = originalConsoleLog;
         originalConsoleLog = null;
-        console.log('[RunTracker] Restored original console.log function');
       }
       
       // Clear all pending debouncer timers
@@ -1654,9 +1589,9 @@ exports = {
         console.log('[RunTracker] Cleared all debouncer timers');
       }
       
-      // Flush any pending storage operations
+      // Flush any pending storage operations (await for data integrity)
       if (StorageManager) {
-        StorageManager.flushSaves();
+        await StorageManager.flushSaves();
         console.log('[RunTracker] Flushed pending storage operations');
         
         // Clear StorageManager state
@@ -1670,10 +1605,13 @@ exports = {
       // Reset initialization state for clean reinitialization
       hasInitialized = false;
       isInitializing = false;
-      if (window.RunTrackerAPI && typeof window.RunTrackerAPI === 'object') {
-        window.RunTrackerAPI._initialized = false;
+      initializationPromise = null;
+      
+      // Remove global API to prevent memory leaks
+      if (window.RunTrackerAPI) {
+        delete window.RunTrackerAPI;
+        console.log('[RunTracker] Removed global API');
       }
-      console.log('[RunTracker] Reset initialization state');
       
       console.log('[RunTracker] Cleanup completed successfully');
     } catch (error) {

@@ -132,7 +132,6 @@ const findButtonWithText = (textKey) => {
 const clickButtonWithText = (textKey) => {
   const button = findButtonWithText(textKey);
   if (button) {
-    console.log(`[Bestiary Automator] Clicking button: "${textKey}" (${button.textContent.trim()})`);
     button.click();
     return true;
   }
@@ -202,13 +201,12 @@ const clickAllCloseButtons = () => {
   for (const button of closeButtons) {
     const buttonText = button.textContent.trim();
     if (buttonText === 'Close' || buttonText === 'Fechar') {
-      console.log(`[Bestiary Automator] Clicking close button: "${buttonText}"`);
       button.click();
       clickedCount++;
     }
   }
   
-        if (clickedCount > 0) {
+  if (clickedCount > 0) {
     console.log(`[Bestiary Automator] Clicked ${clickedCount} close button(s)`);
   }
   
@@ -662,10 +660,7 @@ const setupStaminaPotionErrorHandler = () => {
 
 // Take rewards if available - only check at game start
 const takeRewardsIfAvailable = async () => {
-  console.log(`[Bestiary Automator] takeRewardsIfAvailable called - autoCollectRewards: ${config.autoCollectRewards}, rewardsCollectedThisSession: ${rewardsCollectedThisSession}`);
-  
   if (!config.autoCollectRewards || rewardsCollectedThisSession) {
-    console.log('[Bestiary Automator] Skipping rewards collection - either disabled or already collected this session');
     return;
   }
   
@@ -679,15 +674,11 @@ const takeRewardsIfAvailable = async () => {
     
     // Check if there are rewards available by looking for the ping animation
     const available = document.querySelector('button[aria-haspopup="menu"]:has(.animate-ping)');
-    console.log(`[Bestiary Automator] Looking for rewards ping animation - found: ${!!available}`);
     
     if (!available) {
-      console.log('[Bestiary Automator] No rewards ping animation found, checking seashell anyway...');
       // Check for seashell collection even if no regular rewards (but only if no timer is set)
       if (!seashellTimer) {
         await collectSeashellIfReady();
-      } else {
-        console.log('[Bestiary Automator] Seashell timer already set, skipping seashell check');
       }
       return;
     }
@@ -713,8 +704,6 @@ const takeRewardsIfAvailable = async () => {
     // Check for seashell collection (but only if no timer is set)
     if (!seashellTimer) {
       await collectSeashellIfReady();
-    } else {
-      console.log('[Bestiary Automator] Seashell timer already set, skipping seashell check');
     }
     
     // Mark rewards as collected for this session
@@ -1042,16 +1031,13 @@ const handleDayCare = async () => {
   if (window.__modCoordination?.boardAnalyzerRunning) return;
   
   try {
-    console.log('[Bestiary Automator] === Starting daycare detection ===');
-    
     // Single query with early exit - if no blip elements, skip processing
     const blipElements = document.querySelectorAll('[data-blip="true"]');
     if (blipElements.length === 0) {
-      console.log('[Bestiary Automator] No daycare creatures found');
       return;
     }
     
-    console.log('[Bestiary Automator] Found', blipElements.length, 'elements with data-blip="true"');
+    console.log('[Bestiary Automator] Found', blipElements.length, 'daycare creatures with data-blip="true"');
     
     // Check for daycare button with visual indicator
     const dayCareButton = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
@@ -1383,25 +1369,14 @@ const subscribeToGameState = () => {
       const handleNewGame = (event) => {
         const now = Date.now();
         if (now - lastGameStateChange < GAME_STATE_DEBOUNCE_MS) {
-          console.log('[Bestiary Automator] Ignoring rapid new game event (debounced)');
           return;
         }
         lastGameStateChange = now;
         
-        console.log('[Bestiary Automator] New game detected via game state API, resetting session flags');
-        console.log('[Bestiary Automator] New game event details:', event);
+        console.log('[Bestiary Automator] New game detected, resetting session flags');
         rewardsCollectedThisSession = false;
         fasterAutoplayExecutedThisSession = false;
         fasterAutoplayRunning = false;
-        
-        
-        
-        // Reset Faster Autoplay session flag when a new game starts
-        if (config.fasterAutoplay) {
-          console.log('[Bestiary Automator] New game detected via game server API, resetting Faster Autoplay session flag...');
-          fasterAutoplayExecutedThisSession = false;
-          fasterAutoplayRunning = false;
-        }
         
         // Cancel any ongoing countdown when new game starts
         if (currentCountdownTask) {
@@ -2080,8 +2055,6 @@ const handleFasterAutoplay = async () => {
   }
   
   try {
-    console.log('[Bestiary Automator] Setting autoplay delay to 0ms...');
-    
     // Set autoplay delay to 0 for instant execution
     globalThis.state.clientConfig.trigger.setState({
       fn: (prev) => ({
@@ -2147,9 +2120,6 @@ const startAutomation = () => {
     
     // Schedule next run with appropriate interval
     const nextInterval = getAutomationInterval();
-    const mode = document.hidden ? 'background (10s)' : 'foreground (5s)';
-    console.log(`[Bestiary Automator] Next run in ${nextInterval}ms - ${mode} mode`);
-    
     automationInterval = setTimeout(runWithAdaptiveInterval, nextInterval);
   };
   

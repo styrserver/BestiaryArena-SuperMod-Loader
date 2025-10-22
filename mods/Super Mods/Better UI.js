@@ -130,23 +130,43 @@ const t = (key) => api.i18n.t(key);
 // Track timeouts for cleanup
 const activeTimeouts = new Set();
 
-// State
-let staminaTimerElement = null;
-let lastStaminaValue = null;
-let updateThrottle = null;
-let lastUpdateTime = 0;
-let staminaObserver = null;
-let settingsButton = null;
-let tabObserver = null;
-let contextMenuObserver = null;
-let creatureObserver = null;
-let setupLabelsObserver = null;
-let scrollLockObserver = null;
-let creatureButtonListeners = new WeakMap(); // Track event listeners on creature buttons
-let favoriteCreatures = new Map(); // Maps uniqueId -> symbolKey
-let autoplayRefreshGameSubscription = null;
-let autoplayRefreshSetPlayModeSubscription = null;
-let lastOptimizedFavoriteUpdate = 0; // Track last optimized favorite update to prevent double-refresh
+// Observer state
+const observers = {
+  stamina: null,
+  tab: null,
+  contextMenu: null,
+  creature: null,
+  setupLabels: null,
+  scrollLock: null
+};
+
+// Timer state
+const timerState = {
+  element: null,
+  lastValue: null,
+  updateThrottle: null,
+  lastUpdateTime: 0
+};
+
+// UI state
+const uiState = {
+  settingsButton: null
+};
+
+// Favorites state
+const favoritesState = {
+  creatures: new Map(), // Maps uniqueId -> symbolKey
+  buttonListeners: new WeakMap(), // Track event listeners on creature buttons
+  lastOptimizedUpdate: 0 // Track last optimized favorite update to prevent double-refresh
+};
+
+// Subscriptions state
+const subscriptions = {
+  autoplayRefreshGame: null,
+  autoplayRefreshSetPlayMode: null
+};
+
+// Global update tracking
 let lastGlobalUpdate = 0; // Track last global update across all observers
 const GLOBAL_UPDATE_DEBOUNCE = 300; // Global debounce for all styling updates (ms)
 
@@ -224,6 +244,10 @@ const FAVORITE_SYMBOLS = {
     name: 'SPD',
     icon: 'https://bestiaryarena.com/assets/icons/speed.png'
   },
+  shinystar: {
+    name: 'Shiny',
+    icon: 'https://bestiaryarena.com/assets/icons/shiny-star.png'
+  },
   none: {
     name: '(none)',
     icon: null,
@@ -295,8 +319,12 @@ function isShinyCreature(imgElement) {
   return imgElement.src.includes('-shiny.png');
 }
 
+function getPlayerMonsters() {
+  return globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
+}
+
 function getTier4Monsters() {
-  return globalThis.state.player.getSnapshot().context.monsters.filter(
+  return getPlayerMonsters().filter(
     (m) => m.tier === GAME_CONSTANTS.MAX_TIER
   );
 }
@@ -348,11 +376,32 @@ const CSS_TEMPLATES = {
       box-shadow: 0 0 6px ${colorOption.textColor}60;
       filter: brightness(1.2) saturate(1.3);
     }
+  `,
+  maxShinies: (colorOption, colorKey) => `
+    .has-rarity[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
+      border: 2px solid;
+      border-image: ${colorOption.borderGradient} 1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
+    }
+    .has-rarity-text[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
+      --tw-text-opacity: 1;
+      color: ${colorOption.textColor};
+      text-shadow: 0 0 8px ${colorOption.textColor}, 0 0 16px ${colorOption.textColor}80;
+    }
+    img[alt="creature"][data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
+      filter: brightness(1.2) saturate(1.3);
+      box-shadow: 0 0 6px ${colorOption.textColor}60;
+    }
   `
 };
 
 function generateMaxCreaturesCSS(colorOption, colorKey) {
   return CSS_TEMPLATES.maxCreatures(colorOption, colorKey);
+}
+
+function generateMaxShiniesCSS(colorOption, colorKey) {
+  return CSS_TEMPLATES.maxShinies(colorOption, colorKey);
 }
 
 // Parse stamina values from DOM elements
@@ -395,11 +444,11 @@ function calculateStaminaReadyTime(current, max) {
 // Check if update should be throttled
 function shouldThrottleUpdate() {
   const now = Date.now();
-  if (now - lastUpdateTime < THROTTLE_SETTINGS.UPDATE) {
+  if (now - timerState.lastUpdateTime < THROTTLE_SETTINGS.UPDATE) {
     console.log('[Better UI] Update throttled (less than 10s since last update)');
     return true;
   }
-  lastUpdateTime = now;
+  timerState.lastUpdateTime = now;
   return false;
 }
 
@@ -417,30 +466,24 @@ function shouldSkipGlobalUpdate(source = 'unknown') {
   return false;
 }
 
-// Create and style DOM element
-function createStyledElement(tagName, className, styles, parentSelector) {
-  const element = document.createElement(tagName);
-  element.className = className;
-  
-  // Apply styles
-  Object.assign(element.style, styles);
-  
-  // Insert into DOM if parent selector provided
-  if (parentSelector) {
-    const parentElement = document.querySelector(parentSelector);
-    if (parentElement) {
-      parentElement.appendChild(element);
-    }
-  }
-  
-  return element;
-}
-
 // Schedule timeout and track it for cleanup
 function scheduleTimeout(callback, delay) {
   const timeoutId = setTimeout(callback, delay);
   activeTimeouts.add(timeoutId);
   return timeoutId;
+}
+
+// Disconnect observer helper for cleanup
+function disconnectObserver(observer, name) {
+  if (observer) {
+    try {
+      observer.disconnect();
+      console.log(`[Better UI] ${name} observer disconnected`);
+    } catch (error) {
+      console.warn(`[Better UI] Error disconnecting ${name} observer:`, error);
+    }
+  }
+  return null;
 }
 
 // Create throttled MutationObserver with leading+trailing execution
@@ -498,23 +541,23 @@ function loadFavorites() {
     if (saved) {
       const data = JSON.parse(saved);
       console.log('[Better UI] Parsed favorites data:', data);
-      favoriteCreatures = new Map(Object.entries(data));
-      console.log('[Better UI] Loaded', favoriteCreatures.size, 'favorites:', favoriteCreatures);
+      favoritesState.creatures = new Map(Object.entries(data));
+      console.log('[Better UI] Loaded', favoritesState.creatures.size, 'favorites:', favoritesState.creatures);
     } else {
       console.log('[Better UI] No saved favorites found');
     }
   } catch (error) {
     console.error('[Better UI] Error loading favorites:', error);
-    favoriteCreatures = new Map();
+    favoritesState.creatures = new Map();
   }
 }
 
 function saveFavorites() {
   try {
-    const data = Object.fromEntries(favoriteCreatures);
+    const data = Object.fromEntries(favoritesState.creatures);
     const jsonData = JSON.stringify(data);
     localStorage.setItem(FAVORITES_STORAGE_KEY, jsonData);
-    console.log('[Better UI] Favorites saved:', favoriteCreatures.size, 'data:', jsonData);
+    console.log('[Better UI] Favorites saved:', favoritesState.creatures.size, 'data:', jsonData);
   } catch (error) {
     console.error('[Better UI] Error saving favorites:', error);
   }
@@ -564,7 +607,7 @@ function updateLocalCreatureLock(uniqueId) {
     
     // Verify and close menu
     scheduleTimeout(() => {
-      const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
+      const monsters = getPlayerMonsters();
       const creature = monsters.find(m => m.id === uniqueId);
       console.log('[Better UI] 🔍 Creature AFTER state update:', {
         id: creature?.id,
@@ -590,7 +633,7 @@ function updateLocalCreatureLock(uniqueId) {
     
     // Fallback: direct update
     try {
-      const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
+      const monsters = getPlayerMonsters();
       const creature = monsters.find(m => m.id === uniqueId);
       if (creature) {
         creature.locked = true;
@@ -604,16 +647,16 @@ function updateLocalCreatureLock(uniqueId) {
 
 // Toggle favorite status for a creature with a specific symbol
 async function toggleFavorite(uniqueId, symbolKey = 'heart') {
-  if (favoriteCreatures.has(uniqueId)) {
+  if (favoritesState.creatures.has(uniqueId)) {
     // If already favorited, update the symbol instead of removing
-    favoriteCreatures.set(uniqueId, symbolKey);
+    favoritesState.creatures.set(uniqueId, symbolKey);
     console.log('[Better UI] Updated favorite symbol to', symbolKey + ':', uniqueId);
   } else {
-    favoriteCreatures.set(uniqueId, symbolKey);
+    favoritesState.creatures.set(uniqueId, symbolKey);
     console.log('[Better UI] Added to favorites with symbol', symbolKey + ':', uniqueId);
     
     // Log creature state before locking
-    const monstersBefore = globalThis.state.player.getSnapshot().context.monsters || [];
+    const monstersBefore = getPlayerMonsters();
     const creatureBefore = monstersBefore.find(m => m.id === uniqueId);
     console.log('[Better UI] 🔍 Creature BEFORE lock API call:', {
       id: creatureBefore?.id,
@@ -633,24 +676,13 @@ async function toggleFavorite(uniqueId, symbolKey = 'heart') {
       updateLocalCreatureLock(uniqueId);
     } catch (error) {
       console.error('[Better UI] Failed to lock creature:', error);
-      favoriteCreatures.delete(uniqueId);
+      favoritesState.creatures.delete(uniqueId);
       console.log('[Better UI] Removed from favorites due to lock failure:', uniqueId);
     }
   }
   
   saveFavorites();
   updateFavoriteHearts(uniqueId);
-}
-
-// Generate color picker dropdown HTML
-function generateColorPickerHTML(id, configKey) {
-  return `
-    <select id="${id}" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
-      ${Object.entries(COLOR_OPTIONS).map(([key, option]) => 
-        `<option value="${key}" ${config[configKey] === key ? 'selected' : ''}>${option.name}</option>`
-      ).join('')}
-    </select>
-  `;
 }
 
 // Create settings event handler for checkboxes
@@ -944,7 +976,7 @@ function showSettingsModal() {
       }
       
       // Re-attach event handlers for the new content
-      setTimeout(() => {
+      scheduleTimeout(() => {
         attachEventHandlers(content);
       }, 0);
     }
@@ -965,15 +997,15 @@ function showSettingsModal() {
       if (staminaCheckbox) {
         createSettingsCheckboxHandler('showStaminaTimer',
           () => {
-            if (staminaTimerElement) {
-              staminaTimerElement.style.display = 'inline';
+            if (timerState.element) {
+              timerState.element.style.display = 'inline';
             } else {
               updateStaminaTimer();
             }
           },
           () => {
-            if (staminaTimerElement) {
-              staminaTimerElement.style.display = 'none';
+            if (timerState.element) {
+              timerState.element.style.display = 'none';
             }
           }
         )(staminaCheckbox);
@@ -1015,12 +1047,10 @@ function showSettingsModal() {
       if (setupLabelsCheckbox) {
         createSettingsCheckboxHandler('showSetupLabels',
           () => {
-            // Show setup labels
             applySetupLabelsVisibility(true);
             console.log('[Better UI] Setup labels shown');
           },
           () => {
-            // Hide setup labels
             applySetupLabelsVisibility(false);
             console.log('[Better UI] Setup labels hidden');
           }
@@ -1048,7 +1078,6 @@ function showSettingsModal() {
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');
     if (autoplayRefreshCheckbox) {
-      // Set initial state from config
       autoplayRefreshCheckbox.checked = config.enableAutoplayRefresh;
       
       autoplayRefreshCheckbox.addEventListener('change', () => {
@@ -1067,7 +1096,6 @@ function showSettingsModal() {
     
     const autoplayRefreshMinutesInput = content.querySelector('#autoplay-refresh-minutes');
     if (autoplayRefreshMinutesInput) {
-      // Set initial value from config
       autoplayRefreshMinutesInput.value = config.autoplayRefreshMinutes;
       
       autoplayRefreshMinutesInput.addEventListener('input', () => {
@@ -1118,7 +1146,6 @@ function showSettingsModal() {
       
       const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
       if (disableAutoReloadCheckbox) {
-        // Set initial state from config
         disableAutoReloadCheckbox.checked = config.disableAutoReload;
         
         disableAutoReloadCheckbox.addEventListener('change', () => {
@@ -1154,7 +1181,7 @@ function showSettingsModal() {
     });
     
     // Set static size for the modal dialog (non-resizable)
-    setTimeout(() => {
+    scheduleTimeout(() => {
       const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
       if (dialog) {
         dialog.style.width = `${MODAL_CONFIG.width}px`;
@@ -1187,7 +1214,7 @@ function showSettingsModal() {
     }, 0);
     
     // Inject auto-save indicator into the modal footer
-    setTimeout(() => {
+    scheduleTimeout(() => {
       const modalElement = document.querySelector('div[role="dialog"][data-state="open"]');
       if (modalElement) {
         const footer = modalElement.querySelector('.flex.justify-end.gap-2');
@@ -1253,7 +1280,7 @@ function createSettingsButton() {
     currencyContainer.appendChild(settingsButtonElement);
     
     // Store reference for cleanup
-    settingsButton = settingsButtonElement;
+    uiState.settingsButton = settingsButtonElement;
     console.log('[Better UI] Settings button created in currency section');
     
   } catch (error) {
@@ -1269,77 +1296,61 @@ function createSettingsButton() {
 function getCreatureNameFromMenu(menuElem) {
   // Look for the group element (like Cyclopedia does)
   const group = menuElem.querySelector('div[role="group"]');
-  console.log('[Better UI] Found group:', group);
   if (!group) {
-    console.log('[Better UI] No group found in menu');
     return null;
   }
   
   // Get first item from the group
   const firstItem = group.querySelector('.dropdown-menu-item');
-  console.log('[Better UI] getCreatureNameFromMenu - firstItem:', firstItem);
   if (!firstItem) {
-    console.log('[Better UI] No first item found in group');
     return null;
   }
   
   const text = firstItem.textContent;
-  console.log('[Better UI] First item text:', text);
   
   // Check for monster pattern: "Monster Name (X%)"
   const monsterMatch = text.match(/^(.*?)\s*\(\d+%\)/);
-  console.log('[Better UI] Monster match:', monsterMatch);
   if (monsterMatch) {
     return monsterMatch[1].trim();
   }
   
   // Check for equipment pattern: "Equipment Name (Tier: X)"
   const equipmentMatch = text.match(/^(.*?)\s*\(Tier: \d+\)/);
-  console.log('[Better UI] Equipment match:', equipmentMatch);
   if (equipmentMatch) {
     return equipmentMatch[1].trim();
   }
   
-  console.log('[Better UI] No pattern match found');
   return null;
 }
 
 // Validate if context menu should receive favorite button
 function validateContextMenu(menuElem) {
   if (!config.enableFavorites) {
-    console.log('[Better UI] Validation failed: enableFavorites is false');
     return false;
   }
   if (isScrollLocked()) {
-    console.log('[Better UI] Validation failed: scroll is locked');
     return false;
   }
   if (menuElem.hasAttribute('data-favorite-processed')) {
-    console.log('[Better UI] Validation failed: already processed');
     return false;
   }
   
   const creatureName = getCreatureNameFromMenu(menuElem);
   if (!creatureName) {
-    console.log('[Better UI] Validation failed: no creature name found');
     return false;
   }
   
   const menuText = menuElem.textContent || '';
   if (/\(Tier: \d+\)/.test(menuText)) {
-    console.log('[Better UI] Validation failed: tier list detected');
     return false;
   }
   if (menuText.toLowerCase().includes('my account') || menuText.toLowerCase().includes('logout')) {
-    console.log('[Better UI] Validation failed: account menu detected');
     return false;
   }
   if (menuText.toLowerCase().includes('game mode') || menuText.toLowerCase().includes('manual')) {
-    console.log('[Better UI] Validation failed: game mode menu detected');
     return false;
   }
   
-  console.log('[Better UI] Validation passed for creature:', creatureName);
   return true;
 }
 
@@ -1363,7 +1374,7 @@ function identifyCreatureFromMenu(menuElem) {
   const creatureInfo = getCreatureUniqueId(currentRightClickedCreature.creatureImg, contextMenuPercentage);
   if (!creatureInfo) return null;
   
-  const monsters = globalThis.state.player.getSnapshot().context.monsters || [];
+  const monsters = getPlayerMonsters();
   const creature = monsters.find(m => m.id === creatureInfo.uniqueId);
   
   return {
@@ -1400,7 +1411,7 @@ function createFavoriteSubmenu(uniqueId, currentSymbol) {
   submenu.setAttribute('data-radix-menu-content', '');
   submenu.style.cssText = `position: absolute; left: 100%; top: 0; display: none; z-index: 1000; min-width: 120px;`;
   
-  const isFavorite = uniqueId ? favoriteCreatures.has(uniqueId) : false;
+  const isFavorite = uniqueId ? favoritesState.creatures.has(uniqueId) : false;
   
   Object.entries(FAVORITE_SYMBOLS).forEach(([symbolKey, symbol]) => {
     const symbolItem = document.createElement('div');
@@ -1426,7 +1437,7 @@ function createFavoriteSubmenu(uniqueId, currentSymbol) {
       e.stopPropagation();
       if (uniqueId) {
         if (symbol.isNone) {
-          favoriteCreatures.delete(uniqueId);
+          favoritesState.creatures.delete(uniqueId);
           saveFavorites();
           updateFavoriteHearts(uniqueId);
         } else {
@@ -1482,18 +1493,14 @@ function attachSubmenuHandlers(mainItem, submenu) {
 
 // Inject favorite button into context menu
 function injectFavoriteButton(menuElem) {
-  console.log('[Better UI] injectFavoriteButton called');
   if (!validateContextMenu(menuElem)) {
-    console.log('[Better UI] validateContextMenu failed');
     return false;
   }
-  
-  console.log('[Better UI] Validation passed, injecting favorite button');
   menuElem.setAttribute('data-favorite-processed', 'true');
   
   const creatureData = identifyCreatureFromMenu(menuElem);
   const uniqueId = creatureData?.uniqueId || null;
-  const currentSymbol = uniqueId ? favoriteCreatures.get(uniqueId) : null;
+  const currentSymbol = uniqueId ? favoritesState.creatures.get(uniqueId) : null;
   
   const favoriteMainItem = createFavoriteMainMenuItem();
   const submenu = createFavoriteSubmenu(uniqueId, currentSymbol);
@@ -1523,27 +1530,21 @@ function injectFavoriteButton(menuElem) {
 // Remove all favorite hearts
 function removeFavoriteHearts() {
   document.querySelectorAll('.favorite-heart').forEach(heart => heart.remove());
-  console.log('[Better UI] All favorite hearts removed');
 }
 
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
-  console.log('[Better UI] updateFavoriteHearts called with targetUniqueId:', targetUniqueId);
-  
   // Skip if Board Analyzer is running
   if (window.__modCoordination?.boardAnalyzerRunning) {
-    console.log('[Better UI] Skipping updateFavoriteHearts - Board Analyzer active');
     return;
   }
   
   if (!config.enableFavorites) {
-    console.log('[Better UI] Favorites disabled, removing hearts');
     removeFavoriteHearts();
     return;
   }
   
   if (isScrollLocked()) {
-    console.log('[Better UI] Scroll locked, skipping update (not removing hearts)');
     return;
   }
   
@@ -1555,21 +1556,18 @@ function updateFavoriteHearts(targetUniqueId = null) {
                          imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
     return !isInAnalyzer;
   });
-  console.log('[Better UI] Found', creatures.length, 'visible creatures in collection (excluded', allCreatures.length - creatures.length, 'analyzer creatures)');
   
   // If no creatures visible, don't remove existing hearts - collection might be transitioning
   if (creatures.length === 0) {
-    console.log('[Better UI] No creatures visible, skipping update (not removing hearts)');
     return;
   }
   
-  const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
+  const monsters = getPlayerMonsters();
   
   // OPTIMIZATION: If updating a specific creature, only update that one
   if (targetUniqueId) {
-    console.log('[Better UI] Optimized update: only updating creature', targetUniqueId);
     updateSingleFavoriteHeart(targetUniqueId, creatures, monsters);
-    lastOptimizedFavoriteUpdate = Date.now(); // Track time to prevent observer double-refresh
+    favoritesState.lastOptimizedUpdate = Date.now(); // Track time to prevent observer double-refresh
     return;
   }
   
@@ -1589,20 +1587,17 @@ function updateFavoriteHearts(targetUniqueId = null) {
     
     creaturesChecked++;
     
-    const isFavorite = favoriteCreatures.has(uniqueId);
+    const isFavorite = favoritesState.creatures.has(uniqueId);
     const container = imgEl.parentElement;
     
     // Add favorite symbol if favorited
     if (isFavorite) {
-      const symbolKey = favoriteCreatures.get(uniqueId) || 'heart';
+      const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
       const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-      
-      console.log('[Better UI] Adding favorite heart for:', uniqueId, 'symbolKey:', symbolKey);
       
       const heart = createFavoriteHeartElement(symbolKey, symbol);
       container.appendChild(heart);
       heartsAdded++;
-      console.log('[Better UI] Heart added successfully for:', uniqueId);
     }
   });
   
@@ -1641,18 +1636,13 @@ function updateSingleFavoriteHeart(targetUniqueId, allCreatures, monsters) {
       }
       
       // Add heart if favorited
-      const isFavorite = favoriteCreatures.has(uniqueId);
+      const isFavorite = favoritesState.creatures.has(uniqueId);
       if (isFavorite) {
-        const symbolKey = favoriteCreatures.get(uniqueId) || 'heart';
+        const symbolKey = favoritesState.creatures.get(uniqueId) || 'heart';
         const symbol = FAVORITE_SYMBOLS[symbolKey] || FAVORITE_SYMBOLS.heart;
-        
-        console.log('[Better UI] Adding favorite heart for:', uniqueId, 'symbolKey:', symbolKey);
         
         const heart = createFavoriteHeartElement(symbolKey, symbol);
         container.appendChild(heart);
-        console.log('[Better UI] Heart added successfully for:', uniqueId);
-      } else {
-        console.log('[Better UI] Removed favorite heart for:', uniqueId);
       }
       
       break; // Found and updated, exit early
@@ -1822,20 +1812,9 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
   const gameId = getCreatureGameId(creatureImg);
   if (!gameId) return null;
   
-  console.log('[Better UI] getCreatureUniqueId - Target gameId:', gameId);
-  if (contextMenuPercentage !== null) {
-    console.log('[Better UI] getCreatureUniqueId - Context menu percentage provided:', contextMenuPercentage + '%');
-  }
-  
   // Get all monsters from game state
-  const monsters = globalThis.state?.player?.getSnapshot()?.context?.monsters || [];
+  const monsters = getPlayerMonsters();
   const matchingMonsters = getSortedMonstersByGameId(monsters, gameId);
-  
-  console.log('[Better UI] getCreatureUniqueId - Found', matchingMonsters.length, 'monsters in game state with gameId', gameId);
-  console.log('[Better UI] getCreatureUniqueId - Monster IDs in SORTED order:', matchingMonsters.map(m => {
-    const level = getLevelFromExp(m.exp || 0);
-    return `${m.id} (lvl ${level})`;
-  }));
   
   // Get ALL visible creatures in DOM order, EXCLUDING creatures inside context menus or modals
   const allVisibleCreatures = Array.from(document.querySelectorAll('img[alt="creature"]')).filter(img => {
@@ -1845,11 +1824,6 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     const isInModal = img.closest('[role="dialog"]');
     return !isInContextMenu && !isInModal;
   });
-  console.log('[Better UI] getCreatureUniqueId - Total visible creatures in DOM (excluding menus/modals):', allVisibleCreatures.length);
-  console.log('[Better UI] getCreatureUniqueId - All creatures in DOM order:', allVisibleCreatures.map((img, i) => {
-    const gid = getCreatureGameId(img);
-    return `${i}: gameId ${gid}`;
-  }));
   
   // Use sequential counter logic to match DOM order with game state
   const gameIdIndexMap = new Map();
@@ -1874,34 +1848,16 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
     const levelSpan = button.querySelector('span[translate="no"]');
     const displayedLevel = levelSpan ? parseInt(levelSpan.textContent) : null;
     
-    // Check for any unique identifiers on the button
-    const buttonData = {
-      'data-gameid': button.getAttribute('data-gameid'),
-      'data-picked': button.getAttribute('data-picked'),
-      'data-state': button.getAttribute('data-state'),
-      'aria-describedby': button.getAttribute('aria-describedby'),
-      'tabindex': button.getAttribute('tabindex'),
-      'class': button.className,
-      'id': button.id
-    };
-    
-    console.log('[Better UI] getCreatureUniqueId - FOUND target at DOM position', i);
-    console.log('[Better UI] getCreatureUniqueId - Displayed level:', displayedLevel);
-    console.log('[Better UI] getCreatureUniqueId - Button data:', buttonData);
-    console.log('[Better UI] getCreatureUniqueId - This is the', currentIndex, 'th creature with gameId', currentGameId);
-    
     // Try to match by context menu percentage first (most reliable)
     let identifiedMonster = matchingMonsters[currentIndex];
     let matchedByPercentage = false;
     
     if (contextMenuPercentage !== null) {
-      console.log('[Better UI] getCreatureUniqueId - Using provided percentage:', contextMenuPercentage + '%');
       const monster = matchMonsterByPercentage(matchingMonsters, contextMenuPercentage, displayedLevel);
       
       if (monster) {
         identifiedMonster = monster;
         matchedByPercentage = true;
-        console.log('[Better UI] getCreatureUniqueId - Matched by percentage:', contextMenuPercentage + '%', '→', monster.id);
       } else {
         console.warn('[Better UI] getCreatureUniqueId - No monster found with percentage:', contextMenuPercentage + '%');
       }
@@ -1913,17 +1869,11 @@ function getCreatureUniqueId(creatureImg, contextMenuPercentage = null) {
       const isShiny = currentImg.src.includes('-shiny');
       const hasStars = button.querySelector('.tier-stars') !== null;
       
-      console.log('[Better UI] getCreatureUniqueId - Visual clues:', { level: displayedLevel, isShiny, hasStars });
-      
       const bestMatch = matchMonsterByLevelAndVisuals(matchingMonsters, displayedLevel, isShiny, hasStars);
       if (bestMatch) {
         identifiedMonster = bestMatch;
-        console.log('[Better UI] getCreatureUniqueId - Matched by level + visual clues');
       }
     }
-    
-    console.log('[Better UI] getCreatureUniqueId - Mapping to monster:', identifiedMonster?.id);
-    console.log('[Better UI] getCreatureUniqueId - Monster stats:', calculateCreatureStats(identifiedMonster));
     
     return {
       uniqueId: identifiedMonster?.id,
@@ -1945,12 +1895,10 @@ let currentRightClickedCreature = null;
 
 // Start context menu observer
 function startContextMenuObserver() {
-  if (contextMenuObserver) {
+  if (observers.contextMenu) {
     console.log('[Better UI] Context menu observer already running');
     return;
   }
-  
-  console.log('[Better UI] Starting context menu observer...');
   
   // Handle right-click on creature button
   function handleCreatureRightClick(event) {
@@ -1967,9 +1915,9 @@ function startContextMenuObserver() {
     const creatureButtons = document.querySelectorAll('button[data-picked]');
     creatureButtons.forEach(button => {
       // Only add listener if not already added
-      if (!creatureButtonListeners.has(button)) {
+      if (!favoritesState.buttonListeners.has(button)) {
         button.addEventListener('contextmenu', handleCreatureRightClick);
-        creatureButtonListeners.set(button, handleCreatureRightClick);
+        favoritesState.buttonListeners.set(button, handleCreatureRightClick);
       }
     });
   }
@@ -1995,10 +1943,10 @@ function startContextMenuObserver() {
     }
   };
   
-  contextMenuObserver = createThrottledObserver(processMenuMutations, 50);
+  observers.contextMenu = createThrottledObserver(processMenuMutations, 50);
   
   // Observe both document.body and document.documentElement to catch portals
-  contextMenuObserver.observe(document.body, { childList: true, subtree: true });
+  observers.contextMenu.observe(document.body, { childList: true, subtree: true });
   
   // Initial setup
   addRightClickListeners();
@@ -2008,9 +1956,9 @@ function startContextMenuObserver() {
 
 // Stop context menu observer
 function stopContextMenuObserver() {
-  if (contextMenuObserver) {
-    contextMenuObserver.disconnect();
-    contextMenuObserver = null;
+  if (observers.contextMenu) {
+    observers.contextMenu.disconnect();
+    observers.contextMenu = null;
     console.log('[Better UI] Context menu observer stopped');
   }
   
@@ -2018,10 +1966,10 @@ function stopContextMenuObserver() {
   const creatureButtons = document.querySelectorAll('button[data-picked]');
   let removedCount = 0;
   creatureButtons.forEach(button => {
-    const listener = creatureButtonListeners.get(button);
+    const listener = favoritesState.buttonListeners.get(button);
     if (listener) {
       button.removeEventListener('contextmenu', listener);
-      creatureButtonListeners.delete(button);
+      favoritesState.buttonListeners.delete(button);
       removedCount++;
     }
   });
@@ -2154,8 +2102,6 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
   // Generate CSS using template system
   const css = generateMaxCreaturesCSS(colorOption, colorKey);
   style.textContent = css;
-  
-  console.log(`[Better UI] Max creatures applied with ${colorOption.name} color`);
 }
 
 function applyMaxCreatures() {
@@ -2207,8 +2153,6 @@ function removeMaxCreatures() {
       textRarityEl.removeAttribute('data-max-creatures');
       textRarityEl.removeAttribute('data-max-creatures-color');
     });
-    
-    console.log('[Better UI] Max creatures styling removed');
   } catch (error) {
     console.error('[Better UI] Error removing max creatures styling:', error);
   }
@@ -2280,26 +2224,9 @@ function injectMaxShiniesCSS(colorOption, colorKey) {
   style.id = styleId;
   document.head.appendChild(style);
   
-  // Generate CSS for shinies - matching Max Creatures styling
-  style.textContent = `
-    .has-rarity[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
-      border: 2px solid;
-      border-image: ${colorOption.borderGradient} 1;
-      background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-      box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15;
-    }
-    .has-rarity-text[data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
-      --tw-text-opacity: 1;
-      color: ${colorOption.textColor};
-      text-shadow: 0 0 8px ${colorOption.textColor}, 0 0 16px ${colorOption.textColor}80;
-    }
-    img[alt="creature"][data-max-shinies="true"][data-max-shinies-color="${colorKey}"] {
-      filter: brightness(1.2) saturate(1.3);
-      box-shadow: 0 0 6px ${colorOption.textColor}60;
-    }
-  `;
-  
-  console.log(`[Better UI] Max shinies applied with ${colorOption.name} color`);
+  // Generate CSS using template system
+  const css = generateMaxShiniesCSS(colorOption, colorKey);
+  style.textContent = css;
 }
 
 function applyMaxShinies() {
@@ -2348,8 +2275,6 @@ function removeMaxShinies() {
       textRarityEl.removeAttribute('data-max-shinies');
       textRarityEl.removeAttribute('data-max-shinies-color');
     });
-    
-    console.log('[Better UI] Max shinies styling removed');
   } catch (error) {
     console.error('[Better UI] Error removing max shinies styling:', error);
   }
@@ -2376,6 +2301,37 @@ function extractSpriteIdFromClasses(element) {
   const classList = Array.from(element.classList);
   const idClass = classList.find(cls => cls.startsWith('id-'));
   return idClass ? idClass.replace('id-', '') : null;
+}
+
+// Helper: Get comprehensive sprite information from a sprite element
+function getSpriteInfo(spriteElement) {
+  // Null safety check
+  if (!spriteElement) {
+    return {
+      spriteContainer: null,
+      battleContainer: null,
+      isInDialog: false,
+      spriteId: null,
+      creatureName: null,
+      isEnemy: false
+    };
+  }
+  
+  const spriteContainer = spriteElement.closest('.sprite');
+  const battleContainer = spriteElement.closest('[data-name]');
+  const isInDialog = spriteElement.closest('[role="dialog"]') !== null;
+  const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
+  const creatureName = battleContainer?.getAttribute('data-name') || null;
+  const isEnemy = battleContainer ? isEnemyByHealthBar(battleContainer) : false;
+  
+  return {
+    spriteContainer,
+    battleContainer,
+    isInDialog,
+    spriteId,
+    creatureName,
+    isEnemy
+  };
 }
 
 // Helper: Check if creature is in the unobtainable list
@@ -2614,13 +2570,12 @@ function updateStaminaTimer() {
     }
     
     const { current: currentStamina, max: maxStamina } = staminaValues;
-    console.log('[Better UI] Stamina values:', staminaValues);
     
     // Check if stamina value changed
-    const staminaChanged = lastStaminaValue !== currentStamina;
+    const staminaChanged = timerState.lastValue !== currentStamina;
     if (staminaChanged) {
-      console.log('[Better UI] Stamina changed from', lastStaminaValue, 'to', currentStamina);
-      lastStaminaValue = currentStamina;
+      const oldValue = timerState.lastValue;
+      timerState.lastValue = currentStamina;
       
       // Check throttle
       if (shouldThrottleUpdate()) {
@@ -2629,7 +2584,7 @@ function updateStaminaTimer() {
       
       // Calculate ready time
       const readyTime = calculateStaminaReadyTime(currentStamina, maxStamina);
-      console.log('[Better UI] Ready time calculated:', readyTime);
+      console.log(`[Better UI] Stamina: ${oldValue || 'init'}→${currentStamina}/${maxStamina}, Status: ${readyTime}`);
       
       // Update timer only if stamina changed
       updateTimerDisplay(readyTime);
@@ -2651,13 +2606,13 @@ function updateTimerDisplay(readyTime) {
   }
   
   // Find or create timer element
-  if (!staminaTimerElement) {
+  if (!timerState.element) {
     console.log('[Better UI] Creating stamina timer element');
     
     // Create timer element with styles
-    staminaTimerElement = document.createElement('span');
-    staminaTimerElement.className = 'better-ui-stamina-timer';
-    Object.assign(staminaTimerElement.style, TIMER_STYLES);
+    timerState.element = document.createElement('span');
+    timerState.element.className = 'better-ui-stamina-timer';
+    Object.assign(timerState.element.style, TIMER_STYLES);
     
     // Insert within the parent span to keep it inline
     const staminaDiv = document.querySelector(SELECTORS.STAMINA_DIV);
@@ -2671,18 +2626,16 @@ function updateTimerDisplay(readyTime) {
         parentSpan.style.alignItems = 'baseline';
         
         // Insert at the end of the parent span to keep it inline with stamina values
-        parentSpan.appendChild(staminaTimerElement);
+        parentSpan.appendChild(timerState.element);
       }
     }
   }
   
   // Update timer text
   if (readyTime === 'Full') {
-    staminaTimerElement.textContent = ` 🕐Full`;
-    console.log('[Better UI] Stamina is full, showing Full status');
+    timerState.element.textContent = ` 🕐Full`;
   } else {
-    staminaTimerElement.textContent = ` 🕐${readyTime}`;
-    console.log('[Better UI] Timer updated to:', readyTime);
+    timerState.element.textContent = ` 🕐${readyTime}`;
   }
 }
 
@@ -2711,19 +2664,18 @@ function initStaminaTimer() {
     console.log('[Better UI] Setting up MutationObserver for stamina changes');
     const staminaSpan = staminaDiv.querySelector(SELECTORS.STAMINA_PARENT_SPAN);
     if (staminaSpan) {
-      staminaObserver = new MutationObserver((mutations) => {
+      observers.stamina = new MutationObserver((mutations) => {
         // Throttle updates to prevent spam
-        if (updateThrottle) return;
-        updateThrottle = setTimeout(() => {
-          activeTimeouts.delete(updateThrottle);
-          updateThrottle = null;
-          console.log('[Better UI] Stamina span changed, checking timer');
+        if (timerState.updateThrottle) return;
+        timerState.updateThrottle = setTimeout(() => {
+          activeTimeouts.delete(timerState.updateThrottle);
+          timerState.updateThrottle = null;
           updateStaminaTimer();
         }, THROTTLE_SETTINGS.DOM_CHECK);
-        activeTimeouts.add(updateThrottle);
+        activeTimeouts.add(timerState.updateThrottle);
       });
       
-      staminaObserver.observe(staminaSpan, {
+      observers.stamina.observe(staminaSpan, {
         childList: true,
         subtree: true,
         characterData: true
@@ -2740,8 +2692,8 @@ function initStaminaTimer() {
 function initTabObserver() {
   try {
     // Disconnect existing observer if any
-    if (tabObserver) {
-      tabObserver.disconnect();
+    if (observers.tab) {
+      observers.tab.disconnect();
     }
     
     // Find the tab list
@@ -2751,10 +2703,8 @@ function initTabObserver() {
       return;
     }
     
-    console.log('[Better UI] Setting up tab observer');
-    
     // Create observer to watch for tab changes
-    tabObserver = new MutationObserver((mutations) => {
+    observers.tab = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         // Check if a tab's state changed
         if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
@@ -2807,7 +2757,7 @@ function initTabObserver() {
     // Observe all tab buttons for attribute changes
     const tabButtons = tabList.querySelectorAll('button[role="tab"]');
     tabButtons.forEach((button) => {
-      tabObserver.observe(button, {
+      observers.tab.observe(button, {
         attributes: true,
         attributeFilter: ['data-state']
       });
@@ -2821,8 +2771,6 @@ function initTabObserver() {
 
 // Start observer for creature container changes (search filtering)
 function startCreatureContainerObserver() {
-  console.log('[Better UI] Starting creature container observer...');
-  
   // Find the creature container
   const creatureContainer = document.querySelector('[data-testid="monster-grid"]') || 
                            document.querySelector('.grid') ||
@@ -2834,14 +2782,12 @@ function startCreatureContainerObserver() {
     return;
   }
   
-  console.log('[Better UI] Creature container found, setting up observer');
-  
   // Disconnect existing observer if any
-  if (creatureObserver) {
-    creatureObserver.disconnect();
+  if (observers.creature) {
+    observers.creature.disconnect();
   }
   
-  creatureObserver = new MutationObserver((mutations) => {
+  observers.creature = new MutationObserver((mutations) => {
     let shouldUpdate = false;
     
     mutations.forEach(mutation => {
@@ -2854,28 +2800,28 @@ function startCreatureContainerObserver() {
     if (shouldUpdate) {
       
       // Debounce the updates to avoid excessive calls
-      if (creatureObserver.updateTimeout) {
-        clearTimeout(creatureObserver.updateTimeout);
-        activeTimeouts.delete(creatureObserver.updateTimeout);
+      if (observers.creature.updateTimeout) {
+        clearTimeout(observers.creature.updateTimeout);
+        activeTimeouts.delete(observers.creature.updateTimeout);
       }
-      creatureObserver.updateTimeout = setTimeout(() => {
+      observers.creature.updateTimeout = setTimeout(() => {
         // Check global debounce to prevent redundant updates from other observers
         if (shouldSkipGlobalUpdate('creature-observer')) {
           // Reconnect observer even if skipping
-          if (creatureObserver && creatureContainer) {
-            creatureObserver.observe(creatureContainer, {
+          if (observers.creature && creatureContainer) {
+            observers.creature.observe(creatureContainer, {
               childList: true,
               subtree: true
             });
           }
-          activeTimeouts.delete(creatureObserver.updateTimeout);
-          creatureObserver.updateTimeout = null;
+          activeTimeouts.delete(observers.creature.updateTimeout);
+          observers.creature.updateTimeout = null;
           return;
         }
         
         // Temporarily disconnect observer to prevent infinite loop
-        if (creatureObserver) {
-          creatureObserver.disconnect();
+        if (observers.creature) {
+          observers.creature.disconnect();
         }
         
         // Use requestIdleCallback for non-critical cosmetic updates (with fallback)
@@ -2899,7 +2845,7 @@ function startCreatureContainerObserver() {
           // Update favorite hearts if enabled
           // Skip if we just did an optimized update (within 500ms) to prevent double-refresh
           if (config.enableFavorites) {
-            const timeSinceOptimizedUpdate = Date.now() - lastOptimizedFavoriteUpdate;
+            const timeSinceOptimizedUpdate = Date.now() - favoritesState.lastOptimizedUpdate;
             if (timeSinceOptimizedUpdate > 500) {
               updateFavoriteHearts();
             } else {
@@ -2908,8 +2854,8 @@ function startCreatureContainerObserver() {
           }
           
           // Reconnect observer
-          if (creatureObserver && creatureContainer) {
-            creatureObserver.observe(creatureContainer, {
+          if (observers.creature && creatureContainer) {
+            observers.creature.observe(creatureContainer, {
               childList: true,
               subtree: true
             });
@@ -2917,15 +2863,15 @@ function startCreatureContainerObserver() {
         }, { timeout: 1000 }); // Fallback timeout for requestIdleCallback
         
         // Clean up the timeout reference
-        activeTimeouts.delete(creatureObserver.updateTimeout);
-        creatureObserver.updateTimeout = null;
+        activeTimeouts.delete(observers.creature.updateTimeout);
+        observers.creature.updateTimeout = null;
       }, TIMEOUT_DELAYS.CONTAINER_DEBOUNCE);
-      activeTimeouts.add(creatureObserver.updateTimeout);
+      activeTimeouts.add(observers.creature.updateTimeout);
     }
   });
   
   // Start observing (only childList changes, no attributes)
-  creatureObserver.observe(creatureContainer, {
+  observers.creature.observe(creatureContainer, {
     childList: true,
     subtree: true
   });
@@ -2935,13 +2881,11 @@ function startCreatureContainerObserver() {
 
 // Start observer for scroll lock state changes
 function initScrollLockObserver() {
-  console.log('[Better UI] Starting scroll lock observer...');
-  
   // Track previous scroll lock state
   let previouslyLocked = isScrollLocked();
   let scrollUnlockDebounce = null;
   
-  scrollLockObserver = new MutationObserver((mutations) => {
+  observers.scrollLock = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
       if (mutation.type === 'attributes' && mutation.attributeName === 'data-scroll-locked') {
         const currentlyLocked = isScrollLocked();
@@ -2956,8 +2900,6 @@ function initScrollLockObserver() {
           
           // Debounce the update to handle multiple rapid unlock events
           scrollUnlockDebounce = scheduleTimeout(() => {
-            console.log('[Better UI] Scroll unlocked, applying updates...');
-            
             // Re-apply all enabled features
             if (config.enableMaxCreatures) {
               applyMaxCreatures();
@@ -2985,7 +2927,7 @@ function initScrollLockObserver() {
   });
   
   // Observe document.body for data-scroll-locked attribute changes
-  scrollLockObserver.observe(document.body, {
+  observers.scrollLock.observe(document.body, {
     attributes: true,
     attributeFilter: ['data-scroll-locked']
   });
@@ -3329,7 +3271,7 @@ function stopBattleBoardObserver() {
 }
 
 // =======================
-// 9. Autoplay Refresh Monitor
+// 11. Autoplay Refresh Monitor
 // =======================
 
 // Parse autoplay time from text content (supports English and Portuguese)
@@ -3398,7 +3340,7 @@ function startAutoplayRefreshMonitor() {
     // Listen for new game events to start monitoring autoplay session
     if (globalThis.state.board) {
       // Listen for newGame event as documented in game_state_api.md
-      autoplayRefreshGameSubscription = globalThis.state.board.on('newGame', (event) => {
+      subscriptions.autoplayRefreshGame = globalThis.state.board.on('newGame', (event) => {
         console.log('[Better UI] New game event:', event);
         
         // Check autoplay session timer and refresh if needed on each new game
@@ -3406,7 +3348,7 @@ function startAutoplayRefreshMonitor() {
       });
       
       // Also listen for setPlayMode when switching to autoplay
-      autoplayRefreshSetPlayModeSubscription = globalThis.state.board.on('setPlayMode', (event) => {
+      subscriptions.autoplayRefreshSetPlayMode = globalThis.state.board.on('setPlayMode', (event) => {
         console.log(`[Better UI] setPlayMode event - mode: ${event.mode}`);
         if (event.mode === 'autoplay') {
           console.log('[Better UI] Autoplay mode set - checking refresh threshold');
@@ -3465,15 +3407,15 @@ function checkAutoplayRefreshThreshold() {
 // Stop monitoring the autoplay session timer
 function stopAutoplayRefreshMonitor() {
   try {
-    if (autoplayRefreshGameSubscription && typeof autoplayRefreshGameSubscription === 'function') {
-      autoplayRefreshGameSubscription();
-      autoplayRefreshGameSubscription = null;
+    if (subscriptions.autoplayRefreshGame && typeof subscriptions.autoplayRefreshGame === 'function') {
+      subscriptions.autoplayRefreshGame();
+      subscriptions.autoplayRefreshGame = null;
       console.log('[Better UI] Autoplay refresh game subscription stopped');
     }
     
-    if (autoplayRefreshSetPlayModeSubscription && typeof autoplayRefreshSetPlayModeSubscription === 'function') {
-      autoplayRefreshSetPlayModeSubscription();
-      autoplayRefreshSetPlayModeSubscription = null;
+    if (subscriptions.autoplayRefreshSetPlayMode && typeof subscriptions.autoplayRefreshSetPlayMode === 'function') {
+      subscriptions.autoplayRefreshSetPlayMode();
+      subscriptions.autoplayRefreshSetPlayMode = null;
       console.log('[Better UI] Autoplay refresh setPlayMode subscription stopped');
     }
     
@@ -3484,17 +3426,15 @@ function stopAutoplayRefreshMonitor() {
 }
 
 // =======================
-// 10. Initialization
+// 12. Initialization
 // =======================
 
 function initBetterUI() {
   try {
     console.log('[Better UI] Starting initialization');
     
-    // Load favorites
     loadFavorites();
     
-    // Initialize features based on config
     const features = [
       { name: 'Stamina Timer', enabled: config.showStaminaTimer, init: initStaminaTimer },
       { name: 'Settings Button', enabled: config.showSettingsButton, init: createSettingsButton }
@@ -3509,26 +3449,22 @@ function initBetterUI() {
       }
     });
     
-    // Apply max creatures if enabled
     if (config.enableMaxCreatures) {
       console.log('[Better UI] Applying max creatures');
       applyMaxCreatures();
     }
     
-    // Apply max shinies if enabled
     if (config.enableMaxShinies) {
       console.log('[Better UI] Applying max shinies');
       applyMaxShinies();
     }
     
-    // Apply shiny enemies if enabled
     if (config.enableShinyEnemies) {
       console.log('[Better UI] Applying shiny enemies');
       startBattleBoardObserver();
       applyShinyEnemies();
     }
     
-    // Start autoplay refresh monitor if enabled
     if (config.enableAutoplayRefresh) {
       console.log('[Better UI] Autoplay refresh enabled in config, starting monitor');
       startAutoplayRefreshMonitor();
@@ -3536,19 +3472,11 @@ function initBetterUI() {
       console.log('[Better UI] Autoplay refresh disabled in config');
     }
     
-    // Always setup tab observer (it will check config.enableMaxCreatures internally)
     initTabObserver();
-    
-    // Start context menu observer for favorites
     startContextMenuObserver();
-    
-    // Start creature container observer for search filtering
     startCreatureContainerObserver();
-    
-    // Start scroll lock observer to re-apply styles when unlocking
     initScrollLockObserver();
     
-    // Initial update of favorite hearts if enabled
     if (config.enableFavorites) {
       scheduleTimeout(() => updateFavoriteHearts(), TIMEOUT_DELAYS.FAVORITES_INIT);
     }
@@ -3556,7 +3484,7 @@ function initBetterUI() {
     // Apply initial setup labels visibility and start observer
     scheduleTimeout(() => {
       applySetupLabelsVisibility(config.showSetupLabels);
-      setupLabelsObserver = startSetupLabelsObserver();
+      observers.setupLabels = startSetupLabelsObserver();
       console.log('[Better UI] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
     
@@ -3564,7 +3492,6 @@ function initBetterUI() {
     if (config.removeWebsiteFooter) {
       scheduleTimeout(() => {
         hideWebsiteFooter();
-        console.log('[Better UI] Website footer hidden on init');
       }, 1000); // Delay to ensure DOM is ready
     }
     
@@ -3581,13 +3508,12 @@ initBetterUI();
 window.betterUIConfig = config;
 
 // =======================
-// 10. Cleanup
+// 13. Cleanup
 // =======================
 
 function cleanupBetterUI() {
   console.log('[Better UI] Cleanup called');
   try {
-    // Clear all active timeouts
     activeTimeouts.forEach(timeoutId => {
       try {
         clearTimeout(timeoutId);
@@ -3598,79 +3524,18 @@ function cleanupBetterUI() {
     });
     activeTimeouts.clear();
     
-    // Clear throttle timeouts
-    if (updateThrottle) {
-      clearTimeout(updateThrottle);
-      updateThrottle = null;
+    if (timerState.updateThrottle) {
+      clearTimeout(timerState.updateThrottle);
+      timerState.updateThrottle = null;
     }
     
-    // Disconnect MutationObservers
-    if (staminaObserver) {
-      try {
-        staminaObserver.disconnect();
-        console.log('[Better UI] Stamina MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting stamina MutationObserver:', error);
-      }
-      staminaObserver = null;
-    }
-    
-    if (tabObserver) {
-      try {
-        tabObserver.disconnect();
-        console.log('[Better UI] Tab MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting tab MutationObserver:', error);
-      }
-      tabObserver = null;
-    }
-    
-    // Disconnect context menu observer
+    observers.stamina = disconnectObserver(observers.stamina, 'Stamina');
+    observers.tab = disconnectObserver(observers.tab, 'Tab');
     stopContextMenuObserver();
-    
-    // Disconnect creature container observer
-    if (creatureObserver) {
-      try {
-        creatureObserver.disconnect();
-        console.log('[Better UI] Creature container MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting creature container MutationObserver:', error);
-      }
-      creatureObserver = null;
-    }
-    
-    // Disconnect setup labels observer
-    if (setupLabelsObserver) {
-      try {
-        setupLabelsObserver.disconnect();
-        console.log('[Better UI] Setup labels MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting setup labels MutationObserver:', error);
-      }
-      setupLabelsObserver = null;
-    }
-    
-    // Disconnect scroll lock observer
-    if (scrollLockObserver) {
-      try {
-        scrollLockObserver.disconnect();
-        console.log('[Better UI] Scroll lock MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting scroll lock MutationObserver:', error);
-      }
-      scrollLockObserver = null;
-    }
-    
-    // Disconnect battle board observer and board state listeners
-    if (battleBoardObserver) {
-      try {
-        battleBoardObserver.disconnect();
-        console.log('[Better UI] Battle board MutationObserver disconnected');
-      } catch (error) {
-        console.warn('[Better UI] Error disconnecting battle board MutationObserver:', error);
-      }
-      battleBoardObserver = null;
-    }
+    observers.creature = disconnectObserver(observers.creature, 'Creature container');
+    observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
+    observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
+    battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board');
     
     // Unsubscribe from board state events
     if (boardStateUnsubscribe) {
@@ -3683,10 +3548,8 @@ function cleanupBetterUI() {
       boardStateUnsubscribe = null;
     }
     
-    // Stop autoplay refresh monitor
     stopAutoplayRefreshMonitor();
     
-    // Remove favorite hearts
     document.querySelectorAll('.favorite-heart').forEach(heart => {
       try {
         heart.remove();
@@ -3695,32 +3558,28 @@ function cleanupBetterUI() {
       }
     });
     
-    // Remove stamina timer element
-    if (staminaTimerElement && staminaTimerElement.parentNode) {
+    if (timerState.element && timerState.element.parentNode) {
       try {
-        staminaTimerElement.parentNode.removeChild(staminaTimerElement);
+        timerState.element.parentNode.removeChild(timerState.element);
       } catch (error) {
         console.warn('[Better UI] Error removing stamina timer:', error);
       }
     }
-    staminaTimerElement = null;
+    timerState.element = null;
     
-    // Remove settings button
-    if (settingsButton && settingsButton.parentNode) {
+    if (uiState.settingsButton && uiState.settingsButton.parentNode) {
       try {
-        settingsButton.parentNode.removeChild(settingsButton);
+        uiState.settingsButton.parentNode.removeChild(uiState.settingsButton);
         console.log('[Better UI] Settings button removed');
       } catch (error) {
         console.warn('[Better UI] Error removing settings button:', error);
       }
     }
-    settingsButton = null;
+    uiState.settingsButton = null;
     
-    // Remove max creatures styling
     try {
       removeMaxCreatures();
       
-      // Remove all max creatures styles
       Object.keys(COLOR_OPTIONS).forEach(color => {
         const style = document.getElementById(`max-creatures-${color}-style`);
         if (style && style.parentNode) {
@@ -3732,11 +3591,9 @@ function cleanupBetterUI() {
       console.warn('[Better UI] Error cleaning up max creatures:', error);
     }
     
-    // Remove max shinies styling
     try {
       removeMaxShinies();
       
-      // Remove all max shinies styles
       Object.keys(COLOR_OPTIONS).forEach(color => {
         const style = document.getElementById(`max-shinies-${color}-style`);
         if (style && style.parentNode) {
@@ -3748,7 +3605,6 @@ function cleanupBetterUI() {
       console.warn('[Better UI] Error cleaning up max shinies:', error);
     }
     
-    // Restore website footer
     try {
       showWebsiteFooter();
       console.log('[Better UI] Website footer restored');
@@ -3791,8 +3647,25 @@ function cleanupBetterUI() {
     }
     
     // Reset state variables
-    lastStaminaValue = null;
-    lastUpdateTime = 0;
+    timerState.element = null;
+    timerState.lastValue = null;
+    timerState.updateThrottle = null;
+    timerState.lastUpdateTime = 0;
+    
+    // Reset UI state
+    uiState.settingsButton = null;
+    
+    // Reset favorites state
+    favoritesState.creatures.clear();
+    favoritesState.lastOptimizedUpdate = 0;
+    // Note: buttonListeners is a WeakMap and will be garbage collected
+    
+    // Reset subscriptions
+    subscriptions.autoplayRefreshGame = null;
+    subscriptions.autoplayRefreshSetPlayMode = null;
+    
+    // Reset global update tracking
+    lastGlobalUpdate = 0;
     
     console.log('[Better UI] Cleanup completed');
   } catch (error) {
@@ -3801,7 +3674,7 @@ function cleanupBetterUI() {
 }
 
 // =======================
-// 11. Exports & Lifecycle Management
+// 14. Exports & Lifecycle Management
 // =======================
 
 // Proper exports following mod development guide

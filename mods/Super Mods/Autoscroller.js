@@ -756,10 +756,24 @@
 // =======================
 // MODULE 5: API Functions & Request Queue
 // =======================
-  async function summonScroll(rarity) {
+  /**
+   * Queue an API request for processing with rate limiting and error handling
+   * @param {Function} executeFn - Async function that performs the API call
+   * @returns {Promise} Promise that resolves/rejects based on API result
+   */
+  function queueApiRequest(executeFn) {
     return new Promise((resolve, reject) => {
       const request = {
-        execute: async () => {
+        execute: executeFn,
+        resolve,
+        reject
+      };
+      addToApiQueue(request);
+    });
+  }
+
+  async function summonScroll(rarity) {
+    return queueApiRequest(async () => {
           // Check circuit breaker
           if (isCircuitBreakerOpen()) {
             throw new Error('Circuit breaker is open - too many consecutive errors');
@@ -889,12 +903,6 @@
       handleSuccess();
       
       return data[0]?.result?.data?.json;
-        },
-        resolve,
-        reject
-      };
-      
-      addToApiQueue(request);
     });
   }
   
@@ -1457,10 +1465,8 @@
    * @returns {Promise<Object>} API response
    */
   async function squeezeMonsters(monsterIds, retryCount = 0) {
-    return new Promise((resolve, reject) => {
-      const request = {
-        execute: async () => {
-          try {
+    return queueApiRequest(async () => {
+      try {
             const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
             const body = { "0": { json: monsterIds } };
             
@@ -1494,16 +1500,10 @@
               console.warn(`[Autoscroller] Unexpected squeeze API response format:`, apiResponse);
               return { success: false, message: 'Unexpected response format' };
             }
-          } catch (error) {
-            console.error(`[Autoscroller] Error squeezing monsters:`, error);
-            return { success: false, error: error.message };
-          }
-        },
-        resolve,
-        reject
-      };
-      
-      addToApiQueue(request);
+      } catch (error) {
+        console.error(`[Autoscroller] Error squeezing monsters:`, error);
+        return { success: false, error: error.message };
+      }
     });
   }
 
@@ -1513,10 +1513,8 @@
    * @returns {Promise<Object>} API response
    */
   async function sellMonster(monsterId, retryCount = 0) {
-    return new Promise((resolve, reject) => {
-      const request = {
-        execute: async () => {
-          try {
+    return queueApiRequest(async () => {
+      try {
             const url = 'https://bestiaryarena.com/api/trpc/game.sellMonster?batch=1';
             const body = { "0": { json: monsterId } };
             
@@ -1573,22 +1571,16 @@
             const data = await response.json();
             const apiResponse = data[0]?.result?.data?.json;
             
-            if (apiResponse && apiResponse.goldValue != null) {
-                      return { success: true, goldValue: apiResponse.goldValue };
-            } else {
-              console.warn(`[Autoscroller] Unexpected sell API response format:`, apiResponse);
-              return { success: false, message: 'Unexpected response format' };
-            }
-          } catch (error) {
-            console.error(`[Autoscroller] Error selling monster ${monsterId}:`, error);
-            return { success: false, error: error.message };
-          }
-        },
-        resolve,
-        reject
-      };
-      
-      addToApiQueue(request);
+        if (apiResponse && apiResponse.goldValue != null) {
+          return { success: true, goldValue: apiResponse.goldValue };
+        } else {
+          console.warn(`[Autoscroller] Unexpected sell API response format:`, apiResponse);
+          return { success: false, message: 'Unexpected response format' };
+        }
+      } catch (error) {
+        console.error(`[Autoscroller] Error selling monster ${monsterId}:`, error);
+        return { success: false, error: error.message };
+      }
     });
   }
   
@@ -1727,7 +1719,7 @@
           autoscrollStats.shinyCount++;
           const monsterName = getMonsterNameFromGameId(result.summonedMonster.gameId);
           const totalGenes = getMonsterGenes(result.summonedMonster);
-          console.log(`✨ SHINY FOUND! ${monsterName || 'Unknown'} (${totalGenes}% genes)`);
+          console.log(`[Autoscroller] ✨ SHINY FOUND! ${monsterName || 'Unknown'} (${totalGenes}% genes)`);
           autoscrollStats.foundShinies.push({
             name: monsterName || 'Unknown',
             totalGenes: totalGenes
@@ -3541,7 +3533,7 @@
   // MODULE INITIALIZATION
   // =======================
   function initializeAutoscroller() {
-    console.log('[Autoscroller] Initializing version 2.0 (Optimized)');
+    console.log('[Autoscroller] initializing...');
     
     // Log database integration status
     if (window.inventoryDatabase) {

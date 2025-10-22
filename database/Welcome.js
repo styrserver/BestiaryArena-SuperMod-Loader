@@ -365,12 +365,7 @@ function createToast({ message, type = 'info', duration = 3000, icon = null }) {
     iconImg.alt = type;
     iconImg.src = icon;
     iconImg.className = 'pixelated';
-    // Use appropriate sizing for the Bestiary Arena logo
-    if (type === 'loading') {
-      iconImg.style.cssText = 'width: 20px; height: 20px;'; // Slightly larger for loading
-    } else {
-      iconImg.style.cssText = 'width: 24px; height: 24px;'; // Larger for completion
-    }
+    iconImg.style.cssText = 'width: 16px; height: 16px;';
     widgetBottom.appendChild(iconImg);
   }
   
@@ -434,7 +429,7 @@ function showLoadingToast() {
     loadingToast = createToast({
       message: '<span class="text-monster">Loading mods</span>...',
       type: 'loading',
-      duration: 10000, // Show for 10 seconds
+      duration: 5000, // Show for 5 seconds
       icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
     });
 
@@ -452,7 +447,7 @@ function showModErrorToast(error) {
     const errorToast = createToast({
       message: `<span class="text-red-400">Mod loading error:</span> ${error}`,
       type: 'error',
-      duration: 8000, // Show for 8 seconds
+      duration: 5000, // Show for 5 seconds
       icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
     });
 
@@ -493,7 +488,7 @@ async function updateLoadingToComplete() {
     const completionToast = createToast({
       message: '<span class="text-monster">Mods</span> loaded successfully!',
       type: 'success',
-      duration: 10000, // Show for 10 seconds
+      duration: 5000, // Show for 5 seconds
       icon: 'https://bestiaryarena.com/assets/logo.png' // Use the official Bestiary Arena logo
     });
 
