@@ -25,25 +25,50 @@ const UI_TEXT = {
         REMOVE: 'Remover',
         CONFIRM: 'Confirmar',
         AUTO_SETUP: 'Autoconfigurar',
-        NEW_TASK: 'Nova task'
+        NEW_TASK: 'Nova tarefa'
     },
     LABELS: {
         TASK_START_DELAY: 'Task Start Delay (seconds)',
-        AUTO_REFILL_STAMINA: 'Automatically refill stamina when starting a task',
+        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
+        FASTER_AUTOPLAY: 'Faster Autoplay',
+        AUTOCOMPLETE_TASKS: 'Autocomplete Tasks',
+        ENABLE_AUTOPLANT: 'Enable Autoplant',
         CREATURE_SELECTION: 'Select which creatures you want to hunt for tasks:',
         WARNING_UNSELECTED: 'Unselected creatures will cause active tasks to be removed'
     },
     LABELS_PT: {
-        TASK_START_DELAY: 'Delay de Início da Task (segundos)',
-        AUTO_REFILL_STAMINA: 'Recarregar stamina automaticamente ao iniciar uma task',
-        CREATURE_SELECTION: 'Selecione quais criaturas você quer caçar para tasks:',
-        WARNING_UNSELECTED: 'Criaturas não selecionadas causarão remoção de tasks ativas'
+        TASK_START_DELAY: 'Delay de Início da Tarefa (segundos)',
+        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
+        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
+        AUTOCOMPLETE_TASKS: 'Autocompletar Tarefas',
+        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
+        CREATURE_SELECTION: 'Selecione quais criaturas você quer caçar para tarefas:',
+        WARNING_UNSELECTED: 'Criaturas não selecionadas causarão remoção de tarefas ativas'
+    },
+    DESCRIPTIONS: {
+        NO_CREATURES_AVAILABLE: 'No creatures available. Please refresh the page.'
+    },
+    DESCRIPTIONS_PT: {
+        NO_CREATURES_AVAILABLE: 'Nenhuma criatura disponível. Por favor, atualize a página.'
     }
 };
 
 const MOD_ID = 'better-tasker';
 const TASKER_BUTTON_ID = `${MOD_ID}-settings-button`;
 const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
+
+// Language detection function
+function isPortuguese() {
+    return document.documentElement.lang === 'pt-BR' || 
+           document.querySelector('html[lang="pt-BR"]') || 
+           navigator.language.startsWith('pt-BR') ||
+           window.location.href.includes('/pt/');
+}
+
+// Get localized text based on current language
+function getLocalizedText(englishText, portugueseText) {
+    return isPortuguese() ? portugueseText : englishText;
+}
 
 // Default settings constants
 const DEFAULT_TASK_START_DELAY = 3;
@@ -56,14 +81,20 @@ const TASKER_STATES = {
 };
 const DEFAULT_TASKER_STATE = TASKER_STATES.DISABLED;
 
-// Task handling delay constants
-const QUEST_LOG_LOAD_DELAY = 300;
-const MAP_NAVIGATION_DELAY = 200;
-const MAP_LOAD_DELAY = 1000;
-const AUTO_SETUP_DELAY = 1000;
-const AUTOPLAY_SETUP_DELAY = 1000;
-const BESTIARY_AUTOMATOR_INIT_DELAY = 500;
-const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
+// Timing constants - Standardized across all mods
+const NAVIGATION_DELAY = 500;           // Reduced from 200ms for consistency
+const AUTO_SETUP_DELAY = 800;          // Reduced from 1000ms for faster response
+const AUTOPLAY_SETUP_DELAY = 500;      // Reduced from 1000ms for faster response
+const AUTOMATION_CHECK_DELAY = 300;    // New standardized delay
+const BESTIARY_INTEGRATION_DELAY = 300; // Reduced from 500ms for faster response
+const BESTIARY_RETRY_DELAY = 1500;     // Reduced from 2000ms for faster response
+const BESTIARY_INIT_WAIT = 2000;       // Reduced from 3000ms for faster response
+
+// Legacy constants removed - now using standardized timing constants
+
+// User-configurable delays
+const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
+const MAX_START_DELAY = 10;            // 10 seconds maximum
 const ESC_KEY_DELAY = 50;
 const TASK_START_DELAY = 200;
 
@@ -1219,7 +1250,7 @@ function findPawAndFurSection() {
 
 // Create the settings button
 function createSettingsButton() {
-    return createStyledButton(TASKER_BUTTON_ID, UI_TEXT.BUTTONS.SETTINGS, 'blue', () => {
+    return createStyledButton(TASKER_BUTTON_ID, getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS), 'blue', () => {
         console.log('[Better Tasker] Settings button clicked');
         openTaskerSettingsModal();
     });
@@ -1227,7 +1258,7 @@ function createSettingsButton() {
 
 // Create the toggle button
 function createToggleButton() {
-    return createStyledButton(TASKER_TOGGLE_ID, 'Disabled', 'red', () => {
+    return createStyledButton(TASKER_TOGGLE_ID, getLocalizedText('Disabled', 'Desabilitado'), 'red', () => {
         console.log('[Better Tasker] Toggle button clicked');
         toggleTasker();
     });
@@ -1588,11 +1619,11 @@ function updateToggleButton() {
     
     switch (taskerState) {
         case TASKER_STATES.DISABLED:
-            toggleButton.textContent = 'Disabled';
+            toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
-            toggleButton.textContent = 'New Task+';
+            toggleButton.textContent = getLocalizedText('New Task+', 'Nova Task+');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             // Set custom blue background
             toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
@@ -1600,26 +1631,12 @@ function updateToggleButton() {
             toggleButton.style.backgroundPosition = 'center';
             break;
         case TASKER_STATES.ENABLED:
-            toggleButton.textContent = UI_TEXT.BUTTONS.ENABLED;
+            toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             break;
     }
 }
 
-// Update toggle button to show Raid Hunter is preventing activation
-function updateToggleButtonWithRaidHunterStatus() {
-    const toggleButton = document.querySelector(`#${TASKER_TOGGLE_ID}`);
-    if (!toggleButton) return;
-    
-    // Temporarily show that Raid Hunter is blocking activation
-    toggleButton.textContent = 'Raid Active';
-    toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-yellow active:frame-pressed-1-yellow surface-yellow gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
-    
-    // Reset to normal state after 3 seconds
-    setTimeout(() => {
-        updateToggleButton();
-    }, 3000);
-}
 
 
 // ============================================================================
@@ -2427,11 +2444,11 @@ function openTaskerSettingsModal() {
                             
                             // Open modal
                             activeTaskerModal = context.api.ui.components.createModal({
-                                title: 'Better Tasker Settings',
+                                title: getLocalizedText('Better Tasker Settings', 'Configurações do Better Tasker'),
                                 width: TASKER_MODAL_WIDTH,
                                 height: TASKER_MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: UI_TEXT.BUTTONS.CLOSE, primary: true }],
+                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }],
                                 onClose: () => {
                                     console.log('[Better Tasker] Settings modal closed');
                                     cleanupTaskerModal();
@@ -2471,7 +2488,10 @@ function openTaskerSettingsModal() {
                                     if (footer) {
                                         // Create auto-save indicator
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
+                                        autoSaveIndicator.textContent = getLocalizedText(
+                                            '✓ Settings auto-save when changed',
+                                            '✓ Configurações são salvas automaticamente quando alteradas'
+                                        );
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -2603,7 +2623,7 @@ function createGeneralSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Auto-Task Settings';
+    title.textContent = getLocalizedText('Auto-Task Settings', 'Configurações de Auto-Task');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -2634,7 +2654,7 @@ function createGeneralSettings() {
     `;
     
     const taskDelayLabel = document.createElement('label');
-    taskDelayLabel.textContent = 'Task Start Delay (seconds)';
+    taskDelayLabel.textContent = getLocalizedText(UI_TEXT.LABELS.TASK_START_DELAY, UI_TEXT.LABELS_PT.TASK_START_DELAY);
     taskDelayLabel.className = 'pixel-font-16';
     taskDelayLabel.style.cssText = `
         font-weight: bold;
@@ -2661,23 +2681,13 @@ function createGeneralSettings() {
     addTrackedListener(taskDelayInput, 'input', autoSaveSettings);
     taskDelayDiv.appendChild(taskDelayInput);
     
-    const taskDelayDesc = document.createElement('div');
-    taskDelayDesc.textContent = 'Delay before starting a task after detection';
-    taskDelayDesc.className = 'pixel-font-16';
-    taskDelayDesc.style.cssText = `
-        font-size: 11px;
-        color: #888;
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    taskDelayDiv.appendChild(taskDelayDesc);
     settingsWrapper.appendChild(taskDelayDiv);
     
     // Auto-refill Stamina setting
     const staminaRefillSetting = createCheckboxSetting(
         'autoRefillStamina',
-        'Auto-refill Stamina',
-        'Automatically refill stamina when starting a task',
+        getLocalizedText(UI_TEXT.LABELS.AUTO_REFILL_STAMINA, UI_TEXT.LABELS_PT.AUTO_REFILL_STAMINA),
+        '',
         false
     );
     settingsWrapper.appendChild(staminaRefillSetting);
@@ -2685,8 +2695,8 @@ function createGeneralSettings() {
     // Faster Autoplay setting
     const fasterAutoplaySetting = createCheckboxSetting(
         'fasterAutoplay',
-        'Faster Autoplay',
-        'Enable faster autoplay speed during tasks',
+        getLocalizedText(UI_TEXT.LABELS.FASTER_AUTOPLAY, UI_TEXT.LABELS_PT.FASTER_AUTOPLAY),
+        '',
         false
     );
     settingsWrapper.appendChild(fasterAutoplaySetting);
@@ -2694,8 +2704,8 @@ function createGeneralSettings() {
     // Auto-complete Tasks setting
     const autoCompleteSetting = createCheckboxSetting(
         'autoCompleteTasks',
-        'Autocomplete Tasks',
-        'Automatically complete tasks when possible',
+        getLocalizedText(UI_TEXT.LABELS.AUTOCOMPLETE_TASKS, UI_TEXT.LABELS_PT.AUTOCOMPLETE_TASKS),
+        '',
         true
     );
     settingsWrapper.appendChild(autoCompleteSetting);
@@ -2703,8 +2713,8 @@ function createGeneralSettings() {
     // Enable Autoplant setting
     const dragonPlantSetting = createCheckboxSetting(
         'enableDragonPlant',
-        'Enable Autoplant',
-        'Enable Autoplant (Autoseller) during tasks',
+        getLocalizedText(UI_TEXT.LABELS.ENABLE_AUTOPLANT, UI_TEXT.LABELS_PT.ENABLE_AUTOPLANT),
+        '',
         false
     );
     settingsWrapper.appendChild(dragonPlantSetting);
@@ -2753,7 +2763,7 @@ function createMonsterSelectionSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Monster Selection';
+    title.textContent = getLocalizedText('Monster Selection', 'Seleção de Monstros');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 15px 0;
@@ -2764,7 +2774,7 @@ function createMonsterSelectionSettings() {
     section.appendChild(title);
     
     const description = document.createElement('div');
-    description.textContent = 'Select which creatures you want to hunt for tasks:';
+    description.textContent = getLocalizedText(UI_TEXT.LABELS.CREATURE_SELECTION, UI_TEXT.LABELS_PT.CREATURE_SELECTION);
     description.className = 'pixel-font-16';
     description.style.cssText = `
         margin-bottom: 15px;
@@ -2807,7 +2817,7 @@ function createMonsterSelectionSettings() {
     
     if (creatures.length === 0) {
         const noCreaturesDiv = document.createElement('div');
-        noCreaturesDiv.textContent = 'No creatures available. Please refresh the page.';
+        noCreaturesDiv.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_CREATURES_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_CREATURES_AVAILABLE);
         noCreaturesDiv.className = 'pixel-font-16';
         noCreaturesDiv.style.cssText = `
             color: #888;
@@ -2858,7 +2868,10 @@ function createMonsterSelectionSettings() {
             transition: opacity 0.2s ease;
             cursor: help;
         `;
-        warningSymbol.setAttribute('title', 'Unselected creatures will cause active tasks to be removed');
+        warningSymbol.setAttribute('title', getLocalizedText(
+            'Unselected creatures will cause active tasks to be removed',
+            'Criaturas não selecionadas causarão remoção de tasks ativas'
+        ));
             
         // Function to update warning visibility and count
         const updateWarningVisibility = () => {
@@ -2881,7 +2894,10 @@ function createMonsterSelectionSettings() {
         const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
         const totalCreatures = checkboxes.length;
         const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-        warning.textContent = `⚠️ Warning: Unselected creatures will cause active tasks to be removed! (${selectedCount}/${totalCreatures} selected creatures)`;
+        warning.textContent = getLocalizedText(
+            `⚠️ Warning: Unselected creatures will cause active tasks to be removed! (${selectedCount}/${totalCreatures} selected creatures)`,
+            `⚠️ Aviso: Criaturas não selecionadas causarão remoção de tasks ativas! (${selectedCount}/${totalCreatures} criaturas selecionadas)`
+        );
     };
     
     // Add warning before monster container
@@ -3110,9 +3126,9 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
                 setTimeout(() => {
                     const retrySuccess = enableBestiaryAutomatorStaminaRefill();
                     if (retrySuccess) anySuccess = true;
-                }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+                }, BESTIARY_RETRY_DELAY);
             }
-        }, BESTIARY_AUTOMATOR_INIT_DELAY);
+        }, BESTIARY_INTEGRATION_DELAY);
     }
     
     if (settings.fasterAutoplay) {
@@ -3127,9 +3143,9 @@ function enableBestiaryAutomatorSettings(returnSuccess = false) {
                 setTimeout(() => {
                     const retrySuccess = enableBestiaryAutomatorFasterAutoplay();
                     if (retrySuccess) anySuccess = true;
-                }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+                }, BESTIARY_RETRY_DELAY);
             }
-        }, BESTIARY_AUTOMATOR_INIT_DELAY);
+        }, BESTIARY_INTEGRATION_DELAY);
     }
     
     if (settings.enableDragonPlant) {
@@ -3150,7 +3166,7 @@ async function handleQuestLogState(roomId) {
     await clearModalsWithEsc(3);
     
     // Wait for quest log to close
-    await sleep(MAP_LOAD_DELAY);
+    await sleep(AUTOMATION_CHECK_DELAY);
     console.log('[Better Tasker] Quest log closed with ESC presses');
     
     // Now navigate to the suggested map
@@ -3159,10 +3175,10 @@ async function handleQuestLogState(roomId) {
         type: 'selectRoomById',
         roomId: roomId
     });
-    await sleep(MAP_NAVIGATION_DELAY);
+    await sleep(NAVIGATION_DELAY);
     
     // Wait for map to load
-    await sleep(MAP_LOAD_DELAY);
+    await sleep(AUTOMATION_CHECK_DELAY);
     console.log('[Better Tasker] Navigation to suggested map completed via API');
     
     return true; // Navigation completed, quest log closed
@@ -3233,7 +3249,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         console.log('[Better Tasker] Looking for suggested map link...');
         
         // Wait a bit for the quest log to fully load
-        await sleep(QUEST_LOG_LOAD_DELAY);
+        await sleep(AUTOMATION_CHECK_DELAY);
         
         // Use provided element or look for the suggested map link
         let suggestedMapLink = suggestedMapElement;
@@ -3322,9 +3338,13 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Enable Bestiary Automator settings if configured
                 enableBestiaryAutomatorSettings();
                 
-                // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+                // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
                 console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
-                await sleep(3000);
+                await sleep(BESTIARY_INIT_WAIT);
+                
+                // Post-navigation settings validation
+                console.log('[Better Tasker] Validating settings after navigation...');
+                validateSettingsAfterNavigation();
                 
                 // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
                 taskNavigationCompleted = true;
@@ -3628,6 +3648,25 @@ function findBestiaryAutomator() {
     return null;
 }
 
+// Lightweight health check for Bestiary Automator integration
+function checkBestiaryAutomatorHealth() {
+    try {
+        const automator = findBestiaryAutomator();
+        if (!automator) {
+            return { healthy: false, reason: 'Bestiary Automator not available' };
+        }
+        
+        // Check if automator is responsive
+        if (typeof automator.updateConfig !== 'function') {
+            return { healthy: false, reason: 'Bestiary Automator not responsive' };
+        }
+        
+        return { healthy: true, reason: 'Bestiary Automator is healthy' };
+    } catch (error) {
+        return { healthy: false, reason: `Health check failed: ${error.message}` };
+    }
+}
+
 // Generic function to update Bestiary Automator configuration
 function updateBestiaryAutomatorConfig(setting, value, enableRetry = false) {
     try {
@@ -3716,6 +3755,64 @@ function enableBestiaryAutomatorFasterAutoplay() {
     return toggleBestiaryAutomatorSetting('fasterAutoplay', true, true);
 }
 
+// Post-navigation settings validation
+function validateSettingsAfterNavigation() {
+    try {
+        const settings = loadSettings();
+        let validationIssues = [];
+        
+        // Validate Bestiary Automator settings if enabled
+        if (settings.autoRefillStamina) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for stamina refill');
+            }
+        }
+        
+        if (settings.fasterAutoplay) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for faster autoplay');
+            }
+        }
+        
+        // Validate creature filtering settings
+        if (settings.allowedCreatures && settings.allowedCreatures.length === 0) {
+            validationIssues.push('No creatures allowed for tasking');
+        }
+        
+        // Log validation results and attempt recovery
+        if (validationIssues.length > 0) {
+            console.warn('[Better Tasker] Settings validation issues:', validationIssues);
+            
+            // Attempt automatic recovery for Bestiary Automator issues
+            if (validationIssues.some(issue => issue.includes('Bestiary Automator'))) {
+                console.log('[Better Tasker] Attempting automatic recovery for Bestiary Automator...');
+                const healthCheck = checkBestiaryAutomatorHealth();
+                if (!healthCheck.healthy) {
+                    console.warn('[Better Tasker] Bestiary Automator health check failed:', healthCheck.reason);
+                } else {
+                    console.log('[Better Tasker] Bestiary Automator health check passed, attempting to re-enable settings...');
+                    // Re-enable settings if health check passes
+                    if (settings.autoRefillStamina) {
+                        enableBestiaryAutomatorStaminaRefill();
+                    }
+                    if (settings.fasterAutoplay) {
+                        enableBestiaryAutomatorFasterAutoplay();
+                    }
+                }
+            }
+        } else {
+            console.log('[Better Tasker] Settings validation passed');
+        }
+        
+        return validationIssues.length === 0;
+    } catch (error) {
+        console.error('[Better Tasker] Error during settings validation:', error);
+        return false;
+    }
+}
+
 // Disable Bestiary Automator's faster autoplay setting
 function disableBestiaryAutomatorFasterAutoplay() {
     return toggleBestiaryAutomatorSetting('fasterAutoplay', false);
@@ -3778,8 +3875,8 @@ function findButtonByText(text) {
         'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE],
         'New task': [UI_TEXT.BUTTONS.NEW_TASK, UI_TEXT.BUTTONS_PT.NEW_TASK],
         'Remove': [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE],
-        'Remove current task': ['Remove current task', 'Remover task atual'],
-        'Remove task': ['Remove task', 'Remover task'],
+        'Remove current task': ['Remove current task', 'Remover tarefa atual'],
+        'Remove task': ['Remove task', 'Remover tarefa'],
         'Confirm': [UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM]
     };
     
@@ -3817,8 +3914,8 @@ function findConfirmationButton() {
     
     // Define confirmation button text mappings using centralized constants
     const confirmationTexts = [
-        'Remove current task', 'Remover task atual',
-        'Remove task', 'Remover task', 
+        'Remove current task', 'Remover tarefa atual',
+        'Remove task', 'Remover tarefa', 
         UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM
     ];
     
@@ -4350,7 +4447,7 @@ async function findAndClickFinishButton() {
         console.log('[Better Tasker] Looking for Finish button...');
         
         // Wait for quest log to load
-        await sleep(500);
+        await sleep(1200);
         
         // Find Finish button (100ms fast polling, 5 attempts)
         const finishButton = await findFinishButton(100, 5, false);

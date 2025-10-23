@@ -9,11 +9,93 @@ const MOD_ID = 'better-boosted-maps';
 const TOGGLE_BUTTON_ID = `${MOD_ID}-toggle-button`;
 const SETTINGS_BUTTON_ID = `${MOD_ID}-settings-button`;
 
-// Timing constants
-const NAVIGATION_DELAY = 1000;
-const AUTOMATION_CHECK_DELAY = 1000;
-const BESTIARY_INTEGRATION_DELAY = 500;
-const BESTIARY_RETRY_DELAY = 2000;
+// UI Text Constants - Centralized text management for multi-language support
+const UI_TEXT = {
+    BUTTONS: {
+        ENABLED: 'Enabled',
+        SETTINGS: 'Settings',
+        CLOSE: 'Close',
+        START: 'Start',
+        AUTO_SETUP: 'Auto-setup',
+        REMOVE: 'Remove',
+        CONFIRM: 'Confirm'
+    },
+    BUTTONS_PT: {
+        ENABLED: 'Habilitado',
+        SETTINGS: 'Configurações',
+        CLOSE: 'Fechar',
+        START: 'Iniciar',
+        AUTO_SETUP: 'Autoconfigurar',
+        REMOVE: 'Remover',
+        CONFIRM: 'Confirmar'
+    },
+    LABELS: {
+        START_DELAY: 'Start Delay (seconds)',
+        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
+        FASTER_AUTOPLAY: 'Faster Autoplay',
+        ENABLE_AUTOPLANT: 'Enable Autoplant',
+        BOOSTED_MAP_SELECTION: 'Select which boosted maps to farm:',
+        EQUIPMENT_SELECTION: 'Select which equipment to use:',
+        WARNING_UNSELECTED: 'Unselected maps will be skipped'
+    },
+    LABELS_PT: {
+        START_DELAY: 'Delay de Início (segundos)',
+        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
+        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
+        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
+        BOOSTED_MAP_SELECTION: 'Selecione quais mapas boosted farmar:',
+        EQUIPMENT_SELECTION: 'Selecione qual equipamento usar:',
+        WARNING_UNSELECTED: 'Mapas não selecionados serão ignorados'
+    },
+    TITLES: {
+        BOOSTED_MAPS_SETTINGS: 'Better Boosted Maps Settings',
+        BOOSTED_MAP_SETTINGS: 'Boosted Map Settings',
+        SELECTION_SETTINGS: 'Selection Settings'
+    },
+    TITLES_PT: {
+        BOOSTED_MAPS_SETTINGS: 'Configurações do Better Boosted Maps',
+        BOOSTED_MAP_SETTINGS: 'Configurações de Mapas Boosted',
+        SELECTION_SETTINGS: 'Configurações de Seleção'
+    },
+    DESCRIPTIONS: {
+        SELECT_MAPS: 'Select Maps',
+        SELECT_EQUIPMENT: 'Select Equipment',
+        NO_MAPS_AVAILABLE: 'No maps available',
+        NO_EQUIPMENT_AVAILABLE: 'No equipment available'
+    },
+    DESCRIPTIONS_PT: {
+        SELECT_MAPS: 'Selecionar Mapas',
+        SELECT_EQUIPMENT: 'Selecionar Equipamento',
+        NO_MAPS_AVAILABLE: 'Nenhum mapa disponível',
+        NO_EQUIPMENT_AVAILABLE: 'Nenhum equipamento disponível'
+    }
+};
+
+// Language detection function
+function isPortuguese() {
+    return document.documentElement.lang === 'pt-BR' || 
+           document.querySelector('html[lang="pt-BR"]') || 
+           navigator.language.startsWith('pt-BR') ||
+           window.location.href.includes('/pt/');
+}
+
+// Get localized text based on current language
+function getLocalizedText(englishText, portugueseText) {
+    return isPortuguese() ? portugueseText : englishText;
+}
+
+// Timing constants - Standardized across all mods
+const NAVIGATION_DELAY = 500;           // Reduced from 1000ms for faster response
+const AUTO_SETUP_DELAY = 800;          // Reduced from 1000ms for faster response
+const AUTOPLAY_SETUP_DELAY = 500;      // Reduced from 1000ms for faster response
+const AUTOMATION_CHECK_DELAY = 300;    // Reduced from 1000ms for faster response
+const BESTIARY_INTEGRATION_DELAY = 300; // Reduced from 500ms for faster response
+const BESTIARY_RETRY_DELAY = 1500;     // Reduced from 2000ms for faster response
+const BESTIARY_INIT_WAIT = 2000;       // Reduced from 3000ms for faster response
+
+// User-configurable delays
+const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
+const MAX_START_DELAY = 10;            // 10 seconds maximum
 
 // Stamina constants
 const DEFAULT_STAMINA_COST = 30;
@@ -948,10 +1030,10 @@ function insertButtons() {
             const buttonContainer = document.createElement('div');
             buttonContainer.style.cssText = `display: flex; gap: 4px; margin-top: 4px;`;
             
-            const toggleButton = createStyledButton(TOGGLE_BUTTON_ID, 'Disabled', 'red', toggleBoostedMaps);
+            const toggleButton = createStyledButton(TOGGLE_BUTTON_ID, getLocalizedText('Disabled', 'Desabilitado'), 'red', toggleBoostedMaps);
             buttonContainer.appendChild(toggleButton);
             
-            const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, 'Settings', 'blue', openSettingsModal);
+            const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS), 'blue', openSettingsModal);
             buttonContainer.appendChild(settingsButton);
             
             // Find the timer element (has clock icon and time)
@@ -1022,10 +1104,10 @@ function updateToggleButton() {
     if (!toggleButton) return;
     
     if (modState.enabled) {
-        toggleButton.textContent = 'Enabled';
+        toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     } else {
-        toggleButton.textContent = 'Disabled';
+        toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     }
 }
@@ -1061,7 +1143,7 @@ function loadSettings() {
         autoRefillStamina: false,
         fasterAutoplay: false,
         enableAutoplant: false,
-        startDelay: 3,
+        startDelay: DEFAULT_START_DELAY,  // Use standardized default
         showNotification: true,
         maps: {},
         equipment: {}
@@ -1189,7 +1271,7 @@ function createBoostedMapSettings(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Boosted Map Settings';
+    title.textContent = getLocalizedText(UI_TEXT.TITLES.BOOSTED_MAP_SETTINGS, UI_TEXT.TITLES_PT.BOOSTED_MAP_SETTINGS);
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1212,18 +1294,18 @@ function createBoostedMapSettings(settings) {
     // Start delay setting
     const startDelayDiv = createNumberSetting(
         'boosted-maps-startDelay',
-        'Start Delay (seconds)',
-        'Delay before starting a run after detection',
+        getLocalizedText(UI_TEXT.LABELS.START_DELAY, UI_TEXT.LABELS_PT.START_DELAY),
+        '',
         settings.startDelay,
-        1, 30
+        1, MAX_START_DELAY
     );
     settingsWrapper.appendChild(startDelayDiv);
     
     // Auto-refill stamina setting
     const autoRefillStaminaDiv = createCheckboxSetting(
         'boosted-maps-autoRefillStamina',
-        'Auto-refill Stamina',
-        'Automatically activates refill stamina',
+        getLocalizedText(UI_TEXT.LABELS.AUTO_REFILL_STAMINA, UI_TEXT.LABELS_PT.AUTO_REFILL_STAMINA),
+        '',
         settings.autoRefillStamina
     );
     settingsWrapper.appendChild(autoRefillStaminaDiv);
@@ -1231,8 +1313,8 @@ function createBoostedMapSettings(settings) {
     // Faster autoplay setting
     const fasterAutoplayDiv = createCheckboxSetting(
         'boosted-maps-fasterAutoplay',
-        'Faster Autoplay',
-        'Enable faster autoplay speed during runs',
+        getLocalizedText(UI_TEXT.LABELS.FASTER_AUTOPLAY, UI_TEXT.LABELS_PT.FASTER_AUTOPLAY),
+        '',
         settings.fasterAutoplay
     );
     settingsWrapper.appendChild(fasterAutoplayDiv);
@@ -1240,8 +1322,8 @@ function createBoostedMapSettings(settings) {
     // Enable autoplant setting
     const enableAutoplantDiv = createCheckboxSetting(
         'boosted-maps-enableAutoplant',
-        'Enable Autoplant',
-        'Enable Autoplant (Autoseller) during runs',
+        getLocalizedText(UI_TEXT.LABELS.ENABLE_AUTOPLANT, UI_TEXT.LABELS_PT.ENABLE_AUTOPLANT),
+        '',
         settings.enableAutoplant
     );
     settingsWrapper.appendChild(enableAutoplantDiv);
@@ -1361,7 +1443,7 @@ function createMapsTab(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Select Maps';
+    title.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.SELECT_MAPS, UI_TEXT.DESCRIPTIONS_PT.SELECT_MAPS);
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1390,7 +1472,7 @@ function createMapsTab(settings) {
     
     if (Object.keys(organizedMaps).length === 0) {
         const noMaps = document.createElement('div');
-        noMaps.textContent = 'No maps available';
+        noMaps.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_MAPS_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_MAPS_AVAILABLE);
         noMaps.className = 'pixel-font-14';
         noMaps.style.color = '#888';
         scrollContainer.appendChild(noMaps);
@@ -1526,7 +1608,7 @@ function createEquipmentTab(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Select Equipment';
+    title.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.SELECT_EQUIPMENT, UI_TEXT.DESCRIPTIONS_PT.SELECT_EQUIPMENT);
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1554,7 +1636,7 @@ function createEquipmentTab(settings) {
     
     if (allEquipment.length === 0) {
         const noEquipment = document.createElement('div');
-        noEquipment.textContent = 'No equipment available';
+        noEquipment.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_EQUIPMENT_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_EQUIPMENT_AVAILABLE);
         noEquipment.className = 'pixel-font-14';
         noEquipment.style.color = '#888';
         scrollContainer.appendChild(noEquipment);
@@ -1733,11 +1815,11 @@ function openSettingsModal() {
                             const settingsContent = createSettingsContent();
                             
                             modState.activeModal = context.api.ui.components.createModal({
-                                title: 'Better Boosted Maps Settings',
+                                title: getLocalizedText(UI_TEXT.TITLES.BOOSTED_MAPS_SETTINGS, UI_TEXT.TITLES_PT.BOOSTED_MAPS_SETTINGS),
                                 width: MODAL_WIDTH,
                                 height: MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: 'Close', primary: true }],
+                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }],
                                 onClose: () => {
                                     console.log('[Better Boosted Maps] Settings modal closed');
                                     cleanupModal();
@@ -1781,7 +1863,10 @@ function openSettingsModal() {
                                     const footer = modalElement.querySelector('.flex.justify-end.gap-2');
                                     if (footer) {
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
+                                        autoSaveIndicator.textContent = getLocalizedText(
+                                            '✓ Settings auto-save when changed',
+                                            '✓ Configurações são salvas automaticamente quando alteradas'
+                                        );
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -1831,8 +1916,9 @@ function openSettingsModal() {
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     const textMappings = {
-        'Auto-setup': ['Auto-setup', 'Autoconfigurar'],
-        'Start': ['Start', 'Iniciar']
+        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
+        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
+        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE]
     };
     const possibleTexts = textMappings[text] || [text];
     return buttons.find(button => possibleTexts.includes(button.textContent.trim()));
@@ -1877,10 +1963,16 @@ async function startBoostedMapFarming() {
         // Show toast notification
         showToast('Starting Boosted Map');
         
-        // Close any open modals
-        console.log('[Better Boosted Maps] Waiting before navigation...');
-        clearModalsWithEsc(1);
-        await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
+        // Close any open modals (3 ESC presses for consistency)
+        console.log('[Better Boosted Maps] Clearing modals before navigation...');
+        clearModalsWithEsc(3);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // User-configurable initial delay
+        const initialSettings = loadSettings();
+        const startDelay = (initialSettings.startDelay || DEFAULT_START_DELAY) * 1000;
+        console.log(`[Better Boosted Maps] Waiting ${startDelay/1000}s before navigation...`);
+        await new Promise(resolve => setTimeout(resolve, startDelay));
         
         // Check automation status after initial delay
         if (!checkAutomationEnabled('during navigation delay')) return;
@@ -1914,7 +2006,7 @@ async function startBoostedMapFarming() {
         
         console.log('[Better Boosted Maps] Clicking Auto-setup button...');
         autoSetupButton.click();
-        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+        await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
         
         // Check automation status after auto-setup
         if (!checkAutomationEnabled('after auto-setup')) return;
@@ -1925,7 +2017,7 @@ async function startBoostedMapFarming() {
         // Enable autoplay mode
         console.log('[Better Boosted Maps] Enabling autoplay mode...');
         globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
-        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+        await new Promise(resolve => setTimeout(resolve, AUTOPLAY_SETUP_DELAY));
         
         // Check automation status after enabling autoplay
         if (!checkAutomationEnabled('after enabling autoplay')) return;
@@ -1946,9 +2038,13 @@ async function startBoostedMapFarming() {
             enableAutosellerDragonPlant();
         }
         
-        // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+        // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
         console.log('[Better Boosted Maps] Waiting for Bestiary Automator to initialize...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, BESTIARY_INIT_WAIT));
+        
+        // Post-navigation settings validation
+        console.log('[Better Boosted Maps] Validating settings after navigation...');
+        validateSettingsAfterNavigation();
         
         // Check stamina before attempting to start
         console.log('[Better Boosted Maps] Checking stamina status...');
@@ -2127,6 +2223,103 @@ function enableAutosellerDragonPlant() {
         return false;
     } catch (error) {
         console.error('[Better Boosted Maps] Error enabling Dragon Plant:', error);
+        return false;
+    }
+}
+
+// Find Bestiary Automator instance
+function findBestiaryAutomator() {
+    // Method 1: Check if Bestiary Automator is available in global scope
+    if (window.bestiaryAutomator?.updateConfig) {
+        return window.bestiaryAutomator;
+    }
+    
+    // Method 2: Check if Bestiary Automator is available via API
+    if (window.BestiaryAutomatorAPI?.updateConfig) {
+        return window.BestiaryAutomatorAPI;
+    }
+    
+    return null;
+}
+
+// Lightweight health check for Bestiary Automator integration
+function checkBestiaryAutomatorHealth() {
+    try {
+        const automator = findBestiaryAutomator();
+        if (!automator) {
+            return { healthy: false, reason: 'Bestiary Automator not available' };
+        }
+        
+        // Check if automator is responsive
+        if (typeof automator.updateConfig !== 'function') {
+            return { healthy: false, reason: 'Bestiary Automator not responsive' };
+        }
+        
+        return { healthy: true, reason: 'Bestiary Automator is healthy' };
+    } catch (error) {
+        return { healthy: false, reason: `Health check failed: ${error.message}` };
+    }
+}
+
+// Post-navigation settings validation
+function validateSettingsAfterNavigation() {
+    try {
+        const settings = loadSettings();
+        let validationIssues = [];
+        
+        // Validate Bestiary Automator settings if enabled
+        if (settings.autoRefillStamina) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for stamina refill');
+            }
+        }
+        
+        if (settings.fasterAutoplay) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for faster autoplay');
+            }
+        }
+        
+        // Validate boosted map settings
+        if (!settings.maps || Object.keys(settings.maps).length === 0) {
+            validationIssues.push('No boosted maps configured');
+        }
+        
+        // Validate equipment settings
+        if (!settings.equipment || Object.keys(settings.equipment).length === 0) {
+            validationIssues.push('No equipment configured');
+        }
+        
+        // Log validation results and attempt recovery
+        if (validationIssues.length > 0) {
+            console.warn('[Better Boosted Maps] Settings validation issues:', validationIssues);
+            
+            // Attempt automatic recovery for Bestiary Automator issues
+            if (validationIssues.some(issue => issue.includes('Bestiary Automator'))) {
+                console.log('[Better Boosted Maps] Attempting automatic recovery for Bestiary Automator...');
+                const healthCheck = checkBestiaryAutomatorHealth();
+                if (!healthCheck.healthy) {
+                    console.warn('[Better Boosted Maps] Bestiary Automator health check failed:', healthCheck.reason);
+                } else {
+                    console.log('[Better Boosted Maps] Bestiary Automator health check passed, attempting to re-enable settings...');
+                    // Re-enable settings if health check passes
+                    if (settings.autoRefillStamina) {
+                        enableBestiaryAutomatorStaminaRefill();
+                    }
+                    if (settings.fasterAutoplay) {
+                        enableBestiaryAutomatorFasterAutoplay();
+                    }
+                }
+            }
+        } else {
+            console.log('[Better Boosted Maps] Settings validation passed');
+        }
+        
+        return validationIssues.length === 0;
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error during settings validation:', error);
         return false;
     }
 }

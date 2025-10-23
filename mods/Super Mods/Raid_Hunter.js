@@ -15,18 +15,79 @@ const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
 const AUTOMATION_ENABLED = true;
 const AUTOMATION_DISABLED = false;
 
-// Timeout and delay
-const RAID_DETECTION_DELAY = 500;
+// UI Text Constants - Centralized text management for multi-language support
+const UI_TEXT = {
+    BUTTONS: {
+        ENABLED: 'Enabled',
+        SETTINGS: 'Settings',
+        CLOSE: 'Close',
+        START: 'Start',
+        AUTO_SETUP: 'Auto-setup',
+        REMOVE: 'Remove',
+        CONFIRM: 'Confirm'
+    },
+    BUTTONS_PT: {
+        ENABLED: 'Habilitado',
+        SETTINGS: 'Configurações',
+        CLOSE: 'Fechar',
+        START: 'Iniciar',
+        AUTO_SETUP: 'Autoconfigurar',
+        REMOVE: 'Remover',
+        CONFIRM: 'Confirmar'
+    },
+    LABELS: {
+        RAID_START_DELAY: 'Raid Start Delay (seconds)',
+        RAID_MAP_SELECTION: 'Select which raid maps to hunt:',
+        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
+        FASTER_AUTOPLAY: 'Faster Autoplay',
+        ENABLE_AUTOPLANT: 'Enable Autoplant',
+        WARNING_UNSELECTED: 'Unselected maps will be skipped'
+    },
+    LABELS_PT: {
+        RAID_START_DELAY: 'Delay de Início do Raid (segundos)',
+        RAID_MAP_SELECTION: 'Selecione quais mapas de raid caçar:',
+        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
+        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
+        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
+        WARNING_UNSELECTED: 'Mapas não selecionados serão ignorados'
+    },
+    TITLES: {
+        RAID_HUNTER_SETTINGS: 'Raid Hunter Settings',
+        AUTO_RAID_SETTINGS: 'Auto-Raid Settings',
+        OTHER_SETTINGS: 'Other Settings'
+    },
+    TITLES_PT: {
+        RAID_HUNTER_SETTINGS: 'Configurações do Raid Hunter',
+        AUTO_RAID_SETTINGS: 'Configurações de Auto-Raid',
+        OTHER_SETTINGS: 'Outras Configurações'
+    },
+    DESCRIPTIONS: {
+        RAID_MAP_SELECTION_DESC: 'Select which raid maps you want to auto-raid when detected:'
+    },
+    DESCRIPTIONS_PT: {
+        RAID_MAP_SELECTION_DESC: 'Selecione quais mapas de raid você quer auto-raidar quando detectados:'
+    }
+};
+
+// Timing constants - Standardized across all mods
+const NAVIGATION_DELAY = 500;           // Reduced from 1000ms for faster response
+const AUTO_SETUP_DELAY = 800;          // New standardized delay
+const AUTOPLAY_SETUP_DELAY = 500;      // New standardized delay
+const AUTOMATION_CHECK_DELAY = 300;    // Reduced from 1000ms for faster response
+const BESTIARY_INTEGRATION_DELAY = 300; // Reduced from 500ms for faster response
+const BESTIARY_RETRY_DELAY = 1500;     // Reduced from 2000ms for faster response
+const BESTIARY_INIT_WAIT = 2000;       // New standardized delay (was missing)
+
+// Raid Hunter specific constants (not standardized)
 const RAID_CLOCK_UPDATE_INTERVAL = 1000;
-const RAID_START_DELAY = 1000;
-const MODAL_OPEN_DELAY = 1000;
-const BESTIARY_AUTOMATOR_RETRY_DELAY = 2000;
-const AUTOMATION_CHECK_DELAY = 1000;
-const BESTIARY_INTEGRATION_DELAY = 500;
-const BESTIARY_VERIFICATION_DELAY = 1000;
 const RAID_FAILURE_RETRY_DELAY = 5000;
 const NEXT_RAID_DELAY = 2000;
 const QUEST_BUTTON_VALIDATION_INTERVAL = 30000;
+const MODAL_OPEN_DELAY = 1000;
+
+// User-configurable delays
+const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
+const MAX_START_DELAY = 10;            // 10 seconds maximum
 const STAMINA_MONITOR_INTERVAL = 30000;
 const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
 const RAID_END_CHECK_INTERVAL = 30000;
@@ -1189,7 +1250,7 @@ function closeOpenModals() {
         console.log('[Raid Hunter] Sent ESC key to close modals');
         
         // Small delay to let modals close
-        return new Promise(resolve => setTimeout(resolve, RAID_DETECTION_DELAY));
+        return new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     } catch (error) {
         console.error('[Raid Hunter] Error closing modals:', error);
         return Promise.resolve();
@@ -1355,10 +1416,10 @@ function createRaidClock() {
                 </div>
                 <div class="flex gap-1 mt-1">
                     <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="raid-hunter-toggle-btn">
-                        Disabled
+                        ${getLocalizedText('Disabled', 'Desabilitado')}
                     </button>
                     <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="raid-hunter-settings-btn">
-                        Settings
+                        ${getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS)}
                     </button>
                 </div>
             </div>
@@ -1664,6 +1725,25 @@ function findBestiaryAutomator() {
     return null;
 }
 
+// Lightweight health check for Bestiary Automator integration
+function checkBestiaryAutomatorHealth() {
+    try {
+        const automator = findBestiaryAutomator();
+        if (!automator) {
+            return { healthy: false, reason: 'Bestiary Automator not available' };
+        }
+        
+        // Check if automator is responsive
+        if (typeof automator.updateConfig !== 'function') {
+            return { healthy: false, reason: 'Bestiary Automator not responsive' };
+        }
+        
+        return { healthy: true, reason: 'Bestiary Automator is healthy' };
+    } catch (error) {
+        return { healthy: false, reason: `Health check failed: ${error.message}` };
+    }
+}
+
 // Helper function to update Bestiary Automator config with retry
 function updateBestiaryAutomatorConfig(configUpdate, settingName, verifyProperty) {
     const automator = findBestiaryAutomator();
@@ -1678,7 +1758,7 @@ function updateBestiaryAutomatorConfig(configUpdate, settingName, verifyProperty
             if (window.bestiaryAutomator?.config) {
                 console.log(`[Raid Hunter] Verifying ${settingName}:`, window.bestiaryAutomator.config[verifyProperty]);
             }
-        }, BESTIARY_VERIFICATION_DELAY);
+        }, AUTOMATION_CHECK_DELAY);
         
         return true;
     } else {
@@ -1695,11 +1775,11 @@ function updateBestiaryAutomatorConfig(configUpdate, settingName, verifyProperty
                     if (window.bestiaryAutomator?.config) {
                         console.log(`[Raid Hunter] Verifying ${settingName} (retry):`, window.bestiaryAutomator.config[verifyProperty]);
                     }
-                }, BESTIARY_VERIFICATION_DELAY);
+                }, AUTOMATION_CHECK_DELAY);
             } else {
                 console.log(`[Raid Hunter] Bestiary Automator still not available - you may need to enable ${settingName} manually`);
             }
-        }, BESTIARY_AUTOMATOR_RETRY_DELAY);
+        }, BESTIARY_RETRY_DELAY);
         return false;
     }
 }
@@ -1756,6 +1836,64 @@ function disableBestiaryAutomatorFasterAutoplay() {
             return false;
         }
     }, 'disable Bestiary Automator faster autoplay');
+}
+
+// Post-navigation settings validation
+function validateSettingsAfterNavigation() {
+    try {
+        const settings = loadSettings();
+        let validationIssues = [];
+        
+        // Validate Bestiary Automator settings if enabled
+        if (settings.autoRefillStamina) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for stamina refill');
+            }
+        }
+        
+        if (settings.fasterAutoplay) {
+            const automator = findBestiaryAutomator();
+            if (!automator) {
+                validationIssues.push('Bestiary Automator not available for faster autoplay');
+            }
+        }
+        
+        // Validate raid delay settings
+        if (settings.raidDelay < 1 || settings.raidDelay > 30) {
+            validationIssues.push('Invalid raid delay setting');
+        }
+        
+        // Log validation results and attempt recovery
+        if (validationIssues.length > 0) {
+            console.warn('[Raid Hunter] Settings validation issues:', validationIssues);
+            
+            // Attempt automatic recovery for Bestiary Automator issues
+            if (validationIssues.some(issue => issue.includes('Bestiary Automator'))) {
+                console.log('[Raid Hunter] Attempting automatic recovery for Bestiary Automator...');
+                const healthCheck = checkBestiaryAutomatorHealth();
+                if (!healthCheck.healthy) {
+                    console.warn('[Raid Hunter] Bestiary Automator health check failed:', healthCheck.reason);
+                } else {
+                    console.log('[Raid Hunter] Bestiary Automator health check passed, attempting to re-enable settings...');
+                    // Re-enable settings if health check passes
+                    if (settings.autoRefillStamina) {
+                        enableBestiaryAutomatorStaminaRefill();
+                    }
+                    if (settings.fasterAutoplay) {
+                        enableBestiaryAutomatorFasterAutoplay();
+                    }
+                }
+            }
+        } else {
+            console.log('[Raid Hunter] Settings validation passed');
+        }
+        
+        return validationIssues.length === 0;
+    } catch (error) {
+        console.error('[Raid Hunter] Error during settings validation:', error);
+        return false;
+    }
 }
 
 // Enable Autoseller's Dragon Plant setting
@@ -1837,15 +1975,28 @@ function getEventNameForRoomId(roomId) {
     return `Unknown (${roomId})`;
 }
 
+// Language detection function
+function isPortuguese() {
+    return document.documentElement.lang === 'pt-BR' || 
+           document.querySelector('html[lang="pt-BR"]') || 
+           navigator.language.startsWith('pt-BR') ||
+           window.location.href.includes('/pt/');
+}
+
+// Get localized text based on current language
+function getLocalizedText(englishText, portugueseText) {
+    return isPortuguese() ? portugueseText : englishText;
+}
+
 // Finds button by text content - supports both English and Portuguese
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    // Define text mappings for different languages
+    // Define text mappings for different languages using centralized constants
     const textMappings = {
-        'Auto-setup': ['Auto-setup', 'Autoconfigurar'],
-        'Start': ['Start', 'Iniciar'],
-        'Close': ['Close', 'Fechar']
+        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
+        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
+        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE]
     };
     
     // Get the list of possible texts for the given text key
@@ -1971,10 +2122,10 @@ function updateToggleButton() {
     if (!toggleButton) return;
     
     if (isAutomationActive()) {
-        toggleButton.textContent = 'Enabled';
+        toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     } else {
-        toggleButton.textContent = 'Disabled';
+        toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     }
 }
@@ -2216,9 +2367,11 @@ async function handleEventOrRaid(roomId) {
     showToast('Starting Raid Hunter');
 
     try {
-        // Sleep for 1000ms before navigating to the raid map
-        console.log('[Raid Hunter] Waiting 1000ms before navigation...');
-        await new Promise(resolve => setTimeout(resolve, RAID_START_DELAY));
+        // User-configurable initial delay (standardized timing)
+        const settings = loadSettings();
+        const startDelay = (settings.raidDelay || DEFAULT_START_DELAY) * 1000;
+        console.log(`[Raid Hunter] Waiting ${startDelay/1000}s before navigation...`);
+        await new Promise(resolve => setTimeout(resolve, startDelay));
         
         // Check automation status after initial delay
         if (!isAutomationActive()) {
@@ -2232,7 +2385,7 @@ async function handleEventOrRaid(roomId) {
             type: 'selectRoomById',
             roomId: roomId
         });
-        await new Promise(resolve => setTimeout(resolve, RAID_START_DELAY));
+        await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
         console.log('[Raid Hunter] Navigation completed');
         
         // Check automation status after navigation
@@ -2240,6 +2393,10 @@ async function handleEventOrRaid(roomId) {
             cancelCurrentRaid('automation disabled after navigation');
             return;
         }
+        
+        // Post-navigation settings validation
+        console.log('[Raid Hunter] Validating settings after navigation...');
+        validateSettingsAfterNavigation();
     } catch (error) {
         console.error('[Raid Hunter] Error navigating to map via API:', error);
         handleRaidFailure('Failed to navigate to map');
@@ -2257,7 +2414,7 @@ async function handleEventOrRaid(roomId) {
     
     console.log('[Raid Hunter] Clicking Auto-setup button...');
     autoSetupButton.click();
-    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+    await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
     
     // Check automation status after auto-setup
     if (!isAutomationActive()) {
@@ -2271,7 +2428,7 @@ async function handleEventOrRaid(roomId) {
     // Enable autoplay mode
     console.log('[Raid Hunter] Enabling autoplay mode...');
     ensureAutoplayMode();
-    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+    await new Promise(resolve => setTimeout(resolve, AUTOPLAY_SETUP_DELAY));
     
     // Check automation status after enabling autoplay
     if (!isAutomationActive()) {
@@ -2340,9 +2497,9 @@ async function handleEventOrRaid(roomId) {
         enableAutosellerDragonPlant();
     }
     
-    // CRITICAL FIX: Wait for Bestiary Automator to initialize (500ms + 2000ms retry + buffer)
+    // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
     console.log('[Raid Hunter] Waiting for Bestiary Automator to initialize...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, BESTIARY_INIT_WAIT));
     
     // Check stamina before attempting to start raid
     console.log('[Raid Hunter] Checking stamina status...');
@@ -2820,7 +2977,7 @@ async function handleNewRaid(raid) {
             const closeButton = findButtonByText('Close');
             if (closeButton) {
                 closeButton.click();
-                await new Promise(resolve => setTimeout(resolve, BESTIARY_AUTOMATOR_RETRY_DELAY));
+                await new Promise(resolve => setTimeout(resolve, BESTIARY_RETRY_DELAY));
             } else {
                 break;
             }
@@ -2931,11 +3088,11 @@ function openRaidHunterSettingsModal() {
                             
                             // Open modal using the same API as Cyclopedia
                             activeRaidHunterModal = context.api.ui.components.createModal({
-                                title: 'Raid Hunter Settings',
+                                title: getLocalizedText(UI_TEXT.TITLES.RAID_HUNTER_SETTINGS, UI_TEXT.TITLES_PT.RAID_HUNTER_SETTINGS),
                                 width: RAID_HUNTER_MODAL_WIDTH,
                                 height: RAID_HUNTER_MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: 'Close', primary: true }], // Add Close button like other mods
+                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }], // Add Close button like other mods
                                 onClose: () => {
                                     console.log('[Raid Hunter] Settings modal closed');
                                     cleanupRaidHunterModal();
@@ -2950,7 +3107,10 @@ function openRaidHunterSettingsModal() {
                                     if (footer) {
                                         // Create auto-save indicator
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = '✓ Settings auto-save when changed';
+                                        autoSaveIndicator.textContent = getLocalizedText(
+                                            '✓ Settings auto-save when changed',
+                                            '✓ Configurações são salvas automaticamente quando alteradas'
+                                        );
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -3132,7 +3292,7 @@ function createAutoRaidSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Auto-Raid Settings';
+    title.textContent = getLocalizedText(UI_TEXT.TITLES.AUTO_RAID_SETTINGS, UI_TEXT.TITLES_PT.AUTO_RAID_SETTINGS);
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -3162,7 +3322,7 @@ function createAutoRaidSettings() {
     `;
     
     const delayLabel = document.createElement('label');
-    delayLabel.textContent = 'Raid Start Delay (seconds)';
+    delayLabel.textContent = getLocalizedText(UI_TEXT.LABELS.RAID_START_DELAY, UI_TEXT.LABELS_PT.RAID_START_DELAY);
     delayLabel.className = 'pixel-font-16';
     delayLabel.style.cssText = `
         font-weight: bold;
@@ -3187,16 +3347,6 @@ function createAutoRaidSettings() {
     });
     delayDiv.appendChild(delayInput);
     
-    const delayDesc = document.createElement('div');
-    delayDesc.textContent = 'Delay before starting a raid after detection';
-    delayDesc.className = 'pixel-font-16';
-    delayDesc.style.cssText = `
-        font-size: 11px;
-        color: ${COLOR_GRAY};
-        font-style: italic;
-        margin-top: 2px;
-    `;
-    delayDiv.appendChild(delayDesc);
     settingsWrapper.appendChild(delayDiv);
     
     // Auto-refill Stamina setting
@@ -3217,7 +3367,10 @@ function createAutoRaidSettings() {
         margin-bottom: 4px;
     `;
     
-    const staminaRefillSetting = createCheckboxSetting('autoRefillStamina', 'Auto-refill Stamina', 'Automatically refill stamina when starting a raid', false);
+    const staminaRefillSetting = createCheckboxSetting('autoRefillStamina', 
+        getLocalizedText('Auto-refill Stamina', 'Recarregar Stamina Automaticamente'), 
+        '', 
+        false);
     staminaRefillDiv.appendChild(staminaRefillSetting);
     settingsWrapper.appendChild(staminaRefillDiv);
     
@@ -3230,7 +3383,10 @@ function createAutoRaidSettings() {
         gap: 6px;
     `;
     
-    const fasterAutoplaySetting = createCheckboxSetting('fasterAutoplay', 'Faster Autoplay', 'Enable faster autoplay speed during raids', false);
+    const fasterAutoplaySetting = createCheckboxSetting('fasterAutoplay', 
+        getLocalizedText('Faster Autoplay', 'Autoplay Mais Rápido'), 
+        '', 
+        false);
     fasterAutoplayDiv.appendChild(fasterAutoplaySetting);
     settingsWrapper.appendChild(fasterAutoplayDiv);
     
@@ -3243,7 +3399,10 @@ function createAutoRaidSettings() {
         gap: 6px;
     `;
     
-    const dragonPlantSetting = createCheckboxSetting('enableDragonPlant', 'Enable Autoplant', 'Enable Autoplant (Autoseller) during raids', false);
+    const dragonPlantSetting = createCheckboxSetting('enableDragonPlant', 
+        getLocalizedText('Enable Autoplant', 'Ativar Vendedor Automático'), 
+        '', 
+        false);
     dragonPlantDiv.appendChild(dragonPlantSetting);
     settingsWrapper.appendChild(dragonPlantDiv);
     
@@ -3259,7 +3418,10 @@ function createAutoRaidSettings() {
     `;
     
     const creditText = document.createElement('div');
-    creditText.innerHTML = 'Inspired by <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>';
+    creditText.innerHTML = getLocalizedText(
+        'Inspired by <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>',
+        'Inspirado por <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>'
+    );
     creditText.className = 'pixel-font-16';
     creditText.style.cssText = `
         font-size: 10px;
@@ -3309,7 +3471,7 @@ function createRaidMapSelection() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = 'Raid Map Selection';
+    title.textContent = getLocalizedText('Raid Map Selection', 'Seleção de Mapas de Raid');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 15px 0;
@@ -3321,7 +3483,7 @@ function createRaidMapSelection() {
     section.appendChild(title);
     
     const description = document.createElement('div');
-    description.textContent = 'Select which raid maps you want to auto-raid when detected:';
+    description.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.RAID_MAP_SELECTION_DESC, UI_TEXT.DESCRIPTIONS_PT.RAID_MAP_SELECTION_DESC);
     description.className = 'pixel-font-16';
     description.style.cssText = `
         margin-bottom: 15px;

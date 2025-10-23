@@ -2742,7 +2742,9 @@
   function getUserCurrentDust() {
     try {
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-      return Number(playerContext?.dust) || 0;
+      const dust = Number(playerContext?.dust) || 0;
+      console.log(`[Better Forge] 💰 getUserCurrentDust: ${dust} (from context.dust: ${playerContext?.dust})`);
+      return dust;
     } catch (error) {
       console.error('[Better Forge] Error getting user dust:', error);
       return 0;
@@ -3880,6 +3882,11 @@
       const playerContext = globalThis.state?.player?.getSnapshot()?.context;
       const currentDust = Number(playerContext?.dust) || 0;
       console.log(`[Better Forge] 📊 Current dust from global state:`, currentDust);
+      
+      // Safety check: if dust is 0 but we're not supposed to have 0 dust, log a warning
+      if (currentDust === 0 && numericDustChange > 0) {
+        console.warn(`[Better Forge] ⚠️ Dust is 0 but we're adding ${numericDustChange} dust - potential state sync issue`);
+      }
       
       if (numericDustChange !== 0) {
         // Calculate the start value for animation (current dust BEFORE the change)
@@ -5505,6 +5512,8 @@
       const player = globalThis.state?.player;
       if (!player) return;
       
+      console.log(`[Better Forge] 💰 updateLocalInventoryGoldDust called: goldChange=${goldChange}, dustChange=${dustChange}`);
+      
       player.send({
         type: "setState",
         fn: (prev) => {
@@ -5514,16 +5523,22 @@
           const currentGold = Number(prev.inventory?.gold ?? prev.gold ?? 0);
           const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? 0);
           
+          console.log(`[Better Forge] 💰 Current state: gold=${currentGold}, dust=${currentDust}`);
+          
           if (goldChange !== 0) {
-            newState.inventory.gold = currentGold + goldChange;
-            newState.gold = newState.inventory.gold;
+            const newGold = currentGold + goldChange;
+            newState.inventory.gold = newGold;
+            newState.gold = newGold;
+            console.log(`[Better Forge] 💰 Gold updated: ${currentGold} → ${newGold}`);
           }
           
           if (dustChange !== 0) {
             const newDust = currentDust + dustChange;
             // Ensure dust never goes negative in local state
-            newState.inventory.dust = Math.max(0, newDust);
-            newState.dust = newState.inventory.dust;
+            const safeDust = Math.max(0, newDust);
+            newState.inventory.dust = safeDust;
+            newState.dust = safeDust;
+            console.log(`[Better Forge] 💰 Dust updated: ${currentDust} → ${safeDust} (change: ${dustChange})`);
           }
           
           return newState;
