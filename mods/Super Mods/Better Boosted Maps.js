@@ -480,6 +480,102 @@ const modState = {
 // 3. Utility Functions
 // =======================
 
+// =======================
+// 3.1. Better Setups Integration Functions
+// =======================
+
+/**
+ * Check if Better Setups mod is available and enabled
+ * @returns {boolean} True if Better Setups is available
+ */
+function isBetterSetupsAvailable() {
+    try {
+        const storedSetupsEnabled = window.localStorage.getItem('stored-setups');
+        const storedLabels = window.localStorage.getItem('stored-setup-labels');
+        return storedSetupsEnabled === 'true' && storedLabels !== null;
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error checking Better Setups availability:', error);
+        return false;
+    }
+}
+
+/**
+ * Get available setup options from Better Setups
+ * @returns {Array} Array of available setup options
+ */
+function getAvailableSetupOptions() {
+    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    
+    if (isBetterSetupsAvailable()) {
+        try {
+            const labels = JSON.parse(window.localStorage.getItem('stored-setup-labels') || '[]');
+            if (Array.isArray(labels) && labels.length > 0) {
+                options.push(...labels);
+                console.log('[Better Boosted Maps] Better Setups labels found:', labels);
+            }
+        } catch (error) {
+            console.error('[Better Boosted Maps] Error parsing Better Setups labels:', error);
+        }
+    }
+    
+    return options;
+}
+
+/**
+ * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
+ * @param {HTMLElement} button - The button element to check
+ * @returns {boolean} True if button has a saved setup
+ */
+function hasSavedSetup(button) {
+    // Green buttons have saved setups, grey buttons don't
+    // Check for green styling classes
+    const hasGreenStyling = button.classList.contains('frame-1-green') || 
+                           button.classList.contains('surface-green') ||
+                           button.style.backgroundImage?.includes('background-green');
+    
+    return hasGreenStyling;
+}
+
+/**
+ * Find setup button by option name with fallback to Auto-setup if no saved setup
+ * @param {string} option - The setup option to find
+ * @returns {HTMLElement|null} The button element or null if not found
+ */
+function findSetupButton(option) {
+    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
+        return findButtonByText('Auto-setup');
+    }
+    
+    // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const setupButton = buttons.find(button => {
+        const text = button.textContent.trim();
+        return text === `Setup (${option})` || text === `Save (${option})`;
+    });
+    
+    if (setupButton) {
+        console.log(`[Better Boosted Maps] Found Better Setups button: ${setupButton.textContent.trim()}`);
+        
+        // Check if this button has a saved setup
+        if (hasSavedSetup(setupButton)) {
+            console.log(`[Better Boosted Maps] Button has saved setup (green) - using it`);
+            return setupButton;
+        } else {
+            console.log(`[Better Boosted Maps] Button has no saved setup (grey) - falling back to Auto-setup`);
+            // Fallback to Auto-setup if the selected button has no saved setup
+            const autoSetupButton = findButtonByText('Auto-setup');
+            if (autoSetupButton) {
+                console.log(`[Better Boosted Maps] Using Auto-setup as fallback`);
+                return autoSetupButton;
+            }
+        }
+    } else {
+        console.log(`[Better Boosted Maps] Better Setups button not found for: ${option}`);
+    }
+    
+    return null;
+}
+
 function createStyledButton(id, text, color, onClick) {
     const button = document.createElement('button');
     button.id = id;
@@ -1144,6 +1240,7 @@ function loadSettings() {
         fasterAutoplay: false,
         enableAutoplant: false,
         startDelay: DEFAULT_START_DELAY,  // Use standardized default
+        setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
         showNotification: true,
         maps: {},
         equipment: {}
@@ -1166,7 +1263,7 @@ function saveSettings() {
         equipment: {}
     };
     
-    const inputs = document.querySelectorAll('input[id^="boosted-maps-"]');
+    const inputs = document.querySelectorAll('input[id^="boosted-maps-"], select[id^="boosted-maps-"]');
     
     inputs.forEach(input => {
         if (input.type === 'checkbox') {
@@ -1182,6 +1279,9 @@ function saveSettings() {
         } else if (input.type === 'number') {
             const id = input.id.replace('boosted-maps-', '');
             settings[id] = parseInt(input.value) || 3;
+        } else if (input.tagName === 'SELECT') {
+            const id = input.id.replace('boosted-maps-', '');
+            settings[id] = input.value;
         }
     });
     
@@ -1300,6 +1400,16 @@ function createBoostedMapSettings(settings) {
         1, MAX_START_DELAY
     );
     settingsWrapper.appendChild(startDelayDiv);
+    
+    // Setup method selection
+    const setupMethodDiv = createDropdownSetting(
+        'boosted-maps-setupMethod',
+        getLocalizedText('Setup Method', 'Método de Configuração'),
+        '',
+        settings.setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        getAvailableSetupOptions()
+    );
+    settingsWrapper.appendChild(setupMethodDiv);
     
     // Auto-refill stamina setting
     const autoRefillStaminaDiv = createCheckboxSetting(
@@ -1781,6 +1891,72 @@ function createNumberSetting(id, label, description, value = 3, min = 1, max = 3
     return settingDiv;
 }
 
+function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
+    const settingDiv = document.createElement('div');
+    settingDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    const labelElement = document.createElement('label');
+    labelElement.textContent = label;
+    labelElement.className = 'pixel-font-16';
+    labelElement.setAttribute('for', id);
+    labelElement.style.cssText = `
+        font-weight: bold;
+        color: #fff;
+        margin-bottom: 4px;
+    `;
+    settingDiv.appendChild(labelElement);
+    
+    const selectElement = document.createElement('select');
+    selectElement.id = id;
+    selectElement.className = 'pixel-font-16';
+    selectElement.style.cssText = `
+        width: 100%;
+        padding: 6px;
+        background: #333;
+        border: 1px solid #ffe066;
+        color: #fff;
+        border-radius: 3px;
+        box-sizing: border-box;
+        font-size: 14px;
+        cursor: pointer;
+    `;
+    
+    // Add options to dropdown
+    options.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        optionElement.style.cssText = `
+            background: #333;
+            color: #fff;
+        `;
+        selectElement.appendChild(optionElement);
+    });
+    
+    // Set initial value
+    selectElement.value = value;
+    selectElement.addEventListener('change', saveSettings);
+    settingDiv.appendChild(selectElement);
+    
+    const descElement = document.createElement('div');
+    descElement.textContent = description;
+    descElement.className = 'pixel-font-16';
+    descElement.style.cssText = `
+        font-size: 11px;
+        color: #888;
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    settingDiv.appendChild(descElement);
+    
+    return settingDiv;
+}
+
 function cleanupModal() {
     if (modState.activeModal) {
         modState.activeModal = null;
@@ -1995,21 +2171,25 @@ async function startBoostedMapFarming() {
         // Check automation status after navigation
         if (!checkAutomationEnabled('after navigation')) return;
         
-        // Find and click Auto-setup button
-        console.log('[Better Boosted Maps] Looking for Auto-setup button...');
-        const autoSetupButton = findButtonByText('Auto-setup');
-        if (!autoSetupButton) {
-            console.log('[Better Boosted Maps] Auto-setup button not found');
-            cancelBoostedMapFarming('Auto-setup button not found');
+        // Get user's selected setup method
+        const setupSettings = loadSettings();
+        const setupMethod = setupSettings.setupMethod || 'Auto-setup';
+        
+        // Find and click the appropriate setup button
+        console.log(`[Better Boosted Maps] Looking for ${setupMethod} button...`);
+        const setupButton = findSetupButton(setupMethod);
+        if (!setupButton) {
+            console.log(`[Better Boosted Maps] ${setupMethod} button not found`);
+            cancelBoostedMapFarming(`${setupMethod} button not found`);
             return;
         }
         
-        console.log('[Better Boosted Maps] Clicking Auto-setup button...');
-        autoSetupButton.click();
+        console.log(`[Better Boosted Maps] Clicking ${setupMethod} button...`);
+        setupButton.click();
         await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
         
-        // Check automation status after auto-setup
-        if (!checkAutomationEnabled('after auto-setup')) return;
+        // Check automation status after setup
+        if (!checkAutomationEnabled('after setup')) return;
         
         // Load settings once for all configuration
         const settings = loadSettings();

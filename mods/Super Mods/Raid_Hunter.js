@@ -369,6 +369,102 @@ function stopStaminaTooltipMonitoring() {
 }
 
 // ============================================================================
+// 1.1. BETTER SETUPS INTEGRATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Check if Better Setups mod is available and enabled
+ * @returns {boolean} True if Better Setups is available
+ */
+function isBetterSetupsAvailable() {
+    try {
+        const storedSetupsEnabled = window.localStorage.getItem('stored-setups');
+        const storedLabels = window.localStorage.getItem('stored-setup-labels');
+        return storedSetupsEnabled === 'true' && storedLabels !== null;
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking Better Setups availability:', error);
+        return false;
+    }
+}
+
+/**
+ * Get available setup options from Better Setups
+ * @returns {Array} Array of available setup options
+ */
+function getAvailableSetupOptions() {
+    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    
+    if (isBetterSetupsAvailable()) {
+        try {
+            const labels = JSON.parse(window.localStorage.getItem('stored-setup-labels') || '[]');
+            if (Array.isArray(labels) && labels.length > 0) {
+                options.push(...labels);
+                console.log('[Raid Hunter] Better Setups labels found:', labels);
+            }
+        } catch (error) {
+            console.error('[Raid Hunter] Error parsing Better Setups labels:', error);
+        }
+    }
+    
+    return options;
+}
+
+/**
+ * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
+ * @param {HTMLElement} button - The button element to check
+ * @returns {boolean} True if button has a saved setup
+ */
+function hasSavedSetup(button) {
+    // Green buttons have saved setups, grey buttons don't
+    // Check for green styling classes
+    const hasGreenStyling = button.classList.contains('frame-1-green') || 
+                           button.classList.contains('surface-green') ||
+                           button.style.backgroundImage?.includes('background-green');
+    
+    return hasGreenStyling;
+}
+
+/**
+ * Find setup button by option name with fallback to Auto-setup if no saved setup
+ * @param {string} option - The setup option to find
+ * @returns {HTMLElement|null} The button element or null if not found
+ */
+function findSetupButton(option) {
+    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
+        return findButtonByText('Auto-setup');
+    }
+    
+    // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const setupButton = buttons.find(button => {
+        const text = button.textContent.trim();
+        return text === `Setup (${option})` || text === `Save (${option})`;
+    });
+    
+    if (setupButton) {
+        console.log(`[Raid Hunter] Found Better Setups button: ${setupButton.textContent.trim()}`);
+        
+        // Check if this button has a saved setup
+        if (hasSavedSetup(setupButton)) {
+            console.log(`[Raid Hunter] Button has saved setup (green) - using it`);
+            return setupButton;
+        } else {
+            console.log(`[Raid Hunter] Button has no saved setup (grey) - falling back to Auto-setup`);
+            // Fallback to Auto-setup if the selected button has no saved setup
+            const autoSetupButton = findButtonByText('Auto-setup');
+            if (autoSetupButton) {
+                console.log(`[Raid Hunter] Using Auto-setup as fallback`);
+                return autoSetupButton;
+            }
+        }
+    } else {
+        console.log(`[Raid Hunter] Better Setups button not found for: ${option}`);
+    }
+    
+    return null;
+}
+
+// ============================================================================
 // 2. STATE MANAGEMENT
 // ============================================================================
 
@@ -583,6 +679,72 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
         margin-top: 2px;
     `;
     settingDiv.appendChild(desc);
+    
+    return settingDiv;
+}
+
+function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
+    const settingDiv = document.createElement('div');
+    settingDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    const labelElement = document.createElement('label');
+    labelElement.textContent = label;
+    labelElement.className = 'pixel-font-16';
+    labelElement.setAttribute('for', id);
+    labelElement.style.cssText = `
+        font-weight: bold;
+        color: ${COLOR_WHITE};
+        margin-bottom: 4px;
+    `;
+    settingDiv.appendChild(labelElement);
+    
+    const selectElement = document.createElement('select');
+    selectElement.id = id;
+    selectElement.className = 'pixel-font-16';
+    selectElement.style.cssText = `
+        width: 100%;
+        padding: 6px;
+        background: ${COLOR_DARK_GRAY};
+        border: 1px solid ${COLOR_ACCENT};
+        color: ${COLOR_WHITE};
+        border-radius: 3px;
+        box-sizing: border-box;
+        font-size: 14px;
+        cursor: pointer;
+    `;
+    
+    // Add options to dropdown
+    options.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        optionElement.style.cssText = `
+            background: ${COLOR_DARK_GRAY};
+            color: ${COLOR_WHITE};
+        `;
+        selectElement.appendChild(optionElement);
+    });
+    
+    // Set initial value
+    selectElement.value = value;
+    selectElement.addEventListener('change', autoSaveSettings);
+    settingDiv.appendChild(selectElement);
+    
+    const descElement = document.createElement('div');
+    descElement.textContent = description;
+    descElement.className = 'pixel-font-16';
+    descElement.style.cssText = `
+        font-size: 11px;
+        color: ${COLOR_GRAY};
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    settingDiv.appendChild(descElement);
     
     return settingDiv;
 }
@@ -2403,17 +2565,21 @@ async function handleEventOrRaid(roomId) {
         return;
     }
     
-    // Find and click Auto-setup button
-    console.log('[Raid Hunter] Looking for Auto-setup button...');
-    const autoSetupButton = findButtonByText('Auto-setup');
-    if (!autoSetupButton) {
-        console.log('[Raid Hunter] Auto-setup button not found');
-        handleRaidFailure('Auto-setup button not found');
+    // Get user's selected setup method
+    const settings = loadSettings();
+    const setupMethod = settings.setupMethod || 'Auto-setup';
+    
+    // Find and click the appropriate setup button
+    console.log(`[Raid Hunter] Looking for ${setupMethod} button...`);
+    const setupButton = findSetupButton(setupMethod);
+    if (!setupButton) {
+        console.log(`[Raid Hunter] ${setupMethod} button not found`);
+        handleRaidFailure(`${setupMethod} button not found`);
         return;
     }
     
-    console.log('[Raid Hunter] Clicking Auto-setup button...');
-    autoSetupButton.click();
+    console.log(`[Raid Hunter] Clicking ${setupMethod} button...`);
+    setupButton.click();
     await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
     
     // Check automation status after auto-setup
@@ -2423,7 +2589,7 @@ async function handleEventOrRaid(roomId) {
     }
     
     // Load settings once for all raid configuration
-    const settings = loadSettings();
+    const raidSettings = loadSettings();
 
     // Enable autoplay mode
     console.log('[Raid Hunter] Enabling autoplay mode...');
@@ -2464,7 +2630,7 @@ async function handleEventOrRaid(roomId) {
     }
 
     // Enable Bestiary Automator's autorefill stamina if Raid Hunter setting is enabled
-    if (settings.autoRefillStamina) {
+    if (raidSettings.autoRefillStamina) {
         console.log('[Raid Hunter] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
         setTimeout(() => {
@@ -2478,7 +2644,7 @@ async function handleEventOrRaid(roomId) {
             }
         }, 500);
     }
-    if (settings.fasterAutoplay) {
+    if (raidSettings.fasterAutoplay) {
         console.log('[Raid Hunter] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
         setTimeout(() => {
@@ -2492,7 +2658,7 @@ async function handleEventOrRaid(roomId) {
             }
         }, 500);
     }
-    if (settings.enableDragonPlant) {
+    if (raidSettings.enableDragonPlant) {
         console.log('[Raid Hunter] Dragon Plant enabled - enabling via Autoseller...');
         enableAutosellerDragonPlant();
     }
@@ -3430,6 +3596,16 @@ function createAutoRaidSettings() {
     
     settingsWrapper.appendChild(delayDiv);
     
+    // Setup method selection
+    const setupMethodDiv = createDropdownSetting(
+        'setupMethod',
+        getLocalizedText('Setup Method', 'Método de Configuração'),
+        '',
+        loadSettings().setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        getAvailableSetupOptions()
+    );
+    settingsWrapper.appendChild(setupMethodDiv);
+    
     // Auto-refill Stamina setting
     const staminaRefillDiv = document.createElement('div');
     staminaRefillDiv.style.cssText = `
@@ -3709,6 +3885,7 @@ const DEFAULT_SETTINGS = {
     autoRefillStamina: false,
     fasterAutoplay: false,
     enableDragonPlant: false,
+    setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
     enabledRaidMaps: []
 };
 
@@ -3751,6 +3928,11 @@ function sanitizeSettings(settings) {
         console.warn('[Raid Hunter] Invalid raid maps, using default: []');
     }
     
+    // Preserve setup method setting
+    if (settings.setupMethod) {
+        sanitized.setupMethod = settings.setupMethod;
+    }
+    
     return sanitized;
 }
 
@@ -3779,7 +3961,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id.startsWith('raid-')) {
+            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -3877,6 +4059,15 @@ function loadAndApplySettings() {
                 checkbox.checked = settings.enableDragonPlant;
                 // Add auto-save listener
                 checkbox.addEventListener('change', autoSaveSettings);
+            }
+        }
+        
+        // Apply setup method setting
+        if (settings.setupMethod !== undefined) {
+            const setupMethodSelect = document.getElementById('setupMethod');
+            if (setupMethodSelect) {
+                setupMethodSelect.value = settings.setupMethod;
+                // Note: auto-save listener is already added in createDropdownSetting function
             }
         }
         

@@ -268,6 +268,72 @@ function createCheckboxSetting(id, labelText, description, checked = false) {
     return settingDiv;
 }
 
+function createDropdownSetting(id, label, description, value = 'Auto-setup', options = ['Auto-setup']) {
+    const settingDiv = document.createElement('div');
+    settingDiv.style.cssText = `
+        margin-bottom: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    `;
+    
+    const labelElement = document.createElement('label');
+    labelElement.textContent = label;
+    labelElement.className = 'pixel-font-16';
+    labelElement.setAttribute('for', id);
+    labelElement.style.cssText = `
+        font-weight: bold;
+        color: #fff;
+        margin-bottom: 4px;
+    `;
+    settingDiv.appendChild(labelElement);
+    
+    const selectElement = document.createElement('select');
+    selectElement.id = id;
+    selectElement.className = 'pixel-font-16';
+    selectElement.style.cssText = `
+        width: 100%;
+        padding: 6px;
+        background: #333;
+        border: 1px solid #ffe066;
+        color: #fff;
+        border-radius: 3px;
+        box-sizing: border-box;
+        font-size: 14px;
+        cursor: pointer;
+    `;
+    
+    // Add options to dropdown
+    options.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        optionElement.style.cssText = `
+            background: #333;
+            color: #fff;
+        `;
+        selectElement.appendChild(optionElement);
+    });
+    
+    // Set initial value
+    selectElement.value = value;
+    addTrackedListener(selectElement, 'change', autoSaveSettings);
+    settingDiv.appendChild(selectElement);
+    
+    const descElement = document.createElement('div');
+    descElement.textContent = description;
+    descElement.className = 'pixel-font-16';
+    descElement.style.cssText = `
+        font-size: 11px;
+        color: #888;
+        font-style: italic;
+        margin-top: 2px;
+    `;
+    settingDiv.appendChild(descElement);
+    
+    return settingDiv;
+}
+
 // Sleep function for delays
 function sleep(timeout = 1000) {
     return new Promise((resolve) => {
@@ -583,6 +649,102 @@ function stopStaminaTooltipMonitoring() {
     }
     
     console.log('[Better Tasker] Stamina monitoring stopped');
+}
+
+// ============================================================================
+// 1.1. BETTER SETUPS INTEGRATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Check if Better Setups mod is available and enabled
+ * @returns {boolean} True if Better Setups is available
+ */
+function isBetterSetupsAvailable() {
+    try {
+        const storedSetupsEnabled = window.localStorage.getItem('stored-setups');
+        const storedLabels = window.localStorage.getItem('stored-setup-labels');
+        return storedSetupsEnabled === 'true' && storedLabels !== null;
+    } catch (error) {
+        console.error('[Better Tasker] Error checking Better Setups availability:', error);
+        return false;
+    }
+}
+
+/**
+ * Get available setup options from Better Setups
+ * @returns {Array} Array of available setup options
+ */
+function getAvailableSetupOptions() {
+    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    
+    if (isBetterSetupsAvailable()) {
+        try {
+            const labels = JSON.parse(window.localStorage.getItem('stored-setup-labels') || '[]');
+            if (Array.isArray(labels) && labels.length > 0) {
+                options.push(...labels);
+                console.log('[Better Tasker] Better Setups labels found:', labels);
+            }
+        } catch (error) {
+            console.error('[Better Tasker] Error parsing Better Setups labels:', error);
+        }
+    }
+    
+    return options;
+}
+
+/**
+ * Check if a Better Setups button has a saved setup (green button = has setup, grey = no setup)
+ * @param {HTMLElement} button - The button element to check
+ * @returns {boolean} True if button has a saved setup
+ */
+function hasSavedSetup(button) {
+    // Green buttons have saved setups, grey buttons don't
+    // Check for green styling classes
+    const hasGreenStyling = button.classList.contains('frame-1-green') || 
+                           button.classList.contains('surface-green') ||
+                           button.style.backgroundImage?.includes('background-green');
+    
+    return hasGreenStyling;
+}
+
+/**
+ * Find setup button by option name with fallback to Auto-setup if no saved setup
+ * @param {string} option - The setup option to find
+ * @returns {HTMLElement|null} The button element or null if not found
+ */
+function findSetupButton(option) {
+    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
+        return findButtonByText('Auto-setup');
+    }
+    
+    // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const setupButton = buttons.find(button => {
+        const text = button.textContent.trim();
+        return text === `Setup (${option})` || text === `Save (${option})`;
+    });
+    
+    if (setupButton) {
+        console.log(`[Better Tasker] Found Better Setups button: ${setupButton.textContent.trim()}`);
+        
+        // Check if this button has a saved setup
+        if (hasSavedSetup(setupButton)) {
+            console.log(`[Better Tasker] Button has saved setup (green) - using it`);
+            return setupButton;
+        } else {
+            console.log(`[Better Tasker] Button has no saved setup (grey) - falling back to Auto-setup`);
+            // Fallback to Auto-setup if the selected button has no saved setup
+            const autoSetupButton = findButtonByText('Auto-setup');
+            if (autoSetupButton) {
+                console.log(`[Better Tasker] Using Auto-setup as fallback`);
+                return autoSetupButton;
+            }
+        }
+    } else {
+        console.log(`[Better Tasker] Better Setups button not found for: ${option}`);
+    }
+    
+    return null;
 }
 
 // ============================================================================
@@ -2683,6 +2845,16 @@ function createGeneralSettings() {
     
     settingsWrapper.appendChild(taskDelayDiv);
     
+    // Setup method selection
+    const setupMethodDiv = createDropdownSetting(
+        'setupMethod',
+        getLocalizedText('Setup Method', 'Método de Configuração'),
+        '',
+        loadSettings().setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        getAvailableSetupOptions()
+    );
+    settingsWrapper.appendChild(setupMethodDiv);
+    
     // Auto-refill Stamina setting
     const staminaRefillSetting = createCheckboxSetting(
         'autoRefillStamina',
@@ -2972,6 +3144,7 @@ function loadSettings() {
         autoRefillStamina: false,
         fasterAutoplay: false,
         enableDragonPlant: false,
+        setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
         // Default all creatures to enabled
         ...Object.fromEntries(
             (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
@@ -3000,7 +3173,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Better Tasker settings
-            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'taskStartDelay' || input.id.startsWith('creature-')) {
+            if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'taskStartDelay' || input.id === 'setupMethod' || input.id.startsWith('creature-')) {
                 if (input.type === 'checkbox') {
                     settings[input.id] = input.checked;
                 } else {
@@ -3060,6 +3233,16 @@ function loadAndApplySettings() {
                 input.value = settings.taskStartDelay;
                 // Add auto-save listener with tracking
                 addTrackedListener(input, 'input', autoSaveSettings);
+            }
+        }
+        
+        // Apply setup method setting
+        if (settings.setupMethod !== undefined) {
+            const setupMethodSelect = document.getElementById('setupMethod');
+            if (setupMethodSelect) {
+                setupMethodSelect.value = settings.setupMethod;
+                // Add auto-save listener
+                setupMethodSelect.addEventListener('change', autoSaveSettings);
             }
         }
         
@@ -3318,16 +3501,20 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId);
                 
-                // Find and click Auto-setup button
-                console.log('[Better Tasker] Looking for Auto-setup button...');
-                const autoSetupButton = findButtonByText('Auto-setup');
-                if (!autoSetupButton) {
-                    console.log('[Better Tasker] Auto-setup button not found');
+                // Get user's selected setup method
+                const settings = loadSettings();
+                const setupMethod = settings.setupMethod || 'Auto-setup';
+                
+                // Find and click the appropriate setup button
+                console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
+                const setupButton = findSetupButton(setupMethod);
+                if (!setupButton) {
+                    console.log(`[Better Tasker] ${setupMethod} button not found`);
                     return;
                 }
                 
-                console.log('[Better Tasker] Clicking Auto-setup button...');
-                autoSetupButton.click();
+                console.log(`[Better Tasker] Clicking ${setupMethod} button...`);
+                setupButton.click();
                 await sleep(AUTO_SETUP_DELAY);
                 
                 // Enable autoplay mode
