@@ -370,8 +370,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyPopupTheme(localStorage.getItem('dashboard-theme') || 'default');
   }
   
-  await i18n.init();
-  
   // Load debug mode and set up toggle
   await loadDebugMode();
   
@@ -519,7 +517,7 @@ function renderLocalMods(mods) {
   if (!mods || mods.length === 0) {
     const emptyMessage = document.createElement('div');
     emptyMessage.className = 'empty-message';
-    emptyMessage.textContent = i18n.t('messages.noLocalMods');
+    emptyMessage.textContent = 'No local mods found';
     if (officialModsList) officialModsList.appendChild(emptyMessage.cloneNode(true));
     if (superModsList) superModsList.appendChild(emptyMessage.cloneNode(true));
     if (userModsList) userModsList.appendChild(emptyMessage.cloneNode(true));
@@ -647,7 +645,7 @@ async function toggleLocalMod(name, enabled) {
     });
     
     if (!response.success) {
-      showError(response.error || i18n.t('messages.unknownError'));
+      showError(response.error || 'Unknown error occurred');
       loadLocalMods();
     }
   } catch (error) {
@@ -664,7 +662,7 @@ async function executeLocalMod(name) {
     });
     
     if (!response.success) {
-      showError(response.error || i18n.t('messages.unknownError'));
+      showError(response.error || 'Unknown error occurred');
     }
   } catch (error) {
     showError(`Communication error: ${error.message}`);
@@ -682,7 +680,7 @@ window.browserAPI.storage.onChanged.addListener((changes, area) => {
       loadLocalMods();
     }
     if (changes.locale) {
-      i18n.setLocale(changes.locale.newValue);
+      // Locale change handling removed - no i18n support
     }
   }
 });
