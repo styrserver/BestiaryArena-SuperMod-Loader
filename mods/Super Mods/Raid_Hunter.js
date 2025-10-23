@@ -2527,19 +2527,87 @@ async function handleEventOrRaid(roomId) {
                 return;
             }
             
-            // Check if autoplay is still running
+            // Check if autoplay session is actually running (not just mode enabled)
             const boardContext = globalThis.state.board.getSnapshot().context;
-            const isAutoplay = boardContext.mode === 'autoplay';
+            const isAutoplayMode = boardContext.mode === 'autoplay';
+            const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
             
-            if (isAutoplay) {
-                // Autoplay is still running (auto-refill working) - just continue monitoring
-                console.log('[Raid Hunter] Autoplay still running - continuing stamina monitoring');
+            if (isAutoplayMode && isAutoplaySessionRunning) {
+                // Autoplay session is actually running - just continue monitoring
+                console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
             } else {
-                // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-                console.log(`[Raid Hunter] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-                stopStaminaTooltipMonitoring();
-                handleRaidFailure('User changed mode during stamina wait');
+                // Autoplay session is not running - need to click Start button
+                console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
+                
+                // Find and click Start button
+                const startButton = findButtonByText('Start');
+                if (!startButton) {
+                    console.log('[Raid Hunter] Start button not found after stamina recovery');
+                    handleRaidFailure('Start button not found after stamina recovery');
+                    return;
+                }
+                
+                console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
+                startButton.click();
+                
+                // Set up stamina depletion monitoring for the new autoplay session
+                const handleStaminaDepletion = () => {
+                    const continuousStaminaMonitoring = () => {
+                        console.log('[Raid Hunter] Stamina recovered - checking autoplay state');
+                        
+                        // Check if still valid to continue
+                        if (!isAutomationActive() || !isCurrentlyRaiding) {
+                            console.log('[Raid Hunter] Raid no longer active during stamina recovery');
+                            stopStaminaTooltipMonitoring();
+                            return;
+                        }
+                        
+                        // Check if user is still on correct raid map
+                        if (!isOnCorrectRaidMap()) {
+                            console.log('[Raid Hunter] User changed map - stopping stamina monitoring');
+                            stopStaminaTooltipMonitoring();
+                            return;
+                        }
+                        
+                        // Check if autoplay session is actually running (not just mode enabled)
+                        const boardContext = globalThis.state.board.getSnapshot().context;
+                        const isAutoplayMode = boardContext.mode === 'autoplay';
+                        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
+                        
+                        if (isAutoplayMode && isAutoplaySessionRunning) {
+                            // Autoplay session is actually running - just continue monitoring
+                            console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        } else {
+                            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
+                            console.log(`[Raid Hunter] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
+                            stopStaminaTooltipMonitoring();
+                            cancelCurrentRaid('User changed mode during stamina wait');
+                        }
+                    };
+                    
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                };
+                
+                // Watch for stamina depletion during autoplay
+                const watchStaminaDepletion = () => {
+                    const depletionCheckInterval = setInterval(() => {
+                        const currentCheck = hasInsufficientStamina();
+                        if (currentCheck.insufficient) {
+                            console.log('[Raid Hunter] Stamina depleted during autoplay - starting recovery monitoring');
+                            clearInterval(depletionCheckInterval);
+                            handleStaminaDepletion();
+                        }
+                    }, 5000); // Check every 5 seconds
+                    
+                    // Store for cleanup
+                    window.raidHunterDepletionInterval = depletionCheckInterval;
+                };
+                
+                watchStaminaDepletion();
+                
+                console.log('[Raid Hunter] Autoplay started after stamina recovery');
             }
         };
         
@@ -2599,19 +2667,32 @@ async function handleEventOrRaid(roomId) {
             return;
         }
         
-        // Check if autoplay is still running
+        // Check if autoplay session is actually running (not just mode enabled)
         const boardContext = globalThis.state.board.getSnapshot().context;
-        const isAutoplay = boardContext.mode === 'autoplay';
+        const isAutoplayMode = boardContext.mode === 'autoplay';
+        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
         
-        if (isAutoplay) {
-            // Autoplay is still running (auto-refill working) - just continue monitoring
-            console.log('[Raid Hunter] Autoplay still running - continuing stamina monitoring');
+        if (isAutoplayMode && isAutoplaySessionRunning) {
+            // Autoplay session is actually running - just continue monitoring
+            console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
             startStaminaTooltipMonitoring(continuousStaminaMonitoring);
         } else {
-            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-            console.log(`[Raid Hunter] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-            stopStaminaTooltipMonitoring();
-            cancelCurrentRaid('User changed mode during stamina wait');
+            // Autoplay session is not running - need to click Start button
+            console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
+            
+            // Find and click Start button
+            const startButton = findButtonByText('Start');
+            if (!startButton) {
+                console.log('[Raid Hunter] Start button not found after stamina recovery');
+                cancelCurrentRaid('Start button not found after stamina recovery');
+                return;
+            }
+            
+            console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
+            startButton.click();
+            
+            // Continue monitoring for stamina depletion
+            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
         }
     };
     

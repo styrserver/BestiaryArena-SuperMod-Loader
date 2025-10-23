@@ -2159,21 +2159,46 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
             return;
         }
         
-        // Check if autoplay is still running
+        // Check if autoplay session is actually running (not just mode enabled)
         const boardContext = globalThis.state.board.getSnapshot().context;
-        const isAutoplay = boardContext.mode === 'autoplay';
+        const isAutoplayMode = boardContext.mode === 'autoplay';
+        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
         
-        if (isAutoplay) {
-            // Autoplay is still running (auto-refill working) - just continue monitoring
-            console.log('[Better Boosted Maps] Autoplay still running - continuing stamina monitoring');
+        if (isAutoplayMode && isAutoplaySessionRunning) {
+            // Autoplay session is actually running - just continue monitoring
+            console.log('[Better Boosted Maps] Autoplay session running - continuing stamina monitoring');
             const requiredStamina = getStaminaCost();
             const callback = createStaminaMonitoringCallback(logPrefix, successMessage);
             startStaminaTooltipMonitoring(callback, requiredStamina);
         } else {
-            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-            console.log(`[Better Boosted Maps] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-            stopStaminaTooltipMonitoring();
-            cancelBoostedMapFarming('User changed mode during stamina wait');
+            // Autoplay session is not running - need to click Start button
+            console.log('[Better Boosted Maps] Autoplay session not running - clicking Start button');
+            
+            // Find and click Start button
+            const startButton = findButtonByText('Start');
+            if (!startButton) {
+                console.log('[Better Boosted Maps] Start button not found after stamina recovery');
+                cancelBoostedMapFarming('Start button not found after stamina recovery');
+                return;
+            }
+            
+            console.log('[Better Boosted Maps] Clicking Start button after stamina recovery...');
+            startButton.click();
+            
+            // Set up stamina depletion monitoring for the new autoplay session
+            const handleStaminaDepletion = () => {
+                const continuousStaminaMonitoring = createStaminaMonitoringCallback(
+                    'Stamina depleted during autoplay - restarting',
+                    'Autoplay restarted after stamina recovery'
+                );
+                
+                const requiredStamina = getStaminaCost();
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring, requiredStamina);
+            };
+            
+            watchStaminaDepletion(handleStaminaDepletion);
+            
+            console.log('[Better Boosted Maps] Autoplay started after stamina recovery');
         }
     };
 }

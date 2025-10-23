@@ -3376,19 +3376,32 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                             return;
                         }
                         
-                        // Check if autoplay is still running
+                        // Check if autoplay session is actually running (not just mode enabled)
                         const boardContext = globalThis.state.board.getSnapshot().context;
-                        const isAutoplay = boardContext.mode === 'autoplay';
+                        const isAutoplayMode = boardContext.mode === 'autoplay';
+                        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
                         
-                        if (isAutoplay) {
-                            // Autoplay is still running (auto-refill working) - just continue monitoring
-                            console.log('[Better Tasker] Autoplay still running - continuing stamina monitoring');
+                        if (isAutoplayMode && isAutoplaySessionRunning) {
+                            // Autoplay session is actually running - just continue monitoring
+                            console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
                             startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                         } else {
-                            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-                            console.log(`[Better Tasker] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-                            stopStaminaTooltipMonitoring();
-                            resetState('navigation');
+                            // Autoplay session is not running - need to click Start button
+                            console.log('[Better Tasker] Autoplay session not running - clicking Start button');
+                            
+                            // Find and click Start button
+                            const startButton = findButtonByText('Start');
+                            if (!startButton) {
+                                console.log('[Better Tasker] Start button not found after stamina recovery');
+                                resetState('navigation');
+                                return;
+                            }
+                            
+                            console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                            startButton.click();
+                            
+                            // Continue monitoring for stamina depletion
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                         }
                     };
                     
@@ -3452,19 +3465,32 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                         return;
                     }
                     
-                    // Check if autoplay is still running
+                    // Check if autoplay session is actually running (not just mode enabled)
                     const boardContext = globalThis.state.board.getSnapshot().context;
-                    const isAutoplay = boardContext.mode === 'autoplay';
+                    const isAutoplayMode = boardContext.mode === 'autoplay';
+                    const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
                     
-                    if (isAutoplay) {
-                        // Autoplay is still running (auto-refill working) - just continue monitoring
-                        console.log('[Better Tasker] Autoplay still running - continuing stamina monitoring');
+                    if (isAutoplayMode && isAutoplaySessionRunning) {
+                        // Autoplay session is actually running - just continue monitoring
+                        console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
                         startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                     } else {
-                        // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-                        console.log(`[Better Tasker] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-                        stopStaminaTooltipMonitoring();
-                        resetState('navigation');
+                        // Autoplay session is not running - need to click Start button
+                        console.log('[Better Tasker] Autoplay session not running - clicking Start button');
+                        
+                        // Find and click Start button
+                        const startButton = findButtonByText('Start');
+                        if (!startButton) {
+                            console.log('[Better Tasker] Start button not found after stamina recovery');
+                            resetState('navigation');
+                            return;
+                        }
+                        
+                        console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                        startButton.click();
+                        
+                        // Continue monitoring for stamina depletion
+                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                     }
                 };
                 
