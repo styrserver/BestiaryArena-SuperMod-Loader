@@ -824,6 +824,9 @@ window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManage
 // Raid Hunter coordination state
 let isRaidHunterActive = false;
 let raidHunterCoordinationInterval = null;
+let lastRaidHunterCheckTime = null; // Track when we first detected raids but no Raid Hunter control
+let lastRaidHunterActiveTime = 0; // Track when Raid Hunter was last active to prevent ping-pong
+let raidHunterFailureCount = 0; // Track consecutive Raid Hunter failures
 let gameStateUnsubscribers = [];
 let automationInterval = null;
 let questLogInterval = null;
@@ -1172,11 +1175,6 @@ async function resumeAutoplayWithButton() {
 
 // Check if Raid Hunter is actively raiding
 function isRaidHunterRaiding() {
-    // If Raid Hunter coordination is disabled, always return false
-    if (!raidHunterCoordinationInterval) {
-        return false;
-    }
-    
     try {
         // Check if Raid Hunter mod is loaded and actively raiding
         if (typeof window !== 'undefined') {
@@ -1194,20 +1192,67 @@ function isRaidHunterRaiding() {
                 const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
                 
                 // Check if Raid Hunter has control of the quest button OR is internally raiding
-                const isRaidHunterCurrentlyRaiding = window.QuestButtonManager?.getCurrentOwner() === 'Raid Hunter' ||
+                const questButtonOwner = window.QuestButtonManager?.getCurrentOwner();
+                const isRaidHunterCurrentlyRaiding = questButtonOwner === 'Raid Hunter' ||
                                                      (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
+                
+                // Debug logging to help diagnose coordination issues
+                if (currentRaidList.length > 0) {
+                    console.log(`[Better Tasker] Raid coordination check - raids: ${currentRaidList.length}, quest owner: ${questButtonOwner}, raid function: ${window.raidHunterIsCurrentlyRaiding ? window.raidHunterIsCurrentlyRaiding() : 'N/A'}`);
+                }
                 
                 // Only yield control if Raid Hunter is actually actively raiding (has quest button control)
                 if (isRaidHunterCurrentlyRaiding) {
                     console.log('[Better Tasker] Raid Hunter is actively raiding - preventing task automation');
+                    lastRaidHunterCheckTime = null; // Reset timer since Raid Hunter has control
+                    lastRaidHunterActiveTime = Date.now(); // Track when Raid Hunter was last active
+                    raidHunterFailureCount = 0; // Reset failure count when Raid Hunter is active
                     return true;
                 } else if (currentRaidList.length > 0 && raidHunterEnabled === 'true') {
-                    console.log('[Better Tasker] Active raids available but Raid Hunter not actively raiding - allowing task automation');
-                    // Don't yield control - let Better Tasker check for tasks
-                    return false;
+                    // Check if we're currently tasking - if so, don't interfere with ongoing task
+                    if (taskHuntingOngoing) {
+                        console.log('[Better Tasker] Task hunting ongoing, skipping automation');
+                        return false;
+                    }
+                    
+                    // Track Raid Hunter failures and give it more time when struggling
+                    const now = Date.now();
+                    const timeSinceLastActive = now - lastRaidHunterActiveTime;
+                    
+                    // If Raid Hunter was active recently, increment failure count and give it more time
+                    if (timeSinceLastActive < 60000) { // 60 second cooldown
+                        raidHunterFailureCount++;
+                        const extendedCooldown = Math.min(raidHunterFailureCount * 30, 180); // Up to 3 minutes for struggling Raid Hunter
+                        
+                        if (timeSinceLastActive < extendedCooldown * 1000) {
+                            console.log(`[Better Tasker] Raid Hunter struggling (${raidHunterFailureCount} failures, ${Math.round(timeSinceLastActive/1000)}s ago) - extending yield time to ${extendedCooldown}s`);
+                            return true;
+                        }
+                    }
+                    
+                    // If raids are available but Raid Hunter isn't actively raiding,
+                    // give Raid Hunter a chance to claim control (especially after foreground transitions)
+                    // Wait up to 10 seconds for Raid Hunter to claim control
+                    if (!lastRaidHunterCheckTime) {
+                        lastRaidHunterCheckTime = now;
+                        console.log('[Better Tasker] Active raids available - waiting for Raid Hunter to claim control...');
+                        return true; // Yield control temporarily
+                    }
+                    
+                    const timeSinceFirstCheck = now - lastRaidHunterCheckTime;
+                    if (timeSinceFirstCheck < 10000) { // Wait up to 10 seconds
+                        console.log(`[Better Tasker] Still waiting for Raid Hunter to claim control... (${Math.round(timeSinceFirstCheck/1000)}s)`);
+                        return true; // Continue yielding
+                    } else {
+                        // Timeout reached - Raid Hunter hasn't claimed control, proceed with tasks
+                        console.log('[Better Tasker] Raid Hunter timeout - proceeding with task automation');
+                        lastRaidHunterCheckTime = null; // Reset for next time
+                        return false;
+                    }
                 }
             } else {
                 console.log('[Better Tasker] Raid state not available - assuming no active raids');
+                lastRaidHunterCheckTime = null; // Reset timer when no raids
             }
         }
         return false;

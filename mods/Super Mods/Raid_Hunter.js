@@ -1038,7 +1038,69 @@ let stateManager = {
 let boardAnalyzerCoordinationInterval = null;
 let isBoardAnalyzerRunning = false;
 
+// Page visibility handling for foreground/background transitions
+let pageVisibilityHandler = null;
+let lastPageVisibilityChange = 0;
+
 // Toast detection for fight icon (now consolidated with quest log observer)
+
+// Handle page visibility changes (foreground/background transitions)
+function handlePageVisibilityChange() {
+    try {
+        const now = Date.now();
+        
+        // Debounce rapid visibility changes
+        if (now - lastPageVisibilityChange < 1000) {
+            return;
+        }
+        lastPageVisibilityChange = now;
+        
+        if (document.visibilityState === 'visible') {
+            console.log('[Raid Hunter] Page became visible - checking for active raids and reclaiming control if needed');
+            
+            // Check if we have active raids but lost control
+            const raidState = globalThis.state?.raids?.getSnapshot?.();
+            const hasActiveRaids = raidState?.context?.list?.length > 0;
+            const questButtonOwner = window.QuestButtonManager?.getCurrentOwner();
+            
+            if (hasActiveRaids && questButtonOwner !== 'Raid Hunter') {
+                console.log('[Raid Hunter] Active raids detected but quest button not controlled by Raid Hunter - reclaiming control');
+                
+                // Update raid state first
+                updateRaidState();
+                
+                // If we have raids in queue but aren't currently raiding, start processing
+                if (raidQueue.length > 0 && !isCurrentlyRaiding) {
+                    console.log('[Raid Hunter] Found queued raids after foreground transition - processing next raid');
+                    processNextRaid();
+                } else if (isCurrentlyRaiding) {
+                    // We were raiding but lost quest button control - reclaim it
+                    console.log('[Raid Hunter] Reclaiming quest button control for ongoing raid');
+                    modifyQuestButtonForRaiding();
+                }
+            }
+        } else {
+            console.log('[Raid Hunter] Page became hidden - maintaining raid state');
+        }
+    } catch (error) {
+        console.error('[Raid Hunter] Error handling page visibility change:', error);
+    }
+}
+
+// Set up page visibility monitoring for foreground/background transitions
+function setupPageVisibilityMonitoring() {
+    // Remove existing listener if any
+    if (pageVisibilityHandler) {
+        document.removeEventListener('visibilitychange', pageVisibilityHandler);
+        pageVisibilityHandler = null;
+    }
+    
+    // Add new listener
+    pageVisibilityHandler = handlePageVisibilityChange;
+    document.addEventListener('visibilitychange', pageVisibilityHandler);
+    
+    console.log('[Raid Hunter] Page visibility monitoring set up');
+}
 
 // Safe execution wrapper to prevent race conditions
 function safeExecute(fn) {
@@ -4181,6 +4243,9 @@ function init() {
     // Start monitoring for quest log (like Better Yasir)
     // Don't try to create immediately - wait for quest log to appear
     startQuestLogMonitoring();
+    
+    // Set up page visibility monitoring for foreground/background transitions
+    setupPageVisibilityMonitoring();
 
     console.log('[Raid Hunter] Raid Hunter Mod initialized.');
     
@@ -4646,6 +4711,12 @@ function cleanupRaidHunter() {
         }
         if (toggleButton) {
             toggleButton.replaceWith(toggleButton.cloneNode(true)); // Remove all event listeners
+        }
+        
+        // Clean up page visibility monitoring
+        if (pageVisibilityHandler) {
+            document.removeEventListener('visibilitychange', pageVisibilityHandler);
+            pageVisibilityHandler = null;
         }
         
         // Note: Control release is handled automatically by withControl functions
