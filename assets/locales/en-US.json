@@ -72,6 +72,8 @@
       "persistAutomatorAutoRefillWarning": "When enabled, Bestiary Automator's Autorefill Stamina setting will persist across page refreshes. Use with caution.",
       "disableAutoReload": "⚠️ Disable Auto-Reload",
       "disableAutoReloadWarning": "Prevents automatic page reloads from Raid Hunter and Better Tasker.",
+      "alwaysOpenHuntAnalyzer": "⚠️ Auto-open Hunt Analyzer",
+      "alwaysOpenHuntAnalyzerWarning": "Automatically opens the Hunt Analyzer panel when starting new games. Only works if Hunt Analyzer mod is loaded.",
       "hideWebsiteFooter": "Hide Website Footer",
       "settingsAutoSave": "✓ Settings auto-save when changed"
     },
@@ -309,7 +311,19 @@
     },
     "huntAnalyzer": {
       "buttonText": "Hunt Analyzer",
-      "buttonTooltip": "Click to open hunt analyzer panel"
+      "buttonTooltip": "Click to open hunt analyzer panel",
+      "currentRoom": "Current Room",
+      "sessions": "Sessions",
+      "sessionsPerHour": "Sessions/h",
+      "goldPerHour": "Gold/h",
+      "creaturesPerHour": "Creatures/h",
+      "equipmentPerHour": "Equipment/h",
+      "runesPerHour": "Runes/h",
+      "staminaSpent": "Stamina spent",
+      "loot": "Loot",
+      "creatureDrops": "Creature Drops",
+      "clearAll": "Clear All",
+      "copyLog": "Copy Log"
     },
     "betterYasir": {
       "activated": "Better Yasir activated!",

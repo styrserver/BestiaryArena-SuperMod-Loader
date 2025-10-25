@@ -21,7 +21,8 @@ const defaultConfig = {
   enableAutoplayRefresh: false,
   autoplayRefreshMinutes: 30,
   disableAutoReload: false,
-  removeWebsiteFooter: false
+  removeWebsiteFooter: false,
+  alwaysOpenHuntAnalyzer: false
 };
 
 // Storage key for this mod
@@ -971,6 +972,12 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="always-open-hunt-analyzer-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.alwaysOpenHuntAnalyzerWarning')}">${t('mods.betterUI.alwaysOpenHuntAnalyzer')}</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       }
@@ -1152,6 +1159,17 @@ function showSettingsModal() {
           config.disableAutoReload = disableAutoReloadCheckbox.checked;
           saveConfig();
           console.log('[Better UI] Auto-reload disabled:', config.disableAutoReload);
+        });
+      }
+      
+      const alwaysOpenHuntAnalyzerCheckbox = content.querySelector('#always-open-hunt-analyzer-toggle');
+      if (alwaysOpenHuntAnalyzerCheckbox) {
+        alwaysOpenHuntAnalyzerCheckbox.checked = config.alwaysOpenHuntAnalyzer;
+        
+        alwaysOpenHuntAnalyzerCheckbox.addEventListener('change', () => {
+          config.alwaysOpenHuntAnalyzer = alwaysOpenHuntAnalyzerCheckbox.checked;
+          saveConfig();
+          console.log('[Better UI] Always open Hunt Analyzer:', config.alwaysOpenHuntAnalyzer);
         });
       }
     }
@@ -1548,13 +1566,19 @@ function updateFavoriteHearts(targetUniqueId = null) {
     return;
   }
   
-  // Get all creatures, but exclude those inside the Impact Analyzer
+  // Get all creatures, but exclude those inside the Impact Analyzer and autoplay session
   const allCreatures = Array.from(getVisibleCreatures());
   const creatures = allCreatures.filter(imgEl => {
     // Exclude creatures inside the Impact Analyzer panel
     const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
                          imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    return !isInAnalyzer;
+    
+    // Exclude creatures inside the autoplay session widget
+    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
+                               imgEl.closest('#autoseller-session-widget') ||
+                               imgEl.closest('#drop-widget-bottom-element');
+    
+    return !isInAnalyzer && !isInAutoplaySession;
   });
   
   // If no creatures visible, don't remove existing hearts - collection might be transitioning
@@ -1606,11 +1630,17 @@ function updateFavoriteHearts(targetUniqueId = null) {
 
 // Helper: Update a single creature's favorite heart (optimized for single-creature updates)
 function updateSingleFavoriteHeart(targetUniqueId, allCreatures, monsters) {
-  // Filter out analyzer creatures
+  // Filter out analyzer creatures and autoplay session creatures
   const creatures = allCreatures.filter(imgEl => {
     const isInAnalyzer = imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="damage"]') ||
                          imgEl.closest('div[data-state="open"]')?.querySelector('img[alt="healing"]');
-    return !isInAnalyzer;
+    
+    // Exclude creatures inside the autoplay session widget
+    const isInAutoplaySession = imgEl.closest('div[data-autosetup]') ||
+                               imgEl.closest('#autoseller-session-widget') ||
+                               imgEl.closest('#drop-widget-bottom-element');
+    
+    return !isInAnalyzer && !isInAutoplaySession;
   });
   
   resetCreatureMatchingIndex();
@@ -3290,6 +3320,16 @@ function parseAutoplayTime(textContent) {
   return null;
 }
 
+// Board inactivity tracking variables
+let lastBoardActivityTime = Date.now();
+let boardInactivityTimer = null;
+
+// Reset board activity timer when board state changes
+function resetBoardActivityTimer() {
+  lastBoardActivityTime = Date.now();
+  console.log('[Better UI] Board activity timer reset');
+}
+
 // Get the autoplay session timer from the DOM
 function getAutoplaySessionTime() {
   try {
@@ -3343,8 +3383,16 @@ function startAutoplayRefreshMonitor() {
       subscriptions.autoplayRefreshGame = globalThis.state.board.on('newGame', (event) => {
         console.log('[Better UI] New game event:', event);
         
+        // Reset board activity timer on new game
+        resetBoardActivityTimer();
+        
         // Check autoplay session timer and refresh if needed on each new game
         checkAutoplayRefreshThreshold();
+        
+        // Check if Hunt Analyzer should be opened (with a small delay to ensure button is created)
+        scheduleTimeout(() => {
+          checkAndOpenHuntAnalyzer();
+        }, 100);
       });
       
       // Also listen for setPlayMode when switching to autoplay
@@ -3356,7 +3404,13 @@ function startAutoplayRefreshMonitor() {
         }
       });
       
-      console.log('[Better UI] Game event listeners set up for newGame and setPlayMode');
+      // Subscribe to board state changes to track activity
+      subscriptions.autoplayRefreshBoardState = globalThis.state.board.subscribe((state) => {
+        console.log('[Better UI] Board state changed - resetting activity timer');
+        resetBoardActivityTimer();
+      });
+      
+      console.log('[Better UI] Game event listeners set up for newGame, setPlayMode, and board state changes');
     }
     
     // Also check immediately if a game is already running
@@ -3369,6 +3423,9 @@ function startAutoplayRefreshMonitor() {
       }
     }
     
+    // Initialize board activity timer
+    resetBoardActivityTimer();
+    
     console.log('[Better UI] Autoplay refresh monitor started - waiting for new game or monitoring current game');
     
     // Test the autoplay session timer detection
@@ -3379,14 +3436,73 @@ function startAutoplayRefreshMonitor() {
   }
 }
 
+// Check if Hunt Analyzer should be opened and open it if needed
+function checkAndOpenHuntAnalyzer() {
+  try {
+    if (!config.alwaysOpenHuntAnalyzer) {
+      return;
+    }
+    
+    // Check if Hunt Analyzer panel is already open
+    const huntAnalyzerPanel = document.getElementById('mod-autoplay-analyzer-panel');
+    if (huntAnalyzerPanel) {
+      console.log('[Better UI] Hunt Analyzer is already open, skipping auto-open');
+      return;
+    }
+    
+    // Check if Hunt Analyzer button exists - try multiple selectors
+    let huntAnalyzerButton = document.querySelector('[data-mod-id="mod-autoplay-button"]');
+    if (!huntAnalyzerButton) {
+      // Try alternative selector for the button
+      huntAnalyzerButton = document.querySelector('button[title*="Hunt Analyzer"], button[title*="Analisador"]');
+    }
+    if (!huntAnalyzerButton) {
+      // Try finding by text content
+      const buttons = document.querySelectorAll('button');
+      huntAnalyzerButton = Array.from(buttons).find(btn => 
+        btn.textContent.includes('Hunt Analyzer') || 
+        btn.textContent.includes('Analisador') ||
+        btn.textContent.includes('Analyzer')
+      );
+    }
+    if (!huntAnalyzerButton) {
+      console.log('[Better UI] Hunt Analyzer button not found, cannot auto-open');
+      // Debug: Log available buttons for troubleshooting
+      const allButtons = document.querySelectorAll('button');
+      console.log('[Better UI] Available buttons:', Array.from(allButtons).map(btn => ({
+        text: btn.textContent,
+        title: btn.title,
+        id: btn.id,
+        className: btn.className
+      })));
+      return;
+    }
+    
+    // Open Hunt Analyzer by clicking the button
+    console.log('[Better UI] Auto-opening Hunt Analyzer on new game');
+    huntAnalyzerButton.click();
+  } catch (error) {
+    console.error('[Better UI] Error checking/opening Hunt Analyzer:', error);
+  }
+}
+
 // Check autoplay session timer and refresh if needed
 function checkAutoplayRefreshThreshold() {
   try {
     const currentMinutes = getAutoplaySessionTime();
-    console.log(`[Better UI] Autoplay refresh check: ${currentMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
+    const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
     
-    if (currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes) {
-      console.log(`[Better UI] Autoplay refresh threshold reached (${currentMinutes.toFixed(1)} >= ${config.autoplayRefreshMinutes} minutes). Refreshing page in 1 second...`);
+    console.log(`[Better UI] Autoplay refresh check: session=${currentMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, inactivity=${inactivityMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
+    
+    // Check session time threshold
+    const sessionThresholdReached = currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes;
+    
+    // Check board inactivity threshold
+    const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
+    
+    if (sessionThresholdReached || inactivityThresholdReached) {
+      const reason = sessionThresholdReached ? 'session time' : 'board inactivity';
+      console.log(`[Better UI] Autoplay refresh threshold reached (${reason}). Refreshing page in 1 second...`);
       
       // Wait 1 second before refreshing
       scheduleTimeout(() => {
@@ -3417,6 +3533,18 @@ function stopAutoplayRefreshMonitor() {
       subscriptions.autoplayRefreshSetPlayMode();
       subscriptions.autoplayRefreshSetPlayMode = null;
       console.log('[Better UI] Autoplay refresh setPlayMode subscription stopped');
+    }
+    
+    if (subscriptions.autoplayRefreshBoardState && typeof subscriptions.autoplayRefreshBoardState === 'function') {
+      subscriptions.autoplayRefreshBoardState();
+      subscriptions.autoplayRefreshBoardState = null;
+      console.log('[Better UI] Autoplay refresh board state subscription stopped');
+    }
+    
+    // Clear board inactivity timer
+    if (boardInactivityTimer) {
+      clearTimeout(boardInactivityTimer);
+      boardInactivityTimer = null;
     }
     
     console.log('[Better UI] Autoplay refresh monitor stopped');
@@ -3496,6 +3624,11 @@ function initBetterUI() {
     }
     
     console.log('[Better UI] Initialization completed');
+    
+    // Check if Hunt Analyzer should be opened on initialization
+    scheduleTimeout(() => {
+      checkAndOpenHuntAnalyzer();
+    }, 500); // Small delay to ensure all mods are loaded
   } catch (error) {
     console.error('[Better UI] Initialization error:', error);
   }

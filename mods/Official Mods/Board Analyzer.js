@@ -2753,9 +2753,7 @@ function showResultsModal(results) {
           (count / results.summary.totalRuns * 100).toFixed(2) : '0.00';
         
         const label = document.createElement('div');
-        label.textContent = rankPoints === results.summary.maxRankPoints ? 
-          t('mods.boardAnalyzer.sPlusMaxPointsRateLabel').replace('{points}', rankPoints) : 
-          `S+${rankPoints} Rate:`;
+        label.textContent = t('mods.boardAnalyzer.sPlusMaxPointsRateLabel').replace('{points}', rankPoints);
         label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
         
         const value = document.createElement('div');
