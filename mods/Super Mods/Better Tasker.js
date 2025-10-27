@@ -931,7 +931,7 @@ function resetState(resetType = 'full') {
         
         const resetTaskHunting = () => {
             taskHuntingOngoing = false;
-            // Clear saved tasking map ID
+            // Clear saved tasking map ID only when task hunting actually stops
             taskingMapId = null;
             // Reset quest button modification flag
             questButtonModifiedForTasking = false;
@@ -954,7 +954,7 @@ function resetState(resetType = 'full') {
                 if (!taskHuntingOngoing) {
                     resetCommonFlags();
                 } else {
-                    // Reset flags but preserve quest button state during task hunting
+                    // Reset flags but preserve quest button state and tasking map ID during task hunting
                     autoplayPausedByTasker = false;
                     pendingTaskCompletion = false;
                     taskOperationInProgress = false;
@@ -962,7 +962,8 @@ function resetState(resetType = 'full') {
                     // CRITICAL FIX: Reset quest button modification flag during session reset
                     // This prevents the quest button from staying in modified state indefinitely
                     questButtonModifiedForTasking = false;
-                    console.log('[Better Tasker] Session reset during task hunting - reset quest button modification flag');
+                    // CRITICAL FIX: Do NOT clear taskingMapId during session reset - preserve it for map validation
+                    console.log('[Better Tasker] Session reset during task hunting - reset quest button modification flag but preserving tasking map ID');
                 }
                 // Don't reset taskHuntingOngoing during session reset - it should persist until task completion
                 console.log('[Better Tasker] Session state reset (preserving task hunting flag)');
@@ -1931,23 +1932,14 @@ function isOnCorrectTaskingMap() {
         const playerContext = globalThis.state.player.getSnapshot().context;
         const task = playerContext?.questLog?.task;
         
-        if (task && task.suggestedMap) {
-            const recommendedMapName = task.suggestedMap;
-            console.log(`[Better Tasker] Task recommended map: ${recommendedMapName}`);
+        if (task) {
+            console.log(`[Better Tasker] Task object keys:`, Object.keys(task));
             
-            // Check if current map matches recommended map
-            const recommendedRoomId = getRoomIdForMapName(recommendedMapName);
-            
-            if (recommendedRoomId) {
-                const isCorrectMap = currentRoomId === recommendedRoomId;
-                console.log(`[Better Tasker] Map validation (fallback): current=${currentRoomId}, recommended=${recommendedRoomId}, correct=${isCorrectMap}`);
-                return isCorrectMap;
-            } else {
-                console.log(`[Better Tasker] Could not find room ID for recommended map: ${recommendedMapName}`);
-                return true;
-            }
+            // Game State API doesn't provide suggestedMap - this validation is not possible via API
+            console.log('[Better Tasker] Cannot validate map via Game State API - suggestedMap not available');
+            return true; // Allow any map since we can't validate
         } else {
-            console.log('[Better Tasker] No task or recommended map found - allowing any map');
+            console.log('[Better Tasker] No task found - allowing any map');
             return true;
         }
     } catch (error) {
@@ -3482,7 +3474,71 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
     try {
         console.log('[Better Tasker] Looking for suggested map link...');
         
-        // Wait a bit for the quest log to fully load
+        // First, ensure quest log is open
+        console.log('[Better Tasker] Ensuring quest log is open...');
+        const questLogOpened = await openQuestLogDirectly();
+        if (!questLogOpened) {
+            console.log('[Better Tasker] Failed to open quest log - checking if we can use stored map ID...');
+            
+            // If quest log cannot be opened (e.g., during autoplay), try to use stored taskingMapId
+            if (taskingMapId) {
+                console.log(`[Better Tasker] Using stored tasking map ID: ${taskingMapId}`);
+                const roomId = taskingMapId;
+                
+                // Show toast notification
+                showToast('Starting Better Tasker');
+                
+                // Handle quest log state and navigation
+                const navigationCompleted = await handleQuestLogState(roomId);
+                
+                // Set the tasking map ID for future validation (already set, but ensure it's preserved)
+                taskingMapId = roomId;
+                console.log(`[Better Tasker] Tasking map ID preserved: ${taskingMapId}`);
+                
+                // Continue with setup...
+                const settings = loadSettings();
+                const setupMethod = settings.setupMethod || 'Auto-setup';
+                
+                // Find and click the appropriate setup button
+                console.log(`[Better Tasker] Looking for ${setupMethod} button...`);
+                const setupButton = findSetupButton(setupMethod);
+                if (!setupButton) {
+                    console.log(`[Better Tasker] ${setupMethod} button not found`);
+                    return false;
+                }
+                
+                console.log(`[Better Tasker] Clicking ${setupMethod} button...`);
+                setupButton.click();
+                await sleep(AUTO_SETUP_DELAY);
+                
+                // Enable autoplay mode
+                console.log('[Better Tasker] Enabling autoplay mode...');
+                await ensureAutoplayMode();
+                await sleep(AUTOPLAY_SETUP_DELAY);
+                
+                // Enable Bestiary Automator settings if configured
+                enableBestiaryAutomatorSettings();
+                
+                // Wait for Bestiary Automator to initialize
+                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                await sleep(BESTIARY_INIT_WAIT);
+                
+                // Post-navigation settings validation
+                console.log('[Better Tasker] Validating settings after navigation...');
+                validateSettingsAfterNavigation();
+                
+                // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
+                taskNavigationCompleted = true;
+                console.log('[Better Tasker] Task navigation flag set - will not repeat quest log navigation during ongoing task');
+                
+                return true; // Navigation successful
+            } else {
+                console.log('[Better Tasker] No stored tasking map ID available - cannot proceed without quest log access');
+                return false;
+            }
+        }
+        
+        // Wait for quest log to fully load
         await sleep(AUTOMATION_CHECK_DELAY);
         
         // Use provided element or look for the suggested map link
@@ -3510,7 +3566,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
             // If still no link found in Paw and Fur Society section, don't proceed
             if (!suggestedMapLink) {
                 console.log('[Better Tasker] No suggested map found in Paw and Fur Society section');
-                return;
+                return false;
             }
         } else {
             console.log('[Better Tasker] Using provided suggested map element (already validated)');
@@ -3552,6 +3608,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Handle quest log state and navigation
                 const navigationCompleted = await handleQuestLogState(roomId);
+                
+                // Set the tasking map ID for future validation
+                taskingMapId = roomId;
+                console.log(`[Better Tasker] Tasking map ID set to: ${taskingMapId}`);
                 
                 // Get user's selected setup method
                 const settings = loadSettings();
@@ -3739,7 +3799,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 console.log('[Better Tasker] Navigation and setup completed');
                 
-                return;
+                return true; // Navigation successful
             } else {
                 console.log('[Better Tasker] No room ID found for map name:', mapName);
                 console.log('[Better Tasker] Available maps:', globalThis.state?.utils?.ROOM_NAME ? Object.values(globalThis.state.utils.ROOM_NAME) : 'Not available');
@@ -3748,8 +3808,10 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
         
         // If no suggested map found or no room ID extracted, log and return
         console.log('[Better Tasker] No suggested map found or no room ID available for API navigation');
+        return false;
     } catch (error) {
         console.error('[Better Tasker] Error navigating to suggested map:', error);
+        return false;
     }
 }
 
@@ -4626,23 +4688,71 @@ async function findFinishButton(pollInterval = 1000, maxAttempts = 3, useFallbac
         attempts++;
         
         // Search for buttons with SVG check icon (language-independent)
+        // Exclude checkboxes and other non-Finish buttons by checking button context
         const allButtons = document.querySelectorAll('button');
-        finishButton = Array.from(allButtons).find(btn => 
-            btn.querySelector('svg.lucide-check') && 
-            !btn.hasAttribute('disabled') && 
-            !btn.disabled
-        );
+        finishButton = Array.from(allButtons).find(btn => {
+            // Must have check icon
+            if (!btn.querySelector('svg.lucide-check') || btn.hasAttribute('disabled') || btn.disabled) {
+                return false;
+            }
+            
+            // Exclude checkboxes and input elements
+            if (btn.type === 'checkbox' || btn.tagName === 'INPUT') {
+                return false;
+            }
+            
+            // Exclude buttons that are clearly not Finish buttons (like settings checkboxes)
+            const buttonText = btn.textContent.trim().toLowerCase();
+            if (buttonText.includes('enable') || buttonText.includes('disable') || 
+                buttonText.includes('dragon') || buttonText.includes('plant') ||
+                buttonText.includes('autoplay') || buttonText.includes('stamina')) {
+                return false;
+            }
+            
+            // Prefer buttons that are in quest log context
+            const questLogContainer = findQuestLogContainer();
+            if (questLogContainer && questLogContainer.contains(btn)) {
+                return true;
+            }
+            
+            // If not in quest log, check if it's a proper Finish button by looking for task-related context
+            const parentSection = btn.closest('.frame-1.surface-regular');
+            if (parentSection) {
+                const sectionTitle = parentSection.querySelector('p.text-whiteHighlight');
+                if (sectionTitle && sectionTitle.textContent === 'Paw and Fur Society') {
+                    return true;
+                }
+            }
+            
+            return false;
+        });
         
         // If not found and fallback selectors enabled, try CSS selectors
         if (!finishButton && useFallbackSelectors) {
             for (const selector of finishSelectors) {
                 try {
                     const buttons = document.querySelectorAll(selector);
-                    finishButton = Array.from(buttons).find(btn => 
-                        btn.querySelector('svg.lucide-check') && 
-                        !btn.hasAttribute('disabled') && 
-                        !btn.disabled
-                    );
+                    finishButton = Array.from(buttons).find(btn => {
+                        // Must have check icon
+                        if (!btn.querySelector('svg.lucide-check') || btn.hasAttribute('disabled') || btn.disabled) {
+                            return false;
+                        }
+                        
+                        // Exclude checkboxes and input elements
+                        if (btn.type === 'checkbox' || btn.tagName === 'INPUT') {
+                            return false;
+                        }
+                        
+                        // Exclude buttons that are clearly not Finish buttons (like settings checkboxes)
+                        const buttonText = btn.textContent.trim().toLowerCase();
+                        if (buttonText.includes('enable') || buttonText.includes('disable') || 
+                            buttonText.includes('dragon') || buttonText.includes('plant') ||
+                            buttonText.includes('autoplay') || buttonText.includes('stamina')) {
+                            return false;
+                        }
+                        
+                        return true;
+                    });
                     
                     if (finishButton) break;
                 } catch (error) {
@@ -5055,16 +5165,9 @@ async function handleTaskFinishing() {
                 }
             }
             
-            // Try to open quest log when there's an active task
-            if (task.gameId) {
-                console.log('[Better Tasker] Attempting to open quest log for active task...');
-            } else if (isQuestBlipReady) {
-                console.log('[Better Tasker] New task available - opening quest log to start task...');
-            } else {
-                console.log('[Better Tasker] Attempting to open quest log to start new task...');
-            }
-            
+            // Only attempt quest log access when necessary
             if (isTaskReady) {
+                console.log('[Better Tasker] Task is ready - proceeding with completion');
                 await triggerFailsafe('Task is ready');
                 return;
                 
@@ -5072,26 +5175,61 @@ async function handleTaskFinishing() {
                 console.log('[Better Tasker] New task available - opening quest log to start task...');
                 // New task availability is only for starting new tasks, not completing existing ones
                 
-            } else if (isAutoplayActive) {
-                console.log('[Better Tasker] Autoplay is active and quest log accessible, checking...');
-            } else {
-                if (task.gameId) {
-                    console.log('[Better Tasker] No quest blip found, but checking quest log anyway for active task...');
-                } else {
-                    // Check if we should wait before re-checking (1 minute delay)
-                    const now = Date.now();
-                    const NO_TASK_CHECK_DELAY = 60000; // 1 minute in milliseconds
+            } else if (task.gameId && !task.ready) {
+                // Active task that's not ready yet - check if we need to navigate to the task map
+                if (!taskNavigationCompleted) {
+                    console.log('[Better Tasker] Active task in progress (not ready) - checking if already on correct map...');
                     
-                    if (now - lastNoTaskCheck < NO_TASK_CHECK_DELAY) {
-                        // Still within the delay period, skip this check
+                    // First check if we're already on the correct map
+                    const currentRoomId = getCurrentRoomId();
+                    if (currentRoomId && taskingMapId && currentRoomId === taskingMapId) {
+                        console.log(`[Better Tasker] Already on correct task map (${currentRoomId}) - skipping navigation`);
+                        taskNavigationCompleted = true;
+                        updateExposedState();
                         return;
                     }
                     
-                    // Update the last check time
-                    lastNoTaskCheck = now;
-                    console.log('[Better Tasker] No quest blip found and no active task - waiting 1 minute before next check');
+                    // If we don't have a taskingMapId, try to get it from quest log
+                    if (!taskingMapId) {
+                        console.log(`[Better Tasker] No tasking map ID stored (current: ${currentRoomId}) - opening quest log to get suggested map information...`);
+                        const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
+                        if (navigationResult) {
+                            console.log('[Better Tasker] Navigation successful - tasking map ID should now be set');
+                        } else {
+                            console.log('[Better Tasker] Navigation failed - will retry on next check');
+                        }
+                        return;
+                    } else {
+                        console.log(`[Better Tasker] Not on correct map (current: ${currentRoomId}, expected: ${taskingMapId}) - opening quest log to get suggested map information...`);
+                        const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
+                        if (navigationResult) {
+                            console.log('[Better Tasker] Navigation successful');
+                        } else {
+                            console.log('[Better Tasker] Navigation failed - will retry on next check');
+                        }
+                        return;
+                    }
+                } else {
+                    console.log('[Better Tasker] Active task in progress (not ready) - already navigated, monitoring kill progress only');
                     return;
                 }
+                
+            } else if (isAutoplayActive) {
+                console.log('[Better Tasker] Autoplay is active and quest log accessible, checking...');
+            } else {
+                // No active task and no new task available
+                const now = Date.now();
+                const NO_TASK_CHECK_DELAY = 60000; // 1 minute in milliseconds
+                
+                if (now - lastNoTaskCheck < NO_TASK_CHECK_DELAY) {
+                    // Still within the delay period, skip this check
+                    return;
+                }
+                
+                // Update the last check time
+                lastNoTaskCheck = now;
+                console.log('[Better Tasker] No quest blip found and no active task - waiting 1 minute before next check');
+                return;
             }
             
             // 1. Open quest log for other cases (autoplay active, etc.)
@@ -6638,12 +6776,23 @@ function cleanupBetterTasker() {
 // Expose state for other mods to check (like Raid Hunter coordination)
 function exposeTaskerState() {
     if (typeof window !== 'undefined') {
+        // Check if we have an active task (even if in cooldown)
+        let hasActiveTask = false;
+        try {
+            const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+            const task = playerContext?.questLog?.task;
+            hasActiveTask = !!(task && task.gameId);
+        } catch (error) {
+            // Ignore errors, hasActiveTask remains false
+        }
+        
         window.betterTaskerState = {
             taskOperationInProgress: taskOperationInProgress,
             taskHuntingOngoing: taskHuntingOngoing,
             pendingTaskCompletion: pendingTaskCompletion,
             taskerState: taskerState,
-            taskNavigationCompleted: taskNavigationCompleted
+            taskNavigationCompleted: taskNavigationCompleted,
+            hasActiveTask: hasActiveTask
         };
     }
 }

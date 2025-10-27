@@ -322,6 +322,15 @@ const HuntAnalyzerState = {
   settings: {
     theme: 'original',
     persistData: false
+  },
+  // Internal clock system for accurate time tracking
+  timeTracking: {
+    currentMap: null,
+    mapStartTime: 0,
+    accumulatedTimeMs: 0, // Total time accumulated across all maps
+    mapTimeMs: new Map(), // Time per map: Map<roomName, timeMs>
+    lastAutoplayTime: 0,
+    clockIntervalId: null
   }
 };
 
@@ -331,7 +340,148 @@ const HUNT_ANALYZER_STATE_KEY = 'huntAnalyzerState';
 const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 
 // =======================
-// 1.5. Performance Caching
+// 1.5. Autoplay Time Tracking Functions
+// =======================
+// Parse autoplay session time from DOM text content
+function parseAutoplayTime(textContent) {
+  const enText = "Autoplay session";
+  const ptText = "Sessão autoplay";
+  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
+  
+  const match = textContent.match(pattern);
+  if (match) {
+    const minutes = parseInt(match[1]);
+    const seconds = parseInt(match[2]);
+    return minutes + (seconds / 60);
+  }
+  return null;
+}
+
+// Get current autoplay session time from DOM
+function getAutoplaySessionTime() {
+  try {
+    const autoplayButton = document.querySelector('button.widget-top-text img[alt="Autoplay"]');
+    if (autoplayButton) {
+      const button = autoplayButton.closest('button');
+      if (button) {
+        const time = parseAutoplayTime(button.textContent);
+        if (time !== null) return time;
+      }
+    }
+    
+    // Fallback: look for any button containing autoplay session text
+    const buttons = document.querySelectorAll('button');
+    for (const button of buttons) {
+      const time = parseAutoplayTime(button.textContent);
+      if (time !== null) return time;
+    }
+    
+    return 0;
+  } catch (error) {
+    console.error('[Hunt Analyzer] Error getting autoplay session time:', error);
+    return 0;
+  }
+}
+
+// =======================
+// 1.7. Internal Clock System
+// =======================
+// Start the internal clock system
+function startInternalClock() {
+  if (HuntAnalyzerState.timeTracking.clockIntervalId) {
+    clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
+  }
+  
+  HuntAnalyzerState.timeTracking.clockIntervalId = setInterval(() => {
+    updateInternalClock();
+  }, 1000); // Update every second
+}
+
+// Stop the internal clock system
+function stopInternalClock() {
+  if (HuntAnalyzerState.timeTracking.clockIntervalId) {
+    clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
+    HuntAnalyzerState.timeTracking.clockIntervalId = null;
+  }
+}
+
+// Update the internal clock by watching DOM autoplay timer
+function updateInternalClock() {
+  const currentAutoplayTime = getAutoplaySessionTime();
+  
+  // If autoplay time decreased (session reset), accumulate the previous time
+  if (currentAutoplayTime < HuntAnalyzerState.timeTracking.lastAutoplayTime) {
+    const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
+    
+    // Add to accumulated time
+    HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
+    
+    // Add to current map time if we have one
+    if (HuntAnalyzerState.timeTracking.currentMap) {
+      const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
+      HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
+    }
+  }
+  
+  HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
+}
+
+// Track map change and start timing for new map
+function trackMapChange(roomName) {
+  // If we're switching maps, accumulate current session time
+  if (HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomName) {
+    const currentAutoplayTime = getAutoplaySessionTime();
+    const timeToAccumulate = currentAutoplayTime * 60 * 1000; // Convert minutes to ms
+    
+    // Add to accumulated time
+    HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
+    
+    // Add to previous map time
+    const previousMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
+    HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, previousMapTime + timeToAccumulate);
+  }
+  
+  // Set new current map
+  HuntAnalyzerState.timeTracking.currentMap = roomName;
+  HuntAnalyzerState.timeTracking.mapStartTime = Date.now();
+}
+
+// Get filtered time for rate calculations
+function getFilteredTimeHours() {
+  if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
+    // Return total accumulated time plus current session time
+    const currentAutoplayTime = getAutoplaySessionTime();
+    const currentSessionMs = currentAutoplayTime * 60 * 1000;
+    return (HuntAnalyzerState.timeTracking.accumulatedTimeMs + currentSessionMs) / (1000 * 60 * 60);
+  } else {
+    // Return time for selected map plus current session if on that map
+    const mapTimeMs = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.ui.selectedMapFilter) || 0;
+    let totalTimeMs = mapTimeMs;
+    
+    // If currently on the selected map, add current session time
+    if (HuntAnalyzerState.timeTracking.currentMap === HuntAnalyzerState.ui.selectedMapFilter) {
+      const currentAutoplayTime = getAutoplaySessionTime();
+      totalTimeMs += currentAutoplayTime * 60 * 1000;
+    }
+    
+    return totalTimeMs / (1000 * 60 * 60);
+  }
+}
+
+// Format playtime for display
+function formatPlaytime(hours) {
+  const totalMinutes = Math.floor(hours * 60);
+  const totalSeconds = Math.floor(hours * 3600);
+  
+  const displayHours = Math.floor(totalSeconds / 3600);
+  const displayMinutes = Math.floor((totalSeconds % 3600) / 60);
+  const displaySeconds = totalSeconds % 60;
+  
+  return `${displayHours.toString().padStart(2, '0')}:${displayMinutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}`;
+}
+
+// =======================
+// 1.8. Performance Caching
 // =======================
 const equipmentCache = new Map();
 const monsterCache = new Map();
@@ -488,6 +638,13 @@ loadHuntAnalyzerSettings();
 loadHuntAnalyzerData();
 loadHuntAnalyzerState();
 
+// Ensure map filter is set to "ALL" on initialization
+HuntAnalyzerState.ui.selectedMapFilter = "ALL";
+console.log('[Hunt Analyzer] Map filter initialized to:', HuntAnalyzerState.ui.selectedMapFilter);
+
+// Initialize internal clock system
+startInternalClock();
+
 // Auto-reopen panel if needed
 autoReopenHuntAnalyzer();
 
@@ -496,72 +653,6 @@ autoReopenHuntAnalyzer();
 // =======================
 
 // Function to check if sprite CSS is loaded
-function isSpriteCSSLoaded() {
-    // Check if there are any stylesheets or styles that contain sprite-related CSS
-    const styleSheets = Array.from(document.styleSheets);
-    let hasSpriteCSS = false;
-    
-    try {
-        for (const sheet of styleSheets) {
-            if (sheet.href && (sheet.href.includes('sprite') || sheet.href.includes('spritesheet'))) {
-                hasSpriteCSS = true;
-                break;
-            }
-            
-            // Try to access rules (might fail due to CORS)
-            try {
-                const rules = sheet.cssRules || sheet.rules;
-                if (rules) {
-                    for (let i = 0; i < rules.length; i++) {
-                        const rule = rules[i];
-                        if (rule.selectorText && rule.selectorText.includes('.sprite')) {
-                            hasSpriteCSS = true;
-                            break;
-                        }
-                    }
-                }
-            } catch (e) {
-                // CORS error, ignore
-            }
-        }
-    } catch (e) {
-        // Ignore errors
-    }
-    
-    console.log('[Hunt Analyzer] Sprite CSS loaded:', hasSpriteCSS);
-    return hasSpriteCSS;
-}
-
-// Function to test if sprite system is working
-function testSpriteSystem() {
-    if (!globalThis.state?.utils) return false;
-    
-    // Create a test sprite element to see if the sprite system is working
-    const testSprite = createItemSprite(35909, 'Test'); // Dice Manipulator sprite ID
-    document.body.appendChild(testSprite);
-    
-    // Check if the sprite actually rendered (has proper dimensions and content)
-    const img = testSprite.querySelector('img');
-    const isWorking = img && img.complete && img.naturalWidth > 0;
-    
-    // Also check if the sprite has the proper CSS classes applied
-    const hasSpriteClass = testSprite.classList.contains('sprite');
-    const hasItemClass = testSprite.classList.contains('item');
-    
-    console.log('[Hunt Analyzer] Sprite test details:', {
-        imgExists: !!img,
-        imgComplete: img?.complete,
-        imgNaturalWidth: img?.naturalWidth,
-        hasSpriteClass,
-        hasItemClass,
-        spriteElement: testSprite.outerHTML.substring(0, 100) + '...'
-    });
-    
-    document.body.removeChild(testSprite);
-    
-    return isWorking;
-}
-
 // Function to create inventory-style creature portrait like the game does
 function createInventoryStyleCreaturePortrait(creatureData) {
     const containerSlot = document.createElement('div');
@@ -714,15 +805,8 @@ function regenerateAllVisuals() {
     console.log('[Hunt Analyzer] Regenerating visual elements:', {
         gameAPI: !!globalThis.state?.utils,
         getEquipment: !!globalThis.state?.utils?.getEquipment,
-        getMonster: !!globalThis.state?.utils?.getMonster,
-        spriteCSS: isSpriteCSSLoaded(),
-        spriteSystem: testSpriteSystem()
+        getMonster: !!globalThis.state?.utils?.getMonster
     });
-    
-    // Test if sprite system is working
-    const spriteSystemWorking = testSpriteSystem();
-    // Don't return early - try regeneration even if sprite test fails
-    // The sprite system might work for actual items even if test fails
     
     let regeneratedCount = 0;
     
@@ -908,12 +992,22 @@ function saveHuntAnalyzerData() {
             cleanAggregatedCreatures.set(key, cleanValue);
         });
         
+        // Convert Map to array for timeTracking persistence
+        const mapTimeMsArray = Array.from(HuntAnalyzerState.timeTracking.mapTimeMs.entries());
+        
         const dataToSave = {
             sessions: HuntAnalyzerState.data.sessions,
             totals: HuntAnalyzerState.totals,
             aggregatedLoot: Array.from(cleanAggregatedLoot.entries()),
             aggregatedCreatures: Array.from(cleanAggregatedCreatures.entries()),
-            session: HuntAnalyzerState.session
+            session: HuntAnalyzerState.session,
+            timeTracking: {
+                currentMap: HuntAnalyzerState.timeTracking.currentMap,
+                mapStartTime: HuntAnalyzerState.timeTracking.mapStartTime,
+                accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
+                mapTimeMs: mapTimeMsArray,
+                lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime
+            }
         };
         
         localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
@@ -952,6 +1046,19 @@ function loadHuntAnalyzerData() {
             // Restore session state
             if (parsedData.session) {
                 Object.assign(HuntAnalyzerState.session, parsedData.session);
+            }
+            
+            // Restore timeTracking data
+            if (parsedData.timeTracking) {
+                HuntAnalyzerState.timeTracking.currentMap = parsedData.timeTracking.currentMap || null;
+                HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
+                HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
+                HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
+                
+                // Convert array back to Map for mapTimeMs
+                if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
+                    HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
+                }
             }
             
             return true;
@@ -1855,6 +1962,9 @@ class DataProcessor {
     const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
     const readableRoomName = roomNamesMap?.[rewardScreen.roomId] || `Room ID: ${rewardScreen.roomId}`;
 
+    // Track map change for internal clock system
+    trackMapChange(readableRoomName);
+
     // Update Room ID display in header
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
     if (cachedRoomIdDisplayElement && rewardScreen.roomId) {
@@ -1890,6 +2000,32 @@ class DataProcessor {
       ...(rewardScreen.loot.droppedItems || []),
       ...(rewardScreen.equipDrop ? [rewardScreen.equipDrop] : [])
     ];
+
+    // Immediately track stamina recovery from dropped potions
+    for (const item of allLootItems) {
+      if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
+          (item.tooltipKey && item.tooltipKey.toLowerCase() === 'gold') ||
+          item.spriteId === CONFIG.HEAL_POTION_SPRITE_ID) {
+        continue;
+      }
+
+      // Check if this is a stamina potion and add recovery immediately
+      let itemName = 'Unknown Item';
+      if (item.tooltipKey?.toLowerCase().includes('dust') || 
+          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
+        itemName = 'Dust';
+      } else if (item.tooltipKey) {
+        itemName = item.tooltipKey;
+      } else if (item.name) {
+        itemName = item.name;
+      }
+
+      const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
+      if (staminaRecovery > 0) {
+        HuntAnalyzerState.totals.staminaRecovered += staminaRecovery;
+        console.log(`[Hunt Analyzer] Stamina potion dropped: ${itemName} (+${staminaRecovery} stamina)`);
+      }
+    }
 
     for (const item of allLootItems) {
       if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
@@ -1941,11 +2077,6 @@ class DataProcessor {
         }
       }
       
-      // Calculate stamina recovery for stamina potions
-      const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
-      if (staminaRecovery > 0) {
-        HuntAnalyzerState.totals.staminaRecovered += staminaRecovery;
-      }
       
       const rarityBorderColor = getRarityBorderColor(rarity);
 
@@ -2205,6 +2336,8 @@ class DataProcessor {
     HuntAnalyzerState.totals.runes = 0;
     HuntAnalyzerState.totals.dust = 0;
     HuntAnalyzerState.totals.shiny = 0;
+    HuntAnalyzerState.totals.staminaSpent = 0;
+    HuntAnalyzerState.totals.staminaRecovered = 0;
     HuntAnalyzerState.totals.wins = 0;
     HuntAnalyzerState.totals.losses = 0;
 
@@ -2224,6 +2357,10 @@ class DataProcessor {
         } else if (sessionData.victory === false) {
           HuntAnalyzerState.totals.losses++;
         }
+        
+        // Aggregate stamina data
+        HuntAnalyzerState.totals.staminaSpent += sessionData.staminaSpent || 0;
+        HuntAnalyzerState.totals.staminaRecovered += sessionData.staminaRecovered || 0;
         
         sessionData.loot.forEach(item => {
             // Handle special items (Gold, Dust) that should only appear in totals
@@ -2796,16 +2933,15 @@ function generateSummaryLogText() {
     let summary = `--- Hunt Analyzer Summary ---\n`;
 
     // Overall Stats
-    const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-    const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
+    const filteredTimeHours = getFilteredTimeHours();
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
     
     // Calculate overall rates for summary
-    const autoplayRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours) : 0;
-    const goldRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours) : 0;
-    const creatureRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours) : 0;
-    const equipmentRatePerHour = overallElapsedTimeHours > 0 ? Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours) : 0;
-    const staminaSpentRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours) : 0;
+    const autoplayRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.session.count / filteredTimeHours) : 0;
+    const goldRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours) : 0;
+    const creatureRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours) : 0;
+    const equipmentRatePerHour = filteredTimeHours > 0 ? Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours) : 0;
+    const staminaSpentRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours) : 0;
     
     // Calculate overall efficiency metrics
     const goldPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.totals.gold / HuntAnalyzerState.totals.staminaSpent).toFixed(2) : 'N/A';
@@ -2816,7 +2952,7 @@ function generateSummaryLogText() {
     summary += `Room: ${cachedRoomIdDisplayElement?.textContent || 'N/A'}\n`;
     summary += `Sessions: ${HuntAnalyzerState.session.count}\n`;
     summary += `Win/Loss: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
-    summary += `Time Elapsed: ${formatTime(overallElapsedTimeMs)}\n`;
+    summary += `Time Elapsed: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
     summary += `Gold: ${HuntAnalyzerState.totals.gold} | Dust: ${HuntAnalyzerState.totals.dust}\n`;
     summary += `Equipment Drops: ${HuntAnalyzerState.totals.equipment} | Creature Drops: ${HuntAnalyzerState.totals.creatures} | Shiny Drops: ${HuntAnalyzerState.totals.shiny}\n`;
     summary += `Total Stamina Spent: ${HuntAnalyzerState.totals.staminaSpent}\n`;
@@ -3301,6 +3437,7 @@ function createConfirmationDialog(titleKey, messageKey, onConfirm, onCancel) {
 
 // Resets all Hunt Analyzer state data
 function resetHuntAnalyzerState() {
+    HuntAnalyzerState.ui.autoplayLogText = ""; // Reset the log text
     HuntAnalyzerState.session.count = 0;
     HuntAnalyzerState.totals.gold = 0;
     HuntAnalyzerState.totals.creatures = 0;
@@ -3318,6 +3455,19 @@ function resetHuntAnalyzerState() {
     HuntAnalyzerState.data.sessions = [];
     HuntAnalyzerState.data.aggregatedLoot.clear();
     HuntAnalyzerState.data.aggregatedCreatures.clear();
+    
+    // Reset time tracking data
+    HuntAnalyzerState.timeTracking.currentMap = null;
+    HuntAnalyzerState.timeTracking.mapStartTime = 0;
+    HuntAnalyzerState.timeTracking.accumulatedTimeMs = 0;
+    HuntAnalyzerState.timeTracking.mapTimeMs.clear();
+    HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
+    
+    // Immediately update playtime display to show 0
+    const playtimeElement = document.getElementById('mod-playtime-display');
+    if (playtimeElement) {
+        playtimeElement.textContent = "Playtime: 00:00:00";
+    }
 }
 
 // Updates room display with current room information
@@ -3379,19 +3529,19 @@ function createLiveDisplaySection() {
     autoplayCounter.style.color = "#61AFEF";
     
     const sessionCountSpan = document.createElement("span");
-    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0`;
+    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0 (0/h)`;
     sessionCountSpan.id = "mod-session-count";
     
     autoplayCounter.appendChild(sessionCountSpan);
 
-    const autoplayRateElement = document.createElement("span");
-    autoplayRateElement.id = "mod-autoplay-rate";
-    autoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: 0`;
-    autoplayRateElement.style.fontSize = "10px";
-    autoplayRateElement.style.color = "#61AFEF";
+    const playtimeElement = document.createElement("span");
+    playtimeElement.id = "mod-playtime-display";
+    playtimeElement.textContent = "Playtime: 0m";
+    playtimeElement.style.fontSize = "10px";
+    playtimeElement.style.color = "#61AFEF";
     
     firstRow.appendChild(autoplayCounter);
-    firstRow.appendChild(autoplayRateElement);
+    firstRow.appendChild(playtimeElement);
     
     // Second row for Stamina and W/L
     const secondRow = document.createElement("div");
@@ -3962,19 +4112,19 @@ function createAutoplayAnalyzerPanel() {
     autoplayCounter.style.color = "#61AFEF";
     
     const sessionCountSpan = document.createElement("span");
-    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0`;
+    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0 (0/h)`;
     sessionCountSpan.id = "mod-session-count";
     
     autoplayCounter.appendChild(sessionCountSpan);
 
-    const autoplayRateElement = document.createElement("span");
-    autoplayRateElement.id = "mod-autoplay-rate";
-    autoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: 0`;
-    autoplayRateElement.style.fontSize = "10px";
-    autoplayRateElement.style.color = "#61AFEF";
+    const playtimeElement = document.createElement("span");
+    playtimeElement.id = "mod-playtime-display";
+    playtimeElement.textContent = "Playtime: 0m";
+    playtimeElement.style.fontSize = "10px";
+    playtimeElement.style.color = "#61AFEF";
     
     firstRow.appendChild(autoplayCounter);
-    firstRow.appendChild(autoplayRateElement);
+    firstRow.appendChild(playtimeElement);
     
     // Second row for Stamina and W/L
     const secondRow = document.createElement("div");
@@ -4045,18 +4195,10 @@ function createAutoplayAnalyzerPanel() {
 
     const totalStaminaSpentElement = document.createElement('span');
     totalStaminaSpentElement.id = 'mod-total-stamina-spent';
-    // Calculate initial stamina efficiency with natural regen
-    const initialElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-    const initialElapsedTimeMinutes = initialElapsedTimeMs / (1000 * 60);
-    const initialElapsedTimeHours = initialElapsedTimeMs / (1000 * 60 * 60);
-    const initialNaturalStaminaRegen = Math.floor(initialElapsedTimeMinutes);
-    const initialTotalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + initialNaturalStaminaRegen;
-    const initialNetStaminaChange = initialTotalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-    const initialNetStaminaPerHour = Math.floor(initialNetStaminaChange / initialElapsedTimeHours);
-    const initialRecoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-        Math.round((initialTotalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-    const initialStaminaSpentRatePerHour = initialElapsedTimeHours > 0 ? 
-        Math.floor(HuntAnalyzerState.totals.staminaSpent / initialElapsedTimeHours) : 0;
+    // Calculate initial stamina efficiency - show zeros until first session completes
+    const initialStaminaSpentRatePerHour = 0;
+    const initialNetStaminaPerHour = 0;
+    const initialRecoveryEfficiency = 0;
     totalStaminaSpentElement.textContent = `Stamina/h: ${initialStaminaSpentRatePerHour} (Net: ${initialNetStaminaPerHour > 0 ? '+' : ''}${initialNetStaminaPerHour}/h) [${initialRecoveryEfficiency}% recovery]`;
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
@@ -4370,30 +4512,15 @@ function createAutoplayAnalyzerPanel() {
 
 
         confirmBtn.addEventListener('click', () => {
-            // Perform the clear all action
-            HuntAnalyzerState.ui.autoplayLogText = ""; // Reset the log text here
-            HuntAnalyzerState.session.count = 0;
-            HuntAnalyzerState.totals.gold = 0;
-            HuntAnalyzerState.totals.creatures = 0;
-            HuntAnalyzerState.totals.equipment = 0;
-            HuntAnalyzerState.totals.runes = 0;
-            HuntAnalyzerState.totals.dust = 0;
-            HuntAnalyzerState.totals.shiny = 0;
-            HuntAnalyzerState.totals.staminaSpent = 0;
-            HuntAnalyzerState.totals.staminaRecovered = 0; // Reset stamina on clear
-            HuntAnalyzerState.totals.wins = 0; // Reset wins on clear
-            HuntAnalyzerState.totals.losses = 0; // Reset losses on clear
-            HuntAnalyzerState.session.startTime = Date.now(); // Reset overall session timer
-            HuntAnalyzerState.session.sessionStartTime = 0;
-            HuntAnalyzerState.session.isActive = false;
-            HuntAnalyzerState.data.sessions = []; // Clear all stored sessions
-            HuntAnalyzerState.data.aggregatedLoot.clear(); // Clear global aggregated data
-            HuntAnalyzerState.data.aggregatedCreatures.clear(); // Clear global aggregated data
-        // Clear the visual display divs and update counter
-        const cachedLootDiv = domCache.get("mod-loot-display");
-        const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
-        if (cachedLootDiv) cachedLootDiv.innerHTML = "";
-        if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
+            // Perform comprehensive clear all action using the reset function
+            resetHuntAnalyzerState();
+            
+            // Clear the visual display divs and update counter
+            const cachedLootDiv = domCache.get("mod-loot-display");
+            const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
+            if (cachedLootDiv) cachedLootDiv.innerHTML = "";
+            if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
+            
             // Call renderAllSessions to refresh the display (which will now be empty)
             renderAllSessions(); // Re-render to show cleared state
             updateMapFilterDropdown(); // Update filter dropdown to show only ALL
@@ -4498,7 +4625,7 @@ function createAutoplayAnalyzerPanel() {
     domCache.set("mod-session-count", sessionCountSpan);
     domCache.set("mod-stamina-display", staminaDisplaySpan);
     domCache.set("mod-win-loss-display", winLossElement);
-    domCache.set("mod-autoplay-rate", autoplayRateElement);
+    domCache.set("mod-playtime-display", playtimeElement);
     domCache.set("mod-gold-rate", goldRateElement);
     domCache.set("mod-creature-rate", creatureRateElement);
     domCache.set("mod-equipment-rate", equipmentRateElement);
@@ -4626,7 +4753,7 @@ function updatePanelDisplay() {
     const cachedSessionCountSpan = domCache.get("mod-session-count");
     const cachedStaminaDisplayElement = domCache.get("mod-stamina-display");
     const cachedWinLossElement = domCache.get("mod-win-loss-display");
-    const cachedAutoplayRateElement = domCache.get("mod-autoplay-rate");
+    const cachedPlaytimeDisplayElement = domCache.get("mod-playtime-display");
     const cachedGoldRateElement = domCache.get("mod-gold-rate");
     const cachedCreatureRateElement = domCache.get("mod-creature-rate");
     const cachedEquipmentRateElement = domCache.get("mod-equipment-rate");
@@ -4647,7 +4774,12 @@ function updatePanelDisplay() {
                 session.roomName === HuntAnalyzerState.ui.selectedMapFilter
             ).length;
         }
-        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount}`;
+        
+        // Calculate session rate for display
+        const filteredTimeHours = getFilteredTimeHours();
+        const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
+        
+        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${sessionRate}/h)`;
     }
     
     // Update win/loss display
@@ -4705,10 +4837,9 @@ function updatePanelDisplay() {
 
     // --- Autoplay Sessions/Hour Calculation (filtered by selected map) ---
     let autoplayRatePerHour = 0;
-    const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-    const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
+    const filteredTimeHours = getFilteredTimeHours();
 
-    if (overallElapsedTimeHours > 0) {
+    if (filteredTimeHours > 0) {
         let sessionCountForRate = HuntAnalyzerState.session.count;
         if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
             // Count sessions only from the selected map for rate calculation
@@ -4716,33 +4847,36 @@ function updatePanelDisplay() {
                 session.roomName === HuntAnalyzerState.ui.selectedMapFilter
             ).length;
         }
-        const actualRate = Math.floor(sessionCountForRate / overallElapsedTimeHours);
-        autoplayRatePerHour = getSmoothedRate(actualRate, overallElapsedTimeMs);
+        const actualRate = filteredTimeHours > 0 ? Math.floor(sessionCountForRate / filteredTimeHours) : 0;
+        autoplayRatePerHour = getSmoothedRate(actualRate, filteredTimeHours * 60 * 60 * 1000);
     }
-    if (cachedAutoplayRateElement) {
-        cachedAutoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: ${autoplayRatePerHour}`;
+    // Update playtime display
+    if (cachedPlaytimeDisplayElement) {
+        const filteredTimeHours = getFilteredTimeHours();
+        const playtimeText = formatPlaytime(filteredTimeHours);
+        cachedPlaytimeDisplayElement.textContent = `Playtime: ${playtimeText}`;
     }
     // --- End Autoplay Sessions/Hour Calculation ---
 
-    // --- Rate Calculation Logic for Gold/Creatures/Equipment: Based on total elapsed time ---
+    // --- Rate Calculation Logic for Gold/Creatures/Equipment: Based on filtered time ---
     let goldRatePerHour = 0;
     let creatureRatePerHour = 0;
     let equipmentRatePerHour = 0;
     let runeRatePerHour = 0;
     let staminaSpentRatePerHour = 0;
 
-    if (overallElapsedTimeHours > 0) {
-        const actualGoldRate = Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours);
-        const actualCreatureRate = Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours);
-        const actualEquipmentRate = Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours);
-        const actualRuneRate = Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours);
-        const actualStaminaRate = Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours);
+    if (filteredTimeHours > 0) {
+        const actualGoldRate = Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours);
+        const actualCreatureRate = Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours);
+        const actualEquipmentRate = Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours);
+        const actualRuneRate = Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours);
+        const actualStaminaRate = Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours);
         
-        goldRatePerHour = getSmoothedRate(actualGoldRate, overallElapsedTimeMs);
-        creatureRatePerHour = getSmoothedRate(actualCreatureRate, overallElapsedTimeMs);
-        equipmentRatePerHour = getSmoothedRate(actualEquipmentRate, overallElapsedTimeMs);
-        runeRatePerHour = getSmoothedRate(actualRuneRate, overallElapsedTimeMs);
-        staminaSpentRatePerHour = getSmoothedRate(actualStaminaRate, overallElapsedTimeMs);
+        goldRatePerHour = getSmoothedRate(actualGoldRate, filteredTimeHours * 60 * 60 * 1000);
+        creatureRatePerHour = getSmoothedRate(actualCreatureRate, filteredTimeHours * 60 * 60 * 1000);
+        equipmentRatePerHour = getSmoothedRate(actualEquipmentRate, filteredTimeHours * 60 * 60 * 1000);
+        runeRatePerHour = getSmoothedRate(actualRuneRate, filteredTimeHours * 60 * 60 * 1000);
+        staminaSpentRatePerHour = getSmoothedRate(actualStaminaRate, filteredTimeHours * 60 * 60 * 1000);
     }
 
     if (cachedGoldRateElement) {
@@ -4758,17 +4892,20 @@ function updatePanelDisplay() {
         cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
     }
     if (cachedTotalStaminaSpentElement) {
-        // Calculate natural stamina regeneration (1 per minute)
-        const overallElapsedTimeMinutes = overallElapsedTimeMs / (1000 * 60);
-        const naturalStaminaRegen = Math.floor(overallElapsedTimeMinutes);
+        // Only calculate natural regeneration if we have completed sessions
+        const hasCompletedSessions = HuntAnalyzerState.data.sessions.length > 0;
+        const filteredTimeMinutes = filteredTimeHours * 60;
+        const naturalStaminaRegen = hasCompletedSessions ? Math.floor(filteredTimeMinutes) : 0;
         
-        // Total stamina recovery = potions + natural regen
+        // Total stamina recovery = potions + natural regen (only if sessions completed)
         const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
         
         // Net stamina change (positive = gaining, negative = losing)
         const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-        const actualNetStaminaRate = Math.floor(netStaminaChange / overallElapsedTimeHours);
-        const netStaminaPerHour = getSmoothedRate(actualNetStaminaRate, overallElapsedTimeMs);
+        const actualNetStaminaRate = filteredTimeHours > 0 ? Math.floor(netStaminaChange / filteredTimeHours) : 0;
+        // Only apply smoothing if we have completed sessions, otherwise show actual rate
+        const netStaminaPerHour = hasCompletedSessions ? 
+            getSmoothedRate(actualNetStaminaRate, filteredTimeHours * 60 * 60 * 1000) : actualNetStaminaRate;
         
         // Recovery efficiency percentage (including natural regen)
         const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
@@ -5119,76 +5256,81 @@ const translationEventHandler = (event) => {
         }
         
         // Update session counter
-        const sessionCounter = document.getElementById('mod-autoplay-counter');
+        const sessionCounter = document.getElementById('mod-session-count');
         if (sessionCounter) {
-            const currentCount = HuntAnalyzerState.session.count;
-            sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${currentCount}`;
+            let filteredSessionCount = HuntAnalyzerState.session.count;
+            if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
+                filteredSessionCount = HuntAnalyzerState.data.sessions.filter(session => 
+                    session.roomName === HuntAnalyzerState.ui.selectedMapFilter
+                ).length;
+            }
+            
+            const filteredTimeHours = getFilteredTimeHours();
+            const sessionRate = filteredTimeHours > 0 ? Math.floor(filteredSessionCount / filteredTimeHours) : 0;
+            sessionCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount} (${sessionRate}/h)`;
         }
         
-        // Update session rate
-        const sessionRate = document.getElementById('mod-autoplay-rate');
-        if (sessionRate) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const autoplayRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
-            sessionRate.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: ${autoplayRatePerHour}`;
+        // Update playtime display
+        const playtimeDisplay = document.getElementById('mod-playtime-display');
+        if (playtimeDisplay) {
+            const filteredTimeHours = getFilteredTimeHours();
+            const playtimeText = formatPlaytime(filteredTimeHours);
+            playtimeDisplay.textContent = `Playtime: ${playtimeText}`;
         }
         
         // Update rate displays
         const goldRate = document.getElementById('mod-gold-rate');
         if (goldRate) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const goldRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            const filteredTimeHours = getFilteredTimeHours();
+            const goldRatePerHour = filteredTimeHours > 0 ? 
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${goldRatePerHour}`;
         }
         
         const creatureRate = document.getElementById('mod-creature-rate');
         if (creatureRate) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const creatureRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            const filteredTimeHours = getFilteredTimeHours();
+            const creatureRatePerHour = filteredTimeHours > 0 ? 
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${creatureRatePerHour}`;
         }
         
         const equipmentRate = document.getElementById('mod-equipment-rate');
         if (equipmentRate) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const equipmentRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            const filteredTimeHours = getFilteredTimeHours();
+            const equipmentRatePerHour = filteredTimeHours > 0 ? 
+                getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${equipmentRatePerHour}`;
         }
         
         const runeRate = document.getElementById('mod-rune-rate');
         if (runeRate) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const runeRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            const filteredTimeHours = getFilteredTimeHours();
+            const runeRatePerHour = filteredTimeHours > 0 ? 
+                getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
         }
         
         const staminaSpent = document.getElementById('mod-total-stamina-spent');
         if (staminaSpent) {
-            const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
-            const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
-            const overallElapsedTimeMinutes = overallElapsedTimeMs / (1000 * 60);
-            const staminaSpentRatePerHour = overallElapsedTimeHours > 0 ? 
-                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            const filteredTimeHours = getFilteredTimeHours();
+            const filteredTimeMinutes = filteredTimeHours * 60;
+            const staminaSpentRatePerHour = filteredTimeHours > 0 ? 
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.staminaSpent / filteredTimeHours), filteredTimeHours * 60 * 60 * 1000) : 0;
             
-            // Calculate natural stamina regeneration (1 per minute)
-            const naturalStaminaRegen = Math.floor(overallElapsedTimeMinutes);
+            // Only calculate natural regeneration if we have completed sessions
+            const hasCompletedSessions = HuntAnalyzerState.data.sessions.length > 0;
+            const naturalStaminaRegen = hasCompletedSessions ? Math.floor(filteredTimeMinutes) : 0;
             
-            // Total stamina recovery = potions + natural regen
+            // Total stamina recovery = potions + natural regen (only if sessions completed)
             const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
             
             // Net stamina change (positive = gaining, negative = losing)
             const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
-            const netStaminaPerHour = getSmoothedRate(Math.floor(netStaminaChange / overallElapsedTimeHours), overallElapsedTimeMs);
+            const actualNetStaminaRate = filteredTimeHours > 0 ? Math.floor(netStaminaChange / filteredTimeHours) : 0;
+            // Only apply smoothing if we have completed sessions, otherwise show actual rate
+            const netStaminaPerHour = hasCompletedSessions ? 
+                getSmoothedRate(actualNetStaminaRate, filteredTimeHours * 60 * 60 * 1000) : actualNetStaminaRate;
             
             // Recovery efficiency percentage (including natural regen)
             const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
@@ -5527,6 +5669,9 @@ function cleanupHuntAnalyzer() {
             clearInterval(autoSaveIntervalId);
             autoSaveIntervalId = null;
         }
+        
+        // Stop internal clock system
+        stopInternalClock();
         
         // Clear all timeouts
         timeoutIds.forEach(id => clearTimeout(id));

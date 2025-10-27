@@ -888,9 +888,11 @@ function isBetterTaskerTasking() {
                 }
                 
                 // Check operation flags (enabled state alone doesn't indicate activity)
+                // Also check if Better Tasker has an active task (even if in cooldown)
                 hasActiveTaskOperations = betterTaskerState.taskOperationInProgress || 
                                          betterTaskerState.taskHuntingOngoing || 
-                                         betterTaskerState.pendingTaskCompletion;
+                                         betterTaskerState.pendingTaskCompletion ||
+                                         betterTaskerState.hasActiveTask;
             }
             
             const isActivelyTasking = hasBetterTaskerQuestButtonControl || hasActiveTaskOperations;
