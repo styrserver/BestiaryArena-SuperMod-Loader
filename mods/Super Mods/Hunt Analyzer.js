@@ -695,7 +695,7 @@ function createInventoryStyleItemPortrait(itemData) {
     if (itemData.spriteId && (typeof itemData.spriteId === 'number' || /^\d+$/.test(itemData.spriteId))) {
         try {
             // Use the sprite system with proper DOM structure
-            const spriteDiv = createItemSprite(itemData.spriteId, itemData.originalName, itemData.rarity || 1);
+            const spriteDiv = createItemSprite(itemData.spriteId, itemData.originalName, itemData.rarity || 1, itemData.stat);
             
             // Add count overlay to sprite container (bottom left like creatures)
             const countSpan = createCountOverlay(itemData.count);
@@ -801,6 +801,20 @@ function regenerateAllVisuals() {
                     if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
                         const equipmentSpriteId = equipData.metadata.spriteId;
                         
+                        // Extract stat information from equipment data
+                        let equipmentStat = null;
+                        if (equipData.metadata && equipData.metadata.stat) {
+                            equipmentStat = equipData.metadata.stat;
+                        } else if (equipData.stats && equipData.stats.length > 0) {
+                            // Get the primary stat (first stat in the array)
+                            equipmentStat = equipData.stats[0].type;
+                        }
+                        
+                        // Update the stat information in the stored data
+                        if (equipmentStat && !value.stat) {
+                            value.stat = equipmentStat;
+                        }
+                        
                         // Use API component for equipment like Cyclopedia does
                         if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
                             try {
@@ -819,10 +833,15 @@ function regenerateAllVisuals() {
                                             const countSpan = createCountOverlay(value.count);
                                             
                                             firstChild.appendChild(countSpan);
+                                            
+                                            // Add stat icon to the portrait
+                                            addStatIconToPortrait(firstChild, equipmentStat);
+                                            
                                             visualElement = firstChild;
                                         }
                                     } else {
                                         // Use the portrait directly if it's not a button
+                                        addStatIconToPortrait(equipmentPortrait, equipmentStat);
                                         visualElement = equipmentPortrait;
                                     }
                                 }
@@ -1574,7 +1593,82 @@ const iconMap = {
     speed: "/assets/icons/speed.png",
     level: "/assets/icons/achievement.png"
 };
-function createItemSprite(itemId, tooltipKey = '', rarity = 1) {
+
+// Function to add stat icon to existing equipment portrait
+function addStatIconToPortrait(portrait, stat) {
+    if (!stat || !portrait) return;
+    
+    // Check if stat icon already exists
+    if (portrait.querySelector('.stat-icon')) return;
+    
+    const statIcon = document.createElement('img');
+    statIcon.className = 'stat-icon';
+    statIcon.style.cssText = `
+        position: absolute;
+        bottom: 1px;
+        right: 1px;
+        width: 12px;
+        height: 12px;
+        image-rendering: pixelated;
+        z-index: 10;
+    `;
+    
+    const statType = stat.toLowerCase();
+    if (statType === 'ad' || statType === 'attackdamage') {
+        statIcon.src = '/assets/icons/attackdamage.png';
+    } else if (statType === 'ap' || statType === 'abilitypower') {
+        statIcon.src = '/assets/icons/abilitypower.png';
+    } else if (statType === 'hp' || statType === 'health') {
+        statIcon.src = '/assets/icons/heal.png';
+    } else if (statType === 'armor') {
+        statIcon.src = '/assets/icons/armor.png';
+    } else if (statType === 'mr' || statType === 'magicresist') {
+        statIcon.src = '/assets/icons/magicresist.png';
+    } else {
+        statIcon.src = '/assets/icons/attackdamage.png';
+    }
+    
+    portrait.appendChild(statIcon);
+}
+
+// Function to add stat icons to all existing equipment portraits in the loot display
+function addStatIconsToExistingPortraits() {
+    const lootDisplay = document.getElementById('mod-loot-display');
+    if (!lootDisplay) return;
+    
+    const equipmentPortraits = lootDisplay.querySelectorAll('.equipment-portrait');
+    equipmentPortraits.forEach(portrait => {
+        // Check if stat icon already exists
+        if (portrait.querySelector('.stat-icon')) return;
+        
+        // Try to find the equipment data for this portrait
+        const spriteElement = portrait.querySelector('.sprite.item');
+        if (spriteElement) {
+            const itemId = spriteElement.className.match(/id-(\d+)/);
+            if (itemId) {
+                const gameId = parseInt(itemId[1]);
+                try {
+                    const equipData = globalThis.state?.utils?.getEquipment?.(gameId);
+                    if (equipData) {
+                        let stat = null;
+                        if (equipData.metadata && equipData.metadata.stat) {
+                            stat = equipData.metadata.stat;
+                        } else if (equipData.stats && equipData.stats.length > 0) {
+                            stat = equipData.stats[0].type;
+                        }
+                        
+                        if (stat) {
+                            addStatIconToPortrait(portrait, stat);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Hunt Analyzer] Error getting equipment data for stat icon:', e);
+                }
+            }
+        }
+    });
+}
+function createItemSprite(itemId, tooltipKey = '', rarity = 1, stat = null) {
     // Create the main container following Cyclopedia pattern
     const containerSlot = createContainerSlot('36px', 'container-slot surface-darker');
     containerSlot.title = tooltipKey || `ID-${itemId}`;
@@ -1609,6 +1703,36 @@ function createItemSprite(itemId, tooltipKey = '', rarity = 1) {
     spriteContainer.appendChild(spriteElement);
     rarityContainer.appendChild(spriteContainer);
     containerSlot.appendChild(rarityContainer);
+    
+    // Add stat icon if stat is provided
+    if (stat) {
+        const statIcon = document.createElement('img');
+        statIcon.style.cssText = `
+            position: absolute;
+            bottom: 1px;
+            right: 1px;
+            width: 12px;
+            height: 12px;
+            image-rendering: pixelated;
+            z-index: 10;
+        `;
+        
+        const statType = stat.toLowerCase();
+        if (statType === 'ad' || statType === 'attackdamage') {
+            statIcon.src = '/assets/icons/attackdamage.png';
+        } else if (statType === 'ap' || statType === 'abilitypower') {
+            statIcon.src = '/assets/icons/abilitypower.png';
+        } else if (statType === 'hp' || statType === 'health') {
+            statIcon.src = '/assets/icons/heal.png';
+        } else if (statType === 'armor') {
+            statIcon.src = '/assets/icons/armor.png';
+        } else if (statType === 'mr' || statType === 'magicresist') {
+            statIcon.src = '/assets/icons/magicresist.png';
+        } else {
+            statIcon.src = '/assets/icons/attackdamage.png';
+        }
+        containerSlot.appendChild(statIcon);
+    }
     
     return containerSlot;
 }
@@ -2043,7 +2167,7 @@ class DataProcessor {
       const rarityBorderColor = getRarityBorderColor(rarity);
 
       // Use resolved itemName to avoid redundant API calls in getItemVisual
-      let itemVisual, resolvedItemName;
+      let itemVisual, resolvedItemName, equipmentStat = null;
       
       // Handle equipment items specially using API components for grid display
       if (isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && item.gameId) {
@@ -2052,6 +2176,14 @@ class DataProcessor {
           if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
             const equipmentSpriteId = equipData.metadata.spriteId;
             resolvedItemName = equipData.metadata.name || itemName;
+            
+            // Extract stat information from equipment data
+            if (equipData.metadata && equipData.metadata.stat) {
+              equipmentStat = equipData.metadata.stat;
+            } else if (equipData.stats && equipData.stats.length > 0) {
+              // Get the primary stat (first stat in the array)
+              equipmentStat = equipData.stats[0].type;
+            }
             
             // Use API component for equipment like Cyclopedia does
             if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
@@ -2071,6 +2203,10 @@ class DataProcessor {
                       const countSpan = createCountOverlay(item.amount);
                       
                       firstChild.appendChild(countSpan);
+                      
+                      // Add stat icon to the portrait
+                      addStatIconToPortrait(firstChild, equipmentStat);
+                      
                       itemVisual = firstChild;
                     }
                   }
@@ -2148,9 +2284,12 @@ class DataProcessor {
         if (item._descriptiveRarity) {
           existing._descriptiveRarity = item._descriptiveRarity;
         }
-        // Update gameId for equipment items
+        // Update gameId and stat for equipment items
         if (item.gameId) {
           existing.gameId = item.gameId;
+        }
+        if (equipmentStat && !existing.stat) {
+          existing.stat = equipmentStat;
         }
         aggregatedLootForSession.set(mapKey, existing);
       } else {
@@ -2164,7 +2303,7 @@ class DataProcessor {
           src: item.spriteSrc,
           isEquipment: isEquipment,
           gameId: item.gameId, // Add gameId for equipment items
-          stat: item.stat || null,
+          stat: item.stat || equipmentStat || null,
           _descriptiveRarity: item._descriptiveRarity || null
         });
       }
@@ -2726,10 +2865,15 @@ function renderAllSessions() {
                                     const countSpan = createCountOverlay(data.count);
                                     
                                     firstChild.appendChild(countSpan);
+                                    
+                                    // Add stat icon to the portrait
+                                    addStatIconToPortrait(firstChild, data.stat);
+                                    
                                     visualElement = firstChild;
                                 }
                             } else {
                                 // Use the portrait directly if it's not a button
+                                addStatIconToPortrait(equipmentPortrait, data.stat);
                                 visualElement = equipmentPortrait;
                             }
                         }
@@ -2777,6 +2921,9 @@ function renderAllSessions() {
     
     // Append grid container to loot display
     cachedLootDiv.appendChild(lootGridContainer);
+    
+    // Add stat icons to any existing equipment portraits
+    setTimeout(() => addStatIconsToExistingPortraits(), 100);
 
     // Sort and render overall aggregated creatures in grid layout
     const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
