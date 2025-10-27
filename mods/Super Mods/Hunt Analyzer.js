@@ -241,7 +241,7 @@ const LAYOUT_MODES = {
 };
 const LAYOUT_DIMENSIONS = {
     [LAYOUT_MODES.VERTICAL]: { width: 350, height: 750, minWidth: 260, maxWidth: 500, minHeight: 500, maxHeight: 750 },
-    [LAYOUT_MODES.HORIZONTAL]: { width: 750, height: 300, minWidth: 650, maxWidth: 1000, minHeight: 220, maxHeight: 400 },
+    [LAYOUT_MODES.HORIZONTAL]: { width: 300, height: 300, minWidth: 650, maxWidth: 1000, minHeight: 220, maxHeight: 400 },
     [LAYOUT_MODES.MINIMIZED]: { width: 250, height: 250, minWidth: 250, maxWidth: 250, minHeight: 250, maxHeight: 250 }
 };
 
@@ -655,17 +655,10 @@ autoReopenHuntAnalyzer();
 // Function to check if sprite CSS is loaded
 // Function to create inventory-style creature portrait like the game does
 function createInventoryStyleCreaturePortrait(creatureData) {
-    const containerSlot = document.createElement('div');
-    containerSlot.className = 'container-slot surface-darker relative';
-    containerSlot.style.width = '34px';
-    containerSlot.style.height = '34px';
-    containerSlot.style.overflow = 'visible';
+    const containerSlot = createContainerSlot('34px');
     
     // Rarity border
-    const rarityDiv = document.createElement('div');
-    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-    rarityDiv.setAttribute('data-rarity', String(creatureData.tierLevel || 1));
-    rarityDiv.setAttribute('role', 'none');
+    const rarityDiv = createRarityBorder(creatureData.tierLevel || 1);
     
     // Creature image
     const img = document.createElement('img');
@@ -705,18 +698,7 @@ function createInventoryStyleItemPortrait(itemData) {
             const spriteDiv = createItemSprite(itemData.spriteId, itemData.originalName, itemData.rarity || 1);
             
             // Add count overlay to sprite container (bottom left like creatures)
-            const countSpan = document.createElement('span');
-            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-            countSpan.style.position = 'absolute';
-            countSpan.style.bottom = '0px';
-            countSpan.style.left = '2px';
-            countSpan.style.color = 'white';
-            countSpan.style.fontSize = '14px';
-            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-            countSpan.style.padding = '0px 2px';
-            countSpan.style.borderRadius = '2px';
-            countSpan.style.zIndex = '10';
-            countSpan.textContent = itemData.count || 1;
+            const countSpan = createCountOverlay(itemData.count);
             
             // Make sure the sprite container has relative positioning for the count overlay
             spriteDiv.style.position = 'relative';
@@ -728,17 +710,10 @@ function createInventoryStyleItemPortrait(itemData) {
     }
     
     // Fallback to image-based approach for non-sprite items
-    const containerSlot = document.createElement('div');
-    containerSlot.className = 'container-slot surface-darker relative';
-    containerSlot.style.width = '36px';
-    containerSlot.style.height = '36px';
-    containerSlot.style.overflow = 'visible';
+    const containerSlot = createContainerSlot('36px');
     
     // Rarity border
-    const rarityDiv = document.createElement('div');
-    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
-    rarityDiv.setAttribute('data-rarity', String(itemData.rarity || 1));
-    rarityDiv.setAttribute('role', 'none');
+    const rarityDiv = createRarityBorder(itemData.rarity || 1);
     
     // Item image
     const img = document.createElement('img');
@@ -775,17 +750,7 @@ function createInventoryStyleItemPortrait(itemData) {
     img.style.borderRadius = '3px';
     
     // Count overlay (bottom left like creatures)
-    const countSpan = document.createElement('span');
-    countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-    countSpan.style.position = 'absolute';
-    countSpan.style.bottom = '0px';
-    countSpan.style.left = '2px';
-    countSpan.style.color = 'white';
-    countSpan.style.fontSize = '14px';
-    countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-    countSpan.style.padding = '0px 2px';
-    countSpan.style.borderRadius = '2px';
-    countSpan.textContent = itemData.count || 1;
+    const countSpan = createCountOverlay(itemData.count);
     
     containerSlot.appendChild(rarityDiv);
     containerSlot.appendChild(img);
@@ -851,18 +816,7 @@ function regenerateAllVisuals() {
                                         const firstChild = equipmentPortrait.firstChild;
                                         if (firstChild && firstChild.nodeType) {
                                             // Add count overlay to the portrait (bottom left like creatures)
-                                            const countSpan = document.createElement('span');
-                                            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-                                            countSpan.style.position = 'absolute';
-                                            countSpan.style.bottom = '0px';
-                                            countSpan.style.left = '2px';
-                                            countSpan.style.color = 'white';
-                                            countSpan.style.fontSize = '14px';
-                                            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-                                            countSpan.style.padding = '0px 2px';
-                                            countSpan.style.borderRadius = '2px';
-                                            countSpan.style.zIndex = '10';
-                                            countSpan.textContent = value.count || 1;
+                                            const countSpan = createCountOverlay(value.count);
                                             
                                             firstChild.appendChild(countSpan);
                                             visualElement = firstChild;
@@ -883,18 +837,7 @@ function regenerateAllVisuals() {
                             const spriteDiv = createItemSprite(equipmentSpriteId, value.originalName, value.rarity || 1);
                             
                             // Add count overlay to sprite (bottom left like creatures)
-                            const countSpan = document.createElement('span');
-                            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-                            countSpan.style.position = 'absolute';
-                            countSpan.style.bottom = '0px';
-                            countSpan.style.left = '2px';
-                            countSpan.style.color = 'white';
-                            countSpan.style.fontSize = '14px';
-                            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-                            countSpan.style.padding = '0px 2px';
-                            countSpan.style.borderRadius = '2px';
-                            countSpan.style.zIndex = '10';
-                            countSpan.textContent = value.count || 1;
+                            const countSpan = createCountOverlay(value.count);
                             
                             // Make sure the sprite container has relative positioning for the count overlay
                             spriteDiv.style.position = 'relative';
@@ -1072,65 +1015,41 @@ function loadHuntAnalyzerData() {
 
 // Save Hunt Analyzer UI state
 function saveHuntAnalyzerState() {
-    try {
-        const stateToSave = {
-            isOpen: HuntAnalyzerState.ui.isOpen,
-            isMinimized: HuntAnalyzerState.ui.isMinimized,
-            displayMode: HuntAnalyzerState.ui.displayMode,
-            selectedMapFilter: HuntAnalyzerState.ui.selectedMapFilter,
-            closedManually: false
-        };
-        
-        localStorage.setItem(HUNT_ANALYZER_STATE_KEY, JSON.stringify(stateToSave));
-        logPersistenceOperation('UI state save');
-    } catch (error) {
-        console.error('[Hunt Analyzer] Error saving UI state:', error);
-        logPersistenceOperation('UI state save', false);
-    }
+    const stateToSave = {
+        isOpen: HuntAnalyzerState.ui.isOpen,
+        isMinimized: HuntAnalyzerState.ui.isMinimized,
+        displayMode: HuntAnalyzerState.ui.displayMode,
+        selectedMapFilter: HuntAnalyzerState.ui.selectedMapFilter,
+        closedManually: false
+    };
+    
+    return saveToStorage(HUNT_ANALYZER_STATE_KEY, stateToSave);
 }
 
 // Load Hunt Analyzer UI state
 function loadHuntAnalyzerState() {
-    try {
-        const savedState = localStorage.getItem(HUNT_ANALYZER_STATE_KEY);
-        if (savedState) {
-            const parsedState = JSON.parse(savedState);
-            
-            HuntAnalyzerState.ui.isOpen = parsedState.isOpen || false;
-            HuntAnalyzerState.ui.isMinimized = parsedState.isMinimized || false;
-            HuntAnalyzerState.ui.displayMode = parsedState.displayMode || 'vertical';
-            HuntAnalyzerState.ui.selectedMapFilter = parsedState.selectedMapFilter || "ALL";
-            
-            return parsedState;
-        }
-    } catch (error) {
-        console.error('[Hunt Analyzer] Error loading UI state:', error);
+    const parsedState = loadFromStorage(HUNT_ANALYZER_STATE_KEY);
+    if (parsedState) {
+        HuntAnalyzerState.ui.isOpen = parsedState.isOpen || false;
+        HuntAnalyzerState.ui.isMinimized = parsedState.isMinimized || false;
+        HuntAnalyzerState.ui.displayMode = parsedState.displayMode || 'vertical';
+        HuntAnalyzerState.ui.selectedMapFilter = parsedState.selectedMapFilter || "ALL";
+        return parsedState;
     }
     return null;
 }
 
 // Save Hunt Analyzer settings
 function saveHuntAnalyzerSettings() {
-    try {
-        localStorage.setItem(HUNT_ANALYZER_SETTINGS_KEY, JSON.stringify(HuntAnalyzerState.settings));
-        logPersistenceOperation('Settings save');
-    } catch (error) {
-        console.error('[Hunt Analyzer] Error saving settings:', error);
-        logPersistenceOperation('Settings save', false);
-    }
+    return saveToStorage(HUNT_ANALYZER_SETTINGS_KEY, HuntAnalyzerState.settings);
 }
 
 // Load Hunt Analyzer settings
 function loadHuntAnalyzerSettings() {
-    try {
-        const savedSettings = localStorage.getItem(HUNT_ANALYZER_SETTINGS_KEY);
-        if (savedSettings) {
-            const parsedSettings = JSON.parse(savedSettings);
-            Object.assign(HuntAnalyzerState.settings, parsedSettings);
-            return true;
-        }
-    } catch (error) {
-        console.error('[Hunt Analyzer] Error loading settings:', error);
+    const parsedSettings = loadFromStorage(HUNT_ANALYZER_SETTINGS_KEY);
+    if (parsedSettings) {
+        Object.assign(HuntAnalyzerState.settings, parsedSettings);
+        return true;
     }
     return false;
 }
@@ -1657,17 +1576,11 @@ const iconMap = {
 };
 function createItemSprite(itemId, tooltipKey = '', rarity = 1) {
     // Create the main container following Cyclopedia pattern
-    const containerSlot = document.createElement('div');
-    containerSlot.className = 'container-slot surface-darker';
-    containerSlot.style.width = '36px';
-    containerSlot.style.height = '36px';
-    containerSlot.style.overflow = 'visible';
+    const containerSlot = createContainerSlot('36px', 'container-slot surface-darker');
     containerSlot.title = tooltipKey || `ID-${itemId}`;
     
     // Create rarity container
-    const rarityContainer = document.createElement('div');
-    rarityContainer.className = 'has-rarity relative grid h-full place-items-center';
-    rarityContainer.setAttribute('data-rarity', String(rarity));
+    const rarityContainer = createRarityBorder(rarity, 'has-rarity relative grid h-full place-items-center');
     
     // Create sprite container
     const spriteContainer = document.createElement('div');
@@ -1762,18 +1675,7 @@ function getItemVisual(itemData, preResolvedName = null) {
                 const spriteDiv = createItemSprite(equipmentSpriteId, recognizedName, itemData.rarity || 1);
                 
                 // Add count overlay to sprite (bottom left like creatures)
-                const countSpan = document.createElement('span');
-                countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-                countSpan.style.position = 'absolute';
-                countSpan.style.bottom = '0px';
-                countSpan.style.left = '2px';
-                countSpan.style.color = 'white';
-                countSpan.style.fontSize = '14px';
-                countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-                countSpan.style.padding = '0px 2px';
-                countSpan.style.borderRadius = '2px';
-                countSpan.style.zIndex = '10';
-                countSpan.textContent = itemData.count || 1;
+                const countSpan = createCountOverlay(itemData.count);
                 
                 // Make sure the sprite container has relative positioning for the count overlay
                 spriteDiv.style.position = 'relative';
@@ -1819,18 +1721,7 @@ function getItemVisual(itemData, preResolvedName = null) {
         const spriteDiv = createItemSprite(itemData.spriteId, itemData.tooltipKey, itemData.rarity || 1);
         
         // Add count overlay to sprite (bottom left like creatures)
-        const countSpan = document.createElement('span');
-        countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-        countSpan.style.position = 'absolute';
-        countSpan.style.bottom = '0px';
-        countSpan.style.left = '2px';
-        countSpan.style.color = 'white';
-        countSpan.style.fontSize = '14px';
-        countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-        countSpan.style.padding = '0px 2px';
-        countSpan.style.borderRadius = '2px';
-        countSpan.style.zIndex = '10';
-        countSpan.textContent = itemData.count || 1;
+        const countSpan = createCountOverlay(itemData.count);
         
         // Make sure the sprite container has relative positioning for the count overlay
         spriteDiv.style.position = 'relative';
@@ -1939,6 +1830,77 @@ function copyToClipboard(text) {
 
 function clamp(val, min, max) {
     return Math.max(min, Math.min(max, val));
+}
+
+// =======================
+// 1.9. Helper Functions for UI Elements
+// =======================
+
+// Helper function to create count overlay spans
+function createCountOverlay(count) {
+    const countSpan = document.createElement('span');
+    countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+    countSpan.style.position = 'absolute';
+    countSpan.style.bottom = '0px';
+    countSpan.style.left = '2px';
+    countSpan.style.color = 'white';
+    countSpan.style.fontSize = '14px';
+    countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+    countSpan.style.padding = '0px 2px';
+    countSpan.style.borderRadius = '2px';
+    countSpan.style.zIndex = '10';
+    countSpan.textContent = count || 1;
+    return countSpan;
+}
+
+// Helper function to create container slots
+function createContainerSlot(size = '34px', className = 'container-slot surface-darker relative') {
+    const containerSlot = document.createElement('div');
+    containerSlot.className = className;
+    containerSlot.style.width = size;
+    containerSlot.style.height = size;
+    containerSlot.style.overflow = 'visible';
+    return containerSlot;
+}
+
+// Helper function to create rarity borders
+function createRarityBorder(rarity, className = 'has-rarity absolute inset-0 z-1 opacity-80') {
+    const rarityDiv = document.createElement('div');
+    rarityDiv.className = className;
+    rarityDiv.setAttribute('data-rarity', String(rarity));
+    rarityDiv.setAttribute('role', 'none');
+    return rarityDiv;
+}
+
+// =======================
+// 1.10. Storage Utility Functions
+// =======================
+
+// Generic function to save data to localStorage
+function saveToStorage(key, data) {
+    try {
+        localStorage.setItem(key, JSON.stringify(data));
+        logPersistenceOperation(`${key} save`);
+        return true;
+    } catch (error) {
+        console.error(`[Hunt Analyzer] Error saving ${key}:`, error);
+        logPersistenceOperation(`${key} save`, false);
+        return false;
+    }
+}
+
+// Generic function to load data from localStorage
+function loadFromStorage(key) {
+    try {
+        const savedData = localStorage.getItem(key);
+        if (savedData) {
+            return JSON.parse(savedData);
+        }
+    } catch (error) {
+        console.error(`[Hunt Analyzer] Error loading ${key}:`, error);
+        logPersistenceOperation(`${key} load`, false);
+    }
+    return null;
 }
 
 // =======================
@@ -2106,18 +2068,7 @@ class DataProcessor {
                     const firstChild = equipmentPortrait.firstChild;
                     if (firstChild && firstChild.nodeType) {
                       // Add count overlay to the portrait (bottom left like creatures)
-                      const countSpan = document.createElement('span');
-                      countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-                      countSpan.style.position = 'absolute';
-                      countSpan.style.bottom = '0px';
-                      countSpan.style.left = '2px';
-                      countSpan.style.color = 'white';
-                      countSpan.style.fontSize = '14px';
-                      countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-                      countSpan.style.padding = '0px 2px';
-                      countSpan.style.borderRadius = '2px';
-                      countSpan.style.zIndex = '10';
-                      countSpan.textContent = item.amount || 1;
+                      const countSpan = createCountOverlay(item.amount);
                       
                       firstChild.appendChild(countSpan);
                       itemVisual = firstChild;
@@ -2134,18 +2085,7 @@ class DataProcessor {
               const spriteDiv = createItemSprite(equipmentSpriteId, resolvedItemName, rarity || 1);
               
               // Add count overlay to sprite (bottom left like creatures)
-              const countSpan = document.createElement('span');
-              countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-              countSpan.style.position = 'absolute';
-              countSpan.style.bottom = '0px';
-              countSpan.style.left = '2px';
-              countSpan.style.color = 'white';
-              countSpan.style.fontSize = '14px';
-              countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-              countSpan.style.padding = '0px 2px';
-              countSpan.style.borderRadius = '2px';
-              countSpan.style.zIndex = '10';
-              countSpan.textContent = item.amount || 1;
+              const countSpan = createCountOverlay(item.amount);
               
               // Make sure the sprite container has relative positioning for the count overlay
               spriteDiv.style.position = 'relative';
@@ -2287,6 +2227,31 @@ class DataProcessor {
       HuntAnalyzerState.totals.staminaSpent += serverResults.next.playerExpDiff;
     }
 
+    // Calculate stamina recovered for this session
+    let sessionStaminaRecovered = 0;
+    for (const item of allLootItems) {
+      if (item.spriteId === CONFIG.GOLD_SPRITE_ID || 
+          (item.tooltipKey && item.tooltipKey.toLowerCase() === 'gold') ||
+          item.spriteId === CONFIG.HEAL_POTION_SPRITE_ID) {
+        continue;
+      }
+
+      let itemName = 'Unknown Item';
+      if (item.tooltipKey?.toLowerCase().includes('dust') || 
+          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
+        itemName = 'Dust';
+      } else if (item.tooltipKey) {
+        itemName = item.tooltipKey;
+      } else if (item.name) {
+        itemName = item.name;
+      }
+
+      const staminaRecovery = getStaminaRecoveryAmount(itemName, item);
+      if (staminaRecovery > 0) {
+        sessionStaminaRecovered += staminaRecovery;
+      }
+    }
+
     // Track win/loss
     if (rewardScreen.victory) {
       HuntAnalyzerState.totals.wins++;
@@ -2303,6 +2268,7 @@ class DataProcessor {
       creatures: Array.from(aggregatedCreaturesForSession.values()),
       timestamp: Date.now(),
       staminaSpent: serverResults.next?.playerExpDiff || 0,
+      staminaRecovered: sessionStaminaRecovered,
       victory: rewardScreen.victory
     };
     
@@ -2315,7 +2281,8 @@ class DataProcessor {
       gold: rewardScreen.loot?.goldAmount || 0,
       lootItems: aggregatedLootForSession.size,
       creatures: aggregatedCreaturesForSession.size,
-      staminaSpent: sessionData.staminaSpent
+      staminaSpent: sessionData.staminaSpent,
+      staminaRecovered: sessionData.staminaRecovered
     });
     
     // Auto-save data if persistence is enabled
@@ -2756,18 +2723,7 @@ function renderAllSessions() {
                                 const firstChild = equipmentPortrait.firstChild;
                                 if (firstChild && firstChild.nodeType) {
                                     // Add count overlay to the portrait (bottom left like creatures)
-                                    const countSpan = document.createElement('span');
-                                    countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
-                                    countSpan.style.position = 'absolute';
-                                    countSpan.style.bottom = '0px';
-                                    countSpan.style.left = '2px';
-                                    countSpan.style.color = 'white';
-                                    countSpan.style.fontSize = '14px';
-                                    countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
-                                    countSpan.style.padding = '0px 2px';
-                                    countSpan.style.borderRadius = '2px';
-                                    countSpan.style.zIndex = '10';
-                                    countSpan.textContent = data.count || 1;
+                                    const countSpan = createCountOverlay(data.count);
                                     
                                     firstChild.appendChild(countSpan);
                                     visualElement = firstChild;
@@ -5065,9 +5021,18 @@ function updatePanelLayout(panel) {
         buttonContainer.style.flex = "0 0 auto";
         buttonContainer.style.flexDirection = 'row';
     }
-    if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
-    if (lootContainer) lootContainer.style.flex = "1 1 0";
-    if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+    // Set flex based on layout mode
+    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+        // In vertical mode, give map filter minimal space and make loot/creatures bigger
+        if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
+        if (lootContainer) lootContainer.style.flex = "1 1 0";
+        if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+    } else {
+        // In horizontal mode, all sections get their normal sizing
+        if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
+        if (lootContainer) lootContainer.style.flex = "1 1 0";
+        if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+    }
 
     // Use currentLayoutMode for layout
     if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
