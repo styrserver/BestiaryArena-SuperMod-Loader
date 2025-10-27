@@ -50,6 +50,12 @@ const UI_TEXT = {
     },
     DESCRIPTIONS_PT: {
         NO_CREATURES_AVAILABLE: 'Nenhuma criatura disponível. Por favor, atualize a página.'
+    },
+    QUEST_TEXT: {
+        SUGGESTED_MAP: 'Suggested map:'
+    },
+    QUEST_TEXT_PT: {
+        SUGGESTED_MAP: 'Mapa sugerido:'
     }
 };
 
@@ -3489,8 +3495,9 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Paw and Fur Society section found, looking for suggested map...');
                 // Look for suggested map text within this section
                 const allParagraphs = pawAndFurSection.querySelectorAll('p.pixel-font-14');
+                const suggestedMapText = getLocalizedText(UI_TEXT.QUEST_TEXT.SUGGESTED_MAP, UI_TEXT.QUEST_TEXT_PT.SUGGESTED_MAP);
                 for (const p of allParagraphs) {
-                    if (p.textContent && p.textContent.includes('Suggested map:')) {
+                    if (p.textContent && p.textContent.includes(suggestedMapText)) {
                         suggestedMapLink = p.querySelector('span.action-link');
                         console.log('[Better Tasker] Suggested map found within Paw and Fur Society section');
                         break;
@@ -5869,8 +5876,9 @@ function extractSuggestedMapFromSection(section) {
         
         // Look for suggested map text within this section
         const allParagraphs = section.querySelectorAll('p.pixel-font-14');
+        const suggestedMapText = getLocalizedText(UI_TEXT.QUEST_TEXT.SUGGESTED_MAP, UI_TEXT.QUEST_TEXT_PT.SUGGESTED_MAP);
         for (const p of allParagraphs) {
-            if (p.textContent && p.textContent.includes('Suggested map:')) {
+            if (p.textContent && p.textContent.includes(suggestedMapText)) {
                 const suggestedMapElement = p.querySelector('span.action-link');
                 if (suggestedMapElement) {
                     console.log('[Better Tasker] Suggested map element found in section:', suggestedMapElement.textContent.trim());

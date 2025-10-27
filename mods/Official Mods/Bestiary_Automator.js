@@ -541,6 +541,9 @@ const disableAutoRefillDueToNoPotions = () => {
   
   // Update button styling
   updateAutomatorButton();
+  
+  // Update settings modal UI if it's open
+  updateSettingsModalUI();
 };
 
 // Remove stamina potion from local inventory when 403 error occurs

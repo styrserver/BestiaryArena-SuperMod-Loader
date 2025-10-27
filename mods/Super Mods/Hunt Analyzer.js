@@ -8,10 +8,212 @@
 const t = (key) => api.i18n.t(key);
 
 // =======================
+// 0.1. CSS Styles
+// =======================
+// Inject CSS styles for common UI patterns
+function injectHuntAnalyzerStyles() {
+    const styleId = 'hunt-analyzer-styles';
+    if (document.getElementById(styleId)) return; // Already injected
+    
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+        /* Hunt Analyzer Common Styles */
+        .ha-panel-container {
+            position: fixed;
+            background-image: url(/_next/static/media/background-darker.2679c837.png);
+            background-repeat: repeat;
+            background-color: #282C34;
+            border: 1px solid #3A404A;
+            color: #ABB2BF;
+            padding: 0;
+            overflow: hidden;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            font-family: Inter, sans-serif;
+            border-radius: 7px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.7);
+        }
+        
+        .ha-header-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            background-image: url(/_next/static/media/background-dark.95edca67.png);
+            background-repeat: repeat;
+            background-color: #1a1a1a;
+            border-bottom: 1px solid #3A404A;
+            padding: 4px;
+            flex: 0 0 auto;
+        }
+        
+        .ha-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 2px;
+            cursor: move;
+        }
+        
+        .ha-room-title {
+            margin: 0;
+            font-size: 14px;
+            color: #E06C75;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(224, 108, 117, 0.7);
+        }
+        
+        .ha-header-controls {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .ha-styled-button {
+            padding: 6px 12px;
+            border: 1px solid #3A404A;
+            background: linear-gradient(to bottom, #4B5563, #343841);
+            color: #ABB2BF;
+            font-size: 9px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+            flex-grow: 1;
+        }
+        
+        .ha-styled-button:hover {
+            background: linear-gradient(to bottom, #6B7280, #4B5563);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2);
+            transform: translateY(-1px);
+        }
+        
+        .ha-styled-button:active {
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+            transform: translateY(1px);
+        }
+        
+        .ha-icon-button {
+            background-color: transparent;
+            border: 1px solid #3A404A;
+            color: #ABB2BF;
+            padding: 2px 6px;
+            margin: 0;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            min-width: 20px;
+            min-height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            transition: all 0.2s ease;
+        }
+        
+        .ha-icon-button:hover {
+            background-color: #3A404A;
+            color: #FFFFFF;
+        }
+        
+        .ha-icon-button:active {
+            transform: translateY(1px);
+            background-color: #2C313A;
+        }
+        
+        .ha-container-section {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-height: 0;
+            margin: 0 5px 5px 5px;
+            background-image: url(/_next/static/media/background-regular.b0337118.png);
+            background-repeat: repeat;
+            background-color: url(/_next/static/media/background-dark.95edca67.png);
+            border-radius: 6px;
+            padding: 6px;
+            overflow-y: auto;
+        }
+        
+        .ha-section-title {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 3px;
+        }
+        
+        .ha-section-title h3 {
+            margin: 0px;
+            font-size: 14px;
+            color: rgb(224, 108, 117);
+            font-weight: bold;
+            text-shadow: rgba(224, 108, 117, 0.7) 0px 0px 5px;
+        }
+        
+        .ha-display-content {
+            width: 100%;
+            padding: 4px;
+            border: 1px solid #3A404A;
+            background-color: rgba(40,44,52,0.4);
+            border-radius: 4px;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+        
+        .ha-flex-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        
+        .ha-flex-column {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .ha-stats-text {
+            font-size: 10px;
+            color: #98C379;
+        }
+        
+        .ha-border-separator {
+            border-top: 1px solid #3A404A;
+            border-bottom: 1px solid #3A404A;
+            margin-top: 6px;
+            padding: 3px 0;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Inject styles immediately
+injectHuntAnalyzerStyles();
+
+// =======================
 // 1.1. Utility Functions
 // =======================
 function normalizeName(name) {
     return name?.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Determines the category of an item for sorting purposes
+ * @param {Object} item - The item object
+ * @returns {number} Category priority: 1=Runes, 2=Equipment, 3=Everything else
+ */
+function getItemCategory(item) {
+    const name = item.originalName.toLowerCase();
+    if (name.includes('rune')) {
+        return 1; // Runes first
+    } else if (item.isEquipment) {
+        return 2; // Equipment second
+    } else {
+        return 3; // Everything else last
+    }
 }
 
 // Throttling for frequent updates
@@ -27,7 +229,7 @@ let lastKnownShiny = 0;
 let lastBoardSubscriptionTime = 0;
 
 // =======================
-// 1.3. Constants & Globals
+// 1.2. Constants & Globals
 // =======================
 const PANEL_ID = "mod-autoplay-analyzer-panel";
 const BUTTON_ID = "mod-autoplay-button";
@@ -44,7 +246,7 @@ const LAYOUT_DIMENSIONS = {
 };
 
 // =======================
-// 1.4. Configuration Constants
+// 1.3. Configuration Constants
 // =======================
 const CONFIG = {
     // Throttling and timing
@@ -77,12 +279,15 @@ const CONFIG = {
         2: 24,  // Strong  
         3: 48,  // Great
         4: 96,  // Ultimate
-        5: 999  // Supreme (full stamina)
-    }
+        5: null  // Supreme (will be set to player's max stamina, capped at 360)
+    },
+    
+    // Auto-save interval (30 seconds)
+    AUTO_SAVE_INTERVAL: 30000
 };
 
 // =======================
-// 1.5. Centralized State Management
+// 1.4. Centralized State Management
 // =======================
 const HuntAnalyzerState = {
   session: {
@@ -99,7 +304,9 @@ const HuntAnalyzerState = {
     dust: 0,
     shiny: 0,
     staminaSpent: 0,
-    staminaRecovered: 0
+    staminaRecovered: 0,
+    wins: 0,
+    losses: 0
   },
   data: {
     sessions: [],
@@ -109,21 +316,32 @@ const HuntAnalyzerState = {
   ui: {
     updateIntervalId: null,
     lastSeed: null,
-    autoplayLogText: ""
+    autoplayLogText: "",
+    selectedMapFilter: "ALL"
+  },
+  settings: {
+    theme: 'original',
+    persistData: false
   }
 };
 
+// Storage keys for persistence
+const HUNT_ANALYZER_STORAGE_KEY = 'huntAnalyzerData';
+const HUNT_ANALYZER_STATE_KEY = 'huntAnalyzerState';
+const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
+
 // =======================
-// 1.6. Performance Caching
+// 1.5. Performance Caching
 // =======================
 const equipmentCache = new Map();
 const monsterCache = new Map();
 const itemInfoCache = new Map();
 
-
 // Cleanup references
 let boardSubscription = null;
-let gameTimerSubscription = null;
+let updateIntervalId = null;
+let autoSaveIntervalId = null;
+let timeoutIds = [];
 
 // Event handler tracking for memory leak prevention
 let panelResizeMouseMoveHandler = null;
@@ -134,14 +352,15 @@ let globalResizeMouseMoveHandler = null;
 let globalResizeMouseUpHandler = null;
 let windowMessageHandler = null;
 
-
-// Cached DOM - now handled by domCache
-
-// Add cache for item visuals
-const itemVisualCache = new Map();
+// Additional event handlers for cleanup
+let dropdownClickHandler = null;
+let documentClickHandler = null;
+let optionMouseEnterHandler = null;
+let optionMouseLeaveHandler = null;
+let optionClickHandler = null;
 
 // =======================
-// 1.7. DOM Cache Manager
+// 1.6. DOM Cache Manager
 // =======================
 class DOMCache {
   constructor() {
@@ -181,7 +400,7 @@ class DOMCache {
 const domCache = new DOMCache();
 
 // =======================
-// 1.8. Panel Management Class
+// 1.7. Panel Management Class
 // =======================
 class PanelManager {
   constructor() {
@@ -225,9 +444,631 @@ class PanelManager {
 // Initialize panel manager
 const panelManager = new PanelManager();
 
+// Helper function to get player's max stamina from DOM
+function getPlayerMaxStamina() {
+    try {
+        const elStamina = document.querySelector('[title="Stamina"]');
+        if (!elStamina) {
+            console.log('[Hunt Analyzer] Stamina element not found');
+            return 360; // Fallback to max
+        }
+        
+        const staminaSpans = elStamina.querySelectorAll('span span');
+        if (staminaSpans.length < 2) {
+            console.log('[Hunt Analyzer] Stamina spans not found');
+            return 360; // Fallback to max
+        }
+        
+        const maxStaminaText = staminaSpans[1].textContent.trim();
+        const maxStamina = parseInt(maxStaminaText.replace('/', ''));
+        
+        if (isNaN(maxStamina)) {
+            console.log('[Hunt Analyzer] Invalid max stamina value');
+            return 360; // Fallback to max
+        }
+        
+        // Cap at 360 as specified
+        const cappedStamina = Math.min(maxStamina, 360);
+        console.log(`[Hunt Analyzer] Player max stamina: ${maxStamina} (capped at ${cappedStamina})`);
+        return cappedStamina;
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error getting max stamina:', error);
+        return 360; // Fallback to max
+    }
+}
+
+// Initialize max stamina for tier 5 potions
+CONFIG.STAMINA_RECOVERY[5] = getPlayerMaxStamina();
+
+// Debug log to verify max stamina initialization
+console.log('[Hunt Analyzer] Initialized max stamina for tier 5 potions:', CONFIG.STAMINA_RECOVERY[5]);
+
+// Initialize persistence system
+loadHuntAnalyzerSettings();
+loadHuntAnalyzerData();
+loadHuntAnalyzerState();
+
+// Auto-reopen panel if needed
+autoReopenHuntAnalyzer();
+
 // =======================
-// 1.9. State Synchronization - REMOVED
+// 1.8. Data Persistence System
 // =======================
+
+// Function to check if sprite CSS is loaded
+function isSpriteCSSLoaded() {
+    // Check if there are any stylesheets or styles that contain sprite-related CSS
+    const styleSheets = Array.from(document.styleSheets);
+    let hasSpriteCSS = false;
+    
+    try {
+        for (const sheet of styleSheets) {
+            if (sheet.href && (sheet.href.includes('sprite') || sheet.href.includes('spritesheet'))) {
+                hasSpriteCSS = true;
+                break;
+            }
+            
+            // Try to access rules (might fail due to CORS)
+            try {
+                const rules = sheet.cssRules || sheet.rules;
+                if (rules) {
+                    for (let i = 0; i < rules.length; i++) {
+                        const rule = rules[i];
+                        if (rule.selectorText && rule.selectorText.includes('.sprite')) {
+                            hasSpriteCSS = true;
+                            break;
+                        }
+                    }
+                }
+            } catch (e) {
+                // CORS error, ignore
+            }
+        }
+    } catch (e) {
+        // Ignore errors
+    }
+    
+    console.log('[Hunt Analyzer] Sprite CSS loaded:', hasSpriteCSS);
+    return hasSpriteCSS;
+}
+
+// Function to test if sprite system is working
+function testSpriteSystem() {
+    if (!globalThis.state?.utils) return false;
+    
+    // Create a test sprite element to see if the sprite system is working
+    const testSprite = createItemSprite(35909, 'Test'); // Dice Manipulator sprite ID
+    document.body.appendChild(testSprite);
+    
+    // Check if the sprite actually rendered (has proper dimensions and content)
+    const img = testSprite.querySelector('img');
+    const isWorking = img && img.complete && img.naturalWidth > 0;
+    
+    // Also check if the sprite has the proper CSS classes applied
+    const hasSpriteClass = testSprite.classList.contains('sprite');
+    const hasItemClass = testSprite.classList.contains('item');
+    
+    console.log('[Hunt Analyzer] Sprite test details:', {
+        imgExists: !!img,
+        imgComplete: img?.complete,
+        imgNaturalWidth: img?.naturalWidth,
+        hasSpriteClass,
+        hasItemClass,
+        spriteElement: testSprite.outerHTML.substring(0, 100) + '...'
+    });
+    
+    document.body.removeChild(testSprite);
+    
+    return isWorking;
+}
+
+// Function to create inventory-style creature portrait like the game does
+function createInventoryStyleCreaturePortrait(creatureData) {
+    const containerSlot = document.createElement('div');
+    containerSlot.className = 'container-slot surface-darker relative';
+    containerSlot.style.width = '34px';
+    containerSlot.style.height = '34px';
+    containerSlot.style.overflow = 'visible';
+    
+    // Rarity border
+    const rarityDiv = document.createElement('div');
+    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityDiv.setAttribute('data-rarity', String(creatureData.tierLevel || 1));
+    rarityDiv.setAttribute('role', 'none');
+    
+    // Creature image
+    const img = document.createElement('img');
+    img.src = `/assets/portraits/${creatureData.gameId}.png`;
+    img.alt = creatureData.originalName;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.maxWidth = '34px';
+    img.style.maxHeight = '34px';
+    img.style.objectFit = 'contain';
+    
+    // Level count
+    const levelSpan = document.createElement('span');
+    levelSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+    levelSpan.style.position = 'absolute';
+    levelSpan.style.bottom = '0px';
+    levelSpan.style.left = '2px';
+    levelSpan.style.color = 'white';
+    levelSpan.style.fontSize = '14px';
+    levelSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+    levelSpan.style.padding = '0px 2px';
+    levelSpan.textContent = creatureData.count || 1;
+    
+    containerSlot.appendChild(rarityDiv);
+    containerSlot.appendChild(img);
+    containerSlot.appendChild(levelSpan);
+    
+    return containerSlot;
+}
+
+// Function to create inventory-style item portrait like the game does
+function createInventoryStyleItemPortrait(itemData) {
+    // For sprite items, use the proper sprite system like Cyclopedia
+    if (itemData.spriteId && (typeof itemData.spriteId === 'number' || /^\d+$/.test(itemData.spriteId))) {
+        try {
+            // Use the sprite system with proper DOM structure
+            const spriteDiv = createItemSprite(itemData.spriteId, itemData.originalName, itemData.rarity || 1);
+            
+            // Add count overlay to sprite container (bottom left like creatures)
+            const countSpan = document.createElement('span');
+            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+            countSpan.style.position = 'absolute';
+            countSpan.style.bottom = '0px';
+            countSpan.style.left = '2px';
+            countSpan.style.color = 'white';
+            countSpan.style.fontSize = '14px';
+            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+            countSpan.style.padding = '0px 2px';
+            countSpan.style.borderRadius = '2px';
+            countSpan.style.zIndex = '10';
+            countSpan.textContent = itemData.count || 1;
+            
+            // Make sure the sprite container has relative positioning for the count overlay
+            spriteDiv.style.position = 'relative';
+            spriteDiv.appendChild(countSpan);
+            return spriteDiv;
+        } catch (error) {
+            console.warn('[Hunt Analyzer] Error creating sprite, falling back to image:', error);
+        }
+    }
+    
+    // Fallback to image-based approach for non-sprite items
+    const containerSlot = document.createElement('div');
+    containerSlot.className = 'container-slot surface-darker relative';
+    containerSlot.style.width = '36px';
+    containerSlot.style.height = '36px';
+    containerSlot.style.overflow = 'visible';
+    
+    // Rarity border
+    const rarityDiv = document.createElement('div');
+    rarityDiv.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+    rarityDiv.setAttribute('data-rarity', String(itemData.rarity || 1));
+    rarityDiv.setAttribute('role', 'none');
+    
+    // Item image
+    const img = document.createElement('img');
+    if (itemData.src) {
+        img.src = itemData.src;
+    } else if (itemData.spriteSrc) {
+        img.src = itemData.spriteSrc;
+    } else {
+        // Try API component as fallback
+        try {
+            const apiElement = api.ui.components.createItemPortrait({
+                itemId: itemData.spriteId,
+                tier: itemData.rarity || 1
+            });
+            const apiImg = apiElement.querySelector('img');
+            if (apiImg && apiImg.src && apiImg.src.trim() !== '') {
+                img.src = apiImg.src;
+            } else {
+                img.src = '/assets/icons/unknown.png';
+            }
+        } catch (error) {
+            console.warn('[Hunt Analyzer] Error creating API portrait:', error);
+            img.src = '/assets/icons/unknown.png';
+        }
+    }
+    
+    img.alt = itemData.originalName;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.maxWidth = '36px';
+    img.style.maxHeight = '36px';
+    img.style.objectFit = 'contain';
+    img.style.imageRendering = 'pixelated';
+    img.style.borderRadius = '3px';
+    
+    // Count overlay (bottom left like creatures)
+    const countSpan = document.createElement('span');
+    countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+    countSpan.style.position = 'absolute';
+    countSpan.style.bottom = '0px';
+    countSpan.style.left = '2px';
+    countSpan.style.color = 'white';
+    countSpan.style.fontSize = '14px';
+    countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+    countSpan.style.padding = '0px 2px';
+    countSpan.style.borderRadius = '2px';
+    countSpan.textContent = itemData.count || 1;
+    
+    containerSlot.appendChild(rarityDiv);
+    containerSlot.appendChild(img);
+    containerSlot.appendChild(countSpan);
+    
+    return containerSlot;
+}
+
+// Function to regenerate all visual elements when game API is available
+function regenerateAllVisuals() {
+    if (!globalThis.state?.utils) {
+        console.log('[Hunt Analyzer] Game API not available yet, skipping visual regeneration');
+        return;
+    }
+    
+    // Consolidated visual regeneration log
+    console.log('[Hunt Analyzer] Regenerating visual elements:', {
+        gameAPI: !!globalThis.state?.utils,
+        getEquipment: !!globalThis.state?.utils?.getEquipment,
+        getMonster: !!globalThis.state?.utils?.getMonster,
+        spriteCSS: isSpriteCSSLoaded(),
+        spriteSystem: testSpriteSystem()
+    });
+    
+    // Test if sprite system is working
+    const spriteSystemWorking = testSpriteSystem();
+    // Don't return early - try regeneration even if sprite test fails
+    // The sprite system might work for actual items even if test fails
+    
+    let regeneratedCount = 0;
+    
+    // Regenerate loot visuals using API components
+    HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
+        // Ensure equipment items have gameId set from spriteId
+        if (value.isEquipment && !value.gameId && value.spriteId) {
+            value.gameId = value.spriteId;
+        }
+        
+        // Always regenerate equipment items to use API components, even if they already have visuals
+        const shouldRegenerate = !(value.visual instanceof HTMLElement) || 
+                                (value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId);
+        
+        if (shouldRegenerate) {
+            // Only log equipment items for debugging
+            if (value.isEquipment) {
+                // Equipment processing consolidated - see summary log at end
+            }
+            
+            let visualElement;
+            
+            // Handle equipment items specially using API components
+            if (value.isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && value.gameId) {
+                try {
+                    const equipData = globalThis.state.utils.getEquipment(value.gameId);
+                    if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
+                        const equipmentSpriteId = equipData.metadata.spriteId;
+                        
+                        // Use API component for equipment like Cyclopedia does
+                        if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
+                            try {
+                                const equipmentPortrait = api.ui.components.createItemPortrait({
+                                    itemId: equipmentSpriteId,
+                                    tier: value.rarity || 1
+                                });
+                                
+                                // Check if we got a valid DOM element
+                                if (equipmentPortrait && equipmentPortrait.nodeType) {
+                                    // If it's a button, get the first child (the actual portrait)
+                                    if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
+                                        const firstChild = equipmentPortrait.firstChild;
+                                        if (firstChild && firstChild.nodeType) {
+                                            // Add count overlay to the portrait (bottom left like creatures)
+                                            const countSpan = document.createElement('span');
+                                            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+                                            countSpan.style.position = 'absolute';
+                                            countSpan.style.bottom = '0px';
+                                            countSpan.style.left = '2px';
+                                            countSpan.style.color = 'white';
+                                            countSpan.style.fontSize = '14px';
+                                            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+                                            countSpan.style.padding = '0px 2px';
+                                            countSpan.style.borderRadius = '2px';
+                                            countSpan.style.zIndex = '10';
+                                            countSpan.textContent = value.count || 1;
+                                            
+                                            firstChild.appendChild(countSpan);
+                                            visualElement = firstChild;
+                                        }
+                                    } else {
+                                        // Use the portrait directly if it's not a button
+                                        visualElement = equipmentPortrait;
+                                    }
+                                }
+                            } catch (apiError) {
+                                console.warn('[Hunt Analyzer] Error creating API equipment portrait, falling back to sprite:', apiError);
+                            }
+                        }
+                        
+                        // Fallback to sprite system if API component failed
+                        if (!visualElement) {
+                            console.log('[Hunt Analyzer] API component failed, falling back to sprite system for:', value.originalName);
+                            const spriteDiv = createItemSprite(equipmentSpriteId, value.originalName, value.rarity || 1);
+                            
+                            // Add count overlay to sprite (bottom left like creatures)
+                            const countSpan = document.createElement('span');
+                            countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+                            countSpan.style.position = 'absolute';
+                            countSpan.style.bottom = '0px';
+                            countSpan.style.left = '2px';
+                            countSpan.style.color = 'white';
+                            countSpan.style.fontSize = '14px';
+                            countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+                            countSpan.style.padding = '0px 2px';
+                            countSpan.style.borderRadius = '2px';
+                            countSpan.style.zIndex = '10';
+                            countSpan.textContent = value.count || 1;
+                            
+                            // Make sure the sprite container has relative positioning for the count overlay
+                            spriteDiv.style.position = 'relative';
+                            spriteDiv.appendChild(countSpan);
+                            visualElement = spriteDiv;
+                            console.log('[Hunt Analyzer] Fallback sprite created:', visualElement);
+                        }
+                    }
+                } catch (e) { 
+                    console.error("[Hunt Analyzer] Error getting equipment data:", e); 
+                }
+            }
+            
+            // For non-equipment items, use the standard approach
+            if (!visualElement) {
+                // Pass the correct data structure to createInventoryStyleItemPortrait
+                const itemData = {
+                    spriteId: value.spriteId,
+                    src: value.src,
+                    spriteSrc: value.src,
+                    originalName: value.originalName,
+                    rarity: value.rarity,
+                    count: value.count
+                };
+                visualElement = createInventoryStyleItemPortrait(itemData);
+            }
+            
+            value.visual = visualElement;
+            regeneratedCount++;
+            // Only log equipment visuals for debugging
+            if (value.isEquipment) {
+                // Equipment visual generation consolidated - see summary log at end
+            }
+        }
+    });
+    
+    // Regenerate creature visuals using API components
+    HuntAnalyzerState.data.aggregatedCreatures.forEach((value, key) => {
+        if (!(value.visual instanceof HTMLElement)) {
+            let visualElement;
+            if (value.gameId) {
+                // Create inventory-style creature portrait like the game does
+                visualElement = createInventoryStyleCreaturePortrait(value);
+            } else {
+                // Fallback emoji
+                const span = document.createElement('span');
+                span.textContent = '👾';
+                span.style.fontSize = '24px';
+                span.style.width = '36px';
+                span.style.height = '36px';
+                span.style.display = 'flex';
+                span.style.justifyContent = 'center';
+                span.style.alignItems = 'center';
+                visualElement = span;
+            }
+            
+            value.visual = visualElement;
+            regeneratedCount++;
+        }
+    });
+    
+    // Consolidated visual regeneration summary
+    if (regeneratedCount > 0) {
+        console.log(`[Hunt Analyzer] Visual regeneration completed: ${regeneratedCount} elements processed`);
+    }
+    
+    // Re-render the display with updated visuals
+    renderAllSessions();
+}
+
+// Consolidated persistence logging
+function logPersistenceOperation(operation, success = true) {
+    if (success) {
+        console.log(`[Hunt Analyzer] Persistence: ${operation} completed`);
+    } else {
+        console.error(`[Hunt Analyzer] Persistence: ${operation} failed`);
+    }
+}
+
+// Save Hunt Analyzer data to localStorage
+function saveHuntAnalyzerData() {
+    try {
+        // Clean aggregated data by removing visual elements (they can be regenerated)
+        const cleanAggregatedLoot = new Map();
+        HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
+            const cleanValue = { ...value };
+            delete cleanValue.visual; // Remove visual element - will be regenerated on load
+            cleanAggregatedLoot.set(key, cleanValue);
+        });
+        
+        const cleanAggregatedCreatures = new Map();
+        HuntAnalyzerState.data.aggregatedCreatures.forEach((value, key) => {
+            const cleanValue = { ...value };
+            delete cleanValue.visual; // Remove visual element - will be regenerated on load
+            cleanAggregatedCreatures.set(key, cleanValue);
+        });
+        
+        const dataToSave = {
+            sessions: HuntAnalyzerState.data.sessions,
+            totals: HuntAnalyzerState.totals,
+            aggregatedLoot: Array.from(cleanAggregatedLoot.entries()),
+            aggregatedCreatures: Array.from(cleanAggregatedCreatures.entries()),
+            session: HuntAnalyzerState.session
+        };
+        
+        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
+        logPersistenceOperation('Data save');
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error saving data:', error);
+        logPersistenceOperation('Data save', false);
+    }
+}
+
+// Load Hunt Analyzer data from localStorage
+function loadHuntAnalyzerData() {
+    try {
+        const savedData = localStorage.getItem(HUNT_ANALYZER_STORAGE_KEY);
+        if (savedData) {
+            const parsedData = JSON.parse(savedData);
+            
+            // Restore sessions
+            if (parsedData.sessions) {
+                HuntAnalyzerState.data.sessions = parsedData.sessions;
+            }
+            
+            // Restore totals
+            if (parsedData.totals) {
+                Object.assign(HuntAnalyzerState.totals, parsedData.totals);
+            }
+            
+            // Restore aggregated data (convert arrays back to Maps, visuals will be regenerated later)
+            if (parsedData.aggregatedLoot) {
+                HuntAnalyzerState.data.aggregatedLoot = new Map(parsedData.aggregatedLoot);
+            }
+            if (parsedData.aggregatedCreatures) {
+                HuntAnalyzerState.data.aggregatedCreatures = new Map(parsedData.aggregatedCreatures);
+            }
+            
+            // Restore session state
+            if (parsedData.session) {
+                Object.assign(HuntAnalyzerState.session, parsedData.session);
+            }
+            
+            return true;
+        }
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error loading data:', error);
+        logPersistenceOperation('Data load', false);
+    }
+    return false;
+}
+
+// Save Hunt Analyzer UI state
+function saveHuntAnalyzerState() {
+    try {
+        const stateToSave = {
+            isOpen: HuntAnalyzerState.ui.isOpen,
+            isMinimized: HuntAnalyzerState.ui.isMinimized,
+            displayMode: HuntAnalyzerState.ui.displayMode,
+            selectedMapFilter: HuntAnalyzerState.ui.selectedMapFilter,
+            closedManually: false
+        };
+        
+        localStorage.setItem(HUNT_ANALYZER_STATE_KEY, JSON.stringify(stateToSave));
+        logPersistenceOperation('UI state save');
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error saving UI state:', error);
+        logPersistenceOperation('UI state save', false);
+    }
+}
+
+// Load Hunt Analyzer UI state
+function loadHuntAnalyzerState() {
+    try {
+        const savedState = localStorage.getItem(HUNT_ANALYZER_STATE_KEY);
+        if (savedState) {
+            const parsedState = JSON.parse(savedState);
+            
+            HuntAnalyzerState.ui.isOpen = parsedState.isOpen || false;
+            HuntAnalyzerState.ui.isMinimized = parsedState.isMinimized || false;
+            HuntAnalyzerState.ui.displayMode = parsedState.displayMode || 'vertical';
+            HuntAnalyzerState.ui.selectedMapFilter = parsedState.selectedMapFilter || "ALL";
+            
+            return parsedState;
+        }
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error loading UI state:', error);
+    }
+    return null;
+}
+
+// Save Hunt Analyzer settings
+function saveHuntAnalyzerSettings() {
+    try {
+        localStorage.setItem(HUNT_ANALYZER_SETTINGS_KEY, JSON.stringify(HuntAnalyzerState.settings));
+        logPersistenceOperation('Settings save');
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error saving settings:', error);
+        logPersistenceOperation('Settings save', false);
+    }
+}
+
+// Load Hunt Analyzer settings
+function loadHuntAnalyzerSettings() {
+    try {
+        const savedSettings = localStorage.getItem(HUNT_ANALYZER_SETTINGS_KEY);
+        if (savedSettings) {
+            const parsedSettings = JSON.parse(savedSettings);
+            Object.assign(HuntAnalyzerState.settings, parsedSettings);
+            return true;
+        }
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error loading settings:', error);
+    }
+    return false;
+}
+
+// Check if panel should be reopened after page refresh
+function shouldReopenHuntAnalyzer() {
+    if (!HuntAnalyzerState.settings.persistData) {
+        console.log('[Hunt Analyzer] Persistence disabled, not auto-reopening');
+        return false;
+    }
+    
+    const savedState = loadHuntAnalyzerState();
+    console.log('[Hunt Analyzer] Checking auto-reopen conditions:', {
+        savedState,
+        persistData: HuntAnalyzerState.settings.persistData,
+        hasData: HuntAnalyzerState.data.sessions.length > 0
+    });
+    
+    // Auto-reopen if:
+    // 1. Persistence is enabled AND
+    // 2. We have saved data AND
+    // 3. Panel wasn't manually closed (or no saved state exists)
+    if (savedState) {
+        return savedState.isOpen && !savedState.closedManually;
+    } else {
+        // If no saved state but we have data and persistence is enabled, reopen
+        return HuntAnalyzerState.data.sessions.length > 0;
+    }
+}
+
+// Auto-reopen Hunt Analyzer after page refresh
+function autoReopenHuntAnalyzer() {
+    if (shouldReopenHuntAnalyzer()) {
+        console.log('[Hunt Analyzer] Auto-reopening panel after page refresh');
+        setTimeout(() => {
+            createAutoplayAnalyzerPanel();
+        }, 2000); // Wait 2 seconds for page to fully load
+    } else {
+        console.log('[Hunt Analyzer] Not auto-reopening panel:', {
+            persistData: HuntAnalyzerState.settings.persistData,
+            hasData: HuntAnalyzerState.data.sessions.length > 0,
+            savedState: loadHuntAnalyzerState()
+        });
+    }
+}
 
 // =======================
 // 2. Utility Modules
@@ -297,18 +1138,16 @@ const UIElements = {
     return createStyledIconButton(iconText);
   },
   
-  createItemSprite(itemId, tooltipKey) {
-    return createItemSprite(itemId, tooltipKey);
+  createItemSprite(itemId, tooltipKey, rarity = 1) {
+    return createItemSprite(itemId, tooltipKey, rarity);
   }
 };
 
 // =======================
-// 2.1. Legacy Utility Functions (for backward compatibility)
+// 2.0. Legacy Utility Functions (for backward compatibility)
 // =======================
-/**
- * Checks if the current game mode is sandbox mode.
- * @returns {boolean} True if in sandbox mode, false otherwise.
- */
+// Checks if the current game mode is sandbox mode.
+// Returns true if in sandbox mode, false otherwise.
 function isSandboxMode() {
     try {
         const boardContext = globalThis.state.board.getSnapshot().context;
@@ -512,7 +1351,6 @@ function getItemInfoFromDatabase(itemName, tooltipKey, item) {
     return result;
 }
 
-
 function isRuneItem(itemName, item) {
     // Check if the item is a rune based on name patterns
     const normalizedName = itemName?.toLowerCase().replace(/\s+/g, '');
@@ -710,26 +1548,49 @@ const iconMap = {
     speed: "/assets/icons/speed.png",
     level: "/assets/icons/achievement.png"
 };
-function createItemSprite(itemId, tooltipKey = '') {
+function createItemSprite(itemId, tooltipKey = '', rarity = 1) {
+    // Create the main container following Cyclopedia pattern
+    const containerSlot = document.createElement('div');
+    containerSlot.className = 'container-slot surface-darker';
+    containerSlot.style.width = '36px';
+    containerSlot.style.height = '36px';
+    containerSlot.style.overflow = 'visible';
+    containerSlot.title = tooltipKey || `ID-${itemId}`;
+    
+    // Create rarity container
+    const rarityContainer = document.createElement('div');
+    rarityContainer.className = 'has-rarity relative grid h-full place-items-center';
+    rarityContainer.setAttribute('data-rarity', String(rarity));
+    
+    // Create sprite container
     const spriteContainer = document.createElement('div');
-    spriteContainer.className = `sprite item relative id-${itemId}`;
-    spriteContainer.style.width = '36px';
-    spriteContainer.style.height = '36px';
-    spriteContainer.style.imageRendering = 'pixelated';
-    spriteContainer.style.margin = '0';
-    spriteContainer.style.borderRadius = '3px';
-    spriteContainer.title = tooltipKey || `ID-${itemId}`;
+    spriteContainer.className = 'relative size-sprite';
+    spriteContainer.style.overflow = 'visible';
+    
+    // Create sprite element
+    const spriteElement = document.createElement('div');
+    spriteElement.className = `sprite item id-${itemId} absolute bottom-0 right-0`;
+    
+    // Create viewport
     const viewport = document.createElement('div');
     viewport.className = 'viewport';
+    
+    // Create image
     const img = document.createElement('img');
     img.alt = tooltipKey || String(itemId);
     img.setAttribute('data-cropped', 'false');
     img.className = 'spritesheet';
     img.style.setProperty('--cropX', '0');
     img.style.setProperty('--cropY', '0');
+    
+    // Assemble the structure
     viewport.appendChild(img);
-    spriteContainer.appendChild(viewport);
-    return spriteContainer;
+    spriteElement.appendChild(viewport);
+    spriteContainer.appendChild(spriteElement);
+    rarityContainer.appendChild(spriteContainer);
+    containerSlot.appendChild(rarityContainer);
+    
+    return containerSlot;
 }
 function getEquipmentNameFromId(gameId) {
     if (equipmentCache.has(gameId)) {
@@ -789,7 +1650,27 @@ function getItemVisual(itemData, preResolvedName = null) {
             if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
                 const equipmentSpriteId = equipData.metadata.spriteId;
                 recognizedName = equipData.metadata.name || recognizedName;
-                const spriteDiv = createItemSprite(equipmentSpriteId, recognizedName);
+                
+                // Use simple sprite system like the original implementation
+                const spriteDiv = createItemSprite(equipmentSpriteId, recognizedName, itemData.rarity || 1);
+                
+                // Add count overlay to sprite (bottom left like creatures)
+                const countSpan = document.createElement('span');
+                countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+                countSpan.style.position = 'absolute';
+                countSpan.style.bottom = '0px';
+                countSpan.style.left = '2px';
+                countSpan.style.color = 'white';
+                countSpan.style.fontSize = '14px';
+                countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+                countSpan.style.padding = '0px 2px';
+                countSpan.style.borderRadius = '2px';
+                countSpan.style.zIndex = '10';
+                countSpan.textContent = itemData.count || 1;
+                
+                // Make sure the sprite container has relative positioning for the count overlay
+                spriteDiv.style.position = 'relative';
+                spriteDiv.appendChild(countSpan);
                 return { visualElement: spriteDiv, recognizedName: formatNameToTitleCase(recognizedName) };
             }
         } catch (e) { console.error("[Hunt Analyzer] Error getting equipment name:", e); }
@@ -828,7 +1709,25 @@ function getItemVisual(itemData, preResolvedName = null) {
         return { visualElement: img, recognizedName: recognizedName };
     }
     if (itemData.spriteId) {
-        const spriteDiv = createItemSprite(itemData.spriteId, itemData.tooltipKey);
+        const spriteDiv = createItemSprite(itemData.spriteId, itemData.tooltipKey, itemData.rarity || 1);
+        
+        // Add count overlay to sprite (bottom left like creatures)
+        const countSpan = document.createElement('span');
+        countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+        countSpan.style.position = 'absolute';
+        countSpan.style.bottom = '0px';
+        countSpan.style.left = '2px';
+        countSpan.style.color = 'white';
+        countSpan.style.fontSize = '14px';
+        countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+        countSpan.style.padding = '0px 2px';
+        countSpan.style.borderRadius = '2px';
+        countSpan.style.zIndex = '10';
+        countSpan.textContent = itemData.count || 1;
+        
+        // Make sure the sprite container has relative positioning for the count overlay
+        spriteDiv.style.position = 'relative';
+        spriteDiv.appendChild(countSpan);
         recognizedName = formatNameToTitleCase(itemData.tooltipKey || `ID-${itemData.spriteId}`);
         return { visualElement: spriteDiv, recognizedName: recognizedName };
     }
@@ -936,7 +1835,7 @@ function clamp(val, min, max) {
 }
 
 // =======================
-// 2.2. Data Processing Class
+// 2.1. Data Processing Class
 // =======================
 class DataProcessor {
   constructor() {
@@ -952,19 +1851,17 @@ class DataProcessor {
     const aggregatedCreaturesForSession = new Map();
     const currentLootItemsLog = [];
 
+    // Get room name for display and session data
+    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
+    const readableRoomName = roomNamesMap?.[rewardScreen.roomId] || `Room ID: ${rewardScreen.roomId}`;
+
     // Update Room ID display in header
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
     if (cachedRoomIdDisplayElement && rewardScreen.roomId) {
-      const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
-      let readableRoomName = roomNamesMap?.[rewardScreen.roomId] || `Room ID: ${rewardScreen.roomId}`;
-      const boostedRoomId = rewardScreen.boostedRoomId || globalThis.state.daily?.getSnapshot?.()?.context?.boostedMap?.roomId;
-      if (boostedRoomId === rewardScreen.roomId) {
-        readableRoomName += ' (boosted)';
-      }
-      cachedRoomIdDisplayElement.textContent = readableRoomName;
+      updateRoomTitleDisplay(rewardScreen.roomId, readableRoomName);
     }
 
-    // Process Gold
+    // Process Gold - add to session loot but will be filtered out in aggregation
     if (rewardScreen.loot?.goldAmount > 0) {
       const goldAmount = rewardScreen.loot.goldAmount;
       const { visualElement: goldVisual, recognizedName: goldName } = getItemVisual({
@@ -984,6 +1881,8 @@ class DataProcessor {
         isEquipment: false,
         stat: null
       });
+      
+      currentLootItemsLog.push(`Gold (x${goldAmount})`);
     }
 
     // Process all loot items
@@ -1003,7 +1902,8 @@ class DataProcessor {
       let rarity = item.rarityLevel || item.tier || 0;
       
       let itemName = 'Unknown Item';
-      if (item.tooltipKey?.toLowerCase().includes('dust')) {
+      if (item.tooltipKey?.toLowerCase().includes('dust') || 
+          (item.spriteSrc && item.spriteSrc.includes('dust'))) {
         itemName = 'Dust';
       } else if (isEquipment) {
         itemName = getEquipmentNameFromId(item.gameId) || 
@@ -1012,6 +1912,12 @@ class DataProcessor {
         itemName = item.tooltipKey;
       } else if (item.spriteId) {
         itemName = `ID-${item.spriteId}`;
+      }
+      
+      // For equipment items, ensure they have gameId
+      if (isEquipment && !item.gameId) {
+        // Try to get gameId from spriteId if available
+        item.gameId = item.spriteId;
       }
       
       // Get both rarity and display name in one optimized lookup
@@ -1044,14 +1950,107 @@ class DataProcessor {
       const rarityBorderColor = getRarityBorderColor(rarity);
 
       // Use resolved itemName to avoid redundant API calls in getItemVisual
-      const { visualElement: itemVisual, recognizedName: resolvedItemName } = getItemVisual({
-        spriteId: item.spriteId || item.gameId,
-        spriteSrc: item.spriteSrc,
-        tooltipKey: itemName,
-        stat: item.stat,
-        gameId: item.gameId,
-        isEquipment
-      }, itemName); // Pass itemName as preResolvedName to avoid API calls
+      let itemVisual, resolvedItemName;
+      
+      // Handle equipment items specially using API components for grid display
+      if (isEquipment && typeof globalThis.state?.utils?.getEquipment === 'function' && item.gameId) {
+        try {
+          const equipData = globalThis.state.utils.getEquipment(item.gameId);
+          if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
+            const equipmentSpriteId = equipData.metadata.spriteId;
+            resolvedItemName = equipData.metadata.name || itemName;
+            
+            // Use API component for equipment like Cyclopedia does
+            if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
+              try {
+                const equipmentPortrait = api.ui.components.createItemPortrait({
+                  itemId: equipmentSpriteId,
+                  tier: rarity || 1
+                });
+                
+                // Check if we got a valid DOM element
+                if (equipmentPortrait && equipmentPortrait.nodeType) {
+                  // If it's a button, get the first child (the actual portrait)
+                  if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
+                    const firstChild = equipmentPortrait.firstChild;
+                    if (firstChild && firstChild.nodeType) {
+                      // Add count overlay to the portrait (bottom left like creatures)
+                      const countSpan = document.createElement('span');
+                      countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+                      countSpan.style.position = 'absolute';
+                      countSpan.style.bottom = '0px';
+                      countSpan.style.left = '2px';
+                      countSpan.style.color = 'white';
+                      countSpan.style.fontSize = '14px';
+                      countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+                      countSpan.style.padding = '0px 2px';
+                      countSpan.style.borderRadius = '2px';
+                      countSpan.style.zIndex = '10';
+                      countSpan.textContent = item.amount || 1;
+                      
+                      firstChild.appendChild(countSpan);
+                      itemVisual = firstChild;
+                    }
+                  }
+                }
+              } catch (apiError) {
+                console.warn('[Hunt Analyzer] Error creating API equipment portrait, falling back to sprite:', apiError);
+              }
+            }
+            
+            // Fallback to sprite system if API component failed
+            if (!itemVisual) {
+              const spriteDiv = createItemSprite(equipmentSpriteId, resolvedItemName, rarity || 1);
+              
+              // Add count overlay to sprite (bottom left like creatures)
+              const countSpan = document.createElement('span');
+              countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+              countSpan.style.position = 'absolute';
+              countSpan.style.bottom = '0px';
+              countSpan.style.left = '2px';
+              countSpan.style.color = 'white';
+              countSpan.style.fontSize = '14px';
+              countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+              countSpan.style.padding = '0px 2px';
+              countSpan.style.borderRadius = '2px';
+              countSpan.style.zIndex = '10';
+              countSpan.textContent = item.amount || 1;
+              
+              // Make sure the sprite container has relative positioning for the count overlay
+              spriteDiv.style.position = 'relative';
+              spriteDiv.appendChild(countSpan);
+              itemVisual = spriteDiv;
+            }
+          }
+        } catch (e) { 
+          console.error("[Hunt Analyzer] Error getting equipment data:", e); 
+        }
+      }
+      
+      // For non-equipment items, use the same approach as regenerative system
+      if (!itemVisual) {
+        resolvedItemName = itemName;
+        
+        // Use the same visual creation system as the regenerative system
+        const itemData = {
+          spriteId: item.spriteId || item.gameId,
+          src: item.spriteSrc,
+          spriteSrc: item.spriteSrc,
+          originalName: resolvedItemName,
+          rarity: rarity,
+          count: item.amount || 1
+        };
+        itemVisual = createInventoryStyleItemPortrait(itemData);
+      }
+
+      // Handle dust items - add to session but will be filtered out in aggregation
+      if (resolvedItemName === 'Dust') {
+        console.log('[Hunt Analyzer] Processing dust item:', { amount: item.amount, totalBefore: HuntAnalyzerState.totals.dust });
+        HuntAnalyzerState.totals.dust += item.amount || 1;
+        currentLootItemsLog.push(`Dust (x${item.amount || 1})`);
+        console.log('[Hunt Analyzer] Dust total after processing:', HuntAnalyzerState.totals.dust);
+        // Continue processing to add dust to session loot (will be filtered out later)
+      }
 
       // Track rune drops - check both original and resolved names
       const originalItemName = item.tooltipKey || `ID-${item.spriteId}`;
@@ -1065,9 +2064,22 @@ class DataProcessor {
       if (aggregatedLootForSession.has(mapKey)) {
         const existing = aggregatedLootForSession.get(mapKey);
         existing.count += currentQuantity;
+        
+        // Update the count overlay in the visual element
+        if (existing.visual && existing.visual.querySelector) {
+            const countSpan = existing.visual.querySelector('.pixel-font-16');
+            if (countSpan) {
+                countSpan.textContent = existing.count;
+            }
+        }
+        
         // Update descriptive rarity if available
         if (item._descriptiveRarity) {
           existing._descriptiveRarity = item._descriptiveRarity;
+        }
+        // Update gameId for equipment items
+        if (item.gameId) {
+          existing.gameId = item.gameId;
         }
         aggregatedLootForSession.set(mapKey, existing);
       } else {
@@ -1080,6 +2092,7 @@ class DataProcessor {
           spriteId: item.spriteId || item.gameId,
           src: item.spriteSrc,
           isEquipment: isEquipment,
+          gameId: item.gameId, // Add gameId for equipment items
           stat: item.stat || null,
           _descriptiveRarity: item._descriptiveRarity || null
         });
@@ -1089,8 +2102,7 @@ class DataProcessor {
 
     // Process Creature Drop
     if (rewardScreen.monsterDrop) {
-        console.log('[Hunt Analyzer] Processing monster drop:', rewardScreen.monsterDrop);
-      const { name: creatureName, visual: creatureVisual, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny } = 
+      const { name: creatureName, totalStats, tierName, tierLevel, gameId: creatureGameId, isShiny } = 
         getCreatureDetails(rewardScreen.monsterDrop);
 
       if (!creatureName.toLowerCase().includes('monster squeezer')) {
@@ -1104,7 +2116,23 @@ class DataProcessor {
         if (aggregatedCreaturesForSession.has(mapKey)) {
           const existing = aggregatedCreaturesForSession.get(mapKey);
           existing.count += 1;
+          
+          // Update the count overlay in the visual element
+          const countSpan = existing.visual.querySelector('.pixel-font-16');
+          if (countSpan) {
+            countSpan.textContent = existing.count;
+          }
         } else {
+          // Use the same visual creation system as the regenerative system
+          const creatureData = {
+            gameId: creatureGameId,
+            originalName: creatureName,
+            tierLevel: tierLevel,
+            count: 1,
+            isShiny: isShiny
+          };
+          const creatureVisual = createInventoryStyleCreaturePortrait(creatureData);
+          
           aggregatedCreaturesForSession.set(mapKey, {
             count: 1,
             visual: creatureVisual,
@@ -1128,15 +2156,41 @@ class DataProcessor {
       HuntAnalyzerState.totals.staminaSpent += serverResults.next.playerExpDiff;
     }
 
+    // Track win/loss
+    if (rewardScreen.victory) {
+      HuntAnalyzerState.totals.wins++;
+    } else {
+      HuntAnalyzerState.totals.losses++;
+    }
+    
     // Store session data
     const sessionData = {
       message: autoplayMessage,
+      roomId: rewardScreen.roomId,
+      roomName: readableRoomName,
       loot: Array.from(aggregatedLootForSession.values()),
-      creatures: Array.from(aggregatedCreaturesForSession.values())
+      creatures: Array.from(aggregatedCreaturesForSession.values()),
+      timestamp: Date.now(),
+      staminaSpent: serverResults.next?.playerExpDiff || 0,
+      victory: rewardScreen.victory
     };
     
-    console.log('[Hunt Analyzer] Session data being added:', sessionData);
     this.state.data.sessions.push(sessionData);
+    
+    // Consolidated session processing summary
+    console.log('[Hunt Analyzer] Session processed:', {
+      result: autoplayMessage,
+      room: readableRoomName,
+      gold: rewardScreen.loot?.goldAmount || 0,
+      lootItems: aggregatedLootForSession.size,
+      creatures: aggregatedCreaturesForSession.size,
+      staminaSpent: sessionData.staminaSpent
+    });
+    
+    // Auto-save data if persistence is enabled
+    if (HuntAnalyzerState.settings.persistData) {
+      saveHuntAnalyzerData();
+    }
   }
 
   aggregateData() {
@@ -1151,28 +2205,61 @@ class DataProcessor {
     HuntAnalyzerState.totals.runes = 0;
     HuntAnalyzerState.totals.dust = 0;
     HuntAnalyzerState.totals.shiny = 0;
+    HuntAnalyzerState.totals.wins = 0;
+    HuntAnalyzerState.totals.losses = 0;
 
-    // Aggregate data from all sessions into the global maps
-    this.state.data.sessions.forEach(sessionData => {
+    // Filter sessions by selected map
+    const filteredSessions = this.state.data.sessions.filter(sessionData => {
+      if (this.state.ui.selectedMapFilter === "ALL") {
+        return true;
+      }
+      return sessionData.roomName === this.state.ui.selectedMapFilter;
+    });
+
+    // Aggregate data from filtered sessions into the global maps
+    filteredSessions.forEach(sessionData => {
+        // Track wins/losses
+        if (sessionData.victory === true) {
+          HuntAnalyzerState.totals.wins++;
+        } else if (sessionData.victory === false) {
+          HuntAnalyzerState.totals.losses++;
+        }
+        
         sessionData.loot.forEach(item => {
-        const mapKey = `${item.originalName}_${item.rarity}_${item.spriteId}_${item.src}_${item.isEquipment}_${item.stat}`;
-        if (this.state.data.aggregatedLoot.has(mapKey)) {
-          const existing = this.state.data.aggregatedLoot.get(mapKey);
-                existing.count += item.count;
-          this.state.data.aggregatedLoot.set(mapKey, existing);
-            } else {
-          this.state.data.aggregatedLoot.set(mapKey, { ...item });
+            // Handle special items (Gold, Dust) that should only appear in totals
+            if (item.originalName === 'Gold' || item.originalName === 'Dust') {
+                // Still accumulate totals for Gold and Dust
+                if (item.originalName === 'Gold') {
+                    HuntAnalyzerState.totals.gold += item.count;
+                } else if (item.originalName === 'Dust') {
+                    HuntAnalyzerState.totals.dust += item.count;
+                }
+                return; // Skip adding to aggregatedLoot
             }
 
-            // Accumulate global totals for Gold, Dust, Equipment, and Runes based on originalName
-            if (item.originalName === 'Gold') {
-          HuntAnalyzerState.totals.gold += item.count;
-        } else if (item.originalName === 'Dust') {
-          HuntAnalyzerState.totals.dust += item.count;
-        } else if (item.isEquipment) {
-          HuntAnalyzerState.totals.equipment += item.count;
-        } else if (item.originalName.includes('Rune') || item.originalName.includes('rune')) {
-          HuntAnalyzerState.totals.runes += item.count;
+            const mapKey = `${item.originalName}_${item.rarity}_${item.spriteId}_${item.src}_${item.isEquipment}_${item.stat}`;
+            if (this.state.data.aggregatedLoot.has(mapKey)) {
+                const existing = this.state.data.aggregatedLoot.get(mapKey);
+                existing.count += item.count;
+                
+                // Update the count overlay in the visual element
+                if (existing.visual && existing.visual.querySelector) {
+                    const countSpan = existing.visual.querySelector('.pixel-font-16');
+                    if (countSpan) {
+                        countSpan.textContent = existing.count;
+                    }
+                }
+                
+                this.state.data.aggregatedLoot.set(mapKey, existing);
+            } else {
+                this.state.data.aggregatedLoot.set(mapKey, { ...item });
+            }
+
+            // Accumulate global totals for Equipment and Runes based on originalName
+            if (item.isEquipment) {
+                HuntAnalyzerState.totals.equipment += item.count;
+            } else if (item.originalName.includes('Rune') || item.originalName.includes('rune')) {
+                HuntAnalyzerState.totals.runes += item.count;
             }
         });
 
@@ -1181,6 +2268,15 @@ class DataProcessor {
         if (this.state.data.aggregatedCreatures.has(mapKey)) {
           const existing = this.state.data.aggregatedCreatures.get(mapKey);
                 existing.count += creature.count;
+                
+                // Update the count overlay in the visual element
+                if (existing.visual && existing.visual.querySelector) {
+                    const countSpan = existing.visual.querySelector('.pixel-font-16');
+                    if (countSpan) {
+                        countSpan.textContent = existing.count;
+                    }
+                }
+                
           this.state.data.aggregatedCreatures.set(mapKey, existing);
             } else {
           this.state.data.aggregatedCreatures.set(mapKey, { ...creature });
@@ -1199,12 +2295,196 @@ class DataProcessor {
 const dataProcessor = new DataProcessor();
 
 // =======================
+// 2.2. Room Display Enhancement Functions
+// =======================
+
+// Enhanced room title display with boosted and raid status
+function updateRoomTitleDisplay(roomId, roomName) {
+    const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
+    if (!cachedRoomIdDisplayElement) return;
+
+    let displayText = roomName || `Room ID: ${roomId}`;
+    let statusIndicators = [];
+
+    // Check if map is boosted
+    const boostedRoomId = globalThis.state?.daily?.getSnapshot?.()?.context?.boostedMap?.roomId;
+    if (boostedRoomId === roomId) {
+        statusIndicators.push('Boosted');
+    }
+
+    // Check if map is a raid using maps database
+    if (typeof window !== 'undefined' && window.mapsDatabase) {
+        const mapData = window.mapsDatabase.getMapById(roomId);
+        if (mapData && mapData.raid === true) {
+            statusIndicators.push('Raid');
+        }
+    }
+
+    // Add status indicators to display text
+    if (statusIndicators.length > 0) {
+        displayText += ` (${statusIndicators.join(', ')})`;
+    }
+
+    cachedRoomIdDisplayElement.textContent = displayText;
+}
+
+// =======================
+// 2.3. Map Filter Functions
+// =======================
+
+// Update map filter dropdown based on available maps
+function updateMapFilterDropdown() {
+    const mapFilterRow = domCache.get("mod-map-filter-row");
+    if (!mapFilterRow) return;
+
+    // Clear existing content
+    mapFilterRow.innerHTML = "";
+
+    // Create dropdown container
+    const dropdownContainer = document.createElement("div");
+    dropdownContainer.style.position = "relative";
+    dropdownContainer.style.display = "inline-block";
+
+    // Create dropdown button
+    const dropdownButton = document.createElement("button");
+    dropdownButton.id = "mod-map-filter-dropdown-button";
+    dropdownButton.style.padding = "6px 12px";
+    dropdownButton.style.border = "1px solid #3A404A";
+    dropdownButton.style.borderRadius = "4px";
+    dropdownButton.style.backgroundColor = "rgba(40,44,52,0.8)";
+    dropdownButton.style.color = "#ABB2BF";
+    dropdownButton.style.fontSize = "12px";
+    dropdownButton.style.cursor = "pointer";
+    dropdownButton.style.minWidth = "150px";
+    dropdownButton.style.textAlign = "left";
+    dropdownButton.style.display = "flex";
+    dropdownButton.style.justifyContent = "space-between";
+    dropdownButton.style.alignItems = "center";
+
+    // Create dropdown arrow
+    const arrow = document.createElement("span");
+    arrow.textContent = "▼";
+    arrow.style.fontSize = "10px";
+    arrow.style.marginLeft = "8px";
+
+    dropdownButton.appendChild(document.createTextNode(HuntAnalyzerState.ui.selectedMapFilter));
+    dropdownButton.appendChild(arrow);
+
+    // Create dropdown menu
+    const dropdownMenu = document.createElement("div");
+    dropdownMenu.id = "mod-map-filter-dropdown-menu";
+    dropdownMenu.style.position = "absolute";
+    dropdownMenu.style.top = "100%";
+    dropdownMenu.style.left = "0";
+    dropdownMenu.style.right = "0";
+    dropdownMenu.style.backgroundColor = "rgba(40,44,52,0.95)";
+    dropdownMenu.style.border = "1px solid #3A404A";
+    dropdownMenu.style.borderRadius = "4px";
+    dropdownMenu.style.boxShadow = "0 4px 8px rgba(0,0,0,0.3)";
+    dropdownMenu.style.zIndex = "10000";
+    dropdownMenu.style.display = "none";
+    dropdownMenu.style.maxHeight = "200px";
+    dropdownMenu.style.overflowY = "auto";
+
+    // Get unique map names from sessions
+    const availableMaps = [...new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName))];
+    
+    // Add "ALL" option
+    const allOption = createDropdownOption("ALL");
+    dropdownMenu.appendChild(allOption);
+
+    // Add options for each farmed map
+    availableMaps.forEach(mapName => {
+        const mapOption = createDropdownOption(mapName);
+        dropdownMenu.appendChild(mapOption);
+    });
+
+    // Toggle dropdown visibility
+    dropdownClickHandler = (e) => {
+        e.stopPropagation();
+        const isVisible = dropdownMenu.style.display === "block";
+        dropdownMenu.style.display = isVisible ? "none" : "block";
+        arrow.textContent = isVisible ? "▼" : "▲";
+    };
+    dropdownButton.addEventListener("click", dropdownClickHandler);
+
+    // Close dropdown when clicking outside
+    documentClickHandler = () => {
+        dropdownMenu.style.display = "none";
+        arrow.textContent = "▼";
+    };
+    document.addEventListener("click", documentClickHandler);
+
+    dropdownContainer.appendChild(dropdownButton);
+    dropdownContainer.appendChild(dropdownMenu);
+    mapFilterRow.appendChild(dropdownContainer);
+}
+
+// Create a dropdown option
+function createDropdownOption(mapName) {
+    const option = document.createElement("div");
+    option.textContent = mapName;
+    option.style.padding = "8px 12px";
+    option.style.cursor = "pointer";
+    option.style.fontSize = "12px";
+    option.style.color = "#ABB2BF";
+    option.style.borderBottom = "1px solid #3A404A";
+    option.style.transition = "background-color 0.2s ease";
+
+    // Highlight selected option
+    if (mapName === HuntAnalyzerState.ui.selectedMapFilter) {
+        option.style.backgroundColor = "rgba(224, 108, 117, 0.3)";
+        option.style.color = "#FFFFFF";
+    }
+
+    // Hover effects
+    option.addEventListener("mouseenter", () => {
+        if (mapName !== HuntAnalyzerState.ui.selectedMapFilter) {
+            option.style.backgroundColor = "rgba(224, 108, 117, 0.2)";
+        }
+    });
+
+    option.addEventListener("mouseleave", () => {
+        if (mapName !== HuntAnalyzerState.ui.selectedMapFilter) {
+            option.style.backgroundColor = "transparent";
+        }
+    });
+
+    // Click handler
+    option.addEventListener("click", () => {
+        HuntAnalyzerState.ui.selectedMapFilter = mapName;
+        
+        // Update dropdown button text
+        const dropdownButton = document.getElementById("mod-map-filter-dropdown-button");
+        if (dropdownButton) {
+            dropdownButton.childNodes[0].textContent = mapName;
+        }
+        
+        // Close dropdown
+        const dropdownMenu = document.getElementById("mod-map-filter-dropdown-menu");
+        if (dropdownMenu) {
+            dropdownMenu.style.display = "none";
+        }
+        
+        // Update arrow
+        const arrow = dropdownButton?.querySelector("span");
+        if (arrow) {
+            arrow.textContent = "▼";
+        }
+        
+        // Refresh data and display
+        dataProcessor.aggregateData();
+        renderAllSessions();
+    });
+
+    return option;
+}
+
+// =======================
 // 3. Data Processing Functions
 // =======================
-/**
- * Renders all stored game sessions to the analyzer panel.
- * Optimized to use incremental updates instead of full re-renders when possible.
- */
+// Renders all stored game sessions to the analyzer panel.
+// Optimized to use incremental updates instead of full re-renders when possible.
 function renderAllSessions() {
     // Check if the panel is open first
     if (!document.getElementById(PANEL_ID)) {
@@ -1226,7 +2506,6 @@ function renderAllSessions() {
     dataProcessor.aggregateData();
     
     // Use DocumentFragment for efficient batch DOM updates
-    const lootFragment = document.createDocumentFragment();
     const creatureFragment = document.createDocumentFragment();
     
     // Clear previous content - but build fragments first to minimize reflow
@@ -1244,365 +2523,457 @@ function renderAllSessions() {
         cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
     }
 
-    // Filter out Gold and Dust from the main loot display (as they have separate totals)
-    const filteredLoot = Array.from(HuntAnalyzerState.data.aggregatedLoot.values()).filter(item =>
-        item.originalName !== 'Gold' && item.originalName !== 'Dust'
-    );
+    // Get all loot items (Gold and Dust are already excluded from aggregatedLoot)
+    const allLoot = Array.from(HuntAnalyzerState.data.aggregatedLoot.values());
 
-    // Sort and render overall filtered loot based on new rules
-    const sortedFilteredLoot = filteredLoot.sort((a, b) => {
-        // Rule 0: Runes come first
-        const aIsRune = isRuneItem(a.originalName, a);
-        const bIsRune = isRuneItem(b.originalName, b);
-        if (aIsRune && !bIsRune) {
-            return -1; // a (rune) comes before b (non-rune)
-        }
-        if (!aIsRune && bIsRune) {
-            return 1; // b (rune) comes before a (non-rune)
-        }
-
-        // Rule 1: equipDrop items come before non-equipDrop items
-        if (a.isEquipment && !b.isEquipment) {
-            return -1; // a (equipment) comes before b (non-equipment)
-        }
-        if (!a.isEquipment && b.isEquipment) {
-            return 1; // b (equipment) comes before a (non-equipment)
-        }
-
-        // If both are equipment or both are non-equipment, apply secondary rules
-        if (a.isEquipment && b.isEquipment) {
-            // Rule 2.1: If both are equipDrop, sort by GameId
-            if (a.gameId !== b.gameId) {
-                return a.gameId - b.gameId;
-            }
-            // Rule 2.2: Then by Stat (alphabetical)
-            if (a.stat && b.stat) {
-                return a.stat.localeCompare(b.stat);
-            }
-            // Fallback for equipment if stats are same or missing
-            return a.originalName.localeCompare(b.originalName);
-        } else {
-            // Rule 3.1: If both are non-equipDrop, sort by TooltipKey (originalName)
-            const nameCompare = a.originalName.localeCompare(b.originalName);
-            if (nameCompare !== 0) {
-                return nameCompare;
-            }
-            // Rule 3.2: Then by rarityLevel (rarity) (ascending)
-            return a.rarity - b.rarity;
-        }
+    // Calculate total loot items for current filter
+    let totalLootItems = 0;
+    allLoot.forEach((data) => {
+        totalLootItems += data.count;
     });
 
-    sortedFilteredLoot.forEach((data) => {
-        const itemEntryDiv = document.createElement('div');
-        itemEntryDiv.style.display = 'flex';
-        itemEntryDiv.style.flexDirection = 'row';
-        itemEntryDiv.style.alignItems = 'center';
-        itemEntryDiv.style.justifyContent = 'flex-start';
-        itemEntryDiv.style.border = `1px solid ${data.rarityBorderColor}`;
-        itemEntryDiv.style.borderRadius = '5px';
-        itemEntryDiv.style.padding = '4px 8px';
-        itemEntryDiv.style.backgroundColor = '#3B4048';
-        itemEntryDiv.style.flexShrink = '0';
-        itemEntryDiv.style.width = '100%';
-        itemEntryDiv.style.height = '48px'; /* Fixed height for loot items */
-        itemEntryDiv.style.boxShadow = 'inset 0 1px 3px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.4)';
-        itemEntryDiv.style.transition = 'all 0.2s ease-out';
+    // Update loot title with total count
+    const lootTitle = document.getElementById('mod-loot-title');
+    if (lootTitle) {
+        const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? '' : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
+        lootTitle.textContent = `${t('mods.huntAnalyzer.loot')}: ${totalLootItems}${filterText}`;
+    }
 
-
-        const iconWrapper = document.createElement('div'); // Changed from iconSpan to iconWrapper
-        iconWrapper.style.flexShrink = '0';
-        iconWrapper.style.marginRight = '8px';
-        // The visual will be an HTMLElement (img or div.sprite) or a string (emoji)
-        // Ensure it's treated as HTMLElement if it is.
-        if (data.visual instanceof HTMLElement) {
-            iconWrapper.appendChild(data.visual);
-        } else {
-            // Fallback for emojis or plain text if getItemVisual returns string
-            iconWrapper.textContent = data.visual;
-            iconWrapper.style.fontSize = '24px'; // Make emoji/text larger
-            iconWrapper.style.width = '36px';
-            iconWrapper.style.height = '36px';
-            iconWrapper.style.display = 'flex';
-            iconWrapper.style.justifyContent = 'center';
-            iconWrapper.style.alignItems = 'center';
-        }
-        itemEntryDiv.appendChild(iconWrapper);
-
-        const nameSpan = document.createElement('span');
-        nameSpan.style.flexGrow = '1';
-        nameSpan.style.color = '#ABB2BF';
-        nameSpan.style.fontSize = "10px";
-        nameSpan.style.whiteSpace = 'nowrap';
-        nameSpan.style.overflow = 'hidden';
-        nameSpan.style.textOverflow = 'ellipsis';
-        nameSpan.textContent = data.originalName; // Simply display the name
-        itemEntryDiv.appendChild(nameSpan);
-
-        const lootInfoSpan = document.createElement('span');
-        lootInfoSpan.style.flexShrink = '0';
-        lootInfoSpan.style.marginLeft = '8px';
-        lootInfoSpan.style.fontSize = "10px";
-        lootInfoSpan.style.fontFamily = 'inherit';
-        lootInfoSpan.style.textAlign = 'right';
-
-        // Check if the item is equipment and has a stat icon
-        if (data.isEquipment && data.stat && iconMap[data.stat]) {
-            const statIconImg = document.createElement('img');
-            statIconImg.src = iconMap[data.stat];
-            statIconImg.alt = data.stat.toUpperCase();
-            statIconImg.style.width = '14px'; // Small icon
-            statIconImg.style.height = '14px';
-            statIconImg.style.verticalAlign = 'middle';
-            statIconImg.style.marginRight = '2px';
-            statIconImg.style.imageRendering = 'pixelated';
-
-            lootInfoSpan.appendChild(statIconImg);
-            const textNode = document.createTextNode(` (x${data.count})`);
-            lootInfoSpan.appendChild(textNode);
-            lootInfoSpan.style.color = data.rarityBorderColor; // Keep rarity color for equipment
-        } else if (data.rarity > 0) {
-            // Use descriptive rarity if available, otherwise use database rarity text, fallback to numeric
-            const rarityText = data._descriptiveRarity || 
-                              window.inventoryDatabase?.rarityText?.[data.rarity] || 
-                              `Rarity ${data.rarity}`;
-            lootInfoSpan.textContent = `${rarityText} (x${data.count})`;
-            lootInfoSpan.style.color = data.rarityBorderColor;
-        } else {
-            lootInfoSpan.textContent = `x${data.count}`;
-            lootInfoSpan.style.color = '#ABB2BF';
-        }
-        itemEntryDiv.appendChild(lootInfoSpan);
-        lootFragment.appendChild(itemEntryDiv);
-    });
-    
-    // Batch append all loot items at once
-    cachedLootDiv.appendChild(lootFragment);
-
-    // Sort and render overall aggregated creatures
-    const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
-        // First priority: shiny creatures at the top
-        if (a.isShiny !== b.isShiny) {
-            return a.isShiny ? -1 : 1; // Shiny creatures first
+    // Sort loot with new priority order: Runes → Equipment → Everything else
+    const sortedFilteredLoot = allLoot.sort((a, b) => {
+        // First priority: Category (Runes → Equipment → Everything else)
+        const categoryA = getItemCategory(a);
+        const categoryB = getItemCategory(b);
+        if (categoryA !== categoryB) {
+            return categoryA - categoryB;
         }
         
-        // Within same shiny status, sort by GameId, then by tierLevel
+        // Second priority: Name (alphabetical within each category)
+        const nameCompare = a.originalName.localeCompare(b.originalName);
+        if (nameCompare !== 0) {
+            return nameCompare;
+        }
+        
+        // Third priority: Rarity (highest rarity first)
+        if (a.rarity !== b.rarity) {
+            return b.rarity - a.rarity; // Higher rarity first (descending)
+        }
+        
+        // Within same name and rarity, sort by GameId for consistency
         if (a.gameId !== b.gameId) {
             return a.gameId - b.gameId; // Sort by GameId numerically
-        }
-        if (a.tierLevel !== b.tierLevel) {
-            return a.tierLevel - b.tierLevel; // Then by tier level
         }
         return 0;
     });
 
-    sortedOverallCreatures.forEach((data) => {
-        const creatureEntryDiv = document.createElement('div');
-        creatureEntryDiv.style.display = 'flex';
-        creatureEntryDiv.style.flexDirection = 'row';
-        creatureEntryDiv.style.alignItems = 'center';
-        creatureEntryDiv.style.justifyContent = 'flex-start';
-        // Use tierLevel for border color
-        creatureEntryDiv.style.border = `1px solid ${getRarityBorderColor(data.tierLevel)}`;
-        creatureEntryDiv.style.borderRadius = '5px';
-        creatureEntryDiv.style.padding = '4px 8px';
-        creatureEntryDiv.style.backgroundColor = '#3B4048';
-        creatureEntryDiv.style.flexShrink = '0';
-        creatureEntryDiv.style.width = '100%';
-        creatureEntryDiv.style.height = '48px'; /* Fixed height for creature items */
-        creatureEntryDiv.style.boxShadow = 'inset 0 1px 3px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.4)'; // Corrected application
-        creatureEntryDiv.style.transition = 'all 0.2s ease-out'; // Corrected application
+    // Create grid container for loot using unified function
+    const lootGridContainer = createUnifiedGridContainer();
 
-        const iconWrapper = document.createElement('div'); // Wrapper for the creature icon
-        iconWrapper.style.flexShrink = '0';
-        iconWrapper.style.marginRight = '8px';
-        iconWrapper.style.width = '36px'; // Size for the icon
-        iconWrapper.style.height = '36px';
+    sortedFilteredLoot.forEach((data) => {
+        const lootEntryDiv = document.createElement('div');
+        lootEntryDiv.style.display = 'flex';
+        lootEntryDiv.style.flexDirection = 'column';
+        lootEntryDiv.style.alignItems = 'center';
+        lootEntryDiv.style.justifyContent = 'center';
+        lootEntryDiv.style.padding = '4px';
+        lootEntryDiv.style.backgroundColor = 'rgba(59, 64, 72, 0.3)';
+        lootEntryDiv.style.borderRadius = '6px';
+
+        const iconWrapper = document.createElement('div');
         iconWrapper.style.display = 'flex';
         iconWrapper.style.justifyContent = 'center';
         iconWrapper.style.alignItems = 'center';
 
-        // Append the visual element (which is now an <img>) to the wrapper
-        if (data.visual instanceof HTMLElement) {
-            iconWrapper.appendChild(data.visual);
+        // Debug: Log equipment items only
+        if (data.isEquipment) {
+            // Equipment processing consolidated - see summary log at end
+        }
+        
+        // For equipment items, always use API components directly
+        // This ensures proper equipment portraits regardless of stored visual state
+        let visualElement;
+        
+        // Try to get gameId from spriteId if missing for equipment items
+        let equipmentGameId = data.gameId;
+        if (data.isEquipment && !equipmentGameId && data.spriteId) {
+            equipmentGameId = data.spriteId;
+        }
+        
+        if (data.isEquipment && equipmentGameId && typeof globalThis.state?.utils?.getEquipment === 'function') {
+            try {
+                const equipData = globalThis.state.utils.getEquipment(equipmentGameId);
+                if (equipData && equipData.metadata && typeof equipData.metadata.spriteId === 'number') {
+                    const equipmentSpriteId = equipData.metadata.spriteId;
+                    
+                    // Use API component for equipment like Cyclopedia does
+                    if (api && api.ui && api.ui.components && api.ui.components.createItemPortrait) {
+                        const equipmentPortrait = api.ui.components.createItemPortrait({
+                            itemId: equipmentSpriteId,
+                            tier: data.rarity || 1
+                        });
+                        
+                        // Check if we got a valid DOM element
+                        if (equipmentPortrait && equipmentPortrait.nodeType) {
+                            // If it's a button, get the first child (the actual portrait)
+                            if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
+                                const firstChild = equipmentPortrait.firstChild;
+                                if (firstChild && firstChild.nodeType) {
+                                    // Add count overlay to the portrait (bottom left like creatures)
+                                    const countSpan = document.createElement('span');
+                                    countSpan.className = 'pixel-font-16 absolute bottom-0 left-2px z-3 text-whiteExp';
+                                    countSpan.style.position = 'absolute';
+                                    countSpan.style.bottom = '0px';
+                                    countSpan.style.left = '2px';
+                                    countSpan.style.color = 'white';
+                                    countSpan.style.fontSize = '14px';
+                                    countSpan.style.background = 'rgba(0, 0, 0, 0.7)';
+                                    countSpan.style.padding = '0px 2px';
+                                    countSpan.style.borderRadius = '2px';
+                                    countSpan.style.zIndex = '10';
+                                    countSpan.textContent = data.count || 1;
+                                    
+                                    firstChild.appendChild(countSpan);
+                                    visualElement = firstChild;
+                                }
+                            } else {
+                                // Use the portrait directly if it's not a button
+                                visualElement = equipmentPortrait;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[Hunt Analyzer] Error creating equipment API component:', e);
+            }
+        }
+        
+        // Fallback to stored visual or regenerate for non-equipment items
+        if (!visualElement) {
+            visualElement = data.visual;
+            
+            // Only regenerate if visual is not a proper HTMLElement
+            if (!(visualElement instanceof HTMLElement)) {
+                // Regenerate visual from item data (loaded from persistence)
+                const itemData = {
+                    spriteId: data.spriteId,
+                    src: data.src,
+                    spriteSrc: data.src,
+                    originalName: data.originalName,
+                    rarity: data.rarity,
+                    count: data.count,
+                    isEquipment: data.isEquipment,
+                    gameId: data.gameId,
+                    stat: data.stat
+                };
+                visualElement = createInventoryStyleItemPortrait(itemData);
+            }
+        }
+        
+        if (visualElement instanceof HTMLElement) {
+            iconWrapper.appendChild(visualElement);
         } else {
-            // Fallback for non-image visuals (e.g., if getCreatureDetails ever returns string)
-            iconWrapper.textContent = data.visual;
-            iconWrapper.style.fontSize = '24px'; // Apply font size for emojis/text
+            // Fallback for non-image visuals
+            iconWrapper.textContent = visualElement || '🎲';
+            iconWrapper.style.fontSize = '24px';
+        }
+        lootEntryDiv.appendChild(iconWrapper);
+
+        lootGridContainer.appendChild(lootEntryDiv);
+        HuntAnalyzerState.totals.loot += data.count; // Accumulate for overall rate
+    });
+    
+    // Append grid container to loot display
+    cachedLootDiv.appendChild(lootGridContainer);
+
+    // Sort and render overall aggregated creatures in grid layout
+    const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
+        // First priority: name (alphabetical)
+        const nameCompare = a.originalName.localeCompare(b.originalName);
+        if (nameCompare !== 0) {
+            return nameCompare;
+        }
+        
+        // Second priority: rarity (highest tier level first)
+        if (a.tierLevel !== b.tierLevel) {
+            return b.tierLevel - a.tierLevel; // Higher tier level first (descending)
+        }
+        
+        // Within same name and tier level, sort by GameId for consistency
+        if (a.gameId !== b.gameId) {
+            return a.gameId - b.gameId; // Sort by GameId numerically
+        }
+        return 0;
+    });
+
+    // Calculate total creature drops for current filter
+    let totalCreatureDrops = 0;
+    sortedOverallCreatures.forEach((data) => {
+        totalCreatureDrops += data.count;
+    });
+
+    // Update creature drops title with total count
+    const creatureDropTitle = document.getElementById('mod-creature-drops-title');
+    if (creatureDropTitle) {
+        const filterText = HuntAnalyzerState.ui.selectedMapFilter === 'ALL' ? '' : ` (${HuntAnalyzerState.ui.selectedMapFilter})`;
+        creatureDropTitle.textContent = `${t('mods.huntAnalyzer.creatureDrops')}: ${totalCreatureDrops}${filterText}`;
+    }
+
+    // Create grid container for creatures using unified function
+    const gridContainer = createUnifiedGridContainer();
+
+    sortedOverallCreatures.forEach((data) => {
+        const creatureEntryDiv = document.createElement('div');
+        creatureEntryDiv.style.display = 'flex';
+        creatureEntryDiv.style.flexDirection = 'column';
+        creatureEntryDiv.style.alignItems = 'center';
+        creatureEntryDiv.style.justifyContent = 'center';
+        creatureEntryDiv.style.padding = '4px';
+        creatureEntryDiv.style.backgroundColor = 'rgba(59, 64, 72, 0.3)';
+        creatureEntryDiv.style.borderRadius = '6px';
+
+        const iconWrapper = document.createElement('div');
+        iconWrapper.style.display = 'flex';
+        iconWrapper.style.justifyContent = 'center';
+        iconWrapper.style.alignItems = 'center';
+
+        // Regenerate visual element from creature data instead of using saved visual
+        // This fixes the "[object Object]" issue when loading from persistence
+        let visualElement;
+        if (data.visual instanceof HTMLElement) {
+            // Use existing visual if it's a proper HTMLElement (fresh data)
+            visualElement = data.visual;
+        } else {
+            // Regenerate visual from creature data (loaded from persistence)
+            if (data.gameId) {
+                // Create inventory-style creature portrait like the game does
+                visualElement = createInventoryStyleCreaturePortrait(data);
+            } else {
+                // Fallback emoji
+                visualElement = '👾';
+            }
+        }
+        
+        if (visualElement instanceof HTMLElement) {
+            iconWrapper.appendChild(visualElement);
+        } else {
+            // Fallback for non-image visuals
+            iconWrapper.textContent = visualElement || '👾';
+            iconWrapper.style.fontSize = '24px';
         }
         creatureEntryDiv.appendChild(iconWrapper);
 
-        const nameSpan = document.createElement('span');
-        nameSpan.style.flexGrow = '1';
-        // Display creature name with shiny indicator if applicable
-        let displayName = data.originalName;
-        if (data.isShiny) {
-            displayName = `✨ ${displayName}`;
-        }
-        nameSpan.textContent = displayName;
-        nameSpan.style.fontSize = "10px";
-        nameSpan.style.color = data.isShiny ? '#FFD700' : '#ABB2BF'; // Gold color for shiny creatures
-        nameSpan.style.whiteSpace = 'nowrap';
-        nameSpan.style.overflow = 'hidden';
-        nameSpan.style.textOverflow = 'ellipsis';
-        creatureEntryDiv.appendChild(nameSpan);
-
-        const tierAndCountText = document.createElement('span');
-        tierAndCountText.style.flexShrink = '0';
-        tierAndCountText.style.marginLeft = '8px';
-        tierAndCountText.style.fontSize = "10px";
-        tierAndCountText.style.fontFamily = 'inherit';
-        tierAndCountText.style.textAlign = 'right';
-        // Apply tier-based color
-        tierAndCountText.style.color = getRarityBorderColor(data.tierLevel);
-
-        tierAndCountText.textContent = `${data.tierName} (x${data.count})`; // Display tier name and count
-
-        creatureEntryDiv.appendChild(tierAndCountText);
-        creatureFragment.appendChild(creatureEntryDiv);
+        gridContainer.appendChild(creatureEntryDiv);
         HuntAnalyzerState.totals.creatures += data.count; // Accumulate for overall rate
     });
     
-    // Batch append all creature items at once
-    cachedCreatureDropDiv.appendChild(creatureFragment);
+    // Append grid container to creature display
+    cachedCreatureDropDiv.appendChild(gridContainer);
 
     updatePanelDisplay(); // Update overall rates after rendering all sessions
 }
 
 
-/**
- * PROCESSES THE CONTENT OF AN AUTOPLAY SUMMARY USING A 'serverResults' OBJECT.
- * This function now extracts data from the serverResults and adds it to the
- * `allGameSessionsData` array. It does NOT render directly.
- *
- * @param {FullServerResults} serverResults - The structured data containing game outcome, loot, and creature drops.
- */
+// PROCESSES THE CONTENT OF AN AUTOPLAY SUMMARY USING A 'serverResults' OBJECT.
+// This function now extracts data from the serverResults and adds it to the
+// `allGameSessionsData` array. It does NOT render directly.
+// serverResults - The structured data containing game outcome, loot, and creature drops.
 function processAutoplaySummary(serverResults) {
-    console.log('[Hunt Analyzer] processAutoplaySummary called with:', serverResults);
-    
     // Delegate to the new data processor
-    console.log('[Hunt Analyzer] Processing session data...');
     dataProcessor.processSession(serverResults);
 
     // Trigger re-render - use requestAnimationFrame to batch DOM updates
-    console.log('[Hunt Analyzer] Triggering re-render...');
     requestAnimationFrame(() => {
         renderAllSessions();
+        updateMapFilterDropdown();
     });
 }
 
 
-/**
- * Generates a summarized log text of all aggregated loot and creature drops.
- * This is the text that will be copied to the user's clipboard.
- * @returns {string} The formatted summary log.
- */
+// Generates a summarized log text of all aggregated loot and creature drops.
+// This is the text that will be copied to the user's clipboard.
+// Returns the formatted summary log.
 function generateSummaryLogText() {
     let summary = `--- Hunt Analyzer Summary ---\n`;
 
     // Overall Stats
     const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
+    const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
     const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
+    
+    // Calculate overall rates for summary
+    const autoplayRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours) : 0;
+    const goldRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours) : 0;
+    const creatureRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours) : 0;
+    const equipmentRatePerHour = overallElapsedTimeHours > 0 ? Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours) : 0;
+    const staminaSpentRatePerHour = overallElapsedTimeHours > 0 ? Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours) : 0;
+    
+    // Calculate overall efficiency metrics
+    const goldPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.totals.gold / HuntAnalyzerState.totals.staminaSpent).toFixed(2) : 'N/A';
+    const sessionsPerStamina = HuntAnalyzerState.totals.staminaSpent > 0 ? (HuntAnalyzerState.session.count / HuntAnalyzerState.totals.staminaSpent).toFixed(3) : 'N/A';
+    const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
+    const winRate = totalSessionsForWinRate > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100) : 0;
+    
     summary += `Room: ${cachedRoomIdDisplayElement?.textContent || 'N/A'}\n`;
     summary += `Sessions: ${HuntAnalyzerState.session.count}\n`;
+    summary += `Win/Loss: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
     summary += `Time Elapsed: ${formatTime(overallElapsedTimeMs)}\n`;
     summary += `Gold: ${HuntAnalyzerState.totals.gold} | Dust: ${HuntAnalyzerState.totals.dust}\n`;
     summary += `Equipment Drops: ${HuntAnalyzerState.totals.equipment} | Creature Drops: ${HuntAnalyzerState.totals.creatures} | Shiny Drops: ${HuntAnalyzerState.totals.shiny}\n`;
     summary += `Total Stamina Spent: ${HuntAnalyzerState.totals.staminaSpent}\n`;
+    summary += `---------------------------\n`;
+    summary += `Overall Rates: ${autoplayRatePerHour} sessions/h | ${goldRatePerHour} gold/h | ${creatureRatePerHour} creatures/h | ${equipmentRatePerHour} equipment/h\n`;
+    summary += `Overall Efficiency: ${goldPerStamina} gold/stamina | ${sessionsPerStamina} sessions/stamina | ${staminaSpentRatePerHour} stamina/h\n`;
+    summary += `Generated: ${new Date().toLocaleString()}\n`;
     summary += `---------------------------\n\n`;
 
-    // Loot Summary
-    summary += `--- Aggregated Loot ---\n`;
-    if (HuntAnalyzerState.data.aggregatedLoot.size === 0) {
-        summary += `No loot recorded.\n`;
+    // Map-specific Analysis
+    summary += `--- Map Analysis ---\n`;
+    if (HuntAnalyzerState.data.sessions.length === 0) {
+        summary += `No sessions recorded.\n`;
     } else {
-        // Sort loot for consistent output based on new rules
-        const sortedLoot = Array.from(HuntAnalyzerState.data.aggregatedLoot.values()).sort((a, b) => {
-            // Rule 0: Runes come first
-            const aIsRune = isRuneItem(a.originalName, a);
-            const bIsRune = isRuneItem(b.originalName, b);
-            if (aIsRune && !bIsRune) {
-                return -1; // a (rune) comes before b (non-rune)
-            }
-            if (!aIsRune && bIsRune) {
-                return 1; // b (rune) comes before a (non-rune)
-            }
-
-            // Rule 1: equipDrop items come before non-equipDrop items
-            if (a.isEquipment && !b.isEquipment) {
-                return -1; // a (equipment) comes before b (non-equipment)
-            }
-            if (!a.isEquipment && b.isEquipment) {
-                return 1; // b (equipment) comes before a (non-equipment)
-            }
-
-            // If both are equipment or both are non-equipment, apply secondary rules
-            if (a.isEquipment && b.isEquipment) {
-                // Rule 2.1: If both are equipDrop, sort by GameId
-                if (a.gameId !== b.gameId) {
-                    return a.gameId - b.gameId;
-                }
-                // Rule 2.2: Then by Stat
-                if (a.stat && b.stat) {
-                    return a.stat.localeCompare(b.stat);
-                }
-                // Fallback for equipment if stats are same or missing
-                return a.originalName.localeCompare(b.originalName);
-            } else {
-                // Rule 3.1: If both are non-equipDrop, sort by TooltipKey (originalName)
-                const nameCompare = a.originalName.localeCompare(b.originalName);
-                if (nameCompare !== 0) {
-                    return nameCompare;
-                }
-                // Rule 3.2: Then by rarityLevel (rarity)
-                return a.rarity - b.rarity;
-            }
-        });
-
-        sortedLoot.forEach(item => {
-            let itemLine = `${item.originalName}: x${item.count}`;
-            if (item.rarity > 0) {
-                // Use descriptive rarity if available, otherwise use database rarity text, fallback to numeric
-                const rarityText = item._descriptiveRarity || 
-                                  window.inventoryDatabase?.rarityText?.[item.rarity] || 
-                                  `Rarity ${item.rarity}`;
-                itemLine += ` (${rarityText})`;
-            }
-            if (item.isEquipment && item.stat) {
-                itemLine += ` (Stat: ${item.stat.toUpperCase()})`;
-            }
-            summary += `${itemLine}\n`;
-        });
-    }
-    summary += `---------------------------\n\n`;
-
-    // Creature Summary
-    summary += `--- Aggregated Creature Drops ---\n`;
-    if (HuntAnalyzerState.data.aggregatedCreatures.size === 0) {
-        summary += `No creatures recorded.\n`;
-    } else {
-        // Sort creatures for consistent output
-        const sortedCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
-            // First priority: shiny creatures at the top
-            if (a.isShiny !== b.isShiny) {
-                return a.isShiny ? -1 : 1; // Shiny creatures first
+        // Group sessions by map and calculate map-specific stats
+        const mapGroups = {};
+        const overallStartTime = HuntAnalyzerState.session.startTime;
+        const sessionsWithTimestamps = HuntAnalyzerState.data.sessions.filter(s => s.timestamp);
+        
+        HuntAnalyzerState.data.sessions.forEach(session => {
+            const mapName = session.roomName || 'Unknown Map';
+            if (!mapGroups[mapName]) {
+                mapGroups[mapName] = {
+                    sessions: 0,
+                    wins: 0,
+                    losses: 0,
+                    loot: new Map(),
+                    creatures: new Map(),
+                    totalGold: 0,
+                    totalDust: 0,
+                    totalStamina: 0,
+                    totalEquipment: 0,
+                    totalCreatures: 0,
+                    totalShiny: 0,
+                    startTime: session.timestamp || overallStartTime,
+                    endTime: session.timestamp || overallStartTime,
+                    hasTimestamps: false
+                };
             }
             
-            // Within same shiny status, sort by GameId, then by tierLevel
-            if (a.gameId !== b.gameId) {
-                return a.gameId - b.gameId; // Sort by GameId numerically
+            mapGroups[mapName].sessions++;
+            if (session.victory === true) {
+                mapGroups[mapName].wins++;
+            } else if (session.victory === false) {
+                mapGroups[mapName].losses++;
             }
-            if (a.tierLevel !== b.tierLevel) {
-                return a.tierLevel - b.tierLevel; // Then by tier level
+            mapGroups[mapName].totalGold += session.gold || 0;
+            mapGroups[mapName].totalDust += session.dust || 0;
+            mapGroups[mapName].totalStamina += session.staminaSpent || 0;
+            
+            // Track time range for this map
+            if (session.timestamp) {
+                mapGroups[mapName].hasTimestamps = true;
+                mapGroups[mapName].startTime = Math.min(mapGroups[mapName].startTime, session.timestamp);
+                mapGroups[mapName].endTime = Math.max(mapGroups[mapName].endTime, session.timestamp);
+            } else {
+                // For sessions without timestamps, use overall session time range
+                mapGroups[mapName].startTime = Math.min(mapGroups[mapName].startTime, overallStartTime);
+                mapGroups[mapName].endTime = Math.max(mapGroups[mapName].endTime, Date.now());
             }
-            return 0;
+            
+            // Aggregate loot for this map
+            session.loot.forEach(item => {
+                const mapKey = `${item.originalName}_${item.rarity}_${item.spriteId}_${item.src}_${item.isEquipment}_${item.stat}`;
+                if (mapGroups[mapName].loot.has(mapKey)) {
+                    const existing = mapGroups[mapName].loot.get(mapKey);
+                    existing.count += item.count;
+                    mapGroups[mapName].loot.set(mapKey, existing);
+                } else {
+                    mapGroups[mapName].loot.set(mapKey, { ...item });
+                }
+                
+                // Count equipment and creatures
+                if (item.isEquipment) {
+                    mapGroups[mapName].totalEquipment += item.count;
+                }
+            });
+            
+            // Aggregate creatures for this map
+            session.creatures.forEach(creature => {
+                const mapKey = `${creature.gameId}_${creature.tierLevel}_${creature.isShiny ? 'shiny' : 'normal'}`;
+                if (mapGroups[mapName].creatures.has(mapKey)) {
+                    const existing = mapGroups[mapName].creatures.get(mapKey);
+                    existing.count += creature.count;
+                    mapGroups[mapName].creatures.set(mapKey, existing);
+                } else {
+                    mapGroups[mapName].creatures.set(mapKey, { ...creature });
+                }
+                
+                mapGroups[mapName].totalCreatures += creature.count;
+                if (creature.isShiny) {
+                    mapGroups[mapName].totalShiny += creature.count;
+                }
+            });
         });
-
-        sortedCreatures.forEach(creature => {
-            let creatureLine = `${creature.originalName} (${creature.tierName}): x${creature.count}`;
-            if (creature.isShiny) {
-                creatureLine = `✨ ${creatureLine}`;
+        
+        // Sort maps by session count (most hunted first)
+        const sortedMaps = Object.keys(mapGroups).sort((a, b) => mapGroups[b].sessions - mapGroups[a].sessions);
+        
+        sortedMaps.forEach(mapName => {
+            const mapData = mapGroups[mapName];
+            const mapTimeHours = (mapData.endTime - mapData.startTime) / (1000 * 60 * 60);
+            
+            // Calculate map-specific rates
+            const mapSessionRate = mapTimeHours > 0 ? Math.floor(mapData.sessions / mapTimeHours) : 0;
+            const mapGoldRate = mapTimeHours > 0 ? Math.floor(mapData.totalGold / mapTimeHours) : 0;
+            const mapCreatureRate = mapTimeHours > 0 ? Math.floor(mapData.totalCreatures / mapTimeHours) : 0;
+            const mapEquipmentRate = mapTimeHours > 0 ? Math.round(mapData.totalEquipment / mapTimeHours) : 0;
+            const mapStaminaRate = mapTimeHours > 0 ? Math.floor(mapData.totalStamina / mapTimeHours) : 0;
+            
+            // Calculate map-specific efficiency
+            const mapGoldPerStamina = mapData.totalStamina > 0 ? (mapData.totalGold / mapData.totalStamina).toFixed(2) : 'N/A';
+            const mapSessionsPerStamina = mapData.totalStamina > 0 ? (mapData.sessions / mapData.totalStamina).toFixed(3) : 'N/A';
+            const mapWinRate = (mapData.wins + mapData.losses) > 0 ? Math.round((mapData.wins / (mapData.wins + mapData.losses)) * 100) : 0;
+            
+            summary += `\n${mapName}:\n`;
+            summary += `  Sessions: ${mapData.sessions} | W/L: ${mapData.wins}/${mapData.losses} (${mapWinRate}%) | Time: ${formatTime(mapData.endTime - mapData.startTime)}${mapData.hasTimestamps ? '' : ' (estimated)'}\n`;
+            summary += `  Gold: ${mapData.totalGold} | Dust: ${mapData.totalDust} | Stamina: ${mapData.totalStamina}\n`;
+            summary += `  Equipment: ${mapData.totalEquipment} | Creatures: ${mapData.totalCreatures} | Shiny: ${mapData.totalShiny}\n`;
+            summary += `  Rates: ${mapSessionRate} sessions/h | ${mapGoldRate} gold/h | ${mapCreatureRate} creatures/h | ${mapEquipmentRate} equipment/h\n`;
+            summary += `  Efficiency: ${mapGoldPerStamina} gold/stamina | ${mapSessionsPerStamina} sessions/stamina | ${mapStaminaRate} stamina/h\n`;
+            
+            // Show top loot items for this map (limit to 8 most common)
+            const sortedLoot = Array.from(mapData.loot.values()).sort((a, b) => b.count - a.count);
+            const topLoot = sortedLoot.slice(0, 8);
+            
+            if (topLoot.length > 0) {
+                summary += `  Top Loot:\n`;
+                topLoot.forEach(item => {
+                    let itemLine = `    ${item.originalName}: x${item.count}`;
+                    if (item.rarity > 0) {
+                        const rarityText = item._descriptiveRarity || 
+                                          window.inventoryDatabase?.rarityText?.[item.rarity] || 
+                                          `Rarity ${item.rarity}`;
+                        itemLine += ` (${rarityText})`;
+                    }
+                    if (item.isEquipment && item.stat) {
+                        itemLine += ` (Stat: ${item.stat.toUpperCase()})`;
+                    }
+                    summary += `${itemLine}\n`;
+                });
             }
-            summary += `${creatureLine}\n`;
+            
+            // Show creatures for this map (limit to 8 most common)
+            const sortedCreatures = Array.from(mapData.creatures.values()).sort((a, b) => b.count - a.count);
+            const topCreatures = sortedCreatures.slice(0, 8);
+            
+            if (topCreatures.length > 0) {
+                summary += `  Creatures:\n`;
+                topCreatures.forEach(creature => {
+                    let creatureLine = `    ${creature.originalName} (${creature.tierName}): x${creature.count}`;
+                    if (creature.isShiny) {
+                        creatureLine = `    ✨ ${creatureLine}`;
+                    }
+                    summary += `${creatureLine}\n`;
+                });
+            }
         });
     }
     summary += `---------------------------\n`;
@@ -1611,123 +2982,643 @@ function generateSummaryLogText() {
 }
 
 // =======================
-// 4. UI Creation Functions
+// 3.1. Unified Grid Functions
 // =======================
-/**
- * Helper function to create a consistently styled button.
- * @param {string} text - The text content of the button.
- * @returns {HTMLButtonElement} The styled button element.
- */
+// Helper function to create a unified grid container for both loot and creature displays
+// Returns a styled grid container element
+function createUnifiedGridContainer() {
+    const gridContainer = document.createElement('div');
+    gridContainer.style.display = 'grid';
+    gridContainer.style.gridTemplateColumns = 'repeat(5, 1fr)';
+    gridContainer.style.gap = '8px';
+    gridContainer.style.padding = '4px';
+    return gridContainer;
+}
+
+// =======================
+// 4.0. Event Handler Functions
+// =======================
+
+// Handles the style button click for layout switching
+function handleStyleButtonClick(panel, styleButton, minimizeBtn) {
+    // Only toggle between vertical and horizontal
+    if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
+        // If minimized, restore to last non-minimized mode, then toggle
+        panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
+    }
+    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+        panelState.mode = LAYOUT_MODES.HORIZONTAL;
+        styleButton.textContent = 'Vertical';
+        styleButton.title = 'Switch to vertical layout';
+    } else {
+        panelState.mode = LAYOUT_MODES.VERTICAL;
+        styleButton.textContent = 'Horizontal';
+        styleButton.title = 'Switch to horizontal layout';
+    }
+    // Always update _lastMode for minimize restore
+    panelState._lastMode = panelState.mode;
+    // Always reset to default layout size for the new mode
+    const layout = LAYOUT_DIMENSIONS[panelState.mode];
+    panel.style.width = layout.width + 'px';
+    panel.style.height = layout.height + 'px';
+    panel.style.minWidth = layout.minWidth + 'px';
+    panel.style.maxWidth = layout.maxWidth + 'px';
+    panel.style.minHeight = layout.minHeight + 'px';
+    panel.style.maxHeight = layout.maxHeight + 'px';
+    updatePanelLayout(panel);
+    updatePanelPosition();
+    // Update minimize button state if coming from minimized
+    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+        minimizeBtn.textContent = '–';
+        minimizeBtn.title = 'Minimize Analyzer';
+    }
+}
+
+// Handles the minimize button click
+function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
+    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+        panelState._lastMode = panelState.mode;
+        panelState.mode = LAYOUT_MODES.MINIMIZED;
+        minimizeBtn.textContent = '+';
+        minimizeBtn.title = 'Restore Analyzer';
+    } else {
+        panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
+        minimizeBtn.textContent = '–';
+        minimizeBtn.title = 'Minimize Analyzer';
+    }
+    // Always reset to default layout size for the new mode
+    const layout = LAYOUT_DIMENSIONS[panelState.mode];
+    panel.style.width = layout.width + 'px';
+    panel.style.height = layout.height + 'px';
+    panel.style.minWidth = layout.minWidth + 'px';
+    panel.style.maxWidth = layout.maxWidth + 'px';
+    panel.style.minHeight = layout.minHeight + 'px';
+    panel.style.maxHeight = layout.maxHeight + 'px';
+    updatePanelLayout(panel);
+    updatePanelPosition();
+    // Update style button state if coming from minimized
+    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+        styleButton.textContent = 'Horizontal';
+        styleButton.title = 'Switch to horizontal layout';
+    } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
+        styleButton.textContent = 'Vertical';
+        styleButton.title = 'Switch to vertical layout';
+    }
+}
+
+// Handles the close button click
+function handleCloseButtonClick(panel) {
+    // Save panel settings before closing
+    savePanelSettings(panel);
+    
+    // Remove document event listeners to prevent memory leaks
+    if (panelResizeMouseMoveHandler) {
+        document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
+        panelResizeMouseMoveHandler = null;
+    }
+    if (panelResizeMouseUpHandler) {
+        document.removeEventListener('mouseup', panelResizeMouseUpHandler);
+        panelResizeMouseUpHandler = null;
+    }
+    if (panelDragMouseMoveHandler) {
+        document.removeEventListener('mousemove', panelDragMouseMoveHandler);
+        panelDragMouseMoveHandler = null;
+    }
+    if (panelDragMouseUpHandler) {
+        document.removeEventListener('mouseup', panelDragMouseUpHandler);
+        panelDragMouseUpHandler = null;
+    }
+    
+    // Clear cached DOM references
+    domCache.clear();
+    // Stop the live update interval
+    // Remove resize listener
+    window.removeEventListener('resize', updatePanelPosition);
+    // Remove the panel
+    panel.remove();
+}
+
+// Handles panel resize mouse move
+function handlePanelResizeMouseMove(e, panel) {
+    if (!panelState.isResizing || panelState.mode === LAYOUT_MODES.MINIMIZED) return;
+    let dx = e.clientX - panelState.resizeStartX;
+    let dy = e.clientY - panelState.resizeStartY;
+    let newWidth = panelState.startWidth;
+    let newHeight = panelState.startHeight;
+    let newLeft = panelState.startLeft;
+    let newTop = panelState.startTop;
+    const layout = LAYOUT_DIMENSIONS[panelState.mode];
+    
+    // Allow resizing in both directions for vertical/horizontal
+    if (panelState.resizeDir.includes('e')) {
+        newWidth = clamp(panelState.startWidth + dx, layout.minWidth, layout.maxWidth);
+    }
+    if (panelState.resizeDir.includes('w')) {
+        newWidth = clamp(panelState.startWidth - dx, layout.minWidth, layout.maxWidth);
+        newLeft = panelState.startLeft + dx;
+    }
+    if (panelState.resizeDir.includes('s')) {
+        newHeight = clamp(panelState.startHeight + dy, layout.minHeight, layout.maxHeight);
+    }
+    if (panelState.resizeDir.includes('n')) {
+        newHeight = clamp(panelState.startHeight - dy, layout.minHeight, layout.maxHeight);
+        newTop = panelState.startTop + dy;
+    }
+    panel.style.width = newWidth + 'px';
+    panel.style.height = newHeight + 'px';
+    panel.style.left = newLeft + 'px';
+    panel.style.top = newTop + 'px';
+    panel.style.transition = 'none';
+}
+
+// Handles panel resize mouse up
+function handlePanelResizeMouseUp(panel) {
+    if (panelState.isResizing) {
+        panelState.isResizing = false;
+        document.body.style.userSelect = '';
+        panel.style.transition = '';
+    }
+}
+
+// Handles panel drag mouse move
+function handlePanelDragMouseMove(e, panel) {
+    if (!panelState.isDragging) return;
+    let newLeft = e.clientX - panelState.dragOffsetX;
+    let newTop = e.clientY - panelState.dragOffsetY;
+    
+    // Clamp to viewport
+    newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, newLeft));
+    newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, newTop));
+    panel.style.left = newLeft + 'px';
+    panel.style.top = newTop + 'px';
+    panel.style.transition = 'none';
+}
+
+// Handles panel drag mouse up
+function handlePanelDragMouseUp(panel) {
+    if (panelState.isDragging) {
+        panelState.isDragging = false;
+        document.body.style.userSelect = '';
+        panel.style.transition = '';
+    }
+}
+
+// =======================
+// 4.1. Utility Functions for Repeated Patterns
+// =======================
+
+// Creates a display element with icon and amount
+function createResourceDisplay(iconSrc, iconAlt, amountId, textColor = '#ABB2BF') {
+    const displayDiv = document.createElement('div');
+    displayDiv.style.display = 'flex';
+    displayDiv.style.alignItems = 'center';
+    displayDiv.style.gap = '4px';
+
+    const icon = document.createElement('img');
+    icon.style.width = '12px';
+    icon.style.height = '12px';
+    icon.style.imageRendering = 'pixelated';
+    icon.src = iconSrc;
+    icon.alt = iconAlt;
+
+    const amountSpan = document.createElement('span');
+    amountSpan.id = amountId;
+    amountSpan.style.color = textColor;
+    amountSpan.style.fontSize = '12px';
+    amountSpan.style.fontWeight = 'bold';
+    amountSpan.textContent = '0';
+
+    displayDiv.appendChild(amountSpan);
+    displayDiv.appendChild(icon);
+
+    return { displayDiv, amountSpan };
+}
+
+// Creates a rate display element
+function createRateDisplay(rateId, labelKey, initialValue = 0) {
+    const rateElement = document.createElement("span");
+    rateElement.id = rateId;
+    rateElement.textContent = `${t(labelKey)}: ${initialValue}`;
+    rateElement.className = "ha-stats-text";
+    return rateElement;
+}
+
+// Creates a flex row container
+function createFlexRow(gap = '4px', justifyContent = 'space-between', alignItems = 'center') {
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.gap = gap;
+    row.style.justifyContent = justifyContent;
+    row.style.alignItems = alignItems;
+    return row;
+}
+
+// Creates a flex column container
+function createFlexColumn(gap = '2px') {
+    const column = document.createElement("div");
+    column.style.display = "flex";
+    column.style.flexDirection = "column";
+    column.style.gap = gap;
+    return column;
+}
+
+// Creates a section title
+function createSectionTitle(titleId, titleText) {
+    const titleContainer = document.createElement("div");
+    titleContainer.className = "ha-section-title";
+
+    const title = document.createElement("h3");
+    title.id = titleId;
+    title.textContent = titleText;
+    titleContainer.appendChild(title);
+
+    return { titleContainer, title };
+}
+
+// Creates a display content area
+function createDisplayContent(contentId, maxHeight = '200px') {
+    const contentDiv = document.createElement("div");
+    contentDiv.id = contentId;
+    contentDiv.className = "ha-display-content";
+    contentDiv.style.maxHeight = maxHeight;
+    return contentDiv;
+}
+
+// Creates a confirmation dialog
+function createConfirmationDialog(titleKey, messageKey, onConfirm, onCancel) {
+    const confirmDialog = document.createElement('div');
+    confirmDialog.style.position = 'fixed';
+    confirmDialog.style.top = '50%';
+    confirmDialog.style.left = '50%';
+    confirmDialog.style.transform = 'translate(-50%, -50%)';
+    confirmDialog.style.backgroundColor = '#282C34';
+    confirmDialog.style.border = '2px solid #E06C75';
+    confirmDialog.style.borderRadius = '8px';
+    confirmDialog.style.padding = '20px';
+    confirmDialog.style.zIndex = '10000';
+    confirmDialog.style.color = '#ABB2BF';
+    confirmDialog.style.fontFamily = 'Inter, sans-serif';
+    confirmDialog.style.boxShadow = '0 0 20px rgba(0,0,0,0.8)';
+
+    const dialogTitle = document.createElement('h3');
+    dialogTitle.textContent = t(titleKey);
+    dialogTitle.style.margin = '0 0 15px 0';
+    dialogTitle.style.color = '#E06C75';
+    dialogTitle.style.fontSize = '16px';
+
+    const dialogMessage = document.createElement('p');
+    dialogMessage.textContent = t(messageKey);
+    dialogMessage.style.margin = '0 0 20px 0';
+    dialogMessage.style.fontSize = '14px';
+    dialogMessage.style.lineHeight = '1.4';
+
+    const dialogButtonContainer = document.createElement('div');
+    dialogButtonContainer.style.display = 'flex';
+    dialogButtonContainer.style.gap = '10px';
+    dialogButtonContainer.style.justifyContent = 'center';
+
+    const confirmBtn = createStyledButton(t('mods.huntAnalyzer.confirm'));
+    confirmBtn.addEventListener('click', () => {
+        onConfirm();
+        document.body.removeChild(confirmDialog);
+    });
+
+    const cancelBtn = createStyledButton("Cancel");
+    cancelBtn.addEventListener('click', () => {
+        if (onCancel) onCancel();
+        document.body.removeChild(confirmDialog);
+    });
+
+    dialogButtonContainer.appendChild(confirmBtn);
+    dialogButtonContainer.appendChild(cancelBtn);
+
+    confirmDialog.appendChild(dialogTitle);
+    confirmDialog.appendChild(dialogMessage);
+    confirmDialog.appendChild(dialogButtonContainer);
+    
+    return confirmDialog;
+}
+
+// Resets all Hunt Analyzer state data
+function resetHuntAnalyzerState() {
+    HuntAnalyzerState.session.count = 0;
+    HuntAnalyzerState.totals.gold = 0;
+    HuntAnalyzerState.totals.creatures = 0;
+    HuntAnalyzerState.totals.equipment = 0;
+    HuntAnalyzerState.totals.runes = 0;
+    HuntAnalyzerState.totals.dust = 0;
+    HuntAnalyzerState.totals.shiny = 0;
+    HuntAnalyzerState.totals.staminaSpent = 0;
+    HuntAnalyzerState.totals.staminaRecovered = 0;
+    HuntAnalyzerState.totals.wins = 0;
+    HuntAnalyzerState.totals.losses = 0;
+    HuntAnalyzerState.session.startTime = Date.now();
+    HuntAnalyzerState.session.sessionStartTime = 0;
+    HuntAnalyzerState.session.isActive = false;
+    HuntAnalyzerState.data.sessions = [];
+    HuntAnalyzerState.data.aggregatedLoot.clear();
+    HuntAnalyzerState.data.aggregatedCreatures.clear();
+}
+
+// Updates room display with current room information
+function updateCurrentRoomDisplay() {
+    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
+    let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
+    let currentRoomId = null;
+    
+    if (roomNamesMap) {
+        currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
+        if (currentRoomId && roomNamesMap[currentRoomId]) {
+            roomDisplayName = roomNamesMap[currentRoomId];
+        } else if (currentRoomId) {
+            roomDisplayName = `Room ID: ${currentRoomId}`;
+        }
+    }
+    
+    if (currentRoomId) {
+        updateRoomTitleDisplay(currentRoomId, roomDisplayName);
+    }
+}
+
+// =======================
+// 4.2. Panel Section Creation Functions
+// =======================
+
+// Creates the live display section with session stats and rates
+function createLiveDisplaySection() {
+    const liveDisplaySection = document.createElement("div");
+    liveDisplaySection.className = "live-display-section";
+    liveDisplaySection.style.display = "flex";
+    liveDisplaySection.style.flexDirection = "column";
+    liveDisplaySection.style.padding = "8px";
+    liveDisplaySection.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    liveDisplaySection.style.backgroundRepeat = 'repeat';
+    liveDisplaySection.style.backgroundColor = '#323234'; // Fallback
+    liveDisplaySection.style.flex = "0 0 auto"; // FIXED SIZE
+    liveDisplaySection.style.width = "100%";
+    liveDisplaySection.style.boxSizing = "border-box";
+
+    // Session Stats
+    const sessionStatsDiv = document.createElement("div");
+    sessionStatsDiv.style.display = "flex";
+    sessionStatsDiv.style.flexDirection = "column";
+    sessionStatsDiv.style.gap = "2px";
+    sessionStatsDiv.style.marginBottom = "4px";
+
+    const firstRow = document.createElement("div");
+    firstRow.style.display = "flex";
+    firstRow.style.justifyContent = "space-between";
+    firstRow.style.alignItems = "center";
+
+    const autoplayCounter = document.createElement("div");
+    autoplayCounter.id = "mod-autoplay-counter";
+    autoplayCounter.style.display = "flex";
+    autoplayCounter.style.alignItems = "center";
+    autoplayCounter.style.gap = "4px";
+    autoplayCounter.style.fontSize = "12px";
+    autoplayCounter.style.color = "#61AFEF";
+    
+    const sessionCountSpan = document.createElement("span");
+    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0`;
+    sessionCountSpan.id = "mod-session-count";
+    
+    autoplayCounter.appendChild(sessionCountSpan);
+
+    const autoplayRateElement = document.createElement("span");
+    autoplayRateElement.id = "mod-autoplay-rate";
+    autoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: 0`;
+    autoplayRateElement.style.fontSize = "10px";
+    autoplayRateElement.style.color = "#61AFEF";
+    
+    firstRow.appendChild(autoplayCounter);
+    firstRow.appendChild(autoplayRateElement);
+    
+    // Second row for Stamina and W/L
+    const secondRow = document.createElement("div");
+    secondRow.style.display = "flex";
+    secondRow.style.justifyContent = "space-between";
+    secondRow.style.alignItems = "center";
+    
+    // Stamina Display
+    const staminaDisplaySpan = document.createElement("span");
+    staminaDisplaySpan.id = "mod-stamina-display";
+    staminaDisplaySpan.style.display = "none";
+    staminaDisplaySpan.style.whiteSpace = "nowrap";
+    staminaDisplaySpan.style.lineHeight = "12px";
+    staminaDisplaySpan.style.verticalAlign = "middle";
+    staminaDisplaySpan.style.fontSize = "10px";
+    staminaDisplaySpan.style.color = "#61AFEF";
+
+    // Win/Loss Display
+    const winLossElement = document.createElement("span");
+    winLossElement.id = "mod-win-loss-display";
+    winLossElement.style.fontSize = "10px";
+    winLossElement.style.color = "#61AFEF";
+    winLossElement.textContent = "W/L: 0/0 (0%)";
+    
+    secondRow.appendChild(staminaDisplaySpan);
+    secondRow.appendChild(winLossElement);
+    
+    sessionStatsDiv.appendChild(firstRow);
+    sessionStatsDiv.appendChild(secondRow);
+    liveDisplaySection.appendChild(sessionStatsDiv);
+
+    return { liveDisplaySection, autoplayCounter, sessionCountSpan, autoplayRateElement, staminaDisplaySpan, winLossElement };
+}
+
+// Creates the drop rate live feed section
+function createDropRateSection() {
+    const dropRateLiveFeedDiv = document.createElement("div");
+    dropRateLiveFeedDiv.className = "ha-border-separator";
+    dropRateLiveFeedDiv.style.fontSize = "10px";
+    dropRateLiveFeedDiv.style.color = "#98C379";
+
+    // Left section for rates
+    const leftRatesSection = createFlexColumn();
+
+    const goldRateElement = createRateDisplay("mod-gold-rate", 'mods.huntAnalyzer.goldPerHour');
+    leftRatesSection.appendChild(goldRateElement);
+
+    const creatureRateElement = createRateDisplay("mod-creature-rate", 'mods.huntAnalyzer.creaturesPerHour');
+    leftRatesSection.appendChild(creatureRateElement);
+
+    const equipmentRateElement = createRateDisplay("mod-equipment-rate", 'mods.huntAnalyzer.equipmentPerHour');
+    leftRatesSection.appendChild(equipmentRateElement);
+
+    const runeRateElement = createRateDisplay("mod-rune-rate", 'mods.huntAnalyzer.runesPerHour');
+    leftRatesSection.appendChild(runeRateElement);
+
+    const totalStaminaSpentElement = document.createElement('span');
+    totalStaminaSpentElement.id = 'mod-total-stamina-spent';
+    totalStaminaSpentElement.className = "ha-stats-text";
+    // Calculate initial stamina efficiency with natural regen
+    const initialElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
+    const initialElapsedTimeMinutes = initialElapsedTimeMs / (1000 * 60);
+    const initialElapsedTimeHours = initialElapsedTimeMs / (1000 * 60 * 60);
+    const initialNaturalStaminaRegen = Math.floor(initialElapsedTimeMinutes);
+    const initialTotalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + initialNaturalStaminaRegen;
+    const initialNetStaminaChange = initialTotalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
+    const initialNetStaminaPerHour = Math.floor(initialNetStaminaChange / initialElapsedTimeHours);
+    const initialRecoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
+        Math.round((initialTotalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
+    const initialStaminaSpentRatePerHour = initialElapsedTimeHours > 0 ? 
+        Math.floor(HuntAnalyzerState.totals.staminaSpent / initialElapsedTimeHours) : 0;
+    totalStaminaSpentElement.textContent = `Stamina/h: ${initialStaminaSpentRatePerHour} (Net: ${initialNetStaminaPerHour > 0 ? '+' : ''}${initialNetStaminaPerHour}/h) [${initialRecoveryEfficiency}% recovery]`;
+    leftRatesSection.appendChild(totalStaminaSpentElement);
+
+    // Right section for totals
+    const rightTotalsSection = createFlexColumn();
+    rightTotalsSection.style.alignItems = 'flex-end';
+
+    // Create resource displays using utility function
+    const { displayDiv: goldDisplayDiv, amountSpan: goldAmountSpan } = createResourceDisplay('/assets/icons/goldpile.png', 'Gold', 'mod-total-gold-display', '#E5C07B');
+    rightTotalsSection.appendChild(goldDisplayDiv);
+
+    const { displayDiv: dustDisplayDiv, amountSpan: dustAmountSpan } = createResourceDisplay('/assets/icons/dust.png', 'Dust', 'mod-total-dust-display', '#61AFEF');
+    rightTotalsSection.appendChild(dustDisplayDiv);
+
+    const { displayDiv: shinyDisplayDiv, amountSpan: shinyAmountSpan } = createResourceDisplay('/assets/icons/shiny.png', 'Shiny', 'mod-total-shiny-display', '#E5C07B');
+    rightTotalsSection.appendChild(shinyDisplayDiv);
+
+    const { displayDiv: runesDisplayDiv, amountSpan: runesAmountSpan } = createResourceDisplay('/assets/icons/rune.png', 'Runes', 'mod-total-runes-display', '#C678DD');
+    rightTotalsSection.appendChild(runesDisplayDiv);
+
+    dropRateLiveFeedDiv.appendChild(leftRatesSection);
+    dropRateLiveFeedDiv.appendChild(rightTotalsSection);
+
+    return { 
+        dropRateLiveFeedDiv, 
+        goldRateElement, 
+        creatureRateElement, 
+        equipmentRateElement, 
+        runeRateElement, 
+        totalStaminaSpentElement,
+        goldAmountSpan,
+        dustAmountSpan,
+        shinyAmountSpan,
+        runesAmountSpan
+    };
+}
+
+// Creates the button container section
+function createButtonContainer() {
+    const buttonContainer = createFlexRow('5px', 'center');
+    buttonContainer.style.padding = "8px";
+    buttonContainer.style.flex = "0 0 auto";
+
+    // Clear Data Button
+    const clearDataBtn = createStyledButton(t('mods.huntAnalyzer.clearData'));
+    clearDataBtn.addEventListener('click', () => {
+        const confirmDialog = createConfirmationDialog(
+            'mods.huntAnalyzer.confirmClear',
+            'mods.huntAnalyzer.clearWarning',
+            () => {
+                resetHuntAnalyzerState();
+                // Clear the visual display divs and update counter
+                const cachedLootDiv = domCache.get("mod-loot-display");
+                const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
+                if (cachedLootDiv) cachedLootDiv.innerHTML = "";
+                if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
+                // Call renderAllSessions to refresh the display (which will now be empty)
+                renderAllSessions(); // Re-render to show cleared state
+                updateMapFilterDropdown(); // Update filter dropdown to show only ALL
+                updatePanelDisplay(); // Update overall rates to reflect cleared state
+                updateCurrentRoomDisplay(); // Reset the room ID display to current room name
+                updatePanelPosition(); // Re-align after clear
+            }
+        );
+        document.body.appendChild(confirmDialog);
+    });
+
+    buttonContainer.appendChild(clearDataBtn);
+
+    return buttonContainer;
+}
+
+// Creates the map filter container section
+function createMapFilterContainer() {
+    const mapFilterContainer = document.createElement("div");
+    mapFilterContainer.className = "ha-container-section";
+    mapFilterContainer.style.flex = "0 0 auto";
+
+    const { titleContainer: mapFilterTitleContainer, title: mapFilterTitle } = createSectionTitle("mod-map-filter-title", t('mods.huntAnalyzer.mapFilter'));
+
+    const mapFilterDropdown = document.createElement("select");
+    mapFilterDropdown.id = "mod-map-filter-dropdown";
+    mapFilterDropdown.style.width = "100%";
+    mapFilterDropdown.style.padding = "4px";
+    mapFilterDropdown.style.border = "1px solid #3A404A";
+    mapFilterDropdown.style.borderRadius = "4px";
+    mapFilterDropdown.style.backgroundColor = "#282C34";
+    mapFilterDropdown.style.color = "#ABB2BF";
+    mapFilterDropdown.style.fontSize = "12px";
+
+    mapFilterContainer.appendChild(mapFilterTitleContainer);
+    mapFilterContainer.appendChild(mapFilterDropdown);
+
+    return { mapFilterContainer, mapFilterDropdown };
+}
+
+// Creates the loot container section
+function createLootContainer() {
+    const lootContainer = document.createElement("div");
+    lootContainer.className = "ha-container-section";
+
+    const { titleContainer: lootTitleContainer, title: lootTitle } = createSectionTitle("mod-loot-title", t('mods.huntAnalyzer.loot'));
+
+    const lootDisplayDiv = createDisplayContent("mod-loot-display");
+
+    lootContainer.appendChild(lootTitleContainer);
+    lootContainer.appendChild(lootDisplayDiv);
+
+    return { lootContainer, lootDisplayDiv };
+}
+
+// Creates the creature drop container section
+function createCreatureDropContainer() {
+    const creatureDropContainer = document.createElement("div");
+    creatureDropContainer.className = "ha-container-section";
+
+    const { titleContainer: creatureDropTitleContainer, title: creatureDropTitle } = createSectionTitle("mod-creature-drops-title", t('mods.huntAnalyzer.creatureDrops'));
+
+    const creatureDropDisplayDiv = createDisplayContent("mod-creature-drop-display");
+
+    creatureDropContainer.appendChild(creatureDropTitleContainer);
+    creatureDropContainer.appendChild(creatureDropDisplayDiv);
+
+    return { creatureDropContainer, creatureDropDisplayDiv };
+}
+// Helper function to create a consistently styled button.
+// text - The text content of the button.
+// Returns the styled button element.
 function createStyledButton(text) {
     const button = document.createElement("button");
     button.textContent = text;
-    button.style.padding = "6px 12px";
-    button.style.border = "1px solid #3A404A";
-    button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
-    button.style.color = "#ABB2BF";
-    button.style.fontSize = "9px";
-    button.style.cursor = "pointer";
-    button.style.borderRadius = "5px";
-    button.style.transition = "all 0.2s ease";
-    button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-    button.style.flexGrow = '1';
-
-    button.onmouseover = () => {
-        button.style.background = "linear-gradient(to bottom, #6B7280, #4B5563)";
-        button.style.boxShadow = '0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2)';
-        button.style.transform = 'translateY(-1px)';
-    };
-    button.onmouseout = () => {
-        button.style.background = "linear-gradient(to bottom, #4B5563, #343841)";
-        button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-        button.style.transform = 'translateY(0)';
-    };
-    button.onmousedown = () => {
-        button.style.boxShadow = 'inset 0 2px 5px rgba(0,0,0,0.5)';
-        button.style.transform = 'translateY(1px)';
-    };
-    button.onmouseup = () => {
-        button.style.boxShadow = '0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)';
-        button.style.transform = 'translateY(0)';
-    };
+    button.className = "ha-styled-button";
 
     return button;
 }
 
-/**
- * Helper function to create a consistently styled icon button for header.
- * @param {string} iconText - The text/emoji for the icon (e.g., '—', '✕').
- * @returns {HTMLButtonElement} The styled button element.
- */
+// Helper function to create a consistently styled icon button for header.
+// iconText - The text/emoji for the icon (e.g., '—', '✕').
+// Returns the styled button element.
 function createStyledIconButton(iconText) {
     const button = document.createElement("button");
     button.textContent = iconText;
-    button.style.backgroundColor = "transparent";
-    button.style.border = "1px solid #3A404A";
-    button.style.color = "#ABB2BF";
-    button.style.padding = "2px 6px"; // Reduced padding from default
-    button.style.margin = "0";
-    button.style.cursor = "pointer";
-    button.style.fontSize = "12px"; // Reduced font size
-    button.style.lineHeight = "1"; // Added to ensure proper vertical alignment
-    button.style.minWidth = "20px"; // Added minimum width
-    button.style.minHeight = "20px"; // Added minimum height
-    button.style.display = "flex"; // Added to center the icon
-    button.style.alignItems = "center"; // Added to center the icon
-    button.style.justifyContent = "center"; // Added to center the icon
-    button.style.borderRadius = "3px"; // Reduced border radius
-    button.style.transition = "all 0.2s ease";
-
-    // Hover effect
-    button.onmouseover = () => {
-        button.style.backgroundColor = "#3A404A";
-        button.style.color = "#FFFFFF";
-    };
-    button.onmouseout = () => {
-        button.style.backgroundColor = "transparent";
-        button.style.color = "#ABB2BF";
-    };
-
-    // Active effect
-    button.onmousedown = () => {
-        button.style.transform = "translateY(1px)";
-        button.style.backgroundColor = "#2C313A";
-    };
-    button.onmouseup = () => {
-        button.style.transform = "translateY(0)";
-        button.style.backgroundColor = "#3A404A";
-    };
+    button.className = "ha-icon-button";
 
     return button;
 }
 
-/**
- * Creates the main panel container with basic styling and layout.
- */
+// Creates the main panel container with basic styling and layout.
 function createPanelContainer() {
     const panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.position = "fixed";
+    panel.className = "ha-panel-container";
+    
+    // Apply positioning and sizing (these need to remain inline for dynamic behavior)
     panel.style.top = "50px";
-    panel.style.width = "25vw";
-    panel.style.maxWidth = "315px";
-    panel.style.minWidth = "200px";
-    panel.style.height = "90vh";
-    panel.style.maxHeight = "800px";
-    panel.style.backgroundImage = 'url(/_next/static/media/background-darker.2679c837.png)';
-    panel.style.backgroundRepeat = 'repeat';
-    panel.style.backgroundColor = "#282C34"; // Fallback
-    panel.style.border = "1px solid #3A404A";
-    panel.style.color = "#ABB2BF";
-    panel.style.padding = "0";
-    panel.style.overflow = "hidden";
-    panel.style.zIndex = "9999";
-    panel.style.display = "flex";
-    panel.style.flexDirection = "column";
-    panel.style.height = '100%';
-    panel.style.fontFamily = 'Inter, sans-serif';
-    panel.style.borderRadius = "7px";
-    panel.style.boxShadow = '0 0 15px rgba(0,0,0,0.7)';
+    panel.style.left = "10px";
 
     // Apply initial layout constraints
     const initialLayout = LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL];
@@ -1738,47 +3629,44 @@ function createPanelContainer() {
     panel.style.minHeight = initialLayout.minHeight + 'px';
     panel.style.maxHeight = initialLayout.maxHeight + 'px';
 
+    // Try to regenerate visuals immediately, and set up periodic checks
+    regenerateAllVisuals();
+    
+    // Set up one-time visual regeneration check after a short delay
+    // This replaces the polling mechanism with a more efficient approach
+    setTimeout(() => {
+        if (globalThis.state?.utils) {
+            regenerateAllVisuals();
+        }
+    }, 1000); // Single check after 1 second
+
+    // Render the initial display with any persisted data
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+        renderAllSessions();
+    }, 100);
+
     return panel;
 }
 
-/**
- * Creates the top header section with title and controls.
- */
+// Creates the top header section with title and controls.
 function createHeaderSection() {
     const topHeaderContainer = document.createElement("div");
-    topHeaderContainer.style.display = "flex";
-    topHeaderContainer.style.flexDirection = "column";
-    topHeaderContainer.style.width = "100%";
-    topHeaderContainer.style.backgroundImage = 'url(/_next/static/media/background-dark.95edca67.png)';
-    topHeaderContainer.style.backgroundRepeat = 'repeat';
-    topHeaderContainer.style.backgroundColor = '#1a1a1a'; // Darker fallback
-    topHeaderContainer.style.borderBottom = "1px solid #3A404A";
-    topHeaderContainer.style.padding = "4px"; // Reduced padding from 8px to 4px
-    topHeaderContainer.style.flex = "0 0 auto"; // FIXED SIZE
+    topHeaderContainer.className = "ha-header-container";
 
     // Title and Controls Row
     const titleAndControlsRow = document.createElement("div");
-    titleAndControlsRow.style.display = "flex";
-    titleAndControlsRow.style.justifyContent = "space-between";
-    titleAndControlsRow.style.alignItems = "center";
-    titleAndControlsRow.style.width = "100%";
-    titleAndControlsRow.style.marginBottom = "2px"; // Reduced margin from 4px to 2px
-    titleAndControlsRow.style.cursor = "move";
+    titleAndControlsRow.className = "ha-title-row";
 
     // Room ID Display
     const roomIdDisplay = document.createElement("h3");
     roomIdDisplay.id = "mod-room-id-display";
+    roomIdDisplay.className = "ha-room-title";
     roomIdDisplay.textContent = t('mods.huntAnalyzer.currentRoom');
-    roomIdDisplay.style.margin = "0";
-    roomIdDisplay.style.fontSize = "14px"; // Reduced from 18px to 14px
-    roomIdDisplay.style.color = "#E06C75";
-    roomIdDisplay.style.fontWeight = "bold";
-    roomIdDisplay.style.textShadow = '0 0 5px rgba(224, 108, 117, 0.7)';
 
     // Header Controls
     const headerControls = document.createElement("div");
-    headerControls.style.display = "flex";
-    headerControls.style.gap = "5px";
+    headerControls.className = "ha-header-controls";
 
     // Style Button (Vertical/Horizontal)
     const styleButton = createStyledIconButton('Horizontal'); // Default to horizontal icon
@@ -1809,14 +3697,10 @@ function createHeaderSection() {
     return { topHeaderContainer, titleAndControlsRow, headerControls, roomIdDisplay, styleButton, minimizeBtn, closeBtn };
 }
 
-/**
- * Creates and appends the Hunt Analyzer Mod panel to the document body.
- * Prevents creation of duplicate panels.
- * Styles are applied inline to match a professional game theme.
- */
+// Creates and appends the Hunt Analyzer Mod panel to the document body.
+// Prevents creation of duplicate panels.
+// Styles are applied inline to match a professional game theme.
 function createAutoplayAnalyzerPanel() {
-    console.log('[Hunt Analyzer] createAutoplayAnalyzerPanel called');
-    
     // Check if the panel already exists to prevent duplicates.
     if (document.getElementById(PANEL_ID)) {
         console.log('[Hunt Analyzer] Panel already exists, skipping creation');
@@ -1825,20 +3709,46 @@ function createAutoplayAnalyzerPanel() {
     
     console.log('[Hunt Analyzer] Creating new analyzer panel...');
 
-    // Reset tracking variables for a fresh panel session
-    HuntAnalyzerState.session.count = 0;
-    HuntAnalyzerState.totals.gold = 0;
-    HuntAnalyzerState.totals.creatures = 0;
-    HuntAnalyzerState.totals.equipment = 0;
-    HuntAnalyzerState.totals.runes = 0;
-    HuntAnalyzerState.totals.dust = 0;
-    HuntAnalyzerState.totals.staminaSpent = 0;
-    HuntAnalyzerState.session.startTime = Date.now();
-    HuntAnalyzerState.session.isActive = false;
-    HuntAnalyzerState.session.sessionStartTime = 0;
-    HuntAnalyzerState.data.sessions = [];
-    HuntAnalyzerState.data.aggregatedLoot.clear();
-    HuntAnalyzerState.data.aggregatedCreatures.clear();
+    // Only reset data if we don't have persisted data
+    if (HuntAnalyzerState.data.sessions.length === 0) {
+        // Reset tracking variables for a fresh panel session
+        HuntAnalyzerState.session.count = 0;
+        HuntAnalyzerState.totals.gold = 0;
+        HuntAnalyzerState.totals.creatures = 0;
+        HuntAnalyzerState.totals.equipment = 0;
+        HuntAnalyzerState.totals.runes = 0;
+        HuntAnalyzerState.totals.dust = 0;
+        HuntAnalyzerState.totals.shiny = 0;
+        HuntAnalyzerState.totals.staminaSpent = 0;
+        HuntAnalyzerState.totals.staminaRecovered = 0;
+        HuntAnalyzerState.totals.wins = 0;
+        HuntAnalyzerState.totals.losses = 0;
+        HuntAnalyzerState.session.startTime = Date.now();
+        HuntAnalyzerState.session.isActive = false;
+        HuntAnalyzerState.session.sessionStartTime = 0;
+        HuntAnalyzerState.data.sessions = [];
+        HuntAnalyzerState.data.aggregatedLoot.clear();
+        HuntAnalyzerState.data.aggregatedCreatures.clear();
+    } else {
+        // Re-aggregate data from persisted sessions
+        dataProcessor.aggregateData();
+    }
+    
+    // Consolidated panel initialization log
+    console.log('[Hunt Analyzer] Panel initialized:', {
+        hasPersistedData: HuntAnalyzerState.data.sessions.length > 0,
+        sessionCount: HuntAnalyzerState.data.sessions.length,
+        isOpen: true
+    });
+    
+    // Set UI state to open
+    HuntAnalyzerState.ui.isOpen = true;
+    HuntAnalyzerState.ui.closedManually = false;
+    
+    // Save UI state
+    if (HuntAnalyzerState.settings.persistData) {
+        saveHuntAnalyzerState();
+    }
     let currentLayoutMode = LAYOUT_MODES.VERTICAL; // Default to vertical layout
 
     // Create main panel container
@@ -1846,107 +3756,13 @@ function createAutoplayAnalyzerPanel() {
     
     // Create header section
     const { topHeaderContainer, titleAndControlsRow, headerControls, roomIdDisplay, styleButton, minimizeBtn, closeBtn } = createHeaderSection();
-    styleButton.addEventListener("click", () => {
-        // Only toggle between vertical and horizontal
-        if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-            // If minimized, restore to last non-minimized mode, then toggle
-            panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
-        }
-        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-            panelState.mode = LAYOUT_MODES.HORIZONTAL;
-            styleButton.textContent = 'Vertical';
-            styleButton.title = 'Switch to vertical layout';
-        } else {
-            panelState.mode = LAYOUT_MODES.VERTICAL;
-            styleButton.textContent = 'Horizontal';
-            styleButton.title = 'Switch to horizontal layout';
-        }
-        // Always update _lastMode for minimize restore
-        panelState._lastMode = panelState.mode;
-        // Always reset to default layout size for the new mode
-        const layout = LAYOUT_DIMENSIONS[panelState.mode];
-        panel.style.width = layout.width + 'px';
-        panel.style.height = layout.height + 'px';
-        panel.style.minWidth = layout.minWidth + 'px';
-        panel.style.maxWidth = layout.maxWidth + 'px';
-        panel.style.minHeight = layout.minHeight + 'px';
-        panel.style.maxHeight = layout.maxHeight + 'px';
-        updatePanelLayout(panel);
-        updatePanelPosition();
-        // Update minimize button state if coming from minimized
-        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-            minimizeBtn.textContent = '–';
-            minimizeBtn.title = 'Minimize Analyzer';
-        }
-    });
+    styleButton.addEventListener("click", () => handleStyleButtonClick(panel, styleButton, minimizeBtn));
 
     // Set up minimize button event handler
-    minimizeBtn.addEventListener("click", () => {
-        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-            panelState._lastMode = panelState.mode;
-            panelState.mode = LAYOUT_MODES.MINIMIZED;
-            minimizeBtn.textContent = '+';
-            minimizeBtn.title = 'Restore Analyzer';
-        } else {
-            panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
-            minimizeBtn.textContent = '–';
-            minimizeBtn.title = 'Minimize Analyzer';
-        }
-        // Always reset to default layout size for the new mode
-        const layout = LAYOUT_DIMENSIONS[panelState.mode];
-        panel.style.width = layout.width + 'px';
-        panel.style.height = layout.height + 'px';
-        panel.style.minWidth = layout.minWidth + 'px';
-        panel.style.maxWidth = layout.maxWidth + 'px';
-        panel.style.minHeight = layout.minHeight + 'px';
-        panel.style.maxHeight = layout.maxHeight + 'px';
-        updatePanelLayout(panel);
-        updatePanelPosition();
-        // Update style button state if coming from minimized
-        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-            styleButton.textContent = 'Horizontal';
-            styleButton.title = 'Switch to horizontal layout';
-        } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-            styleButton.textContent = 'Vertical';
-            styleButton.title = 'Switch to vertical layout';
-        }
-    });
+    minimizeBtn.addEventListener("click", () => handleMinimizeButtonClick(panel, styleButton, minimizeBtn));
 
     // Set up close button event handler
-    closeBtn.addEventListener("click", () => {
-        // Save panel settings before closing
-        savePanelSettings(panel);
-        
-        // Remove document event listeners to prevent memory leaks
-        if (panelResizeMouseMoveHandler) {
-            document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
-            panelResizeMouseMoveHandler = null;
-        }
-        if (panelResizeMouseUpHandler) {
-            document.removeEventListener('mouseup', panelResizeMouseUpHandler);
-            panelResizeMouseUpHandler = null;
-        }
-        if (panelDragMouseMoveHandler) {
-            document.removeEventListener('mousemove', panelDragMouseMoveHandler);
-            panelDragMouseMoveHandler = null;
-        }
-        if (panelDragMouseUpHandler) {
-            document.removeEventListener('mouseup', panelDragMouseUpHandler);
-            panelDragMouseUpHandler = null;
-        }
-        
-        // Clear cached DOM references
-        domCache.clear();
-        // Stop the live update interval
-        if (HuntAnalyzerState.ui.updateIntervalId) {
-            clearInterval(HuntAnalyzerState.ui.updateIntervalId);
-            HuntAnalyzerState.ui.updateIntervalId = null;
-        }
-        // Remove resize listener
-        window.removeEventListener('resize', updatePanelPosition);
-        // Remove the panel
-        panel.remove();
-    });
+    closeBtn.addEventListener("click", () => handleCloseButtonClick(panel));
 
     // Add buttons in order: style, minimize, close
     headerControls.appendChild(styleButton);
@@ -2128,24 +3944,66 @@ function createAutoplayAnalyzerPanel() {
     // Session Stats
     const sessionStatsDiv = document.createElement("div");
     sessionStatsDiv.style.display = "flex";
-    sessionStatsDiv.style.justifyContent = "space-between";
-    sessionStatsDiv.style.alignItems = "center";
+    sessionStatsDiv.style.flexDirection = "column";
+    sessionStatsDiv.style.gap = "2px";
     sessionStatsDiv.style.marginBottom = "4px";
 
-    const autoplayCounter = document.createElement("span");
+    const firstRow = document.createElement("div");
+    firstRow.style.display = "flex";
+    firstRow.style.justifyContent = "space-between";
+    firstRow.style.alignItems = "center";
+
+    const autoplayCounter = document.createElement("div");
     autoplayCounter.id = "mod-autoplay-counter";
-    autoplayCounter.textContent = `${t('mods.huntAnalyzer.sessions')}: 0`;
+    autoplayCounter.style.display = "flex";
+    autoplayCounter.style.alignItems = "center";
+    autoplayCounter.style.gap = "4px";
     autoplayCounter.style.fontSize = "12px";
     autoplayCounter.style.color = "#61AFEF";
+    
+    const sessionCountSpan = document.createElement("span");
+    sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0`;
+    sessionCountSpan.id = "mod-session-count";
+    
+    autoplayCounter.appendChild(sessionCountSpan);
 
     const autoplayRateElement = document.createElement("span");
     autoplayRateElement.id = "mod-autoplay-rate";
     autoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: 0`;
     autoplayRateElement.style.fontSize = "10px";
-    autoplayRateElement.style.color = "#56B6C2";
+    autoplayRateElement.style.color = "#61AFEF";
+    
+    firstRow.appendChild(autoplayCounter);
+    firstRow.appendChild(autoplayRateElement);
+    
+    // Second row for Stamina and W/L
+    const secondRow = document.createElement("div");
+    secondRow.style.display = "flex";
+    secondRow.style.justifyContent = "space-between";
+    secondRow.style.alignItems = "center";
+    
+    // Stamina Display
+    const staminaDisplaySpan = document.createElement("span");
+    staminaDisplaySpan.id = "mod-stamina-display";
+    staminaDisplaySpan.style.display = "none";
+    staminaDisplaySpan.style.whiteSpace = "nowrap";
+    staminaDisplaySpan.style.lineHeight = "12px";
+    staminaDisplaySpan.style.verticalAlign = "middle";
+    staminaDisplaySpan.style.fontSize = "10px";
+    staminaDisplaySpan.style.color = "#61AFEF";
 
-    sessionStatsDiv.appendChild(autoplayCounter);
-    sessionStatsDiv.appendChild(autoplayRateElement);
+    // Win/Loss Display
+    const winLossElement = document.createElement("span");
+    winLossElement.id = "mod-win-loss-display";
+    winLossElement.style.fontSize = "10px";
+    winLossElement.style.color = "#61AFEF";
+    winLossElement.textContent = "W/L: 0/0 (0%)";
+    
+    secondRow.appendChild(staminaDisplaySpan);
+    secondRow.appendChild(winLossElement);
+    
+    sessionStatsDiv.appendChild(firstRow);
+    sessionStatsDiv.appendChild(secondRow);
     liveDisplaySection.appendChild(sessionStatsDiv);
 
     // Drop Rate Live Feed
@@ -2187,10 +4045,19 @@ function createAutoplayAnalyzerPanel() {
 
     const totalStaminaSpentElement = document.createElement('span');
     totalStaminaSpentElement.id = 'mod-total-stamina-spent';
-    // Calculate initial stamina efficiency
-    const initialStaminaEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-        Math.round((HuntAnalyzerState.totals.staminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-    totalStaminaSpentElement.textContent = `${t('mods.huntAnalyzer.staminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent} [${initialStaminaEfficiency}%]`;
+    // Calculate initial stamina efficiency with natural regen
+    const initialElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
+    const initialElapsedTimeMinutes = initialElapsedTimeMs / (1000 * 60);
+    const initialElapsedTimeHours = initialElapsedTimeMs / (1000 * 60 * 60);
+    const initialNaturalStaminaRegen = Math.floor(initialElapsedTimeMinutes);
+    const initialTotalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + initialNaturalStaminaRegen;
+    const initialNetStaminaChange = initialTotalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
+    const initialNetStaminaPerHour = Math.floor(initialNetStaminaChange / initialElapsedTimeHours);
+    const initialRecoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
+        Math.round((initialTotalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
+    const initialStaminaSpentRatePerHour = initialElapsedTimeHours > 0 ? 
+        Math.floor(HuntAnalyzerState.totals.staminaSpent / initialElapsedTimeHours) : 0;
+    totalStaminaSpentElement.textContent = `Stamina/h: ${initialStaminaSpentRatePerHour} (Net: ${initialNetStaminaPerHour > 0 ? '+' : ''}${initialNetStaminaPerHour}/h) [${initialRecoveryEfficiency}% recovery]`;
     leftRatesSection.appendChild(totalStaminaSpentElement);
 
     // Right section for totals
@@ -2300,14 +4167,49 @@ function createAutoplayAnalyzerPanel() {
     dropRateLiveFeedDiv.appendChild(rightTotalsSection);
     liveDisplaySection.appendChild(dropRateLiveFeedDiv);
 
-    // 3. Loot Section
+    // 3. Map Filter Section
+    const mapFilterContainer = document.createElement("div");
+    mapFilterContainer.className = "map-filter-container";
+    mapFilterContainer.style.display = "flex";
+    mapFilterContainer.style.flexDirection = "row";
+    mapFilterContainer.style.flex = "0 0 auto";
+    mapFilterContainer.style.margin = "5px";
+    mapFilterContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    mapFilterContainer.style.backgroundRepeat = 'repeat';
+    mapFilterContainer.style.backgroundColor = 'url(/_next/static/media/background-dark.95edca67.png)';
+    mapFilterContainer.style.borderRadius = '6px';
+    mapFilterContainer.style.padding = '6px';
+    mapFilterContainer.style.alignItems = "center";
+    mapFilterContainer.style.justifyContent = "center";
+    mapFilterContainer.style.gap = "8px";
+
+    const mapFilterTitle = document.createElement("h3");
+    mapFilterTitle.textContent = "Map Filter";
+    mapFilterTitle.style.margin = "0px";
+    mapFilterTitle.style.fontSize = "14px";
+    mapFilterTitle.style.color = "rgb(224, 108, 117)";
+    mapFilterTitle.style.fontWeight = "bold";
+    mapFilterTitle.style.textShadow = "rgba(224, 108, 117, 0.7) 0px 0px 5px";
+    mapFilterTitle.style.flex = "0 0 auto";
+
+    const mapFilterRow = document.createElement("div");
+    mapFilterRow.id = "mod-map-filter-row";
+    mapFilterRow.style.display = "flex";
+    mapFilterRow.style.alignItems = "center";
+    mapFilterRow.style.justifyContent = "center";
+    mapFilterRow.style.flex = "0 0 auto";
+
+    mapFilterContainer.appendChild(mapFilterTitle);
+    mapFilterContainer.appendChild(mapFilterRow);
+
+    // 4. Loot Section
     const lootContainer = document.createElement("div");
     lootContainer.className = "loot-container";
     lootContainer.style.display = "flex";
     lootContainer.style.flexDirection = "column";
     lootContainer.style.flex = "1 1 0"; // FLEXIBLE
     lootContainer.style.minHeight = "0";
-    lootContainer.style.margin = "5px";
+    lootContainer.style.margin = "0px 5px 5px 5px";
     lootContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
     lootContainer.style.backgroundRepeat = 'repeat';
     lootContainer.style.backgroundColor = 'url(/_next/static/media/background-dark.95edca67.png)'; // Darker fallback
@@ -2322,7 +4224,7 @@ function createAutoplayAnalyzerPanel() {
     lootTitleContainer.style.marginBottom = "3px";
 
     const lootTitle = document.createElement("h3");
-    lootTitle.textContent = t('mods.huntAnalyzer.loot');
+    lootTitle.id = "mod-loot-title";
     lootTitle.style.margin = "0px";
     lootTitle.style.fontSize = "14px";
     lootTitle.style.color = "rgb(224, 108, 117)";
@@ -2370,7 +4272,7 @@ function createAutoplayAnalyzerPanel() {
     creatureDropTitleContainer.style.marginBottom = "3px";
 
     const creatureDropTitle = document.createElement("h3");
-    creatureDropTitle.textContent = t('mods.huntAnalyzer.creatureDrops');
+    creatureDropTitle.id = "mod-creature-drops-title";
     creatureDropTitle.style.margin = "0px";
     creatureDropTitle.style.fontSize = "14px";
     creatureDropTitle.style.color = "rgb(224, 108, 117)";
@@ -2402,13 +4304,17 @@ function createAutoplayAnalyzerPanel() {
     buttonContainer.style.display = "flex";
     buttonContainer.style.justifyContent = "center";
     buttonContainer.style.gap = "8px";
-    buttonContainer.style.padding = "8px";
-    buttonContainer.style.borderTop = "1px solid #3A404A";
+    buttonContainer.style.padding = "0px 8px 8px 8px";
+    buttonContainer.style.margin = "0";
+    buttonContainer.style.marginTop = "0";
+    buttonContainer.style.borderTop = "none";
     buttonContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
     buttonContainer.style.backgroundRepeat = 'repeat';
     buttonContainer.style.backgroundColor = '#323234'; // Fallback
     buttonContainer.style.flex = "0 0 auto"; // FIXED SIZE
     buttonContainer.style.flexDirection = 'row';
+
+    // Settings button removed - now handled by Better UI
 
     const clearButton = createStyledButton(t('mods.huntAnalyzer.clearAll'));
     clearButton.addEventListener("click", () => {
@@ -2475,6 +4381,8 @@ function createAutoplayAnalyzerPanel() {
             HuntAnalyzerState.totals.shiny = 0;
             HuntAnalyzerState.totals.staminaSpent = 0;
             HuntAnalyzerState.totals.staminaRecovered = 0; // Reset stamina on clear
+            HuntAnalyzerState.totals.wins = 0; // Reset wins on clear
+            HuntAnalyzerState.totals.losses = 0; // Reset losses on clear
             HuntAnalyzerState.session.startTime = Date.now(); // Reset overall session timer
             HuntAnalyzerState.session.sessionStartTime = 0;
             HuntAnalyzerState.session.isActive = false;
@@ -2488,21 +4396,22 @@ function createAutoplayAnalyzerPanel() {
         if (cachedCreatureDropDiv) cachedCreatureDropDiv.innerHTML = "";
             // Call renderAllSessions to refresh the display (which will now be empty)
             renderAllSessions(); // Re-render to show cleared state
+            updateMapFilterDropdown(); // Update filter dropdown to show only ALL
             updatePanelDisplay(); // Update overall rates to reflect cleared state
             // Reset the room ID display to current room name
             const roomNamesMap = globalThis.state?.utils?.ROOM_NAME; // Changed to ROOM_NAME (singular)
             let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
+            let currentRoomId = null;
             if (roomNamesMap) {
-                const potentialRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
-                if (potentialRoomId && roomNamesMap[potentialRoomId]) {
-                    roomDisplayName = roomNamesMap[potentialRoomId];
-                } else if (potentialRoomId) {
-                    roomDisplayName = `Room ID: ${potentialRoomId}`;
+                currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
+                if (currentRoomId && roomNamesMap[currentRoomId]) {
+                    roomDisplayName = roomNamesMap[currentRoomId];
+                } else if (currentRoomId) {
+                    roomDisplayName = `Room ID: ${currentRoomId}`;
                 }
             }
-            const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
-            if (cachedRoomIdDisplayElement) {
-                cachedRoomIdDisplayElement.textContent = roomDisplayName;
+            if (currentRoomId) {
+                updateRoomTitleDisplay(currentRoomId, roomDisplayName);
             }
             updatePanelPosition(); // Re-align after clear
 
@@ -2547,15 +4456,15 @@ function createAutoplayAnalyzerPanel() {
         panel.appendChild(feedbackMessage);
 
         // Fade in and then fade out
-        setTimeout(() => {
+        timeoutIds.push(setTimeout(() => {
             feedbackMessage.style.opacity = '1';
-        }, 10);
-        setTimeout(() => {
+        }, 10));
+        timeoutIds.push(setTimeout(() => {
             feedbackMessage.style.opacity = '0';
-            setTimeout(() => {
+            timeoutIds.push(setTimeout(() => {
                 feedbackMessage.remove();
-            }, 300); // Remove after fade out
-        }, 1500); // Display for 1.5 seconds
+            }, 300)); // Remove after fade out
+        }, 1500)); // Display for 1.5 seconds
     });
 
     buttonContainer.appendChild(clearButton);
@@ -2578,6 +4487,7 @@ function createAutoplayAnalyzerPanel() {
 
     // Assemble the panel (default to vertical, updatePanelLayout will fix for horizontal)
     panel.appendChild(leftColumn);
+    panel.appendChild(mapFilterContainer);
     panel.appendChild(lootContainer);
     panel.appendChild(creatureDropContainer);
 
@@ -2585,6 +4495,9 @@ function createAutoplayAnalyzerPanel() {
     domCache.set("mod-loot-display", lootDisplayDiv);
     domCache.set("mod-creature-drop-display", creatureDropDisplayDiv);
     domCache.set("mod-autoplay-counter", autoplayCounter);
+    domCache.set("mod-session-count", sessionCountSpan);
+    domCache.set("mod-stamina-display", staminaDisplaySpan);
+    domCache.set("mod-win-loss-display", winLossElement);
     domCache.set("mod-autoplay-rate", autoplayRateElement);
     domCache.set("mod-gold-rate", goldRateElement);
     domCache.set("mod-creature-rate", creatureRateElement);
@@ -2602,10 +4515,31 @@ function createAutoplayAnalyzerPanel() {
     panel._topHeaderContainer = topHeaderContainer;
     panel._liveDisplaySection = liveDisplaySection;
     panel._buttonContainer = buttonContainer;
+    panel._mapFilterContainer = mapFilterContainer;
     panel._lootContainer = lootContainer;
     panel._creatureDropContainer = creatureDropContainer;
 
     document.body.appendChild(panel);
+
+    // Set up timer for per-hour metrics calculation (needs to update every second)
+    if (updateIntervalId) {
+        clearInterval(updateIntervalId);
+    }
+    updateIntervalId = setInterval(updatePanelDisplay, 1000);
+    
+    // Set up periodic auto-save if persistence is enabled
+    if (HuntAnalyzerState.settings.persistData) {
+        if (autoSaveIntervalId) {
+            clearInterval(autoSaveIntervalId);
+        }
+        autoSaveIntervalId = setInterval(() => {
+            if (HuntAnalyzerState.data.sessions.length > 0) {
+                saveHuntAnalyzerData();
+                console.log('[Hunt Analyzer] Periodic auto-save completed');
+            }
+        }, CONFIG.AUTO_SAVE_INTERVAL);
+        console.log('[Hunt Analyzer] Periodic auto-save enabled (30s interval)');
+    }
 
     // Force layout update to fit header and live sections on first open
     updatePanelLayout(panel);
@@ -2614,11 +4548,8 @@ function createAutoplayAnalyzerPanel() {
     updatePanelPosition();
     window.addEventListener('resize', updatePanelPosition);
 
-    if (HuntAnalyzerState.ui.updateIntervalId) {
-        clearInterval(HuntAnalyzerState.ui.updateIntervalId);
-    }
-    HuntAnalyzerState.ui.updateIntervalId = setInterval(updatePanelDisplay, 30000); // Reduced frequency to every 30 seconds to avoid interfering with animations
     updatePanelDisplay();
+    updateMapFilterDropdown(); // Initialize map filter dropdown
 
     // Set initial layout
     updatePanelLayout(panel);
@@ -2636,36 +4567,45 @@ function createAutoplayAnalyzerPanel() {
     }
 }
 
-/**
- * Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
- * autoplay session count, and live drop rates.
- */
+
+// Smooths initial rate values to prevent inflated numbers at startup
+// Uses a longer period with more gradual easing for ultra-smooth progression
+function getSmoothedRate(actualRate, elapsedTimeMs) {
+    const SMOOTHING_TIME_MS = 10 * 60 * 1000; // 10 minutes for ultra-smooth progression
+    const SMOOTHING_FACTOR = 0.1; // Start with only 10% of actual rate for very conservative start
+    
+    // Handle edge case where elapsedTimeMs is 0 or negative
+    if (elapsedTimeMs <= 0) {
+        return Math.max(1, Math.floor(actualRate * SMOOTHING_FACTOR));
+    }
+    
+    if (elapsedTimeMs < SMOOTHING_TIME_MS) {
+        const timeProgress = elapsedTimeMs / SMOOTHING_TIME_MS;
+        
+        // Use ease-out cubic function for smoother, more natural progression
+        // This creates a curve that starts slow and accelerates toward the end
+        const easedProgress = 1 - Math.pow(1 - timeProgress, 3);
+        
+        // Apply the eased progression to the smoothing factor
+        const smoothingFactor = SMOOTHING_FACTOR + (1 - SMOOTHING_FACTOR) * easedProgress;
+        
+        // Use Math.round instead of Math.floor to prevent zero values for small rates
+        const smoothedRate = Math.round(actualRate * smoothingFactor);
+        
+        // Ensure minimum value of 1 for rates > 0 to avoid showing 0 when there's actual progress
+        return actualRate > 0 ? Math.max(1, smoothedRate) : smoothedRate;
+    }
+    
+    return actualRate;
+}
+
+// Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
+// autoplay session count, and live drop rates.
 function updatePanelDisplay() {
     const now = Date.now();
     const shouldLog = (now - lastUpdateLogTime) > CONFIG.UPDATE_LOG_THROTTLE;
     
-    // Check if data has actually changed to avoid unnecessary DOM manipulation
-    const currentSessionCount = HuntAnalyzerState.session.count;
-    const currentGold = HuntAnalyzerState.totals.gold;
-    const currentDust = HuntAnalyzerState.totals.dust;
-    const currentShiny = HuntAnalyzerState.totals.shiny;
-    
-    const hasDataChanged = (
-        currentSessionCount !== lastKnownSessionCount ||
-        currentGold !== lastKnownGold ||
-        currentDust !== lastKnownDust ||
-        currentShiny !== lastKnownShiny
-    );
-    
-    // Only update if data has changed or if we should log
-    if (!hasDataChanged && !shouldLog) {
-        return; // Skip update to avoid interfering with animations
-    }
-    
-    // Throttle DOM updates to avoid interfering with battle animations
-    if (now - lastBoardSubscriptionTime < CONFIG.BOARD_SUBSCRIPTION_THROTTLE) {
-        return; // Skip if we're updating too frequently
-    }
+    // Always update for continuous timer - no throttling
     lastBoardSubscriptionTime = now;
     
     if (shouldLog) {
@@ -2673,16 +4613,19 @@ function updatePanelDisplay() {
         lastUpdateLogTime = now;
     }
     
-    // Update tracked values
-    lastKnownSessionCount = currentSessionCount;
-    lastKnownGold = currentGold;
-    lastKnownDust = currentDust;
-    lastKnownShiny = currentShiny;
+    // Update tracked values for continuous updates
+    lastKnownSessionCount = HuntAnalyzerState.session.count;
+    lastKnownGold = HuntAnalyzerState.totals.gold;
+    lastKnownDust = HuntAnalyzerState.totals.dust;
+    lastKnownShiny = HuntAnalyzerState.totals.shiny;
     
     // Get cached DOM elements
     const cachedLootDiv = domCache.get("mod-loot-display");
     const cachedCreatureDropDiv = domCache.get("mod-creature-drop-display");
     const cachedAutoplayCounterElement = domCache.get("mod-autoplay-counter");
+    const cachedSessionCountSpan = domCache.get("mod-session-count");
+    const cachedStaminaDisplayElement = domCache.get("mod-stamina-display");
+    const cachedWinLossElement = domCache.get("mod-win-loss-display");
     const cachedAutoplayRateElement = domCache.get("mod-autoplay-rate");
     const cachedGoldRateElement = domCache.get("mod-gold-rate");
     const cachedCreatureRateElement = domCache.get("mod-creature-rate");
@@ -2695,18 +4638,86 @@ function updatePanelDisplay() {
     const cachedTotalRunesDisplayElement = domCache.get("mod-total-runes-display");
     const cachedTotalStaminaSpentElement = domCache.get("mod-total-stamina-spent");
 
-    // Update the session counter display
-    if (cachedAutoplayCounterElement) {
-        cachedAutoplayCounterElement.textContent = `${t('mods.huntAnalyzer.sessions')}: ${HuntAnalyzerState.session.count}`;
+    // Update the session counter display (filtered by selected map)
+    if (cachedSessionCountSpan) {
+        let filteredSessionCount = HuntAnalyzerState.session.count;
+        if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
+            // Count sessions only from the selected map
+            filteredSessionCount = HuntAnalyzerState.data.sessions.filter(session => 
+                session.roomName === HuntAnalyzerState.ui.selectedMapFilter
+            ).length;
+        }
+        cachedSessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: ${filteredSessionCount}`;
+    }
+    
+    // Update win/loss display
+    if (cachedWinLossElement) {
+        const totalSessions = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
+        const winRate = totalSessions > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessions) * 100) : 0;
+        cachedWinLossElement.textContent = `W/L: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)`;
+    }
+    
+    // Update stamina display
+    if (cachedStaminaDisplayElement) {
+        cachedStaminaDisplayElement.textContent = `Total Stamina: ${HuntAnalyzerState.totals.staminaSpent}`;
+        cachedStaminaDisplayElement.style.display = 'inline';
     }
 
-    // --- Autoplay Sessions/Hour Calculation ---
+    // Update dust display
+    if (cachedTotalDustDisplayElement) {
+        cachedTotalDustDisplayElement.textContent = HuntAnalyzerState.totals.dust;
+    }
+
+    // Update gold display
+    if (cachedTotalGoldDisplayElement) {
+        cachedTotalGoldDisplayElement.textContent = HuntAnalyzerState.totals.gold;
+    }
+
+    // Update shiny display
+    if (cachedTotalShinyDisplayElement) {
+        cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
+    }
+
+    // Update runes display
+    if (cachedTotalRunesDisplayElement) {
+        cachedTotalRunesDisplayElement.textContent = HuntAnalyzerState.totals.runes;
+    }
+
+    // Update room ID display
+    if (cachedRoomIdDisplayElement) {
+        const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
+        let roomDisplayName = t('mods.huntAnalyzer.currentRoom');
+        let currentRoomId = null;
+        
+        if (roomNamesMap) {
+            currentRoomId = globalThis.state.board?.area?.id || globalThis.state.player?.currentRoomId;
+            if (currentRoomId && roomNamesMap[currentRoomId]) {
+                roomDisplayName = roomNamesMap[currentRoomId];
+            } else if (currentRoomId) {
+                roomDisplayName = `Room ID: ${currentRoomId}`;
+            }
+        }
+        
+        if (currentRoomId) {
+            updateRoomTitleDisplay(currentRoomId, roomDisplayName);
+        }
+    }
+
+    // --- Autoplay Sessions/Hour Calculation (filtered by selected map) ---
     let autoplayRatePerHour = 0;
     const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
     const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
 
     if (overallElapsedTimeHours > 0) {
-        autoplayRatePerHour = Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours); // Ensure no decimals
+        let sessionCountForRate = HuntAnalyzerState.session.count;
+        if (HuntAnalyzerState.ui.selectedMapFilter !== "ALL") {
+            // Count sessions only from the selected map for rate calculation
+            sessionCountForRate = HuntAnalyzerState.data.sessions.filter(session => 
+                session.roomName === HuntAnalyzerState.ui.selectedMapFilter
+            ).length;
+        }
+        const actualRate = Math.floor(sessionCountForRate / overallElapsedTimeHours);
+        autoplayRatePerHour = getSmoothedRate(actualRate, overallElapsedTimeMs);
     }
     if (cachedAutoplayRateElement) {
         cachedAutoplayRateElement.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: ${autoplayRatePerHour}`;
@@ -2721,11 +4732,17 @@ function updatePanelDisplay() {
     let staminaSpentRatePerHour = 0;
 
     if (overallElapsedTimeHours > 0) {
-        goldRatePerHour = Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours);
-        creatureRatePerHour = Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours);
-        equipmentRatePerHour = Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours);
-        runeRatePerHour = Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours);
-        staminaSpentRatePerHour = Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours);
+        const actualGoldRate = Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours);
+        const actualCreatureRate = Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours);
+        const actualEquipmentRate = Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours);
+        const actualRuneRate = Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours);
+        const actualStaminaRate = Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours);
+        
+        goldRatePerHour = getSmoothedRate(actualGoldRate, overallElapsedTimeMs);
+        creatureRatePerHour = getSmoothedRate(actualCreatureRate, overallElapsedTimeMs);
+        equipmentRatePerHour = getSmoothedRate(actualEquipmentRate, overallElapsedTimeMs);
+        runeRatePerHour = getSmoothedRate(actualRuneRate, overallElapsedTimeMs);
+        staminaSpentRatePerHour = getSmoothedRate(actualStaminaRate, overallElapsedTimeMs);
     }
 
     if (cachedGoldRateElement) {
@@ -2740,25 +4757,29 @@ function updatePanelDisplay() {
     if (cachedRuneRateElement) {
         cachedRuneRateElement.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
     }
-    if (cachedTotalShinyDisplayElement) {
-        cachedTotalShinyDisplayElement.textContent = HuntAnalyzerState.totals.shiny;
-    }
-    if (cachedTotalRunesDisplayElement) {
-        cachedTotalRunesDisplayElement.textContent = HuntAnalyzerState.totals.runes;
-    }
     if (cachedTotalStaminaSpentElement) {
-        // Calculate stamina efficiency percentage
-        const staminaEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-            Math.round((HuntAnalyzerState.totals.staminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
+        // Calculate natural stamina regeneration (1 per minute)
+        const overallElapsedTimeMinutes = overallElapsedTimeMs / (1000 * 60);
+        const naturalStaminaRegen = Math.floor(overallElapsedTimeMinutes);
         
-        cachedTotalStaminaSpentElement.textContent = `${t('mods.huntAnalyzer.staminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent} (${staminaSpentRatePerHour}/h) [${staminaEfficiency}%]`;
+        // Total stamina recovery = potions + natural regen
+        const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
+        
+        // Net stamina change (positive = gaining, negative = losing)
+        const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
+        const actualNetStaminaRate = Math.floor(netStaminaChange / overallElapsedTimeHours);
+        const netStaminaPerHour = getSmoothedRate(actualNetStaminaRate, overallElapsedTimeMs);
+        
+        // Recovery efficiency percentage (including natural regen)
+        const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
+            Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
+        
+        cachedTotalStaminaSpentElement.textContent = `Stamina/h: ${staminaSpentRatePerHour} (Net: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% recovery]`;
     }
 }
 
-/**
- * Calculates and applies the correct position for the analyzer panel.
- * It will now attempt to position the panel to the left of the main game content, with a small gap.
- */
+// Calculates and applies the correct position for the analyzer panel.
+// It will now attempt to position the panel to the left of the main game content, with a small gap.
 function updatePanelPosition() {
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
@@ -2782,10 +4803,8 @@ function updatePanelPosition() {
     }
 }
 
-/**
- * Toggles the minimized state of the analyzer panel.
- * Hides/shows content and adjusts panel height.
- */
+// Toggles the minimized state of the analyzer panel.
+// Hides/shows content and adjusts panel height.
 function toggleMinimize() {
     const panel = document.getElementById(PANEL_ID);
     const lootContainer = document.querySelector(`#${PANEL_ID} .loot-container`);
@@ -2827,13 +4846,13 @@ function toggleMinimize() {
     if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
         panelState.isResizing = false;
     }
-    applyLayoutMode(panel, panelState.mode, lootContainer, creatureDropContainer, buttonContainer);
+    applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer);
     updatePanelLayout(panel);
     updatePanelPosition();
 }
 
 // Add this helper function near the top (after LAYOUT_DIMENSIONS):
-function applyLayoutMode(panel, mode, lootContainer, creatureDropContainer, buttonContainer) {
+function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer) {
     const layout = LAYOUT_DIMENSIONS[mode];
     if (!layout) return;
     panel.style.width = layout.width + 'px';
@@ -2848,10 +4867,13 @@ function applyLayoutMode(panel, mode, lootContainer, creatureDropContainer, butt
         panel.style.flexDirection = 'column';
     }
     if (mode === LAYOUT_MODES.MINIMIZED) {
+        mapFilterContainer.style.display = 'none';
         lootContainer.style.display = 'none';
         creatureDropContainer.style.display = 'none';
         if (buttonContainer) buttonContainer.style.display = 'flex';
     } else {
+        mapFilterContainer.style.display = 'flex';
+        mapFilterContainer.style.flexDirection = 'column';
         lootContainer.style.display = 'flex';
         lootContainer.style.flexDirection = 'column';
         creatureDropContainer.style.display = 'flex';
@@ -2866,6 +4888,7 @@ function updatePanelLayout(panel) {
     const topHeaderContainer = panel._topHeaderContainer;
     const liveDisplaySection = panel._liveDisplaySection;
     const buttonContainer = panel._buttonContainer;
+    const mapFilterContainer = panel._mapFilterContainer;
     const lootContainer = panel._lootContainer;
     const creatureDropContainer = panel._creatureDropContainer;
 
@@ -2905,6 +4928,7 @@ function updatePanelLayout(panel) {
         buttonContainer.style.flex = "0 0 auto";
         buttonContainer.style.flexDirection = 'row';
     }
+    if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
     if (lootContainer) lootContainer.style.flex = "1 1 0";
     if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
 
@@ -2917,16 +4941,16 @@ function updatePanelLayout(panel) {
             if (leftColumn.children[1] !== liveDisplaySection) leftColumn.insertBefore(liveDisplaySection, leftColumn.children[1] || null);
             if (leftColumn.children[2] !== buttonContainer) leftColumn.appendChild(buttonContainer);
         }
-        // Ensure panel order: leftColumn, loot, creatures
-        [leftColumn, lootContainer, creatureDropContainer].forEach((el, idx) => {
+        // Ensure panel order: leftColumn, mapFilter, loot, creatures
+        [leftColumn, mapFilterContainer, lootContainer, creatureDropContainer].forEach((el, idx) => {
             if (el && panel.children[idx] !== el) panel.insertBefore(el, panel.children[idx] || null);
         });
     } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
         panel.style.flexDirection = 'column';
         // Remove leftColumn if present
         if (leftColumn && panel.contains(leftColumn)) panel.removeChild(leftColumn);
-        // Always remove all five elements from the panel, then append in correct order
-        [topHeaderContainer, liveDisplaySection, buttonContainer, lootContainer, creatureDropContainer].forEach(el => {
+        // Always remove all six elements from the panel, then append in correct order
+        [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
             if (el && el.parentNode === panel) panel.removeChild(el);
         });
         [topHeaderContainer, liveDisplaySection, buttonContainer].forEach(el => {
@@ -2952,11 +4976,11 @@ function updatePanelLayout(panel) {
         panel.style.flexDirection = 'column';
         // Remove leftColumn if present
         if (leftColumn && panel.contains(leftColumn)) panel.removeChild(leftColumn);
-        // Always remove all five elements from the panel, then append in correct order
-        [topHeaderContainer, liveDisplaySection, buttonContainer, lootContainer, creatureDropContainer].forEach(el => {
+        // Always remove all six elements from the panel, then append in correct order
+        [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
             if (el && el.parentNode === panel) panel.removeChild(el);
         });
-        [topHeaderContainer, liveDisplaySection, buttonContainer, lootContainer, creatureDropContainer].forEach(el => {
+        [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
             if (el) panel.appendChild(el);
         });
     }
@@ -2981,8 +5005,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             return; // Exit immediately if panel is not open
         }
         
-        console.log('[Hunt Analyzer] newGame event received:', event);
-        
         // Skip recording if in sandbox mode
         if (isSandboxMode()) {
             console.log("[Hunt Analyzer] Skipping sandbox mode session");
@@ -2991,21 +5013,21 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         
         // Only update session state, don't process rewards here
         // Rewards will be processed by the board subscription when serverResults arrive
-        console.log('[Hunt Analyzer] Processing new game session');
         HuntAnalyzerState.session.count++;
         HuntAnalyzerState.session.isActive = true;
         HuntAnalyzerState.session.sessionStartTime = Date.now();
         
-        console.log('[Hunt Analyzer] Session state updated:', {
+        // Consolidated session lifecycle log
+        console.log('[Hunt Analyzer] New session started:', {
             count: HuntAnalyzerState.session.count,
             isActive: HuntAnalyzerState.session.isActive,
             sessionStartTime: HuntAnalyzerState.session.sessionStartTime
         });
         
         // Defer display update to avoid interfering with animations
-        setTimeout(() => {
+        timeoutIds.push(setTimeout(() => {
             updatePanelDisplay();
-        }, 0);
+        }, 0));
     });
 
     if (globalThis.state.board.subscribe) {
@@ -3035,60 +5057,37 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             }
             
             // Only process when we have valid server results and a new seed
-            console.log(`[Hunt Analyzer] Processing server results with new seed: ${seed}`);
             HuntAnalyzerState.ui.lastSeed = seed;
             
-            console.log('[Hunt Analyzer] Processing autoplay summary...');
+            // Consolidated server results processing log
+            console.log(`[Hunt Analyzer] Processing server results:`, {
+                seed: seed,
+                hasRewardScreen: !!serverResults.rewardScreen,
+                hasNext: !!serverResults.next
+            });
             
             // Use setTimeout to defer processing and avoid blocking animations
-            setTimeout(() => {
+            timeoutIds.push(setTimeout(() => {
                 processAutoplaySummary(serverResults);
                 HuntAnalyzerState.session.isActive = false;
                 
-                console.log('[Hunt Analyzer] Session ended, updating display');
                 updatePanelDisplay();
-            }, 0);
+            }, 0));
         });
     }
 }
 
-// Add game end detection using gameTimer.
-if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.gameTimer && globalThis.state.gameTimer.subscribe) {
-    console.log('[Hunt Analyzer] Setting up gameTimer subscription...');
-    gameTimerSubscription = globalThis.state.gameTimer.subscribe((data) => {
-        console.log('[Hunt Analyzer] GameTimer subscription triggered:', data);
-        
-        // Skip processing if in sandbox mode
-        if (isSandboxMode()) {
-            console.log('[Hunt Analyzer] Sandbox mode detected, skipping gameTimer');
-            return;
-        }
-        
-        const { readableGrade, rankPoints } = data.context;
-        console.log('[Hunt Analyzer] GameTimer data:', { readableGrade, rankPoints, isActive: HuntAnalyzerState.session.isActive });
-        
-        if ((readableGrade !== undefined && readableGrade !== null) || (rankPoints !== undefined && rankPoints !== null)) {
-            if (HuntAnalyzerState.session.isActive) {
-                console.log('[Hunt Analyzer] Game ended, deactivating session');
-                HuntAnalyzerState.session.isActive = false;
-                
-                updatePanelDisplay();
-            }
-        }
-    });
-}
+// Note: gameTimer subscription removed as it's redundant with board subscription
 
 // Create button to open the sidebar panel.
 function createHuntAnalyzerButton() {
     if (typeof api !== 'undefined' && api && api.ui && api.ui.addButton) {
-        console.log('[Hunt Analyzer] Creating UI button...');
         api.ui.addButton({
             id: BUTTON_ID,
             text: t('mods.huntAnalyzer.buttonText'),
             tooltip: t('mods.huntAnalyzer.buttonTooltip'),
             primary: false,
             onClick: () => {
-                console.log('[Hunt Analyzer] Button clicked, creating panel...');
                 createAutoplayAnalyzerPanel();
             }
         });
@@ -3099,8 +5098,8 @@ function createHuntAnalyzerButton() {
 // Create button immediately if API is ready
 createHuntAnalyzerButton();
 
-// Also listen for translation loading event to update button text and panel content
-document.addEventListener('bestiary-translations-loaded', (event) => {
+// Translation event handler
+const translationEventHandler = (event) => {
     console.log('[Hunt Analyzer] Translations loaded, updating UI elements...', event.detail);
     
     // Update button text if it exists
@@ -3132,7 +5131,7 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
             const autoplayRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours) : 0;
+                getSmoothedRate(Math.floor(HuntAnalyzerState.session.count / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
             sessionRate.textContent = `${t('mods.huntAnalyzer.sessionsPerHour')}: ${autoplayRatePerHour}`;
         }
         
@@ -3142,7 +5141,7 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
             const goldRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours) : 0;
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.gold / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
             goldRate.textContent = `${t('mods.huntAnalyzer.goldPerHour')}: ${goldRatePerHour}`;
         }
         
@@ -3151,7 +5150,7 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
             const creatureRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours) : 0;
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.creatures / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
             creatureRate.textContent = `${t('mods.huntAnalyzer.creaturesPerHour')}: ${creatureRatePerHour}`;
         }
         
@@ -3160,7 +5159,7 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
             const equipmentRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours) : 0;
+                getSmoothedRate(Math.round(HuntAnalyzerState.totals.equipment / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
             equipmentRate.textContent = `${t('mods.huntAnalyzer.equipmentPerHour')}: ${equipmentRatePerHour}`;
         }
         
@@ -3169,7 +5168,7 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
             const runeRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours) : 0;
+                getSmoothedRate(Math.round(HuntAnalyzerState.totals.runes / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
             runeRate.textContent = `${t('mods.huntAnalyzer.runesPerHour')}: ${runeRatePerHour}`;
         }
         
@@ -3177,11 +5176,25 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
         if (staminaSpent) {
             const overallElapsedTimeMs = Date.now() - HuntAnalyzerState.session.startTime;
             const overallElapsedTimeHours = overallElapsedTimeMs / (1000 * 60 * 60);
+            const overallElapsedTimeMinutes = overallElapsedTimeMs / (1000 * 60);
             const staminaSpentRatePerHour = overallElapsedTimeHours > 0 ? 
-                Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours) : 0;
-            const staminaEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
-                Math.round((HuntAnalyzerState.totals.staminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
-            staminaSpent.textContent = `${t('mods.huntAnalyzer.staminaSpent')}: ${HuntAnalyzerState.totals.staminaSpent} (${staminaSpentRatePerHour}/h) [${staminaEfficiency}%]`;
+                getSmoothedRate(Math.floor(HuntAnalyzerState.totals.staminaSpent / overallElapsedTimeHours), overallElapsedTimeMs) : 0;
+            
+            // Calculate natural stamina regeneration (1 per minute)
+            const naturalStaminaRegen = Math.floor(overallElapsedTimeMinutes);
+            
+            // Total stamina recovery = potions + natural regen
+            const totalStaminaRecovered = HuntAnalyzerState.totals.staminaRecovered + naturalStaminaRegen;
+            
+            // Net stamina change (positive = gaining, negative = losing)
+            const netStaminaChange = totalStaminaRecovered - HuntAnalyzerState.totals.staminaSpent;
+            const netStaminaPerHour = getSmoothedRate(Math.floor(netStaminaChange / overallElapsedTimeHours), overallElapsedTimeMs);
+            
+            // Recovery efficiency percentage (including natural regen)
+            const recoveryEfficiency = HuntAnalyzerState.totals.staminaSpent > 0 ? 
+                Math.round((totalStaminaRecovered / HuntAnalyzerState.totals.staminaSpent) * 100) : 0;
+            
+            staminaSpent.textContent = `Stamina/h: ${staminaSpentRatePerHour} (Net: ${netStaminaPerHour > 0 ? '+' : ''}${netStaminaPerHour}/h) [${recoveryEfficiency}% recovery]`;
         }
         
         // Update section titles
@@ -3206,7 +5219,10 @@ document.addEventListener('bestiary-translations-loaded', (event) => {
             copyLogButton.textContent = t('mods.huntAnalyzer.copyLog');
         }
     }
-});
+};
+
+// Also listen for translation loading event to update button text and panel content
+document.addEventListener('bestiary-translations-loaded', translationEventHandler);
 
 // Initial script execution setup.
 
@@ -3495,16 +5511,26 @@ const panelState = {
 // 6. Cleanup System
 // =======================
 
-// Simplified cleanup function
+// Comprehensive cleanup function for memory leak prevention
+// Follows mod development guide best practices for cleanup
 function cleanupHuntAnalyzer() {
     console.log('[Hunt Analyzer] Starting cleanup...');
     
     try {
-        // 1. Clear intervals
-        if (HuntAnalyzerState.ui.updateIntervalId) {
-            clearInterval(HuntAnalyzerState.ui.updateIntervalId);
-            HuntAnalyzerState.ui.updateIntervalId = null;
+        // 1. Clear intervals and timeouts
+        if (updateIntervalId) {
+            clearInterval(updateIntervalId);
+            updateIntervalId = null;
         }
+        
+        if (autoSaveIntervalId) {
+            clearInterval(autoSaveIntervalId);
+            autoSaveIntervalId = null;
+        }
+        
+        // Clear all timeouts
+        timeoutIds.forEach(id => clearTimeout(id));
+        timeoutIds = [];
         
         // 2. Remove document event listeners to prevent memory leaks
         if (panelResizeMouseMoveHandler) {
@@ -3536,6 +5562,26 @@ function cleanupHuntAnalyzer() {
             windowMessageHandler = null;
         }
         
+        // Remove additional tracked event listeners
+        if (dropdownClickHandler) {
+            const dropdownButton = document.querySelector('[data-map-filter-dropdown]');
+            if (dropdownButton) {
+                dropdownButton.removeEventListener('click', dropdownClickHandler);
+                dropdownClickHandler = null;
+            }
+        }
+        
+        if (documentClickHandler) {
+            document.removeEventListener('click', documentClickHandler);
+            documentClickHandler = null;
+        }
+        
+        // Remove window resize listener
+        window.removeEventListener('resize', updatePanelPosition);
+        
+        // Remove translation event listener
+        document.removeEventListener('bestiary-translations-loaded', translationEventHandler);
+        
         // 3. Unsubscribe from subscriptions
         if (boardSubscription) {
             try {
@@ -3546,34 +5592,79 @@ function cleanupHuntAnalyzer() {
             }
         }
         
-        if (gameTimerSubscription) {
-            try {
-                gameTimerSubscription.unsubscribe();
-                gameTimerSubscription = null;
-            } catch (error) {
-                console.warn('[Hunt Analyzer] Error unsubscribing gameTimer:', error);
-            }
+        
+        // 4. Set UI state to closed and save data before removing panel
+        HuntAnalyzerState.ui.isOpen = false;
+        HuntAnalyzerState.ui.closedManually = true;
+        
+        if (HuntAnalyzerState.settings.persistData) {
+            saveHuntAnalyzerData();
+            saveHuntAnalyzerState();
         }
         
-        // 4. Remove panel and test button
+        // 5. Remove panel and test button
         const panel = document.getElementById(PANEL_ID);
         if (panel && panel.parentNode) {
             panel.parentNode.removeChild(panel);
         }
         
+        // Remove test button if it exists
+        const testButton = document.querySelector('[data-hunt-analyzer-test]');
+        if (testButton && testButton.parentNode) {
+            testButton.parentNode.removeChild(testButton);
+        }
         
-        // 5. Reset critical state only
+        // Remove any dynamically created dropdown elements
+        const dropdownElements = document.querySelectorAll('[data-map-filter-dropdown], .map-filter-dropdown');
+        dropdownElements.forEach(element => {
+            if (element.parentNode) {
+                element.parentNode.removeChild(element);
+            }
+        });
+        
+        
+        // 5. Clear caches to prevent memory leaks
+        equipmentCache.clear();
+        monsterCache.clear();
+        itemInfoCache.clear();
+        
+        // Clear DOM cache if it exists
+        if (window.domCache && typeof window.domCache.clear === 'function') {
+            window.domCache.clear();
+        }
+        
+        // 6. Reset critical state only
         HuntAnalyzerState.session.count = 0;
         HuntAnalyzerState.session.isActive = false;
         HuntAnalyzerState.data.sessions = [];
         HuntAnalyzerState.data.aggregatedLoot.clear();
         HuntAnalyzerState.data.aggregatedCreatures.clear();
-        itemVisualCache.clear();
         
         console.log('[Hunt Analyzer] Cleanup completed');
         
     } catch (error) {
         console.error('[Hunt Analyzer] Error during cleanup:', error);
+        
+        // Force cleanup of critical resources even if errors occur
+        try {
+            if (updateIntervalId) {
+                clearInterval(updateIntervalId);
+                updateIntervalId = null;
+            }
+            if (autoSaveIntervalId) {
+                clearInterval(autoSaveIntervalId);
+                autoSaveIntervalId = null;
+            }
+            timeoutIds.forEach(id => clearTimeout(id));
+            timeoutIds = [];
+            
+            if (boardSubscription) {
+                boardSubscription.unsubscribe();
+                boardSubscription = null;
+            }
+        } catch (forceCleanupError) {
+            console.error('[Hunt Analyzer] Error during force cleanup:', forceCleanupError);
+        }
     }
 }
 
@@ -3595,7 +5686,17 @@ windowMessageHandler = function(event) {
 window.addEventListener('message', windowMessageHandler);
 console.log('[Hunt Analyzer] Message listener added');
 
-// Export functionality
+// Save data before page unload
+window.addEventListener('beforeunload', () => {
+    if (HuntAnalyzerState.settings.persistData) {
+        saveHuntAnalyzerData();
+        saveHuntAnalyzerState();
+    }
+});
+
+// Export functionality and expose state globally for Better UI integration
+window.HuntAnalyzerState = HuntAnalyzerState;
+
 exports = {
     cleanup: cleanupHuntAnalyzer,
     getStats: () => ({
@@ -3608,5 +5709,4 @@ exports = {
     })
 };
 
-console.log('[Hunt Analyzer] Mod initialization complete');
 console.log('[Hunt Analyzer] Mod initialization complete');

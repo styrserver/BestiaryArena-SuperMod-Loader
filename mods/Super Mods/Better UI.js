@@ -779,15 +779,16 @@ function showSettingsModal() {
     // Right column - Checkboxes
     const rightColumn = document.createElement('div');
     Object.assign(rightColumn.style, {
-      width: `${MODAL_CONFIG.rightColumnWidth}px`,
-      minWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
-      maxWidth: `${MODAL_CONFIG.rightColumnWidth}px`,
-      flex: `0 0 ${MODAL_CONFIG.rightColumnWidth}px`,
+      width: '280px',
+      minWidth: '280px',
+      maxWidth: '280px',
+      flex: '0 0 280px',
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
       gap: '8px',
-      overflowY: 'auto'
+      overflowY: 'auto',
+      padding: '2px'
     });
     
     // Helper function to apply menu item styling
@@ -806,6 +807,7 @@ function showSettingsModal() {
     // Create menu items for left column
     const menuItems = [
       { id: 'creatures', label: 'Creatures', selected: true },
+      { id: 'hunt-analyzer', label: 'Hunt Analyzer', selected: false },
       { id: 'ui', label: 'UI', selected: false },
       { id: 'advanced', label: 'Advanced', selected: false }
     ];
@@ -972,14 +974,25 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
             </label>
           </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="always-open-hunt-analyzer-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.alwaysOpenHuntAnalyzerWarning')}">${t('mods.betterUI.alwaysOpenHuntAnalyzer')}</span>
-            </label>
-          </div>
         `;
         rightColumn.appendChild(advancedContent);
+      } else if (categoryId === 'hunt-analyzer') {
+        const huntAnalyzerContent = document.createElement('div');
+        huntAnalyzerContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="hunt-analyzer-persist-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Saves all Hunt Analyzer data and automatically reopens the panel after page refresh. This includes session statistics, loot data, and UI state.">⚠️ Persist through page refresh</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">Theme</span>
+            <select id="hunt-analyzer-theme-selector" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; width: 120px;">
+              <option value="original" selected="">Original</option>
+            </select>
+          </div>
+        `;
+        rightColumn.appendChild(huntAnalyzerContent);
       }
       
       // Re-attach event handlers for the new content
@@ -1162,14 +1175,70 @@ function showSettingsModal() {
         });
       }
       
-      const alwaysOpenHuntAnalyzerCheckbox = content.querySelector('#always-open-hunt-analyzer-toggle');
-      if (alwaysOpenHuntAnalyzerCheckbox) {
-        alwaysOpenHuntAnalyzerCheckbox.checked = config.alwaysOpenHuntAnalyzer;
+      // Hunt Analyzer settings
+      const huntAnalyzerPersistCheckbox = content.querySelector('#hunt-analyzer-persist-toggle');
+      if (huntAnalyzerPersistCheckbox) {
+        // Load current Hunt Analyzer settings
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          huntAnalyzerPersistCheckbox.checked = parsedSettings.persistData || false;
+        } catch (error) {
+          console.error('[Better UI] Error reading Hunt Analyzer settings:', error);
+        }
         
-        alwaysOpenHuntAnalyzerCheckbox.addEventListener('change', () => {
-          config.alwaysOpenHuntAnalyzer = alwaysOpenHuntAnalyzerCheckbox.checked;
-          saveConfig();
-          console.log('[Better UI] Always open Hunt Analyzer:', config.alwaysOpenHuntAnalyzer);
+        huntAnalyzerPersistCheckbox.addEventListener('change', () => {
+          const newValue = huntAnalyzerPersistCheckbox.checked;
+          
+          // Update Hunt Analyzer settings in localStorage
+          try {
+            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+            settings.persistData = newValue;
+            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            console.log('[Better UI] Updated Hunt Analyzer persistData:', newValue);
+          } catch (error) {
+            console.error('[Better UI] Error updating Hunt Analyzer settings:', error);
+          }
+          
+          // Also update runtime if Hunt Analyzer is loaded
+          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+            window.HuntAnalyzerState.settings.persistData = newValue;
+            console.log('[Better UI] Updated Hunt Analyzer runtime settings');
+          }
+        });
+      }
+      
+      const huntAnalyzerThemeSelector = content.querySelector('#hunt-analyzer-theme-selector');
+      if (huntAnalyzerThemeSelector) {
+        // Load current Hunt Analyzer theme
+        try {
+          const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+          const parsedSettings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+          huntAnalyzerThemeSelector.value = parsedSettings.theme || 'original';
+        } catch (error) {
+          console.error('[Better UI] Error reading Hunt Analyzer theme:', error);
+        }
+        
+        huntAnalyzerThemeSelector.addEventListener('change', () => {
+          const newTheme = huntAnalyzerThemeSelector.value;
+          
+          // Update Hunt Analyzer settings in localStorage
+          try {
+            const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
+            const settings = huntAnalyzerSettings ? JSON.parse(huntAnalyzerSettings) : {};
+            settings.theme = newTheme;
+            localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
+            console.log('[Better UI] Updated Hunt Analyzer theme:', newTheme);
+          } catch (error) {
+            console.error('[Better UI] Error updating Hunt Analyzer theme:', error);
+          }
+          
+          // Also update runtime if Hunt Analyzer is loaded
+          if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+            window.HuntAnalyzerState.settings.theme = newTheme;
+            console.log('[Better UI] Updated Hunt Analyzer runtime theme');
+          }
         });
       }
     }

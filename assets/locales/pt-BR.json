@@ -323,7 +323,9 @@
       "loot": "Saque",
       "creatureDrops": "Drops de Criaturas",
       "clearAll": "Limpar Tudo",
-      "copyLog": "Copiar Log"
+      "copyLog": "Copiar Log",
+      "confirm": "Confirmar",
+      "clearData": "Limpar Dados"
     },
     "betterYasir": {
       "activated": "Better Yasir ativado!",
