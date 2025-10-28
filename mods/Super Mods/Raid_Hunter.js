@@ -147,6 +147,7 @@ const EVENT_TEXTS = [
     'Buzzing Madness', 
     'Monastery Catacombs',
     'Ghostlands Boneyard',
+    'Halloween Mansion',
     'Permafrosted Hole',
     'Jammed Mailbox',
     'Frosted Bunker',
@@ -167,6 +168,7 @@ const EVENT_TO_ROOM_MAPPING = {
     'Buzzing Madness': 'crwasp',
     'Monastery Catacombs': 'crcat',
     'Ghostlands Boneyard': 'crghst4',
+    'Halloween Mansion': 'crhw',
     'Permafrosted Hole': 'fhole',
     'Jammed Mailbox': 'fbox',
     'Frosted Bunker': 'fscave',
@@ -3835,7 +3837,8 @@ function createRaidMapSelection() {
         'Carlin': [
             'Buzzing Madness',
             'Monastery Catacombs',
-            'Ghostlands Boneyard'
+            'Ghostlands Boneyard',
+            'Halloween Mansion'
         ],
         'Folda': [
             'Permafrosted Hole',

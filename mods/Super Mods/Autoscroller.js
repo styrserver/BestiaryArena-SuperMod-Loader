@@ -2068,10 +2068,10 @@
     if (!DOM_ELEMENTS.summonScrollButtons || !DOM_ELEMENTS.isCacheValid()) {
       // Get all buttons with the focus style, but exclude autoscroller buttons
       const allButtons = DOMCache.getAll('button.focus-style-visible.active\\:opacity-70');
-      DOM_ELEMENTS.summonScrollButtons = Array.from(allButtons).filter(button => 
+      DOM_ELEMENTS.summonScrollButtons = allButtons ? Array.from(allButtons).filter(button => 
         !button.classList.contains('autoscroller-inventory-button') &&
         !button.classList.contains('autoscroller-scroll-button')
-      );
+      ) : [];
       DOM_ELEMENTS.lastCacheTime = Date.now();
     }
     return DOM_ELEMENTS.summonScrollButtons;
@@ -3390,6 +3390,7 @@
     }
     
     let summonScrollButtons = getSummonScrollButtons();
+    
     if (!summonScrollButtons || summonScrollButtons.length === 0) {
       // Fallback: get all buttons but filter out autoscroller buttons
       const allButtons = inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70');
@@ -3412,9 +3413,22 @@
     // Look for summon scrolls in descending tier order (T5, T4, T3, T2, T1)
     const tierOrder = ['summonscroll5.png', 'summonscroll4.png', 'summonscroll3.png', 'summonscroll2.png', 'summonscroll1.png'];
     
+    // Search through ALL buttons to find summon scrolls
+    const summonScrollButtonsFound = [];
+    for (let i = 0; i < summonScrollButtons.length; i++) {
+      const button = summonScrollButtons[i];
+      const img = button.querySelector('img');
+      if (img && img.src && img.src.includes('summonscroll')) {
+        summonScrollButtonsFound.push(button);
+      }
+    }
+    
+    // Use the found summon scroll buttons instead of all buttons
+    const buttonsToSearch = summonScrollButtonsFound.length > 0 ? summonScrollButtonsFound : summonScrollButtons;
+    
     for (const tier of tierOrder) {
-      for (const button of summonScrollButtons) {
-        const img = button.querySelector('img[alt*="summon scroll"]');
+      for (const button of buttonsToSearch) {
+        const img = button.querySelector('img');
         if (img && img.src && img.src.includes(tier)) {
           targetButton = button;
           break;
@@ -3423,9 +3437,9 @@
       if (targetButton) break;
     }
     
-    if (!targetButton && summonScrollButtons.length > 0) {
-      const lastButton = summonScrollButtons[summonScrollButtons.length - 1];
-      const img = lastButton.querySelector('img[alt*="summon scroll"]');
+    if (!targetButton && summonScrollButtonsFound.length > 0) {
+      const lastButton = summonScrollButtonsFound[summonScrollButtonsFound.length - 1];
+      const img = lastButton.querySelector('img');
       if (img && img.src && img.src.includes('summonscroll')) {
         targetButton = lastButton;
       }
