@@ -4096,24 +4096,6 @@ function createRaidMapSelection() {
     `;
     section.appendChild(description);
     
-    // Priority info
-    const priorityInfo = document.createElement('div');
-    priorityInfo.innerHTML = getLocalizedText(
-        '<strong>Priority:</strong> Halloween Mansion only waits for Better Tasker (takes priority over Better Boosted Maps)',
-        '<strong>Prioridade:</strong> Halloween Mansion apenas aguarda Better Tasker (tem prioridade sobre Better Boosted Maps)'
-    );
-    priorityInfo.className = 'pixel-font-16';
-    priorityInfo.style.cssText = `
-        margin-bottom: 15px;
-        padding: 8px;
-        font-size: 11px;
-        color: ${COLOR_YELLOW};
-        background: rgba(255, 211, 61, 0.1);
-        border-left: 3px solid ${COLOR_YELLOW};
-        border-radius: 3px;
-    `;
-    section.appendChild(priorityInfo);
-    
     // Create map selection container
     const mapContainer = document.createElement('div');
     mapContainer.style.cssText = `

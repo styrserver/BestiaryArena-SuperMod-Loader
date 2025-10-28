@@ -4584,6 +4584,18 @@ async function openQuestLogDirectly() {
                 const questLogContainer = findQuestLogContainer();
                 if (questLogContainer) {
                     console.log('[Better Tasker] Quest log opened via quest blip and validated');
+                    
+                    // Check if we're in a sub-view (like Halloween Quests) and need to go back
+                    const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
+                        btn.querySelector('svg.lucide-arrow-left')
+                    );
+                    
+                    if (backButton && isElementVisible(backButton)) {
+                        console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
+                        backButton.click();
+                        await sleep(500); // Wait for transition back to main quest log
+                    }
+                    
                     return true;
                 } else {
                     console.log('[Better Tasker] Quest blip clicked but quest log did not appear');
@@ -4619,6 +4631,18 @@ async function openQuestLogDirectly() {
             const questLogContainer = document.querySelector('[class*="quest"], [class*="modal"], [class*="dialog"]');
             if (questLogContainer) {
                 console.log('[Better Tasker] Quest log opened directly and validated');
+                
+                // Check if we're in a sub-view (like Halloween Quests) and need to go back
+                const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
+                    btn.querySelector('svg.lucide-arrow-left')
+                );
+                
+                if (backButton && isElementVisible(backButton)) {
+                    console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
+                    backButton.click();
+                    await sleep(500); // Wait for transition back to main quest log
+                }
+                
                 return true;
             } else {
                 console.log('[Better Tasker] Quest log button clicked but UI did not appear');
@@ -4643,6 +4667,18 @@ async function openQuestLogDirectly() {
                 const questLogContainer = document.querySelector('[class*="quest"], [class*="modal"], [class*="dialog"]');
                 if (questLogContainer) {
                     console.log('[Better Tasker] Quest log opened via fallback and validated');
+                    
+                    // Check if we're in a sub-view (like Halloween Quests) and need to go back
+                    const backButton = Array.from(document.querySelectorAll('button')).find(btn => 
+                        btn.querySelector('svg.lucide-arrow-left')
+                    );
+                    
+                    if (backButton && isElementVisible(backButton)) {
+                        console.log('[Better Tasker] Detected sub-view (e.g., Halloween Quests) - clicking Back button');
+                        backButton.click();
+                        await sleep(500); // Wait for transition back to main quest log
+                    }
+                    
                     return true;
                 } else {
                     console.log('[Better Tasker] Quest log fallback clicked but UI did not appear');
