@@ -686,6 +686,22 @@ function createInventoryStyleCreaturePortrait(creatureData) {
     containerSlot.appendChild(img);
     containerSlot.appendChild(levelSpan);
     
+    // Add shiny indicator if creature is shiny
+    if (creatureData.isShiny) {
+        const shinyIcon = document.createElement('img');
+        shinyIcon.src = 'https://bestiaryarena.com/assets/icons/shiny-star.png';
+        shinyIcon.alt = 'Shiny';
+        shinyIcon.title = 'Shiny';
+        shinyIcon.style.position = 'absolute';
+        shinyIcon.style.bottom = '0px';
+        shinyIcon.style.right = '0px';
+        shinyIcon.style.width = '9px';
+        shinyIcon.style.height = '10px';
+        shinyIcon.style.imageRendering = 'pixelated';
+        shinyIcon.style.zIndex = '10';
+        containerSlot.appendChild(shinyIcon);
+    }
+    
     return containerSlot;
 }
 
@@ -2927,13 +2943,18 @@ function renderAllSessions() {
 
     // Sort and render overall aggregated creatures in grid layout
     const sortedOverallCreatures = Array.from(HuntAnalyzerState.data.aggregatedCreatures.values()).sort((a, b) => {
-        // First priority: name (alphabetical)
+        // First priority: shiny creatures first
+        if (a.isShiny !== b.isShiny) {
+            return b.isShiny ? 1 : -1; // Shiny first
+        }
+        
+        // Second priority: name (alphabetical)
         const nameCompare = a.originalName.localeCompare(b.originalName);
         if (nameCompare !== 0) {
             return nameCompare;
         }
         
-        // Second priority: rarity (highest tier level first)
+        // Third priority: rarity (highest tier level first)
         if (a.tierLevel !== b.tierLevel) {
             return b.tierLevel - a.tierLevel; // Higher tier level first (descending)
         }

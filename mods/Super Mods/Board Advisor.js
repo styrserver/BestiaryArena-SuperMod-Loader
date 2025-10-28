@@ -6490,7 +6490,7 @@ class AnalysisEngine {
       const equipment = setup
         .map(p => ({
           equipId: p.equipId,
-          equipmentName: p.equipmentName || p.equipId,
+          equipmentName: String(p.equipmentName || p.equipId || ''),
           stat: p.stat,
           tier: p.tier
         }))

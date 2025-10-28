@@ -1203,11 +1203,6 @@ function isRaidHunterRaiding() {
                 const isRaidHunterCurrentlyRaiding = questButtonOwner === 'Raid Hunter' ||
                                                      (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
                 
-                // Debug logging to help diagnose coordination issues
-                if (currentRaidList.length > 0) {
-                    console.log(`[Better Tasker] Raid coordination check - raids: ${currentRaidList.length}, quest owner: ${questButtonOwner}, raid function: ${window.raidHunterIsCurrentlyRaiding ? window.raidHunterIsCurrentlyRaiding() : 'N/A'}`);
-                }
-                
                 // Only yield control if Raid Hunter is actually actively raiding (has quest button control)
                 if (isRaidHunterCurrentlyRaiding) {
                     console.log('[Better Tasker] Raid Hunter is actively raiding - preventing task automation');
@@ -1218,8 +1213,24 @@ function isRaidHunterRaiding() {
                 } else if (currentRaidList.length > 0 && raidHunterEnabled === 'true') {
                     // Check if we're currently tasking - if so, don't interfere with ongoing task
                     if (taskHuntingOngoing) {
-                        console.log('[Better Tasker] Task hunting ongoing, skipping automation');
                         return false;
+                    }
+                    
+                    // PRIORITY CHECK: If Better Tasker has an active task, it takes priority over low-priority raids
+                    // Check if we have an active task in the quest log
+                    let hasActiveTask = false;
+                    try {
+                        const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+                        const task = playerContext?.questLog?.task;
+                        hasActiveTask = !!(task && task.gameId);
+                    } catch (error) {
+                        // Ignore errors
+                    }
+                    
+                    if (hasActiveTask) {
+                        console.log('[Better Tasker] ✅ Better Tasker has ACTIVE TASK - taking priority over waiting raids');
+                        lastRaidHunterCheckTime = null; // Reset timer
+                        return false; // Proceed with task automation
                     }
                     
                     // Track Raid Hunter failures and give it more time when struggling
