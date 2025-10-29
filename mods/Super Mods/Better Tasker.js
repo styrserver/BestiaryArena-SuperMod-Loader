@@ -849,6 +849,8 @@ let lastModalCall = 0;
 
 // Event listener management
 let escKeyListener = null;
+let pageVisibilityHandler = null;
+let lastPageVisibilityChange = 0;
 
 // Timeout tracking for cleanup
 let safetyTimeouts = [];
@@ -1203,20 +1205,43 @@ function isRaidHunterRaiding() {
                 const isRaidHunterCurrentlyRaiding = questButtonOwner === 'Raid Hunter' ||
                                                      (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
                 
-                // Only yield control if Raid Hunter is actually actively raiding (has quest button control)
+                // Only yield control if Raid Hunter is actually actively raiding a HIGH priority raid
+                // Halloween Mansion has lower priority than Better Tasker, so we don't yield for it
                 if (isRaidHunterCurrentlyRaiding) {
-                    console.log('[Better Tasker] Raid Hunter is actively raiding - preventing task automation');
-                    lastRaidHunterCheckTime = null; // Reset timer since Raid Hunter has control
-                    lastRaidHunterActiveTime = Date.now(); // Track when Raid Hunter was last active
-                    raidHunterFailureCount = 0; // Reset failure count when Raid Hunter is active
-                    return true;
+                    // Check if it's a HIGH priority raid (not Halloween Mansion)
+                    const isHighPriorityRaid = (window.raidHunterIsRaidingHighPriority && window.raidHunterIsRaidingHighPriority());
+                    if (isHighPriorityRaid) {
+                        console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - preventing task automation');
+                        lastRaidHunterCheckTime = null; // Reset timer since Raid Hunter has control
+                        lastRaidHunterActiveTime = Date.now(); // Track when Raid Hunter was last active
+                        raidHunterFailureCount = 0; // Reset failure count when Raid Hunter is active
+                        return true;
+                    } else {
+                        console.log('[Better Tasker] Raid Hunter is raiding Halloween Mansion (low priority) - Better Tasker can proceed');
+                        return false; // Don't yield for Halloween Mansion
+                    }
                 } else if (currentRaidList.length > 0 && raidHunterEnabled === 'true') {
                     // Check if we're currently tasking - if so, don't interfere with ongoing task
                     if (taskHuntingOngoing) {
                         return false;
                     }
                     
-                    // PRIORITY CHECK: If Better Tasker has an active task, it takes priority over low-priority raids
+                    // PRIORITY CHECK: If Better Tasker has an active task, it takes priority over waiting raids
+                    // BUT: Never proceed if Raid Hunter is actually actively raiding a HIGH priority raid
+                    // Re-check Raid Hunter status here to catch the case where it's raiding but hasn't claimed quest button yet
+                    // Halloween Mansion has lower priority, so we don't yield for it
+                    const raidHunterActuallyRaiding = (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
+                    if (raidHunterActuallyRaiding) {
+                        const isHighPriorityRaid = (window.raidHunterIsRaidingHighPriority && window.raidHunterIsRaidingHighPriority());
+                        if (isHighPriorityRaid) {
+                            console.log('[Better Tasker] Raid Hunter is actually raiding HIGH priority raid (detected via internal flag) - yielding control despite active task');
+                            return true; // Yield to Raid Hunter even if we have active task (only for HIGH priority raids)
+                        } else {
+                            console.log('[Better Tasker] Raid Hunter is raiding Halloween Mansion (low priority) - Better Tasker can proceed with active task');
+                            // Continue to active task check below - don't yield for Halloween Mansion
+                        }
+                    }
+                    
                     // Check if we have an active task in the quest log
                     let hasActiveTask = false;
                     try {
@@ -1228,7 +1253,7 @@ function isRaidHunterRaiding() {
                     }
                     
                     if (hasActiveTask) {
-                        console.log('[Better Tasker] ✅ Better Tasker has ACTIVE TASK - taking priority over waiting raids');
+                        console.log('[Better Tasker] ✅ Better Tasker has ACTIVE TASK - taking priority over waiting raids (Raid Hunter not actively raiding)');
                         lastRaidHunterCheckTime = null; // Reset timer
                         return false; // Proceed with task automation
                     }
@@ -1249,11 +1274,21 @@ function isRaidHunterRaiding() {
                     }
                     
                     // If raids are available but Raid Hunter isn't actively raiding,
-                    // give Raid Hunter a chance to claim control (especially after foreground transitions)
+                    // check if any enabled HIGH priority raids exist before waiting
+                    // If no enabled HIGH priority raids exist, proceed immediately (don't wait for disabled raids)
+                    const hasEnabledHighPriorityRaid = (window.raidHunterHasEnabledHighPriorityRaid && window.raidHunterHasEnabledHighPriorityRaid());
+                    
+                    if (!hasEnabledHighPriorityRaid) {
+                        console.log('[Better Tasker] No enabled HIGH priority raids available - proceeding immediately (disabled raids ignored)');
+                        lastRaidHunterCheckTime = null; // Reset timer
+                        return false; // Proceed immediately - don't wait for disabled raids
+                    }
+                    
+                    // Give Raid Hunter a chance to claim control (especially after foreground transitions)
                     // Wait up to 10 seconds for Raid Hunter to claim control
                     if (!lastRaidHunterCheckTime) {
                         lastRaidHunterCheckTime = now;
-                        console.log('[Better Tasker] Active raids available - waiting for Raid Hunter to claim control...');
+                        console.log('[Better Tasker] Enabled HIGH priority raids available - waiting for Raid Hunter to claim control...');
                         return true; // Yield control temporarily
                     }
                     
@@ -1280,11 +1315,68 @@ function isRaidHunterRaiding() {
     }
 }
 
+// Handle page visibility changes (foreground/background transitions)
+// CRITICAL: Immediately check Raid Hunter state when page becomes visible to prevent taking control during transitions
+function handlePageVisibilityChange() {
+    try {
+        const now = Date.now();
+        
+        // Debounce rapid visibility changes
+        if (now - lastPageVisibilityChange < 1000) {
+            return;
+        }
+        lastPageVisibilityChange = now;
+        
+        if (document.visibilityState === 'visible') {
+            console.log('[Better Tasker] Page became visible - immediately checking Raid Hunter state');
+            
+            // CRITICAL: Immediately sync Raid Hunter state when page becomes visible
+            // This prevents Better Tasker from taking control during foreground transitions
+            const wasRaidHunterActive = isRaidHunterActive;
+            isRaidHunterActive = isRaidHunterRaiding();
+            
+            // If Raid Hunter is now active and we're running automation, pause it immediately
+            if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+                console.log('[Better Tasker] Page visible: Raid Hunter detected as active - immediately pausing task automation');
+                pauseAutomationDuringRaid();
+            }
+            
+            // If we were paused due to Raid Hunter but it's no longer active, don't resume here
+            // Let the coordination interval handle resumption (with proper delay)
+            // This prevents race conditions where Raid Hunter might be temporarily undetected
+        } else {
+            console.log('[Better Tasker] Page became hidden - maintaining task automation state');
+        }
+    } catch (error) {
+        console.error('[Better Tasker] Error handling page visibility change:', error);
+    }
+}
+
+// Set up page visibility monitoring for foreground/background transitions
+function setupPageVisibilityMonitoring() {
+    // Remove existing listener if any
+    if (pageVisibilityHandler) {
+        document.removeEventListener('visibilitychange', pageVisibilityHandler);
+        pageVisibilityHandler = null;
+    }
+    
+    // Create new handler
+    pageVisibilityHandler = handlePageVisibilityChange;
+    
+    // Add event listener
+    document.addEventListener('visibilitychange', pageVisibilityHandler);
+    
+    console.log('[Better Tasker] Page visibility monitoring set up');
+}
+
 // Monitor Raid Hunter coordination
 function setupRaidHunterCoordination() {
     if (raidHunterCoordinationInterval) {
         clearInterval(raidHunterCoordinationInterval);
     }
+    
+    // Set up page visibility monitoring FIRST - this ensures immediate detection when page becomes visible
+    setupPageVisibilityMonitoring();
     
     // Check Raid Hunter status every 10 seconds
     raidHunterCoordinationInterval = setInterval(() => {
@@ -1356,6 +1448,13 @@ function cleanupRaidHunterCoordination() {
         clearInterval(raidHunterCoordinationInterval);
         raidHunterCoordinationInterval = null;
     }
+    
+    // Remove page visibility listener
+    if (pageVisibilityHandler) {
+        document.removeEventListener('visibilitychange', pageVisibilityHandler);
+        pageVisibilityHandler = null;
+    }
+    
     isRaidHunterActive = false;
 }
 
@@ -3483,6 +3582,12 @@ function isQuestBlipAvailable() {
 // Navigate to suggested map and start autoplay using API
 async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null) {
     try {
+        // CRITICAL: Check if Raid Hunter is actively raiding BEFORE doing anything (HIGH priority raids take precedence)
+        if (isRaidHunterRaiding()) {
+            console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting navigation (HIGH priority raid takes precedence)');
+            return false;
+        }
+        
         console.log('[Better Tasker] Looking for suggested map link...');
         
         // First, ensure quest log is open
@@ -4560,6 +4665,12 @@ async function resumeAutoplay() {
 // Open quest log directly without relying on quest blip
 async function openQuestLogDirectly() {
     try {
+        // CRITICAL: Check if Raid Hunter is actively raiding BEFORE opening quest log (HIGH priority raids take precedence)
+        if (isRaidHunterRaiding()) {
+            console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - aborting quest log opening');
+            return false;
+        }
+        
         console.log('[Better Tasker] Opening quest log directly...');
         
         // FIRST: Try to find and click quest blip (most reliable for task completion)
@@ -5167,6 +5278,12 @@ async function handleTaskFinishing() {
                         return;
                     }
                     
+                    // Check if Raid Hunter started raiding during delay (HIGH priority raids take precedence)
+                    if (isRaidHunterRaiding()) {
+                        console.log('[Better Tasker] Raid Hunter started raiding HIGH priority raid during task start delay - aborting task operation');
+                        return;
+                    }
+                    
                     // Check if tasker is still enabled after delay
                     if (taskerState !== TASKER_STATES.ENABLED) {
                         console.log('[Better Tasker] Tasker disabled during task start delay');
@@ -5238,6 +5355,11 @@ async function handleTaskFinishing() {
                     
                     // If we don't have a taskingMapId, try to get it from quest log
                     if (!taskingMapId) {
+                        // Check if Raid Hunter is actively raiding before navigating
+                        if (isRaidHunterRaiding()) {
+                            console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                            return;
+                        }
                         console.log(`[Better Tasker] No tasking map ID stored (current: ${currentRoomId}) - opening quest log to get suggested map information...`);
                         const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
                         if (navigationResult) {
@@ -5247,6 +5369,11 @@ async function handleTaskFinishing() {
                         }
                         return;
                     } else {
+                        // Check if Raid Hunter is actively raiding before navigating
+                        if (isRaidHunterRaiding()) {
+                            console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                            return;
+                        }
                         console.log(`[Better Tasker] Not on correct map (current: ${currentRoomId}, expected: ${taskingMapId}) - opening quest log to get suggested map information...`);
                         const navigationResult = await navigateToSuggestedMapAndStartAutoplay();
                         if (navigationResult) {
@@ -5375,10 +5502,22 @@ async function handleTaskFinishing() {
                     
                     console.log('[Better Tasker] Task creature is allowed, proceeding with navigation...');
                     
+                    // Check if Raid Hunter is actively raiding before navigating
+                    if (isRaidHunterRaiding()) {
+                        console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                        return;
+                    }
+                    
                     // 3. Navigate to suggested map and start autoplay
                     await navigateToSuggestedMapAndStartAutoplay();
                 } else {
                     console.log('[Better Tasker] New Task button not found, checking for suggested map...');
+                    
+                    // Check if Raid Hunter is actively raiding before navigating
+                    if (isRaidHunterRaiding()) {
+                        console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                        return;
+                    }
                     
                     // Try to navigate to suggested map using API (will validate Paw and Fur Society section internally)
                     await navigateToSuggestedMapAndStartAutoplay();
@@ -5503,6 +5642,11 @@ async function handleTaskFinishing() {
                         const suggestedMapElement = extractSuggestedMapFromSection(pawAndFurSection);
                         
                         if (suggestedMapElement) {
+                            // Check if Raid Hunter is actively raiding before navigating
+                            if (isRaidHunterRaiding()) {
+                                console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - deferring task navigation');
+                                return;
+                            }
                             console.log('[Better Tasker] Suggested map found, navigating...');
                             await navigateToSuggestedMapAndStartAutoplay(suggestedMapElement);
                         } else {
@@ -5676,7 +5820,8 @@ function subscribeToGameState() {
                 console.log('[Better Tasker] New task available check result:', newTaskAvailable);
                 
                 if (newTaskAvailable) {
-                    console.log('[Better Tasker] New task available - accepting task (works during raids)');
+                    // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
+                    console.log('[Better Tasker] New task available - accepting task');
                     await openQuestLogAndAcceptTask();
                     return;
                 }
@@ -6396,6 +6541,7 @@ function scheduleTaskCheck() {
         // Check if new task is available now
         if (!task.resetAt) {
             console.log('[Better Tasker] Scheduler: New task available NOW (resetAt is null) - accepting immediately');
+            // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
             openQuestLogAndAcceptTask();
             return;
         }
@@ -6406,6 +6552,7 @@ function scheduleTaskCheck() {
         
         if (timeRemaining <= 0) {
             console.log('[Better Tasker] Scheduler: Task cooldown EXPIRED - accepting task now');
+            // openQuestLogAndAcceptTask() handles raids internally - accepts tasks but blocks navigation
             openQuestLogAndAcceptTask();
             return;
         }
@@ -6502,6 +6649,7 @@ async function openQuestLogAndAcceptTask() {
         });
         
         // Don't set task operation in progress flag here - only set it when actually processing a task
+        // Note: We allow task acceptance during raids (non-invasive), but navigation is blocked at line 6707
         console.log('[Better Tasker] Opening quest log to check for tasks...');
         
         // Clear any open modals first

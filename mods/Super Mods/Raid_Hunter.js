@@ -5105,3 +5105,50 @@ context.exports = {
 
 // Expose Raid Hunter state globally for Better Tasker coordination
 window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;
+
+// Expose function to check if Raid Hunter is raiding a HIGH priority raid (not Halloween Mansion)
+// Better Tasker should yield for HIGH priority raids but NOT for Halloween Mansion
+window.raidHunterIsRaidingHighPriority = () => {
+    if (!isCurrentlyRaiding || !currentRaidInfo) {
+        return false;
+    }
+    // Halloween Mansion has HALLOWEEN priority (3), HIGH priority raids have priority (1)
+    // Better Tasker should NOT yield for Halloween Mansion
+    return currentRaidInfo.priority === RAID_PRIORITY.HIGH;
+};
+
+// Expose function to check if Raid Hunter has any enabled HIGH priority raids available
+// This helps Better Tasker avoid waiting unnecessarily for disabled raids
+window.raidHunterHasEnabledHighPriorityRaid = () => {
+    try {
+        const settings = loadSettings();
+        const enabledMaps = settings.enabledRaidMaps || [];
+        
+        if (enabledMaps.length === 0) {
+            return false; // No raids enabled at all
+        }
+        
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        if (!raidState) {
+            return false;
+        }
+        
+        const currentRaidList = raidState.context?.list || [];
+        
+        // Check if any of the available raids are enabled HIGH priority raids
+        for (const raid of currentRaidList) {
+            const raidName = getEventNameForRoomId(raid.roomId);
+            if (enabledMaps.includes(raidName)) {
+                const priority = getRaidPriority(raidName);
+                if (priority === RAID_PRIORITY.HIGH) {
+                    return true; // Found an enabled HIGH priority raid
+                }
+            }
+        }
+        
+        return false; // No enabled HIGH priority raids found
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking enabled HIGH priority raids:', error);
+        return false;
+    }
+};
