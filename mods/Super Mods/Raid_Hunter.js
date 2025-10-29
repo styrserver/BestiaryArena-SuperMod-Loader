@@ -2647,7 +2647,63 @@ function interruptCurrentRaid(callback) {
 // Stops autoplay when raid ends
 function stopAutoplayOnRaidEnd() {
     try {
-        console.log('[Raid Hunter] Raid ended - reloading to check for more raids');
+        console.log('[Raid Hunter] Raid ended - checking for more raids in queue');
+        
+        // Update raid state to refresh queue before checking
+        updateRaidState();
+        
+        // Check if there are more raids in the queue
+        if (raidQueue.length > 0) {
+            console.log(`[Raid Hunter] Found ${raidQueue.length} raid(s) in queue - navigating to next raid instead of reloading`);
+            
+            // Reset current raid state (but preserve queue)
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            raidRetryCount = 0;
+            lastRaidTime = 0;
+            
+            // Restore quest button appearance
+            restoreQuestButtonAppearance();
+            
+            // Stop quest button validation monitoring
+            stopAutoplayStateMonitoring();
+            stopQuestButtonValidation();
+            
+            // Stop stamina tooltip monitoring
+            stopStaminaTooltipMonitoring();
+            
+            // Stop raid end checking
+            stopRaidEndChecking();
+            
+            // Check if Better Tasker is active before disabling Bestiary Automator settings
+            if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
+                console.log('[Raid Hunter] Better Tasker is active - skipping Bestiary Automator settings reset to avoid conflicts');
+            } else {
+                // Disable Bestiary Automator's autorefill stamina when raid ends
+                const settings = loadSettings();
+                if (settings.autoRefillStamina) {
+                    console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
+                    disableBestiaryAutomatorStaminaRefill();
+                }
+                if (settings.fasterAutoplay) {
+                    console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
+                    disableBestiaryAutomatorFasterAutoplay();
+                }
+            }
+            
+            // Navigate to next raid after cleanup delay
+            setTimeout(() => {
+                if (isAutomationActive() && raidQueue.length > 0) {
+                    console.log('[Raid Hunter] Processing next raid from queue');
+                    processNextRaid();
+                }
+            }, 2000); // 2 second delay to allow cleanup
+            
+            return; // Exit early - don't reload
+        }
+        
+        // No more raids in queue - proceed with normal cleanup and reload
+        console.log('[Raid Hunter] No more raids in queue - reloading page');
         
         // Reset raid state
         resetState('raid');
@@ -2678,7 +2734,7 @@ function stopAutoplayOnRaidEnd() {
             }
         }
         
-        // Always reload page after cleanup to reset cache, DOM, and check for more raids
+        // Reload page after cleanup to reset cache, DOM, and check for more raids
         setTimeout(() => {
             if (!isSafeToReload()) return;
             // Check if Better UI has disabled auto-reload
@@ -4884,7 +4940,26 @@ function startAutoplayStateMonitoring() {
                         modifyQuestButtonForRaiding();
                     }
                 } else if (!isAutoplay) {
-                    // Autoplay paused - restore quest button
+                    // Autoplay paused - check if raid ended
+                    console.log('[Raid Hunter] Autoplay stopped - checking if raid ended');
+                    
+                    // Update raid state to check if current raid still exists
+                    updateRaidState();
+                    
+                    // Check if current raid still exists in the list
+                    const raidState = globalThis.state?.raids?.getSnapshot?.();
+                    const currentRaidList = raidState?.context?.list || [];
+                    const currentRaidStillExists = currentRaidInfo && 
+                        currentRaidList.some(raid => raid.roomId === currentRaidInfo.roomId);
+                    
+                    if (!currentRaidStillExists && isCurrentlyRaiding) {
+                        // Raid ended - check for more raids in queue
+                        console.log('[Raid Hunter] Raid ended (no longer in list) - checking queue for next raid');
+                        stopAutoplayOnRaidEnd(); // This now checks queue and navigates if available
+                        return;
+                    }
+                    
+                    // Autoplay paused but raid still active - restore quest button
                     console.log('[Raid Hunter] Autoplay paused - restoring quest button');
                     
                     // Force take control to restore quest button (we need to restore it regardless of current owner)
@@ -4958,7 +5033,28 @@ function startQuestButtonValidation() {
             // Check if we're still in autoplay mode (indicates raid is still active)
             const boardContext = globalThis.state.board.getSnapshot().context;
             if (boardContext.mode !== 'autoplay') {
-                console.log('[Raid Hunter] No longer in autoplay mode - quest button restored');
+                console.log('[Raid Hunter] No longer in autoplay mode - checking if raid ended');
+                
+                // Update raid state to check if current raid still exists
+                updateRaidState();
+                
+                // Check if current raid still exists in the list
+                const raidState = globalThis.state?.raids?.getSnapshot?.();
+                const currentRaidList = raidState?.context?.list || [];
+                const currentRaidStillExists = currentRaidInfo && 
+                    currentRaidList.some(raid => raid.roomId === currentRaidInfo.roomId);
+                
+                if (!currentRaidStillExists && isCurrentlyRaiding) {
+                    // Raid ended - check for more raids in queue
+                    console.log('[Raid Hunter] Raid ended (no longer in list) - checking queue for next raid');
+                    isCurrentlyRaiding = false;
+                    stopQuestButtonValidation();
+                    stopAutoplayOnRaidEnd(); // This now checks queue and navigates if available
+                    return;
+                }
+                
+                // Autoplay paused but raid still active - restore quest button
+                console.log('[Raid Hunter] Autoplay paused - quest button restored');
                 isCurrentlyRaiding = false;
                 currentRaidInfo = null;
                 restoreQuestButtonAppearance();
