@@ -21,6 +21,7 @@ const defaultConfig = {
   enableAutoplayRefresh: false,
   autoplayRefreshMinutes: 30,
   disableAutoReload: false,
+  enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
   alwaysOpenHuntAnalyzer: false
 };
@@ -158,7 +159,8 @@ const uiState = {
 const favoritesState = {
   creatures: new Map(), // Maps uniqueId -> symbolKey
   buttonListeners: new WeakMap(), // Track event listeners on creature buttons
-  lastOptimizedUpdate: 0 // Track last optimized favorite update to prevent double-refresh
+  lastOptimizedUpdate: 0, // Track last optimized favorite update to prevent double-refresh
+  lastLoggedResult: null // Track last logged result to prevent duplicate logs
 };
 
 // Subscriptions state
@@ -166,6 +168,9 @@ const subscriptions = {
   autoplayRefreshGame: null,
   autoplayRefreshSetPlayMode: null
 };
+
+// Anti-idle sounds state
+let antiIdleAudioElement = null;
 
 // Global update tracking
 let lastGlobalUpdate = 0; // Track last global update across all observers
@@ -974,6 +979,12 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="anti-idle-sounds-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Prevents browser idle timeout by playing a muted audio loop. The audio is completely silent and won't disturb your browsing.">⚠️ Anti-Idle Sounds</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -1172,6 +1183,22 @@ function showSettingsModal() {
           config.disableAutoReload = disableAutoReloadCheckbox.checked;
           saveConfig();
           console.log('[Better UI] Auto-reload disabled:', config.disableAutoReload);
+        });
+      }
+      
+      const antiIdleSoundsCheckbox = content.querySelector('#anti-idle-sounds-toggle');
+      if (antiIdleSoundsCheckbox) {
+        antiIdleSoundsCheckbox.checked = config.enableAntiIdleSounds;
+        
+        antiIdleSoundsCheckbox.addEventListener('change', () => {
+          config.enableAntiIdleSounds = antiIdleSoundsCheckbox.checked;
+          saveConfig();
+          
+          if (antiIdleSoundsCheckbox.checked) {
+            enableAntiIdleSounds();
+          } else {
+            disableAntiIdleSounds();
+          }
         });
       }
       
@@ -1694,7 +1721,14 @@ function updateFavoriteHearts(targetUniqueId = null) {
     }
   });
   
-  console.log('[Better UI] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
+  // Only log when hearts were actually added and result is different from last time
+  if (heartsAdded > 0) {
+    const currentResult = `${creaturesChecked}-${heartsAdded}`;
+    if (favoritesState.lastLoggedResult !== currentResult) {
+      console.log('[Better UI] updateFavoriteHearts completed. Creatures checked:', creaturesChecked, 'Total hearts added:', heartsAdded);
+      favoritesState.lastLoggedResult = currentResult;
+    }
+  }
 }
 
 // Helper: Update a single creature's favorite heart (optimized for single-creature updates)
@@ -2554,9 +2588,13 @@ function applyShinyEnemies() {
       }
     });
     
-    // Only log when something actually happened
-    if (appliedCount > 0 || skippedCount > 0) {
-      console.log(`[Better UI] Shiny enemies applied to ${appliedCount} creatures (skipped ${skippedCount} unobtainable)`);
+    // Only log when something actually happened and result is different from last time
+    if (appliedCount > 0) {
+      const currentResult = `${appliedCount}-${skippedCount}`;
+      if (lastShinyEnemiesLogResult !== currentResult) {
+        console.log(`[Better UI] Shiny enemies applied to ${appliedCount} creatures (skipped ${skippedCount} unobtainable)`);
+        lastShinyEnemiesLogResult = currentResult;
+      }
     }
   } catch (error) {
     console.error('[Better UI] Error applying shiny enemies:', error);
@@ -3129,14 +3167,12 @@ function startBattleBoardObserver() {
                   
                   if (isEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
                     spriteImg.setAttribute('data-shiny', 'true');
-                    console.log(`[Better UI] ✨ Summoned enemy: ${creatureName} - applied shiny`);
                   } else if (!isEnemy) {
                     // NOT in boardConfig as enemy - check if it's a visual summon by health bar
                     const isVisualEnemy = isEnemyByHealthBar(containerNode);
                     
                     if (isVisualEnemy && dataShiny === 'false' && !isCreatureUnobtainable(creatureName)) {
                       spriteImg.setAttribute('data-shiny', 'true');
-                      console.log(`[Better UI] ✨ Visual summon: ${creatureName} - applied shiny`);
                     }
                   }
                   
@@ -3326,8 +3362,6 @@ function startBattleBoardObserver() {
         
         // Detect when new enemies are added (e.g., summoned by Trolls or Orc Riders)
         if (currentEnemyCount > lastEnemyCount && lastEnemyCount > 0) {
-          console.log(`[Better UI] Enemy summoned - re-applying shiny`);
-          
           scheduleTimeout(() => {
             applyShinyEnemies();
           }, 20);
@@ -3393,10 +3427,12 @@ function parseAutoplayTime(textContent) {
 let lastBoardActivityTime = Date.now();
 let boardInactivityTimer = null;
 
+// Track last logged shiny enemies result to prevent duplicate logs
+let lastShinyEnemiesLogResult = null;
+
 // Reset board activity timer when board state changes
 function resetBoardActivityTimer() {
   lastBoardActivityTime = Date.now();
-  console.log('[Better UI] Board activity timer reset');
 }
 
 // Get the autoplay session timer from the DOM
@@ -3475,7 +3511,6 @@ function startAutoplayRefreshMonitor() {
       
       // Subscribe to board state changes to track activity
       subscriptions.autoplayRefreshBoardState = globalThis.state.board.subscribe((state) => {
-        console.log('[Better UI] Board state changed - resetting activity timer');
         resetBoardActivityTimer();
       });
       
@@ -3622,6 +3657,46 @@ function stopAutoplayRefreshMonitor() {
   }
 }
 
+// Enable anti-idle sounds
+function enableAntiIdleSounds() {
+  try {
+    // Clear any existing audio element
+    disableAntiIdleSounds();
+    
+    const el = document.createElement("audio");
+    document.body.append(el);
+    el.muted = true;
+    el.volume = 0;
+    el.loop = true;
+    el.src = '/swoosh.mp3';
+    
+    el.play().catch(error => {
+      console.warn('[Better UI] Anti-idle sounds play failed (may require user interaction):', error);
+    });
+    
+    antiIdleAudioElement = el;
+    console.log('[Better UI] Anti-idle sounds enabled');
+  } catch (error) {
+    console.error('[Better UI] Error enabling anti-idle sounds:', error);
+  }
+}
+
+// Disable anti-idle sounds
+function disableAntiIdleSounds() {
+  try {
+    if (antiIdleAudioElement) {
+      antiIdleAudioElement.pause();
+      if (antiIdleAudioElement.parentNode) {
+        antiIdleAudioElement.parentNode.removeChild(antiIdleAudioElement);
+      }
+      antiIdleAudioElement = null;
+      console.log('[Better UI] Anti-idle sounds disabled');
+    }
+  } catch (error) {
+    console.error('[Better UI] Error disabling anti-idle sounds:', error);
+  }
+}
+
 // =======================
 // 12. Initialization
 // =======================
@@ -3667,6 +3742,13 @@ function initBetterUI() {
       startAutoplayRefreshMonitor();
     } else {
       console.log('[Better UI] Autoplay refresh disabled in config');
+    }
+    
+    if (config.enableAntiIdleSounds) {
+      console.log('[Better UI] Anti-idle sounds enabled in config, starting audio');
+      enableAntiIdleSounds();
+    } else {
+      console.log('[Better UI] Anti-idle sounds disabled in config');
     }
     
     initTabObserver();
@@ -3751,6 +3833,7 @@ function cleanupBetterUI() {
     }
     
     stopAutoplayRefreshMonitor();
+    disableAntiIdleSounds();
     
     document.querySelectorAll('.favorite-heart').forEach(heart => {
       try {
@@ -3865,6 +3948,9 @@ function cleanupBetterUI() {
     // Reset subscriptions
     subscriptions.autoplayRefreshGame = null;
     subscriptions.autoplayRefreshSetPlayMode = null;
+    
+    // Reset anti-idle sounds
+    antiIdleAudioElement = null;
     
     // Reset global update tracking
     lastGlobalUpdate = 0;

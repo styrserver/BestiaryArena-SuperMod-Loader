@@ -1,5 +1,4 @@
 // Raid Hunter Mod for Bestiary Arena
-console.log('🎃🎃🎃 [Raid Hunter] FILE LOADED - VERSION 2.0 WITH PRIORITY SYSTEM 🎃🎃🎃');
 console.log('[Raid Hunter] Initializing...');
 
 // ============================================================================
@@ -171,32 +170,32 @@ function isBetterTaskerActive() {
         
         // Check if Better Tasker has an active task
         if (state.hasActiveTask === true) {
-            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE: has active task');
+            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE');
             return true;
         }
         
         // Check if Better Tasker is currently hunting for a task
         if (state.taskHuntingOngoing === true) {
-            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE: task hunting');
+            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE');
             return true;
         }
         
         // Check if Better Tasker is performing a task operation
         if (state.taskOperationInProgress === true) {
-            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE: task operation');
+            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE');
             return true;
         }
         
         // Check if Better Tasker is pending task completion
         if (state.pendingTaskCompletion === true) {
-            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE: task completion pending');
+            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE');
             return true;
         }
         
         // Check AutoplayManager owner as final fallback
         if (window.AutoplayManager?.getCurrentOwner && 
             window.AutoplayManager.getCurrentOwner() === 'Better Tasker') {
-            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE: owns AutoplayManager');
+            console.log('[Raid Hunter] ✅ Better Tasker ACTIVE');
             return true;
         }
         
@@ -430,7 +429,7 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
         );
         
         if (!tooltipStillExists && hasStaminaIssue) {
-            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (tooltip gone) - current: ${currentStamina}`);
+            console.log(`[Raid Hunter] ✅ STAMINA RECOVERED - current: ${currentStamina}`);
             hasStaminaIssue = false;
             
             // Save callback before cleanup (cleanup clears the callback)
@@ -464,7 +463,7 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
                     
                     if (wasStaminaTooltip && hasStaminaIssue) {
                         const currentStamina = getCurrentStamina();
-                        console.log(`[Raid Hunter] ✅ STAMINA RECOVERED (tooltip removed) - current: ${currentStamina}`);
+                        console.log(`[Raid Hunter] ✅ STAMINA RECOVERED - current: ${currentStamina}`);
                         hasStaminaIssue = false;
                         
                         // Save callback before cleanup (cleanup clears the callback)
@@ -1006,7 +1005,6 @@ function resetState(resetType = 'full') {
             raidQueue = [];
             lastRaidList = [];
             raidCountdownEndTime = null;
-            console.log('[Raid Hunter] Raid state reset');
         };
         
         const resetMonitoringState = () => {
@@ -1066,31 +1064,25 @@ function resetState(resetType = 'full') {
                 clearTimeout(retryTimeout);
                 retryTimeout = null;
             }
-            
-            console.log('[Raid Hunter] Monitoring state reset');
         };
         
         const resetModalState = () => {
             activeRaidHunterModal = null;
             raidHunterModalInProgress = false;
             lastModalCall = 0;
-            console.log('[Raid Hunter] Modal state reset');
         };
         
         const resetBoardAnalyzerState = () => {
             isBoardAnalyzerRunning = false;
-            console.log('[Raid Hunter] Board Analyzer state reset');
         };
         
         const resetQuestButtonState = () => {
             originalQuestButtonState = null;
-            console.log('[Raid Hunter] Quest button state reset');
         };
         
         const resetStateManager = () => {
             stateManager.isInitializing = false;
             stateManager.isProcessing = false;
-            console.log('[Raid Hunter] State manager reset');
         };
         
         // Apply resets based on type
@@ -1099,28 +1091,28 @@ function resetState(resetType = 'full') {
                 resetAutomationFlags();
                 resetRaidState();
                 resetQuestButtonState();
-                console.log('[Raid Hunter] Automation state reset');
+                console.log('[Raid Hunter] State reset: automation');
                 break;
                 
             case 'raid':
                 resetRaidState();
                 resetQuestButtonState();
-                console.log('[Raid Hunter] Raid state reset');
+                console.log('[Raid Hunter] State reset: raid');
                 break;
                 
             case 'monitoring':
                 resetMonitoringState();
-                console.log('[Raid Hunter] Monitoring state reset');
+                console.log('[Raid Hunter] State reset: monitoring');
                 break;
                 
             case 'modal':
                 resetModalState();
-                console.log('[Raid Hunter] Modal state reset');
+                console.log('[Raid Hunter] State reset: modal');
                 break;
                 
             case 'boardAnalyzer':
                 resetBoardAnalyzerState();
-                console.log('[Raid Hunter] Board Analyzer state reset');
+                console.log('[Raid Hunter] State reset: board analyzer');
                 break;
                 
             case 'full':
@@ -1132,7 +1124,7 @@ function resetState(resetType = 'full') {
                 resetBoardAnalyzerState();
                 resetQuestButtonState();
                 resetStateManager();
-                console.log('[Raid Hunter] Full state reset');
+                console.log('[Raid Hunter] State reset: full');
                 break;
         }
     } catch (error) {
@@ -1319,12 +1311,10 @@ function safeExecute(fn) {
 
 // Alternative execution method that doesn't use the state manager
 function executeImmediately(fn) {
-    console.log('[Raid Hunter] executeImmediately() - executing without state manager');
     try {
         fn();
-        console.log('[Raid Hunter] executeImmediately() - execution completed');
     } catch (error) {
-        console.error('[Raid Hunter] executeImmediately() - error during execution:', error);
+        console.error('[Raid Hunter] executeImmediately() error:', error);
     }
 }
 
@@ -1379,8 +1369,6 @@ function isRaidToast(element) {
  * Handle fight toast detection and process raids
  */
 function handleFightToast() {
-    console.log(`[Raid Hunter] handleFightToast() called - automation enabled: ${isAutomationEnabled}, AUTOMATION_ENABLED: ${AUTOMATION_ENABLED}`);
-    
     // Check if Board Analyzer is running - if so, skip processing
     if (isBoardAnalyzerRunning) {
         console.log('[Raid Hunter] Fight toast detected but Board Analyzer is running - skipping');
@@ -1388,47 +1376,35 @@ function handleFightToast() {
     }
     
     if (!isAutomationActive()) {
-        console.log(`[Raid Hunter] Fight toast detected but automation is disabled (${isAutomationEnabled} !== ${AUTOMATION_ENABLED})`);
+        console.log('[Raid Hunter] Fight toast detected but automation is disabled');
         return;
     }
     
-    console.log('[Raid Hunter] Fight toast detected - checking for raids...');
-    
     // Check for existing raids and process them (use immediate execution to avoid state manager conflicts)
     executeImmediately(() => {
-        console.log('[Raid Hunter] Inside executeImmediately - Calling updateRaidState()...');
         updateRaidState();
         
-        console.log(`[Raid Hunter] After updateRaidState - raidQueue.length: ${raidQueue.length}, isCurrentlyRaiding: ${isCurrentlyRaiding}`);
-        
         if (raidQueue.length > 0) {
-            console.log('[Raid Hunter] Fight toast detected - processing next raid (raid priority)');
+            console.log('[Raid Hunter] Processing raid');
             
             // Apply raid start delay if configured
             const settings = loadSettings();
             const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
             
             if (raidStartDelay > 0) {
-                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
                     // Check if raid processing can proceed
                     if (canProcessRaid('fight toast delay') && raidQueue.length > 0) {
-                        console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
                         processNextRaid();
-                    } else if (raidQueue.length === 0) {
-                        console.log(`[Raid Hunter] Raid start delay completed but no raids in queue`);
                     }
                 }, raidStartDelay * 1000);
             } else {
                 // No delay, process immediately
-                console.log('[Raid Hunter] No delay - processing raid immediately (raid priority)');
                 processNextRaid();
             }
         } else if (isCurrentlyRaiding) {
-            console.log('[Raid Hunter] Fight toast detected but already raiding');
-        } else {
-            console.log('[Raid Hunter] Fight toast detected but no raids in queue');
+            console.log('[Raid Hunter] Already raiding');
         }
     });
 }
@@ -1641,10 +1617,10 @@ function updateRaidQueue() {
                 console.log(`[Raid Hunter] Checking raid: ${raidName} (roomId: ${raid.roomId})`);
                 console.log(`[Raid Hunter] Is ${raidName} in enabledMaps? ${enabledMaps.includes(raidName)}`);
                 
-                // Skip if this is the raid we're currently doing
+                // Include current raid in queue for priority comparison
                 if (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId) {
-                    console.log(`[Raid Hunter] Skipped ${raidName} - already raiding this map`);
-                    return;
+                    console.log(`[Raid Hunter] Including current raid ${raidName} in queue for priority comparison`);
+                    // Continue to add it to queue instead of skipping
                 }
                 
                 if (enabledMaps.includes(raidName)) {
@@ -1653,7 +1629,8 @@ function updateRaidQueue() {
                         name: raidName,
                         roomId: raid.roomId,
                         button: null, // No UI button needed for API access
-                        priority: priority
+                        priority: priority,
+                        isCurrentRaid: (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId)
                     });
                     // Only log if we're not already raiding this specific raid
                     if (!isCurrentlyRaiding || currentRaidInfo?.roomId !== raid.roomId) {
@@ -1701,8 +1678,13 @@ function closeOpenModals() {
 }
 
 // Process next raid in queue
-function processNextRaid() {
-    if (isCurrentlyRaiding || raidQueue.length === 0) {
+function processNextRaid(allowInterrupt = false) {
+    if (raidQueue.length === 0) {
+        return;
+    }
+    
+    // If currently raiding and not allowing interrupt, don't process
+    if (isCurrentlyRaiding && !allowInterrupt) {
         return;
     }
     
@@ -2633,6 +2615,35 @@ function isSafeToReload() {
     }
 }
 
+// Interrupts current raid for higher priority raid
+function interruptCurrentRaid(callback) {
+    console.log(`[Raid Hunter] Interrupting current raid: ${currentRaidInfo?.name} for higher priority raid`);
+    
+    // Use existing resetState with 'raid' parameter (not 'full')
+    resetState('raid');  // This handles: isCurrentlyRaiding, currentRaidInfo, quest button, monitoring
+    
+    // Stop stamina tooltip monitoring (not handled by resetState)
+    stopStaminaTooltipMonitoring();
+    
+    // Release autoplay control without reloading
+    if (window.AutoplayManager.getCurrentOwner() === 'Raid Hunter') {
+        withControlCheck(window.AutoplayManager, 'Raid Hunter', () => {
+            const boardContext = globalThis.state.board.getSnapshot().context;
+            if (boardContext.mode === 'autoplay') {
+                globalThis.state.board.send({ type: "setPlayMode", mode: "manual" });
+                console.log('[Raid Hunter] Switched to manual mode (interrupted)');
+            }
+        }, 'interrupt raid');
+    }
+    
+    console.log(`[Raid Hunter] Successfully interrupted ${currentRaidInfo?.name}`);
+    
+    // Execute callback after cleanup
+    if (typeof callback === 'function') {
+        setTimeout(() => callback(), 500);
+    }
+}
+
 // Stops autoplay when raid ends
 function stopAutoplayOnRaidEnd() {
     try {
@@ -2724,9 +2735,39 @@ function setupRaidListMonitoring() {
                     
                     // If new raids were added, process next raid (raids have priority over current autoplay)
                     if (raidsAdded) {
-                        console.log(`[Raid Hunter] New raid detected - automation enabled: ${isAutomationEnabled}, AUTOMATION_ENABLED: ${AUTOMATION_ENABLED}, match: ${isAutomationEnabled === AUTOMATION_ENABLED}`);
+                        console.log(`[Raid Hunter] New raid detected`);
                         if (isAutomationEnabled === AUTOMATION_ENABLED) {
-                            console.log('[Raid Hunter] New raids detected - processing next raid (raid priority)');
+                            // Check if we should interrupt current raid for higher priority raid
+                            if (isCurrentlyRaiding && currentRaidInfo) {
+                                // Get highest priority from updated queue
+                                if (raidQueue.length > 0) {
+                                    raidQueue.sort((a, b) => a.priority - b.priority);
+                                    const nextRaid = raidQueue[0];
+                                    
+                                    // Only interrupt if new raid has HIGHER priority than current raid
+                                    if (nextRaid.priority < currentRaidInfo.priority) {
+                                        console.log(`[Raid Hunter] Higher priority raid detected: ${nextRaid.name} (Priority: ${nextRaid.priority}) vs current: ${currentRaidInfo.name} (Priority: ${currentRaidInfo.priority}) - switching`);
+                                        
+                                        // Check if Better Tasker should take control instead
+                                        if (isBetterTaskerActive() && nextRaid.priority === RAID_PRIORITY.HALLOWEEN) {
+                                            console.log('[Raid Hunter] Better Tasker is active - Halloween Mansion should wait');
+                                            return; // Don't interrupt
+                                        }
+                                        
+                                        // Interrupt current raid and switch to higher priority
+                                        interruptCurrentRaid(() => {
+                                            processNextRaid(true); // Allow interrupt
+                                        });
+                                        return;
+                                    } else {
+                                        console.log(`[Raid Hunter] New raid ${nextRaid.name} has same or lower priority than current raid ${currentRaidInfo.name} - continuing current raid`);
+                                        return; // Don't switch
+                                    }
+                                }
+                            }
+                            
+                            // Normal processing when not currently raiding
+                            console.log('[Raid Hunter] Processing next raid');
                             processNextRaid();
                         } else {
                             console.log('[Raid Hunter] New raids detected but automation is disabled - not processing');
@@ -4525,7 +4566,6 @@ function showValidationMessage(message, type = 'info') {
 // ============================================================================
 
 function init() {
-    console.log('[Raid Hunter] Initializing...');
     
     // Load automation state from localStorage first
     loadAutomationState();

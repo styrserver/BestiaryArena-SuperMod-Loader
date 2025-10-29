@@ -346,14 +346,26 @@ const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 function parseAutoplayTime(textContent) {
   const enText = "Autoplay session";
   const ptText = "Sessão autoplay";
-  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
   
-  const match = textContent.match(pattern);
-  if (match) {
-    const minutes = parseInt(match[1]);
-    const seconds = parseInt(match[2]);
+  // Pattern for H:MM:SS format (1 hour and above)
+  const hourPattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+):(\\d+)\\)`);
+  const hourMatch = textContent.match(hourPattern);
+  if (hourMatch) {
+    const hours = parseInt(hourMatch[1]);
+    const minutes = parseInt(hourMatch[2]);
+    const seconds = parseInt(hourMatch[3]);
+    return (hours * 60) + minutes + (seconds / 60);
+  }
+  
+  // Pattern for MM:SS format (under 1 hour)
+  const minutePattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
+  const minuteMatch = textContent.match(minutePattern);
+  if (minuteMatch) {
+    const minutes = parseInt(minuteMatch[1]);
+    const seconds = parseInt(minuteMatch[2]);
     return minutes + (seconds / 60);
   }
+  
   return null;
 }
 

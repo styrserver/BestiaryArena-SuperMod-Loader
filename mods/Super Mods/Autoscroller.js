@@ -2066,12 +2066,20 @@
 
   function getSummonScrollButtons() {
     if (!DOM_ELEMENTS.summonScrollButtons || !DOM_ELEMENTS.isCacheValid()) {
-      // Get all buttons with the focus style, but exclude autoscroller buttons
-      const allButtons = DOMCache.getAll('button.focus-style-visible.active\\:opacity-70');
-      DOM_ELEMENTS.summonScrollButtons = allButtons ? Array.from(allButtons).filter(button => 
+      // Only search within the inventory container to avoid false positives
+      const inventoryContainer = getInventoryContainer();
+      if (!inventoryContainer) {
+        DOM_ELEMENTS.summonScrollButtons = [];
+        DOM_ELEMENTS.lastCacheTime = Date.now();
+        return DOM_ELEMENTS.summonScrollButtons;
+      }
+      
+      // Get buttons with the focus style only within inventory container, but exclude autoscroller buttons
+      const allButtons = inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70');
+      DOM_ELEMENTS.summonScrollButtons = Array.from(allButtons).filter(button => 
         !button.classList.contains('autoscroller-inventory-button') &&
         !button.classList.contains('autoscroller-scroll-button')
-      ) : [];
+      );
       DOM_ELEMENTS.lastCacheTime = Date.now();
     }
     return DOM_ELEMENTS.summonScrollButtons;
@@ -3392,7 +3400,7 @@
     let summonScrollButtons = getSummonScrollButtons();
     
     if (!summonScrollButtons || summonScrollButtons.length === 0) {
-      // Fallback: get all buttons but filter out autoscroller buttons
+      // Fallback: get all buttons within inventory container but filter out autoscroller buttons
       const allButtons = inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70');
       summonScrollButtons = Array.from(allButtons).filter(button => 
         !button.classList.contains('autoscroller-inventory-button') &&
@@ -3420,6 +3428,21 @@
       const img = button.querySelector('img');
       if (img && img.src && img.src.includes('summonscroll')) {
         summonScrollButtonsFound.push(button);
+      }
+    }
+    
+    // Additional safety check: ensure we're not in an autoplay session or other non-inventory context
+    if (summonScrollButtonsFound.length === 0 && summonScrollButtons.length > 0) {
+      // Check if any of the buttons are actually summon scrolls by looking for summon scroll images
+      const hasActualSummonScrolls = summonScrollButtons.some(button => {
+        const img = button.querySelector('img');
+        return img && img.src && img.src.includes('summonscroll');
+      });
+      
+      if (!hasActualSummonScrolls) {
+        // No actual summon scrolls found, likely in wrong context (like autoplay session)
+        console.log('[Autoscroller] No actual summon scrolls found in current context, skipping button addition');
+        return;
       }
     }
     
