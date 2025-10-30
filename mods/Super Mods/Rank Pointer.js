@@ -773,6 +773,7 @@ let openRewardsSubscription = null; // Subscription to openRewards state
 // Shared game state tracker to avoid multiple subscriptions
 let gameStateTracker = null;
 let skipCount = 0; // Track number of skips
+let skipInProgress = false; // Debounce skip handling
 
 // =======================
 // 3. Utility Functions
@@ -908,9 +909,11 @@ function getMaxTeamSize(serverResults = null) {
 // Find and click the start button
 function findStartButton() {
   const buttons = document.querySelectorAll('button');
+  // Support EN and pt-BR labels
+  const startTexts = ['start', 'fight', 'iniciar', 'lutar', 'jogar', 'começar'];
   for (const button of buttons) {
-    if (button.textContent.toLowerCase().includes('start') || 
-        button.textContent.toLowerCase().includes('fight')) {
+    const text = (button.textContent || '').trim().toLowerCase();
+    if (startTexts.some((t) => text.includes(t))) {
       return button;
     }
   }
@@ -1023,7 +1026,7 @@ async function waitForGameCompletion(analysisId) {
   console.log('[Rank Pointer] Waiting for reward screen to open (1 reward screen = 1 run)...');
   
   let attempts = 0;
-  const maxAttempts = 60; // 2 minutes max wait time (60 * 1 second)
+  const maxAttempts = 48; // 4 minutes max wait time (48 * 5 seconds)
   
   // Track game data as it updates
   let lastTick = 0;
@@ -1235,12 +1238,36 @@ async function waitForGameCompletion(analysisId) {
         };
       }
       
-      // Log progress every 10 seconds
-      if (attempts % 10 === 0 && attempts > 0) {
-        console.log(`[Rank Pointer] Still waiting for reward screen... (${attempts}s elapsed)`);
+      // Log progress approximately every 10 seconds
+      if (attempts % 2 === 0 && attempts > 0) {
+        console.log(`[Rank Pointer] Still waiting for reward screen... (${attempts * 5}s elapsed)`);
       }
       
-      await sleep(1000); // Check every 1 second
+      // Fallback window: up to 10 seconds, check every 500ms (enableSkip first)
+      for (let i = 0; i < 20; i++) {
+        try {
+          // 1) Server signal is most reliable
+          try {
+            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+            if (ctx?.serverResults?.enableSkip === true && !skipInProgress) {
+              skipInProgress = true;
+              console.log('[Rank Pointer] enableSkip=true (fast loop) — handling skip...');
+              await handleSkipButton();
+              setTimeout(() => { skipInProgress = false; }, 1200);
+              return { ticks: 0, grade: 'F', rankPoints: 0, completed: false, skipped: true };
+            }
+          } catch (_) {}
+
+          // 2) DOM fallback
+          const skipButtonFast = findSkipButton();
+          if (skipButtonFast) {
+            console.log(`[Rank Pointer] Fast-scan DOM: Skip detected, handling immediately...`);
+            await handleSkipButton();
+            return { ticks: 0, grade: 'F', rankPoints: 0, completed: false, skipped: true };
+          }
+        } catch (_) {}
+        await sleep(500);
+      }
       attempts++;
       
     } catch (error) {
@@ -1285,6 +1312,17 @@ function setupBoardSubscription() {
       if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
         return; // No valid server results yet
       }
+      
+      // If server signals enableSkip, attempt to skip immediately (debounced)
+      try {
+        if (serverResults.enableSkip === true && !skipInProgress) {
+          skipInProgress = true;
+          console.log('[Rank Pointer] enableSkip=true received from server (subscription) — attempting to skip');
+          handleSkipButton().finally(() => {
+            setTimeout(() => { skipInProgress = false; }, 1200);
+          });
+        }
+      } catch (_) {}
       
       // Get the seed
       const seed = serverResults.seed;
@@ -1433,6 +1471,26 @@ async function handleSkipButton() {
     console.error('[Rank Pointer] Error handling skip button:', error);
     return false;
   }
+}
+
+// Rapid scanner to detect Skip button during waits
+async function quickSkipScan(totalMs = 5000, stepMs = 400) {
+  try {
+    const deadline = performance.now() + totalMs;
+    // Cap step to sensible bounds
+    const interval = Math.max(150, Math.min(stepMs, 1000));
+    while (performance.now() < deadline) {
+      const btn = findSkipButton();
+      if (btn) {
+        await handleSkipButton();
+        return true;
+      }
+      await sleep(interval);
+    }
+  } catch (e) {
+    console.warn('[Rank Pointer] quickSkipScan error:', e);
+  }
+  return false;
 }
 
 // Function to wait for reward screen to close

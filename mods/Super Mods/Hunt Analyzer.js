@@ -334,10 +334,74 @@ const HuntAnalyzerState = {
     // Manual mode timing (when no autoplay timer exists)
     manualActive: false,
     manualSessionStartMs: 0,
+    // When true, wait for the next newGame to start manual timing (set on map change)
+    waitingForManualStart: false,
     // Autoplay baseline to subtract when map changes so we don't double count
-    autoplayBaselineMinutes: 0
+    autoplayBaselineMinutes: 0,
+    // When true, skip the next autoplay reset accumulation (used after we already snapshot on map/mode change)
+    suppressNextAutoplayReset: false
   }
 };
+
+// =======================
+// 1.4.a Unified Time Helpers
+// =======================
+function getCurrentMode() {
+  try {
+    const mode = globalThis.state?.board?.getSnapshot?.()?.context?.mode;
+    if (mode === 'autoplay') return 'autoplay';
+    if (mode === 'manual') return 'manual';
+    return 'none';
+  } catch (_e) {
+    return 'none';
+  }
+}
+
+function getLiveSessionMs() {
+  const mode = getCurrentMode();
+  if (mode === 'autoplay') {
+    const currentAutoplayTime = getAutoplaySessionTime(); // minutes
+    if (currentAutoplayTime && currentAutoplayTime > 0) {
+      const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - (HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0));
+      return adjustedAutoplayMinutes * 60 * 1000;
+    }
+    return 0;
+  }
+  if (mode === 'manual') {
+    if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
+      return Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+function snapshotIntoTotals() {
+  const liveMs = getLiveSessionMs();
+  if (liveMs > 0) {
+    HuntAnalyzerState.timeTracking.accumulatedTimeMs += liveMs;
+    if (HuntAnalyzerState.timeTracking.currentMap) {
+      const prevMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
+      HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, prevMapTime + liveMs);
+    }
+  }
+
+  const mode = getCurrentMode();
+  if (mode === 'autoplay') {
+    // Reset autoplay baseline to current DOM minutes so next session starts from 0
+    const currentAutoplayTime = getAutoplaySessionTime();
+    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime || 0;
+    // Ensure manual is not active
+    HuntAnalyzerState.timeTracking.manualActive = false;
+    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+  } else if (mode === 'manual') {
+    // Keep manual timing continuous but avoid double counting: advance start to now
+    if (HuntAnalyzerState.timeTracking.manualActive) {
+      HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+    }
+  }
+  return liveMs;
+}
 
 // Storage keys for persistence
 const HUNT_ANALYZER_STORAGE_KEY = 'huntAnalyzerData';
@@ -404,11 +468,12 @@ function getAutoplaySessionTime() {
 // 1.7. Internal Clock System
 // =======================
 // Start the internal clock system
-function startInternalClock() {
+function startInternalClock(reason) {
   if (HuntAnalyzerState.timeTracking.clockIntervalId) {
     clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
   }
   
+  console.log('[Hunt Analyzer] Internal clock: starting interval (1s)', reason ? `reason: ${reason}` : '');
   HuntAnalyzerState.timeTracking.clockIntervalId = setInterval(() => {
     updateInternalClock();
   }, 1000); // Update every second
@@ -419,6 +484,46 @@ function stopInternalClock() {
   if (HuntAnalyzerState.timeTracking.clockIntervalId) {
     clearInterval(HuntAnalyzerState.timeTracking.clockIntervalId);
     HuntAnalyzerState.timeTracking.clockIntervalId = null;
+    console.log('[Hunt Analyzer] Internal clock: stopped');
+  }
+}
+
+// =======================
+// 1.7.a Rank Pointer Coordination
+// =======================
+let lastRankPointerRunning = null;
+function startRankPointerWatcher() {
+  if (rankPointerCheckIntervalId) return;
+  console.log('[Hunt Analyzer] Rank Pointer watcher: starting (500ms poll)');
+  rankPointerCheckIntervalId = setInterval(() => {
+    try {
+      const running = !!(window.__modCoordination && window.__modCoordination.rankPointerRunning);
+      if (running !== lastRankPointerRunning) {
+        lastRankPointerRunning = running;
+        console.log('[Hunt Analyzer] Rank Pointer state changed:', { running });
+        if (running) {
+          // Rank Pointer started → begin manual timing if in manual mode
+          if (getCurrentMode() === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
+            HuntAnalyzerState.timeTracking.manualActive = true;
+            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+            console.log('[Hunt Analyzer] Manual timing: started due to Rank Pointer');
+            if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+              startInternalClock('rankPointer');
+            }
+          }
+        } else {
+          // Rank Pointer stopped → keep clock running; no changes to manual timing
+          console.log('[Hunt Analyzer] Rank Pointer stopped: keeping manual timing running');
+        }
+      }
+    } catch (_) {}
+  }, 500);
+}
+
+function stopRankPointerWatcher() {
+  if (rankPointerCheckIntervalId) {
+    clearInterval(rankPointerCheckIntervalId);
+    rankPointerCheckIntervalId = null;
   }
 }
 
@@ -426,7 +531,9 @@ function stopInternalClock() {
 function updateInternalClock() {
   const currentAutoplayTime = getAutoplaySessionTime();
   const nowMs = Date.now();
-  const isAutoplayRunning = currentAutoplayTime && currentAutoplayTime > 0;
+  const mode = getCurrentMode();
+  const isAutoplayRunning = mode === 'autoplay' && currentAutoplayTime && currentAutoplayTime > 0;
+  // Lightweight heartbeat only when something interesting changes below
   
   // If autoplay is active, stop manual session (manual starts only on first newGame)
   if (isAutoplayRunning) {
@@ -442,57 +549,54 @@ function updateInternalClock() {
       HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
       // Start autoplay session from its current value (baseline 0 so we count full autoplay session)
       HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+      console.log('[Hunt Analyzer] Internal clock: switched to autoplay, manual elapsed accumulated (ms):', elapsedManualMs);
     }
   }
   
   // If autoplay time decreased (session reset), accumulate the previous time
   if (currentAutoplayTime < HuntAnalyzerState.timeTracking.lastAutoplayTime) {
-    const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
-    
-    // Add to accumulated time
-    HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
-    
-    // Add to current map time if we have one
-    if (HuntAnalyzerState.timeTracking.currentMap) {
-      const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-      HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
+    if (HuntAnalyzerState.timeTracking.suppressNextAutoplayReset) {
+      // We already snapshotted this segment on a recent map/mode change; skip double-counting
+      HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
+      console.log('[Hunt Analyzer] Internal clock: autoplay reset detected but suppressed to avoid double count');
+    } else {
+      const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
+      
+      // Add to accumulated time
+      HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
+      
+      // Add to current map time if we have one
+      if (HuntAnalyzerState.timeTracking.currentMap) {
+        const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
+        HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
+      }
+      console.log('[Hunt Analyzer] Internal clock: autoplay reset detected, accumulated previous autoplay (ms):', timeToAccumulate);
     }
   }
   
+  // Track last DOM-reported autoplay minutes
+  const prevAutoplayTime = HuntAnalyzerState.timeTracking.lastAutoplayTime;
   HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
-  // If autoplay reset, also reset baseline so new session starts from 0
-  if (currentAutoplayTime === 0) {
+  
+  // Only when actually in autoplay mode, detect transition from >0 → 0 and reset baseline
+  if (mode === 'autoplay' && prevAutoplayTime > 0 && currentAutoplayTime === 0) {
     HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+    console.log('[Hunt Analyzer] Internal clock: autoplay baseline reset to 0');
   }
 }
 
 // Track map change and start timing for new map
 function trackMapChange(roomName) {
-  // If we're switching maps, accumulate current session time
+  // If we're switching maps, just update context. Accumulation is handled by snapshotIntoTotals() upstream.
   const mapChanged = HuntAnalyzerState.timeTracking.currentMap && HuntAnalyzerState.timeTracking.currentMap !== roomName;
   if (mapChanged) {
-    // Determine current session time based on mode
-    const currentAutoplayTime = getAutoplaySessionTime();
-    let timeToAccumulate = 0;
-    if (currentAutoplayTime && currentAutoplayTime > 0) {
-      timeToAccumulate = currentAutoplayTime * 60 * 1000; // Convert minutes to ms
-    } else if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-      timeToAccumulate = Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
-    }
-    
-    // Add to accumulated time
-    HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
-    
-    // Add to previous map time
-    const previousMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-    HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, previousMapTime + timeToAccumulate);
-    
-    // For autoplay, set baseline so new map counts from zero without double counting
-    if (currentAutoplayTime && currentAutoplayTime > 0) {
-      HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
-    }
+    console.log('[Hunt Analyzer] Map change:', {
+      from: HuntAnalyzerState.timeTracking.currentMap,
+      to: roomName,
+      accumulatedMs: 0
+    });
   }
-  
+
   // Set new current map
   HuntAnalyzerState.timeTracking.currentMap = roomName;
   HuntAnalyzerState.timeTracking.mapStartTime = Date.now();
@@ -500,38 +604,22 @@ function trackMapChange(roomName) {
   // If in manual mode and map actually changed, start a new manual session window from now
   if (mapChanged && HuntAnalyzerState.timeTracking.manualActive) {
     HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+    console.log('[Hunt Analyzer] Manual timing: new session window started due to map change');
   }
 }
 
 // Get filtered time for rate calculations
 function getFilteredTimeHours() {
+  const liveMs = getLiveSessionMs();
   if (HuntAnalyzerState.ui.selectedMapFilter === "ALL") {
-    // Return total accumulated time plus current session time
-    const currentAutoplayTime = getAutoplaySessionTime();
-    let currentSessionMs = 0;
-    if (currentAutoplayTime && currentAutoplayTime > 0) {
-      const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - (HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0));
-      currentSessionMs = adjustedAutoplayMinutes * 60 * 1000;
-    } else if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-      currentSessionMs = Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
-    }
-    return (HuntAnalyzerState.timeTracking.accumulatedTimeMs + currentSessionMs) / (1000 * 60 * 60);
+    return (HuntAnalyzerState.timeTracking.accumulatedTimeMs + liveMs) / (1000 * 60 * 60);
   } else {
     // Return time for selected map plus current session if on that map
     const mapTimeMs = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.ui.selectedMapFilter) || 0;
     let totalTimeMs = mapTimeMs;
-    
-    // If currently on the selected map, add current session time
     if (HuntAnalyzerState.timeTracking.currentMap === HuntAnalyzerState.ui.selectedMapFilter) {
-      const currentAutoplayTime = getAutoplaySessionTime();
-      if (currentAutoplayTime && currentAutoplayTime > 0) {
-        const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - (HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0));
-        totalTimeMs += adjustedAutoplayMinutes * 60 * 1000;
-      } else if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-        totalTimeMs += (Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs);
-      }
+      totalTimeMs += liveMs;
     }
-    
     return totalTimeMs / (1000 * 60 * 60);
   }
 }
@@ -557,8 +645,12 @@ const itemInfoCache = new Map();
 
 // Cleanup references
 let boardSubscription = null;
+let modeMapSubscription = null;
 let updateIntervalId = null;
 let autoSaveIntervalId = null;
+let rankPointerCheckIntervalId = null;
+let mapDebugLastLogTime = 0;
+let mapDebugLogCount = 0;
 let timeoutIds = [];
 
 // Event handler tracking for memory leak prevention
@@ -1027,6 +1119,9 @@ function logPersistenceOperation(operation, success = true) {
 // Save Hunt Analyzer data to localStorage
 function saveHuntAnalyzerData() {
     try {
+        // Snapshot any live time (manual or autoplay) before persisting
+        snapshotIntoTotals();
+
         // Clean aggregated data by removing visual elements (they can be regenerated)
         const cleanAggregatedLoot = new Map();
         HuntAnalyzerState.data.aggregatedLoot.forEach((value, key) => {
@@ -1042,8 +1137,10 @@ function saveHuntAnalyzerData() {
             cleanAggregatedCreatures.set(key, cleanValue);
         });
         
-        // Convert Map to array for timeTracking persistence
-        const mapTimeMsArray = Array.from(HuntAnalyzerState.timeTracking.mapTimeMs.entries());
+        // Snapshot current manual session time into saved totals (without continuing after reload)
+        // Convert Map to array for timeTracking persistence (already includes snapshot)
+        const mapTimeSnapshot = new Map(HuntAnalyzerState.timeTracking.mapTimeMs);
+        const mapTimeMsArray = Array.from(mapTimeSnapshot.entries());
         
         const dataToSave = {
             sessions: HuntAnalyzerState.data.sessions,
@@ -1057,8 +1154,9 @@ function saveHuntAnalyzerData() {
                 accumulatedTimeMs: HuntAnalyzerState.timeTracking.accumulatedTimeMs,
                 mapTimeMs: mapTimeMsArray,
                 lastAutoplayTime: HuntAnalyzerState.timeTracking.lastAutoplayTime,
-                manualActive: HuntAnalyzerState.timeTracking.manualActive,
-                manualSessionStartMs: HuntAnalyzerState.timeTracking.manualSessionStartMs,
+                // Do not resume ticking on reload; snapshot only
+                manualActive: false,
+                manualSessionStartMs: 0,
                 autoplayBaselineMinutes: HuntAnalyzerState.timeTracking.autoplayBaselineMinutes
             }
         };
@@ -5406,16 +5504,23 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             updatePanelDisplay();
         }, 0));
 
-    // Start manual timer only on first newGame when autoplay isn't active
+    // Simplified: always ensure the internal clock is running on newGame
     try {
-        const currentAutoplayTime = getAutoplaySessionTime();
-        const isAutoplayRunning = currentAutoplayTime && currentAutoplayTime > 0;
-        if (!isAutoplayRunning && !HuntAnalyzerState.timeTracking.manualActive) {
-            HuntAnalyzerState.timeTracking.manualActive = true;
-            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-            if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                startInternalClock();
+        const mode = getCurrentMode();
+        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+            startInternalClock('newGame');
+            console.log('[Hunt Analyzer] Clock: start on newGame (mode:', mode, ')');
+        }
+        if (mode === 'manual') {
+            if (!HuntAnalyzerState.timeTracking.manualActive || HuntAnalyzerState.timeTracking.manualSessionStartMs === 0) {
+                HuntAnalyzerState.timeTracking.manualActive = true;
+                HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
             }
+            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
+        } else {
+            HuntAnalyzerState.timeTracking.manualActive = false;
+            HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+            HuntAnalyzerState.timeTracking.waitingForManualStart = false;
         }
     } catch (_e) { /* ignore */ }
     });
@@ -5458,9 +5563,27 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
             
             // Use setTimeout to defer processing and avoid blocking animations
             timeoutIds.push(setTimeout(() => {
+                // Keep ticking independent of results; do not reset manual window here
                 processAutoplaySummary(serverResults);
                 HuntAnalyzerState.session.isActive = false;
                 
+                // Ensure clock keeps running after results, align manual flag only if not active
+                try {
+                    const modeNow = getCurrentMode();
+                    if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                        startInternalClock('serverResults');
+                        console.log('[Hunt Analyzer] Clock: start on serverResults (mode:', modeNow, ')');
+                    }
+                    if (modeNow === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
+                        HuntAnalyzerState.timeTracking.manualActive = true;
+                        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+                    }
+                    if (modeNow !== 'manual') {
+                        HuntAnalyzerState.timeTracking.manualActive = false;
+                        HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+                    }
+                } catch (_e) { /* ignore */ }
+
                 updatePanelDisplay();
             }, 0));
         });
@@ -5468,40 +5591,88 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         // Separate lightweight subscription to detect map switches and stop internal clock
         try {
             let lastSelectedRoomId = null;
-            globalThis.state.board.subscribe((state) => {
+            let lastKnownMode = null;
+            modeMapSubscription = globalThis.state.board.subscribe((state) => {
                 const ctx = state?.context || {};
-                const roomId = ctx.selectedMap?.id || ctx.area?.id || null;
+                const playerCtx = globalThis.state?.player?.getSnapshot?.()?.context || {};
+                const roomId = (ctx.selectedMap && ctx.selectedMap.selectedRoom && ctx.selectedMap.selectedRoom.id)
+                    || (ctx.selectedMap && ctx.selectedMap.id)
+                    || (ctx.area && ctx.area.id)
+                    || playerCtx.currentRoomId
+                    || null;
                 const mode = ctx.mode || null;
 
-                // If autoplay engaged, accumulate any manual time and ensure clock is running
-                if (mode === 'autoplay') {
-                    if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-                        const nowMs = Date.now();
-                        const elapsedManualMs = nowMs - HuntAnalyzerState.timeTracking.manualSessionStartMs;
-                        HuntAnalyzerState.timeTracking.accumulatedTimeMs += elapsedManualMs;
-                        if (HuntAnalyzerState.timeTracking.currentMap) {
-                            const prevMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-                            HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, prevMapTime + elapsedManualMs);
+                // Mode transition handling: snapshot current live time and start baseline for new mode
+                if (mode !== lastKnownMode) {
+                    // Snapshot whatever was active before switching
+                    snapshotIntoTotals();
+                    // If we were previously in autoplay, we just snapshotted the segment; suppress the next autoplay reset accumulation
+                    if (lastKnownMode === 'autoplay') {
+                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
+                    }
+
+                    // Prepare new mode
+                    if (mode === 'autoplay') {
+                        // Set baseline to current DOM time
+                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = getAutoplaySessionTime() || 0;
+                        // Ensure internal clock runs for UI updates
+                        if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
+                            startInternalClock('modeChange:autoplay');
                         }
-                        HuntAnalyzerState.timeTracking.manualActive = false;
-                        HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
-                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+                    } else if (mode === 'manual') {
+                        // Start manual session window
+                        HuntAnalyzerState.timeTracking.manualActive = true;
+                        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
                     }
-                    if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-                        startInternalClock();
-                    }
+                    lastKnownMode = mode;
                 }
-                if (!roomId) return;
+                if (!roomId) {
+                    const now = Date.now();
+                    if (now - mapDebugLastLogTime > 5000 && mapDebugLogCount < 10) {
+                        mapDebugLastLogTime = now;
+                        mapDebugLogCount++;
+                        console.log('[Hunt Analyzer] Map debug: no roomId in context', {
+                            keys: Object.keys(ctx || {}),
+                            selectedMap: ctx.selectedMap,
+                            area: ctx.area,
+                            selectedRoom: ctx.selectedRoom,
+                            mode
+                        });
+                    }
+                    return;
+                }
                 if (lastSelectedRoomId === null) {
                     lastSelectedRoomId = roomId;
+                    console.log('[Hunt Analyzer] Map debug: initialized room tracking', { roomId, mode });
                     return;
                 }
                 if (roomId !== lastSelectedRoomId) {
+                    const preHadClock = !!HuntAnalyzerState.timeTracking.clockIntervalId;
+                    const preMode = getCurrentMode();
+                    console.log('[Hunt Analyzer] Map change detected:', { from: lastSelectedRoomId, to: roomId, preHadClock, preMode });
+                    // On map change:
+                    // 1) Snapshot any live time
+                    const snapMs = snapshotIntoTotals();
+                    // If currently in autoplay, we just snapshotted the DOM segment; suppress the next autoplay reset accumulation
+                    if (getCurrentMode() === 'autoplay') {
+                        HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
+                    }
+                    // 2) Update map/time context
                     lastSelectedRoomId = roomId;
                     const roomNamesMap = globalThis.state?.utils?.ROOM_NAME;
                     const roomName = roomNamesMap?.[roomId] || `Room ID: ${roomId}`;
                     trackMapChange(roomName);
-                    stopInternalClock();
+                    // 3) Do NOT start or continue manual timing on map change; wait for next newGame
+                    HuntAnalyzerState.timeTracking.manualActive = false;
+                    HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
+                    HuntAnalyzerState.timeTracking.waitingForManualStart = true;
+                    console.log('[Hunt Analyzer] Manual timing paused on map change; waiting for next newGame');
+                    const postHadClock = !!HuntAnalyzerState.timeTracking.clockIntervalId;
+                    const postMode = getCurrentMode();
+                    if (!preHadClock && postHadClock) {
+                        console.log('[Hunt Analyzer] WARNING: Clock started during map change! Investigate callers.');
+                    }
+                    console.log('[Hunt Analyzer] Map change handled:', { postHadClock, postMode });
                     updateRoomTitleDisplay(roomId, roomName);
                 }
             });
@@ -5964,6 +6135,10 @@ function cleanupHuntAnalyzer() {
             clearInterval(autoSaveIntervalId);
             autoSaveIntervalId = null;
         }
+        if (rankPointerCheckIntervalId) {
+            clearInterval(rankPointerCheckIntervalId);
+            rankPointerCheckIntervalId = null;
+        }
         
         // Stop internal clock system
         stopInternalClock();
@@ -6029,6 +6204,14 @@ function cleanupHuntAnalyzer() {
                 boardSubscription = null;
             } catch (error) {
                 console.warn('[Hunt Analyzer] Error unsubscribing board:', error);
+            }
+        }
+        if (modeMapSubscription) {
+            try {
+                modeMapSubscription.unsubscribe();
+                modeMapSubscription = null;
+            } catch (error) {
+                console.warn('[Hunt Analyzer] Error unsubscribing mode/map subscription:', error);
             }
         }
         
@@ -6125,6 +6308,9 @@ windowMessageHandler = function(event) {
 };
 window.addEventListener('message', windowMessageHandler);
 console.log('[Hunt Analyzer] Message listener added');
+
+// Start watching Rank Pointer coordination flag
+try { startRankPointerWatcher(); } catch (_) {}
 
 // Save data before page unload
 window.addEventListener('beforeunload', () => {
