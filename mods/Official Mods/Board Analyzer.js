@@ -1067,6 +1067,22 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Check if board has ally creatures (player pieces)
+function hasAllyCreaturesOnBoard() {
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    if (!boardContext || !boardContext.boardConfig || !Array.isArray(boardContext.boardConfig)) {
+      return false;
+    }
+    // Player pieces are type 'player' or 'custom' with villain: false
+    const isAlly = (piece) => (piece?.type === 'player') || (piece?.type === 'custom' && piece?.villain === false);
+    return boardContext.boardConfig.some(isAlly);
+  } catch (error) {
+    console.warn('[Board Analyzer] Error checking for ally creatures:', error);
+    return false;
+  }
+}
+
 // Find and click buttons in the game
 function findButtonWithText(text) {
   const buttons = document.querySelectorAll('button');
@@ -2508,12 +2524,30 @@ function createConfigPanel(startAnalysisCallback) {
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
   content.appendChild(stopWhenTicksContainer);
 
+  // Warning if no ally creatures on board (parity with Rank Pointer)
+  const hasAlly = hasAllyCreaturesOnBoard();
+  if (!hasAlly) {
+    const warningMsg = document.createElement('div');
+    warningMsg.textContent = '⚠️ No ally creatures on board. Please place at least one ally creature before starting.';
+    warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
+    content.appendChild(warningMsg);
+  }
+
   // Create buttons array
   const buttons = [
     {
       text: t('mods.boardAnalyzer.startAnalysisButton'),
       primary: true,
       onClick: () => {
+        // Prevent starting if there are no ally creatures on board
+        if (!hasAllyCreaturesOnBoard()) {
+          api.ui.components.createModal({
+            title: 'Cannot Start',
+            content: 'Please place at least one ally creature on the board before starting.',
+            buttons: [{ text: 'OK', primary: true }]
+          });
+          return;
+        }
         // Check if analysis is already running
         if (!analysisState.canStart()) {
           console.log('[Board Analyzer] Analysis already running, cannot start new analysis');
@@ -2580,6 +2614,24 @@ function createConfigPanel(startAnalysisCallback) {
   panel.type = MODAL_TYPES.CONFIG;
   modalManager.register('config-panel', panel);
   
+  // If no ally creatures, disable the Start button in the panel UI as well
+  if (!hasAlly) {
+    setTimeout(() => {
+      try {
+        const startText = t('mods.boardAnalyzer.startAnalysisButton');
+        const btns = panel?.element ? panel.element.querySelectorAll('button') : document.querySelectorAll('button');
+        for (const btn of btns) {
+          if (btn.textContent === startText) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+            break;
+          }
+        }
+      } catch (_) {}
+    }, 50);
+  }
+
   activeConfigPanel = panel;
   return panel;
 }

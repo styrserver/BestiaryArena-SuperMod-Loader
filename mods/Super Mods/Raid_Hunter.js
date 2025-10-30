@@ -20,6 +20,19 @@ console.log('[Raid Hunter] Initializing...');
 const MOD_ID = 'raid-hunter';
 const RAID_CLOCK_ID = `${MOD_ID}-raid-clock`;
 
+// Key event constants and helper (align with Rank Pointer)
+const ESC_KEY_EVENT_INIT = {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    which: 27,
+    bubbles: true,
+    cancelable: true
+};
+function dispatchEsc() {
+    try { document.dispatchEvent(new KeyboardEvent('keydown', ESC_KEY_EVENT_INIT)); } catch (_) {}
+}
+
 // Default settings
 const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
 
@@ -226,6 +239,11 @@ function isBoostedMapsActive() {
 
 // Helper function to check if raid processing can proceed based on priority
 function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
+    // Rank Pointer coordination: pause while Rank Pointer runs
+    if (window.__modCoordination?.rankPointerRunning) {
+        console.log(`[Raid Hunter] Rank Pointer running during ${context} - skipping`);
+        return false;
+    }
     // Board Analyzer always blocks (highest priority system task)
     if (isBoardAnalyzerRunning) {
         console.log(`[Raid Hunter] Board Analyzer running during ${context} - skipping`);
@@ -244,14 +262,40 @@ function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
     }
     
     // Halloween Mansion only waits for Better Tasker (NOT Better Boosted Maps)
+    // But "New Task+" mode should not block Halloween Mansion
     if (raidPriority === RAID_PRIORITY.HALLOWEEN) {
-        const betterTaskerActive = isBetterTaskerActive();
-        if (betterTaskerActive) {
-            console.log(`[Raid Hunter] Better Tasker is active - Halloween Mansion waiting`);
-            return false;
+        const betterTaskerState = window.betterTaskerState;
+        
+        // Check if Better Tasker is in "New Task+" mode - if so, allow Halloween Mansion to proceed
+        if (betterTaskerState && betterTaskerState.taskerState === 'new_task_only') {
+            console.log(`[Raid Hunter] Better Tasker is in "New Task+" mode - Halloween Mansion can proceed`);
+            return true;
         }
-        // Halloween has higher priority than Better Boosted Maps, so proceed
-        console.log(`[Raid Hunter] Better Tasker not active - Halloween Mansion can proceed`);
+        
+        // Otherwise, check if Better Tasker is actively doing full automation (excluding "New Task+" mode)
+        // Only consider Better Tasker active if it's in full automation mode, not "New Task+" mode
+        if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+            // Check for active task operations only in full automation mode
+            if (betterTaskerState.hasActiveTask === true || 
+                betterTaskerState.taskHuntingOngoing === true ||
+                betterTaskerState.taskOperationInProgress === true ||
+                betterTaskerState.pendingTaskCompletion === true) {
+                console.log(`[Raid Hunter] Better Tasker is active (full automation) - Halloween Mansion waiting`);
+                return false;
+            }
+        }
+        
+        // Also check AutoplayManager owner for full automation mode only
+        if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+            if (window.AutoplayManager?.getCurrentOwner && 
+                window.AutoplayManager.getCurrentOwner() === 'Better Tasker') {
+                console.log(`[Raid Hunter] Better Tasker has autoplay control (full automation) - Halloween Mansion waiting`);
+                return false;
+            }
+        }
+        
+        // Halloween has higher priority than Better Boosted Maps, and "New Task+" doesn't block
+        console.log(`[Raid Hunter] Better Tasker not blocking - Halloween Mansion can proceed`);
         return true;
     }
     
@@ -260,6 +304,10 @@ function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
 
 // Helper function to check if raid processing can proceed (backwards compatibility)
 function canProcessRaid(context = 'raid processing') {
+    if (window.__modCoordination?.rankPointerRunning) {
+        console.log(`[Raid Hunter] Rank Pointer running during ${context} - skipping`);
+        return false;
+    }
     if (isBoardAnalyzerRunning) {
         console.log(`[Raid Hunter] Board Analyzer running during ${context} - skipping`);
         return false;
@@ -1415,15 +1463,16 @@ function handleBoardAnalyzerCoordination() {
         if (!window.__modCoordination) return;
         
         const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
+        const rankPointerRunning = window.__modCoordination.rankPointerRunning === true;
         
-        if (boardAnalyzerRunning && !isBoardAnalyzerRunning) {
+        if ((boardAnalyzerRunning || rankPointerRunning) && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Raid Hunter monitoring
-            console.log('[Raid Hunter] Board Analyzer started - pausing monitoring');
+            console.log('[Raid Hunter] Coordination active (Board Analyzer or Rank Pointer) - pausing monitoring');
             isBoardAnalyzerRunning = true;
             pauseRaidHunterMonitoring();
-        } else if (!boardAnalyzerRunning && isBoardAnalyzerRunning) {
+        } else if (!boardAnalyzerRunning && !rankPointerRunning && isBoardAnalyzerRunning) {
             // Board Analyzer finished - resume Raid Hunter monitoring
-            console.log('[Raid Hunter] Board Analyzer finished - resuming monitoring');
+            console.log('[Raid Hunter] Coordination cleared - resuming monitoring');
             isBoardAnalyzerRunning = false;
             resumeRaidHunterMonitoring();
         }
@@ -1658,15 +1707,7 @@ function updateRaidQueue() {
 function closeOpenModals() {
     try {
         // Send ESC key to close any open modals (like other scripts)
-        const escEvent = new KeyboardEvent('keydown', {
-            key: 'Escape',
-            code: 'Escape',
-            keyCode: 27,
-            which: 27,
-            bubbles: true,
-            cancelable: true
-        });
-        document.dispatchEvent(escEvent);
+        dispatchEsc();
         console.log('[Raid Hunter] Sent ESC key to close modals');
         
         // Small delay to let modals close
@@ -2805,9 +2846,27 @@ function setupRaidListMonitoring() {
                                         console.log(`[Raid Hunter] Higher priority raid detected: ${nextRaid.name} (Priority: ${nextRaid.priority}) vs current: ${currentRaidInfo.name} (Priority: ${currentRaidInfo.priority}) - switching`);
                                         
                                         // Check if Better Tasker should take control instead
-                                        if (isBetterTaskerActive() && nextRaid.priority === RAID_PRIORITY.HALLOWEEN) {
-                                            console.log('[Raid Hunter] Better Tasker is active - Halloween Mansion should wait');
-                                            return; // Don't interrupt
+                                        // But "New Task+" mode should not block Halloween Mansion
+                                        if (nextRaid.priority === RAID_PRIORITY.HALLOWEEN) {
+                                            const betterTaskerState = window.betterTaskerState;
+                                            
+                                            // Allow Halloween Mansion if Better Tasker is in "New Task+" mode
+                                            if (betterTaskerState && betterTaskerState.taskerState === 'new_task_only') {
+                                                console.log('[Raid Hunter] Better Tasker is in "New Task+" mode - Halloween Mansion can proceed');
+                                                // Continue to interrupt logic below
+                                            } 
+                                            // Only block if Better Tasker is in full automation mode with active operations
+                                            else if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+                                                if (betterTaskerState.hasActiveTask === true || 
+                                                    betterTaskerState.taskHuntingOngoing === true ||
+                                                    betterTaskerState.taskOperationInProgress === true ||
+                                                    betterTaskerState.pendingTaskCompletion === true ||
+                                                    (window.AutoplayManager?.getCurrentOwner && 
+                                                     window.AutoplayManager.getCurrentOwner() === 'Better Tasker')) {
+                                                    console.log('[Raid Hunter] Better Tasker is active (full automation) - Halloween Mansion should wait');
+                                                    return; // Don't interrupt
+                                                }
+                                            }
                                         }
                                         
                                         // Interrupt current raid and switch to higher priority
@@ -3759,15 +3818,7 @@ function openRaidHunterSettingsModal() {
                 if (!raidHunterModalInProgress) return;
                 
                 // Simulate ESC key to remove scroll lock
-                const escEvent = new KeyboardEvent('keydown', {
-                    key: 'Escape',
-                    code: 'Escape',
-                    keyCode: 27,
-                    which: 27,
-                    bubbles: true,
-                    cancelable: true
-                });
-                document.dispatchEvent(escEvent);
+                dispatchEsc();
                 
                 // Small delay to ensure scroll lock is removed
                 setTimeout(() => {

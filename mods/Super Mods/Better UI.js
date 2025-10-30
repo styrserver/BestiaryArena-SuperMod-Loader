@@ -1224,6 +1224,11 @@ function showSettingsModal() {
             settings.persistData = newValue;
             localStorage.setItem('huntAnalyzerSettings', JSON.stringify(settings));
             console.log('[Better UI] Updated Hunt Analyzer persistData:', newValue);
+            
+            // If turning OFF persistence, clear the persisted data
+            if (!newValue) {
+              localStorage.removeItem('huntAnalyzerData');
+            }
           } catch (error) {
             console.error('[Better UI] Error updating Hunt Analyzer settings:', error);
           }
@@ -1231,7 +1236,6 @@ function showSettingsModal() {
           // Also update runtime if Hunt Analyzer is loaded
           if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
             window.HuntAnalyzerState.settings.persistData = newValue;
-            console.log('[Better UI] Updated Hunt Analyzer runtime settings');
           }
         });
       }
@@ -2468,10 +2472,17 @@ function getSpriteInfo(spriteElement) {
 }
 
 // Helper: Check if creature is in the unobtainable list
+// Handles creatures with suffixes like "Dwarf Henchman 4" by checking if the name starts with an unobtainable creature name
 function isCreatureUnobtainable(creatureName) {
   if (!creatureName) return false;
   const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
-  return UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
+  const creatureNameLower = creatureName.toLowerCase();
+  return UNOBTAINABLE_CREATURES.some(c => {
+    const unobtainableLower = c.toLowerCase();
+    // Check exact match or if creature name starts with unobtainable name (for suffixes like "Dwarf Henchman 4")
+    return unobtainableLower === creatureNameLower || 
+           creatureNameLower.startsWith(unobtainableLower + ' ');
+  });
 }
 
 // Helper: Check if a battle container is an enemy (red health bar)
@@ -2527,7 +2538,7 @@ function applyShinyEnemies() {
         creatureName = monster?.metadata?.name;
       }
       
-      // Skip unobtainable creatures
+      // Check if unobtainable first - if so, skip entirely
       if (isCreatureUnobtainable(creatureName)) {
         skippedCount++;
         return;
@@ -2555,15 +2566,21 @@ function applyShinyEnemies() {
     
     // Also apply shiny to all item sprites in battle (e.g., sleeping Bear uses item sprite 7175)
     // These are state-based sprite variations that don't match the creature's main spriteId
-    const itemSprites = document.querySelectorAll('.sprite.item img.spritesheet[data-shiny="false"]');
+    const itemSprites = document.querySelectorAll('.sprite.item img.spritesheet[data-shiny]');
     itemSprites.forEach(img => {
       // Skip sprites inside modals/dialogs (e.g., Bestiary)
       if (img.closest('[role="dialog"]')) return;
       
       const battleContainer = img.closest('[data-name]');
       if (battleContainer && isEnemyByHealthBar(battleContainer)) {
-        img.setAttribute('data-shiny', 'true');
-        appliedCount++;
+        const creatureName = battleContainer.getAttribute('data-name');
+        if (isCreatureUnobtainable(creatureName)) {
+          return;
+        }
+        if (img.getAttribute('data-shiny') === 'false') {
+          img.setAttribute('data-shiny', 'true');
+          appliedCount++;
+        }
       }
     });
     
@@ -2577,10 +2594,15 @@ function applyShinyEnemies() {
       const creatureName = container.getAttribute('data-name');
       
       if (isEnemyByHealthBar(container)) {
-        const outfitSprites = container.querySelectorAll('.sprite.outfit img.spritesheet[data-shiny="false"]');
+        // Check if unobtainable first - if so, skip entirely
+        if (isCreatureUnobtainable(creatureName)) {
+          return;
+        }
+        
+        const outfitSprites = container.querySelectorAll('.sprite.outfit img.spritesheet[data-shiny]');
         
         outfitSprites.forEach(spriteImg => {
-          if (!isCreatureUnobtainable(creatureName)) {
+          if (spriteImg.getAttribute('data-shiny') === 'false') {
             spriteImg.setAttribute('data-shiny', 'true');
             appliedCount++;
           }
@@ -3153,6 +3175,11 @@ function startBattleBoardObserver() {
                   const spriteContainer = spriteImg.closest('.sprite');
                   const spriteId = spriteContainer ? parseInt(extractSpriteIdFromClasses(spriteContainer), 10) : null;
                   
+                  // Check if creature is unobtainable first - if so, skip entirely
+                  if (isCreatureUnobtainable(creatureName)) {
+                    return;
+                  }
+                  
                   // Check if this sprite belongs to an enemy by checking boardConfig
                   const boardConfig = globalThis.state?.board?.getSnapshot()?.context?.boardConfig;
                   let isEnemy = false;
@@ -3250,10 +3277,8 @@ function startBattleBoardObserver() {
                 creatureName = monster?.metadata?.name;
               }
               
-              const isUnobtainable = creatureName && UNOBTAINABLE_CREATURES.some(c => c.toLowerCase() === creatureName.toLowerCase());
-              
-              if (isUnobtainable) {
-                console.log(`[Better UI]    ⊘ Skipped ${creatureName} (unobtainable, no shiny sprite)`);
+              if (isCreatureUnobtainable(creatureName)) {
+                // Skip unobtainable creatures
               } else {
                 // Re-apply shiny immediately to enemy
                 target.setAttribute('data-shiny', 'true');

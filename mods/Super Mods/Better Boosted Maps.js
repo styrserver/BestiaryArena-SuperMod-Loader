@@ -911,6 +911,11 @@ function isBetterTaskerTasking() {
 
 // Check if Better Boosted Maps can run (only if no raids or tasks)
 function canRunBoostedMaps() {
+    // Pause while Rank Pointer is running to avoid conflicts
+    if (window.__modCoordination?.rankPointerRunning === true) {
+        console.log('[Better Boosted Maps] Rank Pointer running - skipping boosted maps');
+        return false;
+    }
     if (!modState.enabled) {
         return false;
     }

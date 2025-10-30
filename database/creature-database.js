@@ -73,10 +73,16 @@ function buildCreatureDatabase() {
   const allCreatureNames = allMonsters.map(m => m.metadata.name);
   
   // Check against hardcoded list of known unobtainable creatures
-  const hardcodedUnobtainable = ['Black Knight', 'Dharalion', 'Dead Tree', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Willi Wasp'];
-  const unobtainableCreatures = allMonsters
+  const hardcodedUnobtainable = ['Black Knight', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp'];
+  
+  // Get unobtainable creatures from allMonsters that match the hardcoded list
+  const unobtainableFromMonsters = allMonsters
     .filter(m => hardcodedUnobtainable.includes(m.metadata.name))
-    .map(m => m.metadata.name)
+    .map(m => m.metadata.name);
+  
+  // Ensure all hardcoded unobtainable creatures are included, even if not in allMonsters
+  // This handles cases like "Dwarf Henchman" which may not be loaded in the initial game state
+  const unobtainableCreatures = [...new Set([...hardcodedUnobtainable, ...unobtainableFromMonsters])]
     .sort((a, b) => a.localeCompare(b));
   
   // Remove unobtainable creatures from ALL_CREATURES and sort alphabetically

@@ -545,8 +545,11 @@ function renderLocalMods(mods) {
     'Cyclopedia.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
+    'Outfiter.js',
     'Playercount.js',
-    'Raid_Hunter.js'
+    'Raid_Hunter.js',
+    'Rank Pointer.js',
+    'RunTracker.js'
   ];
 
 

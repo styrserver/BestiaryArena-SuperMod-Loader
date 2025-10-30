@@ -574,7 +574,7 @@ async function showWelcomeModal() {
             <h3 style="color: #a6adc8; margin-bottom: 15px;">✨ What's Included:</h3>
             <div style="text-align: left; color: #a6adc8; line-height: 1.8;">
               <p><strong>🔧 ${officialCount} Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, Custom Display, and more! <em>(Enabled by default)</em></p>
-              <p><strong>🚀 ${superCount} Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Outfiter, Raid Hunter, and more! <em>(Disabled by default)</em></p>
+              <p><strong>🚀 ${superCount} Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Outfiter, Raid Hunter, <em>Rank Pointer</em>, and more! <em>(Disabled by default)</em></p>
               <p><strong>⚙️ Configuration:</strong> Import/export your settings and mod preferences</p>
               <p><strong>📊 Dashboard:</strong> Access the SuperMod dashboard for advanced features</p>
               <p><strong>🎛️ Popup Controls:</strong> Enable/disable mods directly from the extension popup</p>

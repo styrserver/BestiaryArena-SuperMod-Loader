@@ -301,6 +301,13 @@ Advanced raid automation system for Bestiary Arena:
 * Real-time raid status monitoring with countdown timers and queue system for multiple raids
 * Comprehensive settings panel for customization and raid map selection
 
+==== Rank Pointer ====
+Automates repeated manual runs until victory or a target S+ rank:
+* Starts fights and auto-closes reward screens between attempts
+* Tracks attempts, defeats, stamina spent, and rank points
+* Optional target: stop on S+X based on map and team size
+* Copy replay/seed from the results modal
+
 ==== RunTracker ====
 Local run data tracking and storage system:
 * Automatically tracks and stores run data locally
