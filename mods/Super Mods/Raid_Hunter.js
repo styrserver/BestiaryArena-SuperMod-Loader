@@ -2715,10 +2715,19 @@ function isSafeToReload() {
 function interruptCurrentRaid(callback) {
     console.log(`[Raid Hunter] Interrupting current raid: ${currentRaidInfo?.name} for higher priority raid`);
     
-    // Use existing resetState with 'raid' parameter (not 'full')
-    resetState('raid');  // This handles: isCurrentlyRaiding, currentRaidInfo, quest button, monitoring
+    // Manually reset raid state WITHOUT clearing the queue (we need it for the next raid)
+    isCurrentlyRaiding = false;
+    const interruptedRaidName = currentRaidInfo?.name;
+    currentRaidInfo = null;
+    isRaidActive = false;
+    raidCountdownEndTime = null;
     
-    // Stop stamina tooltip monitoring (not handled by resetState)
+    // Reset quest button state
+    stopAutoplayStateMonitoring();
+    stopQuestButtonValidation();
+    restoreQuestButtonAppearance();
+    
+    // Stop stamina tooltip monitoring
     stopStaminaTooltipMonitoring();
     
     // Release autoplay control without reloading
@@ -2732,7 +2741,7 @@ function interruptCurrentRaid(callback) {
         }, 'interrupt raid');
     }
     
-    console.log(`[Raid Hunter] Successfully interrupted ${currentRaidInfo?.name}`);
+    console.log(`[Raid Hunter] Successfully interrupted ${interruptedRaidName}`);
     
     // Execute callback after cleanup
     if (typeof callback === 'function') {
