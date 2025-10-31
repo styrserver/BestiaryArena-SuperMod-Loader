@@ -5362,8 +5362,8 @@ class AnalysisEngine {
           monsterId: monsterId,
           equipId: piece.equipId,
           tileIndex: piece.tileIndex || piece.tile,
-          tier: piece.tier,
-          level: piece.level,
+          tier: piece.tier ?? null, // Monsters don't have tiers, only equipment does
+          level: (piece.level && piece.level !== 1) ? Number(piece.level) : 50, // Default to level 50 if not specified or if level is 1 (unknown)
           monsterName: piece.monsterName,
           equipmentName: cleanEquipmentName,
           equipmentTier: equipmentTier,

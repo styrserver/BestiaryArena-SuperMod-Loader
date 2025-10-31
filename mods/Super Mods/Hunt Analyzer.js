@@ -2701,6 +2701,17 @@ class DataProcessor {
       HuntAnalyzerState.totals.losses++;
     }
     
+    // Extract gold and dust from loot array for session tracking
+    let sessionGold = 0;
+    let sessionDust = 0;
+    for (const item of aggregatedLootForSession.values()) {
+      if (item.originalName === 'Gold') {
+        sessionGold += item.count;
+      } else if (item.originalName === 'Dust') {
+        sessionDust += item.count;
+      }
+    }
+    
     // Store session data
     const sessionData = {
       message: autoplayMessage,
@@ -2711,7 +2722,9 @@ class DataProcessor {
       timestamp: Date.now(),
       staminaSpent: serverResults.next?.playerExpDiff || 0,
       staminaRecovered: sessionStaminaRecovered,
-      victory: rewardScreen.victory
+      victory: rewardScreen.victory,
+      gold: sessionGold,
+      dust: sessionDust
     };
     
     this.state.data.sessions.push(sessionData);
@@ -3378,7 +3391,17 @@ function generateSummaryLogText() {
 
     // Overall Stats
     const filteredTimeHours = getFilteredTimeHours();
-    const cachedRoomIdDisplayElement = domCache.get("mod-room-id-display");
+    
+    // Determine room name for summary header - check if multiple maps were hunted
+    const uniqueMaps = new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName));
+    let roomDisplayName;
+    if (uniqueMaps.size === 0) {
+        roomDisplayName = 'N/A';
+    } else if (uniqueMaps.size === 1) {
+        roomDisplayName = Array.from(uniqueMaps)[0];
+    } else {
+        roomDisplayName = `All Maps (${uniqueMaps.size} maps)`;
+    }
     
     // Calculate overall rates for summary
     const autoplayRatePerHour = filteredTimeHours > 0 ? Math.floor(HuntAnalyzerState.session.count / filteredTimeHours) : 0;
@@ -3393,7 +3416,7 @@ function generateSummaryLogText() {
     const totalSessionsForWinRate = HuntAnalyzerState.totals.wins + HuntAnalyzerState.totals.losses;
     const winRate = totalSessionsForWinRate > 0 ? Math.round((HuntAnalyzerState.totals.wins / totalSessionsForWinRate) * 100) : 0;
     
-    summary += `Room: ${cachedRoomIdDisplayElement?.textContent || 'N/A'}\n`;
+    summary += `Room: ${roomDisplayName}\n`;
     summary += `Sessions: ${HuntAnalyzerState.session.count}\n`;
     summary += `Win/Loss: ${HuntAnalyzerState.totals.wins}/${HuntAnalyzerState.totals.losses} (${winRate}%)\n`;
     summary += `Time Elapsed: ${formatTime(filteredTimeHours * 60 * 60 * 1000)}\n`;
@@ -3469,7 +3492,7 @@ function generateSummaryLogText() {
                     mapGroups[mapName].loot.set(mapKey, { ...item });
                 }
                 
-                // Count equipment and creatures
+                // Count equipment (gold and dust are tracked via session.gold/dust above)
                 if (item.isEquipment) {
                     mapGroups[mapName].totalEquipment += item.count;
                 }

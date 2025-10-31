@@ -171,7 +171,18 @@ function generateSummary(data, isImport = false) {
   if (data.runData && data.runData.metadata) {
     const runStats = data.runData.metadata;
     if (runStats.totalRuns > 0) {
-      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps`);
+      const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
+      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`);
+    }
+  }
+  
+  // Add Hunt Analyzer data info
+  if (data.huntAnalyzerData && data.huntAnalyzerData.data) {
+    const huntData = data.huntAnalyzerData.data;
+    const sessionCount = huntData.sessions ? huntData.sessions.length : 0;
+    if (sessionCount > 0) {
+      const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
+      summary.push(`Hunt Analyzer: ${sessionCount} sessions (~${estimatedSizeKB} KB)`);
     }
   }
   
@@ -274,7 +285,21 @@ function openConfigurator() {
           • Active mods and their settings<br>
           • Dashboard theme and language<br>
           • Game localStorage data (setup labels, etc.)<br>
-          • Mod-specific data and caches
+          • Mod-specific data and caches<br>
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="export-run-data" checked style="cursor: pointer;">
+              <span>Include Run Tracker data</span>
+            </label>
+            <div id="run-data-info" style="margin-top: 6px; font-size: 12px; color: #7f8fa4; display: none;">
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 8px;">
+              <input type="checkbox" id="export-hunt-analyzer" checked style="cursor: pointer;">
+              <span>Include Hunt Analyzer statistics</span>
+            </label>
+            <div id="hunt-analyzer-info" style="margin-top: 6px; font-size: 12px; color: #7f8fa4; display: none;">
+            </div>
+          </div>
         </div>
       </div>
     `,
@@ -304,6 +329,67 @@ function openConfigurator() {
   const timeoutId = setTimeout(() => {
     const exportBtn = document.getElementById('export-config-btn');
     const importBtn = document.getElementById('import-config-btn');
+    const runDataCheckbox = document.getElementById('export-run-data');
+    const runDataInfo = document.getElementById('run-data-info');
+    const huntAnalyzerCheckbox = document.getElementById('export-hunt-analyzer');
+    const huntAnalyzerInfo = document.getElementById('hunt-analyzer-info');
+    
+    // Check for Run Data and update info
+    if (runDataCheckbox && runDataInfo) {
+      try {
+        let runData = null;
+        if (window.RunTrackerAPI) {
+          runData = window.RunTrackerAPI.getAllRuns();
+          if (runData && runData.metadata) {
+            const runStats = runData.metadata;
+            if (runStats.totalRuns > 0) {
+              // Estimate size (rough calculation: ~1115 bytes per run on average)
+              const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
+              runDataInfo.style.display = 'block';
+              runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+            }
+          }
+        } else if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+          window.browserAPI.storage.local.get('ba_local_runs', result => {
+            const storedRunData = result?.ba_local_runs || null;
+            if (storedRunData && storedRunData.metadata) {
+              const runStats = storedRunData.metadata;
+              if (runStats.totalRuns > 0) {
+                // Estimate size (rough calculation: ~1115 bytes per run on average)
+                const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
+                runDataInfo.style.display = 'block';
+                runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.log('[Configurator] Could not check for Run Data:', e);
+      }
+    }
+    
+    // Check for Hunt Analyzer data and update info
+    if (huntAnalyzerCheckbox && huntAnalyzerInfo) {
+      try {
+        const huntData = localStorage.getItem('huntAnalyzerData');
+        if (huntData) {
+          try {
+            const parsed = JSON.parse(huntData);
+            const sessionCount = parsed.sessions ? parsed.sessions.length : 0;
+            if (sessionCount > 0) {
+              // Estimate size (rough calculation: ~864 bytes per session on average)
+              const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
+              huntAnalyzerInfo.style.display = 'block';
+              huntAnalyzerInfo.textContent = `Found ${sessionCount} sessions (~${estimatedSizeKB} KB)`;
+            }
+          } catch (e) {
+            console.log('[Configurator] Could not parse Hunt Analyzer data:', e);
+          }
+        }
+      } catch (e) {
+        console.log('[Configurator] Could not check for Hunt Analyzer data:', e);
+      }
+    }
     
     if (exportBtn) {
       const exportHandler = () => {
@@ -406,12 +492,28 @@ async function exportConfiguration(modal) {
        timestamp: storageData.utility_script_timestamp || null
      };
      
-     // Get run data (try RunTrackerAPI first, then fallback to storage)
+     // Get run data if checkbox is checked
      let runData = null;
-     if (window.RunTrackerAPI) {
-       runData = window.RunTrackerAPI.getAllRuns();
-     } else {
-       runData = storageData.ba_local_runs || null;
+     const runDataCheckbox = document.getElementById('export-run-data');
+     if (runDataCheckbox && runDataCheckbox.checked) {
+       try {
+         if (window.RunTrackerAPI) {
+           runData = window.RunTrackerAPI.getAllRuns();
+         } else if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
+           // Get from storage as fallback
+           const runDataResult = await new Promise(resolve => {
+             window.browserAPI.storage.local.get('ba_local_runs', result => {
+               resolve(result?.ba_local_runs || null);
+             });
+           });
+           runData = runDataResult;
+         }
+         if (runData) {
+           console.log('[Configurator] Including Run Tracker data in export');
+         }
+       } catch (error) {
+         console.warn('[Configurator] Could not read Run Tracker data:', error);
+       }
      }
     
          // Get all script caches from storage
@@ -427,24 +529,16 @@ async function exportConfiguration(modal) {
      
      const scriptCaches = {};
      const modLocalStorage = {};
+     
      Object.keys(allStorageData).forEach(key => {
        if (key.startsWith('script_')) {
          scriptCaches[key] = allStorageData[key];
-       } else if (key.startsWith('mod_') || key.startsWith('bestiary_') || key.startsWith('ba_')) {
-         // Capture mod-specific localStorage data
+       } else {
+         // Capture all mod-specific localStorage data (including all browserAPI.storage.local keys)
          modLocalStorage[key] = allStorageData[key];
        }
      });
      
-     // Extract mod status from localMods array
-     const modStatus = {};
-     if (localModsData && Array.isArray(localModsData)) {
-       localModsData.forEach(mod => {
-         if (mod.name && typeof mod.enabled === 'boolean') {
-           modStatus[mod.name] = mod.enabled;
-         }
-       });
-     }
     
     // Get game localStorage data (setup labels, mod data, etc.)
     let gameLocalStorage = {};
@@ -455,6 +549,10 @@ async function exportConfiguration(modal) {
         const key = localStorage.key(i);
         if (key) {
           try {
+            // Skip Hunt Analyzer data - it's handled separately
+            if (key === 'huntAnalyzerData' || key === 'huntAnalyzerState' || key === 'huntAnalyzerSettings') {
+              continue;
+            }
             const value = localStorage.getItem(key);
             gameLocalStorage[key] = value;
           } catch (e) {
@@ -474,15 +572,35 @@ async function exportConfiguration(modal) {
       console.log('Could not access game localStorage:', error);
     }
     
+    // Get Hunt Analyzer data if checkbox is checked
+    let huntAnalyzerData = null;
+    const huntAnalyzerCheckbox = document.getElementById('export-hunt-analyzer');
+    if (huntAnalyzerCheckbox && huntAnalyzerCheckbox.checked) {
+      try {
+        const huntData = localStorage.getItem('huntAnalyzerData');
+        const huntState = localStorage.getItem('huntAnalyzerState');
+        const huntSettings = localStorage.getItem('huntAnalyzerSettings');
+        
+        if (huntData || huntState || huntSettings) {
+          huntAnalyzerData = {
+            data: huntData ? JSON.parse(huntData) : null,
+            state: huntState ? JSON.parse(huntState) : null,
+            settings: huntSettings ? JSON.parse(huntSettings) : null
+          };
+          console.log('[Configurator] Including Hunt Analyzer data in export');
+        }
+      } catch (error) {
+        console.warn('[Configurator] Could not read Hunt Analyzer data:', error);
+      }
+    }
+    
          // Create export data
      const exportData = {
-       version: '1.2',
        timestamp: new Date().toISOString(),
        activeScripts: activeScripts || [],
        localMods: localModsData || [],
        manualMods: manualModsData || [],
        localModsConfig: localModsConfigData || {},
-       modStatus: modStatus,
        dashboardTheme: dashboardThemeData || 'default',
        locale: localeData || 'en-US',
        utilityScriptCache: utilityScriptCacheData.cache || null,
@@ -491,16 +609,17 @@ async function exportConfiguration(modal) {
        scriptCaches: scriptCaches,
        modLocalStorage: modLocalStorage,
        gameLocalStorage: gameLocalStorage,
+       huntAnalyzerData: huntAnalyzerData,
        exportInfo: {
          totalActiveScripts: (activeScripts || []).length,
          totalLocalMods: (localModsData || []).length,
          totalManualMods: (manualModsData || []).length,
-         totalModStatus: Object.keys(modStatus).length,
          hasUtilityCache: !!utilityScriptCacheData.cache,
          hasRunData: !!runData,
          hasScriptCaches: Object.keys(scriptCaches).length > 0,
          hasModLocalStorage: Object.keys(modLocalStorage).length > 0,
-         hasGameLocalStorage: Object.keys(gameLocalStorage).length > 0
+         hasGameLocalStorage: Object.keys(gameLocalStorage).length > 0,
+         hasHuntAnalyzerData: !!huntAnalyzerData
        }
      };
     
@@ -605,7 +724,7 @@ async function importConfiguration(modal) {
          console.log('[Configurator] JSON parsed successfully, importData keys:', Object.keys(importData));
         
         // Validate import data
-        if (!importData.version || !importData.activeScripts) {
+        if (!importData.activeScripts) {
           throw new Error('Invalid configuration file format');
         }
         
@@ -616,16 +735,12 @@ async function importConfiguration(modal) {
            `Manual Mods: ${importData.manualMods.length}`
          ];
          
-         if (importData.modStatus && Object.keys(importData.modStatus).length > 0) {
-           info.push(`Mod Status: ${Object.keys(importData.modStatus).length} entries`);
-         }
-        
+         
                  if (importData.exportInfo) {
            info.push(`\nAdditional Data:`);
            if (importData.exportInfo.hasUtilityCache) info.push(`• Utility script cache`);
            if (importData.exportInfo.hasScriptCaches) info.push(`• Script caches (${Object.keys(importData.scriptCaches || {}).length} cached scripts)`);
            if (importData.exportInfo.hasModLocalStorage) info.push(`• Mod localStorage data (${Object.keys(importData.modLocalStorage || {}).length} items)`);
-           if (importData.exportInfo.totalModStatus > 0) info.push(`• Mod status data (${importData.exportInfo.totalModStatus} entries)`);
            if (importData.exportInfo.hasGameLocalStorage) {
              info.push(`• Game localStorage data (${Object.keys(importData.gameLocalStorage || {}).length} items)`);
              // Check for setup labels specifically
@@ -638,14 +753,23 @@ async function importConfiguration(modal) {
                }
              }
            }
-           if (importData.exportInfo.hasRunData) {
-             const runStats = importData.runData?.metadata;
-             if (runStats && runStats.totalRuns > 0) {
-               info.push(`• Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps`);
-             }
-           }
-           if (importData.locale) info.push(`• Language preference: ${importData.locale}`);
-         }
+          if (importData.exportInfo.hasRunData) {
+            const runStats = importData.runData?.metadata;
+            if (runStats && runStats.totalRuns > 0) {
+              const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
+              info.push(`• Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`);
+            }
+          }
+          if (importData.exportInfo.hasHuntAnalyzerData) {
+            const huntData = importData.huntAnalyzerData?.data;
+            if (huntData && huntData.sessions) {
+              const sessionCount = huntData.sessions.length;
+              const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
+              info.push(`• Hunt Analyzer data: ${sessionCount} sessions (~${estimatedSizeKB} KB)`);
+            }
+          }
+          if (importData.locale) info.push(`• Language preference: ${importData.locale}`);
+        }
         
                  // Create user-friendly confirmation info
          const confirmInfo = generateSummary(importData, true);
@@ -780,28 +904,7 @@ async function importConfiguration(modal) {
              }
            }
            
-           // Import mod status data if available
-           if (importData.modStatus && Object.keys(importData.modStatus).length > 0) {
-             // Update localMods with the correct enabled states
-             if (importData.localMods && Array.isArray(importData.localMods)) {
-               const updatedLocalMods = importData.localMods.map(mod => ({
-                 ...mod,
-                 enabled: importData.modStatus[mod.name] !== undefined ? importData.modStatus[mod.name] : mod.enabled
-               }));
-               
-               // Save updated localMods to both sync and local storage
-               if (window.browserAPI.storage.sync) {
-                 await new Promise(resolve => {
-                   window.browserAPI.storage.sync.set({ localMods: updatedLocalMods }, resolve);
-                 });
-               }
-               if (window.browserAPI.storage.local) {
-                 await new Promise(resolve => {
-                   window.browserAPI.storage.local.set({ localMods: updatedLocalMods }, resolve);
-                 });
-               }
-             }
-           }
+           // Mod status is now embedded in localMods.enabled, no separate import needed
         }
         
                  // Import game localStorage data if available
@@ -841,6 +944,28 @@ async function importConfiguration(modal) {
            } catch (error) {
              console.log('Could not restore game localStorage:', error);
              alert('Warning: Failed to restore game localStorage data: ' + error.message);
+           }
+         }
+         
+         // Import Hunt Analyzer data if available
+         if (importData.huntAnalyzerData) {
+           try {
+             // Save Hunt Analyzer data to localStorage
+             if (importData.huntAnalyzerData.data) {
+               localStorage.setItem('huntAnalyzerData', JSON.stringify(importData.huntAnalyzerData.data));
+               console.log('[Configurator] Hunt Analyzer data imported');
+             }
+             if (importData.huntAnalyzerData.state) {
+               localStorage.setItem('huntAnalyzerState', JSON.stringify(importData.huntAnalyzerData.state));
+               console.log('[Configurator] Hunt Analyzer state imported');
+             }
+             if (importData.huntAnalyzerData.settings) {
+               localStorage.setItem('huntAnalyzerSettings', JSON.stringify(importData.huntAnalyzerData.settings));
+               console.log('[Configurator] Hunt Analyzer settings imported');
+             }
+           } catch (error) {
+             console.warn('[Configurator] Could not import Hunt Analyzer data:', error);
+             // Don't show alert for Hunt Analyzer - it's optional data
            }
          }
         
