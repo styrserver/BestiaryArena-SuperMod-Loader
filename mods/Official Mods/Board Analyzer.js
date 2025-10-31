@@ -2528,7 +2528,7 @@ function createConfigPanel(startAnalysisCallback) {
   const hasAlly = hasAllyCreaturesOnBoard();
   if (!hasAlly) {
     const warningMsg = document.createElement('div');
-    warningMsg.textContent = '⚠️ No ally creatures on board. Please place at least one ally creature before starting.';
+    warningMsg.textContent = t('mods.boardAnalyzer.noAllyWarning');
     warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
     content.appendChild(warningMsg);
   }

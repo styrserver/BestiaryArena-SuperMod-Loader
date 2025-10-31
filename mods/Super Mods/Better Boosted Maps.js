@@ -132,7 +132,8 @@ const EXCLUDED_EQUIPMENT = [
     'Paladin Armor',
     'Rubber Cap',
     'Steel Boots',
-    'Windborn Colossus Armor'
+    'Windborn Colossus Armor',
+    'Witch Hat'
 ];
 
 // Maps that cannot have boosted equipment (grey out in settings)
@@ -914,6 +915,11 @@ function canRunBoostedMaps() {
     // Pause while Rank Pointer is running to avoid conflicts
     if (window.__modCoordination?.rankPointerRunning === true) {
         console.log('[Better Boosted Maps] Rank Pointer running - skipping boosted maps');
+        return false;
+    }
+    // Board Analyzer always blocks (highest priority system task)
+    if (window.__modCoordination?.boardAnalyzerRunning === true) {
+        console.log('[Better Boosted Maps] Board Analyzer running - skipping boosted maps');
         return false;
     }
     if (!modState.enabled) {

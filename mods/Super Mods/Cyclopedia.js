@@ -114,9 +114,12 @@ const MONSTER_STATS_CONFIG = [
 ];
 
 // Get creature data from centralized database
-const UNOBTAINABLE_CREATURES = window.creatureDatabase?.UNOBTAINABLE_CREATURES || [];
+const HIDE_FROM_CYCLOPEDIA = ['Tentugly', 'Dwarf Henchman'];
+const UNOBTAINABLE_CREATURES = (window.creatureDatabase?.UNOBTAINABLE_CREATURES || [])
+  .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
-const ALL_CREATURES = window.creatureDatabase?.ALL_CREATURES || [];
+const ALL_CREATURES = (window.creatureDatabase?.ALL_CREATURES || [])
+  .filter(name => !HIDE_FROM_CYCLOPEDIA.includes(name));
 
 // Debug logging for creature database integration
 console.log('[Cyclopedia] Creature database integration:', {

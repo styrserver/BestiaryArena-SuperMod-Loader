@@ -431,12 +431,12 @@ function parseStaminaValues(parentSpan) {
 // Calculate time until stamina is full
 function calculateStaminaReadyTime(current, max) {
   if (current >= max) {
-    return 'Full';
+    return t('mods.betterUI.staminaFullText');
   }
   
   const minutesRemaining = max - current;
   if (minutesRemaining <= 0) {
-    return 'Full';
+    return t('mods.betterUI.staminaFullText');
   }
   
   const readyTime = new Date(Date.now() + minutesRemaining * GAME_CONSTANTS.STAMINA_REGEN_MINUTES * 60000);
@@ -811,10 +811,10 @@ function showSettingsModal() {
     
     // Create menu items for left column
     const menuItems = [
-      { id: 'creatures', label: 'Creatures', selected: true },
-      { id: 'hunt-analyzer', label: 'Hunt Analyzer', selected: false },
-      { id: 'ui', label: 'UI', selected: false },
-      { id: 'advanced', label: 'Advanced', selected: false }
+      { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
+      { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
+      { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
+      { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false }
     ];
     
     menuItems.forEach(item => {
@@ -982,7 +982,7 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="anti-idle-sounds-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Prevents browser idle timeout by playing a muted audio loop. The audio is completely silent and won't disturb your browsing.">⚠️ Anti-Idle Sounds</span>
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.antiIdleTooltip')}">${t('mods.betterUI.antiIdleLabel')}</span>
             </label>
           </div>
         `;
@@ -993,11 +993,11 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="hunt-analyzer-persist-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Saves all Hunt Analyzer data and automatically reopens the panel after page refresh. This includes session statistics, loot data, and UI state.">⚠️ Persist through page refresh</span>
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.huntPersistTooltip')}">${t('mods.betterUI.huntPersistLabel')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-            <span style="color: #ccc;">Theme</span>
+            <span style="color: #ccc;">${t('mods.betterUI.huntThemeLabel')}</span>
             <select id="hunt-analyzer-theme-selector" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; width: 120px;">
               <option value="original" selected="">Original</option>
             </select>
@@ -1625,7 +1625,7 @@ function injectFavoriteButton(menuElem) {
   
   attachSubmenuHandlers(favoriteMainItem, submenu);
   
-  favoriteMainItem.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>Favorite<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ml-auto" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
+  favoriteMainItem.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>${t('mods.betterUI.favoriteMenuLabel')}<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-right ml-auto" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
   
   favoriteMainItem.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2791,8 +2791,8 @@ function updateTimerDisplay(readyTime) {
   }
   
   // Update timer text
-  if (readyTime === 'Full') {
-    timerState.element.textContent = ` 🕐Full`;
+  if (readyTime === t('mods.betterUI.staminaFullText')) {
+    timerState.element.textContent = ` 🕐${t('mods.betterUI.staminaFullText')}`;
   } else {
     timerState.element.textContent = ` 🕐${readyTime}`;
   }

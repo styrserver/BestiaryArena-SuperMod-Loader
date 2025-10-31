@@ -408,6 +408,9 @@ const HUNT_ANALYZER_STORAGE_KEY = 'huntAnalyzerData';
 const HUNT_ANALYZER_STATE_KEY = 'huntAnalyzerState';
 const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 
+// Maximum number of sessions to keep in storage (to prevent quota exceeded errors)
+const MAX_SESSIONS_TO_KEEP = 10000;
+
 // =======================
 // 1.5. Autoplay Time Tracking Functions
 // =======================
@@ -1116,11 +1119,56 @@ function logPersistenceOperation(operation, success = true) {
     }
 }
 
+// Clean session data by removing visual elements and unnecessary fields
+function cleanSessionData(sessions) {
+    return sessions.map(session => {
+        const cleanSession = {
+            message: session.message,
+            roomId: session.roomId,
+            roomName: session.roomName,
+            timestamp: session.timestamp,
+            staminaSpent: session.staminaSpent,
+            staminaRecovered: session.staminaRecovered,
+            victory: session.victory,
+            loot: (session.loot || []).map(item => {
+                const cleanItem = { ...item };
+                delete cleanItem.visual; // Remove visual - will be regenerated on load
+                return cleanItem;
+            }),
+            creatures: (session.creatures || []).map(creature => {
+                const cleanCreature = { ...creature };
+                delete cleanCreature.visual; // Remove visual - will be regenerated on load
+                return cleanCreature;
+            })
+        };
+        return cleanSession;
+    });
+}
+
+// Prune old sessions, keeping only the most recent N sessions
+function pruneOldSessions() {
+    if (HuntAnalyzerState.data.sessions.length <= MAX_SESSIONS_TO_KEEP) {
+        return 0; // No pruning needed
+    }
+    
+    const originalCount = HuntAnalyzerState.data.sessions.length;
+    // Sort by timestamp (newest first) and keep only the most recent ones
+    HuntAnalyzerState.data.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.slice(0, MAX_SESSIONS_TO_KEEP);
+    const prunedCount = originalCount - HuntAnalyzerState.data.sessions.length;
+    
+    console.log(`[Hunt Analyzer] Pruned ${prunedCount} old sessions (kept ${HuntAnalyzerState.data.sessions.length} most recent)`);
+    return prunedCount;
+}
+
 // Save Hunt Analyzer data to localStorage
 function saveHuntAnalyzerData() {
     try {
         // Snapshot any live time (manual or autoplay) before persisting
         snapshotIntoTotals();
+
+        // Prune old sessions if we exceed the limit
+        pruneOldSessions();
 
         // Clean aggregated data by removing visual elements (they can be regenerated)
         const cleanAggregatedLoot = new Map();
@@ -1137,13 +1185,16 @@ function saveHuntAnalyzerData() {
             cleanAggregatedCreatures.set(key, cleanValue);
         });
         
+        // Clean session data by removing visual elements
+        const cleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
+        
         // Snapshot current manual session time into saved totals (without continuing after reload)
         // Convert Map to array for timeTracking persistence (already includes snapshot)
         const mapTimeSnapshot = new Map(HuntAnalyzerState.timeTracking.mapTimeMs);
         const mapTimeMsArray = Array.from(mapTimeSnapshot.entries());
         
         const dataToSave = {
-            sessions: HuntAnalyzerState.data.sessions,
+            sessions: cleanSessions,
             totals: HuntAnalyzerState.totals,
             aggregatedLoot: Array.from(cleanAggregatedLoot.entries()),
             aggregatedCreatures: Array.from(cleanAggregatedCreatures.entries()),
@@ -1161,8 +1212,56 @@ function saveHuntAnalyzerData() {
             }
         };
         
-        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
-        logPersistenceOperation('Data save');
+        try {
+            localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
+            logPersistenceOperation('Data save');
+        } catch (quotaError) {
+            // If quota exceeded, try aggressive pruning and retry
+            if (quotaError.name === 'QuotaExceededError' || quotaError.message?.includes('quota')) {
+                console.warn('[Hunt Analyzer] Quota exceeded, attempting aggressive cleanup...');
+                
+                // Reduce max sessions by half and prune again
+                const originalMax = MAX_SESSIONS_TO_KEEP;
+                const aggressiveMax = Math.floor(MAX_SESSIONS_TO_KEEP / 2);
+                
+                // Temporarily reduce sessions to half
+                HuntAnalyzerState.data.sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                HuntAnalyzerState.data.sessions = HuntAnalyzerState.data.sessions.slice(0, aggressiveMax);
+                
+                // Re-clean and try again
+                const retryCleanSessions = cleanSessionData(HuntAnalyzerState.data.sessions);
+                dataToSave.sessions = retryCleanSessions;
+                
+                try {
+                    localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(dataToSave));
+                    console.log(`[Hunt Analyzer] Successfully saved after aggressive pruning (kept ${aggressiveMax} sessions)`);
+                    logPersistenceOperation('Data save');
+                } catch (retryError) {
+                    console.error('[Hunt Analyzer] Still failed after aggressive cleanup:', retryError);
+                    // Last resort: clear all sessions and save totals only
+                    console.warn('[Hunt Analyzer] Last resort: clearing all session data to save totals');
+                    const minimalData = {
+                        sessions: [],
+                        totals: HuntAnalyzerState.totals,
+                        aggregatedLoot: [],
+                        aggregatedCreatures: [],
+                        session: HuntAnalyzerState.session,
+                        timeTracking: dataToSave.timeTracking
+                    };
+                    try {
+                        localStorage.setItem(HUNT_ANALYZER_STORAGE_KEY, JSON.stringify(minimalData));
+                        console.warn('[Hunt Analyzer] Saved minimal data (sessions cleared due to storage quota)');
+                        logPersistenceOperation('Data save (minimal)');
+                    } catch (finalError) {
+                        console.error('[Hunt Analyzer] Complete save failure:', finalError);
+                        logPersistenceOperation('Data save', false);
+                        throw finalError;
+                    }
+                }
+            } else {
+                throw quotaError;
+            }
+        }
     } catch (error) {
         console.error('[Hunt Analyzer] Error saving data:', error);
         logPersistenceOperation('Data save', false);
@@ -1186,6 +1285,11 @@ function loadHuntAnalyzerData() {
             // Restore sessions
             if (parsedData.sessions) {
                 HuntAnalyzerState.data.sessions = parsedData.sessions;
+                // Prune old sessions if loaded data exceeds limit
+                if (HuntAnalyzerState.data.sessions.length > MAX_SESSIONS_TO_KEEP) {
+                    console.log(`[Hunt Analyzer] Loaded ${HuntAnalyzerState.data.sessions.length} sessions, pruning to ${MAX_SESSIONS_TO_KEEP} most recent`);
+                    pruneOldSessions();
+                }
             }
             
             // Restore totals
@@ -2828,15 +2932,48 @@ function updateMapFilterDropdown() {
     dropdownMenu.style.maxHeight = "200px";
     dropdownMenu.style.overflowY = "auto";
 
-    // Get unique map names from sessions
-    const availableMaps = [...new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName))];
+    // Get unique map names from sessions (maps that have been farmed)
+    const farmedMapNames = new Set(HuntAnalyzerState.data.sessions.map(s => s.roomName));
+    
+    // Get region data and room name mapping (matching Cyclopedia's approach)
+    const roomNamesMap = globalThis.state?.utils?.ROOM_NAME || {};
+    const regions = globalThis.state?.utils?.REGIONS || [];
+    
+    // Build ordered list using region room order (same as Cyclopedia does)
+    const orderedMaps = [];
+    
+    if (regions.length > 0) {
+        // Iterate through regions in their native order
+        regions.forEach(region => {
+            if (!region.rooms) return;
+            
+            // Iterate through rooms in their native order within this region
+            region.rooms.forEach(room => {
+                const roomId = room.id;
+                const mapName = roomNamesMap[roomId];
+                
+                // Only include maps that have been farmed
+                if (mapName && farmedMapNames.has(mapName)) {
+                    orderedMaps.push(mapName);
+                    // Remove from set to avoid duplicates
+                    farmedMapNames.delete(mapName);
+                }
+            });
+        });
+    }
+    
+    // Add any remaining maps not found in regions (fallback - should be rare)
+    if (farmedMapNames.size > 0) {
+        const remainingMaps = Array.from(farmedMapNames).sort();
+        orderedMaps.push(...remainingMaps);
+    }
     
     // Add "ALL" option
     const allOption = createDropdownOption("ALL");
     dropdownMenu.appendChild(allOption);
 
-    // Add options for each farmed map
-    availableMaps.forEach(mapName => {
+    // Add options for each farmed map (in Cyclopedia's order)
+    orderedMaps.forEach(mapName => {
         const mapOption = createDropdownOption(mapName);
         dropdownMenu.appendChild(mapOption);
     });

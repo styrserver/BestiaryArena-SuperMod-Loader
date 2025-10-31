@@ -1205,10 +1205,9 @@ function isRaidHunterRaiding() {
                 const isRaidHunterCurrentlyRaiding = questButtonOwner === 'Raid Hunter' ||
                                                      (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
                 
-                // Only yield control if Raid Hunter is actually actively raiding a HIGH priority raid
-                // Halloween Mansion has lower priority than Better Tasker, so we don't yield for it
+                // Priority-based coordination: HIGH priority yields to Raid Hunter, MEDIUM coexists, LOW allows Better Tasker
                 if (isRaidHunterCurrentlyRaiding) {
-                    // Check if it's a HIGH priority raid (not Halloween Mansion)
+                    // Check if it's a HIGH priority raid - Better Tasker must yield
                     const isHighPriorityRaid = (window.raidHunterIsRaidingHighPriority && window.raidHunterIsRaidingHighPriority());
                     if (isHighPriorityRaid) {
                         console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - preventing task automation');
@@ -1216,10 +1215,19 @@ function isRaidHunterRaiding() {
                         lastRaidHunterActiveTime = Date.now(); // Track when Raid Hunter was last active
                         raidHunterFailureCount = 0; // Reset failure count when Raid Hunter is active
                         return true;
-                    } else {
-                        console.log('[Better Tasker] Raid Hunter is raiding Halloween Mansion (low priority) - Better Tasker can proceed');
-                        return false; // Don't yield for Halloween Mansion
                     }
+                    
+                    // Check if it's a MEDIUM priority raid - Raid Hunter has control and "never yields to Better Tasker"
+                    // Better Tasker should yield to avoid conflicts (Raid Hunter won't give up control)
+                    const isMediumPriorityRaid = (window.raidHunterIsRaidingMediumPriority && window.raidHunterIsRaidingMediumPriority());
+                    if (isMediumPriorityRaid) {
+                        console.log('[Better Tasker] Raid Hunter is raiding MEDIUM priority raid - yielding (Raid Hunter has control and never yields)');
+                        return true; // Yield to avoid conflicts - MEDIUM priority raids keep control per tooltip
+                    }
+                    
+                    // LOW priority raid - Better Tasker can proceed
+                    console.log('[Better Tasker] Raid Hunter is raiding LOW priority raid - Better Tasker can proceed');
+                    return false;
                 } else if (currentRaidList.length > 0 && raidHunterEnabled === 'true') {
                     // Check if we're currently tasking - if so, don't interfere with ongoing task
                     if (taskHuntingOngoing) {
@@ -1227,16 +1235,26 @@ function isRaidHunterRaiding() {
                     }
                     
                     // PRIORITY CHECK: Raid_Hunter should process ALL high-priority raids (active AND waiting) before Better Tasker proceeds
-                    // Check if Raid Hunter is actively raiding a HIGH priority raid
+                    // Check if Raid Hunter is actively raiding
                     const raidHunterActuallyRaiding = (window.raidHunterIsCurrentlyRaiding && window.raidHunterIsCurrentlyRaiding());
                     if (raidHunterActuallyRaiding) {
+                        // HIGH priority: Better Tasker must yield
                         const isHighPriorityRaid = (window.raidHunterIsRaidingHighPriority && window.raidHunterIsRaidingHighPriority());
                         if (isHighPriorityRaid) {
                             console.log('[Better Tasker] Raid Hunter is actively raiding HIGH priority raid - yielding control');
                             return true; // Yield to Raid Hunter even if we have active task (only for HIGH priority raids)
+                        }
+                        
+                        // MEDIUM priority: Raid Hunter has control and "never yields to Better Tasker"
+                        // Better Tasker should yield to avoid conflicts
+                        const isMediumPriorityRaid = (window.raidHunterIsRaidingMediumPriority && window.raidHunterIsRaidingMediumPriority());
+                        if (isMediumPriorityRaid) {
+                            console.log('[Better Tasker] Raid Hunter is raiding MEDIUM priority raid - yielding (Raid Hunter keeps control)');
+                            return true; // Yield - MEDIUM priority raids keep control per tooltip
                         } else {
-                            console.log('[Better Tasker] Raid Hunter is raiding Halloween Mansion (low priority) - Better Tasker can proceed with active task');
-                            // Continue to check for waiting high-priority raids below - don't yield for Halloween Mansion alone
+                            // LOW priority: Better Tasker can proceed
+                            console.log('[Better Tasker] Raid Hunter is raiding LOW priority raid - Better Tasker can proceed with active task');
+                            // Continue to check for waiting high-priority raids below
                         }
                     }
                     

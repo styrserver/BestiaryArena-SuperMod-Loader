@@ -2,18 +2,6 @@
 console.log('[Raid Hunter] Initializing...');
 
 // ============================================================================
-// PRIORITY SYSTEM
-// ============================================================================
-// Raid Hunter implements a priority system for raid processing:
-// 1. HIGH Priority: All raids EXCEPT Halloween Mansion - processed immediately
-// 2. Better Tasker: Gets priority over Halloween Mansion
-// 3. HALLOWEEN Priority: Halloween Mansion - waits for Better Tasker only
-// 4. Better Boosted Maps: LOWEST priority - waits for all raids including Halloween
-//
-// This ensures optimal resource usage while maintaining raid availability.
-// ============================================================================
-
-// ============================================================================
 // 1. CONSTANTS
 // ============================================================================
 
@@ -124,12 +112,11 @@ const DEFAULT_STAMINA_COST = 30;
 const MAX_RETRY_ATTEMPTS = 3;
 const INITIAL_COUNT = 0;
 
-// Priority levels for raid processing
+// Priority levels for raid processing (matches user-facing tooltip: High/Medium/Low)
 const RAID_PRIORITY = {
-    HIGH: 1,              // Regular raids (excluding Halloween Mansion)
-    BETTER_TASKER: 2,     // Better Tasker tasks
-    HALLOWEEN: 3,         // Halloween Mansion (lower priority)
-    BOOSTED_MAPS: 4       // Better Boosted Maps (lowest priority)
+    HIGH: 1,    // High Priority - Highest priority, never yields
+    MEDIUM: 2,  // Medium Priority - Yields to High Priority, never yields to Better Tasker
+    LOW: 3       // Low Priority - Yields to Medium/High Priority and Better Tasker when active
 };
 
 // Colors
@@ -151,12 +138,41 @@ function isAutomationActive() {
     return isAutomationEnabled === AUTOMATION_ENABLED;
 }
 
+// Priority conversion helpers (maps user-facing strings to internal constants)
+function priorityStringToNumber(priorityString) {
+    const p = (priorityString || 'low').toLowerCase();
+    if (p === 'high') return RAID_PRIORITY.HIGH;
+    if (p === 'medium') return RAID_PRIORITY.MEDIUM;
+    if (p === 'low') return RAID_PRIORITY.LOW;
+    return RAID_PRIORITY.LOW; // Default to low
+}
+
+function priorityNumberToString(priorityNumber) {
+    if (priorityNumber === RAID_PRIORITY.HIGH) return 'high';
+    if (priorityNumber === RAID_PRIORITY.MEDIUM) return 'medium';
+    if (priorityNumber === RAID_PRIORITY.LOW) return 'low';
+    return 'low'; // Default to low
+}
+
+function getPriorityLabel(priorityNumber, detailed = false) {
+    if (priorityNumber === RAID_PRIORITY.HIGH) return 'HIGH';
+    if (priorityNumber === RAID_PRIORITY.MEDIUM) return detailed ? 'MEDIUM (Medium Priority)' : 'MEDIUM';
+    if (priorityNumber === RAID_PRIORITY.LOW) return 'LOW';
+    return 'UNKNOWN';
+}
+
 // Helper function to get raid priority
 function getRaidPriority(raidName) {
-    if (raidName === 'Halloween Mansion') {
-        return RAID_PRIORITY.HALLOWEEN;
+    try {
+        const settings = loadSettings();
+        const raidPriorities = settings.raidPriorities || {};
+        const defaultPriorityString = EVENT_TEXTS.includes(raidName) ? 'medium' : 'low';
+        const priorityString = raidPriorities[raidName] || defaultPriorityString;
+        return priorityStringToNumber(priorityString);
+    } catch (_) {
+        // Default: static raids = MEDIUM, dynamic events = LOW
+        return EVENT_TEXTS.includes(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.LOW;
     }
-    return RAID_PRIORITY.HIGH;
 }
 
 // Track if all mods have finished loading
@@ -256,31 +272,29 @@ function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
         return false;
     }
     
-    // High priority raids (non-Halloween) always proceed
-    if (raidPriority === RAID_PRIORITY.HIGH) {
+    // High and Medium priority raids always proceed (do not yield to Better Tasker)
+    if (raidPriority === RAID_PRIORITY.HIGH || raidPriority === RAID_PRIORITY.MEDIUM) {
         return true;
     }
     
-    // Halloween Mansion only waits for Better Tasker (NOT Better Boosted Maps)
-    // But "New Task+" mode should not block Halloween Mansion
-    if (raidPriority === RAID_PRIORITY.HALLOWEEN) {
+    // Low priority raids yield to Better Tasker
+    if (raidPriority === RAID_PRIORITY.LOW) {
         const betterTaskerState = window.betterTaskerState;
         
-        // Check if Better Tasker is in "New Task+" mode - if so, allow Halloween Mansion to proceed
+        // Check if Better Tasker is in "New Task+" mode - if so, allow low priority raids to proceed
         if (betterTaskerState && betterTaskerState.taskerState === 'new_task_only') {
-            console.log(`[Raid Hunter] Better Tasker is in "New Task+" mode - Halloween Mansion can proceed`);
+            console.log(`[Raid Hunter] Better Tasker is in "New Task+" mode - low priority raid can proceed`);
             return true;
         }
         
         // Otherwise, check if Better Tasker is actively doing full automation (excluding "New Task+" mode)
-        // Only consider Better Tasker active if it's in full automation mode, not "New Task+" mode
         if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
             // Check for active task operations only in full automation mode
             if (betterTaskerState.hasActiveTask === true || 
                 betterTaskerState.taskHuntingOngoing === true ||
                 betterTaskerState.taskOperationInProgress === true ||
                 betterTaskerState.pendingTaskCompletion === true) {
-                console.log(`[Raid Hunter] Better Tasker is active (full automation) - Halloween Mansion waiting`);
+                console.log(`[Raid Hunter] Better Tasker is active (full automation) - low priority raid waiting`);
                 return false;
             }
         }
@@ -289,13 +303,13 @@ function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
         if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
             if (window.AutoplayManager?.getCurrentOwner && 
                 window.AutoplayManager.getCurrentOwner() === 'Better Tasker') {
-                console.log(`[Raid Hunter] Better Tasker has autoplay control (full automation) - Halloween Mansion waiting`);
+                console.log(`[Raid Hunter] Better Tasker has autoplay control (full automation) - low priority raid waiting`);
                 return false;
             }
         }
         
-        // Halloween has higher priority than Better Boosted Maps, and "New Task+" doesn't block
-        console.log(`[Raid Hunter] Better Tasker not blocking - Halloween Mansion can proceed`);
+        // Better Tasker not blocking - low priority raid can proceed
+        console.log(`[Raid Hunter] Better Tasker not blocking - low priority raid can proceed`);
         return true;
     }
     
@@ -330,12 +344,12 @@ function cancelCurrentRaid(reason = 'unknown') {
     stopStaminaTooltipMonitoring();
 }
 
+// Static raid list (dynamic events are detected automatically from active raids not in this list)
 const EVENT_TEXTS = [
     'Rat Plague',
     'Buzzing Madness', 
     'Monastery Catacombs',
     'Ghostlands Boneyard',
-    'Halloween Mansion',
     'Permafrosted Hole',
     'Jammed Mailbox',
     'Frosted Bunker',
@@ -350,13 +364,13 @@ const EVENT_TEXTS = [
     'An Arcanist Ritual'
 ];
 
-// Event to room ID mapping
+// Event to room ID mapping (FALLBACK ONLY - game state API is used first)
+// Kept for backward compatibility if game state API is unavailable
 const EVENT_TO_ROOM_MAPPING = {
     'Rat Plague': 'rkcent',
     'Buzzing Madness': 'crwasp',
     'Monastery Catacombs': 'crcat',
     'Ghostlands Boneyard': 'crghst4',
-    'Halloween Mansion': 'crhw',
     'Permafrosted Hole': 'fhole',
     'Jammed Mailbox': 'fbox',
     'Frosted Bunker': 'fscave',
@@ -1225,6 +1239,9 @@ let isBoardAnalyzerRunning = false;
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
 
+// Window message listener for allModsLoaded signal (stored for cleanup)
+let windowMessageHandler = null;
+
 // Toast detection for fight icon (now consolidated with quest log observer)
 
 // Handle page visibility changes (foreground/background transitions)
@@ -1266,7 +1283,8 @@ function handlePageVisibilityChange() {
                         currentRaidInfo = {
                             name: raidName,
                             roomId: currentRoomId,
-                            priority: getRaidPriority(raidName)
+                            priority: getRaidPriority(raidName),
+                            expiresAt: raid?.expiresAt || Infinity
                         };
                     }
                     
@@ -1615,15 +1633,16 @@ function updateRaidState() {
         
         let statusText;
         if (isCurrentlyRaiding) {
-            const priorityLabel = currentRaidInfo?.priority === RAID_PRIORITY.HIGH ? '' : ' (Low Priority)';
+            // Only show priority label for LOW priority (HIGH and MEDIUM are default/normal)
+            const priorityLabel = currentRaidInfo?.priority === RAID_PRIORITY.LOW ? ' (Low Priority)' : '';
             statusText = `Raiding: ${currentRaidInfo?.name || 'Unknown'}${priorityLabel}`;
         } else if (enabledMaps.length === 0) {
             statusText = 'No raid maps enabled - check settings';
         } else if (isRaidActive) {
-            // Check if we have Halloween Mansion waiting for Better Tasker
-            const halloweenRaid = raidQueue.find(r => r.priority === RAID_PRIORITY.HALLOWEEN);
-            if (halloweenRaid && !canProcessRaidWithPriority(RAID_PRIORITY.HALLOWEEN, 'status check')) {
-                statusText = `${currentList.length} raid(s) available - Halloween waiting for Better Tasker`;
+            // Check if we have low priority raid waiting for Better Tasker
+            const lowPriorityRaid = raidQueue.find(r => r.priority === RAID_PRIORITY.LOW);
+            if (lowPriorityRaid && !canProcessRaidWithPriority(RAID_PRIORITY.LOW, 'status check')) {
+                statusText = `${currentList.length} raid(s) available - Low priority raid waiting for Better Tasker`;
             } else {
             statusText = `${currentList.length} raid(s) available`;
             }
@@ -1679,11 +1698,12 @@ function updateRaidQueue() {
                         roomId: raid.roomId,
                         button: null, // No UI button needed for API access
                         priority: priority,
-                        isCurrentRaid: (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId)
+                        isCurrentRaid: (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId),
+                        expiresAt: raid.expiresAt || Infinity // Add expiration time for tie-breaking
                     });
                     // Only log if we're not already raiding this specific raid
                     if (!isCurrentlyRaiding || currentRaidInfo?.roomId !== raid.roomId) {
-                        const priorityLabel = priority === RAID_PRIORITY.HIGH ? 'HIGH' : 'HALLOWEEN';
+                        const priorityLabel = getPriorityLabel(priority);
                         console.log(`[Raid Hunter] Added ${raidName} to queue via API (Priority: ${priorityLabel})`);
                     }
                 } else {
@@ -1691,8 +1711,14 @@ function updateRaidQueue() {
                 }
             });
             
-            // Sort queue by priority (lower number = higher priority)
-            raidQueue.sort((a, b) => a.priority - b.priority);
+            // Sort queue by priority (lower number = higher priority), then by expiration time (least time left first)
+            raidQueue.sort((a, b) => {
+                if (a.priority !== b.priority) {
+                    return a.priority - b.priority;
+                }
+                // If priorities are equal, sort by time remaining (earliest expiring first)
+                return a.expiresAt - b.expiresAt;
+            });
         } else {
             console.log('[Raid Hunter] No raids available in currentRaidList');
         }
@@ -1741,8 +1767,13 @@ function processNextRaid(allowInterrupt = false) {
         return;
     }
     
-    // Sort queue by priority before processing (ensure correct order)
-    raidQueue.sort((a, b) => a.priority - b.priority);
+    // Sort queue by priority before processing (ensure correct order), then by expiration time
+    raidQueue.sort((a, b) => {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+        return a.expiresAt - b.expiresAt;
+    });
     
     // Peek at next raid (don't remove yet)
     const nextRaid = raidQueue[0];
@@ -1752,8 +1783,7 @@ function processNextRaid(allowInterrupt = false) {
     
     // Check if we can proceed based on raid priority
     if (!canProcessRaidWithPriority(nextRaid.priority, 'processNextRaid')) {
-        const priorityLabel = nextRaid.priority === RAID_PRIORITY.HIGH ? 'HIGH' : 
-                             nextRaid.priority === RAID_PRIORITY.HALLOWEEN ? 'HALLOWEEN' : 'UNKNOWN';
+        const priorityLabel = getPriorityLabel(nextRaid.priority);
         console.log(`[Raid Hunter] ${nextRaid.name} (Priority: ${priorityLabel}) waiting for higher priority activities...`);
         
         // Schedule retry check after 10 seconds
@@ -1777,8 +1807,7 @@ function processNextRaid(allowInterrupt = false) {
         return;
     }
     
-    const priorityLabel = nextRaid.priority === RAID_PRIORITY.HIGH ? 'HIGH' : 
-                         nextRaid.priority === RAID_PRIORITY.HALLOWEEN ? 'HALLOWEEN' : 'UNKNOWN';
+    const priorityLabel = getPriorityLabel(nextRaid.priority);
     console.log(`[Raid Hunter] Starting next raid: ${nextRaid.name} (Priority: ${priorityLabel})`);
     currentRaidInfo = nextRaid;
     isCurrentlyRaiding = true;
@@ -2440,25 +2469,51 @@ function isElementVisible(el) {
 }
 
 /**
- * Gets room ID for event
+ * Gets room ID for event name using game state API (with fallback)
  * @param {string} eventName - The event name
  * @returns {string|null} The room ID or null if not found
  */
 function getRoomIdForEvent(eventName) {
+    try {
+        // Try game state API reverse lookup (if ROOM_NAME exists, find matching ROOM_ID)
+        if (globalThis.state?.utils?.ROOM_NAME) {
+            const roomNames = globalThis.state.utils.ROOM_NAME;
+            for (const [roomId, roomName] of Object.entries(roomNames)) {
+                if (roomName === eventName) {
+                    return roomId;
+                }
+            }
+        }
+    } catch (error) {
+        console.warn('[Raid Hunter] Error accessing game state API for room ID:', error);
+    }
+    
+    // Fallback to hardcoded mapping (backward compatibility)
     return EVENT_TO_ROOM_MAPPING[eventName] || null;
 }
 
 /**
- * Gets event name for room ID
+ * Gets event name for room ID using game state API (fully dynamic)
  * @param {string} roomId - The room ID
- * @returns {string|null} The event name or null if not found
+ * @returns {string} The event name or fallback name
  */
 function getEventNameForRoomId(roomId) {
+    try {
+        // Try game state API first (fully dynamic - no hardcoding needed)
+        if (globalThis.state?.utils?.ROOM_NAME?.[roomId]) {
+            return globalThis.state.utils.ROOM_NAME[roomId];
+        }
+    } catch (error) {
+        console.warn('[Raid Hunter] Error accessing game state API for room name:', error);
+    }
+    
+    // Fallback to hardcoded mapping (only needed for backward compatibility)
     for (const [eventName, mappedRoomId] of Object.entries(EVENT_TO_ROOM_MAPPING)) {
         if (mappedRoomId === roomId) {
             return eventName;
         }
     }
+    
     return `Unknown (${roomId})`;
 }
 
@@ -2838,21 +2893,31 @@ function setupRaidListMonitoring() {
                             if (isCurrentlyRaiding && currentRaidInfo) {
                                 // Get highest priority from updated queue
                                 if (raidQueue.length > 0) {
-                                    raidQueue.sort((a, b) => a.priority - b.priority);
+                                    raidQueue.sort((a, b) => {
+                                        if (a.priority !== b.priority) {
+                                            return a.priority - b.priority;
+                                        }
+                                        return a.expiresAt - b.expiresAt;
+                                    });
                                     const nextRaid = raidQueue[0];
                                     
-                                    // Only interrupt if new raid has HIGHER priority than current raid
-                                    if (nextRaid.priority < currentRaidInfo.priority) {
-                                        console.log(`[Raid Hunter] Higher priority raid detected: ${nextRaid.name} (Priority: ${nextRaid.priority}) vs current: ${currentRaidInfo.name} (Priority: ${currentRaidInfo.priority}) - switching`);
+                                    // Only interrupt if new raid has HIGHER priority than current raid, or same priority but expires sooner
+                                    const shouldInterrupt = (nextRaid.priority < currentRaidInfo.priority) || 
+                                                          (nextRaid.priority === currentRaidInfo.priority && nextRaid.expiresAt < (currentRaidInfo.expiresAt || Infinity));
+                                    
+                                    if (shouldInterrupt) {
+                                        const reason = nextRaid.priority < currentRaidInfo.priority ? 
+                                            'higher priority' : 'same priority but expires sooner';
+                                        console.log(`[Raid Hunter] ${reason} raid detected: ${nextRaid.name} (Priority: ${nextRaid.priority}) vs current: ${currentRaidInfo.name} (Priority: ${currentRaidInfo.priority}) - switching`);
                                         
-                                        // Check if Better Tasker should take control instead
-                                        // But "New Task+" mode should not block Halloween Mansion
-                                        if (nextRaid.priority === RAID_PRIORITY.HALLOWEEN) {
+                                        // Check if Better Tasker should block low priority raids
+                                        // HIGH and MEDIUM priority raids always proceed
+                                        if (nextRaid.priority === RAID_PRIORITY.LOW) {
                                             const betterTaskerState = window.betterTaskerState;
                                             
-                                            // Allow Halloween Mansion if Better Tasker is in "New Task+" mode
+                                            // Allow low priority raids if Better Tasker is in "New Task+" mode
                                             if (betterTaskerState && betterTaskerState.taskerState === 'new_task_only') {
-                                                console.log('[Raid Hunter] Better Tasker is in "New Task+" mode - Halloween Mansion can proceed');
+                                                console.log('[Raid Hunter] Better Tasker is in "New Task+" mode - low priority raid can proceed');
                                                 // Continue to interrupt logic below
                                             } 
                                             // Only block if Better Tasker is in full automation mode with active operations
@@ -2863,13 +2928,13 @@ function setupRaidListMonitoring() {
                                                     betterTaskerState.pendingTaskCompletion === true ||
                                                     (window.AutoplayManager?.getCurrentOwner && 
                                                      window.AutoplayManager.getCurrentOwner() === 'Better Tasker')) {
-                                                    console.log('[Raid Hunter] Better Tasker is active (full automation) - Halloween Mansion should wait');
+                                                    console.log('[Raid Hunter] Better Tasker is active (full automation) - low priority raid should wait');
                                                     return; // Don't interrupt
                                                 }
                                             }
                                         }
                                         
-                                        // Interrupt current raid and switch to higher priority
+                                        // Interrupt current raid and switch to higher priority or sooner expiring raid
                                         interruptCurrentRaid(() => {
                                             processNextRaid(true); // Allow interrupt
                                         });
@@ -2888,6 +2953,9 @@ function setupRaidListMonitoring() {
                             console.log('[Raid Hunter] New raids detected but automation is disabled - not processing');
                         }
                     }
+
+                    // Update UI availability for event raids in settings modal, if open
+                    try { applyEventRaidAvailabilityUI(); } catch (_) {}
                 }
             });
         });
@@ -2924,6 +2992,66 @@ function startRaidEndChecking() {
                     console.log('[Raid Hunter] No raids available');
                     stopAutoplayOnRaidEnd();
                     return;
+                }
+                
+                // Check if there's a better raid in the queue than the current one
+                if (currentRaidInfo && raidQueue.length > 0) {
+                    // Sort queue and check if there's a better raid
+                    raidQueue.sort((a, b) => {
+                        if (a.priority !== b.priority) {
+                            return a.priority - b.priority;
+                        }
+                        return a.expiresAt - b.expiresAt;
+                    });
+                    const bestRaid = raidQueue[0];
+                    
+                    const shouldSwitch = (bestRaid.priority < currentRaidInfo.priority) || 
+                                       (bestRaid.priority === currentRaidInfo.priority && bestRaid.expiresAt < (currentRaidInfo.expiresAt || Infinity));
+                    
+                    if (shouldSwitch && bestRaid.roomId !== currentRaidInfo.roomId) {
+                        const reason = bestRaid.priority < currentRaidInfo.priority ? 
+                            'higher priority' : 'same priority but expires sooner';
+                        console.log(`[Raid Hunter] Periodic check: ${reason} raid detected: ${bestRaid.name} vs current: ${currentRaidInfo.name} - switching`);
+                        
+                        // Check Better Tasker blocking for low priority raids
+                        if (bestRaid.priority === RAID_PRIORITY.LOW) {
+                            const betterTaskerState = window.betterTaskerState;
+                            if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+                                if (betterTaskerState.hasActiveTask === true || 
+                                    betterTaskerState.taskHuntingOngoing === true ||
+                                    betterTaskerState.taskOperationInProgress === true ||
+                                    betterTaskerState.pendingTaskCompletion === true) {
+                                    console.log('[Raid Hunter] Better Tasker is active - low priority raid should wait');
+                                    return;
+                                }
+                            }
+                        }
+                        
+                        interruptCurrentRaid(() => {
+                            processNextRaid(true);
+                        });
+                        return;
+                    }
+                }
+                
+                // For LOW priority raids: Monitor Better Tasker and yield if it becomes active
+                if (currentRaidInfo && currentRaidInfo.priority === RAID_PRIORITY.LOW) {
+                    const betterTaskerState = window.betterTaskerState;
+                    if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+                        // Check if Better Tasker is actively tasking
+                        if (betterTaskerState.hasActiveTask === true || 
+                            betterTaskerState.taskHuntingOngoing === true ||
+                            betterTaskerState.taskOperationInProgress === true ||
+                            betterTaskerState.pendingTaskCompletion === true) {
+                            const currentOwner = window.AutoplayManager?.getCurrentOwner();
+                            if (currentOwner === 'Raid Hunter') {
+                                console.log('[Raid Hunter] Better Tasker became active during LOW priority raid - releasing control');
+                                window.AutoplayManager.releaseControl('Raid Hunter');
+                                cancelCurrentRaid('Better Tasker became active - LOW priority raid yields');
+                                return;
+                            }
+                        }
+                    }
                 }
                 
                 // Look for raid-specific UI elements that might indicate raid ended
@@ -3440,7 +3568,7 @@ function handleRaidFailure(reason) {
                     ...currentRaidInfo,
                     priority: priority
                 }); // Put back at front of queue
-                const priorityLabel = priority === RAID_PRIORITY.HIGH ? 'HIGH' : 'HALLOWEEN';
+                const priorityLabel = getPriorityLabel(priority);
                 console.log(`[Raid Hunter] Retry: ${currentRaidInfo.name} (Priority: ${priorityLabel}) is still enabled, adding back to queue`);
             } else {
                 console.log(`[Raid Hunter] Retry: ${currentRaidInfo.name} is no longer enabled, not retrying`);
@@ -3499,26 +3627,49 @@ function handleRaidFailure(reason) {
 }
 
 function ensureAutoplayMode() {
-    // For HIGH priority raids, we take control immediately
-    // For HALLOWEEN priority raids, we only respect Better Tasker (not Better Boosted Maps)
+    // HIGH and MEDIUM priority raids take control from anyone (including Better Tasker)
+    // LOW priority raids MUST yield to Better Tasker when it becomes active
     const currentOwner = window.AutoplayManager.getCurrentOwner();
     const isHighPriorityRaid = currentRaidInfo && currentRaidInfo.priority === RAID_PRIORITY.HIGH;
+    const isMediumPriorityRaid = currentRaidInfo && currentRaidInfo.priority === RAID_PRIORITY.MEDIUM;
+    const isLowPriorityRaid = currentRaidInfo && currentRaidInfo.priority === RAID_PRIORITY.LOW;
+    
+    // For LOW priority raids: Check Better Tasker BEFORE taking control
+    if (isLowPriorityRaid) {
+        const betterTaskerState = window.betterTaskerState;
+        // Check if Better Tasker is active and should take priority
+        if (betterTaskerState && betterTaskerState.taskerState === 'enabled') {
+            if (betterTaskerState.hasActiveTask === true || 
+                betterTaskerState.taskHuntingOngoing === true ||
+                betterTaskerState.taskOperationInProgress === true ||
+                betterTaskerState.pendingTaskCompletion === true ||
+                currentOwner === 'Better Tasker') {
+                console.log(`[Raid Hunter] Better Tasker is active - LOW priority raid yields control`);
+                // Release control to allow Better Tasker to take over
+                if (currentOwner === 'Raid Hunter') {
+                    window.AutoplayManager.releaseControl('Raid Hunter');
+                }
+                return false;
+            }
+        }
+    }
     
     if (currentOwner && currentOwner !== 'Raid Hunter') {
-        // HIGH priority raids take control from anyone
-        if (isHighPriorityRaid) {
-            console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for HIGH priority raid`);
-        window.AutoplayManager.currentOwner = 'Raid Hunter';
-        } 
-        // HALLOWEEN priority raids only respect Better Tasker
-        else if (currentOwner === 'Better Tasker') {
-            console.log(`[Raid Hunter] Respecting Better Tasker control - Halloween Mansion has lower priority`);
-            return false;
-        }
-        // Halloween takes control from Better Boosted Maps and others (higher priority)
-        else {
-            console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for Halloween Mansion raid (higher priority)`);
+        // HIGH and MEDIUM priority raids take control from anyone
+        if (isHighPriorityRaid || isMediumPriorityRaid) {
+            const priorityLabel = isHighPriorityRaid ? 'HIGH' : 'MEDIUM';
+            console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for ${priorityLabel} priority raid`);
             window.AutoplayManager.currentOwner = 'Raid Hunter';
+        } 
+        // Low priority raids take control from Better Boosted Maps and others (but not Better Tasker)
+        else if (isLowPriorityRaid && currentOwner !== 'Better Tasker') {
+            console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for low priority raid`);
+            window.AutoplayManager.currentOwner = 'Raid Hunter';
+        }
+        // Better Tasker has control - LOW priority raid yields
+        else if (isLowPriorityRaid && currentOwner === 'Better Tasker') {
+            console.log(`[Raid Hunter] Better Tasker has control - LOW priority raid yields`);
+            return false;
         }
     }
     
@@ -3527,7 +3678,7 @@ function ensureAutoplayMode() {
         const currentMode = boardContext.mode;
         
         if (currentMode !== 'autoplay') {
-            const priorityLabel = isHighPriorityRaid ? 'HIGH' : 'HALLOWEEN';
+            const priorityLabel = getPriorityLabel(isHighPriorityRaid ? RAID_PRIORITY.HIGH : RAID_PRIORITY.MEDIUM);
             globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
             console.log(`[Raid Hunter] Switched to autoplay mode (${priorityLabel} priority raid)`);
             return true;
@@ -3578,7 +3729,7 @@ async function checkForExistingRaids() {
             if (matchingRaid) {
                 const raidName = getEventNameForRoomId(matchingRaid.roomId);
                 const priority = getRaidPriority(raidName);
-                const priorityLabel = priority === RAID_PRIORITY.HIGH ? 'HIGH' : 'HALLOWEEN (Low Priority)';
+                const priorityLabel = getPriorityLabel(priority, true);
                 
                 console.log('[Raid Hunter] ═══════════════════════════════════════════════════════════');
                 console.log('[Raid Hunter] RESUMING EXISTING RAID');
@@ -3587,22 +3738,17 @@ async function checkForExistingRaids() {
                 console.log('[Raid Hunter]   - Priority:', priorityLabel);
                 console.log('[Raid Hunter] ═══════════════════════════════════════════════════════════');
                 
-                // Check if this is a low priority raid and log what would happen if starting fresh
-                if (priority === RAID_PRIORITY.HALLOWEEN) {
-                    console.log('[Raid Hunter] This is a LOW PRIORITY raid (Halloween Mansion)');
-                    const btActive = isBetterTaskerActive();
-                    if (btActive) {
-                        console.log('[Raid Hunter] ⚠️ Better Tasker is currently active - if this were starting fresh, it would wait');
-                    } else {
-                        console.log('[Raid Hunter] ✅ Better Tasker not active - this raid can continue');
-                    }
+                // Log priority information for medium priority raids
+                if (priority === RAID_PRIORITY.MEDIUM) {
+                    console.log('[Raid Hunter] This is a MEDIUM PRIORITY raid - does not yield to Better Tasker');
                 }
                 
                 isCurrentlyRaiding = true;
                 currentRaidInfo = {
                     name: raidName,
                     roomId: matchingRaid.roomId,
-                    priority: priority
+                    priority: priority,
+                    expiresAt: matchingRaid.expiresAt || Infinity
                 };
                 
                 // Modify quest button to show raiding state
@@ -4221,17 +4367,92 @@ function createRaidMapSelection() {
         flex-direction: column;
     `;
     
+    // Title container with question mark tooltip
+    const titleContainer = document.createElement('div');
+    titleContainer.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 0 0 15px 0;
+    `;
+    
     const title = document.createElement('h3');
     title.textContent = getLocalizedText('Raid Map Selection', 'Seleção de Mapas de Raid');
     title.className = 'pixel-font-16';
     title.style.cssText = `
-        margin: 0 0 15px 0;
+        margin: 0;
         color: ${COLOR_ACCENT};
         font-size: 16px;
         font-weight: bold;
         text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
     `;
-    section.appendChild(title);
+    titleContainer.appendChild(title);
+    
+    // Question mark icon with tooltip
+    const helpIcon = document.createElement('div');
+    helpIcon.textContent = '?';
+    helpIcon.className = 'pixel-font-16';
+    helpIcon.style.cssText = `
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: rgba(255, 224, 102, 0.2);
+        color: ${COLOR_ACCENT};
+        border: 1px solid ${COLOR_ACCENT};
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: help;
+        font-size: 14px;
+        font-weight: bold;
+        position: relative;
+        flex-shrink: 0;
+    `;
+    
+    // Tooltip content
+    const tooltip = document.createElement('div');
+    tooltip.className = 'pixel-font-16';
+    tooltip.style.cssText = `
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 8px;
+        padding: 10px;
+        background: ${COLOR_DARK_GRAY};
+        border: 1px solid ${COLOR_ACCENT};
+        border-radius: 5px;
+        color: ${COLOR_WHITE};
+        font-size: 12px;
+        min-width: 250px;
+        max-width: 300px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+        z-index: 99999;
+        display: none;
+        pointer-events: none;
+        line-height: 1.6;
+    `;
+    tooltip.innerHTML = getLocalizedText(
+        `Priority Levels:<br><br>` +
+        `<strong style="color: ${COLOR_RED}">High Priority:</strong> Highest priority - Never yields<br>` +
+        `<strong style="color: ${COLOR_GREEN}">Medium Priority:</strong> Yields to High Priority, never yields to Better Tasker<br>` +
+        `<strong style="color: ${COLOR_YELLOW}">Low Priority:</strong> Yields to Medium/High Priority and Better Tasker when active`,
+        `Níveis de Prioridade:<br><br>` +
+        `<strong style="color: ${COLOR_RED}">Alta Prioridade:</strong> Prioridade mais alta - Nunca cede<br>` +
+        `<strong style="color: ${COLOR_GREEN}">Prioridade Média:</strong> Cede à Alta Prioridade, nunca cede ao Better Tasker<br>` +
+        `<strong style="color: ${COLOR_YELLOW}">Baixa Prioridade:</strong> Cede à Prioridade Média/Alta e ao Better Tasker quando ativo`
+    );
+    helpIcon.appendChild(tooltip);
+    
+    // Show/hide tooltip on hover
+    helpIcon.addEventListener('mouseenter', () => {
+        tooltip.style.display = 'block';
+    });
+    helpIcon.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+    });
+    
+    titleContainer.appendChild(helpIcon);
+    section.appendChild(titleContainer);
     
     const description = document.createElement('div');
     description.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.RAID_MAP_SELECTION_DESC, UI_TEXT.DESCRIPTIONS_PT.RAID_MAP_SELECTION_DESC);
@@ -4261,9 +4482,7 @@ function createRaidMapSelection() {
     
     // Group raids by region for better organization
     const raidGroups = {
-        'Events': [
-            'Halloween Mansion'
-        ],
+        'Events': [], // Populated dynamically from active raids
         'Rookgaard': [
             'Rat Plague'
         ],
@@ -4294,8 +4513,49 @@ function createRaidMapSelection() {
         ]
     };
     
+    // Dynamically populate Events with any active raids not in the known static list
+    try {
+        const knownStatic = new Set(Object.entries(raidGroups)
+            .filter(([region]) => region !== 'Events')
+            .flatMap(([, raids]) => raids));
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        const list = raidState?.context?.list || [];
+        const allRaidNames = list.map(r => getEventNameForRoomId(r.roomId));
+        
+        const dynamicEvents = Array.from(new Set(allRaidNames
+            .filter(name => name && !knownStatic.has(name) && !name.startsWith('Unknown'))
+        )).sort();
+        
+        raidGroups['Events'] = dynamicEvents;
+    } catch (error) {
+        console.error('[Raid Hunter] Error populating dynamic events:', error);
+    }
+    
+    // Helper: determine if an event raid is currently active (exists and not expired)
+    function isEventRaidActive(raidName) {
+        try {
+            const roomId = getRoomIdForEvent(raidName);
+            if (!roomId) return false;
+            const raidState = globalThis.state?.raids?.getSnapshot?.();
+            const list = raidState?.context?.list || [];
+            const match = list.find(r => r.roomId === roomId);
+            if (!match) return false;
+            if (typeof match.expiresAt === 'number') {
+                return match.expiresAt > Date.now();
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     // Create checkboxes for each raid group
     Object.entries(raidGroups).forEach(([region, raids]) => {
+        // Skip Events section if empty
+        if (region === 'Events' && raids.length === 0) {
+            return;
+        }
+        
         // Region header
         const regionHeader = document.createElement('div');
         regionHeader.textContent = region;
@@ -4321,14 +4581,18 @@ function createRaidMapSelection() {
                 padding: 2px 0;
             `;
             
+            // Load saved checkbox state from settings (works for both static and event raids)
+            const settings = loadSettings();
+            const enabledMaps = settings.enabledRaidMaps || [];
+            const isChecked = enabledMaps.includes(raidName);
+            
             const checkbox = createStyledInput('checkbox', `raid-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`, undefined, `
                 width: 16px;
                 height: 16px;
                 accent-color: ${COLOR_ACCENT};
-            `, { checked: false });
+            `, { checked: isChecked });
             
             const label = document.createElement('label');
-            const isLowPriority = raidName === 'Halloween Mansion';
             label.textContent = raidName;
             label.className = 'pixel-font-16';
             label.style.cssText = `
@@ -4339,25 +4603,71 @@ function createRaidMapSelection() {
             `;
             label.setAttribute('for', checkbox.id);
             
+            // Dynamic events: no greying/disabling; they only render when active
+
             raidDiv.appendChild(checkbox);
             raidDiv.appendChild(label);
             
-            // Add priority badge for Halloween Mansion
-            if (isLowPriority) {
-                const badge = document.createElement('span');
-                badge.textContent = getLocalizedText('Low Priority', 'Baixa Prioridade');
-                badge.className = 'pixel-font-16';
-                badge.style.cssText = `
+            // Add badges and priority control
+            if (region === 'Events') {
+                // Red "Event" badge (left) - only for Events region
+                const eventBadge = document.createElement('span');
+                eventBadge.textContent = getLocalizedText('Event', 'Evento');
+                eventBadge.className = 'pixel-font-16';
+                eventBadge.style.cssText = `
                     font-size: 10px;
                     padding: 2px 6px;
-                    background: rgba(255, 211, 61, 0.2);
-                    color: ${COLOR_YELLOW};
-                    border: 1px solid ${COLOR_YELLOW};
+                    background: rgba(255, 107, 107, 0.2);
+                    color: ${COLOR_RED};
+                    border: 1px solid ${COLOR_RED};
                     border-radius: 3px;
                     font-weight: bold;
+                    margin-right: 6px;
                 `;
-                raidDiv.appendChild(badge);
+                raidDiv.appendChild(eventBadge);
             }
+
+            // Priority dropdown for all raids
+            const prioritySelect = document.createElement('select');
+            prioritySelect.id = `priority-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+            prioritySelect.className = 'pixel-font-16';
+            prioritySelect.setAttribute('data-raid-name', raidName);
+            prioritySelect.style.cssText = `
+                font-size: 10px;
+                padding: 2px 18px 2px 6px;
+                border-radius: 3px;
+                font-weight: bold;
+                cursor: pointer;
+                outline: none;
+                appearance: none;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                min-width: 105px;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23ffffff' d='M1 0l4 4 4-4 1 1-5 5-5-5z'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 6px center;
+            `;
+            const opts = [
+                {v:'low', t:getLocalizedText('Low Priority', 'Baixa Prioridade')},
+                {v:'medium', t:getLocalizedText('Medium Priority', 'Prioridade Média')},
+                {v:'high', t:getLocalizedText('High Priority', 'Alta Prioridade')}
+            ];
+            opts.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.v;
+                opt.textContent = o.t;
+                prioritySelect.appendChild(opt);
+            });
+            // Set initial value from settings (default: medium for static raids, low for events)
+            const raidPriorities = settings.raidPriorities || {};
+            const defaultPriority = EVENT_TEXTS.includes(raidName) ? 'medium' : 'low';
+            prioritySelect.value = raidPriorities[raidName] || defaultPriority;
+            try { stylePrioritySelect(prioritySelect); } catch (_) {}
+            prioritySelect.addEventListener('change', (e) => {
+                stylePrioritySelect(prioritySelect);
+                autoSaveSettings();
+            });
+            raidDiv.appendChild(prioritySelect);
             
             mapContainer.appendChild(raidDiv);
         });
@@ -4392,8 +4702,41 @@ function createRaidMapSelection() {
     return section;
 }
 
+// Refresh availability UI for event raids in the settings modal (refresh priority badge styling)
+function applyEventRaidAvailabilityUI() {
+    try {
+        // Dynamically find all event raids (any active raid not in the known static list)
+        const knownStatic = new Set(EVENT_TEXTS);
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        const list = raidState?.context?.list || [];
+        const eventRaids = list
+            .map(r => getEventNameForRoomId(r.roomId))
+            .filter(name => name && !knownStatic.has(name) && !name.startsWith('Unknown'));
+        
+        // Refresh priority badge styling for all priority selects
+        document.querySelectorAll('select[id^="priority-"]').forEach(select => {
+            try { stylePrioritySelect(select); } catch (_) {}
+        });
+    } catch (_) {}
+}
 
-
+// Style the priority dropdown to look like a colored badge
+function stylePrioritySelect(selectEl) {
+    const v = (selectEl.value || 'low').toLowerCase();
+    if (v === 'low') {
+        selectEl.style.backgroundColor = 'rgba(255, 211, 61, 0.2)';
+        selectEl.style.color = `${COLOR_YELLOW}`;
+        selectEl.style.border = `1px solid ${COLOR_YELLOW}`;
+    } else if (v === 'high') {
+        selectEl.style.backgroundColor = 'rgba(255, 107, 107, 0.2)';
+        selectEl.style.color = `${COLOR_RED}`;
+        selectEl.style.border = `1px solid ${COLOR_RED}`;
+    } else { // medium (green)
+        selectEl.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+        selectEl.style.color = `${COLOR_GREEN}`;
+        selectEl.style.border = `1px solid ${COLOR_GREEN}`;
+    }
+}
 
 // Default settings with validation
 const DEFAULT_SETTINGS = {
@@ -4402,7 +4745,8 @@ const DEFAULT_SETTINGS = {
     fasterAutoplay: false,
     enableDragonPlant: false,
     setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
-    enabledRaidMaps: []
+    enabledRaidMaps: [],
+    raidPriorities: {} // raidName -> 'low' | 'medium' | 'high'
 };
 
 // Settings validation functions
@@ -4413,7 +4757,25 @@ function validateRaidDelay(value) {
 
 function validateRaidMaps(maps) {
     if (!Array.isArray(maps)) return false;
-    return maps.every(map => EVENT_TEXTS.includes(map));
+    // Allow static raids (in EVENT_TEXTS) OR events that exist in game state API or fallback mapping
+    return maps.every(map => {
+        // Static raids
+        if (EVENT_TEXTS.includes(map)) return true;
+        
+        // Check game state API for dynamic events (primary method)
+        try {
+            if (globalThis.state?.utils?.ROOM_NAME) {
+                const roomNames = globalThis.state.utils.ROOM_NAME;
+                const existsInGameState = Object.values(roomNames).includes(map);
+                if (existsInGameState) return true;
+            }
+        } catch (_) {}
+        
+        // Fallback to hardcoded mapping (backward compatibility)
+        if (EVENT_TO_ROOM_MAPPING.hasOwnProperty(map)) return true;
+        
+        return false;
+    });
 }
 
 function validateBoolean(value) {
@@ -4449,6 +4811,18 @@ function sanitizeSettings(settings) {
         sanitized.setupMethod = settings.setupMethod;
     }
     
+    // Validate raid priorities
+    if (settings.raidPriorities && typeof settings.raidPriorities === 'object') {
+        const allowed = ['low','medium','high'];
+        sanitized.raidPriorities = {};
+        Object.entries(settings.raidPriorities).forEach(([raidName, priority]) => {
+            const p = (priority || 'low').toLowerCase();
+            sanitized.raidPriorities[raidName] = allowed.includes(p) ? p : 'low';
+        });
+    } else {
+        sanitized.raidPriorities = {};
+    }
+    
     return sanitized;
 }
 
@@ -4477,7 +4851,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-')) {
+            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-') || input.id.startsWith('priority-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -4498,16 +4872,82 @@ function autoSaveSettings() {
             }
         });
         
-        // Process raid map selections with validation
+        // Process raid map selections (static raids + event raids)
+        // Load current settings first to preserve event raid states that aren't currently visible
+        const currentSettings = loadSettings();
+        const previouslySavedMaps = currentSettings.enabledRaidMaps || [];
         const enabledRaidMaps = [];
+        
+        // Collect all currently visible raid checkboxes (checked and unchecked)
+        const checkedRaids = new Set();
+        const visibleEventRaids = new Set(); // Track which event raids are currently visible
+        
+        document.querySelectorAll('input[type="checkbox"][id^="raid-"]').forEach(checkbox => {
+            // Get the actual raid name from the label text (more reliable than parsing ID)
+            const label = checkbox.nextElementSibling;
+            const raidName = label?.textContent?.trim();
+            if (!raidName) return;
+            
+            // Track all visible event raids (checked or unchecked)
+            if (!EVENT_TEXTS.includes(raidName)) {
+                visibleEventRaids.add(raidName);
+            }
+            
+            // Track checked raids
+            if (checkbox.checked) {
+                checkedRaids.add(raidName);
+            }
+        });
+        
+        // Save static raids based on current checkbox state
         EVENT_TEXTS.forEach(eventText => {
-            const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
-            const checkbox = document.getElementById(checkboxId);
-            if (checkbox && checkbox.checked) {
+            if (checkedRaids.has(eventText)) {
                 enabledRaidMaps.push(eventText);
             }
         });
+        
+        // Save currently visible event raids based on their checkbox state
+        checkedRaids.forEach(raidName => {
+            if (!EVENT_TEXTS.includes(raidName) && !enabledRaidMaps.includes(raidName)) {
+                enabledRaidMaps.push(raidName);
+            }
+        });
+        
+        // Preserve event raid states that aren't currently visible
+        // If an event raid was previously saved (checked) but isn't visible now, keep it checked
+        previouslySavedMaps.forEach(savedRaidName => {
+            if (!EVENT_TEXTS.includes(savedRaidName) && !visibleEventRaids.has(savedRaidName)) {
+                // This is an event raid that was previously saved but not currently visible
+                // Preserve its checked state
+                if (!enabledRaidMaps.includes(savedRaidName)) {
+                    enabledRaidMaps.push(savedRaidName);
+                }
+            }
+        });
+        
         settings.enabledRaidMaps = enabledRaidMaps;
+        
+        // Collect all priority dropdown values
+        const raidPriorities = {};
+        document.querySelectorAll('select[id^="priority-"]').forEach(select => {
+            const raidName = select.getAttribute('data-raid-name');
+            if (raidName && select.value) {
+                raidPriorities[raidName] = select.value;
+            }
+        });
+        
+        // Preserve priorities for raids that aren't currently visible
+        const currentPriorities = (currentSettings.raidPriorities || {});
+        Object.keys(currentPriorities).forEach(raidName => {
+            if (!raidPriorities[raidName]) {
+                // Check if this raid still exists in enabled maps (may be event raid that's not visible)
+                if (enabledRaidMaps.includes(raidName)) {
+                    raidPriorities[raidName] = currentPriorities[raidName];
+                }
+            }
+        });
+        
+        settings.raidPriorities = raidPriorities;
         
         // Validate and sanitize settings before saving
         const sanitizedSettings = sanitizeSettings(settings);
@@ -4587,17 +5027,29 @@ function loadAndApplySettings() {
             }
         }
         
-        // Apply raid map selections with validation
+        // Apply raid map selections with validation (static raids + event raids)
         if (settings.enabledRaidMaps && Array.isArray(settings.enabledRaidMaps)) {
-            settings.enabledRaidMaps.forEach(eventText => {
-                if (EVENT_TEXTS.includes(eventText)) {
-                const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+            settings.enabledRaidMaps.forEach(raidName => {
+                // Restore both static raids and event raids
+                const checkboxId = `raid-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
                 const checkbox = document.getElementById(checkboxId);
-                if (checkbox) checkbox.checked = true;
+                if (checkbox) {
+                    checkbox.checked = true;
                 }
             });
         }
         
+        // Apply priority dropdown values for all raids
+        if (settings.raidPriorities && typeof settings.raidPriorities === 'object') {
+            document.querySelectorAll('select[id^="priority-"]').forEach(select => {
+                const raidName = select.getAttribute('data-raid-name');
+                if (raidName && settings.raidPriorities[raidName]) {
+                    select.value = settings.raidPriorities[raidName];
+                    try { stylePrioritySelect(select); } catch (_) {}
+                }
+            });
+        }
+
         // Add auto-save listeners to all raid map checkboxes
         EVENT_TEXTS.forEach(eventText => {
             const checkboxId = `raid-${eventText.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
@@ -4608,6 +5060,8 @@ function loadAndApplySettings() {
         });
         
         console.log('[Raid Hunter] Settings loaded');
+        // After loading settings, refresh event raid availability UI if modal is open
+        try { applyEventRaidAvailabilityUI(); } catch (_) {}
     } catch (error) {
         console.error('[Raid Hunter] Error loading and applying settings:', error);
         showValidationMessage('Failed to load settings. Using defaults.', 'error');
@@ -4707,7 +5161,8 @@ function startRaidAutomation() {
 }
 
 // Listen for allModsLoaded signal and start automation
-window.addEventListener('message', (event) => {
+// Store handler reference for cleanup (prevents memory leaks per mod development guide)
+windowMessageHandler = (event) => {
     if (event.source !== window) return;
     if (event.data?.from === 'LOCAL_MODS_LOADER' && event.data?.action === 'allModsLoaded') {
         console.log('[Raid Hunter] Received allModsLoaded signal');
@@ -4718,7 +5173,8 @@ window.addEventListener('message', (event) => {
             startRaidAutomation();
         }, 1500);
     }
-});
+};
+window.addEventListener('message', windowMessageHandler);
 
 // Run initialization immediately when file loads
 init();
@@ -5193,26 +5649,42 @@ function stopQuestButtonValidation() {
 // ============================================================================
 
 // Cleanup function for when mod is disabled
+// Follows mod development guide best practices: "Clean up event listeners and intervals when they're no longer needed"
 function cleanupRaidHunter() {
     try {
-        // Clean up modal if open
+        // 1. Clean up all intervals, observers, and timeouts (centralized cleanup)
+        cleanupAll();
+        
+        // 2. Stop quest button validation monitoring
+        stopQuestButtonValidation();
+        
+        // 3. Stop autoplay state monitoring
+        stopAutoplayStateMonitoring();
+        
+        // 4. Clean up modal if open
         if (activeRaidHunterModal) {
             cleanupRaidHunterModal();
         }
         
-        // Clean up raid clock
+        // 5. Clean up modal cleanup observer (defensive check - in case modal was already closed)
+        if (modalCleanupObserver) {
+            modalCleanupObserver.disconnect();
+            modalCleanupObserver = null;
+        }
+        
+        // 6. Clean up raid clock (calls cleanupAll internally, but we already did it above)
         stopRaidClock();
         
-        // Clean up stamina tooltip monitoring
+        // 7. Clean up stamina tooltip monitoring
         stopStaminaTooltipMonitoring();
         
-        // Clean up CSS styles
+        // 8. Clean up CSS styles
         const raidShimmerCSS = document.getElementById('raidShimmerCSS');
         if (raidShimmerCSS) {
             raidShimmerCSS.remove();
         }
         
-        // Clean up event listeners from raid clock buttons
+        // 9. Clean up event listeners from raid clock buttons
         const settingsButton = document.querySelector('#raid-hunter-settings-btn');
         const toggleButton = document.querySelector('#raid-hunter-toggle-btn');
         if (settingsButton) {
@@ -5222,15 +5694,21 @@ function cleanupRaidHunter() {
             toggleButton.replaceWith(toggleButton.cloneNode(true)); // Remove all event listeners
         }
         
-        // Clean up page visibility monitoring
+        // 10. Clean up page visibility monitoring
         if (pageVisibilityHandler) {
             document.removeEventListener('visibilitychange', pageVisibilityHandler);
             pageVisibilityHandler = null;
         }
         
+        // 11. Clean up window message listener (prevent memory leaks)
+        if (windowMessageHandler) {
+            window.removeEventListener('message', windowMessageHandler);
+            windowMessageHandler = null;
+        }
+        
         // Note: Control release is handled automatically by withControl functions
         
-        // Reset all state using centralized function
+        // 12. Reset all state using centralized function
         resetState('full');
         
         console.log('[Raid Hunter] Mod cleanup completed');
@@ -5249,19 +5727,30 @@ context.exports = {
     }
 };
 
-
 // Expose Raid Hunter state globally for Better Tasker coordination
 window.raidHunterIsCurrentlyRaiding = () => isCurrentlyRaiding;
 
-// Expose function to check if Raid Hunter is raiding a HIGH priority raid (not Halloween Mansion)
-// Better Tasker should yield for HIGH priority raids but NOT for Halloween Mansion
+// Expose function to check if Raid Hunter is raiding a HIGH priority raid
+// Better Tasker should yield ONLY for HIGH priority raids
+// MEDIUM priority raids do NOT cause Better Tasker to yield, but also don't yield to Better Tasker
+// LOW priority raids yield to Better Tasker when it's active
 window.raidHunterIsRaidingHighPriority = () => {
     if (!isCurrentlyRaiding || !currentRaidInfo) {
         return false;
     }
-    // Halloween Mansion has HALLOWEEN priority (3), HIGH priority raids have priority (1)
-    // Better Tasker should NOT yield for Halloween Mansion
+    // Only HIGH priority raids cause Better Tasker to yield
+    // MEDIUM and LOW priority raids do not trigger Better Tasker to yield
     return currentRaidInfo.priority === RAID_PRIORITY.HIGH;
+};
+
+// Expose function to check if Raid Hunter is raiding a MEDIUM priority raid
+// Better Tasker should NOT overtake MEDIUM priority raids - they coexist (neither yields)
+window.raidHunterIsRaidingMediumPriority = () => {
+    if (!isCurrentlyRaiding || !currentRaidInfo) {
+        return false;
+    }
+    // MEDIUM priority raids should coexist with Better Tasker - neither yields to the other per tooltip
+    return currentRaidInfo.priority === RAID_PRIORITY.MEDIUM;
 };
 
 // Expose function to check if Raid Hunter has any enabled HIGH priority raids available

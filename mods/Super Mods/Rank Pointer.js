@@ -2170,16 +2170,16 @@ function createConfigPanel() {
   const stopContainer = document.createElement('div');
   stopContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px;';
   const stopLabel = document.createElement('label');
-  stopLabel.textContent = 'Stop when:';
+  stopLabel.textContent = t('mods.rankPointer.stopWhenLabel');
   const stopSelect = document.createElement('select');
   stopSelect.id = `${CONFIG_PANEL_ID}-stop-select`;
   stopSelect.style.cssText = 'min-width: 160px; background-color: #222; color: #fff; border: 1px solid #444; padding: 4px; border-radius: 4px;';
   const optMax = document.createElement('option');
   optMax.value = 'max';
-  optMax.textContent = 'Maximum rank';
+  optMax.textContent = t('mods.rankPointer.stopWhenMax');
   const optAny = document.createElement('option');
   optAny.value = 'any';
-  optAny.textContent = 'Any Victory';
+  optAny.textContent = t('mods.rankPointer.stopWhenAny');
   stopSelect.appendChild(optMax);
   stopSelect.appendChild(optAny);
   stopSelect.value = (config.stopCondition === 'any') ? 'any' : 'max';
@@ -2198,7 +2198,7 @@ function createConfigPanel() {
   
   const hideLabel = document.createElement('label');
   hideLabel.htmlFor = hideInput.id;
-  hideLabel.textContent = 'Hide game board during runs';
+  hideLabel.textContent = t('mods.rankPointer.hideGameBoardDuringRuns');
   
   hideContainer.appendChild(hideInput);
   hideContainer.appendChild(hideLabel);
@@ -2213,7 +2213,7 @@ function createConfigPanel() {
   refillInput.checked = Boolean(config.enableAutoRefillStamina);
   const refillLabel = document.createElement('label');
   refillLabel.htmlFor = refillInput.id;
-  refillLabel.textContent = 'Enable auto-refill stamina (via Automator)';
+  refillLabel.textContent = t('mods.rankPointer.enableAutoRefill');
   refillContainer.appendChild(refillInput);
   refillContainer.appendChild(refillLabel);
   content.appendChild(refillContainer);
@@ -2224,7 +2224,7 @@ function createConfigPanel() {
   // Add warning message if no ally creatures
   if (!hasAlly) {
     const warningMsg = document.createElement('div');
-    warningMsg.textContent = '⚠️ No ally creatures on board. Please place at least one ally creature before starting.';
+    warningMsg.textContent = t('mods.boardAnalyzer.noAllyWarning');
     warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
     content.appendChild(warningMsg);
   }
@@ -2232,7 +2232,7 @@ function createConfigPanel() {
   // Create buttons array - use closure to access hideInput directly
   const buttons = [
     {
-      text: 'Start',
+      text: t('mods.rankPointer.start'),
       primary: true,
       disabled: !hasAlly || !analysisState.canStart(), // Disable if no ally creatures or already running
       onClick: () => {
@@ -2242,9 +2242,9 @@ function createConfigPanel() {
         if (!hasAllyCreaturesOnBoard()) {
           console.log('[Rank Pointer] No ally creatures on board, cannot start');
           api.ui.components.createModal({
-            title: 'Cannot Start',
-            content: 'Please place at least one ally creature on the board before starting.',
-            buttons: [{ text: 'OK', primary: true }]
+            title: t('mods.rankPointer.cannotStartTitle'),
+            content: t('mods.boardAnalyzer.noAllyWarning'),
+            buttons: [{ text: t('controls.ok'), primary: true }]
           });
           return;
         }
@@ -2291,7 +2291,7 @@ function createConfigPanel() {
       }
     },
     {
-      text: 'Save',
+      text: t('mods.rankPointer.save'),
       primary: false,
       onClick: () => {
         // Use direct reference to the checkbox element
@@ -2314,7 +2314,7 @@ function createConfigPanel() {
       }
     },
     {
-      text: 'Cancel',
+      text: t('mods.rankPointer.cancel'),
       primary: false
     }
   ];
@@ -2324,7 +2324,8 @@ function createConfigPanel() {
   separator.style.cssText = 'margin-top: 8px; border-top: 1px solid #444; opacity: 0.6;';
   const credit = document.createElement('div');
   credit.style.cssText = 'margin-top: 2px; font-size: 11px; font-style: italic; color: #aaa; text-align: right;';
-  credit.innerHTML = 'Made with the help of <a href="https://bestiaryarena.com/profile/btlucas" target="_blank" rel="noopener noreferrer" style="color:#61AFEF; text-decoration: underline;">btlucas</a>';
+  const linkHtml = '<a href="https://bestiaryarena.com/profile/btlucas" target="_blank" rel="noopener noreferrer" style="color:#61AFEF; text-decoration: underline;">btlucas</a>';
+  credit.innerHTML = t('mods.rankPointer.madeWithHelp').replace('{link}', linkHtml);
   content.appendChild(separator);
   content.appendChild(credit);
 
@@ -2342,7 +2343,7 @@ function createConfigPanel() {
     setTimeout(() => {
       // Find the Start button in the panel and disable it
       const startButton = panel.element.querySelector('button');
-      if (startButton && startButton.textContent.trim() === 'Start') {
+        if (startButton && startButton.textContent.trim() === t('mods.rankPointer.start')) {
         startButton.disabled = true;
         startButton.style.opacity = '0.5';
         startButton.style.cursor = 'not-allowed';
@@ -2364,26 +2365,28 @@ function showRunningAnalysisModal(attempts, defeats = 0, staminaSpent = 0, targe
   
   const message = document.createElement('p');
   message.id = 'rank-pointer-target';
-  message.textContent = targetRankPoints != null ? `Running until S+${targetRankPoints}` : 'Running until victory...';
+  message.textContent = targetRankPoints != null 
+    ? t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints)
+    : t('mods.rankPointer.runningUntilVictory');
   content.appendChild(message);
   
   const progress = document.createElement('p');
   progress.id = 'rank-pointer-progress';
-  progress.textContent = `Attempt ${attempts}`;
+  progress.textContent = t('mods.rankPointer.attempt').replace('{n}', attempts);
   progress.style.cssText = 'margin-top: 12px;';
   content.appendChild(progress);
   
   // Add defeats count
   const defeatsElement = document.createElement('p');
   defeatsElement.id = 'rank-pointer-defeats';
-  defeatsElement.textContent = `Defeats: ${defeats}`;
+  defeatsElement.textContent = t('mods.rankPointer.defeats').replace('{n}', defeats);
   defeatsElement.style.cssText = 'margin-top: 8px; color: #e74c3c;';
   content.appendChild(defeatsElement);
   
   // Add stamina usage
   const staminaElement = document.createElement('p');
   staminaElement.id = 'rank-pointer-stamina';
-  staminaElement.textContent = `Stamina Spent: ${staminaSpent}`;
+  staminaElement.textContent = t('mods.rankPointer.staminaSpent').replace('{n}', staminaSpent);
   staminaElement.style.cssText = 'margin-top: 8px; color: #3498db;';
   content.appendChild(staminaElement);
   
@@ -2393,13 +2396,13 @@ function showRunningAnalysisModal(attempts, defeats = 0, staminaSpent = 0, targe
   wrapper.id = 'rank-pointer-running-modal';
   wrapper.dataset.pointerModal = 'running';
   wrapper.setAttribute('role', 'dialog');
-  wrapper.setAttribute('aria-label', 'Rank Pointer Running');
+  wrapper.setAttribute('aria-label', t('mods.rankPointer.runningHeader'));
   // Position only; visual theme comes from CSS to match Hunt Analyzer
   wrapper.className = 'rank-pointer-modal';
   wrapper.style.cssText = ['position: absolute','left: 12px','bottom: 12px'].join(';');
 
   const header = document.createElement('div');
-  header.textContent = 'Rank Pointer Running';
+  header.textContent = t('mods.rankPointer.runningHeader');
   header.className = 'rank-pointer-modal-header';
 
   const body = document.createElement('div');
@@ -2411,14 +2414,14 @@ function showRunningAnalysisModal(attempts, defeats = 0, staminaSpent = 0, targe
 
   const stopBtn = document.createElement('button');
   stopBtn.type = 'button';
-  stopBtn.textContent = 'Stop';
+  stopBtn.textContent = t('mods.rankPointer.stop');
   stopBtn.className = 'rank-pointer-button';
   stopBtn.addEventListener('click', (e) => {
     console.log('[Rank Pointer] Stop button clicked, current state:', analysisState.state);
     analysisState.stop();
     console.log('[Rank Pointer] After stop(), state:', analysisState.state);
     stopBtn.disabled = true;
-    stopBtn.textContent = 'Stopping...';
+    stopBtn.textContent = t('mods.rankPointer.stopping');
   });
 
   footer.appendChild(stopBtn);
@@ -2561,7 +2564,7 @@ async function showResultsModal(results) {
     // Add a note if stopped by user
     if (results.forceStopped && !results.success) {
       const partialNote = document.createElement('div');
-      partialNote.textContent = 'Rank Pointer stopped by user';
+      partialNote.textContent = t('mods.rankPointer.stoppedByUser');
       partialNote.style.cssText = 'text-align: center; color: #e74c3c; margin-bottom: 15px;';
       content.appendChild(partialNote);
     }
@@ -2576,7 +2579,7 @@ async function showResultsModal(results) {
     
     // Total Attempts
     const attemptsLabel = document.createElement('div');
-    attemptsLabel.textContent = 'Total Attempts:';
+    attemptsLabel.textContent = t('mods.rankPointer.totalAttempts');
     attemptsLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     const attemptsValue = document.createElement('div');
     attemptsValue.textContent = stats.totalAttempts.toString();
@@ -2584,7 +2587,7 @@ async function showResultsModal(results) {
     
     // Completion Rate
     const completionRateLabel = document.createElement('div');
-    completionRateLabel.textContent = 'Completion Rate:';
+    completionRateLabel.textContent = t('mods.rankPointer.completionRate');
     completionRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     const completionRateValue = document.createElement('div');
     completionRateValue.textContent = `${stats.completionRate}% (${stats.completedAttempts}/${stats.totalAttempts})`;
@@ -2593,7 +2596,7 @@ async function showResultsModal(results) {
     // S+ Rate
     if (stats.sPlusCount > 0) {
       const sPlusRateLabel = document.createElement('div');
-      sPlusRateLabel.textContent = 'S+ Rate:';
+      sPlusRateLabel.textContent = t('mods.rankPointer.sPlusRate');
       sPlusRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
       const sPlusRateValue = document.createElement('div');
       sPlusRateValue.textContent = `${stats.sPlusRate}% (${stats.sPlusCount}/${stats.totalAttempts})`;
@@ -2619,7 +2622,7 @@ async function showResultsModal(results) {
             const count = rankPointsCounts[rp];
             const rate = stats.totalAttempts > 0 ? (count / stats.totalAttempts * 100).toFixed(2) : '0.00';
             const label = document.createElement('div');
-            label.textContent = `S+${rp} Rate:`;
+            label.textContent = t('mods.rankPointer.sPlusPointsRate').replace('{points}', rp);
             label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
             const value = document.createElement('div');
             const rankDifference = highestRankPoints - rp;
@@ -2644,7 +2647,7 @@ async function showResultsModal(results) {
         const targetRankPoints = Math.max(0, (2 * maxTeamSizeForTarget) - playerTeamSizeForTarget);
         
         const highestLabel = document.createElement('div');
-        highestLabel.textContent = 'Highest Rank Points:';
+        highestLabel.textContent = t('mods.rankPointer.highestRankPoints');
         highestLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
         const highestValue = document.createElement('div');
         highestValue.textContent = (stats.maxRankPoints || 0).toString();
@@ -2653,7 +2656,7 @@ async function showResultsModal(results) {
         statsContainer.appendChild(highestValue);
         
         const targetLabel = document.createElement('div');
-        targetLabel.textContent = 'Target Rank:';
+        targetLabel.textContent = t('mods.rankPointer.targetRank');
         targetLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
         const targetValue = document.createElement('div');
         targetValue.textContent = `S+${targetRankPoints}`;
@@ -2668,7 +2671,7 @@ async function showResultsModal(results) {
     // Max Rank Points
     if (stats.maxRankPoints > 0) {
       const maxRankLabel = document.createElement('div');
-      maxRankLabel.textContent = 'Max Rank Points:';
+      maxRankLabel.textContent = t('mods.rankPointer.maxRankPoints');
       maxRankLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
       const maxRankValue = document.createElement('div');
       maxRankValue.textContent = stats.maxRankPoints.toString();
@@ -2682,7 +2685,7 @@ async function showResultsModal(results) {
     
     // Remove ticks/time aggregates; instead show stamina and skips
     const staminaLabel = document.createElement('div');
-    staminaLabel.textContent = 'Stamina Spent:';
+    staminaLabel.textContent = t('mods.rankPointer.staminaSpent').replace(': {n}', ':');
     staminaLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     const staminaValue = document.createElement('div');
     staminaValue.textContent = (stats.staminaSpentTotal || 0).toString();
@@ -2691,7 +2694,7 @@ async function showResultsModal(results) {
     statsContainer.appendChild(staminaValue);
 
     const skipsLabel = document.createElement('div');
-    skipsLabel.textContent = 'Skips:';
+    skipsLabel.textContent = t('mods.rankPointer.skips');
     skipsLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
     const skipsValue = document.createElement('div');
     skipsValue.textContent = (stats.skips || 0).toString();
@@ -2702,13 +2705,13 @@ async function showResultsModal(results) {
     // If victory, show success message
     if (results.success && results.finalResult) {
       const successMsg = document.createElement('div');
-      successMsg.textContent = '✓ Victory achieved!';
+      successMsg.textContent = t('mods.rankPointer.victoryAchieved');
       successMsg.style.cssText = 'text-align: center; color: #2ecc71; margin-bottom: 15px; font-size: 1.2em; font-weight: bold;';
       content.appendChild(successMsg);
       
       // Add final result details
       const finalResultLabel = document.createElement('div');
-      finalResultLabel.textContent = 'Final Result:';
+      finalResultLabel.textContent = t('mods.rankPointer.finalResult');
       finalResultLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
       const finalResultValue = document.createElement('div');
       
@@ -2740,7 +2743,7 @@ async function showResultsModal(results) {
       replayContainer.style.cssText = 'margin-top: 12px; display: flex; justify-content: flex-end;';
 
       const copyReplayBtn = document.createElement('button');
-      copyReplayBtn.textContent = 'Copy Replay';
+      copyReplayBtn.textContent = t('mods.boardAnalyzer.copyReplayButton');
       copyReplayBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
       copyReplayBtn.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
 
@@ -2751,20 +2754,20 @@ async function showResultsModal(results) {
           const replayText = `$replay(${JSON.stringify(replayData)})`;
           const success = copyToClipboard(replayText);
           if (success) {
-            showCopyNotification('Copied replay data!');
+            showCopyNotification(t('mods.rankPointer.copiedReplay'));
           } else {
-            showCopyNotification('Failed to copy replay data', true);
+            showCopyNotification(t('mods.rankPointer.failedCopyReplay'), true);
           }
         } else if (attempt && attempt.seed) {
           const seedText = attempt.seed.toString();
           const success = copyToClipboard(seedText);
           if (success) {
-            showCopyNotification(`Copied seed ${seedText}!`);
+            showCopyNotification(t('mods.rankPointer.copiedSeed').replace('{seed}', seedText));
           } else {
-            showCopyNotification('Failed to copy seed', true);
+            showCopyNotification(t('mods.rankPointer.failedCopySeed'), true);
           }
         } else {
-          showCopyNotification('No replay data or seed available', true);
+          showCopyNotification(t('mods.rankPointer.noReplayOrSeed'), true);
         }
       });
 
@@ -2772,18 +2775,18 @@ async function showResultsModal(results) {
       content.appendChild(replayContainer);
     } else {
       const noAttemptsMessage = document.createElement('p');
-      noAttemptsMessage.textContent = 'No attempts completed yet.';
+      noAttemptsMessage.textContent = t('mods.rankPointer.noAttemptsYet');
       noAttemptsMessage.style.cssText = 'text-align: center; color: #777; margin-top: 15px;';
       content.appendChild(noAttemptsMessage);
     }
     
     const modal = api.ui.components.createModal({
-      title: 'Rank Pointer Results',
+      title: t('mods.rankPointer.resultsTitle'),
       width: 400,
       content: content,
       buttons: [
         {
-          text: 'Close',
+          text: t('controls.close'),
           primary: true,
           onClick: () => {
             // One more check for lingering modals when user closes results (like Board Analyzer)
@@ -2819,7 +2822,7 @@ async function showResultsModal(results) {
       const modalElements = document.querySelectorAll('[role="dialog"]');
       modalElements.forEach((el) => {
         const header = el.querySelector('.widget-top-text');
-        if (header && header.textContent.includes('Rank Pointer Results')) {
+        if (header && header.textContent.includes(t('mods.rankPointer.resultsTitle'))) {
           modalObject.element = el;
           console.log('[Rank Pointer] Found modal element in DOM and attached to modalObject');
         }
@@ -2893,28 +2896,28 @@ async function runAnalysis() {
     const results = await runUntilVictory(targetRankPoints, (status) => {
       const progressEl = document.getElementById('rank-pointer-progress');
       if (progressEl) {
-        progressEl.textContent = `Attempt ${status.attempts}`;
+        progressEl.textContent = t('mods.rankPointer.attempt').replace('{n}', status.attempts);
       }
       
       const targetEl = document.getElementById('rank-pointer-target');
       if (targetEl) {
         if (typeof targetRankPoints === 'number') {
-          targetEl.textContent = `Running until S+${targetRankPoints}`;
+          targetEl.textContent = t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints);
         } else {
-          targetEl.textContent = 'Running until victory...';
+          targetEl.textContent = t('mods.rankPointer.runningUntilVictory');
         }
       }
       
       // Update defeats display
       const defeatsEl = document.getElementById('rank-pointer-defeats');
       if (defeatsEl && status.defeats !== undefined) {
-        defeatsEl.textContent = `Defeats: ${status.defeats}`;
+        defeatsEl.textContent = t('mods.rankPointer.defeats').replace('{n}', status.defeats);
       }
       
       // Update stamina display
       const staminaEl = document.getElementById('rank-pointer-stamina');
       if (staminaEl && status.staminaSpent !== undefined) {
-        staminaEl.textContent = `Stamina Spent: ${status.staminaSpent}`;
+        staminaEl.textContent = t('mods.rankPointer.staminaSpent').replace('{n}', status.staminaSpent);
       }
     });
     
@@ -2998,9 +3001,9 @@ function init() {
   // Add the main button
   api.ui.addButton({
     id: BUTTON_ID,
-    text: 'Rank Pointer',
+    text: t('mods.rankPointer.buttonText'),
     modId: MOD_ID,
-    tooltip: 'Run manual mode until victory (restarts on defeat)',
+    tooltip: t('mods.rankPointer.buttonTooltip'),
     primary: false,
     onClick: () => {
       createConfigPanel();
