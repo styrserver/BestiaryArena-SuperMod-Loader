@@ -1163,11 +1163,11 @@
     if (scrollLimitReached) {
       messageParts.push(`Scroll limit reached (${scrollLimit} scrolls)! Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
       if (isShinyHuntMode()) {
-        messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+        messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
       } else {
-        messageParts.push(` Found ${totalFound} selected creatures in this session.`);
+        messageParts.push(`Found ${totalFound} selected creatures in this session.`);
         if (selectedScrollTier === 5) {
-          messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+          messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
         }
       }
     } else if (reachedCreature && autoscrollStats.totalScrolls === 0) {
@@ -1179,41 +1179,43 @@
     } else {
       // No target reached
       if (isShinyHuntMode()) {
-        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
+        messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
       } else {
-        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls. Found ${totalFound} selected creatures in this session.`);
+        messageParts.push(`Rolled ${autoscrollStats.totalScrolls} ${tierName} summon scrolls.`);
+        messageParts.push(`Found ${totalFound} selected creatures in this session.`);
         // Add shiny count for T5 scrolls (but not in shiny hunt mode)
         if (selectedScrollTier === 5) {
-          messageParts.push(` Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
+          messageParts.push(`Found ${getShinyCreatureText(autoscrollStats.shinyCount)}${formatShinyList(autoscrollStats.foundShinies)}.`);
         }
       }
     }
     
     // Optional: Add autosell statistics
     if (includeStats && autosellNonSelected && autoscrollStats.soldMonsters > 0) {
-      messageParts.push(` Sold ${autoscrollStats.soldMonsters} non-selected creatures for ${autoscrollStats.soldGold} gold.`);
+      messageParts.push(`Sold ${autoscrollStats.soldMonsters} non-selected creatures for ${autoscrollStats.soldGold} gold.`);
     }
     
     // Optional: Add autosqueeze statistics
     if (includeStats && autosellNonSelected && autoscrollStats.squeezedMonsters > 0) {
-      messageParts.push(` Squeezed ${autoscrollStats.squeezedMonsters} non-selected creatures for ${autoscrollStats.squeezedDust} dust.`);
+      messageParts.push(`Squeezed ${autoscrollStats.squeezedMonsters} non-selected creatures for ${autoscrollStats.squeezedDust} dust.`);
     }
     
     // Optional: Add rate limit information
     if (includeRateLimitInfo) {
       if (autosellNonSelected && rateLimitedSales.size > 0) {
-        messageParts.push(` (${rateLimitedSales.size} operations pending due to rate limits)`);
+        messageParts.push(`(${rateLimitedSales.size} operations pending due to rate limits)`);
       }
       
       if (consecutiveRateLimits > 0) {
         const timeSinceLastRateLimit = Date.now() - lastRateLimitTime;
         if (timeSinceLastRateLimit < 30000) { // Show for 30 seconds after rate limit
-          messageParts.push(` [Rate limited ${consecutiveRateLimits}x]`);
+          messageParts.push(`[Rate limited ${consecutiveRateLimits}x]`);
         }
       }
     }
     
-    return messageParts.join('');
+    return messageParts.join('\n');
   }
   
   function saveStateToStorage() {
@@ -1847,6 +1849,12 @@
   async function startAutoscroll() {
     setUILocked(true);
     
+    // Set coordination flag to pause Better UI updates
+    if (!window.__modCoordination) {
+      window.__modCoordination = {};
+    }
+    window.__modCoordination.autoscrollerRunning = true;
+    
     // Update summon scroll counts to reflect current inventory before starting
     updateSummonScrollCounts();
     
@@ -1920,6 +1928,11 @@
   
   function stopAutoscroll() {
     autoscrolling = false;
+    
+    // Clear coordination flag to resume Better UI updates
+    if (window.__modCoordination) {
+      window.__modCoordination.autoscrollerRunning = false;
+    }
     
     if (rateLimitedInterval) {
       clearInterval(rateLimitedInterval);
@@ -2892,6 +2905,7 @@
         const statusText = document.createElement('div');
         statusText.textContent = 'Ready to autoscroll';
         statusText.id = 'autoscroll-status';
+        statusText.style.whiteSpace = 'pre-line'; // Allow line breaks with \n
         statusRow.appendChild(statusText);
         
         const buttonRow = document.createElement('div');
@@ -3201,6 +3215,11 @@
             stopAutoscroll();
           }
           
+          // Clear coordination flag when modal closes
+          if (window.__modCoordination) {
+            window.__modCoordination.autoscrollerRunning = false;
+          }
+          
           // Clear modal cache since modal is closing
           DOM_ELEMENTS.modal = null;
           
@@ -3504,6 +3523,11 @@
       stopAutoscroll();
     }
     
+    // Clear coordination flag
+    if (window.__modCoordination) {
+      window.__modCoordination.autoscrollerRunning = false;
+    }
+    
     if (buttonCheckInterval) {
       clearInterval(buttonCheckInterval);
       buttonCheckInterval = null;
@@ -3571,6 +3595,12 @@
   // =======================
   function initializeAutoscroller() {
     console.log('[Autoscroller] initializing...');
+    
+    // Initialize coordination object for mod coordination
+    if (!window.__modCoordination) {
+      window.__modCoordination = {};
+    }
+    window.__modCoordination.autoscrollerRunning = false;
     
     // Log database integration status
     if (window.inventoryDatabase) {

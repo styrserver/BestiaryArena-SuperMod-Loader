@@ -79,6 +79,16 @@ function getLocalizedText(englishText, portugueseText) {
 // Default settings constants
 const DEFAULT_TASK_START_DELAY = 3;
 
+// Creatures that cannot appear in tasker tasks
+const UNSELECTABLE_CREATURES = [
+    'Firestarter',
+    'Gummy Raider',
+    'Polar Bear',
+    'Swamp Troll',
+    'Tortoise',
+    'Yeti'
+];
+
 // Tasker states
 const TASKER_STATES = {
     DISABLED: 'disabled',
@@ -3171,37 +3181,47 @@ function createMonsterSelectionSettings() {
     } else {
         // Create checkboxes for each creature
         creatures.forEach(creatureName => {
+            const isUnselectable = UNSELECTABLE_CREATURES.includes(creatureName);
+            
             const creatureDiv = document.createElement('div');
             creatureDiv.style.cssText = `
                 display: flex;
                 align-items: center;
                 gap: 8px;
                 padding: 2px 0;
+                ${isUnselectable ? 'opacity: 0.4;' : ''}
             `;
             
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.id = `creature-${creatureName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
-            checkbox.checked = true; // Default to enabled
+            checkbox.checked = isUnselectable ? false : true; // Unselectable creatures default to unchecked
+            checkbox.disabled = isUnselectable; // Disable unselectable creatures
             checkbox.style.cssText = `
                 width: 16px;
                 height: 16px;
                 accent-color: #ffe066;
+                ${isUnselectable ? 'cursor: not-allowed;' : ''}
             `;
             
             const label = document.createElement('label');
             label.textContent = creatureName;
             label.className = 'pixel-font-16';
             label.style.cssText = `
-                color: #fff;
-                cursor: pointer;
+                color: ${isUnselectable ? '#666' : '#fff'};
+                cursor: ${isUnselectable ? 'not-allowed' : 'pointer'};
                 flex: 1;
             `;
             label.setAttribute('for', checkbox.id);
+            if (isUnselectable) {
+                label.setAttribute('title', getLocalizedText(
+                    'This creature cannot appear in tasker tasks',
+                    'Esta criatura não pode aparecer nas tarefas'
+                ));
+            }
             
         // Create warning symbol for unselected creatures
         const warningSymbol = document.createElement('span');
-        warningSymbol.textContent = '⚠️';
         warningSymbol.className = 'creature-warning-symbol';
         warningSymbol.style.cssText = `
             color: #ffc107;
@@ -3209,20 +3229,33 @@ function createMonsterSelectionSettings() {
             opacity: 0;
             transition: opacity 0.2s ease;
             cursor: help;
+            width: 14px;
+            display: inline-block;
         `;
-        warningSymbol.setAttribute('title', getLocalizedText(
-            'Unselected creatures will cause active tasks to be removed',
-            'Criaturas não selecionadas causarão remoção de tasks ativas'
-        ));
+        
+        if (!isUnselectable) {
+            warningSymbol.textContent = '⚠️';
+            warningSymbol.setAttribute('title', getLocalizedText(
+                'Unselected creatures will cause active tasks to be removed',
+                'Criaturas não selecionadas causarão remoção de tasks ativas'
+            ));
+        } else {
+            // Keep blank space for alignment
+            warningSymbol.textContent = '';
+        }
             
         // Function to update warning visibility and count
         const updateWarningVisibility = () => {
-            warningSymbol.style.opacity = checkbox.checked ? '0' : '1';
+            if (!isUnselectable) {
+                warningSymbol.style.opacity = checkbox.checked ? '0' : '1';
+            }
             window.updateWarningText(); // Update the warning count
         };
             
-            // Add change listener to checkbox with tracking
-            addTrackedListener(checkbox, 'change', updateWarningVisibility);
+            // Add change listener to checkbox with tracking (skip disabled checkboxes)
+            if (!isUnselectable) {
+                addTrackedListener(checkbox, 'change', updateWarningVisibility);
+            }
             
             creatureDiv.appendChild(checkbox);
             creatureDiv.appendChild(warningSymbol);
@@ -3233,7 +3266,7 @@ function createMonsterSelectionSettings() {
     
     // Function to update warning text with count (defined after monsterContainer is created)
     window.updateWarningText = () => {
-        const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
+        const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
         const totalCreatures = checkboxes.length;
         const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
         warning.textContent = getLocalizedText(
@@ -3262,7 +3295,7 @@ function createMonsterSelectionSettings() {
         'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
         'flex: 1;',
         () => {
-            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
+            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
             checkboxes.forEach(cb => {
                 cb.checked = true;
                 // Hide warning symbol for this checkbox
@@ -3282,7 +3315,7 @@ function createMonsterSelectionSettings() {
         'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 text-whiteHighlight',
         'flex: 1;',
         () => {
-            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]');
+            const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
             checkboxes.forEach(cb => {
                 cb.checked = false;
                 // Show warning symbol for this checkbox
@@ -3315,10 +3348,11 @@ function loadSettings() {
         fasterAutoplay: false,
         enableDragonPlant: false,
         setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
-        // Default all creatures to enabled
+        // Default all creatures to enabled, except unselectable ones
         ...Object.fromEntries(
             (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
-                [`creature-${creature.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`, true]
+                [`creature-${creature.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`, 
+                 !UNSELECTABLE_CREATURES.includes(creature)]
             )
         )
     };
@@ -3344,6 +3378,9 @@ function autoSaveSettings() {
         inputs.forEach(input => {
             // Only process inputs that belong to Better Tasker settings
             if (input.id === 'autoCompleteTasks' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'taskStartDelay' || input.id === 'setupMethod' || input.id.startsWith('creature-')) {
+                // Skip disabled checkboxes (unselectable creatures)
+                if (input.disabled) return;
+                
                 if (input.type === 'checkbox') {
                     settings[input.id] = input.checked;
                 } else {
@@ -3426,9 +3463,12 @@ function loadAndApplySettings() {
             const checkboxId = `creature-${creatureName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
             const checkbox = document.getElementById(checkboxId);
             if (checkbox) {
-                // Use individual creature setting
-                const individualSetting = settings[checkboxId];
-                checkbox.checked = individualSetting !== undefined ? individualSetting : true;
+                // Skip applying settings to disabled checkboxes (unselectable creatures)
+                if (!checkbox.disabled) {
+                    // Use individual creature setting
+                    const individualSetting = settings[checkboxId];
+                    checkbox.checked = individualSetting !== undefined ? individualSetting : true;
+                }
                 
                 // Update warning symbol visibility based on checkbox state
                 const warningSymbol = checkbox.parentElement.querySelector('.creature-warning-symbol');
@@ -3438,11 +3478,11 @@ function loadAndApplySettings() {
             }
         });
         
-        // Add auto-save listeners to all creature checkboxes
+        // Add auto-save listeners to all creature checkboxes (skip disabled ones)
         creatures.forEach(creatureName => {
             const checkboxId = `creature-${creatureName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
             const checkbox = document.getElementById(checkboxId);
-            if (checkbox) {
+            if (checkbox && !checkbox.disabled) {
                 addTrackedListener(checkbox, 'change', autoSaveSettings);
             }
         });

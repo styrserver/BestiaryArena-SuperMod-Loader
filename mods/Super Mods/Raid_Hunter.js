@@ -4491,7 +4491,6 @@ function createRaidMapSelection() {
     
     // Group raids by region for better organization
     const raidGroups = {
-        'Events': [], // Populated dynamically from active raids
         'Rookgaard': [
             'Rat Plague'
         ],
@@ -4522,46 +4521,73 @@ function createRaidMapSelection() {
         ]
     };
     
-    // Dynamically populate Events with any active raids not in the known static list
-    try {
-        const knownStatic = new Set(Object.entries(raidGroups)
-            .filter(([region]) => region !== 'Events')
-            .flatMap(([, raids]) => raids));
-        const raidState = globalThis.state?.raids?.getSnapshot?.();
-        const list = raidState?.context?.list || [];
-        const allRaidNames = list.map(r => getEventNameForRoomId(r.roomId));
-        
-        const dynamicEvents = Array.from(new Set(allRaidNames
-            .filter(name => name && !knownStatic.has(name) && !name.startsWith('Unknown'))
-        )).sort();
-        
-        raidGroups['Events'] = dynamicEvents;
-    } catch (error) {
-        console.error('[Raid Hunter] Error populating dynamic events:', error);
+    // Helper: Get region name for a room ID using game state API
+    function getRegionNameForRoomId(roomId) {
+        try {
+            const regions = globalThis.state?.utils?.REGIONS;
+            if (!regions || !Array.isArray(regions)) return null;
+            
+            for (const region of regions) {
+                if (region.rooms && Array.isArray(region.rooms)) {
+                    const hasRoom = region.rooms.some(room => room.id === roomId);
+                    if (hasRoom) {
+                        // Map region IDs to friendly names
+                        const regionNameMap = {
+                            'rook': 'Rookgaard',
+                            'carlin': 'Carlin',
+                            'folda': 'Folda',
+                            'ab': 'Ab\'Dendriel',
+                            'kaz': 'Kazordoon',
+                            'venore': 'Venore'
+                        };
+                        return regionNameMap[region.id] || region.id;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[Raid Hunter] Error getting region for room:', error);
+        }
+        return null;
     }
     
-    // Helper: determine if an event raid is currently active (exists and not expired)
-    function isEventRaidActive(raidName) {
-        try {
-            const roomId = getRoomIdForEvent(raidName);
-            if (!roomId) return false;
-            const raidState = globalThis.state?.raids?.getSnapshot?.();
-            const list = raidState?.context?.list || [];
-            const match = list.find(r => r.roomId === roomId);
-            if (!match) return false;
-            if (typeof match.expiresAt === 'number') {
-                return match.expiresAt > Date.now();
+    // Dynamically add active raids to their correct regions using game state API
+    try {
+        const knownStatic = new Set(Object.values(raidGroups).flat());
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        const list = raidState?.context?.list || [];
+        
+        for (const raid of list) {
+            const raidName = getEventNameForRoomId(raid.roomId);
+            if (!raidName || raidName.startsWith('Unknown') || knownStatic.has(raidName)) {
+                continue; // Skip already added or invalid raids
             }
-            return true;
-        } catch (_) {
-            return false;
+            
+            // Get the region for this raid
+            const regionName = getRegionNameForRoomId(raid.roomId);
+            
+            if (regionName && raidGroups[regionName]) {
+                // Add to the correct region
+                if (!raidGroups[regionName].includes(raidName)) {
+                    raidGroups[regionName].push(raidName);
+                }
+            } else {
+                // Fallback: Unknown region - add to first region or create "Other" category
+                if (!raidGroups['Other']) {
+                    raidGroups['Other'] = [];
+                }
+                if (!raidGroups['Other'].includes(raidName)) {
+                    raidGroups['Other'].push(raidName);
+                }
+            }
         }
+    } catch (error) {
+        console.error('[Raid Hunter] Error populating dynamic raids:', error);
     }
 
     // Create checkboxes for each raid group
     Object.entries(raidGroups).forEach(([region, raids]) => {
-        // Skip Events section if empty
-        if (region === 'Events' && raids.length === 0) {
+        // Skip empty regions
+        if (raids.length === 0) {
             return;
         }
         
@@ -4611,15 +4637,13 @@ function createRaidMapSelection() {
                 flex: 1;
             `;
             label.setAttribute('for', checkbox.id);
-            
-            // Dynamic events: no greying/disabling; they only render when active
 
             raidDiv.appendChild(checkbox);
             raidDiv.appendChild(label);
             
-            // Add badges and priority control
-            if (region === 'Events') {
-                // Red "Event" badge (left) - only for Events region
+            // Add "Event" badge only for raids NOT in the hardcoded EVENT_TEXTS list
+            // These are truly dynamic events that are not statically defined
+            if (!EVENT_TEXTS.includes(raidName)) {
                 const eventBadge = document.createElement('span');
                 eventBadge.textContent = getLocalizedText('Event', 'Evento');
                 eventBadge.className = 'pixel-font-16';
@@ -4714,14 +4738,6 @@ function createRaidMapSelection() {
 // Refresh availability UI for event raids in the settings modal (refresh priority badge styling)
 function applyEventRaidAvailabilityUI() {
     try {
-        // Dynamically find all event raids (any active raid not in the known static list)
-        const knownStatic = new Set(EVENT_TEXTS);
-        const raidState = globalThis.state?.raids?.getSnapshot?.();
-        const list = raidState?.context?.list || [];
-        const eventRaids = list
-            .map(r => getEventNameForRoomId(r.roomId))
-            .filter(name => name && !knownStatic.has(name) && !name.startsWith('Unknown'));
-        
         // Refresh priority badge styling for all priority selects
         document.querySelectorAll('select[id^="priority-"]').forEach(select => {
             try { stylePrioritySelect(select); } catch (_) {}

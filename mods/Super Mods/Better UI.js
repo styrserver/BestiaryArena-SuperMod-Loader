@@ -1652,8 +1652,8 @@ function removeFavoriteHearts() {
 
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
-  // Skip if Board Analyzer is running
-  if (window.__modCoordination?.boardAnalyzerRunning) {
+  // Skip if Board Analyzer or Autoscroller is running
+  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
     return;
   }
   
@@ -2242,9 +2242,8 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
 }
 
 function applyMaxCreatures() {
-  // Skip if Board Analyzer is running
-  if (window.__modCoordination?.boardAnalyzerRunning) {
-    console.log('[Better UI] Skipping applyMaxCreatures - Board Analyzer active');
+  // Skip if Board Analyzer or Autoscroller is running
+  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
     return;
   }
   
@@ -2367,9 +2366,8 @@ function injectMaxShiniesCSS(colorOption, colorKey) {
 }
 
 function applyMaxShinies() {
-  // Skip if Board Analyzer is running
-  if (window.__modCoordination?.boardAnalyzerRunning) {
-    console.log('[Better UI] Skipping applyMaxShinies - Board Analyzer active');
+  // Skip if Board Analyzer or Autoscroller is running
+  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
     return;
   }
   
@@ -2493,9 +2491,8 @@ function isEnemyByHealthBar(battleContainer) {
 }
 
 function applyShinyEnemies() {
-  // Skip if Board Analyzer is running
-  if (window.__modCoordination?.boardAnalyzerRunning) {
-    console.log('[Better UI] Skipping applyShinyEnemies - Board Analyzer active');
+  // Skip if Board Analyzer or Autoscroller is running
+  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
     return;
   }
   
@@ -3128,8 +3125,8 @@ function startBattleBoardObserver() {
   let attributeChangeDebounce = null;
   
   const processBattleMutations = (mutations) => {
-    // Skip if Board Analyzer is running
-    if (window.__modCoordination?.boardAnalyzerRunning) {
+    // Skip if Board Analyzer or Autoscroller is running
+    if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
       return;
     }
     
@@ -3340,7 +3337,7 @@ function startBattleBoardObserver() {
   if (globalThis.state?.board?.on) {
     try {
       newGameUnsubscribe = globalThis.state.board.on('emitNewGame', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning) return;
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
         console.log('[Better UI] New game started, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -3349,7 +3346,7 @@ function startBattleBoardObserver() {
       
       // Listen for game end event
       endGameUnsubscribe = globalThis.state.board.on('emitEndGame', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning) return;
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
         console.log('[Better UI] Game ended, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -3358,7 +3355,7 @@ function startBattleBoardObserver() {
       
       // Listen for auto-setup board event
       autoSetupUnsubscribe = globalThis.state.board.on('autoSetupBoard', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning) return;
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
         console.log('[Better UI] Auto-setup detected, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -3377,7 +3374,7 @@ function startBattleBoardObserver() {
       let lastEnemyCount = 0;
       
       boardConfigUnsubscribe = globalThis.state.board.subscribe((state) => {
-        if (window.__modCoordination?.boardAnalyzerRunning) return;
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
         
         const boardConfig = state.context?.boardConfig;
         if (!boardConfig || !Array.isArray(boardConfig)) return;
