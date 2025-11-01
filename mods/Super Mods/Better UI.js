@@ -3690,8 +3690,6 @@ function enableAntiIdleSounds() {
     
     const el = document.createElement("audio");
     document.body.append(el);
-    el.muted = true;
-    el.volume = 0;
     el.loop = true;
     el.src = '/swoosh.mp3';
     
@@ -3700,7 +3698,7 @@ function enableAntiIdleSounds() {
     });
     
     antiIdleAudioElement = el;
-    console.log('[Better UI] Anti-idle sounds enabled');
+    console.log('[Better UI] Anti-idle sounds enabled - tab should show speaker icon');
   } catch (error) {
     console.error('[Better UI] Error enabling anti-idle sounds:', error);
   }
