@@ -345,421 +345,6 @@ class AnalysisState {
 // Create global analysis state instance
 const analysisState = new AnalysisState();
 
-// Chart rendering constants
-const CHART_BAR_WIDTH = 8;
-const CHART_BAR_SPACING = 4;
-const CHART_BATCH_SIZE = 10;
-const CHART_MIN_HEIGHT = 20;
-const CHART_MAX_HEIGHT = 120;
-
-// DOM optimization utility for batch operations
-class DOMOptimizer {
-  static createDocumentFragment() {
-    return document.createDocumentFragment();
-  }
-  
-  static batchAppend(parent, elements) {
-    const fragment = this.createDocumentFragment();
-    elements.forEach(element => {
-      if (element) {
-        fragment.appendChild(element);
-      }
-    });
-    parent.appendChild(fragment);
-  }
-  
-  static batchStyleUpdate(elements, styles) {
-    elements.forEach(element => {
-      if (element && element.style) {
-        Object.assign(element.style, styles);
-      }
-    });
-  }
-  
-  static batchTextUpdate(elements, text) {
-    elements.forEach(element => {
-      if (element) {
-        element.textContent = text;
-      }
-    });
-  }
-}
-
-// Event listener management utility
-class EventManager {
-  constructor() {
-    this.listeners = new Map();
-  }
-  
-  addListener(element, event, handler, options = {}) {
-    element.addEventListener(event, handler, options);
-    
-    if (!this.listeners.has(element)) {
-      this.listeners.set(element, []);
-    }
-    
-    this.listeners.get(element).push({ event, handler, options });
-  }
-  
-  removeListener(element, event, handler) {
-    element.removeEventListener(event, handler);
-    
-    if (this.listeners.has(element)) {
-      const listeners = this.listeners.get(element);
-      const index = listeners.findIndex(l => l.event === event && l.handler === handler);
-      if (index !== -1) {
-        listeners.splice(index, 1);
-      }
-    }
-  }
-  
-  removeAllListeners(element) {
-    if (this.listeners.has(element)) {
-      const listeners = this.listeners.get(element);
-      listeners.forEach(({ event, handler, options }) => {
-        element.removeEventListener(event, handler, options);
-      });
-      this.listeners.delete(element);
-    }
-  }
-  
-  cleanup() {
-    this.listeners.forEach((listeners, element) => {
-      listeners.forEach(({ event, handler, options }) => {
-        element.removeEventListener(event, handler, options);
-      });
-    });
-    this.listeners.clear();
-  }
-}
-
-// ChartRenderer class for efficient chart rendering
-class ChartRenderer {
-  constructor(container, attempts) {
-    this.container = container;
-    this.attempts = attempts;
-    this.eventManager = new EventManager();
-    this.currentSort = 'runs';
-  }
-  
-  render() {
-    try {
-      // Create chart container
-      const chartContainer = document.createElement('div');
-      chartContainer.style.cssText = 'margin-top: 20px; border: 1px solid #333; padding: 10px; height: 200px; position: relative; overflow: hidden;';
-      
-      // Create all chart elements
-      const chartClickableNote = document.createElement('div');
-      chartClickableNote.textContent = 'Click bars to view details';
-      chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
-      
-      // Create sorting buttons and scrollable chart area
-      this.createSortButtons(chartContainer);
-      this.createScrollableChart(chartContainer);
-      
-      // Batch append all elements to container
-      DOMOptimizer.batchAppend(this.container, [chartClickableNote, chartContainer]);
-      
-      // Initial render
-      this.renderChart();
-      
-    } catch (error) {
-      console.error('[Rank Pointer] Error creating chart:', error);
-      this.showChartError();
-    }
-  }
-  
-  createSortButtons(container) {
-    const sortButtonsContainer = document.createElement('div');
-    sortButtonsContainer.style.cssText = 'display: flex; gap: 5px; margin-bottom: 10px; justify-content: center;';
-    
-    const buttons = [
-      { text: 'All Attempts', sortType: 'runs' },
-      { text: 'Sort by Time', sortType: 'time' },
-      { text: 'Sort by Ranks', sortType: 'ranks' }
-    ];
-    
-    buttons.forEach(({ text, sortType }) => {
-      const button = document.createElement('button');
-      button.textContent = text;
-      button.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-      button.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px;';
-      
-      if (sortType === this.currentSort) {
-        button.style.backgroundColor = '#4a5';
-      }
-      
-      this.addEventListener(button, 'click', () => {
-        this.updateSortButtons(sortButtonsContainer, button);
-        this.currentSort = sortType;
-        this.renderChart();
-      });
-      
-      sortButtonsContainer.appendChild(button);
-    });
-    
-    container.appendChild(sortButtonsContainer);
-  }
-  
-  createScrollableChart(container) {
-    // Create bars container
-    const barsContainer = document.createElement('div');
-    barsContainer.style.cssText = 'height: 150px; position: relative;';
-    
-    // Create scrollable wrapper
-    const scrollWrapper = document.createElement('div');
-    scrollWrapper.style.cssText = `
-      width: 246px; 
-      height: 150px; 
-      overflow-x: auto; 
-      overflow-y: hidden;
-      border: 1px solid #555;
-      border-radius: 4px;
-      position: relative;
-      padding-left: 2px;
-      padding-right: 2px;
-    `;
-    
-    scrollWrapper.appendChild(barsContainer);
-    container.appendChild(scrollWrapper);
-    
-    // Store references for later use
-    this.barsContainer = barsContainer;
-    this.scrollWrapper = scrollWrapper;
-  }
-  
-  updateSortButtons(container, activeButton) {
-    container.querySelectorAll('button').forEach(btn => {
-      btn.style.backgroundColor = '';
-    });
-    activeButton.style.backgroundColor = '#4a5';
-  }
-  
-  renderChart() {
-    if (!this.barsContainer) return;
-    
-    // Clear existing bars
-    this.barsContainer.innerHTML = '';
-    
-    // Sort attempts based on current sort type
-    const sortedAttempts = this.getSortedAttempts();
-    
-    // Calculate dimensions
-    const spacing = CHART_BAR_SPACING;
-    const barWidth = CHART_BAR_WIDTH;
-    const totalChartWidth = sortedAttempts.length * (barWidth + spacing) - spacing;
-    
-    // Update container width
-    this.barsContainer.style.width = `${totalChartWidth}px`;
-    
-    // Find max ticks for scaling - ensure it's at least 1 to avoid divide by zero
-    const maxTicks = Math.max(1, ...sortedAttempts.map(a => a.ticks));
-    
-    // Render bars asynchronously to prevent UI blocking
-    this.renderBarsAsync(sortedAttempts, maxTicks, spacing, barWidth);
-  }
-  
-  getSortedAttempts() {
-    switch (this.currentSort) {
-      case 'time':
-        return [...this.attempts].sort((a, b) => {
-          // Failed attempts always go last
-          if (!a.completed && b.completed) return 1;
-          if (a.completed && !b.completed) return -1;
-          // Sort by ticks
-          return a.ticks - b.ticks;
-        });
-      case 'ranks':
-        return [...this.attempts].sort((a, b) => {
-          // Failed attempts always go last
-          if (!a.completed && b.completed) return 1;
-          if (a.completed && !b.completed) return -1;
-          // Both failed, sort by ticks
-          if (!a.completed && !b.completed) return a.ticks - b.ticks;
-          
-          if (a.grade === 'S+' && b.grade !== 'S+') return -1;
-          if (a.grade !== 'S+' && b.grade === 'S+') return 1;
-          if (a.grade === 'S+' && b.grade === 'S+') {
-            // First sort by rank points (highest first)
-            const rankDiff = (b.rankPoints || 0) - (a.rankPoints || 0);
-            if (rankDiff !== 0) return rankDiff;
-            // Then sort by ticks (lowest first)
-            return a.ticks - b.ticks;
-          }
-          // For non-S+ grades, sort by grade first
-          const gradeOrder = { 'S': 1, 'A': 2, 'B': 3, 'C': 4, 'D': 5, 'E': 6 };
-          const gradeDiff = (gradeOrder[a.grade] || 999) - (gradeOrder[b.grade] || 999);
-          if (gradeDiff !== 0) return gradeDiff;
-          // Then sort by ticks (lowest first)
-          return a.ticks - b.ticks;
-        });
-      default:
-        return [...this.attempts];
-    }
-  }
-  
-  async renderBarsAsync(sortedAttempts, maxTicks, spacing, barWidth) {
-    const batchSize = CHART_BATCH_SIZE;
-    
-    for (let i = 0; i < sortedAttempts.length; i += batchSize) {
-      const batch = sortedAttempts.slice(i, i + batchSize);
-      
-      // Use requestAnimationFrame to prevent UI blocking
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      
-      // Create document fragment for batch DOM operations
-      const fragment = DOMOptimizer.createDocumentFragment();
-      
-      batch.forEach((attempt, batchIndex) => {
-        const index = i + batchIndex;
-        const bar = this.createBar(attempt, index, maxTicks, spacing, barWidth);
-        if (bar) {
-          fragment.appendChild(bar);
-        }
-      });
-      
-      // Batch append all bars in this batch
-      this.barsContainer.appendChild(fragment);
-    }
-  }
-  
-  createBar(attempt, index, maxTicks, spacing, barWidth) {
-    try {
-      const bar = document.createElement('div');
-      const height = Math.max(CHART_MIN_HEIGHT, Math.floor((attempt.ticks / maxTicks) * CHART_MAX_HEIGHT));
-      
-      // Determine bar color
-      const barColor = this.getBarColor(attempt);
-      
-      // Set bar styles
-      bar.style.cssText = `
-        position: absolute;
-        bottom: 0;
-        left: ${index * (barWidth + spacing)}px;
-        width: ${barWidth}px;
-        height: ${height}px;
-        background-color: ${barColor};
-        transition: height 0.3s ease;
-        cursor: pointer;
-        border: 1px solid transparent;
-        z-index: 1;
-        display: block;
-        box-sizing: border-box;
-      `;
-      
-      // Add hover effects
-      this.addEventListener(bar, 'mouseenter', () => {
-        bar.style.border = '1px solid white';
-        bar.style.transform = 'scale(1.1)';
-      });
-      
-      this.addEventListener(bar, 'mouseleave', () => {
-        bar.style.border = '1px solid transparent';
-        bar.style.transform = 'scale(1)';
-      });
-      
-      // Add tooltip
-      bar.title = this.createTooltipText(attempt);
-      
-      // Add click handler for copying seed/replay data (like Board Analyzer)
-      this.addEventListener(bar, 'click', () => {
-        this.handleBarClick(attempt);
-      });
-      
-      return bar;
-      
-    } catch (error) {
-      console.error(`[Rank Pointer] Error creating bar ${index}:`, error);
-      return null;
-    }
-  }
-  
-  getBarColor(attempt) {
-    if (attempt.completed) {
-      if (attempt.grade === 'S+' && attempt.rankPoints) {
-        const sPlusAttempts = this.attempts.filter(a => a.grade === 'S+' && a.rankPoints);
-        const highestRankPoints = sPlusAttempts.length > 0 ? 
-          Math.max(...sPlusAttempts.map(a => a.rankPoints)) : 0;
-        
-        const rankDifference = highestRankPoints - attempt.rankPoints;
-        const index = Math.max(0, Math.min(rankDifference, S_PLUS_COLORS.length - 1));
-        return S_PLUS_COLORS[index];
-      } else if (attempt.grade === 'S+') {
-        return '#FFD700';
-      } else {
-        return '#4CAF50';
-      }
-    } else {
-      return '#e74c3c';
-    }
-  }
-  
-  createTooltipText(attempt) {
-    let tooltipText = `Attempt ${attempt.attemptNumber}: ${attempt.ticks} ticks, Grade: `;
-    
-    if (attempt.grade === 'S+' && attempt.rankPoints) {
-      tooltipText += `S+${attempt.rankPoints}`;
-    } else {
-      tooltipText += attempt.grade;
-    }
-    
-    tooltipText += `, ${attempt.completed ? 'Victory' : 'Defeat'}`;
-    
-    if (attempt.seed) {
-      tooltipText += `, Seed: ${attempt.seed}`;
-    }
-    
-    tooltipText += `\nClick to copy replay data`;
-    
-    return tooltipText;
-  }
-  
-  handleBarClick(attempt) {
-    // Create replay data (like Board Analyzer does)
-    const replayData = createReplayDataForAttempt(attempt);
-    
-    if (replayData) {
-      const replayText = `$replay(${JSON.stringify(replayData)})`;
-      const success = copyToClipboard(replayText);
-      
-      if (success) {
-        showCopyNotification(`Copied attempt ${attempt.attemptNumber} replay data!`);
-      } else {
-        showCopyNotification('Failed to copy replay data', true);
-      }
-    } else {
-      // Fallback: if replay data fails, just copy seed
-      if (attempt.seed) {
-        const seedText = attempt.seed.toString();
-        const success = copyToClipboard(seedText);
-        
-        if (success) {
-          showCopyNotification(`Copied seed ${seedText} from attempt ${attempt.attemptNumber}!`);
-        } else {
-          showCopyNotification('Failed to copy seed', true);
-        }
-      } else {
-        showCopyNotification('No replay data or seed available for this attempt', true);
-      }
-    }
-  }
-  
-  showChartError() {
-    const errorMessage = document.createElement('div');
-    errorMessage.textContent = 'Error creating chart. Please check console for details.';
-    errorMessage.style.cssText = 'text-align: center; color: #e74c3c; margin-top: 15px; padding: 10px; border: 1px solid #e74c3c; border-radius: 4px;';
-    this.container.appendChild(errorMessage);
-  }
-  
-  addEventListener(element, event, handler) {
-    this.eventManager.addListener(element, event, handler);
-  }
-  
-  cleanup() {
-    this.eventManager.cleanup();
-  }
-}
-
 // Global variables to track game data
 let attemptCount = 0;
 let currentRunStartTime = null;
@@ -1662,6 +1247,25 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
       }
       
       console.log(`[Rank Pointer] Attempt ${attemptCount}: Starting game...`);
+      
+      // Wait for Bestiary Automator to finish any operations if in progress
+      let waitAttempts = 0;
+      while ((window.__modCoordination?.automatorRefilling || 
+              window.__modCoordination?.automatorCollectingRewards ||
+              window.__modCoordination?.automatorHandlingDaycare) && 
+             waitAttempts < 20) {
+        const operations = [];
+        if (window.__modCoordination?.automatorRefilling) operations.push('refilling stamina');
+        if (window.__modCoordination?.automatorCollectingRewards) operations.push('collecting rewards');
+        if (window.__modCoordination?.automatorHandlingDaycare) operations.push('handling daycare');
+        
+        console.log(`[Rank Pointer] Waiting for Bestiary Automator to finish ${operations.join(', ')}... (${waitAttempts + 1})`);
+        await sleep(500);
+        waitAttempts++;
+      }
+      if (waitAttempts > 0) {
+        console.log(`[Rank Pointer] Bestiary Automator finished operations, resuming analysis`);
+      }
       
       // Reset reward screen state before starting new game
       rewardScreenOpen = false;
@@ -3021,6 +2625,79 @@ function init() {
   console.log('[Rank Pointer] UI initialized');
 }
 
+// =======================
+// 7. Cleanup System
+// =======================
+
+function cleanupRankPointer() {
+  console.log('[Rank Pointer] Starting cleanup...');
+  
+  try {
+    // 1. Stop any running analysis
+    if (analysisState.isRunning()) {
+      console.log('[Rank Pointer] Stopping running analysis during cleanup');
+      analysisState.stop();
+    }
+    
+    // 2. Close all modals (also removes event listeners via DOM removal)
+    console.log('[Rank Pointer] Closing all modals...');
+    forceCloseAllModals();
+    
+    // 3. Cleanup all subscriptions
+    console.log('[Rank Pointer] Cleaning up subscriptions...');
+    cleanupBoardSubscription();
+    cleanupRewardsScreenSubscription();
+    
+    // 4. Cleanup game state tracker
+    if (gameStateTracker) {
+      console.log('[Rank Pointer] Cleaning up game state tracker...');
+      gameStateTracker.stopSubscription();
+      gameStateTracker = null;
+    }
+    
+    // 5. Reset analysis state
+    console.log('[Rank Pointer] Resetting analysis state...');
+    analysisState.reset();
+    
+    // 6. Clear global state variables
+    console.log('[Rank Pointer] Clearing global state...');
+    attemptCount = 0;
+    currentRunStartTime = null;
+    allAttempts = [];
+    pendingServerResults.clear();
+    defeatsCount = 0;
+    totalStaminaSpent = 0;
+    skipCount = 0;
+    skipInProgress = false;
+    rewardScreenOpen = false;
+    rewardScreenClosedCallback = null;
+    
+    // 7. Clear active modals references
+    activeRunningModal = null;
+    activeConfigPanel = null;
+    
+    // 8. Restore game board visibility if hidden
+    if (config.hideGameBoard) {
+      console.log('[Rank Pointer] Restoring game board visibility...');
+      const gameFrame = document.querySelector('main .frame-4');
+      if (gameFrame && gameFrame.style.display === 'none') {
+        gameFrame.style.display = '';
+      }
+    }
+    
+    // 9. Clear coordination flags
+    try {
+      if (window.__modCoordination) {
+        window.__modCoordination.rankPointerRunning = false;
+      }
+    } catch (_) {}
+    
+    console.log('[Rank Pointer] Cleanup completed successfully');
+  } catch (error) {
+    console.error('[Rank Pointer] Error during cleanup:', error);
+  }
+}
+
 // Initialize the mod (guard for API readiness)
 if (typeof api !== 'undefined' && api && api.ui && typeof api.ui.addButton === 'function') {
   init();
@@ -3043,6 +2720,7 @@ context.exports = {
     api.service.updateScriptConfig(context.hash, {
       hideGameBoard: config.hideGameBoard
     });
-  }
+  },
+  cleanup: cleanupRankPointer
 };
 

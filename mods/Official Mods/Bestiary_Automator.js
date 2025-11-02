@@ -471,6 +471,13 @@ const refillStaminaIfNeeded = async () => {
     
     console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
     
+    // Signal to other mods that we're refilling stamina (for coordination)
+    try {
+      window.__modCoordination = window.__modCoordination || {};
+      window.__modCoordination.automatorRefilling = true;
+      console.log('[Bestiary Automator] Set automatorRefilling flag - other mods should pause');
+    } catch (_) {}
+    
     // Choose method based on tab visibility
     if (document.hidden) {
       await refillStaminaSimple(elStamina);
@@ -478,8 +485,18 @@ const refillStaminaIfNeeded = async () => {
       await refillStaminaWithRetry(elStamina, staminaElement);
     }
     
+    // Clear the flag after refilling is complete
+    try {
+      window.__modCoordination.automatorRefilling = false;
+      console.log('[Bestiary Automator] Cleared automatorRefilling flag - other mods can resume');
+    } catch (_) {}
+    
   } catch (error) {
     console.error('[Bestiary Automator] Error refilling stamina:', error);
+    // Always clear the flag even on error
+    try {
+      window.__modCoordination.automatorRefilling = false;
+    } catch (_) {}
   }
 };
 
@@ -688,6 +705,13 @@ const takeRewardsIfAvailable = async () => {
     
     console.log(`[Bestiary Automator] Taking rewards at level ${currentLevel}`);
     
+    // Signal to other mods that we're collecting rewards (for coordination)
+    try {
+      window.__modCoordination = window.__modCoordination || {};
+      window.__modCoordination.automatorCollectingRewards = true;
+      console.log('[Bestiary Automator] Set automatorCollectingRewards flag - other mods should pause');
+    } catch (_) {}
+    
     // Open rewards menu
     globalThis.state.menu.send({
       type: 'setState',
@@ -714,8 +738,19 @@ const takeRewardsIfAvailable = async () => {
     
     // Check for scroll lock after collecting rewards
     await handleScrollLock();
+    
+    // Clear the flag after collecting is complete
+    try {
+      window.__modCoordination.automatorCollectingRewards = false;
+      console.log('[Bestiary Automator] Cleared automatorCollectingRewards flag - other mods can resume');
+    } catch (_) {}
+    
   } catch (error) {
     console.error('[Bestiary Automator] Error taking rewards:', error);
+    // Always clear the flag even on error
+    try {
+      window.__modCoordination.automatorCollectingRewards = false;
+    } catch (_) {}
   }
 };
 
@@ -1034,9 +1069,20 @@ const handleDayCare = async () => {
   if (window.__modCoordination?.boardAnalyzerRunning) return;
   
   try {
+    // Signal to other mods that we're handling daycare (for coordination)
+    try {
+      window.__modCoordination = window.__modCoordination || {};
+      window.__modCoordination.automatorHandlingDaycare = true;
+      console.log('[Bestiary Automator] Set automatorHandlingDaycare flag - other mods should pause');
+    } catch (_) {}
+    
     // Single query with early exit - if no blip elements, skip processing
     const blipElements = document.querySelectorAll('[data-blip="true"]');
     if (blipElements.length === 0) {
+      // Clear the flag if no daycare to handle
+      try {
+        window.__modCoordination.automatorHandlingDaycare = false;
+      } catch (_) {}
       return;
     }
     
@@ -1291,8 +1337,19 @@ const handleDayCare = async () => {
     
     // Check for scroll lock after daycare operations
     await handleScrollLock();
+    
+    // Clear the flag after daycare is complete
+    try {
+      window.__modCoordination.automatorHandlingDaycare = false;
+      console.log('[Bestiary Automator] Cleared automatorHandlingDaycare flag - other mods can resume');
+    } catch (_) {}
+    
   } catch (error) {
     console.error('[Bestiary Automator] Error handling day care:', error);
+    // Always clear the flag even on error
+    try {
+      window.__modCoordination.automatorHandlingDaycare = false;
+    } catch (_) {}
   }
 };
 

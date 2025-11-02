@@ -256,7 +256,31 @@
         const tbody = table.querySelector('tbody');
         if (!tbody) return;
         
-        const rows = tbody.querySelectorAll('tr');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        
+        // Sort rows by shiny status first, then rarity when showing all
+        if (filterValue === 'all') {
+            rows.sort((a, b) => {
+                const isShiny = (row) => {
+                    const img = row.querySelector('img');
+                    return img && img.src.includes('-shiny.png') ? 1 : 0;
+                };
+                
+                const getRarity = (row) => {
+                    const rarityElement = row.querySelector('.has-rarity');
+                    return rarityElement ? parseInt(rarityElement.getAttribute('data-rarity')) || 1 : 1;
+                };
+                
+                // Sort by shiny first (shiny = 1, non-shiny = 0), then by rarity
+                const shinyDiff = isShiny(b) - isShiny(a);
+                if (shinyDiff !== 0) return shinyDiff;
+                
+                return getRarity(b) - getRarity(a); // Then by rarity descending
+            });
+            
+            // Re-append rows in sorted order
+            rows.forEach(row => tbody.appendChild(row));
+        }
         
         rows.forEach(row => {
             const nameCell = row.querySelector('p.text-whiteHighlight');
@@ -289,7 +313,7 @@
         log('Applied filtering:', { 
             searchValue, 
             filterValue, 
-            visibleRows: Array.from(rows).filter(r => r.style.display !== 'none').length 
+            visibleRows: rows.filter(r => r.style.display !== 'none').length 
         });
     }
     
