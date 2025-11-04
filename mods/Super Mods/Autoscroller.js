@@ -3437,8 +3437,8 @@
     
     let targetButton = null;
     
-    // Look for summon scrolls in descending tier order (T5, T4, T3, T2, T1)
-    const tierOrder = ['summonscroll5.png', 'summonscroll4.png', 'summonscroll3.png', 'summonscroll2.png', 'summonscroll1.png'];
+    // Look for summon scrolls in descending tier order (T6, T5, T4, T3, T2, T1)
+    const tierOrder = ['summonscroll6.png', 'summonscroll5.png', 'summonscroll4.png', 'summonscroll3.png', 'summonscroll2.png', 'summonscroll1.png'];
     
     // Search through ALL buttons to find summon scrolls
     const summonScrollButtonsFound = [];

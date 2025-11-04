@@ -565,51 +565,138 @@
         }
     }
     
-    function removeMonstersFromLocalInventory(idsToRemove) {
+    async function removeMonstersFromLocalInventory(idsToRemove, retryCount = 0) {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 500;
+        const VERIFICATION_DELAY = 10; // ms - wait for state to update
+        
         try {
+            // Validation
             if (!Array.isArray(idsToRemove) || idsToRemove.length === 0) {
                 console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Invalid or empty IDs array provided`);
-                return;
+                return { success: false, removed: [] };
             }
             
-            if (!globalThis.state) {
-                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Global state not available`);
-                return;
+            // State checks
+            if (!globalThis.state?.player) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player state not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
             }
             
             const player = globalThis.state.player;
-            if (!player) {
-                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player state not available`);
-                return;
+            if (typeof player.send !== 'function' || typeof player.getSnapshot !== 'function') {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player methods not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
             }
             
-            if (typeof player.send !== 'function') {
-                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Player send method not available`);
-                return;
+            // Get pre-update state for verification
+            const preState = player.getSnapshot();
+            if (!preState?.context?.monsters || !Array.isArray(preState.context.monsters)) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Monsters array not available`);
+                inventoryUpdateTracker.recordFailure();
+                return { success: false, removed: [] };
             }
             
-            const currentState = player.getSnapshot?.();
-            if (!currentState?.context?.monsters) {
-                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Monsters array not available in current state`);
-                return;
-            }
+            const preCount = preState.context.monsters.length;
+            const idsToRemoveSet = new Set(idsToRemove);
+            const expectedRemovedCount = preState.context.monsters.filter(m => idsToRemoveSet.has(m.id)).length;
             
+            console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Attempting to remove ${idsToRemove.length} IDs. Found ${expectedRemovedCount} in current inventory (${preCount} total monsters)`);
+            
+            // Perform state update
             player.send({
                 type: "setState",
                 fn: (prev) => {
                     if (!prev || !Array.isArray(prev.monsters)) {
-                        console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Previous state or monsters array not available`);
+                        console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Invalid previous state`);
                         return prev;
                     }
                     
                     return {
                         ...prev,
-                        monsters: prev.monsters.filter(m => !idsToRemove.includes(m.id))
+                        monsters: prev.monsters.filter(m => !idsToRemoveSet.has(m.id))
                     };
                 },
             });
+            
+            // Wait for state to update
+            await new Promise(resolve => setTimeout(resolve, VERIFICATION_DELAY));
+            
+            // Verify the update
+            const postState = player.getSnapshot();
+            if (!postState?.context?.monsters) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Could not verify update - state unavailable`);
+                inventoryUpdateTracker.recordFailure();
+                
+                // Retry if we haven't exceeded max retries
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
+                }
+                
+                return { success: false, removed: [] };
+            }
+            
+            const postCount = postState.context.monsters.length;
+            
+            // Verify the removal was successful
+            const remainingIds = new Set(postState.context.monsters.map(m => m.id));
+            const actuallyRemoved = idsToRemove.filter(id => !remainingIds.has(id));
+            const notRemoved = idsToRemove.filter(id => remainingIds.has(id));
+            
+            if (actuallyRemoved.length === 0 && expectedRemovedCount > 0) {
+                // Nothing was removed but we expected removals - this is a failure
+                console.error(`[${modName}][ERROR][removeMonstersFromLocalInventory] Update failed - no monsters removed (expected ${expectedRemovedCount})`);
+                inventoryUpdateTracker.recordFailure();
+                
+                // Retry if we haven't exceeded max retries
+                if (retryCount < MAX_RETRIES) {
+                    console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
+                }
+                
+                return { success: false, removed: [] };
+            }
+            
+            // Log results
+            if (notRemoved.length > 0) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] ${notRemoved.length} IDs not found in inventory: ${notRemoved.join(', ')}`);
+            }
+            
+            if (actuallyRemoved.length > 0) {
+                console.log(`[${modName}][SUCCESS][removeMonstersFromLocalInventory] Removed ${actuallyRemoved.length} monsters. Inventory: ${preCount} -> ${postCount}`);
+                inventoryUpdateTracker.recordSuccess(actuallyRemoved.length);
+            }
+            
+            // Check if we should warn about too many failures
+            if (inventoryUpdateTracker.shouldForceRefresh()) {
+                console.warn(`[${modName}][WARN] Too many consecutive failures (${inventoryUpdateTracker.consecutiveFailures}). Consider refreshing inventory from server.`);
+            }
+            
+            return { 
+                success: actuallyRemoved.length > 0, 
+                removed: actuallyRemoved,
+                notFound: notRemoved,
+                preCount,
+                postCount
+            };
+            
         } catch (e) {
-            console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Failed to update local inventory for IDs: ${idsToRemove.join(', ')}`, e);
+            console.error(`[${modName}][ERROR][removeMonstersFromLocalInventory] Exception during update: ${e.message}`, e);
+            inventoryUpdateTracker.recordFailure();
+            
+            // Retry on exception if we haven't exceeded max retries
+            if (retryCount < MAX_RETRIES) {
+                console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
+                return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
+            }
+            
+            return { success: false, removed: [], error: e.message };
         }
     }
 
@@ -2001,6 +2088,36 @@
         console.log('[Autoseller] Dragon Plant API monitor setup complete');
     }
     
+    // Inventory update tracker for monitoring local inventory sync
+    const inventoryUpdateTracker = {
+        successCount: 0,
+        failureCount: 0,
+        consecutiveFailures: 0,
+        lastFailureTime: 0,
+        
+        reset() {
+            this.successCount = 0;
+            this.failureCount = 0;
+            this.consecutiveFailures = 0;
+        },
+        
+        recordSuccess(count) {
+            this.successCount += count;
+            this.consecutiveFailures = 0;
+        },
+        
+        recordFailure() {
+            this.failureCount++;
+            this.consecutiveFailures++;
+            this.lastFailureTime = Date.now();
+        },
+        
+        shouldForceRefresh() {
+            // Force refresh if 5 consecutive failures
+            return this.consecutiveFailures >= 5;
+        }
+    };
+    
     const stateManager = {
         sessionStats: {
             soldCount: 0,
@@ -2166,11 +2283,11 @@
                             
                             stateManager.updateSessionStats('sold', 1, goldReceived);
                             stateManager.markProcessed([id]);
-                            removeMonstersFromLocalInventory([id]);
+                            await removeMonstersFromLocalInventory([id]);
                         } else if (!result.success && result.status === 404) {
                             // 404 means creature no longer exists on server - always remove from local inventory
                             stateManager.markProcessed([id]);
-                            removeMonstersFromLocalInventory([id]);
+                            await removeMonstersFromLocalInventory([id]);
                         } else if (!result.success) {
                             console.warn(`[${modName}][WARN][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status}`);
                         }
@@ -2213,11 +2330,11 @@
                         
                         stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
                         stateManager.markProcessed(ids);
-                        removeMonstersFromLocalInventory(ids);
+                        await removeMonstersFromLocalInventory(ids);
                     } else if (!result.success && result.status === 404) {
                         // 404 means creatures no longer exist on server - always remove from local inventory
                         stateManager.markProcessed(ids);
-                        removeMonstersFromLocalInventory(ids);
+                        await removeMonstersFromLocalInventory(ids);
                     } else if (!result.success) {
                         console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
                         continue;

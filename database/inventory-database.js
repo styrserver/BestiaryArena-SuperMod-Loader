@@ -244,7 +244,7 @@ const inventoryTooltips = {
     text: 'Recycle 3 runes into a different random rune.',
     icon: '/assets/icons/rune-recycle.png',
     rarity: '3',
-    obtain: 'Runemaking'
+    obtain: 'Obtained from Blank Rune'
   },
   runeHp: {
     displayName: "Hitpoints Rune",
@@ -280,6 +280,34 @@ const inventoryTooltips = {
     icon: '/assets/icons/rune-mr.png',
     rarity: '5',
     obtain: 'Folda'
+  },
+  runeKaleidoscopic: {
+    displayName: "Kaleidoscopic Rune",
+    text: 'Fuse 2 shiny creatures into a Summon Scroll (Chromatic).',
+    icon: '/assets/icons/rune-monster-recycle.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune'
+  },
+  runeConversionHp: {
+    displayName: "Conversion Rune (hp)",
+    text: 'For a handful of dust you can convert any equipment stat to hitpoints.',
+    icon: '/assets/icons/rune-conversion-hp.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune'
+  },
+  runeConversionAd: {
+    displayName: "Conversion Rune (ad)",
+    text: 'For a handful of dust you can convert any equipment stat to attack damage.',
+    icon: '/assets/icons/rune-conversion-ad.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune'
+  },
+  runeConversionAp: {
+    displayName: "Conversion Rune (ap)",
+    text: 'For a handful of dust you can convert any equipment stat to ability power.',
+    icon: '/assets/icons/rune-conversion-ap.png',
+    rarity: '5',
+    obtain: 'Obtained from Blank Rune'
   },
 
   // =======================
@@ -407,7 +435,7 @@ const inventoryTooltips = {
 const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
-  'Runes': ['Blank Rune', 'Avarice Rune', 'Recycle Rune', 'Hitpoints Rune', 'Ability Power Rune', 'Attack Damage Rune', 'Armor Rune', 'Magic Resist Rune'],
+  'Runes': ['Blank Rune', 'Avarice Rune', 'Recycle Rune', 'Hitpoints Rune', 'Ability Power Rune', 'Attack Damage Rune', 'Armor Rune', 'Magic Resist Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
   'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
@@ -421,6 +449,7 @@ const INVENTORY_VARIANTS = {
   'Surprise Cubes': ['surpriseCube1', 'surpriseCube2', 'surpriseCube3', 'surpriseCube4', 'surpriseCube5'],
   'Beast Coins': ['beastCoins'], 'Dust': ['dust'], 'Gold': ['gold'], 'Hunting Marks': ['huntingMarks'],
   'Blank Rune': ['runeBlank'], 'Avarice Rune': ['runeAvarice'], 'Recycle Rune': ['runeRecycle'], 'Hitpoints Rune': ['runeHp'], 'Ability Power Rune': ['runeAp'], 'Attack Damage Rune': ['runeAd'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
+  'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
   'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
@@ -431,6 +460,7 @@ const INVENTORY_STATIC_ITEMS = {
   'gold': { name: 'Gold', rarity: '3' }, 'huntingMarks': { name: 'Hunting Marks', rarity: '4' },
   'runeBlank': { name: 'Blank Rune', rarity: '1' }, 'runeAvarice': { name: 'Avarice Rune', rarity: '2' }, 'runeRecycle': { name: 'Recycle Rune', rarity: '3' }, 'runeHp': { name: 'Hitpoints Rune', rarity: '5' }, 'runeAp': { name: 'Ability Power Rune', rarity: '5' }, 
   'runeAd': { name: 'Attack Damage Rune', rarity: '5' }, 'runeAr': { name: 'Armor Rune', rarity: '5' }, 'runeMr': { name: 'Magic Resist Rune', rarity: '5' },
+  'runeKaleidoscopic': { name: 'Kaleidoscopic Rune', rarity: '5' }, 'runeConversionHp': { name: 'Conversion Rune (hp)', rarity: '5' }, 'runeConversionAd': { name: 'Conversion Rune (ad)', rarity: '5' }, 'runeConversionAp': { name: 'Conversion Rune (ap)', rarity: '5' },
   'nicknameMonster': { name: 'Nickname Creature', rarity: '3' }, 'nicknameChange': { name: 'Change Nickname', rarity: '2' },
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },

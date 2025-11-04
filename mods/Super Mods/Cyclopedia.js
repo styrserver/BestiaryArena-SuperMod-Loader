@@ -9510,6 +9510,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               return container;
             });
             
+            // Clear any previous content
+            equipmentContainer.innerHTML = '';
+            equipmentContainer.textContent = '';
+            
             if (actor.equip && actor.equip.gameId) {
               // Create equipment icon using the game's UI components
               try {
@@ -9531,12 +9535,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                   
                   // Check if we got a valid DOM element
                   if (equipmentPortrait && equipmentPortrait.nodeType) {
+                    let portraitElement = null;
+                    
                     // If it's a button, get the first child (the actual portrait)
                     if (equipmentPortrait.tagName === 'BUTTON' && equipmentPortrait.firstChild) {
                       const firstChild = equipmentPortrait.firstChild;
                       if (firstChild && firstChild.nodeType) {
                         equipmentPortrait.removeChild(firstChild);
                         equipmentContainer.appendChild(firstChild);
+                        portraitElement = firstChild;
                       } else {
                         // Invalid first child, fallback to text
                         equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
@@ -9544,6 +9551,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     } else {
                       // Direct append if it's not a button
                       equipmentContainer.appendChild(equipmentPortrait);
+                      portraitElement = equipmentPortrait;
                     }
                     
                     // Style the equipment container
@@ -9554,6 +9562,34 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       width: 40px;
                       height: 40px;
                     `;
+                    
+                    // Add stat icon overlay inside the portrait element
+                    if (portraitElement) {
+                      // Ensure portrait has position: relative for absolute positioning of icon
+                      portraitElement.style.position = 'relative';
+                      
+                      const equipStat = actor.equip.stat || eqData?.metadata?.stat;
+                      if (equipStat && ['hp', 'ad', 'ap'].includes(equipStat)) {
+                        const statIcons = {
+                          hp: '/assets/icons/heal.png',
+                          ad: '/assets/icons/attackdamage.png',
+                          ap: '/assets/icons/abilitypower.png'
+                        };
+                        const statIcon = document.createElement('img');
+                        statIcon.src = statIcons[equipStat];
+                        statIcon.alt = equipStat.toUpperCase();
+                        statIcon.style.cssText = `
+                          position: absolute;
+                          bottom: 2px;
+                          left: 2px;
+                          width: 14px;
+                          height: 14px;
+                          pointer-events: none;
+                          z-index: 10;
+                        `;
+                        portraitElement.appendChild(statIcon);
+                      }
+                    }
                   } else {
                     // Invalid portrait returned, fallback to text
                     equipmentContainer.textContent = `T${actor.equip.tier || 1}`;
@@ -9704,8 +9740,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           countOverlay.style.backgroundSize = 'cover';
           countOverlay.style.backgroundPosition = 'center';
           countOverlay.style.color = '#ffffff';
-          countOverlay.style.fontSize = '12px';
+          countOverlay.style.fontSize = '10px';
           countOverlay.style.fontWeight = 'bold';
+          countOverlay.style.fontFamily = 'Arial, Helvetica, sans-serif';
           countOverlay.style.textAlign = 'center';
           countOverlay.style.padding = '4px 6px';
           countOverlay.style.borderRadius = '4px';

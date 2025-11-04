@@ -381,7 +381,7 @@ if (typeof browserAPI === 'undefined') {
       display: flex;
       flex-direction: row;
       gap: 10px;
-      z-index: 9999;
+      z-index: 100;
     `;
     
     // Create the mod buttons container
@@ -462,7 +462,7 @@ if (typeof browserAPI === 'undefined') {
       position: fixed;
       bottom: 60px; /* Posicionado acima do wrapper de botões */
       right: 10px;
-      z-index: 9999;
+      z-index: 100;
     `;
     
     document.body.appendChild(container);
