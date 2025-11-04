@@ -340,6 +340,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // === STORAGE USAGE DISPLAY ===
+  async function updateStorageUsage() {
+    try {
+      const storageElement = document.getElementById('storage-usage');
+      if (!storageElement) return;
+
+      let totalBytes = 0;
+      
+      // 1. Extension storage (chrome.storage.local/sync)
+      if (window.browserAPI.storage.local.getBytesInUse) {
+        totalBytes += await window.browserAPI.storage.local.getBytesInUse();
+      } else {
+        const allData = await window.browserAPI.storage.local.get(null);
+        totalBytes += new Blob([JSON.stringify(allData)]).size;
+      }
+      
+      // 2. localStorage estimate (need to query from content script or estimate)
+      try {
+        // Try to get from active tab's localStorage
+        const [tab] = await window.browserAPI.tabs.query({ active: true, currentWindow: true });
+        if (tab && tab.url && tab.url.includes('bestiaryarena.com')) {
+          const result = await window.browserAPI.tabs.sendMessage(tab.id, {
+            action: 'getStorageSizes'
+          }).catch(() => null);
+          
+          if (result && result.success) {
+            totalBytes += result.localStorageSize || 0;
+            totalBytes += result.indexedDBSize || 0;
+          }
+        }
+      } catch (e) {
+        // If we can't query tab, just show extension storage
+        originalConsoleLog('Could not query tab storage:', e);
+      }
+      
+      // Format bytes to human-readable
+      const formatBytes = (bytes) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      };
+      
+      storageElement.textContent = `Storage: ${formatBytes(totalBytes)}`;
+      
+      // Add color indicator if storage is getting high
+      if (totalBytes > 4 * 1024 * 1024) { // > 4MB
+        storageElement.style.color = '#ff9966';
+      } else if (totalBytes > 3 * 1024 * 1024) { // > 3MB
+        storageElement.style.color = '#ffe066';
+      } else {
+        storageElement.style.color = 'var(--theme-text-secondary, #aaa)';
+      }
+    } catch (error) {
+      console.error('Failed to calculate storage usage:', error);
+      const storageElement = document.getElementById('storage-usage');
+      if (storageElement) {
+        storageElement.textContent = 'Storage: unavailable';
+      }
+    }
+  }
+
   // === THEME SYNC WITH DASHBOARD ===
   function applyPopupTheme(themeName) {
     document.documentElement.setAttribute('data-theme', themeName || 'default');
@@ -464,6 +527,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Update version display
   await updateVersionDisplay();
   
+  // Update storage usage display
+  await updateStorageUsage();
+  
   await loadLocalMods();
   
   // Listen for changes to manualMods in storage and update the popup in real time
@@ -472,11 +538,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (area === 'local' && changes[MANUAL_MODS_KEY]) {
         loadLocalMods();
       }
+      // Update storage usage when any storage changes
+      if (area === 'local') {
+        updateStorageUsage();
+      }
     });
   } else if (window.chrome && window.chrome.storage && window.chrome.storage.onChanged) {
     window.chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes[MANUAL_MODS_KEY]) {
         loadLocalMods();
+      }
+      // Update storage usage when any storage changes
+      if (area === 'local') {
+        updateStorageUsage();
       }
     });
   }
@@ -484,6 +558,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Also reload mods when the popup gains focus (e.g., when the extension icon is clicked)
   window.addEventListener('focus', () => {
     loadLocalMods();
+    updateStorageUsage();
   });
   
 });
@@ -685,6 +760,8 @@ window.browserAPI.storage.onChanged.addListener((changes, area) => {
     if (changes.locale) {
       // Locale change handling removed - no i18n support
     }
+    // Update storage usage on any local storage change
+    updateStorageUsage();
   }
 });
 
@@ -702,6 +779,7 @@ document.getElementById('reload-mods-btn')?.addEventListener('click', async () =
     }
     await new Promise(res => setTimeout(res, 50));
     await loadLocalMods();
+    await updateStorageUsage();
     alert('Local mods reset!');
   } catch (e) {
     alert('Failed to reset local mods.');
@@ -723,6 +801,7 @@ document.getElementById('reset-all-btn')?.addEventListener('click', async () => 
       window.localStorage.clear();
     }
     await loadLocalMods();
+    await updateStorageUsage();
     alert('All mod loader data reset!');
     window.location.reload();
   } catch (e) {

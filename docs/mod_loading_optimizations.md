@@ -40,8 +40,8 @@ The system follows this exact order:
 1. **Core Scripts**: `content/client.js`, `content/local_mods.js`, `content/ba-sandbox-utils.mjs`
 2. **Active Scripts** (remote/URL-based mods)
 3. **Local Mods** (in order):
-   - **Official Mods** (1-11)
-   - **Super Mods** (12-14)
+   - **Official Mods**
+   - **Super Mods**
    - **User-Generated Scripts** (from localStorage)
 
 ## Benefits

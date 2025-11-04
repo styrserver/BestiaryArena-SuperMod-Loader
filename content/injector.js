@@ -245,6 +245,71 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
+  if (message.action === 'getStorageSizes') {
+    // Calculate localStorage and IndexedDB sizes
+    (async () => {
+      try {
+        let localStorageSize = 0;
+        let indexedDBSize = 0;
+        
+        // Calculate localStorage size
+        try {
+          const localStorageData = JSON.stringify(localStorage);
+          localStorageSize = new Blob([localStorageData]).size;
+        } catch (e) {
+          console.warn('Could not calculate localStorage size:', e);
+        }
+        
+        // Calculate IndexedDB size (estimate)
+        try {
+          const databases = await window.indexedDB.databases();
+          for (const dbInfo of databases) {
+            if (dbInfo.name === 'BoardAdvisorDB' || dbInfo.name.includes('bestiary')) {
+              const request = indexedDB.open(dbInfo.name);
+              await new Promise((resolve, reject) => {
+                request.onsuccess = async (event) => {
+                  const db = event.target.result;
+                  try {
+                    for (const storeName of db.objectStoreNames) {
+                      const transaction = db.transaction(storeName, 'readonly');
+                      const store = transaction.objectStore(storeName);
+                      const getAllRequest = store.getAll();
+                      await new Promise((resolveStore) => {
+                        getAllRequest.onsuccess = () => {
+                          const data = getAllRequest.result;
+                          indexedDBSize += new Blob([JSON.stringify(data)]).size;
+                          resolveStore();
+                        };
+                        getAllRequest.onerror = () => resolveStore();
+                      });
+                    }
+                  } catch (e) {
+                    console.warn('Error reading IndexedDB store:', e);
+                  }
+                  db.close();
+                  resolve();
+                };
+                request.onerror = () => resolve();
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('Could not calculate IndexedDB size:', e);
+        }
+        
+        sendResponse({ 
+          success: true, 
+          localStorageSize, 
+          indexedDBSize 
+        });
+      } catch (error) {
+        console.error('Error calculating storage sizes:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Async response
+  }
+  
   if (message.action === 'executeScript') {
     console.log(`Executing script: ${message.hash}`);
     window.postMessage({

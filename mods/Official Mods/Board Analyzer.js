@@ -40,6 +40,7 @@ const CHART_BAR_SPACING = 4;
 const CHART_BATCH_SIZE = 10;
 const CHART_MIN_HEIGHT = 20;
 const CHART_MAX_HEIGHT = 120;
+const CHART_MAX_BARS = 1000; // Limit chart to prevent performance issues with large analyses
 
 // Modal constants
 const MODAL_TYPES = {
@@ -91,6 +92,11 @@ class ModalManager {
     const modal = this.activeModals.get(id);
     if (modal) {
       try {
+        // Call modal's cleanup function if it exists
+        if (typeof modal.cleanup === 'function') {
+          modal.cleanup();
+        }
+        
         if (typeof modal.close === 'function') {
           modal.close();
         } else if (modal.element && typeof modal.element.remove === 'function') {
@@ -115,6 +121,11 @@ class ModalManager {
     try {
       this.activeModals.forEach((modal, id) => {
         try {
+          // Call modal's cleanup function if it exists
+          if (typeof modal.cleanup === 'function') {
+            modal.cleanup();
+          }
+          
           if (typeof modal.close === 'function') {
             modal.close();
           } else if (modal.element && typeof modal.element.remove === 'function') {
@@ -143,6 +154,11 @@ class ModalManager {
       this.activeModals.forEach((modal, id) => {
         try {
           if (modal && modal.type === type) {
+            // Call modal's cleanup function if it exists
+            if (typeof modal.cleanup === 'function') {
+              modal.cleanup();
+            }
+            
             if (typeof modal.close === 'function') {
               modal.close();
             } else if (modal.element && typeof modal.element.remove === 'function') {
@@ -202,7 +218,7 @@ class DOMOptimizer {
 // Event listener management utility
 class EventManager {
   constructor() {
-    this.listeners = new Map();
+    this.listeners = new WeakMap(); // Use WeakMap to allow garbage collection of DOM elements
   }
   
   addListener(element, event, handler, options = {}) {
@@ -238,16 +254,9 @@ class EventManager {
   }
   
   cleanup() {
-    this.listeners.forEach((listeners, element) => {
-      listeners.forEach(({ event, handler, options }) => {
-        element.removeEventListener(event, handler, options);
-      });
-    });
-    this.listeners.clear();
+    // WeakMap doesn't support iteration, but DOM elements will be garbage collected automatically
   }
 }
-
-
 
 // AnalysisState class for proper state management
 class AnalysisState {
@@ -308,11 +317,67 @@ const analysisState = new AnalysisState();
 
 // ChartRenderer class for efficient chart rendering
 class ChartRenderer {
-  constructor(container, results) {
+  constructor(container, results, onBarClick) {
     this.container = container;
-    this.results = results;
+    
+    // Pre-calculate highest rank points once to avoid repeated filtering
+    const sPlusResults = results.filter(r => r.grade === 'S+' && r.rankPoints);
+    this.highestRankPoints = sPlusResults.length > 0 ? 
+      Math.max(...sPlusResults.map(r => r.rankPoints)) : 0;
+    
+    // Store only minimal data needed for display (not full board data)
+    this.displayData = results.map((r, i) => ({
+      originalIndex: i,  // Track original run number
+      ticks: r.ticks,
+      grade: r.grade,
+      rankPoints: r.rankPoints,
+      completed: r.completed,
+      seed: r.seed
+    }));
+    
+    this.fullResultsCount = results.length;
     this.eventManager = new EventManager();
     this.currentSort = 'runs';
+    this.onBarClick = onBarClick; // Callback to access full results when needed
+  }
+  
+  // Sample results if there are too many for performance
+  sampleResults(results, isSorted = false) {
+    if (results.length <= CHART_MAX_BARS) {
+      return results;
+    }
+    
+    // For sorted views (time/rank), just take the top results
+    if (isSorted) {
+      console.log(`[Board Analyzer] Chart: Showing top ${CHART_MAX_BARS} of ${results.length} results`);
+      return results.slice(0, CHART_MAX_BARS);
+    }
+    
+    // For "All Runs" view, use smart sampling that includes best runs
+    const sampled = new Set();
+    
+    // Always include top performers by time (completed runs first)
+    const sortedByTime = [...results].sort((a, b) => {
+      if (a.completed !== b.completed) return b.completed - a.completed;
+      return a.ticks - b.ticks;
+    });
+    const topCount = Math.min(100, Math.floor(CHART_MAX_BARS * 0.1));
+    for (let i = 0; i < topCount; i++) {
+      sampled.add(sortedByTime[i]);
+    }
+    
+    // Fill remaining with even sampling to maintain overview
+    const remaining = CHART_MAX_BARS - sampled.size;
+    const step = results.length / remaining;
+    for (let i = 0; i < results.length && sampled.size < CHART_MAX_BARS; i += step) {
+      sampled.add(results[Math.floor(i)]);
+    }
+    
+    // Convert back to array and restore original order
+    const sampledArray = Array.from(sampled).sort((a, b) => a.originalIndex - b.originalIndex);
+    
+    console.log(`[Board Analyzer] Chart: Showing ${sampledArray.length} of ${results.length} results (top ${topCount} + sampling)`);
+    return sampledArray;
   }
   
   render() {
@@ -326,12 +391,15 @@ class ChartRenderer {
       chartClickableNote.textContent = t('mods.boardAnalyzer.chartTipMessage');
       chartClickableNote.style.cssText = 'text-align: center; color: #3498db; margin-bottom: 15px; font-size: 0.9em; font-weight: 500;';
       
+      const elementsToAppend = [chartClickableNote];
+      
       // Create sorting buttons and scrollable chart area
       this.createSortButtons(chartContainer);
       this.createScrollableChart(chartContainer);
       
       // Batch append all elements to container
-      DOMOptimizer.batchAppend(this.container, [chartClickableNote, chartContainer]);
+      elementsToAppend.push(chartContainer);
+      DOMOptimizer.batchAppend(this.container, elementsToAppend);
       
       // Initial render
       this.renderChart();
@@ -433,17 +501,21 @@ class ChartRenderer {
   }
   
   getSortedResults() {
+    let sorted;
+    const isSorted = this.currentSort !== 'runs';
+    
     switch (this.currentSort) {
       case 'time':
-        return [...this.results].sort((a, b) => {
+        sorted = [...this.displayData].sort((a, b) => {
           // F runs always go last
           if (a.grade === 'F' && b.grade !== 'F') return 1;
           if (a.grade !== 'F' && b.grade === 'F') return -1;
           // Sort by ticks
           return a.ticks - b.ticks;
         });
+        break;
       case 'splus':
-        return [...this.results].sort((a, b) => {
+        sorted = [...this.displayData].sort((a, b) => {
           // F runs always go last
           if (a.grade === 'F' && b.grade !== 'F') return 1;
           if (a.grade !== 'F' && b.grade === 'F') return -1;
@@ -466,9 +538,13 @@ class ChartRenderer {
           // Then sort by ticks (lowest first)
           return a.ticks - b.ticks;
         });
+        break;
       default:
-        return [...this.results];
+        sorted = [...this.displayData];
     }
+    
+    // Apply smart sampling (takes top results for sorted views)
+    return this.sampleResults(sorted, isSorted);
   }
   
   async renderBarsAsync(sortedResults, maxTicks, spacing, barWidth) {
@@ -550,11 +626,8 @@ class ChartRenderer {
   getBarColor(result) {
     if (result.completed) {
       if (result.grade === 'S+' && result.rankPoints) {
-        const sPlusResults = this.results.filter(r => r.grade === 'S+' && r.rankPoints);
-        const highestRankPoints = sPlusResults.length > 0 ? 
-          Math.max(...sPlusResults.map(r => r.rankPoints)) : 0;
-        
-        const rankDifference = highestRankPoints - result.rankPoints;
+        // Use pre-calculated value instead of filtering every time
+        const rankDifference = this.highestRankPoints - result.rankPoints;
         
         switch (rankDifference) {
           case 0: return '#FFD700';
@@ -578,7 +651,7 @@ class ChartRenderer {
   }
   
   createTooltipText(result) {
-    let tooltipText = `Run ${this.results.indexOf(result) + 1}: ${result.ticks} ticks, Grade: `;
+    let tooltipText = `Run ${result.originalIndex + 1}: ${result.ticks} ticks, Grade: `;
     
     if (result.grade === 'S+' && result.rankPoints) {
       tooltipText += `S+${result.rankPoints}`;
@@ -596,19 +669,8 @@ class ChartRenderer {
   }
   
   handleBarClick(result) {
-    const replayData = createReplayDataForRun(result);
-    
-    if (replayData) {
-      const replayText = `$replay(${JSON.stringify(replayData)})`;
-      const success = copyToClipboard(replayText);
-      
-      if (success) {
-        showCopyNotification(`Copied run ${this.results.indexOf(result) + 1} replay data!`);
-      } else {
-        showCopyNotification('Failed to copy replay data', true);
-      }
-    } else {
-      showCopyNotification('Failed to create replay data for this run', true);
+    if (this.onBarClick) {
+      this.onBarClick(result.originalIndex, result);
     }
   }
   
@@ -2022,7 +2084,11 @@ function updateStatusCallback(currentRun, totalRuns, statsCalculator, statusCall
 async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestRuns, timing) {
   // Generate a new unique seed for this run
   const runSeed = Math.floor((Date.now() * Math.random()) % 2147483647);
-  console.log(`Run ${runIndex} using generated seed: ${runSeed}`);
+  
+  // Only log every 100th run to avoid console spam on large analyses
+  if (runIndex % 100 === 0 || runIndex === 1) {
+    console.log(`Run ${runIndex} using generated seed: ${runSeed}`);
+  }
   
   try {
     // Start the game using direct state manipulation with embedded seed
@@ -2752,6 +2818,10 @@ function showResultsModal(results) {
   setTimeout(() => {
     const content = document.createElement('div');
     
+    // Create EventManager for modal's event listeners
+    const modalEventManager = new EventManager();
+    let chartRenderer = null;
+    
     // Add a partial results note if the analysis was forcefully stopped
     if (results.summary.forceStopped) {
       const partialNote = document.createElement('div');
@@ -2936,8 +3006,8 @@ function showResultsModal(results) {
       copyTargetTicksButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
       copyTargetTicksButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 20px;';
       
-      // Add click handler
-      copyTargetTicksButton.addEventListener('click', () => {
+      // Add click handler using EventManager
+      modalEventManager.addListener(copyTargetTicksButton, 'click', () => {
         // Get the board data
         const replayData = results.summary.targetTicksResult.board;
         
@@ -2981,8 +3051,24 @@ function showResultsModal(results) {
           results: results.results.slice(0, 5) // Log first 5 results for debugging
         });
         
-        // Use the new ChartRenderer class for better performance
-        const chartRenderer = new ChartRenderer(content, results.results);
+        // Use ChartRenderer with callback for replay generation
+        chartRenderer = new ChartRenderer(content, results.results, (originalIndex, displayResult) => {
+          const fullResult = results.results[originalIndex];
+          const replayData = createReplayDataForRun(fullResult);
+          
+          if (replayData) {
+            const replayText = `$replay(${JSON.stringify(replayData)})`;
+            const success = copyToClipboard(replayText);
+            
+            if (success) {
+              showCopyNotification(`Copied run ${originalIndex + 1} replay data!`);
+            } else {
+              showCopyNotification('Failed to copy replay data', true);
+            }
+          } else {
+            showCopyNotification('Failed to create replay data for this run', true);
+          }
+        });
         chartRenderer.render();
       
       } catch (error) {
@@ -3002,6 +3088,50 @@ function showResultsModal(results) {
       content.appendChild(noResultsMessage);
     }
     
+    // Flag to prevent double cleanup
+    let isCleanedUp = false;
+    
+    // Cleanup function for when modal closes
+    const cleanupResultsModal = () => {
+      // Prevent double cleanup
+      if (isCleanedUp) {
+        return;
+      }
+      isCleanedUp = true;
+      
+      // Clean up chart renderer event listeners
+      if (chartRenderer) {
+        chartRenderer.cleanup();
+        console.log('[Board Analyzer] ChartRenderer cleaned up');
+      }
+      
+      // Clean up modal's own event listeners
+      modalEventManager.cleanup();
+      console.log('[Board Analyzer] Modal event listeners cleaned up');
+      
+      // Remove ESC key listener
+      if (escKeyListener) {
+        document.removeEventListener('keydown', escKeyListener);
+      }
+      
+      // Clear global results to free memory when modal closes
+      if (window.__boardAnalyzerResults) {
+        window.__boardAnalyzerResults = null;
+        console.log('[Board Analyzer] Global results cleared from memory');
+      }
+      
+      // One more check for lingering modals when user closes results
+      forceCloseAllModals();
+    };
+    
+    // Add ESC key listener to handle closing via ESC
+    const escKeyListener = (e) => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        cleanupResultsModal();
+      }
+    };
+    document.addEventListener('keydown', escKeyListener);
+    
     // Show the results modal with a callback to clean up when closed
     const resultsModal = api.ui.components.createModal({
       title: t('mods.boardAnalyzer.resultTitle'),
@@ -3011,16 +3141,17 @@ function showResultsModal(results) {
         {
           text: t('mods.boardAnalyzer.closeButton'),
           primary: true,
-          onClick: () => {
-            // One more check for lingering modals when user closes results
-            forceCloseAllModals();
-          }
+          onClick: cleanupResultsModal
         }
       ]
     });
     
     // Register results modal with modal manager
     resultsModal.type = MODAL_TYPES.RESULTS;
+    
+    // Store cleanup function with modal so it can be called when modal is force-closed
+    resultsModal.cleanup = cleanupResultsModal;
+    
     modalManager.register('results-modal', resultsModal);
     
     return resultsModal;
@@ -3292,6 +3423,12 @@ async function runAnalysis() {
     console.log('Results summary:', results.summary);
     console.log('Force stopped:', results.summary.forceStopped);
     console.log('Total runs completed:', results.summary.totalRuns);
+    
+    // Clear old results before storing new ones to prevent memory accumulation
+    if (window.__boardAnalyzerResults) {
+      console.log('[Board Analyzer] Clearing old results from memory');
+      window.__boardAnalyzerResults = null;
+    }
     
     // Store results globally for Board Advisor to access
     window.__boardAnalyzerResults = results;
