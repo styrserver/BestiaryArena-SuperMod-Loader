@@ -4626,6 +4626,8 @@ function createRaidMapSelection() {
                 height: 16px;
                 accent-color: ${COLOR_ACCENT};
             `, { checked: isChecked });
+            // Add auto-save listener for both static and event raids
+            checkbox.addEventListener('change', autoSaveSettings);
             
             const label = document.createElement('label');
             label.textContent = raidName;
