@@ -839,8 +839,8 @@ function showEditLabelsModal() {
                         window.location.href.includes('/pt/');
     
     const noticeText = isPortuguese 
-      ? '<strong>AVISO:</strong> Use o <strong>Configurador</strong> no cabeçalho para fazer backup dos seus rótulos de configuração antes de fazer alterações!'
-      : '<strong>NOTICE:</strong> Use the <strong>Configurator</strong> in the header to backup your setup labels before making changes!';
+      ? '<strong>AVISO:</strong> Use <strong>Configurações</strong> no cabeçalho (aba Backup) para fazer backup dos seus rótulos de configuração antes de fazer alterações!'
+      : '<strong>NOTICE:</strong> Use <strong>Settings</strong> in the header (Backup tab) to backup your setup labels before making changes!';
     
     reminder.innerHTML = noticeText;
     reminder.style.cssText = 'margin: 0 0 15px 0; font-size: 14px; text-align: center; color: #fff; line-height: 1.4; font-weight: normal;';

@@ -138,13 +138,12 @@ async function scanAndRegisterLocalMods() {
     { name: 'Better Hy\'genie.js', enabled: true },
     { name: 'Better Setups.js', enabled: true },
     { name: 'Better Tasker.js', enabled: true },
-    { name: 'Better UI.js', enabled: true },
     { name: 'Better Yasir.js', enabled: true },
     { name: 'Board Advisor.js', enabled: true },
-    { name: 'Configurator.js', enabled: true },
     { name: 'Cyclopedia.js', enabled: true },
     { name: 'Dice_Roller.js', enabled: true },
     { name: 'Hunt Analyzer.js', enabled: true },
+    { name: 'Mod Settings.js', enabled: true },
     { name: 'Raid_Hunter.js', enabled: true },
     { name: 'Rank Pointer.js', enabled: true },
     { name: 'RunTracker.js', enabled: true }
@@ -278,15 +277,13 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Better Hy\'genie.js',
     'Better Setups.js',
     'Better Tasker.js',
-    'Better UI.js',
     'Better Yasir.js',
     'Board Advisor.js',
-    'Configurator.js',
     'Cyclopedia.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
+    'Mod Settings.js',
     'Outfiter.js',
-    'Playercount.js',
     'Raid_Hunter.js',
     'Rank Pointer.js',
     'RunTracker.js'
@@ -299,9 +296,9 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'creature-database.js',
     'equipment-database.js',
     'maps-database.js',
+    'Mod Settings.js',
     'RunTracker.js',
-    'Outfiter.js',
-    'Playercount.js'
+    'Outfiter.js'
   ];
 
 // Helper to normalize mod names for comparison

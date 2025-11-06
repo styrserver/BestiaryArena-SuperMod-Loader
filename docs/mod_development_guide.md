@@ -59,7 +59,7 @@ If you're developing a mod to be included with the extension (not a user-generat
 ```javascript
 export const SUPER_MODS = [
   'Autoseller.js',
-  'Better UI.js',
+  'Mod Settings.js',
   'Your New Mod.js',  // ← Add here
   // ...
 ];
@@ -76,7 +76,7 @@ const modFiles = [
 // Location 2: In superModNames array
 const superModNames = [
   'Autoseller.js',
-  'Better UI.js',
+  'Mod Settings.js',
   'Your New Mod.js',  // ← And here
   // ...
 ];
@@ -86,7 +86,7 @@ const superModNames = [
 ```javascript
 const superModNames = [
   'Autoseller.js',
-  'Better UI.js',
+  'Mod Settings.js',
   'Your New Mod.js',  // ← Add here
   // ...
 ];

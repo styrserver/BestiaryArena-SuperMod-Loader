@@ -67,9 +67,9 @@ async function loadDefaultEnabledMods() {
       'Official Mods/Team_Copier.js',
       'Official Mods/Tick_Tracker.js',
       'Official Mods/Turbo Mode.js',
+      'Super Mods/Mod Settings.js',
       'Super Mods/RunTracker.js',
-      'Super Mods/Outfiter.js',
-      'Super Mods/Playercount.js'
+      'Super Mods/Outfiter.js'
     ];
   } catch (error) {
     console.error('[Background] Error loading default enabled mods from registry:', error);
@@ -91,9 +91,9 @@ async function loadDefaultEnabledMods() {
       'Official Mods/Team_Copier.js',
       'Official Mods/Tick_Tracker.js',
       'Official Mods/Turbo Mode.js',
+      'Super Mods/Mod Settings.js',
       'Super Mods/RunTracker.js',
-      'Super Mods/Outfiter.js',
-      'Super Mods/Playercount.js'
+      'Super Mods/Outfiter.js'
     ];
   }
 }
@@ -1021,7 +1021,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const modCounts = {
           database: 5,
           official: 11,
-          super: 23
+          super: 21
         };
         
         sendResponse({ success: true, counts: modCounts });

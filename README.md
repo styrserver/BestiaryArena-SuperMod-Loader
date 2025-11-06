@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 21 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -206,6 +206,14 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 - Automatically refreshes inventory counts and UI after fusion
 - Smart fusion ratio calculations for optimal resource usage
 
+#### Better Yasir
+Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
+- Adds quantity input fields for bulk buying and selling items
+- Real-time price calculations and resource availability checks
+- Confirmation prompts with total cost display for safe transactions
+- Automatic inventory and currency updates after purchases
+- Smart handling of different item types (dice manipulators, exaltation chests, stones of insight)
+
 #### Better Setups
 Comprehensive setup label management system for organizing team configurations:
 - Activates and manages setup labels (Farm, Speedrun, Rank Points, Boosted Map, Other)
@@ -222,21 +230,13 @@ Advanced quest automation system that streamlines task completion and management
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
 
-#### Better UI
-Enhances the game's user interface with quality-of-life improvements:
+#### Mod Settings
+Centralized mod configuration and backup system with UI enhancements:
 - Stamina timer showing exact time when stamina will be full with real-time tracking
 - Visual enhancements: Max Creatures and Shinies highlighting with 6 customizable color themes (Prismatic, Demonic, Frosty, Venomous, Divine, Undead)
 - Favorites system to mark creatures with custom symbols (heart or stat icons) and Shiny Enemies feature for battles
-- Setup labels visibility toggle with configurable features through integrated settings panel
-- Settings button in currency section for quick access and seamless integration with native UI
-
-#### Better Yasir
-Enhances the Yasir shop interface with advanced features and improved usability:
-- Add quantity input fields for buying and selling items
-- Real-time price calculations and resource tracking
-- Enhanced UI with better visual feedback and confirmation prompts
-- Automatic inventory updates after transactions
-- Support for all item types including equipment, consumables, and special items
+- Live player count display in header with 30-second updates and setup labels visibility toggle
+- Backup/restore configuration including active mods, settings, and game data with integrated settings panel
 
 #### Board Advisor
 Advanced board analysis and recommendations system:
@@ -245,14 +245,6 @@ Advanced board analysis and recommendations system:
 - Learning from successful runs to improve recommendations
 - Automatic analysis when board changes
 - Configurable analysis depth and recommendation thresholds
-
-#### Configurator
-Handles import/export of configuration data for the mod loader:
-- Export complete configuration including active mods, settings, and game data
-- Import configuration files to restore mod settings and game state
-- Backup and restore localStorage data (setup labels, autoseller settings, etc.)
-- User-friendly summary of what will be imported/exported
-- Safe configuration management with confirmation dialogs
 
 #### Cyclopedia
 A comprehensive game data viewer and player profile manager with advanced features:
@@ -286,14 +278,6 @@ Comprehensive outfit management system:
 - Outfit storage and retrieval system
 - Integration with game's outfit system
 
-#### Playercount
-Displays live player count in the game header:
-- Real-time player count updates every 30 seconds
-- Shows current online player count in the header
-- Automatic API integration with the game's player count endpoint
-- Visual indicators for connection status and last update time
-- Non-intrusive display that integrates seamlessly with the existing header
-
 #### Raid Hunter
 Advanced raid automation system for Bestiary Arena:
 - Automatically detects and joins available raids based on user preferences with regional organization
@@ -308,6 +292,7 @@ Automates repeated manual runs until victory or a target S+ rank:
 - Tracks attempts, defeats, stamina spent, and rank points
 - Optional target: stop on S+X based on map and team size
 - Copy replay/seed from the results modal
+- Streamlines rank grinding for efficient progression and S+ achievement
 
 #### RunTracker
 Local run data tracking and storage system:

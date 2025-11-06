@@ -264,9 +264,9 @@ let defaultEnabledMods = [
   'Official Mods/Tick_Tracker.js',
   'Official Mods/Turbo Mode.js',
   // Hidden Super Mods - enabled by default since users can't toggle them in popup
+  'Super Mods/Mod Settings.js',
   'Super Mods/RunTracker.js',
-  'Super Mods/Outfiter.js',
-  'Super Mods/Playercount.js'
+  'Super Mods/Outfiter.js'
   // All other Super Mods are disabled by default - users must manually enable them
 ];
 

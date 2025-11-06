@@ -2361,13 +2361,13 @@ function addCyclopediaHeaderButton() {
           }
         };
         li.appendChild(btn);
-        const configuratorLi = Array.from(headerUl.children).find(
-          el => el.querySelector('button') && el.textContent.includes('Configurator')
+        const settingsLi = Array.from(headerUl.children).find(
+          el => el.querySelector('button.mod-settings-header-btn')
         );
-        if (configuratorLi && configuratorLi.nextSibling) {
-          headerUl.insertBefore(li, configuratorLi.nextSibling);
+        if (settingsLi && settingsLi.nextSibling) {
+          headerUl.insertBefore(li, settingsLi.nextSibling);
         } else {
-          // Fallback: Insert after Trophy Room (English) or Sala de Troféus (Portuguese) if Configurator not found
+          // Fallback: Insert after Trophy Room (English) or Sala de Troféus (Portuguese) if Settings not found
           const trophyRoomLi = Array.from(headerUl.children).find(
             el => el.querySelector('button') && (el.textContent.includes('Trophy Room') || el.textContent.includes('Sala de Trof'))
           );
@@ -5312,7 +5312,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         const organizedRooms = organizeRoomsByRegion(rooms, ROOM_NAMES);
 
         Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
-          const regionHeader = DOMUtils.createTitle(regionName, FONT_CONSTANTS.SIZES.SMALL);
+          const regionHeader = DOMUtils.createTitle(`${regionName} (${regionRooms.length} maps)`, FONT_CONSTANTS.SIZES.SMALL);
           Object.assign(regionHeader.style, {
             margin: '8px 0 4px 0',
             width: '100%',
@@ -5330,6 +5330,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           roomEntry.style.cssText = `
             display: grid;
             grid-template-columns: 80px 1fr;
+            align-items: center;
             gap: 8px;
             margin-bottom: 4px;
             padding: 6px;
@@ -5378,6 +5379,21 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           mapColumn.appendChild(mapIcon);
           mapColumn.appendChild(mapName);
+
+          // Add defeat count
+          if (yourRoom?.count) {
+            const defeatCount = document.createElement('div');
+            defeatCount.style.cssText = `
+              font-size: 10px;
+              color: #aaa;
+              text-align: center;
+              width: 100%;
+              margin-top: 2px;
+            `;
+            const formattedCount = yourRoom.count >= 1000 ? `${(yourRoom.count / 1000).toFixed(1)}k` : yourRoom.count;
+            defeatCount.textContent = `${formattedCount} completions`;
+            mapColumn.appendChild(defeatCount);
+          }
 
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `
@@ -5765,7 +5781,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         // Create room entries organized by region
         Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
           // Create region header using the title system with sticky positioning
-          const regionHeader = DOMUtils.createTitle(regionName, FONT_CONSTANTS.SIZES.SMALL);
+          const regionHeader = DOMUtils.createTitle(`${regionName} (${regionRooms.length} maps)`, FONT_CONSTANTS.SIZES.SMALL);
           Object.assign(regionHeader.style, {
             margin: '8px 0 4px 0',
             width: '100%',
@@ -5779,6 +5795,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           regionRooms.forEach(({ roomCode, roomName }) => {
             const searchedScore = searchedHighscoresMap[roomCode];
             const yourRoom = yourRooms[roomCode];
+            const searchedRoom = searchedRooms[roomCode];
 
             const hasSearchedScore = searchedScore && searchedScore.ticks;
             const hasSearchedRankScore = searchedRankPointsMap[roomCode];
@@ -5787,6 +5804,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             roomEntry.style.cssText = `
               display: grid;
               grid-template-columns: 80px 1fr;
+              align-items: center;
               gap: 8px;
               margin-bottom: 4px;
               padding: 6px;
@@ -5833,6 +5851,21 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           mapColumn.appendChild(mapIcon);
           mapColumn.appendChild(mapName);
+
+          // Add defeat count for searched player
+          if (searchedRoom?.count) {
+            const defeatCount = document.createElement('div');
+            defeatCount.style.cssText = `
+              font-size: 10px;
+              color: #aaa;
+              text-align: center;
+              width: 100%;
+              margin-top: 2px;
+            `;
+            const formattedCount = searchedRoom.count >= 1000 ? `${(searchedRoom.count / 1000).toFixed(1)}k` : searchedRoom.count;
+            defeatCount.textContent = `${formattedCount} completions`;
+            mapColumn.appendChild(defeatCount);
+          }
 
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `

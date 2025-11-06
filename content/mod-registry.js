@@ -58,15 +58,13 @@ export const SUPER_MODS = [
   'Better Hy\'genie.js',
   'Better Setups.js',
   'Better Tasker.js',
-  'Better UI.js',
   'Better Yasir.js',
   'Board Advisor.js',
-  'Configurator.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
   'Hunt Analyzer.js',
+  'Mod Settings.js',
   'Outfiter.js',
-  'Playercount.js',
   'Raid_Hunter.js',
   'Rank Pointer.js',
   'RunTracker.js'
@@ -91,9 +89,9 @@ export const DEFAULT_ENABLED_MODS = [
   'Official Mods/Tick_Tracker.js',
   'Official Mods/Turbo Mode.js',
   // Hidden Super Mods - enabled by default since users can't toggle them in popup
+  'Super Mods/Mod Settings.js',
   'Super Mods/RunTracker.js',
-  'Super Mods/Outfiter.js',
-  'Super Mods/Playercount.js'
+  'Super Mods/Outfiter.js'
   // All other Super Mods are disabled by default - users must manually enable them
 ];
 
@@ -104,9 +102,9 @@ export const HIDDEN_MODS = [
   'creature-database.js',
   'equipment-database.js',
   'maps-database.js',
+  'Mod Settings.js',
   'RunTracker.js',
-  'Outfiter.js',
-  'Playercount.js'
+  'Outfiter.js'
 ];
 
 /**
@@ -145,7 +143,7 @@ export function getModCounts() {
 
 /**
  * Check if a mod should be enabled by default
- * @param {string} modPath - Full path to the mod (e.g., "Super Mods/Better UI.js")
+ * @param {string} modPath - Full path to the mod (e.g., "Super Mods/Mod Settings.js")
  * @returns {boolean} True if mod should be enabled by default
  */
 export function isDefaultEnabled(modPath) {

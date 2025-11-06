@@ -301,7 +301,7 @@ if (typeof browserAPI === 'undefined') {
       });
       
       if (response.success) {
-        // Always auto-detect from game language to match Better UI behavior
+        // Always auto-detect from game language to match Mod Settings behavior
         const htmlLang = document.documentElement.lang;
         const htmlLangQuery = document.querySelector('html[lang="pt"]');
         const urlCheck = window.location.href.includes('/pt/');

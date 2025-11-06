@@ -613,15 +613,13 @@ function renderLocalMods(mods) {
     'Better Hy\'genie.js',
     'Better Setups.js',
     'Better Tasker.js',
-    'Better UI.js',
     'Better Yasir.js',
     'Board Advisor.js',
-    'Configurator.js',
     'Cyclopedia.js',
     'Dice_Roller.js',
     'Hunt Analyzer.js',
+    'Mod Settings.js',
     'Outfiter.js',
-    'Playercount.js',
     'Raid_Hunter.js',
     'Rank Pointer.js',
     'RunTracker.js'
@@ -634,9 +632,9 @@ function renderLocalMods(mods) {
     'Welcome.js',
     'equipment-database.js',
     'maps-database.js',
+    'Mod Settings.js',
     'RunTracker.js',
-    'Outfiter.js',
-    'Playercount.js'
+    'Outfiter.js'
   ];
 
   function normalizeModName(name) {

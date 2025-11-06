@@ -1050,9 +1050,9 @@ function trackFailureAndCheckRefresh(failureType, shouldRefresh = true) {
             // Give user a moment to see the warning
             setTimeout(() => {
                 if (!isSafeToReload()) return;
-                // Check if Better UI has disabled auto-reload
+                // Check if Mod Settings has disabled auto-reload
                 if (window.betterUIConfig?.disableAutoReload) {
-                    console.log('[Better Tasker] Auto-reload disabled by Better UI - skipping page refresh');
+                    console.log('[Better Tasker] Auto-reload disabled by Mod Settings - skipping page refresh');
                     return;
                 }
                 console.log('[Better Tasker] Refreshing page to recover from stuck state...');
@@ -1419,11 +1419,34 @@ function setupRaidHunterCoordination() {
         if (!isRaidHunterActive && wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
             console.log('[Better Tasker] Raid Hunter stopped raiding - resuming task automation');
             // Small delay before resuming to ensure Raid Hunter has fully stopped
-            setTimeout(() => {
+            setTimeout(async () => {
                 if (!isRaidHunterRaiding() && taskerState === TASKER_STATES.ENABLED) {
                     // Now that Raid Hunter has stopped, we can safely disable its Bestiary Automator settings
                     // and enable our own if needed
                     handleRaidHunterStopped();
+                    
+                    // Check if we have an active task that needs resumption
+                    const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+                    const task = playerContext?.questLog?.task;
+                    const hasActiveTask = !!(task && task.gameId);
+                    
+                    if (hasActiveTask) {
+                        console.log('[Better Tasker] Active task found after raid - checking current map');
+                        
+                        // Check if we're already on the correct task map
+                        const currentRoomId = getCurrentRoomId();
+                        const onCorrectMap = currentRoomId && taskingMapId && currentRoomId === taskingMapId;
+                        
+                        if (onCorrectMap) {
+                            console.log('[Better Tasker] Already on correct task map - continuing task');
+                            taskNavigationCompleted = true;
+                        } else {
+                            console.log(`[Better Tasker] Not on task map (current: ${currentRoomId}, expected: ${taskingMapId}) - will navigate`);
+                            taskNavigationCompleted = false;
+                        }
+                    }
+                    
+                    // Start automation (automationInterval already null from pauseAutomationDuringRaid)
                     startAutomation();
                 }
             }, 3000);
@@ -5044,9 +5067,9 @@ async function clickFinishAndVerify(finishButton) {
         
         if (!isSafeToReload()) return false;
         
-        // Check if Better UI has disabled auto-reload
+        // Check if Mod Settings has disabled auto-reload
         if (window.betterUIConfig?.disableAutoReload) {
-            console.log('[Better Tasker] Auto-reload disabled by Better UI - skipping page refresh');
+            console.log('[Better Tasker] Auto-reload disabled by Mod Settings - skipping page refresh');
             // Clear flags manually since we're not reloading
             taskNavigationCompleted = false;
             return true;

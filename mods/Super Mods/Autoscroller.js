@@ -1849,7 +1849,7 @@
   async function startAutoscroll() {
     setUILocked(true);
     
-    // Set coordination flag to pause Better UI updates
+    // Set coordination flag to pause Mod Settings updates
     if (!window.__modCoordination) {
       window.__modCoordination = {};
     }
@@ -1929,7 +1929,7 @@
   function stopAutoscroll() {
     autoscrolling = false;
     
-    // Clear coordination flag to resume Better UI updates
+    // Clear coordination flag to resume Mod Settings updates
     if (window.__modCoordination) {
       window.__modCoordination.autoscrollerRunning = false;
     }

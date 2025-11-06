@@ -1452,7 +1452,7 @@ if (!window.RunTrackerAPI) {
     }
   },
   
-  // Import/Export for Configurator
+  // Import/Export for Mod Settings (Backup tab)
   exportRuns: () => {
     return {
       version: '1.0',
