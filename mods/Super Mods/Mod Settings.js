@@ -5269,3 +5269,7 @@ exports = {
   }
 };
 
+// Auto-initialize if running in mod context
+if (typeof context !== 'undefined' && context.api) {
+  exports.init();
+}
