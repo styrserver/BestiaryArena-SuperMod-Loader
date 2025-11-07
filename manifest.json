@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and comprehensive tools.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -26,7 +26,9 @@
       "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
       "exclude_matches": [
         "*://bestiaryarena.com/profile/*",
-        "*://bestiaryarena.com/recolor*"
+        "*://bestiaryarena.com/recolor*",
+        "*://bestiaryarena.com/assets*",
+        "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/injector.js"],
       "run_at": "document_start"
@@ -35,7 +37,9 @@
       "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
       "exclude_matches": [
         "*://bestiaryarena.com/profile/*",
-        "*://bestiaryarena.com/recolor*"
+        "*://bestiaryarena.com/recolor*",
+        "*://bestiaryarena.com/assets*",
+        "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/utility_injector.js"],
       "run_at": "document_idle"
@@ -44,7 +48,9 @@
       "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
       "exclude_matches": [
         "*://bestiaryarena.com/profile/*",
-        "*://bestiaryarena.com/recolor*"
+        "*://bestiaryarena.com/recolor*",
+        "*://bestiaryarena.com/assets*",
+        "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/dashboard_bridge.js"],
       "run_at": "document_idle"

@@ -887,6 +887,13 @@ const MAX_CONSECUTIVE_FAILURES = 5; // Refresh after 5 consecutive failures
 let lastFailureType = null;
 const FAILURE_RESET_TIME = 60000; // Reset counter after 60 seconds of no failures
 
+// Task removal retry tracking (prevents endless loops)
+let taskRemovalRetryCount = 0;
+let lastTaskRemovalAttempt = 0;
+const MAX_TASK_REMOVAL_RETRIES = 3; // Max retries before giving up
+const TASK_REMOVAL_RETRY_COOLDOWN = 30000; // 30 seconds cooldown after max retries
+const TASK_REMOVAL_RESET_TIME = 60000; // Reset counter after 60 seconds of success
+
 // Check if it's safe to reload the page (won't interrupt user's active game)
 function isSafeToReload() {
     try {
@@ -6623,6 +6630,13 @@ function scheduleTaskCheck() {
         }
         console.log('[Better Tasker] Scheduler: Not task hunting ✓');
         
+        // Check if a task operation is already in progress
+        if (taskOperationInProgress) {
+            console.log('[Better Tasker] Scheduler: Task operation already in progress, skipping to prevent concurrent calls');
+            return;
+        }
+        console.log('[Better Tasker] Scheduler: No task operation in progress ✓');
+        
         // Check if game is active
         if (!isGameActive()) {
             console.log('[Better Tasker] Scheduler: Game not active, exiting');
@@ -6639,16 +6653,23 @@ function scheduleTaskCheck() {
         }
         
         const task = playerContext.questLog.task;
+        
+        // Check for active task using both gameId and player.activeTask
+        const activeTask = globalThis.state?.player?.activeTask;
+        const hasActiveTask = task.gameId || activeTask;
+        
         console.log('[Better Tasker] Scheduler: Task state:', {
             gameId: task.gameId,
             ready: task.ready,
             resetAt: task.resetAt,
-            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null'
+            resetAtDate: task.resetAt ? new Date(task.resetAt).toLocaleString() : 'null',
+            activeTask: !!activeTask,
+            hasActiveTask: hasActiveTask
         });
         
         // Only check if there's no active task
-        if (task.gameId) {
-            console.log('[Better Tasker] Scheduler: Active task in progress (gameId:', task.gameId, ') - no need to schedule new task check');
+        if (hasActiveTask) {
+            console.log('[Better Tasker] Scheduler: Active task detected (gameId:', task.gameId, ', activeTask:', !!activeTask, ') - no need to schedule new task check');
             return;
         }
         console.log('[Better Tasker] Scheduler: No active task (gameId is null/undefined) ✓');
@@ -6720,8 +6741,20 @@ async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
         await sleep(200);
         console.log('[Better Tasker] New Task button clicked');
         
-        // Wait for task selection to load
+        // Wait for task selection to load or error to appear
         await sleep(500);
+        
+        // Check for error message about needing to remove current task
+        const errorElements = document.querySelectorAll('[class*="error"], [class*="Error"], .text-red, .text-red-500');
+        for (const errorEl of errorElements) {
+            const errorText = errorEl.textContent || errorEl.innerText || '';
+            if (errorText.toLowerCase().includes('remove') && errorText.toLowerCase().includes('current task')) {
+                console.log('[Better Tasker] Error detected: "Remove current task before setting a new one"');
+                // Wait a bit for the error to be fully displayed
+                await sleep(500);
+                return false; // Indicate failure - will trigger retry with task removal
+            }
+        }
         
         // Check creature filtering if not skipped
         if (!skipCreatureFiltering) {
@@ -6758,10 +6791,89 @@ async function acceptNewTaskFromQuestLog(skipCreatureFiltering = false) {
 async function openQuestLogAndAcceptTask() {
     try {
         console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK START ===');
+        
+        // Prevent concurrent calls - if already in progress, return immediately
+        if (taskOperationInProgress) {
+            console.log('[Better Tasker] Task operation already in progress, skipping duplicate call');
+            return;
+        }
+        
         console.log('[Better Tasker] Current raid state:', {
             isRaidHunterActive: isRaidHunterActive,
             isRaidHunterRaiding: isRaidHunterRaiding()
         });
+        
+        // Check for active task before proceeding (check both activeTask and gameId)
+        const activeTask = globalThis.state?.player?.activeTask;
+        const playerContext = globalThis.state?.player?.getSnapshot?.()?.context;
+        const taskGameId = playerContext?.questLog?.task?.gameId;
+        
+        if (activeTask || taskGameId) {
+            console.log('[Better Tasker] Active task detected (activeTask:', !!activeTask, ', gameId:', taskGameId, ') - must remove current task before accepting new one');
+            
+            // Check if we're in cooldown after too many removal failures
+            const timeSinceLastAttempt = Date.now() - lastTaskRemovalAttempt;
+            if (taskRemovalRetryCount >= MAX_TASK_REMOVAL_RETRIES && timeSinceLastAttempt < TASK_REMOVAL_RETRY_COOLDOWN) {
+                const remainingCooldown = Math.ceil((TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt) / 1000);
+                console.log(`[Better Tasker] Task removal retry limit reached (${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}). Cooldown active: ${remainingCooldown}s remaining. Stopping to prevent loop.`);
+                // Clear the flag since we're not proceeding
+                taskOperationInProgress = false;
+                updateExposedState();
+                // Schedule next check after cooldown expires
+                const cooldownRemaining = TASK_REMOVAL_RETRY_COOLDOWN - timeSinceLastAttempt;
+                taskCheckTimeout = setTimeout(() => {
+                    // Reset counter after cooldown
+                    taskRemovalRetryCount = 0;
+                    scheduleTaskCheck();
+                }, cooldownRemaining);
+                return;
+            }
+            
+            // Reset counter if enough time has passed since last attempt
+            if (timeSinceLastAttempt > TASK_REMOVAL_RESET_TIME) {
+                taskRemovalRetryCount = 0;
+                console.log('[Better Tasker] Task removal retry counter reset (enough time passed)');
+            }
+            
+            lastTaskRemovalAttempt = Date.now();
+            
+            // First, try to remove the task if creature is not allowed
+            let taskRemoved = await removeCurrentTaskIfNotAllowed();
+            
+            // If that didn't work and there's still an active task, try to remove it directly
+            if (!taskRemoved && (activeTask || taskGameId)) {
+                console.log('[Better Tasker] Active task still exists - attempting direct removal...');
+                const questLogOpened = await openQuestLogForTaskRemoval();
+                if (questLogOpened) {
+                    await sleep(500);
+                    taskRemoved = await removeTaskDirectlyFromQuestLog();
+                    if (taskRemoved) {
+                        await sleep(1000);
+                        await clearModalsWithEsc(3);
+                    }
+                }
+            }
+            
+            if (!taskRemoved) {
+                taskRemovalRetryCount++;
+                console.log(`[Better Tasker] Could not remove active task (retry ${taskRemovalRetryCount}/${MAX_TASK_REMOVAL_RETRIES}) - will retry later`);
+                // Clear the flag since we're not proceeding
+                taskOperationInProgress = false;
+                updateExposedState();
+                
+                // Use exponential backoff: 5s, 10s, 20s
+                const backoffDelay = Math.min(5000 * Math.pow(2, taskRemovalRetryCount - 1), 20000);
+                console.log(`[Better Tasker] Scheduling retry with exponential backoff: ${backoffDelay}ms`);
+                taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), backoffDelay);
+                return;
+            } else {
+                // Success - reset counter
+                taskRemovalRetryCount = 0;
+                console.log('[Better Tasker] Task removal successful - retry counter reset');
+            }
+            // Wait a bit for the task removal to process and state to update
+            await sleep(2000);
+        }
         
         // Don't set task operation in progress flag here - only set it when actually processing a task
         // Note: We allow task acceptance during raids (non-invasive), but navigation is blocked at line 6707
@@ -6852,11 +6964,51 @@ async function openQuestLogAndAcceptTask() {
             const taskAccepted = await acceptNewTaskFromQuestLog(skipFiltering);
             
             if (!taskAccepted) {
-                console.log('[Better Tasker] Task not accepted (filtered or not found)');
+                console.log('[Better Tasker] Task not accepted (filtered, not found, or error)');
+                
+                // Check if there's an active task that needs to be removed
+                const activeTaskAfterFailure = globalThis.state?.player?.activeTask;
+                const playerContextAfterFailure = globalThis.state?.player?.getSnapshot?.()?.context;
+                const taskGameIdAfterFailure = playerContextAfterFailure?.questLog?.task?.gameId;
+                
+                // Detect stale state: API error but no local active task (likely needs browser refresh)
+                const errorDetected = document.querySelector('[class*="error"], [class*="Error"], .text-red, .text-red-500');
+                const hasErrorText = errorDetected && (
+                    errorDetected.textContent?.toLowerCase().includes('remove') && 
+                    errorDetected.textContent?.toLowerCase().includes('current task')
+                );
+                
+                if (hasErrorText && !activeTaskAfterFailure && !taskGameIdAfterFailure) {
+                    console.log('[Better Tasker] Stale state detected: API error but no local active task. Browser may need refresh. Stopping retries to prevent loop.');
+                    // Clear task operation in progress flag
+                    taskOperationInProgress = false;
+                    updateExposedState();
+                    await clearModalsWithEsc(3); // Close quest log
+                    // Reset retry counter and schedule check after longer delay (5 minutes)
+                    taskRemovalRetryCount = 0;
+                    taskCheckTimeout = setTimeout(() => scheduleTaskCheck(), 300000); // 5 minutes
+                    return;
+                }
+                
+                if (activeTaskAfterFailure || taskGameIdAfterFailure) {
+                    console.log('[Better Tasker] Active task detected after failure - will retry after removal');
+                    // Clear task operation in progress flag
+                    taskOperationInProgress = false;
+                    updateExposedState();
+                    await clearModalsWithEsc(3); // Close quest log
+                    // Wait a bit before rescheduling to allow task state to update
+                    await sleep(2000);
+                    // Re-run the check which will now detect and remove the active task (with retry protection)
+                    scheduleTaskCheck();
+                    return;
+                }
+                
                 // Clear task operation in progress flag and reschedule next check
                 taskOperationInProgress = false;
                 updateExposedState();
                 await clearModalsWithEsc(3); // Close quest log
+                // Wait a bit before rescheduling to avoid immediate retry
+                await sleep(1000);
                 scheduleTaskCheck(); // Schedule next task check
                 return;
             }
@@ -6868,7 +7020,11 @@ async function openQuestLogAndAcceptTask() {
                 await clearModalsWithEsc(3); // Close quest log
                 taskOperationInProgress = false;
                 updateExposedState();
-                console.log('[Better Tasker] Task claimed successfully');
+                // Reset retry counter on success
+                taskRemovalRetryCount = 0;
+                console.log('[Better Tasker] Task claimed successfully - retry counter reset');
+                // Wait a bit before rescheduling to avoid immediate retry and allow task state to update
+                await sleep(2000);
                 scheduleTaskCheck(); // Schedule next task check
                 return;
             }
@@ -6885,6 +7041,11 @@ async function openQuestLogAndAcceptTask() {
     } catch (error) {
         console.error('[Better Tasker] Error opening quest log and accepting task:', error);
         console.log('[Better Tasker] === OPEN QUEST LOG AND ACCEPT TASK END (error) ===');
+        // Always clear the flag on error
+        taskOperationInProgress = false;
+        updateExposedState();
+        // Wait a bit before rescheduling to avoid spamming
+        await sleep(2000);
         cleanupTaskCompletionFailure('error opening quest log and accepting task');
     }
 }

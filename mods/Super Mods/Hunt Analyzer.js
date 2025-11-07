@@ -1,31 +1,484 @@
 // Hunt Analyzer Mod for Bestiary Arena
 
 // =======================
-// 0. Initialization & Setup
+// 1. Initialization & Setup
 // =======================
 
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
 
 // =======================
-// 0.1. CSS Styles
+// 1.0. Theme System
+// =======================
+const HUNT_ANALYZER_THEMES = {
+    original: {
+        name: 'Original',
+    colors: {
+      // Panel colors
+      panelBackground: '#282C34',
+      headerBackground: '#1a1a1a',
+      sectionBackground: 'rgba(40,44,52,0.4)',
+      sectionBackgroundFallback: '#323234',
+      
+      // Borders
+      border: '#3A404A',
+      borderDark: '#2C313A',
+      
+      // Text colors
+      text: '#ABB2BF',
+      textSecondary: '#FFFFFF',
+      textAccent: '#E06C75',  // Room title, section titles
+      textStats: '#98C379',   // Stats text
+      textInfo: '#61AFEF',    // Info text (sessions, playtime)
+      textGold: '#E5C07B',    // Gold color
+      textDust: '#61AFEF',    // Dust color
+      textShiny: '#E5C07B',   // Shiny color (note: some uses #C678DD)
+      textRunes: '#98C379',   // Runes color (note: some uses #C678DD)
+      
+      // Button colors
+      buttonBackground: 'linear-gradient(to bottom, #4B5563, #343841)',
+      buttonHover: 'linear-gradient(to bottom, #6B7280, #4B5563)',
+      buttonIconBackground: 'transparent',
+      buttonIconHover: '#3A404A',
+      
+      // Dropdown colors
+      dropdownBackground: 'rgba(40,44,52,0.8)',
+      dropdownMenuBackground: 'rgba(40,44,52,0.95)',
+      dropdownOptionHover: 'rgba(224, 108, 117, 0.2)',
+      dropdownOptionSelected: 'rgba(224, 108, 117, 0.3)',
+      
+      // Entry colors
+      entryBackground: 'rgba(59, 64, 72, 0.3)',
+      
+      // Dialog colors
+      dialogBackground: '#282C34',
+      dialogBorder: '#E06C75',
+      dialogText: '#ABB2BF',
+      dialogTitle: '#E06C75',
+      confirmButtonBackground: '#E06C75',
+      confirmButtonHover: 'linear-gradient(to bottom, #FF8A96, #E06C75)',
+      confirmButtonActive: 'linear-gradient(to bottom, #E06C75, #C25560)',
+      confirmButtonBorder: '#C25560',
+      
+      // Feedback colors
+      feedbackSuccess: '#98C379',
+      feedbackError: '#E06C75',
+      
+      // Shadows
+      panelShadow: 'rgba(0,0,0,0.7)',
+      textShadow: 'rgba(224, 108, 117, 0.7)',
+      buttonShadow: 'rgba(0,0,0,0.5)',
+      buttonShadowHover: 'rgba(0,0,0,0.7)',
+      dialogShadow: 'rgba(0,0,0,0.8)',
+      dropdownShadow: 'rgba(0,0,0,0.3)',
+      
+      // Overlay
+      overlayBackground: 'rgba(0, 0, 0, 0.7)',
+      
+      // Button highlights
+      buttonHighlight: 'rgba(255,255,255,0.1)',
+      buttonHighlightHover: 'rgba(255,255,255,0.2)'
+    },
+    backgrounds: {
+      panel: 'url(/_next/static/media/background-darker.2679c837.png)',
+      header: 'url(/_next/static/media/background-dark.95edca67.png)',
+      section: 'url(/_next/static/media/background-regular.b0337118.png)'
+    }
+  },
+  ice: {
+    name: 'Frosty',
+    colors: {
+      // Panel colors - Cool icy blue tones
+      panelBackground: '#0a1419',
+      headerBackground: '#050a0f',
+      sectionBackground: 'rgba(13, 71, 161, 0.2)',
+      sectionBackgroundFallback: '#0d1b2a',
+      
+      // Borders - Bright ice blue accents
+      border: '#42a5f5',
+      borderDark: '#0277bd',
+      
+      // Text colors - Cool, crisp palette
+      text: '#b3d9f2',
+      textSecondary: '#ffffff',
+      textAccent: '#80d8ff',  // Bright ice blue for accents
+      textStats: '#42a5f5',   // Sky blue for stats
+      textInfo: '#64b5f6',    // Light blue for info
+      textGold: '#ffcc80',    // Warm amber for gold (contrast)
+      textDust: '#80d8ff',    // Ice blue for dust
+      textShiny: '#b3e5fc',   // Light cyan for shiny
+      textRunes: '#42a5f5',   // Sky blue for runes
+      
+      // Button colors - Cool blue gradients
+      buttonBackground: 'linear-gradient(to bottom, #1565c0, #0d47a1)',
+      buttonHover: 'linear-gradient(to bottom, #1976d2, #1565c0)',
+      buttonIconBackground: 'transparent',
+      buttonIconHover: 'rgba(66, 165, 245, 0.2)',
+      
+      // Dropdown colors
+      dropdownBackground: 'rgba(10, 20, 25, 0.95)',
+      dropdownMenuBackground: 'rgba(5, 10, 15, 0.98)',
+      dropdownOptionHover: 'rgba(66, 165, 245, 0.15)',
+      dropdownOptionSelected: 'rgba(128, 216, 255, 0.25)',
+      
+      // Entry colors
+      entryBackground: 'rgba(13, 71, 161, 0.15)',
+      
+      // Dialog colors
+      dialogBackground: '#0a1419',
+      dialogBorder: '#80d8ff',
+      dialogText: '#b3d9f2',
+      dialogTitle: '#80d8ff',
+      confirmButtonBackground: '#42a5f5',
+      confirmButtonHover: 'linear-gradient(to bottom, #64b5f6, #42a5f5)',
+      confirmButtonActive: 'linear-gradient(to bottom, #42a5f5, #0277bd)',
+      confirmButtonBorder: '#0277bd',
+      
+      // Feedback colors
+      feedbackSuccess: '#80d8ff',
+      feedbackError: '#e91e63',
+      
+      // Shadows - Cool blue glow
+      panelShadow: 'rgba(66, 165, 245, 0.3)',
+      textShadow: 'rgba(128, 216, 255, 0.5)',
+      buttonShadow: 'rgba(0, 0, 0, 0.8)',
+      buttonShadowHover: 'rgba(66, 165, 245, 0.4)',
+      dialogShadow: 'rgba(128, 216, 255, 0.4)',
+      dropdownShadow: 'rgba(66, 165, 245, 0.3)',
+      
+      // Overlay
+      overlayBackground: 'rgba(0, 0, 0, 0.85)',
+      
+      // Button highlights - Icy glow
+      buttonHighlight: 'rgba(128, 216, 255, 0.1)',
+      buttonHighlightHover: 'rgba(128, 216, 255, 0.2)'
+    },
+    backgrounds: {
+      // Use blue background textures for ice theme
+      panel: 'url(/_next/static/media/background-blue.7259c4ed.png)',
+      header: 'url(/_next/static/media/background-blue.7259c4ed.png)',
+      section: 'url(/_next/static/media/background-blue.7259c4ed.png)'
+    }
+  },
+  poison: {
+    name: 'Venomous',
+    colors: {
+      // Panel colors - Rich green/nature tones
+      panelBackground: '#0f1a0f',
+      headerBackground: '#050a05',
+      sectionBackground: 'rgba(27, 94, 32, 0.2)',
+      sectionBackgroundFallback: '#1b2e1b',
+      
+      // Borders - Vibrant green accents
+      border: '#43a047',
+      borderDark: '#2e7d32',
+      
+      // Text colors - Natural green palette
+      text: '#c8e6c9',
+      textSecondary: '#ffffff',
+      textAccent: '#66bb6a',  // Bright green for accents
+      textStats: '#4caf50',   // Medium green for stats
+      textInfo: '#81c784',    // Light green for info
+      textGold: '#ffd54f',    // Amber for gold (contrast)
+      textDust: '#81c784',    // Light green for dust
+      textShiny: '#66bb6a',   // Bright green for shiny
+      textRunes: '#4caf50',   // Medium green for runes
+      
+      // Button colors - Green gradients
+      buttonBackground: 'linear-gradient(to bottom, #2e7d32, #1b5e20)',
+      buttonHover: 'linear-gradient(to bottom, #388e3c, #2e7d32)',
+      buttonIconBackground: 'transparent',
+      buttonIconHover: 'rgba(67, 160, 71, 0.2)',
+      
+      // Dropdown colors
+      dropdownBackground: 'rgba(15, 26, 15, 0.95)',
+      dropdownMenuBackground: 'rgba(5, 10, 5, 0.98)',
+      dropdownOptionHover: 'rgba(67, 160, 71, 0.15)',
+      dropdownOptionSelected: 'rgba(102, 187, 106, 0.25)',
+      
+      // Entry colors
+      entryBackground: 'rgba(27, 94, 32, 0.15)',
+      
+      // Dialog colors
+      dialogBackground: '#0f1a0f',
+      dialogBorder: '#66bb6a',
+      dialogText: '#c8e6c9',
+      dialogTitle: '#66bb6a',
+      confirmButtonBackground: '#43a047',
+      confirmButtonHover: 'linear-gradient(to bottom, #66bb6a, #43a047)',
+      confirmButtonActive: 'linear-gradient(to bottom, #43a047, #2e7d32)',
+      confirmButtonBorder: '#2e7d32',
+      
+      // Feedback colors
+      feedbackSuccess: '#66bb6a',
+      feedbackError: '#d32f2f',
+      
+      // Shadows - Natural green glow
+      panelShadow: 'rgba(67, 160, 71, 0.3)',
+      textShadow: 'rgba(102, 187, 106, 0.5)',
+      buttonShadow: 'rgba(0, 0, 0, 0.8)',
+      buttonShadowHover: 'rgba(67, 160, 71, 0.4)',
+      dialogShadow: 'rgba(102, 187, 106, 0.4)',
+      dropdownShadow: 'rgba(67, 160, 71, 0.3)',
+      
+      // Overlay
+      overlayBackground: 'rgba(0, 0, 0, 0.85)',
+      
+      // Button highlights - Green glow
+      buttonHighlight: 'rgba(102, 187, 106, 0.1)',
+      buttonHighlightHover: 'rgba(102, 187, 106, 0.2)'
+    },
+    backgrounds: {
+      // Use green background textures for poison theme
+      panel: 'url(/_next/static/media/background-green.be515334.png)',
+      header: 'url(/_next/static/media/background-green.be515334.png)',
+      section: 'url(/_next/static/media/background-green.be515334.png)'
+    }
+  },
+  fire: {
+    name: 'Demonic',
+    colors: {
+      // Panel colors - Deep red/fire tones
+      panelBackground: '#1a0a0a',
+      headerBackground: '#0f0505',
+      sectionBackground: 'rgba(139, 0, 0, 0.3)',
+      sectionBackgroundFallback: '#2a1414',
+      
+      // Borders - Fiery red accents
+      border: '#dc143c',
+      borderDark: '#8b0000',
+      
+      // Text colors - Warm red palette
+      text: '#ffcccc',
+      textSecondary: '#ffffff',
+      textAccent: '#ff1744',  // Bright red for accents
+      textStats: '#ff4444',   // Red for stats
+      textInfo: '#ff6666',    // Light red for info
+      textGold: '#ffaa00',    // Amber for gold
+      textDust: '#ff6666',    // Light red for dust
+      textShiny: '#ff1744',   // Bright red for shiny
+      textRunes: '#ff4444',   // Red for runes
+      
+      // Button colors - Red gradients
+      buttonBackground: 'linear-gradient(to bottom, #8b0000, #5a0000)',
+      buttonHover: 'linear-gradient(to bottom, #b71c1c, #8b0000)',
+      buttonIconBackground: 'transparent',
+      buttonIconHover: 'rgba(220, 20, 60, 0.2)',
+      
+      // Dropdown colors
+      dropdownBackground: 'rgba(26, 10, 10, 0.95)',
+      dropdownMenuBackground: 'rgba(15, 5, 5, 0.98)',
+      dropdownOptionHover: 'rgba(220, 20, 60, 0.15)',
+      dropdownOptionSelected: 'rgba(255, 23, 68, 0.25)',
+      
+      // Entry colors
+      entryBackground: 'rgba(139, 0, 0, 0.2)',
+      
+      // Dialog colors
+      dialogBackground: '#1a0a0a',
+      dialogBorder: '#ff1744',
+      dialogText: '#ffcccc',
+      dialogTitle: '#ff1744',
+      confirmButtonBackground: '#dc143c',
+      confirmButtonHover: 'linear-gradient(to bottom, #ff1744, #dc143c)',
+      confirmButtonActive: 'linear-gradient(to bottom, #dc143c, #8b0000)',
+      confirmButtonBorder: '#8b0000',
+      
+      // Feedback colors
+      feedbackSuccess: '#ff4444',
+      feedbackError: '#ff1744',
+      
+      // Shadows - Fiery red glow
+      panelShadow: 'rgba(220, 20, 60, 0.4)',
+      textShadow: 'rgba(255, 23, 68, 0.6)',
+      buttonShadow: 'rgba(0, 0, 0, 0.8)',
+      buttonShadowHover: 'rgba(220, 20, 60, 0.5)',
+      dialogShadow: 'rgba(255, 23, 68, 0.5)',
+      dropdownShadow: 'rgba(220, 20, 60, 0.4)',
+      
+      // Overlay
+      overlayBackground: 'rgba(0, 0, 0, 0.85)',
+      
+      // Button highlights - Fiery glow
+      buttonHighlight: 'rgba(255, 23, 68, 0.1)',
+      buttonHighlightHover: 'rgba(255, 23, 68, 0.2)'
+    },
+    backgrounds: {
+      // Use red background textures for fire theme
+      panel: 'url(/_next/static/media/background-red.21d3f4bd.png)',
+      header: 'url(/_next/static/media/background-red.21d3f4bd.png)',
+      section: 'url(/_next/static/media/background-red.21d3f4bd.png)'
+    }
+  },
+  undead: {
+    name: 'Undead',
+    colors: {
+      // Panel colors - Deep purple/undead tones
+      panelBackground: '#1a0f1a',
+      headerBackground: '#0f050f',
+      sectionBackground: 'rgba(74, 20, 140, 0.3)',
+      sectionBackgroundFallback: '#2a142a',
+      
+      // Borders - Mystical purple accents
+      border: '#8e24aa',
+      borderDark: '#4a148c',
+      
+      // Text colors - Purple palette
+      text: '#e1bee7',
+      textSecondary: '#ffffff',
+      textAccent: '#ab47bc',  // Bright purple for accents
+      textStats: '#9575cd',   // Light purple for stats
+      textInfo: '#ba68c8',    // Medium purple for info
+      textGold: '#ffaa00',    // Amber for gold (contrast)
+      textDust: '#ba68c8',    // Medium purple for dust
+      textShiny: '#ab47bc',   // Bright purple for shiny
+      textRunes: '#9575cd',   // Light purple for runes
+      
+      // Button colors - Purple gradients
+      buttonBackground: 'linear-gradient(to bottom, #4a148c, #311b92)',
+      buttonHover: 'linear-gradient(to bottom, #6a1b9a, #4a148c)',
+      buttonIconBackground: 'transparent',
+      buttonIconHover: 'rgba(142, 36, 170, 0.2)',
+      
+      // Dropdown colors
+      dropdownBackground: 'rgba(26, 15, 26, 0.95)',
+      dropdownMenuBackground: 'rgba(15, 5, 15, 0.98)',
+      dropdownOptionHover: 'rgba(142, 36, 170, 0.15)',
+      dropdownOptionSelected: 'rgba(171, 71, 188, 0.25)',
+      
+      // Entry colors
+      entryBackground: 'rgba(74, 20, 140, 0.2)',
+      
+      // Dialog colors
+      dialogBackground: '#1a0f1a',
+      dialogBorder: '#ab47bc',
+      dialogText: '#e1bee7',
+      dialogTitle: '#ab47bc',
+      confirmButtonBackground: '#8e24aa',
+      confirmButtonHover: 'linear-gradient(to bottom, #ab47bc, #8e24aa)',
+      confirmButtonActive: 'linear-gradient(to bottom, #8e24aa, #4a148c)',
+      confirmButtonBorder: '#4a148c',
+      
+      // Feedback colors
+      feedbackSuccess: '#ab47bc',
+      feedbackError: '#d32f2f',
+      
+      // Shadows - Mystical purple glow
+      panelShadow: 'rgba(142, 36, 170, 0.4)',
+      textShadow: 'rgba(171, 71, 188, 0.6)',
+      buttonShadow: 'rgba(0, 0, 0, 0.8)',
+      buttonShadowHover: 'rgba(142, 36, 170, 0.5)',
+      dialogShadow: 'rgba(171, 71, 188, 0.5)',
+      dropdownShadow: 'rgba(142, 36, 170, 0.4)',
+      
+      // Overlay
+      overlayBackground: 'rgba(0, 0, 0, 0.85)',
+      
+      // Button highlights - Purple glow
+      buttonHighlight: 'rgba(171, 71, 188, 0.1)',
+      buttonHighlightHover: 'rgba(171, 71, 188, 0.2)'
+    },
+    backgrounds: {
+      // Use darker background textures for undead theme
+      panel: 'url(/_next/static/media/background-darker.2679c837.png)',
+      header: 'url(/_next/static/media/background-dark.95edca67.png)',
+      section: 'url(/_next/static/media/background-darker.2679c837.png)'
+    }
+  }
+};
+
+// Theme utility functions
+function getCurrentTheme() {
+  // Use try-catch to safely access HuntAnalyzerState (may not be initialized yet during early CSS injection)
+  try {
+    if (typeof HuntAnalyzerState !== 'undefined' && HuntAnalyzerState.settings && HuntAnalyzerState.settings.theme) {
+      const themeName = HuntAnalyzerState.settings.theme;
+      return HUNT_ANALYZER_THEMES[themeName] || HUNT_ANALYZER_THEMES.original;
+    }
+  } catch (e) {
+    // HuntAnalyzerState not yet defined, use default
+  }
+  return HUNT_ANALYZER_THEMES.original;
+}
+
+function getThemeColor(colorKey) {
+  const theme = getCurrentTheme();
+  return theme.colors[colorKey] || '#ABB2BF'; // Fallback to default text color
+}
+
+function getThemeBackground(backgroundKey) {
+  const theme = getCurrentTheme();
+  return theme.backgrounds[backgroundKey] || '';
+}
+
+// Apply theme to an element (helper for inline styles)
+function applyThemeStyle(element, styleMap) {
+  if (!element) return;
+  const theme = getCurrentTheme();
+  Object.entries(styleMap).forEach(([property, colorKey]) => {
+    if (theme.colors[colorKey]) {
+      element.style[property] = theme.colors[colorKey];
+    } else {
+      // Fallback: use colorKey directly if it's not a theme key
+      element.style[property] = colorKey;
+    }
+  });
+}
+
+// =======================
+// 1.1. CSS Styles
 // =======================
 // Inject CSS styles for common UI patterns
 function injectHuntAnalyzerStyles() {
     const styleId = 'hunt-analyzer-styles';
-    if (document.getElementById(styleId)) return; // Already injected
+    let style = document.getElementById(styleId);
     
-    const style = document.createElement('style');
+    // Remove existing style if it exists (for theme updates)
+    if (style) {
+        style.remove();
+    }
+    
+    const theme = getCurrentTheme();
+    
+    style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
+        /* Hunt Analyzer Theme Variables */
+        :root {
+            --ha-panel-bg: ${theme.colors.panelBackground};
+            --ha-panel-bg-image: ${theme.backgrounds.panel};
+            --ha-header-bg: ${theme.colors.headerBackground};
+            --ha-header-bg-image: ${theme.backgrounds.header};
+            --ha-section-bg: ${theme.colors.sectionBackground};
+            --ha-section-bg-image: ${theme.backgrounds.section};
+            --ha-section-bg-fallback: ${theme.colors.sectionBackgroundFallback};
+            --ha-border: ${theme.colors.border};
+            --ha-border-dark: ${theme.colors.borderDark};
+            --ha-text: ${theme.colors.text};
+            --ha-text-secondary: ${theme.colors.textSecondary};
+            --ha-text-accent: ${theme.colors.textAccent};
+            --ha-text-stats: ${theme.colors.textStats};
+            --ha-text-info: ${theme.colors.textInfo};
+            --ha-button-bg: ${theme.colors.buttonBackground};
+            --ha-button-hover: ${theme.colors.buttonHover};
+            --ha-button-icon-bg: ${theme.colors.buttonIconBackground};
+            --ha-button-icon-hover: ${theme.colors.buttonIconHover};
+            --ha-panel-shadow: ${theme.colors.panelShadow};
+            --ha-text-shadow: ${theme.colors.textShadow};
+            --ha-button-shadow: ${theme.colors.buttonShadow};
+            --ha-button-shadow-hover: ${theme.colors.buttonShadowHover};
+            --ha-button-highlight: ${theme.colors.buttonHighlight};
+            --ha-button-highlight-hover: ${theme.colors.buttonHighlightHover};
+        }
+        
         /* Hunt Analyzer Common Styles */
         .ha-panel-container {
             position: fixed;
-            background-image: url(/_next/static/media/background-darker.2679c837.png);
+            background-image: var(--ha-panel-bg-image);
             background-repeat: repeat;
-            background-color: #282C34;
-            border: 1px solid #3A404A;
-            color: #ABB2BF;
+            background-color: var(--ha-panel-bg);
+            border: 1px solid var(--ha-border);
+            color: var(--ha-text);
             padding: 0;
             overflow: hidden;
             z-index: 9999;
@@ -34,17 +487,17 @@ function injectHuntAnalyzerStyles() {
             height: 100%;
             font-family: Inter, sans-serif;
             border-radius: 7px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.7);
+            box-shadow: 0 0 15px var(--ha-panel-shadow);
         }
         
         .ha-header-container {
             display: flex;
             flex-direction: column;
             width: 100%;
-            background-image: url(/_next/static/media/background-dark.95edca67.png);
+            background-image: var(--ha-header-bg-image);
             background-repeat: repeat;
-            background-color: #1a1a1a;
-            border-bottom: 1px solid #3A404A;
+            background-color: var(--ha-header-bg);
+            border-bottom: 1px solid var(--ha-border);
             padding: 4px;
             flex: 0 0 auto;
         }
@@ -61,9 +514,9 @@ function injectHuntAnalyzerStyles() {
         .ha-room-title {
             margin: 0;
             font-size: 14px;
-            color: #E06C75;
+            color: var(--ha-text-accent);
             font-weight: bold;
-            text-shadow: 0 0 5px rgba(224, 108, 117, 0.7);
+            text-shadow: 0 0 5px var(--ha-text-shadow);
         }
         
         .ha-header-controls {
@@ -73,32 +526,32 @@ function injectHuntAnalyzerStyles() {
         
         .ha-styled-button {
             padding: 6px 12px;
-            border: 1px solid #3A404A;
-            background: linear-gradient(to bottom, #4B5563, #343841);
-            color: #ABB2BF;
+            border: 1px solid var(--ha-border);
+            background: var(--ha-button-bg);
+            color: var(--ha-text);
             font-size: 9px;
             cursor: pointer;
             border-radius: 5px;
             transition: all 0.2s ease;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+            box-shadow: 0 2px 5px var(--ha-button-shadow), inset 0 1px 0 var(--ha-button-highlight);
             flex-grow: 1;
         }
         
         .ha-styled-button:hover {
-            background: linear-gradient(to bottom, #6B7280, #4B5563);
-            box-shadow: 0 3px 8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.2);
+            background: var(--ha-button-hover);
+            box-shadow: 0 3px 8px var(--ha-button-shadow-hover), inset 0 1px 0 var(--ha-button-highlight-hover);
             transform: translateY(-1px);
         }
         
         .ha-styled-button:active {
-            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+            box-shadow: inset 0 2px 5px var(--ha-button-shadow);
             transform: translateY(1px);
         }
         
         .ha-icon-button {
-            background-color: transparent;
-            border: 1px solid #3A404A;
-            color: #ABB2BF;
+            background-color: var(--ha-button-icon-bg);
+            border: 1px solid var(--ha-border);
+            color: var(--ha-text);
             padding: 2px 6px;
             margin: 0;
             cursor: pointer;
@@ -114,13 +567,13 @@ function injectHuntAnalyzerStyles() {
         }
         
         .ha-icon-button:hover {
-            background-color: #3A404A;
-            color: #FFFFFF;
+            background-color: var(--ha-button-icon-hover);
+            color: var(--ha-text-secondary);
         }
         
         .ha-icon-button:active {
             transform: translateY(1px);
-            background-color: #2C313A;
+            background-color: var(--ha-border-dark);
         }
         
         .ha-container-section {
@@ -129,9 +582,9 @@ function injectHuntAnalyzerStyles() {
             flex: 1 1 0;
             min-height: 0;
             margin: 0 5px 5px 5px;
-            background-image: url(/_next/static/media/background-regular.b0337118.png);
+            background-image: var(--ha-section-bg-image);
             background-repeat: repeat;
-            background-color: url(/_next/static/media/background-dark.95edca67.png);
+            background-color: var(--ha-section-bg-fallback);
             border-radius: 6px;
             padding: 6px;
             overflow-y: auto;
@@ -147,16 +600,16 @@ function injectHuntAnalyzerStyles() {
         .ha-section-title h3 {
             margin: 0px;
             font-size: 14px;
-            color: rgb(224, 108, 117);
+            color: var(--ha-text-accent);
             font-weight: bold;
-            text-shadow: rgba(224, 108, 117, 0.7) 0px 0px 5px;
+            text-shadow: var(--ha-text-shadow) 0px 0px 5px;
         }
         
         .ha-display-content {
             width: 100%;
             padding: 4px;
-            border: 1px solid #3A404A;
-            background-color: rgba(40,44,52,0.4);
+            border: 1px solid var(--ha-border);
+            background-color: var(--ha-section-bg);
             border-radius: 4px;
             overflow-y: auto;
             max-height: 200px;
@@ -177,12 +630,12 @@ function injectHuntAnalyzerStyles() {
         
         .ha-stats-text {
             font-size: 10px;
-            color: #98C379;
+            color: var(--ha-text-stats);
         }
         
         .ha-border-separator {
-            border-top: 1px solid #3A404A;
-            border-bottom: 1px solid #3A404A;
+            border-top: 1px solid var(--ha-border);
+            border-bottom: 1px solid var(--ha-border);
             margin-top: 6px;
             padding: 3px 0;
         }
@@ -190,11 +643,8 @@ function injectHuntAnalyzerStyles() {
     document.head.appendChild(style);
 }
 
-// Inject styles immediately
-injectHuntAnalyzerStyles();
-
 // =======================
-// 1.1. Utility Functions
+// 2.1. Utility Functions
 // =======================
 function normalizeName(name) {
     return name?.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
@@ -229,7 +679,7 @@ let lastKnownShiny = 0;
 let lastBoardSubscriptionTime = 0;
 
 // =======================
-// 1.2. Constants & Globals
+// 2.2. Constants & Globals
 // =======================
 const PANEL_ID = "mod-autoplay-analyzer-panel";
 const BUTTON_ID = "mod-autoplay-button";
@@ -246,7 +696,7 @@ const LAYOUT_DIMENSIONS = {
 };
 
 // =======================
-// 1.3. Configuration Constants
+// 2.3. Configuration Constants
 // =======================
 const CONFIG = {
     // Throttling and timing
@@ -287,7 +737,7 @@ const CONFIG = {
 };
 
 // =======================
-// 1.4. Centralized State Management
+// 2.4. Centralized State Management
 // =======================
 const HuntAnalyzerState = {
   session: {
@@ -319,10 +769,31 @@ const HuntAnalyzerState = {
     autoplayLogText: "",
     selectedMapFilter: "ALL"
   },
-  settings: {
-    theme: 'original',
-    persistData: false
-  },
+  settings: (() => {
+    const settings = {
+      theme: 'original',
+      persistData: false
+    };
+    let isApplyingTheme = false; // Flag to prevent recursion when applyTheme sets the property
+    // Wrap settings with Proxy to watch for theme changes (event-driven, no polling needed)
+    return new Proxy(settings, {
+      set(target, property, value) {
+        const oldValue = target[property];
+        target[property] = value;
+        // If theme changed externally (not from applyTheme itself), apply it immediately
+        if (property === 'theme' && value !== oldValue && !isApplyingTheme && typeof applyTheme === 'function') {
+          // Use setTimeout to avoid issues if applyTheme is called during initialization
+          setTimeout(() => {
+            console.log('[Hunt Analyzer] Theme changed via direct property update:', value);
+            isApplyingTheme = true;
+            applyTheme(value, true);
+            isApplyingTheme = false;
+          }, 0);
+        }
+        return true;
+      }
+    });
+  })(),
   // Internal clock system for accurate time tracking
   timeTracking: {
     currentMap: null,
@@ -344,7 +815,7 @@ const HuntAnalyzerState = {
 };
 
 // =======================
-// 1.4.a Unified Time Helpers
+// 2.4.a Unified Time Helpers
 // =======================
 function getCurrentMode() {
   try {
@@ -412,7 +883,7 @@ const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 const MAX_SESSIONS_TO_KEEP = 10000;
 
 // =======================
-// 1.5. Autoplay Time Tracking Functions
+// 2.5. Autoplay Time Tracking Functions
 // =======================
 // Parse autoplay session time from DOM text content
 function parseAutoplayTime(textContent) {
@@ -468,7 +939,47 @@ function getAutoplaySessionTime() {
 }
 
 // =======================
-// 1.7. Internal Clock System
+// 2.6. DOM Cache Manager
+// =======================
+class DOMCache {
+  constructor() {
+    this.elements = new Map();
+    this.itemVisuals = new Map();
+  }
+
+  get(id) {
+    if (!this.elements.has(id)) {
+      const element = document.getElementById(id);
+      if (element) {
+        this.elements.set(id, element);
+      }
+    }
+    return this.elements.get(id);
+  }
+
+  set(id, element) {
+    this.elements.set(id, element);
+  }
+
+  clear() {
+    this.elements.clear();
+    this.itemVisuals.clear();
+  }
+
+  getItemVisual(key) {
+    return this.itemVisuals.get(key);
+  }
+
+  setItemVisual(key, visual) {
+    this.itemVisuals.set(key, visual);
+  }
+}
+
+// Initialize DOM cache
+const domCache = new DOMCache();
+
+// =======================
+// 2.7. Internal Clock System
 // =======================
 // Start the internal clock system
 function startInternalClock(reason) {
@@ -492,43 +1003,10 @@ function stopInternalClock() {
 }
 
 // =======================
-// 1.7.a Rank Pointer Coordination
+// 2.7.a Rank Pointer Coordination
 // =======================
-let lastRankPointerRunning = null;
-function startRankPointerWatcher() {
-  if (rankPointerCheckIntervalId) return;
-  console.log('[Hunt Analyzer] Rank Pointer watcher: starting (500ms poll)');
-  rankPointerCheckIntervalId = setInterval(() => {
-    try {
-      const running = !!(window.__modCoordination && window.__modCoordination.rankPointerRunning);
-      if (running !== lastRankPointerRunning) {
-        lastRankPointerRunning = running;
-        console.log('[Hunt Analyzer] Rank Pointer state changed:', { running });
-        if (running) {
-          // Rank Pointer started → begin manual timing if in manual mode
-          if (getCurrentMode() === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
-            HuntAnalyzerState.timeTracking.manualActive = true;
-            HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-            console.log('[Hunt Analyzer] Manual timing: started due to Rank Pointer');
-            if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
-              startInternalClock('rankPointer');
-            }
-          }
-        } else {
-          // Rank Pointer stopped → keep clock running; no changes to manual timing
-          console.log('[Hunt Analyzer] Rank Pointer stopped: keeping manual timing running');
-        }
-      }
-    } catch (_) {}
-  }, 500);
-}
-
-function stopRankPointerWatcher() {
-  if (rankPointerCheckIntervalId) {
-    clearInterval(rankPointerCheckIntervalId);
-    rankPointerCheckIntervalId = null;
-  }
-}
+// Rank Pointer coordination is now handled event-driven in updateInternalClock()
+// No polling needed - manual timing is already started on newGame events and mode changes
 
 // Update the internal clock by watching DOM autoplay timer
 function updateInternalClock() {
@@ -537,6 +1015,19 @@ function updateInternalClock() {
   const mode = getCurrentMode();
   const isAutoplayRunning = mode === 'autoplay' && currentAutoplayTime && currentAutoplayTime > 0;
   // Lightweight heartbeat only when something interesting changes below
+  
+  // Check Rank Pointer coordination (event-driven, no polling)
+  // If Rank Pointer is running and we're in manual mode, ensure timing is active
+  if (mode === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
+    try {
+      const rankPointerRunning = !!(window.__modCoordination && window.__modCoordination.rankPointerRunning);
+      if (rankPointerRunning) {
+        HuntAnalyzerState.timeTracking.manualActive = true;
+        HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
+        console.log('[Hunt Analyzer] Manual timing: started due to Rank Pointer (event-driven)');
+      }
+    } catch (_) {}
+  }
   
   // If autoplay is active, stop manual session (manual starts only on first newGame)
   if (isAutoplayRunning) {
@@ -640,7 +1131,7 @@ function formatPlaytime(hours) {
 }
 
 // =======================
-// 1.8. Performance Caching
+// 2.8. Performance Caching & Event Handlers
 // =======================
 const equipmentCache = new Map();
 const monsterCache = new Map();
@@ -651,7 +1142,6 @@ let boardSubscription = null;
 let modeMapSubscription = null;
 let updateIntervalId = null;
 let autoSaveIntervalId = null;
-let rankPointerCheckIntervalId = null;
 let mapDebugLastLogTime = 0;
 let mapDebugLogCount = 0;
 let timeoutIds = [];
@@ -671,49 +1161,11 @@ let documentClickHandler = null;
 let optionMouseEnterHandler = null;
 let optionMouseLeaveHandler = null;
 let optionClickHandler = null;
+let beforeUnloadHandler = null;
+let storageEventHandler = null;
 
 // =======================
-// 1.6. DOM Cache Manager
-// =======================
-class DOMCache {
-  constructor() {
-    this.elements = new Map();
-    this.itemVisuals = new Map();
-  }
-
-  get(id) {
-    if (!this.elements.has(id)) {
-      const element = document.getElementById(id);
-      if (element) {
-        this.elements.set(id, element);
-      }
-    }
-    return this.elements.get(id);
-  }
-
-  set(id, element) {
-    this.elements.set(id, element);
-  }
-
-  clear() {
-    this.elements.clear();
-    this.itemVisuals.clear();
-  }
-
-  getItemVisual(key) {
-    return this.itemVisuals.get(key);
-  }
-
-  setItemVisual(key, visual) {
-    this.itemVisuals.set(key, visual);
-  }
-}
-
-// Initialize DOM cache
-const domCache = new DOMCache();
-
-// =======================
-// 1.7. Panel Management Class
+// 2.9. Panel Management Class
 // =======================
 class PanelManager {
   constructor() {
@@ -797,6 +1249,8 @@ CONFIG.STAMINA_RECOVERY[5] = getPlayerMaxStamina();
 console.log('[Hunt Analyzer] Initialized max stamina for tier 5 potions:', CONFIG.STAMINA_RECOVERY[5]);
 
 // Initialize persistence system
+// Inject styles after state is defined (needed for theme system)
+injectHuntAnalyzerStyles();
 loadHuntAnalyzerSettings();
 loadHuntAnalyzerData();
 loadHuntAnalyzerState();
@@ -816,10 +1270,9 @@ HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
 autoReopenHuntAnalyzer();
 
 // =======================
-// 1.8. Data Persistence System
+// 2.10. Data Persistence System
 // =======================
 
-// Function to check if sprite CSS is loaded
 // Function to create inventory-style creature portrait like the game does
 function createInventoryStyleCreaturePortrait(creatureData) {
     const containerSlot = createContainerSlot('34px');
@@ -1371,9 +1824,159 @@ function loadHuntAnalyzerSettings() {
     const parsedSettings = loadFromStorage(HUNT_ANALYZER_SETTINGS_KEY);
     if (parsedSettings) {
         Object.assign(HuntAnalyzerState.settings, parsedSettings);
+        // Apply theme after loading settings
+        applyTheme(HuntAnalyzerState.settings.theme || 'original', false);
         return true;
     }
     return false;
+}
+
+// Apply theme and update UI
+function applyTheme(themeName, updateExistingPanel = true) {
+    if (!HUNT_ANALYZER_THEMES[themeName]) {
+        console.warn(`[Hunt Analyzer] Unknown theme: ${themeName}, using 'original'`);
+        themeName = 'original';
+    }
+    
+    HuntAnalyzerState.settings.theme = themeName;
+    
+    // Re-inject styles with new theme
+    injectHuntAnalyzerStyles();
+    
+    // Update existing panel if open and requested
+    if (updateExistingPanel) {
+        const panel = document.getElementById(PANEL_ID);
+        if (panel) {
+            // Panel will use CSS variables, so most updates are automatic
+            // But we need to update inline styles for elements that were created with hardcoded colors
+            updatePanelThemeColors(panel);
+        }
+    }
+    
+    console.log(`[Hunt Analyzer] Theme applied: ${themeName}`);
+}
+
+// Update theme colors for existing panel elements
+function updatePanelThemeColors(panel) {
+    if (!panel) return;
+    
+    // Update resource displays
+    const goldAmountSpan = document.getElementById('mod-total-gold-display');
+    if (goldAmountSpan) goldAmountSpan.style.color = getThemeColor('textGold');
+    
+    const dustAmountSpan = document.getElementById('mod-total-dust-display');
+    if (dustAmountSpan) dustAmountSpan.style.color = getThemeColor('textDust');
+    
+    const shinyAmountSpan = document.getElementById('mod-total-shiny-display');
+    if (shinyAmountSpan) shinyAmountSpan.style.color = getThemeColor('textShiny');
+    
+    const runesAmountSpan = document.getElementById('mod-total-runes-display');
+    if (runesAmountSpan) runesAmountSpan.style.color = getThemeColor('textRunes');
+    
+    // Update info text elements
+    const infoElements = [
+        'mod-autoplay-counter',
+        'mod-playtime-display',
+        'mod-stamina-display',
+        'mod-win-loss-display'
+    ];
+    infoElements.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.color = getThemeColor('textInfo');
+    });
+    
+    // Update stats text
+    const statsElements = panel.querySelectorAll('.ha-stats-text');
+    statsElements.forEach(el => {
+        el.style.color = getThemeColor('textStats');
+    });
+    
+    // Update dropdown
+    const dropdownButton = document.getElementById('mod-map-filter-dropdown-button');
+    if (dropdownButton) {
+        dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
+        dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
+        dropdownButton.style.color = getThemeColor('text');
+    }
+    
+    const dropdownMenu = document.getElementById('mod-map-filter-dropdown-menu');
+    if (dropdownMenu) {
+        dropdownMenu.style.backgroundColor = getThemeColor('dropdownMenuBackground');
+        dropdownMenu.style.border = `1px solid ${getThemeColor('border')}`;
+        dropdownMenu.style.boxShadow = `0 4px 8px ${getThemeColor('dropdownShadow')}`;
+    }
+    
+    // Update live display section background
+    const liveDisplaySection = panel.querySelector('.live-display-section');
+    if (liveDisplaySection) {
+        liveDisplaySection.style.backgroundImage = getThemeBackground('section');
+        liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    }
+    
+    // Update loot container
+    const lootContainer = panel.querySelector('.loot-container');
+    if (lootContainer) {
+        lootContainer.style.backgroundImage = getThemeBackground('section');
+        lootContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    }
+    
+    // Update loot display div
+    const lootDisplayDiv = document.getElementById('mod-loot-display');
+    if (lootDisplayDiv) {
+        lootDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+        lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
+        lootDisplayDiv.style.color = getThemeColor('text');
+    }
+    
+    // Update loot title
+    const lootTitle = document.getElementById('mod-loot-title');
+    if (lootTitle) {
+        lootTitle.style.color = getThemeColor('textAccent');
+        lootTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+    }
+    
+    // Update creature drop container
+    const creatureDropContainer = panel.querySelector('.creature-drop-container');
+    if (creatureDropContainer) {
+        creatureDropContainer.style.backgroundImage = getThemeBackground('section');
+        creatureDropContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    }
+    
+    // Update creature drop display div
+    const creatureDropDisplayDiv = document.getElementById('mod-creature-drop-display');
+    if (creatureDropDisplayDiv) {
+        creatureDropDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+        creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
+        creatureDropDisplayDiv.style.color = getThemeColor('text');
+    }
+    
+    // Update creature drop title
+    const creatureDropTitle = document.getElementById('mod-creature-drops-title');
+    if (creatureDropTitle) {
+        creatureDropTitle.style.color = getThemeColor('textAccent');
+        creatureDropTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+    }
+    
+    // Update map filter container
+    const mapFilterContainer = panel.querySelector('.map-filter-container');
+    if (mapFilterContainer) {
+        mapFilterContainer.style.backgroundImage = getThemeBackground('section');
+        mapFilterContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    }
+    
+    // Update map filter title (if it exists as a separate element)
+    const mapFilterTitle = panel.querySelector('.map-filter-container h3');
+    if (mapFilterTitle && !mapFilterTitle.id) {
+        mapFilterTitle.style.color = getThemeColor('textAccent');
+        mapFilterTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
+    }
+    
+    // Update button container
+    const buttonContainer = panel.querySelector('.button-container');
+    if (buttonContainer) {
+        buttonContainer.style.backgroundImage = getThemeBackground('section');
+        buttonContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
+    }
 }
 
 // Check if panel should be reopened after page refresh
@@ -1419,7 +2022,7 @@ function autoReopenHuntAnalyzer() {
 }
 
 // =======================
-// 2. Utility Modules
+// 3. Utility Modules
 // =======================
 const ItemUtils = {
   getRarity(itemName, tooltipKey, item) {
@@ -1492,7 +2095,7 @@ const UIElements = {
 };
 
 // =======================
-// 2.0. Legacy Utility Functions (for backward compatibility)
+// 3.0. Legacy Utility Functions (for backward compatibility)
 // =======================
 // Checks if the current game mode is sandbox mode.
 // Returns true if in sandbox mode, false otherwise.
@@ -2260,7 +2863,7 @@ function clamp(val, min, max) {
 }
 
 // =======================
-// 1.9. Helper Functions for UI Elements
+// 2.11. Helper Functions for UI Elements
 // =======================
 
 // Helper function to create count overlay spans
@@ -2300,7 +2903,7 @@ function createRarityBorder(rarity, className = 'has-rarity absolute inset-0 z-1
 }
 
 // =======================
-// 1.10. Storage Utility Functions
+// 2.12. Storage Utility Functions
 // =======================
 
 // Generic function to save data to localStorage
@@ -2331,7 +2934,7 @@ function loadFromStorage(key) {
 }
 
 // =======================
-// 2.1. Data Processing Class
+// 3.1. Data Processing Class
 // =======================
 class DataProcessor {
   constructor() {
@@ -2854,7 +3457,7 @@ class DataProcessor {
 const dataProcessor = new DataProcessor();
 
 // =======================
-// 2.2. Room Display Enhancement Functions
+// 3.2. Room Display Enhancement Functions
 // =======================
 
 // Enhanced room title display with boosted and raid status
@@ -2888,7 +3491,7 @@ function updateRoomTitleDisplay(roomId, roomName) {
 }
 
 // =======================
-// 2.3. Map Filter Functions
+// 3.3. Map Filter Functions
 // =======================
 
 // Update map filter dropdown based on available maps
@@ -2908,10 +3511,10 @@ function updateMapFilterDropdown() {
     const dropdownButton = document.createElement("button");
     dropdownButton.id = "mod-map-filter-dropdown-button";
     dropdownButton.style.padding = "6px 12px";
-    dropdownButton.style.border = "1px solid #3A404A";
+    dropdownButton.style.border = `1px solid ${getThemeColor('border')}`;
     dropdownButton.style.borderRadius = "4px";
-    dropdownButton.style.backgroundColor = "rgba(40,44,52,0.8)";
-    dropdownButton.style.color = "#ABB2BF";
+    dropdownButton.style.backgroundColor = getThemeColor('dropdownBackground');
+    dropdownButton.style.color = getThemeColor('text');
     dropdownButton.style.fontSize = "12px";
     dropdownButton.style.cursor = "pointer";
     dropdownButton.style.minWidth = "150px";
@@ -2936,10 +3539,10 @@ function updateMapFilterDropdown() {
     dropdownMenu.style.top = "100%";
     dropdownMenu.style.left = "0";
     dropdownMenu.style.right = "0";
-    dropdownMenu.style.backgroundColor = "rgba(40,44,52,0.95)";
-    dropdownMenu.style.border = "1px solid #3A404A";
+    dropdownMenu.style.backgroundColor = getThemeColor('dropdownMenuBackground');
+    dropdownMenu.style.border = `1px solid ${getThemeColor('border')}`;
     dropdownMenu.style.borderRadius = "4px";
-    dropdownMenu.style.boxShadow = "0 4px 8px rgba(0,0,0,0.3)";
+    dropdownMenu.style.boxShadow = `0 4px 8px ${getThemeColor('dropdownShadow')}`;
     dropdownMenu.style.zIndex = "10000";
     dropdownMenu.style.display = "none";
     dropdownMenu.style.maxHeight = "200px";
@@ -3019,20 +3622,20 @@ function createDropdownOption(mapName) {
     option.style.padding = "8px 12px";
     option.style.cursor = "pointer";
     option.style.fontSize = "12px";
-    option.style.color = "#ABB2BF";
-    option.style.borderBottom = "1px solid #3A404A";
+    option.style.color = getThemeColor('text');
+    option.style.borderBottom = `1px solid ${getThemeColor('border')}`;
     option.style.transition = "background-color 0.2s ease";
 
     // Highlight selected option
     if (mapName === HuntAnalyzerState.ui.selectedMapFilter) {
-        option.style.backgroundColor = "rgba(224, 108, 117, 0.3)";
-        option.style.color = "#FFFFFF";
+        option.style.backgroundColor = getThemeColor('dropdownOptionSelected');
+        option.style.color = getThemeColor('textSecondary');
     }
 
     // Hover effects
     option.addEventListener("mouseenter", () => {
         if (mapName !== HuntAnalyzerState.ui.selectedMapFilter) {
-            option.style.backgroundColor = "rgba(224, 108, 117, 0.2)";
+            option.style.backgroundColor = getThemeColor('dropdownOptionHover');
         }
     });
 
@@ -3073,7 +3676,7 @@ function createDropdownOption(mapName) {
 }
 
 // =======================
-// 3. Data Processing Functions
+// 4. Data Processing Functions
 // =======================
 // Renders all stored game sessions to the analyzer panel.
 // Optimized to use incremental updates instead of full re-renders when possible.
@@ -3168,7 +3771,7 @@ function renderAllSessions() {
         lootEntryDiv.style.alignItems = 'center';
         lootEntryDiv.style.justifyContent = 'center';
         lootEntryDiv.style.padding = '4px';
-        lootEntryDiv.style.backgroundColor = 'rgba(59, 64, 72, 0.3)';
+        lootEntryDiv.style.backgroundColor = getThemeColor('entryBackground');
         lootEntryDiv.style.borderRadius = '6px';
 
         const iconWrapper = document.createElement('div');
@@ -3322,7 +3925,7 @@ function renderAllSessions() {
         creatureEntryDiv.style.alignItems = 'center';
         creatureEntryDiv.style.justifyContent = 'center';
         creatureEntryDiv.style.padding = '4px';
-        creatureEntryDiv.style.backgroundColor = 'rgba(59, 64, 72, 0.3)';
+        creatureEntryDiv.style.backgroundColor = getThemeColor('entryBackground');
         creatureEntryDiv.style.borderRadius = '6px';
 
         const iconWrapper = document.createElement('div');
@@ -3585,7 +4188,7 @@ function generateSummaryLogText() {
 }
 
 // =======================
-// 3.1. Unified Grid Functions
+// 4.1. Unified Grid Functions
 // =======================
 // Helper function to create a unified grid container for both loot and creature displays
 // Returns a styled grid container element
@@ -3599,7 +4202,7 @@ function createUnifiedGridContainer() {
 }
 
 // =======================
-// 4.0. Event Handler Functions
+// 5.0. Event Handler Functions
 // =======================
 
 // Handles the style button click for layout switching
@@ -3767,11 +4370,11 @@ function handlePanelDragMouseUp(panel) {
 }
 
 // =======================
-// 4.1. Utility Functions for Repeated Patterns
+// 5.1. Utility Functions for Repeated Patterns
 // =======================
 
 // Creates a display element with icon and amount
-function createResourceDisplay(iconSrc, iconAlt, amountId, textColor = '#ABB2BF') {
+function createResourceDisplay(iconSrc, iconAlt, amountId, colorKey = 'text') {
     const displayDiv = document.createElement('div');
     displayDiv.style.display = 'flex';
     displayDiv.style.alignItems = 'center';
@@ -3786,7 +4389,7 @@ function createResourceDisplay(iconSrc, iconAlt, amountId, textColor = '#ABB2BF'
 
     const amountSpan = document.createElement('span');
     amountSpan.id = amountId;
-    amountSpan.style.color = textColor;
+    amountSpan.style.color = getThemeColor(colorKey);
     amountSpan.style.fontSize = '12px';
     amountSpan.style.fontWeight = 'bold';
     amountSpan.textContent = '0';
@@ -3844,6 +4447,10 @@ function createDisplayContent(contentId, maxHeight = '200px') {
     contentDiv.id = contentId;
     contentDiv.className = "ha-display-content";
     contentDiv.style.maxHeight = maxHeight;
+    // Ensure theme colors are applied
+    contentDiv.style.border = `1px solid ${getThemeColor('border')}`;
+    contentDiv.style.backgroundColor = getThemeColor('sectionBackground');
+    contentDiv.style.color = getThemeColor('text');
     return contentDiv;
 }
 
@@ -3854,19 +4461,19 @@ function createConfirmationDialog(titleKey, messageKey, onConfirm, onCancel) {
     confirmDialog.style.top = '50%';
     confirmDialog.style.left = '50%';
     confirmDialog.style.transform = 'translate(-50%, -50%)';
-    confirmDialog.style.backgroundColor = '#282C34';
-    confirmDialog.style.border = '2px solid #E06C75';
+    confirmDialog.style.backgroundColor = getThemeColor('dialogBackground');
+    confirmDialog.style.border = `2px solid ${getThemeColor('dialogBorder')}`;
     confirmDialog.style.borderRadius = '8px';
     confirmDialog.style.padding = '20px';
     confirmDialog.style.zIndex = '10000';
-    confirmDialog.style.color = '#ABB2BF';
+    confirmDialog.style.color = getThemeColor('dialogText');
     confirmDialog.style.fontFamily = 'Inter, sans-serif';
-    confirmDialog.style.boxShadow = '0 0 20px rgba(0,0,0,0.8)';
+    confirmDialog.style.boxShadow = `0 0 20px ${getThemeColor('dialogShadow')}`;
 
     const dialogTitle = document.createElement('h3');
     dialogTitle.textContent = t(titleKey);
     dialogTitle.style.margin = '0 0 15px 0';
-    dialogTitle.style.color = '#E06C75';
+    dialogTitle.style.color = getThemeColor('dialogTitle');
     dialogTitle.style.fontSize = '16px';
 
     const dialogMessage = document.createElement('p');
@@ -3980,7 +4587,7 @@ function updateCurrentRoomDisplay() {
 }
 
 // =======================
-// 4.2. Panel Section Creation Functions
+// 5.2. Panel Section Creation Functions
 // =======================
 
 // Creates the live display section with session stats and rates
@@ -3990,9 +4597,9 @@ function createLiveDisplaySection() {
     liveDisplaySection.style.display = "flex";
     liveDisplaySection.style.flexDirection = "column";
     liveDisplaySection.style.padding = "8px";
-    liveDisplaySection.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    liveDisplaySection.style.backgroundImage = getThemeBackground('section');
     liveDisplaySection.style.backgroundRepeat = 'repeat';
-    liveDisplaySection.style.backgroundColor = '#323234'; // Fallback
+    liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback'); // Fallback
     liveDisplaySection.style.flex = "0 0 auto"; // FIXED SIZE
     liveDisplaySection.style.width = "100%";
     liveDisplaySection.style.boxSizing = "border-box";
@@ -4015,7 +4622,7 @@ function createLiveDisplaySection() {
     autoplayCounter.style.alignItems = "center";
     autoplayCounter.style.gap = "4px";
     autoplayCounter.style.fontSize = "12px";
-    autoplayCounter.style.color = "#61AFEF";
+    autoplayCounter.style.color = getThemeColor('textInfo');
     
     const sessionCountSpan = document.createElement("span");
     sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0 (0/h)`;
@@ -4027,7 +4634,7 @@ function createLiveDisplaySection() {
     playtimeElement.id = "mod-playtime-display";
     playtimeElement.textContent = "Playtime: 0m";
     playtimeElement.style.fontSize = "10px";
-    playtimeElement.style.color = "#61AFEF";
+    playtimeElement.style.color = getThemeColor('textInfo');
     
     firstRow.appendChild(autoplayCounter);
     firstRow.appendChild(playtimeElement);
@@ -4046,13 +4653,13 @@ function createLiveDisplaySection() {
     staminaDisplaySpan.style.lineHeight = "12px";
     staminaDisplaySpan.style.verticalAlign = "middle";
     staminaDisplaySpan.style.fontSize = "10px";
-    staminaDisplaySpan.style.color = "#61AFEF";
+    staminaDisplaySpan.style.color = getThemeColor('textInfo');
 
     // Win/Loss Display
     const winLossElement = document.createElement("span");
     winLossElement.id = "mod-win-loss-display";
     winLossElement.style.fontSize = "10px";
-    winLossElement.style.color = "#61AFEF";
+    winLossElement.style.color = getThemeColor('textInfo');
     winLossElement.textContent = "W/L: 0/0 (0%)";
     
     secondRow.appendChild(staminaDisplaySpan);
@@ -4070,7 +4677,7 @@ function createDropRateSection() {
     const dropRateLiveFeedDiv = document.createElement("div");
     dropRateLiveFeedDiv.className = "ha-border-separator";
     dropRateLiveFeedDiv.style.fontSize = "10px";
-    dropRateLiveFeedDiv.style.color = "#98C379";
+    dropRateLiveFeedDiv.style.color = getThemeColor('textStats');
 
     // Left section for rates
     const leftRatesSection = createFlexColumn();
@@ -4110,16 +4717,16 @@ function createDropRateSection() {
     rightTotalsSection.style.alignItems = 'flex-end';
 
     // Create resource displays using utility function
-    const { displayDiv: goldDisplayDiv, amountSpan: goldAmountSpan } = createResourceDisplay('/assets/icons/goldpile.png', 'Gold', 'mod-total-gold-display', '#E5C07B');
+    const { displayDiv: goldDisplayDiv, amountSpan: goldAmountSpan } = createResourceDisplay('/assets/icons/goldpile.png', 'Gold', 'mod-total-gold-display', 'textGold');
     rightTotalsSection.appendChild(goldDisplayDiv);
 
-    const { displayDiv: dustDisplayDiv, amountSpan: dustAmountSpan } = createResourceDisplay('/assets/icons/dust.png', 'Dust', 'mod-total-dust-display', '#61AFEF');
+    const { displayDiv: dustDisplayDiv, amountSpan: dustAmountSpan } = createResourceDisplay('/assets/icons/dust.png', 'Dust', 'mod-total-dust-display', 'textDust');
     rightTotalsSection.appendChild(dustDisplayDiv);
 
-    const { displayDiv: shinyDisplayDiv, amountSpan: shinyAmountSpan } = createResourceDisplay('/assets/icons/shiny.png', 'Shiny', 'mod-total-shiny-display', '#E5C07B');
+    const { displayDiv: shinyDisplayDiv, amountSpan: shinyAmountSpan } = createResourceDisplay('/assets/icons/shiny.png', 'Shiny', 'mod-total-shiny-display', 'textShiny');
     rightTotalsSection.appendChild(shinyDisplayDiv);
 
-    const { displayDiv: runesDisplayDiv, amountSpan: runesAmountSpan } = createResourceDisplay('/assets/icons/rune.png', 'Runes', 'mod-total-runes-display', '#C678DD');
+    const { displayDiv: runesDisplayDiv, amountSpan: runesAmountSpan } = createResourceDisplay('/assets/icons/rune.png', 'Runes', 'mod-total-runes-display', 'textRunes');
     rightTotalsSection.appendChild(runesDisplayDiv);
 
     dropRateLiveFeedDiv.appendChild(leftRatesSection);
@@ -4573,9 +5180,9 @@ function createAutoplayAnalyzerPanel() {
     liveDisplaySection.style.display = "flex";
     liveDisplaySection.style.flexDirection = "column";
     liveDisplaySection.style.padding = "8px";
-    liveDisplaySection.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    liveDisplaySection.style.backgroundImage = getThemeBackground('section');
     liveDisplaySection.style.backgroundRepeat = 'repeat';
-    liveDisplaySection.style.backgroundColor = '#323234'; // Fallback
+    liveDisplaySection.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
     liveDisplaySection.style.flex = "0 0 auto"; // FIXED SIZE
     liveDisplaySection.style.width = "100%";
     liveDisplaySection.style.boxSizing = "border-box";
@@ -4598,7 +5205,7 @@ function createAutoplayAnalyzerPanel() {
     autoplayCounter.style.alignItems = "center";
     autoplayCounter.style.gap = "4px";
     autoplayCounter.style.fontSize = "12px";
-    autoplayCounter.style.color = "#61AFEF";
+    autoplayCounter.style.color = getThemeColor('textInfo');
     
     const sessionCountSpan = document.createElement("span");
     sessionCountSpan.textContent = `${t('mods.huntAnalyzer.sessions')}: 0 (0/h)`;
@@ -4610,7 +5217,7 @@ function createAutoplayAnalyzerPanel() {
     playtimeElement.id = "mod-playtime-display";
     playtimeElement.textContent = "Playtime: 0m";
     playtimeElement.style.fontSize = "10px";
-    playtimeElement.style.color = "#61AFEF";
+    playtimeElement.style.color = getThemeColor('textInfo');
     
     firstRow.appendChild(autoplayCounter);
     firstRow.appendChild(playtimeElement);
@@ -4629,13 +5236,13 @@ function createAutoplayAnalyzerPanel() {
     staminaDisplaySpan.style.lineHeight = "12px";
     staminaDisplaySpan.style.verticalAlign = "middle";
     staminaDisplaySpan.style.fontSize = "10px";
-    staminaDisplaySpan.style.color = "#61AFEF";
+    staminaDisplaySpan.style.color = getThemeColor('textInfo');
 
     // Win/Loss Display
     const winLossElement = document.createElement("span");
     winLossElement.id = "mod-win-loss-display";
     winLossElement.style.fontSize = "10px";
-    winLossElement.style.color = "#61AFEF";
+    winLossElement.style.color = getThemeColor('textInfo');
     winLossElement.textContent = "W/L: 0/0 (0%)";
     
     secondRow.appendChild(staminaDisplaySpan);
@@ -4713,7 +5320,7 @@ function createAutoplayAnalyzerPanel() {
 
     const goldAmountSpan = document.createElement('span');
     goldAmountSpan.id = 'mod-total-gold-display';
-    goldAmountSpan.style.color = '#E5C07B';
+    goldAmountSpan.style.color = getThemeColor('textGold');
     goldAmountSpan.style.fontSize = '12px';
     goldAmountSpan.style.fontWeight = 'bold';
     goldAmountSpan.textContent = '0';
@@ -4737,7 +5344,7 @@ function createAutoplayAnalyzerPanel() {
 
     const dustAmountSpan = document.createElement('span');
     dustAmountSpan.id = 'mod-total-dust-display';
-    dustAmountSpan.style.color = '#61AFEF';
+    dustAmountSpan.style.color = getThemeColor('textDust');
     dustAmountSpan.style.fontSize = '12px';
     dustAmountSpan.style.fontWeight = 'bold';
     dustAmountSpan.textContent = '0';
@@ -4761,7 +5368,7 @@ function createAutoplayAnalyzerPanel() {
 
     const shinyAmountSpan = document.createElement('span');
     shinyAmountSpan.id = 'mod-total-shiny-display';
-    shinyAmountSpan.style.color = '#C678DD';
+    shinyAmountSpan.style.color = getThemeColor('textShiny');
     shinyAmountSpan.style.fontSize = '12px';
     shinyAmountSpan.style.fontWeight = 'bold';
     shinyAmountSpan.textContent = '0';
@@ -4785,7 +5392,7 @@ function createAutoplayAnalyzerPanel() {
 
     const runesAmountSpan = document.createElement('span');
     runesAmountSpan.id = 'mod-total-runes-display';
-    runesAmountSpan.style.color = '#98C379';
+    runesAmountSpan.style.color = getThemeColor('textRunes');
     runesAmountSpan.style.fontSize = '12px';
     runesAmountSpan.style.fontWeight = 'bold';
     runesAmountSpan.textContent = '0';
@@ -4805,9 +5412,9 @@ function createAutoplayAnalyzerPanel() {
     mapFilterContainer.style.flexDirection = "row";
     mapFilterContainer.style.flex = "0 0 auto";
     mapFilterContainer.style.margin = "5px";
-    mapFilterContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    mapFilterContainer.style.backgroundImage = getThemeBackground('section');
     mapFilterContainer.style.backgroundRepeat = 'repeat';
-    mapFilterContainer.style.backgroundColor = 'url(/_next/static/media/background-dark.95edca67.png)';
+    mapFilterContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
     mapFilterContainer.style.borderRadius = '6px';
     mapFilterContainer.style.padding = '6px';
     mapFilterContainer.style.alignItems = "center";
@@ -4818,9 +5425,9 @@ function createAutoplayAnalyzerPanel() {
     mapFilterTitle.textContent = "Map Filter";
     mapFilterTitle.style.margin = "0px";
     mapFilterTitle.style.fontSize = "14px";
-    mapFilterTitle.style.color = "rgb(224, 108, 117)";
+    mapFilterTitle.style.color = getThemeColor('textAccent');
     mapFilterTitle.style.fontWeight = "bold";
-    mapFilterTitle.style.textShadow = "rgba(224, 108, 117, 0.7) 0px 0px 5px";
+    mapFilterTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
     mapFilterTitle.style.flex = "0 0 auto";
 
     const mapFilterRow = document.createElement("div");
@@ -4841,9 +5448,9 @@ function createAutoplayAnalyzerPanel() {
     lootContainer.style.flex = "1 1 0"; // FLEXIBLE
     lootContainer.style.minHeight = "0";
     lootContainer.style.margin = "0px 5px 5px 5px";
-    lootContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    lootContainer.style.backgroundImage = getThemeBackground('section');
     lootContainer.style.backgroundRepeat = 'repeat';
-    lootContainer.style.backgroundColor = 'url(/_next/static/media/background-dark.95edca67.png)'; // Darker fallback
+    lootContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
     lootContainer.style.borderRadius = '6px';
     lootContainer.style.padding = '6px';
     lootContainer.style.overflowY = 'auto';
@@ -4858,18 +5465,18 @@ function createAutoplayAnalyzerPanel() {
     lootTitle.id = "mod-loot-title";
     lootTitle.style.margin = "0px";
     lootTitle.style.fontSize = "14px";
-    lootTitle.style.color = "rgb(224, 108, 117)";
+    lootTitle.style.color = getThemeColor('textAccent');
     lootTitle.style.fontWeight = "bold";
-    lootTitle.style.textShadow = "rgba(224, 108, 117, 0.7) 0px 0px 5px";
+    lootTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
     lootTitleContainer.appendChild(lootTitle);
 
     const lootDisplayDiv = document.createElement("div");
     lootDisplayDiv.id = "mod-loot-display";
     lootDisplayDiv.style.width = "100%";
     lootDisplayDiv.style.padding = "4px";
-    lootDisplayDiv.style.border = "1px solid #3A404A";
-    lootDisplayDiv.style.backgroundColor = "rgba(40,44,52,0.4)";
-    lootDisplayDiv.style.color = "#ABB2BF";
+    lootDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+    lootDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
+    lootDisplayDiv.style.color = getThemeColor('text');
     lootDisplayDiv.style.fontSize = "11px";
     lootDisplayDiv.style.borderRadius = "4px";
     lootDisplayDiv.style.overflowY = "scroll";
@@ -4889,9 +5496,9 @@ function createAutoplayAnalyzerPanel() {
     creatureDropContainer.style.flex = "1 1 0"; // FLEXIBLE
     creatureDropContainer.style.minHeight = "0";
     creatureDropContainer.style.margin = "0 5px 5px 5px";
-    creatureDropContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    creatureDropContainer.style.backgroundImage = getThemeBackground('section');
     creatureDropContainer.style.backgroundRepeat = 'repeat';
-    creatureDropContainer.style.backgroundColor = 'url(/_next/static/media/background-dark.95edca67.png)'; // Darker fallback
+    creatureDropContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
     creatureDropContainer.style.borderRadius = '6px';
     creatureDropContainer.style.padding = '6px';
     creatureDropContainer.style.overflowY = 'auto';
@@ -4906,18 +5513,18 @@ function createAutoplayAnalyzerPanel() {
     creatureDropTitle.id = "mod-creature-drops-title";
     creatureDropTitle.style.margin = "0px";
     creatureDropTitle.style.fontSize = "14px";
-    creatureDropTitle.style.color = "rgb(224, 108, 117)";
+    creatureDropTitle.style.color = getThemeColor('textAccent');
     creatureDropTitle.style.fontWeight = "bold";
-    creatureDropTitle.style.textShadow = "rgba(224, 108, 117, 0.7) 0px 0px 5px";
+    creatureDropTitle.style.textShadow = `${getThemeColor('textShadow')} 0px 0px 5px`;
     creatureDropTitleContainer.appendChild(creatureDropTitle);
 
     const creatureDropDisplayDiv = document.createElement("div");
     creatureDropDisplayDiv.id = "mod-creature-drop-display";
     creatureDropDisplayDiv.style.width = "100%";
     creatureDropDisplayDiv.style.padding = "4px";
-    creatureDropDisplayDiv.style.border = "1px solid #3A404A";
-    creatureDropDisplayDiv.style.backgroundColor = "rgba(40,44,52,0.4)";
-    creatureDropDisplayDiv.style.color = "#ABB2BF";
+    creatureDropDisplayDiv.style.border = `1px solid ${getThemeColor('border')}`;
+    creatureDropDisplayDiv.style.backgroundColor = getThemeColor('sectionBackground');
+    creatureDropDisplayDiv.style.color = getThemeColor('text');
     creatureDropDisplayDiv.style.fontSize = "11px";
     creatureDropDisplayDiv.style.borderRadius = "4px";
     creatureDropDisplayDiv.style.overflowY = "scroll";
@@ -4939,13 +5546,13 @@ function createAutoplayAnalyzerPanel() {
     buttonContainer.style.margin = "0";
     buttonContainer.style.marginTop = "0";
     buttonContainer.style.borderTop = "none";
-    buttonContainer.style.backgroundImage = 'url(/_next/static/media/background-regular.b0337118.png)';
+    buttonContainer.style.backgroundImage = getThemeBackground('section');
     buttonContainer.style.backgroundRepeat = 'repeat';
-    buttonContainer.style.backgroundColor = '#323234'; // Fallback
+    buttonContainer.style.backgroundColor = getThemeColor('sectionBackgroundFallback');
     buttonContainer.style.flex = "0 0 auto"; // FIXED SIZE
     buttonContainer.style.flexDirection = 'row';
 
-    // Settings button removed - now handled by Better UI
+    // Settings button removed - now handled by Mod Settings
 
     const clearButton = createStyledButton(t('mods.huntAnalyzer.clearAll'));
     clearButton.addEventListener("click", () => {
@@ -5627,7 +6234,7 @@ function updatePanelLayout(panel) {
 // document.addEventListener('mousemove', ...)
 
 // =======================
-// 5. Event Handlers and Initialization
+// 6. Event Handlers and Initialization
 // =======================
 
 // Listen for game start and end events using the game's global API.
@@ -5839,8 +6446,6 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
         } catch (_e) { /* ignore */ }
     }
 }
-
-// Note: gameTimer subscription removed as it's redundant with board subscription
 
 // Create button to open the sidebar panel.
 function createHuntAnalyzerButton() {
@@ -6276,7 +6881,7 @@ const panelState = {
 
 
 // =======================
-// 6. Cleanup System
+// 7. Cleanup System
 // =======================
 
 // Comprehensive cleanup function for memory leak prevention
@@ -6294,10 +6899,6 @@ function cleanupHuntAnalyzer() {
         if (autoSaveIntervalId) {
             clearInterval(autoSaveIntervalId);
             autoSaveIntervalId = null;
-        }
-        if (rankPointerCheckIntervalId) {
-            clearInterval(rankPointerCheckIntervalId);
-            rankPointerCheckIntervalId = null;
         }
         
         // Stop internal clock system
@@ -6357,6 +6958,18 @@ function cleanupHuntAnalyzer() {
         // Remove translation event listener
         document.removeEventListener('bestiary-translations-loaded', translationEventHandler);
         
+        // Remove beforeunload listener
+        if (beforeUnloadHandler) {
+            window.removeEventListener('beforeunload', beforeUnloadHandler);
+            beforeUnloadHandler = null;
+        }
+        
+        // Remove storage event listener
+        if (storageEventHandler) {
+            window.removeEventListener('storage', storageEventHandler);
+            storageEventHandler = null;
+        }
+        
         // 3. Unsubscribe from subscriptions
         if (boardSubscription) {
             try {
@@ -6405,7 +7018,6 @@ function cleanupHuntAnalyzer() {
             }
         });
         
-        
         // 5. Clear caches to prevent memory leaks
         equipmentCache.clear();
         monsterCache.clear();
@@ -6445,6 +7057,16 @@ function cleanupHuntAnalyzer() {
                 boardSubscription.unsubscribe();
                 boardSubscription = null;
             }
+            
+            if (beforeUnloadHandler) {
+                window.removeEventListener('beforeunload', beforeUnloadHandler);
+                beforeUnloadHandler = null;
+            }
+            
+            if (storageEventHandler) {
+                window.removeEventListener('storage', storageEventHandler);
+                storageEventHandler = null;
+            }
         } catch (forceCleanupError) {
             console.error('[Hunt Analyzer] Error during force cleanup:', forceCleanupError);
         }
@@ -6469,19 +7091,42 @@ windowMessageHandler = function(event) {
 window.addEventListener('message', windowMessageHandler);
 console.log('[Hunt Analyzer] Message listener added');
 
-// Start watching Rank Pointer coordination flag
-try { startRankPointerWatcher(); } catch (_) {}
-
 // Save data before page unload
-window.addEventListener('beforeunload', () => {
+beforeUnloadHandler = () => {
     if (HuntAnalyzerState.settings.persistData) {
         saveHuntAnalyzerData();
         saveHuntAnalyzerState();
     }
-});
+};
+window.addEventListener('beforeunload', beforeUnloadHandler);
 
-// Export functionality and expose state globally for Better UI integration
+// Export functionality and expose state globally for Mod Settings integration
 window.HuntAnalyzerState = HuntAnalyzerState;
+
+// Expose applyTheme function for Mod Settings integration
+window.applyHuntAnalyzerTheme = applyTheme;
+
+// Expose themes object for Mod Settings to dynamically list available themes
+window.HUNT_ANALYZER_THEMES = HUNT_ANALYZER_THEMES;
+
+// Listen for theme changes from Mod Settings via storage events
+storageEventHandler = (e) => {
+    if (e.key === HUNT_ANALYZER_SETTINGS_KEY && e.newValue) {
+        try {
+            const newSettings = JSON.parse(e.newValue);
+            if (newSettings.theme && newSettings.theme !== HuntAnalyzerState.settings.theme) {
+                console.log('[Hunt Analyzer] Theme changed via storage event:', newSettings.theme);
+                applyTheme(newSettings.theme, true);
+            }
+        } catch (error) {
+            console.error('[Hunt Analyzer] Error parsing theme change from storage:', error);
+        }
+    }
+};
+window.addEventListener('storage', storageEventHandler);
+
+// Theme changes are now handled event-driven via Proxy on HuntAnalyzerState.settings
+// No polling needed - changes are detected immediately when Mod Settings updates the property
 
 exports = {
     cleanup: cleanupHuntAnalyzer,

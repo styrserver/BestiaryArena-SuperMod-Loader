@@ -9,7 +9,8 @@ console.log('[Rank Pointer] initializing...');
 const defaultConfig = {
   hideGameBoard: false,
   stopCondition: 'max', // 'max' = Maximum rank, 'any' = Any Victory
-  enableAutoRefillStamina: false
+  enableAutoRefillStamina: false,
+  stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
 };
 
 // Storage key for localStorage
@@ -52,7 +53,7 @@ const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
 // Timing constants
 const UI_UPDATE_DELAY_MS = 600;
-const GAME_RESTART_DELAY_MS = 1000;
+const GAME_RESTART_DELAY_MS = 400;
 const NOTIFICATION_DISPLAY_MS = 3000;
 
 // Analysis state constants
@@ -352,6 +353,7 @@ let allAttempts = []; // Store all attempt data including serverResults
 let boardSubscription = null; // Subscription to board state for serverResults
 let pendingServerResults = new Map(); // Map of seed -> serverResults for matching to attempts
 let defeatsCount = 0; // Track number of defeats
+let victoriesCount = 0; // Track number of victories
 let totalStaminaSpent = 0; // Track total stamina spent
 let openRewardsSubscription = null; // Subscription to openRewards state
 
@@ -359,6 +361,12 @@ let openRewardsSubscription = null; // Subscription to openRewards state
 let gameStateTracker = null;
 let skipCount = 0; // Track number of skips
 let skipInProgress = false; // Debounce skip handling
+
+// Persistent tracking variables updated by gameTimer subscription
+let persistentLastTick = 0;
+let persistentLastGrade = 'F';
+let persistentLastRankPoints = 0;
+let gameTimerUnsubscribe = null; // Unsubscribe function for gameTimer
 
 // =======================
 // 3. Utility Functions
@@ -606,273 +614,253 @@ function getGameStateTracker() {
   return gameStateTracker;
 }
 
+// Setup persistent gameTimer subscription for tracking game data
+function setupGameTimerSubscription() {
+  if (gameTimerUnsubscribe) {
+    return; // Already set up
+  }
+  
+  // Reset tracking variables
+  persistentLastTick = 0;
+  persistentLastGrade = 'F';
+  persistentLastRankPoints = 0;
+  
+  try {
+    const tracker = getGameStateTracker();
+    gameTimerUnsubscribe = tracker.subscribe((context) => {
+      if (context.currentTick !== undefined) persistentLastTick = context.currentTick;
+      if (context.readableGrade) persistentLastGrade = context.readableGrade;
+      if (context.rankPoints !== undefined) persistentLastRankPoints = context.rankPoints;
+    });
+    console.log('[Rank Pointer] Persistent gameTimer subscription set up');
+  } catch (error) {
+    console.warn('[Rank Pointer] Error setting up gameTimer subscription:', error);
+  }
+}
+
+// Cleanup persistent gameTimer subscription
+function cleanupGameTimerSubscription() {
+  if (gameTimerUnsubscribe) {
+    gameTimerUnsubscribe();
+    gameTimerUnsubscribe = null;
+    console.log('[Rank Pointer] Persistent gameTimer subscription cleaned up');
+  }
+}
+
 // Function to wait for game completion (tracking reward screen - 1 reward screen = 1 run)
 async function waitForGameCompletion(analysisId) {
   console.log('[Rank Pointer] Waiting for reward screen to open (1 reward screen = 1 run)...');
   
-  let attempts = 0;
-  const maxAttempts = 48; // 4 minutes max wait time (48 * 5 seconds)
-  
-  // Track game data as it updates
-  let lastTick = 0;
-  let lastGrade = 'F';
-  let lastRankPoints = 0;
-  
-  // Subscribe to gameTimer to capture game data as it updates
-  const tracker = getGameStateTracker();
-  const unsubscribeTracker = tracker.subscribe((context) => {
-    console.log('[Rank Pointer] gameTimer context update:', {
-      currentTick: context.currentTick,
-      readableGrade: context.readableGrade,
-      rankPoints: context.rankPoints
-    });
-    if (context.currentTick !== undefined) lastTick = context.currentTick;
-    if (context.readableGrade) lastGrade = context.readableGrade;
-    if (context.rankPoints !== undefined) lastRankPoints = context.rankPoints;
+  // Use persistent tracking variables (updated by persistent gameTimer subscription)
+  console.log('[Rank Pointer] Current tracked values:', { 
+    lastTick: persistentLastTick, 
+    lastGrade: persistentLastGrade, 
+    lastRankPoints: persistentLastRankPoints 
   });
-  
-  // Also log the tracked values when reward screen opens
-  console.log('[Rank Pointer] Initial tracked values:', { lastTick, lastGrade, lastRankPoints });
   
   // Reset reward screen state at start (should already be false, but ensure it)
   rewardScreenOpen = false;
   console.log('[Rank Pointer] waitForGameCompletion: Reset rewardScreenOpen to false');
   
-  while (attempts < maxAttempts) {
-    try {
-      // Check if this analysis instance is still valid
-      if (analysisId && !analysisState.isValidId(analysisId)) {
-        console.log('[Rank Pointer] Analysis instance changed during wait - stopping');
-        return {
-          ticks: 0,
-          grade: 'F',
-          rankPoints: 0,
-          completed: false,
-          forceStopped: true
-        };
+  // Promise-based approach: wait for callback to fire or timeout
+  const maxWaitMs = 240000; // 4 minutes max
+  const checkIntervalMs = 1000; // Check stop/skip every second
+  
+  const completionPromise = new Promise((resolve, reject) => {
+    let intervalId;
+    let checkCount = 0;
+    
+    // Register callback for immediate resolution when reward screen opens
+    rewardScreenOpenedCallback = () => {
+      console.log('[Rank Pointer] Reward screen opened via callback - resolving immediately');
+      if (intervalId) clearInterval(intervalId);
+      rewardScreenOpenedCallback = null;
+      resolve('callback');
+    };
+    
+    // Interval to check for stop/skip conditions
+    intervalId = setInterval(async () => {
+      checkCount++;
+      
+      // Check if we should stop
+      if (!analysisState.isValidId(analysisId)) {
+        clearInterval(intervalId);
+        rewardScreenOpenedCallback = null;
+        reject('invalid_id');
+        return;
       }
       
-      // Check for force stop
-      if (analysisState.forceStop) {
-        console.log('[Rank Pointer] Force stop detected during wait - stopping');
-        return {
-          ticks: 0,
-          grade: 'F',
-          rankPoints: 0,
-          completed: false,
-          forceStopped: true
-        };
-      }
-      
-      // Check if analysis state was reset
       if (!analysisState.isRunning()) {
-        console.log('[Rank Pointer] Analysis state reset during wait - stopping');
-        return {
-          ticks: 0,
-          grade: 'F',
-          rankPoints: 0,
-          completed: false,
-          forceStopped: true
-        };
-      }
-      
-      // Check for skip button first (time-limit loss) - like btlucas fix.js
-      const skipButton = findSkipButton();
-      if (skipButton) {
-        console.log(`[Rank Pointer] Skip button detected during check ${attempts + 1} - clicking to skip time-limit loss...`);
-        await handleSkipButton();
-        
-        // Return a defeat result for skip button
-        return {
-          ticks: 0,
-          grade: 'F',
-          rankPoints: 0,
-          completed: false,
-          skipped: true
-        };
-      }
-      
-      // Check if reward screen is open (this means the game completed)
-      let isRewardScreenOpen = false;
-      try {
-        const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-        isRewardScreenOpen = openRewards.getSnapshot();
-      } catch (e) {
-        // Fallback to our tracked state
-        isRewardScreenOpen = rewardScreenOpen;
-      }
-      
-      // Also check tracked state (in case subscription updated it)
-      if (!isRewardScreenOpen) {
-        isRewardScreenOpen = rewardScreenOpen;
-      }
-      
-      console.log(`[Rank Pointer] Check ${attempts + 1}: rewardScreenOpen=${isRewardScreenOpen}`);
-      
-      if (isRewardScreenOpen) {
-        console.log(`[Rank Pointer] Reward screen opened after ${attempts} seconds - game completed!`);
-        console.log(`[Rank Pointer] Tracked game data when reward screen opened:`, { lastTick, lastGrade, lastRankPoints });
-        
-        // Get game state from gameTimer context (for victory check and grade/rank) - like Board Analyzer
-        const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
-        const gameState = gameTimerContext.state;
-        
-        // Get grade and rank from gameTimer context (authoritative source, like Board Analyzer)
-        // Use gameTimer's readableGrade directly if available and valid (non-empty string)
-        // Empty string means grade not yet available
-        let readableGrade = (gameTimerContext.readableGrade && 
-                            gameTimerContext.readableGrade !== '' && 
-                            gameTimerContext.readableGrade !== null && 
-                            gameTimerContext.readableGrade !== undefined)
-          ? gameTimerContext.readableGrade 
-          : lastGrade;
-        let rankPoints = gameTimerContext.rankPoints !== undefined ? gameTimerContext.rankPoints : lastRankPoints;
-        let currentTick = gameTimerContext.currentTick !== undefined ? gameTimerContext.currentTick : lastTick;
-        
-        console.log(`[Rank Pointer] gameTimer context:`, {
-          state: gameState,
-          readableGrade: gameTimerContext.readableGrade,
-          rankPoints: gameTimerContext.rankPoints,
-          currentTick: gameTimerContext.currentTick
-        });
-        
-        // Check pending serverResults first (captured by subscription)
-        let serverResults = null;
-        if (pendingServerResults.size > 0) {
-          const lastSeed = Array.from(pendingServerResults.keys()).pop();
-          serverResults = pendingServerResults.get(lastSeed);
-          console.log(`[Rank Pointer] Got serverResults from pending map for game completion check`);
+        // Don't abort - let the current run finish (reward screen will still be captured)
+        // The main loop will check this after the run completes
+        if (checkCount === 1) {
+          console.log('[Rank Pointer] Stop requested - letting current run finish naturally');
         }
-        
-        // Also check current board context as fallback
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        if (!serverResults && boardContext?.serverResults) {
-          serverResults = boardContext.serverResults;
-          console.log(`[Rank Pointer] Got serverResults from board context`);
-        }
-        
-        let completed = gameState === 'victory';
-        
-        if (serverResults?.rewardScreen) {
-          const serverVictory = typeof serverResults.rewardScreen.victory === 'boolean' ? serverResults.rewardScreen.victory : false;
-          console.log(`[Rank Pointer] Found serverResults - gameState: ${gameState}, serverVictory: ${serverVictory}, gameTicks: ${serverResults.rewardScreen.gameTicks}`);
-          
-          // Use serverResults as authoritative for victory
-          completed = serverVictory;
-          
-          // Use serverResults for tick info if available (especially important in manual mode)
-          if (typeof serverResults.rewardScreen.gameTicks === 'number') {
-            currentTick = serverResults.rewardScreen.gameTicks;
-            console.log(`[Rank Pointer] Using gameTicks from serverResults: ${currentTick}`);
-          }
-          
-          // Try to get rank points from serverResults.rank (not rankPoints) - like RunTracker/Board Advisor
-          if (typeof serverResults.rewardScreen.rank === 'number') {
-            rankPoints = serverResults.rewardScreen.rank;
-            console.log(`[Rank Pointer] Using rank from serverResults.rewardScreen.rank: ${rankPoints}`);
-          }
-          
-          // Check if serverResults has grade field
-          if (serverResults.rewardScreen.grade && 
-              serverResults.rewardScreen.grade !== '' && 
-              typeof serverResults.rewardScreen.grade === 'string') {
-            readableGrade = serverResults.rewardScreen.grade;
-            console.log(`[Rank Pointer] Using grade from serverResults.rewardScreen.grade: ${readableGrade}`);
-          }
-          // Only calculate grade if neither gameTimer nor serverResults provided a valid one
-          else if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
-            // Get maxTeamSize for proper grade calculation (fallback only) - pass serverResults for roomId lookup
-            const maxTeamSize = getMaxTeamSize(serverResults);
-            readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-            console.log(`[Rank Pointer] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (neither gameTimer nor serverResults provided grade)`);
-          } else {
-            // Trust gameTimer's grade (same as Board Analyzer does)
-            console.log(`[Rank Pointer] Using grade from gameTimer: ${readableGrade}`);
-          }
-          
-          // Log all available serverResults fields for debugging
-          console.log(`[Rank Pointer] serverResults.rewardScreen keys:`, Object.keys(serverResults.rewardScreen));
-          if (serverResults.rewardScreen.grade !== undefined) {
-            console.log(`[Rank Pointer] serverResults.rewardScreen.grade:`, serverResults.rewardScreen.grade);
-          }
-          
-        } else {
-          console.log(`[Rank Pointer] No serverResults available yet, using gameState: ${gameState}`);
-          
-          // Only calculate grade if gameTimer didn't provide a valid one (use game's calculation as authoritative)
-          if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
-            const maxTeamSize = getMaxTeamSize(null);
-            readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
-            console.log(`[Rank Pointer] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (gameTimer didn't provide valid grade)`);
-          } else {
-            // Trust gameTimer's grade (same as Board Analyzer does)
-            console.log(`[Rank Pointer] Using grade from gameTimer: ${readableGrade}`);
-          }
-        }
-        
-        console.log(`[Rank Pointer] Final victory determination: ${completed}, ticks: ${currentTick}, grade: ${readableGrade}, rankPoints: ${rankPoints}`);
-        
-        // Unsubscribe from tracker before returning
-        if (unsubscribeTracker) unsubscribeTracker();
-        
-        return {
-          ticks: currentTick,
-          grade: readableGrade,
-          rankPoints: rankPoints,
-          completed: completed
-        };
       }
       
-      // Log progress approximately every 10 seconds
-      if (attempts % 2 === 0 && attempts > 0) {
-        console.log(`[Rank Pointer] Still waiting for reward screen... (${attempts * 5}s elapsed)`);
+      // Check for skip
+      if (await handleSkipDetection(`[Rank Pointer] Skip detected during wait check ${checkCount}`)) {
+        clearInterval(intervalId);
+        rewardScreenOpenedCallback = null;
+        reject('skip');
+        return;
       }
       
-      // Fallback window: up to 10 seconds, check every 500ms (enableSkip first)
-      for (let i = 0; i < 20; i++) {
-        try {
-          // 1) Server signal is most reliable
-          try {
-            const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
-            if (ctx?.serverResults?.enableSkip === true && !skipInProgress) {
-              skipInProgress = true;
-              console.log('[Rank Pointer] enableSkip=true (fast loop) — handling skip...');
-              await handleSkipButton();
-              setTimeout(() => { skipInProgress = false; }, 1200);
-              return { ticks: 0, grade: 'F', rankPoints: 0, completed: false, skipped: true };
-            }
-          } catch (_) {}
-
-          // 2) DOM fallback
-          const skipButtonFast = findSkipButton();
-          if (skipButtonFast) {
-            console.log(`[Rank Pointer] Fast-scan DOM: Skip detected, handling immediately...`);
-            await handleSkipButton();
-            return { ticks: 0, grade: 'F', rankPoints: 0, completed: false, skipped: true };
-          }
-        } catch (_) {}
-        await sleep(500);
+      // Also check state directly (fallback in case callback missed)
+      if (getOpenRewardsStateWithFallback()) {
+        console.log('[Rank Pointer] Reward screen detected via polling fallback');
+        clearInterval(intervalId);
+        rewardScreenOpenedCallback = null;
+        resolve('polling');
+        return;
       }
-      attempts++;
       
-    } catch (error) {
-      console.error('[Rank Pointer] Error checking reward screen during wait:', error);
-      await sleep(1000);
-      attempts++;
+      // Log progress every 10 seconds
+      if (checkCount % 10 === 0) {
+        console.log(`[Rank Pointer] Still waiting for reward screen... (${checkCount}s elapsed, callback will resolve instantly)`);
+      }
+      
+      // Timeout check
+      if (checkCount * checkIntervalMs >= maxWaitMs) {
+        console.log('[Rank Pointer] Wait timeout reached');
+        clearInterval(intervalId);
+        rewardScreenOpenedCallback = null;
+        reject('timeout');
+      }
+    }, checkIntervalMs);
+  });
+  
+  // Wait for completion or error
+  try {
+    const triggerSource = await completionPromise;
+    console.log(`[Rank Pointer] Game completed (triggered by: ${triggerSource})`);
+  } catch (reason) {
+    if (reason === 'invalid_id' || reason === 'stopped') {
+      return createForceStopResult();
+    } else if (reason === 'skip') {
+      return createSkipResult();
+    } else if (reason === 'timeout') {
+      console.log('[Rank Pointer] Timeout waiting for reward screen - returning failed state');
+      return {
+        ticks: persistentLastTick || 0,
+        grade: persistentLastGrade || 'F',
+        rankPoints: persistentLastRankPoints || 0,
+        completed: false,
+        forceStopped: true
+      };
     }
   }
   
-  // Unsubscribe from tracker
-  if (unsubscribeTracker) unsubscribeTracker();
+  // Process completion
+  console.log(`[Rank Pointer] Tracked game data when reward screen opened:`, { 
+    lastTick: persistentLastTick, 
+    lastGrade: persistentLastGrade, 
+    lastRankPoints: persistentLastRankPoints 
+  });
   
-  console.log('[Rank Pointer] Reward screen wait timeout - proceeding anyway...');
-  // Return with failed state, using last tracked values if available
+  // Get game state from gameTimer context (for victory check and grade/rank) - like Board Analyzer
+  const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
+  const gameState = gameTimerContext.state;
+  
+  // Get grade and rank from gameTimer context (authoritative source, like Board Analyzer)
+  // Use gameTimer's readableGrade directly if available and valid (non-empty string)
+  // Empty string means grade not yet available
+  let readableGrade = (gameTimerContext.readableGrade && 
+                      gameTimerContext.readableGrade !== '' && 
+                      gameTimerContext.readableGrade !== null && 
+                      gameTimerContext.readableGrade !== undefined)
+    ? gameTimerContext.readableGrade 
+    : persistentLastGrade;
+  let rankPoints = gameTimerContext.rankPoints !== undefined ? gameTimerContext.rankPoints : persistentLastRankPoints;
+  let currentTick = gameTimerContext.currentTick !== undefined ? gameTimerContext.currentTick : persistentLastTick;
+  
+  console.log(`[Rank Pointer] gameTimer context:`, {
+    state: gameState,
+    readableGrade: gameTimerContext.readableGrade,
+    rankPoints: gameTimerContext.rankPoints,
+    currentTick: gameTimerContext.currentTick
+  });
+  
+  // Check pending serverResults first (captured by subscription)
+  let serverResults = null;
+  if (pendingServerResults.size > 0) {
+    const lastSeed = Array.from(pendingServerResults.keys()).pop();
+    serverResults = pendingServerResults.get(lastSeed);
+    console.log(`[Rank Pointer] Got serverResults from pending map for game completion check`);
+  }
+  
+  // Also check current board context as fallback
+  const boardContext = globalThis.state.board.getSnapshot().context;
+  if (!serverResults && boardContext?.serverResults) {
+    serverResults = boardContext.serverResults;
+    console.log(`[Rank Pointer] Got serverResults from board context`);
+  }
+  
+  let completed = gameState === 'victory';
+  
+  if (serverResults?.rewardScreen) {
+    const serverVictory = typeof serverResults.rewardScreen.victory === 'boolean' ? serverResults.rewardScreen.victory : false;
+    console.log(`[Rank Pointer] Found serverResults - gameState: ${gameState}, serverVictory: ${serverVictory}, gameTicks: ${serverResults.rewardScreen.gameTicks}`);
+    
+    // Use serverResults as authoritative for victory
+    completed = serverVictory;
+    
+    // Use serverResults for tick info if available (especially important in manual mode)
+    if (typeof serverResults.rewardScreen.gameTicks === 'number') {
+      currentTick = serverResults.rewardScreen.gameTicks;
+      console.log(`[Rank Pointer] Using gameTicks from serverResults: ${currentTick}`);
+    }
+    
+    // Try to get rank points from serverResults.rank (not rankPoints) - like RunTracker/Board Advisor
+    if (typeof serverResults.rewardScreen.rank === 'number') {
+      rankPoints = serverResults.rewardScreen.rank;
+      console.log(`[Rank Pointer] Using rank from serverResults.rewardScreen.rank: ${rankPoints}`);
+    }
+    
+    // Check if serverResults has grade field
+    if (serverResults.rewardScreen.grade && 
+        serverResults.rewardScreen.grade !== '' && 
+        typeof serverResults.rewardScreen.grade === 'string') {
+      readableGrade = serverResults.rewardScreen.grade;
+      console.log(`[Rank Pointer] Using grade from serverResults.rewardScreen.grade: ${readableGrade}`);
+    }
+    // Only calculate grade if neither gameTimer nor serverResults provided a valid one
+    else if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
+      // Get maxTeamSize for proper grade calculation (fallback only) - pass serverResults for roomId lookup
+      const maxTeamSize = getMaxTeamSize(serverResults);
+      readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
+      console.log(`[Rank Pointer] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (neither gameTimer nor serverResults provided grade)`);
+    } else {
+      // Trust gameTimer's grade (same as Board Analyzer does)
+      console.log(`[Rank Pointer] Using grade from gameTimer: ${readableGrade}`);
+    }
+    
+    // Log all available serverResults fields for debugging
+    console.log(`[Rank Pointer] serverResults.rewardScreen keys:`, Object.keys(serverResults.rewardScreen));
+    if (serverResults.rewardScreen.grade !== undefined) {
+      console.log(`[Rank Pointer] serverResults.rewardScreen.grade:`, serverResults.rewardScreen.grade);
+    }
+  } else {
+    console.log(`[Rank Pointer] No serverResults available yet, using gameState: ${gameState}`);
+    
+    // Only calculate grade if gameTimer didn't provide a valid one (use game's calculation as authoritative)
+    if (!readableGrade || readableGrade === '' || readableGrade === 'F') {
+      const maxTeamSize = getMaxTeamSize(null);
+      readableGrade = calculateGradeFromRankPoints(rankPoints, maxTeamSize);
+      console.log(`[Rank Pointer] Calculated grade from rankPoints ${rankPoints} and maxTeamSize ${maxTeamSize}: ${readableGrade} (gameTimer didn't provide valid grade)`);
+    } else {
+      // Trust gameTimer's grade (same as Board Analyzer does)
+      console.log(`[Rank Pointer] Using grade from gameTimer: ${readableGrade}`);
+    }
+  }
+  
+  console.log(`[Rank Pointer] Final victory determination: ${completed}, ticks: ${currentTick}, grade: ${readableGrade}, rankPoints: ${rankPoints}`);
+  
   return {
-    ticks: lastTick || 0,
-    grade: lastGrade || 'F',
-    rankPoints: lastRankPoints || 0,
-    completed: false,
-    forceStopped: true
+    ticks: currentTick,
+    grade: readableGrade,
+    rankPoints: rankPoints,
+    completed: completed
   };
 }
 
@@ -931,6 +919,7 @@ function setupBoardSubscription() {
 // Track reward screen state
 let rewardScreenOpen = false;
 let rewardScreenClosedCallback = null;
+let rewardScreenOpenedCallback = null;
 
 // Setup openRewards subscription to track when reward screen opens/closes
 function setupRewardsScreenSubscription() {
@@ -952,6 +941,12 @@ function setupRewardsScreenSubscription() {
           // Reward screen just opened - this indicates a game completed
           console.log('[Rank Pointer] Reward screen opened - game completed! (1 reward screen = 1 run)');
           rewardScreenOpen = true;
+          
+          // Trigger immediate check if callback is registered
+          if (rewardScreenOpenedCallback) {
+            console.log('[Rank Pointer] Triggering immediate check via callback');
+            rewardScreenOpenedCallback();
+          }
         } else if (!isOpen && rewardScreenOpen) {
           // Reward screen just closed
           console.log('[Rank Pointer] Reward screen closed');
@@ -1079,7 +1074,7 @@ async function quickSkipScan(totalMs = 5000, stepMs = 400) {
 }
 
 // Function to wait for reward screen to close
-async function waitForRewardScreenToClose(maxWaitMs = 5000) {
+async function waitForRewardScreenToClose(maxWaitMs = 2500) {
   // Check actual state first, not just the flag
   let isCurrentlyOpen = false;
   try {
@@ -1154,7 +1149,7 @@ async function waitForRewardScreenToClose(maxWaitMs = 5000) {
           resolve(true);
         }
       }
-    }, 100);
+    }, 80);
   });
 }
 
@@ -1192,6 +1187,312 @@ function cleanupBoardSubscription() {
   cleanupRewardsScreenSubscription();
 }
 
+function shouldAbortAnalysisLoop(analysisId) {
+  if (!analysisState.isValidId(analysisId) || !analysisState.isRunning() || analysisState.forceStop) {
+    console.log('[Rank Pointer] Stopping analysis');
+    return true;
+  }
+  return false;
+}
+
+async function waitForModCoordinationTasks(options = {}) {
+  const {
+    maxWaitMs = 10000,
+    delayMs = 500,
+    context = ''
+  } = options || {};
+
+  const start = performance.now();
+  let waitAttempts = 0;
+
+  const getActiveOperations = () => {
+    const ops = [];
+    if (window.__modCoordination?.automatorRefilling) ops.push('refilling stamina');
+    if (window.__modCoordination?.automatorCollectingRewards) ops.push('collecting rewards');
+    if (window.__modCoordination?.automatorHandlingDaycare) ops.push('handling daycare');
+    if (window.__modCoordination?.automatorCollectingSeashell) ops.push('collecting seashell');
+    return ops;
+  };
+
+  // Log initial coordination state
+  const initialOps = getActiveOperations();
+  const contextSuffix = context ? ` [${context}]` : '';
+  console.log(`[Rank Pointer] Checking coordination flags${contextSuffix}:`, {
+    automatorRefilling: !!window.__modCoordination?.automatorRefilling,
+    automatorCollectingRewards: !!window.__modCoordination?.automatorCollectingRewards,
+    automatorHandlingDaycare: !!window.__modCoordination?.automatorHandlingDaycare,
+    automatorCollectingSeashell: !!window.__modCoordination?.automatorCollectingSeashell,
+    activeOperations: initialOps.length > 0 ? initialOps : 'none'
+  });
+
+  let activeOperations = initialOps;
+
+  while (activeOperations.length > 0) {
+    const attemptLabel = waitAttempts + 1;
+    console.log(`[Rank Pointer] Waiting for Bestiary Automator to finish ${activeOperations.join(', ')}... (${attemptLabel})${contextSuffix}`);
+
+    const elapsed = performance.now() - start;
+    if (elapsed >= maxWaitMs) {
+      console.warn(`[Rank Pointer] Waited ${Math.round(elapsed)}ms for Bestiary Automator${contextSuffix}, continuing analysis anyway`);
+      return;
+    }
+
+    await sleep(delayMs);
+    waitAttempts++;
+    activeOperations = getActiveOperations();
+  }
+
+  if (waitAttempts > 0) {
+    const elapsed = Math.round(performance.now() - start);
+    console.log(`[Rank Pointer] Bestiary Automator finished after ${elapsed}ms, resuming analysis${contextSuffix}`);
+  } else {
+    console.log(`[Rank Pointer] No Automator operations active, continuing immediately${contextSuffix}`);
+  }
+}
+
+function prepareAttemptState(nextAttemptNumber) {
+  rewardScreenOpen = false;
+  // Reset persistent tracking variables for new attempt
+  persistentLastTick = 0;
+  persistentLastGrade = 'F';
+  persistentLastRankPoints = 0;
+  console.log(`[Rank Pointer] Reset state for attempt ${nextAttemptNumber}`);
+}
+
+async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
+  const startTime = performance.now();
+  let stopWaitCount = 0;
+  console.log('[Rank Pointer] Checking if game has stopped...');
+  while (stopWaitCount < maxChecks) {
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    if (!boardContext.gameStarted) {
+      const elapsed = Math.round(performance.now() - startTime);
+      console.log(`[Rank Pointer] Game stopped after ${elapsed}ms (${stopWaitCount} checks)`);
+      break;
+    }
+    await sleep(delayMs);
+    stopWaitCount++;
+  }
+  
+  if (stopWaitCount >= maxChecks) {
+    console.log(`[Rank Pointer] Game state still showing as started after ${stopWaitCount * delayMs}ms, continuing anyway`);
+  }
+}
+
+async function ensureRewardScreenHandled() {
+  let isRewardScreenOpen = false;
+  try {
+    const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
+    isRewardScreenOpen = openRewards.getSnapshot();
+    console.log(`[Rank Pointer] Verified reward screen state: ${isRewardScreenOpen}, rewardScreenOpen flag: ${rewardScreenOpen}`);
+  } catch (e) {
+    console.log('[Rank Pointer] Could not check openRewards state, using flag');
+    isRewardScreenOpen = rewardScreenOpen;
+  }
+
+  if (!isRewardScreenOpen) {
+    console.log('[Rank Pointer] Reward screen is not open, skipping close step');
+    return;
+  }
+
+  await waitForModCoordinationTasks({ context: 'reward screen handling' });
+
+  const closeStart = performance.now();
+  console.log('[Rank Pointer] Closing reward screen after game completion...');
+  closeRewardScreen();
+  await sleep(200);
+
+  const rewardClosed = await waitForRewardScreenToClose(2500);
+  const closeElapsed = Math.round(performance.now() - closeStart);
+  
+  if (!rewardClosed) {
+    console.warn(`[Rank Pointer] Reward screen did not close within timeout (${closeElapsed}ms), trying ESC key...`);
+    dispatchEsc();
+    await sleep(1000);
+    try {
+      const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
+      const isOpen = openRewards.getSnapshot();
+      if (isOpen) {
+        console.error('[Rank Pointer] Reward screen still open after ESC key - this may cause issues');
+      } else {
+        console.log('[Rank Pointer] Reward screen closed after ESC key');
+        rewardScreenOpen = false;
+      }
+    } catch (e) {
+      console.log('[Rank Pointer] Could not check reward screen state after ESC');
+    }
+  } else {
+    console.log(`[Rank Pointer] Reward screen closed successfully in ${closeElapsed}ms, processing result...`);
+  }
+}
+
+async function waitForServerResults(maxWaitTime = 2000) {
+  let serverResults = null;
+  const waitStart = performance.now();
+
+  while (!serverResults && (performance.now() - waitStart) < maxWaitTime) {
+    const contextServerResults = globalThis.state?.board?.getSnapshot?.()?.context?.serverResults;
+    if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
+      serverResults = JSON.parse(JSON.stringify(contextServerResults));
+      console.log('[Rank Pointer] Got serverResults from context, seed:', serverResults.seed, 'victory:', serverResults.rewardScreen.victory);
+      break;
+    }
+
+    if (pendingServerResults.size > 0) {
+      const lastSeed = Array.from(pendingServerResults.keys()).pop();
+      serverResults = pendingServerResults.get(lastSeed);
+      pendingServerResults.delete(lastSeed);
+      console.log('[Rank Pointer] Got serverResults from pending map, seed:', serverResults?.seed, 'victory:', serverResults?.rewardScreen?.victory);
+      break;
+    }
+
+    await sleep(50);
+  }
+
+  return serverResults;
+}
+
+function updateVictoryDefeatCounters(isVictory) {
+  if (isVictory) {
+    victoriesCount++;
+  } else {
+    defeatsCount++;
+  }
+}
+
+function trackStaminaUsage(serverResults, attemptNumber) {
+  let attemptStaminaSpent = 0;
+  if (typeof serverResults?.next?.playerExpDiff === 'number') {
+    attemptStaminaSpent = serverResults.next.playerExpDiff;
+    totalStaminaSpent += attemptStaminaSpent;
+    console.log(`[Rank Pointer] Stamina spent this attempt: ${attemptStaminaSpent}, total: ${totalStaminaSpent}`);
+  } else {
+    console.warn(`[Rank Pointer] No valid playerExpDiff found in serverResults for attempt ${attemptNumber}`);
+  }
+  return attemptStaminaSpent;
+}
+
+function createAttemptData({ attemptNumber, result, runTime, serverResults, attemptStaminaSpent, attemptSeed, isVictory }) {
+  return {
+    attemptNumber,
+    ticks: result.ticks,
+    grade: result.grade,
+    rankPoints: result.rankPoints || 0,
+    completed: isVictory,
+    victory: isVictory,
+    runTimeMs: runTime,
+    staminaSpent: attemptStaminaSpent,
+    seed: attemptSeed,
+    serverResults,
+    skipped: !!result.skipped
+  };
+}
+
+function createForceStopResult() {
+  return {
+    ticks: 0,
+    grade: 'F',
+    rankPoints: 0,
+    completed: false,
+    forceStopped: true
+  };
+}
+
+function createSkipResult() {
+  return {
+    ticks: 0,
+    grade: 'F',
+    rankPoints: 0,
+    completed: false,
+    skipped: true
+  };
+}
+
+function getOpenRewardsStateWithFallback() {
+  try {
+    const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
+    return openRewards.getSnapshot();
+  } catch (e) {
+    return rewardScreenOpen;
+  }
+}
+
+function serverSignalsSkipEnabled() {
+  try {
+    const ctx = globalThis.state?.board?.getSnapshot?.()?.context;
+    return ctx?.serverResults?.enableSkip === true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function handleSkipDetection(message) {
+  if (serverSignalsSkipEnabled() && !skipInProgress) {
+    skipInProgress = true;
+    console.log(message || '[Rank Pointer] enableSkip=true received — attempting to skip');
+    await handleSkipButton().finally(() => {
+      setTimeout(() => { skipInProgress = false; }, 1200);
+    });
+    return true;
+  }
+
+  const skipButton = findSkipButton();
+  if (skipButton) {
+    if (!skipInProgress) {
+      skipInProgress = true;
+      console.log('[Rank Pointer] Skip button detected — handling...');
+      await handleSkipButton();
+      setTimeout(() => { skipInProgress = false; }, 1200);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function createTextElement(tag, { id, text, style, className } = {}) {
+  const el = document.createElement(tag);
+  if (id) {
+    el.id = id;
+  }
+  if (typeof text === 'string') {
+    el.textContent = text;
+  }
+  if (style) {
+    el.style.cssText = style;
+  }
+  if (className) {
+    el.className = className;
+  }
+  return el;
+}
+
+function appendStatRow(container, labelText, valueText, { labelStyle, valueStyle } = {}) {
+  const defaultLabelStyle = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+  const defaultValueStyle = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+  const label = createTextElement('div', {
+    text: labelText,
+    style: labelStyle || defaultLabelStyle
+  });
+
+  const value = createTextElement('div', {
+    text: valueText,
+    style: valueStyle || defaultValueStyle
+  });
+
+  container.appendChild(label);
+  container.appendChild(value);
+  return { label, value };
+}
+
+function updateTextContent(id, text) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.textContent = text;
+  }
+}
+
 // Main function to run until victory
 async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
   const thisAnalysisId = analysisState.start();
@@ -1201,6 +1502,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     // Reset attempts array and tracking variables
     allAttempts = [];
     defeatsCount = 0;
+    victoriesCount = 0;
     totalStaminaSpent = 0;
     
     // Setup board subscription to capture serverResults
@@ -1208,6 +1510,9 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     // Setup rewards screen subscription to auto-close reward screens
     setupRewardsScreenSubscription();
+    
+    // Setup persistent gameTimer subscription to track game data
+    setupGameTimerSubscription();
     
     // Ensure manual mode
     ensureManualMode();
@@ -1225,218 +1530,85 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     startTime = performance.now();
     
     while (true) {
-      // Check if should stop
-      if (!analysisState.isValidId(thisAnalysisId) || 
-          !analysisState.isRunning() || 
-          analysisState.forceStop) {
-        console.log('[Rank Pointer] Stopping analysis');
+      if (shouldAbortAnalysisLoop(thisAnalysisId)) {
         break;
       }
-      
+
       attemptCount++;
       currentRunStartTime = performance.now();
-      
-      // Update status initially
+
       if (statusCallback) {
         statusCallback({
           attempts: attemptCount,
           defeats: defeatsCount,
+          victories: victoriesCount,
           staminaSpent: totalStaminaSpent,
           status: 'running'
         });
       }
-      
+
       console.log(`[Rank Pointer] Attempt ${attemptCount}: Starting game...`);
-      
-      // Wait for Bestiary Automator to finish any operations if in progress
-      let waitAttempts = 0;
-      while ((window.__modCoordination?.automatorRefilling || 
-              window.__modCoordination?.automatorCollectingRewards ||
-              window.__modCoordination?.automatorHandlingDaycare) && 
-             waitAttempts < 20) {
-        const operations = [];
-        if (window.__modCoordination?.automatorRefilling) operations.push('refilling stamina');
-        if (window.__modCoordination?.automatorCollectingRewards) operations.push('collecting rewards');
-        if (window.__modCoordination?.automatorHandlingDaycare) operations.push('handling daycare');
-        
-        console.log(`[Rank Pointer] Waiting for Bestiary Automator to finish ${operations.join(', ')}... (${waitAttempts + 1})`);
-        await sleep(500);
-        waitAttempts++;
-      }
-      if (waitAttempts > 0) {
-        console.log(`[Rank Pointer] Bestiary Automator finished operations, resuming analysis`);
-      }
-      
-      // Reset reward screen state before starting new game
-      rewardScreenOpen = false;
-      console.log(`[Rank Pointer] Reset rewardScreenOpen to false for attempt ${attemptCount + 1}`);
-      
-      // Start the game
+
+      await waitForModCoordinationTasks({ context: `pre-start attempt ${attemptCount}` });
+      prepareAttemptState(attemptCount + 1);
+
       if (!clickStartButton()) {
         console.error('[Rank Pointer] Failed to find start button');
         break;
       }
-      
-      // Wait a moment for game to actually start
+
       await sleep(200);
-      
-      // Wait for game to complete (detected by reward screen opening)
-      // Skip button check will happen inside waitForGameCompletion
+
       const result = await waitForGameCompletion(thisAnalysisId);
       if (result && result.skipped) {
         skipCount += 1;
       }
-      
-      // Reward screen should be open now (waitForGameCompletion returned when it opened)
-      // Verify it's actually open and then close it
-      let isRewardScreenOpen = false;
-      try {
-        const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-        isRewardScreenOpen = openRewards.getSnapshot();
-        console.log(`[Rank Pointer] Verified reward screen state: ${isRewardScreenOpen}, rewardScreenOpen flag: ${rewardScreenOpen}`);
-      } catch (e) {
-        console.log('[Rank Pointer] Could not check openRewards state, using flag');
-        isRewardScreenOpen = rewardScreenOpen;
-      }
-      
-      if (!isRewardScreenOpen) {
-        console.log('[Rank Pointer] Reward screen is not open, skipping close step');
-      } else {
-        console.log(`[Rank Pointer] Closing reward screen after game completion...`);
-        
-        // First, try to close the reward screen
-        closeRewardScreen();
-        
-        // Wait a moment for the close action to take effect
-        await sleep(500);
-        
-        // Wait for reward screen to actually close (this is critical for the Start button to appear)
-        const rewardClosed = await waitForRewardScreenToClose(5000); // Increased timeout
-        if (!rewardClosed) {
-          console.warn('[Rank Pointer] Reward screen did not close within timeout, trying ESC key...');
-          // Try ESC key as fallback
-          dispatchEsc();
-          
-          // Wait a bit more
-          await sleep(1000);
-          
-          // Check one more time
-          try {
-            const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
-            const isOpen = openRewards.getSnapshot();
-            if (isOpen) {
-              console.error('[Rank Pointer] Reward screen still open after ESC key - this may cause issues');
-            } else {
-              console.log('[Rank Pointer] Reward screen closed after ESC key');
-              rewardScreenOpen = false;
-            }
-          } catch (e) {
-            console.log('[Rank Pointer] Could not check reward screen state after ESC');
-          }
-        } else {
-          console.log(`[Rank Pointer] Reward screen closed successfully, processing result...`);
-        }
-      }
-      
-      // Check if force stopped
+
+      await ensureRewardScreenHandled();
+      await waitForModCoordinationTasks({ context: `post-attempt cleanup ${attemptCount}` });
+
       if (result.forceStopped) {
         console.log('[Rank Pointer] Analysis stopped');
         break;
       }
-      
+
       const runTime = performance.now() - currentRunStartTime;
-      
-      // Wait for serverResults to arrive (with timeout to avoid infinite wait)
-      // This ensures we get the victory status from serverResults
-      let serverResults = null;
-      const maxWaitTime = 2000; // Max 2 seconds to wait for serverResults
-      const waitStart = performance.now();
-      
-      while (!serverResults && (performance.now() - waitStart) < maxWaitTime) {
-        // First, try to get from context (most reliable and current)
-        if (globalThis.state?.board?.getSnapshot?.()?.context?.serverResults) {
-          const contextServerResults = globalThis.state.board.getSnapshot().context.serverResults;
-          if (contextServerResults && contextServerResults.rewardScreen && typeof contextServerResults.seed !== 'undefined') {
-            // Make a deep copy of serverResults
-            serverResults = JSON.parse(JSON.stringify(contextServerResults));
-            console.log('[Rank Pointer] Got serverResults from context, seed:', serverResults.seed, 'victory:', serverResults.rewardScreen.victory);
-            break;
-          }
-        }
-        
-        // If not found in context, check pending serverResults map
-        if (pendingServerResults.size > 0) {
-          // Get the most recently added serverResults
-          const lastSeed = Array.from(pendingServerResults.keys()).pop();
-          serverResults = pendingServerResults.get(lastSeed);
-          // Remove from pending since we've used it
-          pendingServerResults.delete(lastSeed);
-          console.log('[Rank Pointer] Got serverResults from pending map, seed:', serverResults?.seed, 'victory:', serverResults?.rewardScreen?.victory);
-          break;
-        }
-        
-        // Wait a bit before checking again
-        await sleep(50);
-      }
-      
-      // Determine victory/defeat from serverResults if available, otherwise use result.completed
+      const serverResults = await waitForServerResults();
+
       let isVictory = result.completed;
-      
+
       if (serverResults && serverResults.rewardScreen) {
-        // Use serverResults.rewardScreen.victory as the source of truth (like Hunt Analyzer)
         const serverVictory = serverResults.rewardScreen.victory === true;
         console.log(`[Rank Pointer] Victory status - serverResults: ${serverVictory}, result.completed: ${result.completed}`);
-        
-        // Prefer serverResults over result.completed (server is authoritative)
         if (typeof serverResults.rewardScreen.victory === 'boolean') {
           isVictory = serverVictory;
         }
       } else {
-        console.warn(`[Rank Pointer] No serverResults available, using result.completed:`, result.completed);
+        console.warn('[Rank Pointer] No serverResults available, using result.completed:', result.completed);
       }
-      
-      // Final victory determination
+
       console.log(`[Rank Pointer] Final victory determination: ${isVictory}`);
-      
-      // Track defeats
-      if (!isVictory) {
-        defeatsCount++;
-      }
-      
-      // Track stamina spent from serverResults (like Hunt Analyzer)
-      // Use same approach as Hunt Analyzer: check if playerExpDiff is a number
-      let attemptStaminaSpent = 0;
-      if (typeof serverResults?.next?.playerExpDiff === 'number') {
-        attemptStaminaSpent = serverResults.next.playerExpDiff;
-        totalStaminaSpent += attemptStaminaSpent;
-        console.log(`[Rank Pointer] Stamina spent this attempt: ${attemptStaminaSpent}, total: ${totalStaminaSpent}`);
-      } else {
-        console.warn(`[Rank Pointer] No valid playerExpDiff found in serverResults for attempt ${attemptCount}`);
-      }
-      
-      // Extract seed from serverResults if available
+      updateVictoryDefeatCounters(isVictory);
+
+      const attemptStaminaSpent = trackStaminaUsage(serverResults, attemptCount);
+
       let attemptSeed = null;
       if (serverResults && typeof serverResults.seed !== 'undefined') {
         attemptSeed = serverResults.seed;
       }
-      
-      // Store attempt data (similar to Hunt Analyzer's sessionData structure)
-      const attemptData = {
+
+      const attemptData = createAttemptData({
         attemptNumber: attemptCount,
-        ticks: result.ticks,
-        grade: result.grade,
-        rankPoints: result.rankPoints || 0,
-        completed: isVictory, // Use victory status from serverResults
-        victory: isVictory, // Explicit victory field
-        runTimeMs: runTime,
-        staminaSpent: attemptStaminaSpent, // Store stamina spent per attempt (like Hunt Analyzer)
-        seed: attemptSeed, // Store seed for replay/copy functionality
-        serverResults: serverResults,
-        skipped: !!result.skipped
-      };
-      
+        result,
+        runTime,
+        serverResults,
+        attemptStaminaSpent,
+        attemptSeed,
+        isVictory
+      });
+
       allAttempts.push(attemptData);
-      
+
       console.log(`[Rank Pointer] Attempt ${attemptCount} completed:`, {
         ticks: result.ticks,
         grade: result.grade,
@@ -1450,8 +1622,7 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         totalStaminaSpent: totalStaminaSpent,
         serverResultsKeys: serverResults ? Object.keys(serverResults) : null
       });
-      
-      // Check if serverResults has tick information
+
       if (serverResults) {
         console.log('[Rank Pointer] serverResults structure:', {
           hasRewardScreen: !!serverResults.rewardScreen,
@@ -1461,95 +1632,145 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
         });
       }
       
-      // Update status callback with defeats and stamina info
+      // Check if stop was requested during this run (after recording attempt data)
+      if (!analysisState.isRunning()) {
+        console.log('[Rank Pointer] Stop requested - current run finished and recorded, stopping now');
+        break;
+      }
+
       if (statusCallback) {
         statusCallback({
           attempts: attemptCount,
           defeats: defeatsCount,
+          victories: victoriesCount,
           staminaSpent: totalStaminaSpent,
           status: 'running'
         });
       }
-      
-      // If victory, stop only when reaching target S+ rank points if provided
-      if (isVictory && (targetRankPoints == null || (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints))) {
-        const totalTime = performance.now() - startTime;
-        console.log(`[Rank Pointer] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''}. Stopping analysis.`);
-        console.log(`[Rank Pointer] Victory achieved after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
-        console.log(`[Rank Pointer] Result details:`, {
-          ticks: result.ticks,
-          grade: result.grade,
-          rankPoints: result.rankPoints,
-          serverVictory: serverResults?.rewardScreen?.victory,
-          isVictory: isVictory,
-          resultCompleted: result.completed
-        });
-        console.log(`[Rank Pointer] About to return from runUntilVictory with success: true`);
-        console.log(`[Rank Pointer] Current analysisState:`, analysisState.state);
-        console.log(`[Rank Pointer] All attempts collected:`, allAttempts.length);
-        
-        // Update final result with serverResults data
-        const finalResult = {
-          ...result,
-          completed: true,
-          victory: true
-        };
-        
-        // Return immediately - this will exit the while loop
-        const returnValue = {
-          success: true,
-          attempts: attemptCount,
-          finalResult: finalResult,
-          totalTimeMs: totalTime,
-          allAttempts: allAttempts
-        };
-        
-        console.log(`[Rank Pointer] Returning victory result:`, {
-          success: returnValue.success,
-          attempts: returnValue.attempts,
-          totalTimeMs: returnValue.totalTimeMs,
-          allAttemptsLength: returnValue.allAttempts.length
-        });
-        
-        return returnValue;
-      }
-      
-      // Log defeat for debugging
-      console.log(`[Rank Pointer] Defeat on attempt ${attemptCount} - will restart`);
-      
-      // If defeat, wait a bit then restart
-      console.log(`[Rank Pointer] Defeat on attempt ${attemptCount}, restarting...`);
-      
-      // Wait for game to fully stop before restarting
-      let stopWaitCount = 0;
-      while (stopWaitCount < 10) { // Wait up to 1 second
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        if (!boardContext.gameStarted) {
-          console.log(`[Rank Pointer] Game stopped after ${stopWaitCount * 100}ms`);
-          break;
+
+      const victoryConditionMet = isVictory && (
+        config.stopCondition === 'any' ||
+        targetRankPoints == null ||
+        (typeof result.rankPoints === 'number' && result.rankPoints >= targetRankPoints)
+      );
+
+      let victoryContinueDueToTicks = false;
+
+      if (victoryConditionMet) {
+        if (config.stopWhenTicksReached > 0) {
+          if (result.ticks <= config.stopWhenTicksReached) {
+            const totalTime = performance.now() - startTime;
+            console.log(`[Rank Pointer] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''} and ticks ${result.ticks} <= ${config.stopWhenTicksReached}. Stopping analysis.`);
+            console.log(`[Rank Pointer] Victory achieved after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
+            console.log('[Rank Pointer] Result details:', {
+              ticks: result.ticks,
+              grade: result.grade,
+              rankPoints: result.rankPoints,
+              serverVictory: serverResults?.rewardScreen?.victory,
+              isVictory: isVictory,
+              resultCompleted: result.completed
+            });
+            console.log('[Rank Pointer] About to return from runUntilVictory with success: true');
+            console.log('[Rank Pointer] Current analysisState:', analysisState.state);
+            console.log('[Rank Pointer] All attempts collected:', allAttempts.length);
+
+            const finalResult = {
+              ...result,
+              completed: true,
+              victory: true
+            };
+
+            const returnValue = {
+              success: true,
+              attempts: attemptCount,
+              finalResult,
+              totalTimeMs: totalTime,
+              allAttempts
+            };
+
+            console.log('[Rank Pointer] Returning victory result:', {
+              success: returnValue.success,
+              attempts: returnValue.attempts,
+              totalTimeMs: returnValue.totalTimeMs,
+              allAttemptsLength: returnValue.allAttempts.length
+            });
+
+            return returnValue;
+          } else {
+            victoryContinueDueToTicks = true;
+            console.log(`[Rank Pointer] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''} but ticks ${result.ticks} > ${config.stopWhenTicksReached}, continuing to find better run...`);
+          }
+        } else {
+          const totalTime = performance.now() - startTime;
+          console.log(`[Rank Pointer] ✓ VICTORY DETECTED${targetRankPoints != null ? ` with rank ${result.rankPoints} (target S+${targetRankPoints})` : ''}. Stopping analysis.`);
+          console.log(`[Rank Pointer] Victory achieved after ${attemptCount} attempts! Total time: ${formatMilliseconds(totalTime)}`);
+          console.log('[Rank Pointer] Result details:', {
+            ticks: result.ticks,
+            grade: result.grade,
+            rankPoints: result.rankPoints,
+            serverVictory: serverResults?.rewardScreen?.victory,
+            isVictory: isVictory,
+            resultCompleted: result.completed
+          });
+          console.log('[Rank Pointer] About to return from runUntilVictory with success: true');
+          console.log('[Rank Pointer] Current analysisState:', analysisState.state);
+          console.log('[Rank Pointer] All attempts collected:', allAttempts.length);
+
+          const finalResult = {
+            ...result,
+            completed: true,
+            victory: true
+          };
+
+          const returnValue = {
+            success: true,
+            attempts: attemptCount,
+            finalResult,
+            totalTimeMs: totalTime,
+            allAttempts
+          };
+
+          console.log('[Rank Pointer] Returning victory result:', {
+            success: returnValue.success,
+            attempts: returnValue.attempts,
+            totalTimeMs: returnValue.totalTimeMs,
+            allAttemptsLength: returnValue.allAttempts.length
+          });
+
+          return returnValue;
         }
-        await sleep(100);
-        stopWaitCount++;
       }
+
+      if (victoryContinueDueToTicks) {
+        console.log('[Rank Pointer] Victory found but didn\'t meet ticks threshold, restarting to find better run...');
+      } else {
+        console.log(`[Rank Pointer] Defeat on attempt ${attemptCount} - will restart`);
+      }
+
+      const cleanupStart = performance.now();
+      console.log('[Rank Pointer] Starting post-attempt cleanup...');
       
-      // Wait for reward screen to close (if it opened)
-      // First close it if it's open
+      await ensureGameStopped();
+
       if (rewardScreenOpen) {
-        console.log(`[Rank Pointer] Reward screen is open, closing it...`);
+        console.log('[Rank Pointer] Reward screen is open, closing it...');
         closeRewardScreen();
       }
-      
-      // Wait for it to fully close
+
       const screenClosed = await waitForRewardScreenToClose(3000);
       if (screenClosed) {
-        console.log(`[Rank Pointer] Reward screen closed, ready to continue`);
+        console.log('[Rank Pointer] Reward screen closed, ready to continue');
       } else {
-        console.warn(`[Rank Pointer] Reward screen did not close in time, continuing anyway`);
+        console.warn('[Rank Pointer] Reward screen did not close in time, continuing anyway');
       }
-      
-      // Additional delay to ensure UI is ready
+
+      await waitForModCoordinationTasks({ context: `post-attempt cleanup ${attemptCount}` });
+
+      console.log(`[Rank Pointer] Waiting ${GAME_RESTART_DELAY_MS}ms before next attempt...`);
       await sleep(GAME_RESTART_DELAY_MS);
-      console.log(`[Rank Pointer] Ready to start attempt ${attemptCount + 1}`);
+      
+      const cleanupElapsed = Math.round(performance.now() - cleanupStart);
+      console.log(`[Rank Pointer] Cleanup complete in ${cleanupElapsed}ms, ready to start attempt ${attemptCount + 1}`);
     }
     
     const totalTime = performance.now() - startTime;
@@ -1583,6 +1804,9 @@ async function runUntilVictory(targetRankPoints = null, statusCallback = null) {
     
     // Cleanup board subscription
     cleanupBoardSubscription();
+    
+    // Cleanup gameTimer subscription
+    cleanupGameTimerSubscription();
     
     // Restore game board visibility
     if (config.hideGameBoard) {
@@ -1791,6 +2015,25 @@ function createConfigPanel() {
   stopContainer.appendChild(stopSelect);
   content.appendChild(stopContainer);
 
+  // Stop when ticks reached input
+  const stopWhenTicksContainer = document.createElement('div');
+  stopWhenTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+  
+  const stopWhenTicksLabel = document.createElement('label');
+  stopWhenTicksLabel.textContent = t('mods.rankPointer.stopWhenTicksReachedLabel');
+  
+  const stopWhenTicksInput = document.createElement('input');
+  stopWhenTicksInput.type = 'number';
+  stopWhenTicksInput.id = `${CONFIG_PANEL_ID}-stop-when-ticks-input`;
+  stopWhenTicksInput.min = '0';
+  stopWhenTicksInput.max = '3840'; // 4 minutes (240,000ms / 62.5ms per tick = 3,840 ticks)
+  stopWhenTicksInput.value = config.stopWhenTicksReached || 0;
+  stopWhenTicksInput.style.cssText = 'width: 80px; text-align: center; background-color: #333; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;';
+  
+  stopWhenTicksContainer.appendChild(stopWhenTicksLabel);
+  stopWhenTicksContainer.appendChild(stopWhenTicksInput);
+  content.appendChild(stopWhenTicksContainer);
+
   // Hide game board checkbox
   const hideContainer = document.createElement('div');
   hideContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
@@ -1827,10 +2070,10 @@ function createConfigPanel() {
   
   // Add warning message if no ally creatures
   if (!hasAlly) {
-    const warningMsg = document.createElement('div');
-    warningMsg.textContent = t('mods.boardAnalyzer.noAllyWarning');
-    warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
-    content.appendChild(warningMsg);
+    content.appendChild(createTextElement('div', {
+      text: t('mods.boardAnalyzer.noAllyWarning'),
+      style: 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;'
+    }));
   }
   
   // Create buttons array - use closure to access hideInput directly
@@ -1867,18 +2110,21 @@ function createConfigPanel() {
         config.hideGameBoard = hideInput.checked;
         config.stopCondition = stopSelect.value === 'any' ? 'any' : 'max';
         config.enableAutoRefillStamina = refillInput.checked;
+        config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         // Save to localStorage (preferred method)
         saveConfig();
         // Also save via API for backward compatibility
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina
+          enableAutoRefillStamina: config.enableAutoRefillStamina,
+          stopWhenTicksReached: config.stopWhenTicksReached
         });
         console.log('[Rank Pointer] Config saved on Start,', {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina
+          enableAutoRefillStamina: config.enableAutoRefillStamina,
+          stopWhenTicksReached: config.stopWhenTicksReached
         });
         
         // Close config panel
@@ -1897,23 +2143,27 @@ function createConfigPanel() {
     {
       text: t('mods.rankPointer.save'),
       primary: false,
+      disabled: !analysisState.canStart(),
       onClick: () => {
         // Use direct reference to the checkbox element
         config.hideGameBoard = hideInput.checked;
         config.stopCondition = stopSelect.value === 'any' ? 'any' : 'max';
         config.enableAutoRefillStamina = refillInput.checked;
+        config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         // Save to localStorage (preferred method)
         saveConfig();
         // Also save via API for backward compatibility
         api.service.updateScriptConfig(context.hash, {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina
+          enableAutoRefillStamina: config.enableAutoRefillStamina,
+          stopWhenTicksReached: config.stopWhenTicksReached
         });
         console.log('[Rank Pointer] Config saved', {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
-          enableAutoRefillStamina: config.enableAutoRefillStamina
+          enableAutoRefillStamina: config.enableAutoRefillStamina,
+          stopWhenTicksReached: config.stopWhenTicksReached
         });
       }
     },
@@ -1960,38 +2210,59 @@ function createConfigPanel() {
 }
 
 // Show running analysis modal
-function showRunningAnalysisModal(attempts, defeats = 0, staminaSpent = 0, targetRankPoints = null) {
+function showRunningAnalysisModal(
+  attempts,
+  defeats = 0,
+  victories = 0,
+  staminaSpent = 0,
+  targetRankPoints = null,
+  showVictories = false
+) {
   // First, force close any existing modals (like Board Analyzer does)
   forceCloseAllModals();
   
   const content = document.createElement('div');
   content.style.cssText = 'text-align: center;';
   
-  const message = document.createElement('p');
-  message.id = 'rank-pointer-target';
-  message.textContent = targetRankPoints != null 
-    ? t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints)
-    : t('mods.rankPointer.runningUntilVictory');
+  const message = createTextElement('p', {
+    id: 'rank-pointer-target',
+    text: targetRankPoints != null
+      ? t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints)
+      : t('mods.rankPointer.runningUntilVictory')
+  });
   content.appendChild(message);
-  
-  const progress = document.createElement('p');
-  progress.id = 'rank-pointer-progress';
-  progress.textContent = t('mods.rankPointer.attempt').replace('{n}', attempts);
-  progress.style.cssText = 'margin-top: 12px;';
+
+  const progress = createTextElement('p', {
+    id: 'rank-pointer-progress',
+    text: t('mods.rankPointer.attempt').replace('{n}', attempts),
+    style: 'margin-top: 12px;'
+  });
   content.appendChild(progress);
   
+  // Add victories count only when tracking ticks threshold
+  if (showVictories) {
+    const victoriesElement = createTextElement('p', {
+      id: 'rank-pointer-victories',
+      text: t('mods.rankPointer.victories').replace('{n}', victories),
+      style: 'margin-top: 8px; color: #2ecc71;'
+    });
+    content.appendChild(victoriesElement);
+  }
+  
   // Add defeats count
-  const defeatsElement = document.createElement('p');
-  defeatsElement.id = 'rank-pointer-defeats';
-  defeatsElement.textContent = t('mods.rankPointer.defeats').replace('{n}', defeats);
-  defeatsElement.style.cssText = 'margin-top: 8px; color: #e74c3c;';
+  const defeatsElement = createTextElement('p', {
+    id: 'rank-pointer-defeats',
+    text: t('mods.rankPointer.defeats').replace('{n}', defeats),
+    style: 'margin-top: 8px; color: #e74c3c;'
+  });
   content.appendChild(defeatsElement);
   
   // Add stamina usage
-  const staminaElement = document.createElement('p');
-  staminaElement.id = 'rank-pointer-stamina';
-  staminaElement.textContent = t('mods.rankPointer.staminaSpent').replace('{n}', staminaSpent);
-  staminaElement.style.cssText = 'margin-top: 8px; color: #3498db;';
+  const staminaElement = createTextElement('p', {
+    id: 'rank-pointer-stamina',
+    text: t('mods.rankPointer.staminaSpent').replace('{n}', staminaSpent),
+    style: 'margin-top: 8px; color: #3498db;'
+  });
   content.appendChild(staminaElement);
   
   // Create self-contained HTML modal to avoid conflicts with other modals
@@ -2133,7 +2404,7 @@ async function ensureResultsSafeToOpen(timeoutMs = ENSURE_RESULTS_SAFE_TIMEOUT_M
       if (!isLocked) {
         return true;
       }
-      try { closeRewardScreen(); } catch (_) {}
+      // Just dispatch ESC to close any remaining modals - reward screen is already closed at this point
       dispatchEsc();
       await new Promise(resolve => setTimeout(resolve, ENSURE_RESULTS_POLL_DELAY_MS));
     }
@@ -2167,10 +2438,10 @@ async function showResultsModal(results) {
     
     // Add a note if stopped by user
     if (results.forceStopped && !results.success) {
-      const partialNote = document.createElement('div');
-      partialNote.textContent = t('mods.rankPointer.stoppedByUser');
-      partialNote.style.cssText = 'text-align: center; color: #e74c3c; margin-bottom: 15px;';
-      content.appendChild(partialNote);
+      content.appendChild(createTextElement('div', {
+        text: t('mods.rankPointer.stoppedByUser'),
+        style: 'text-align: center; color: #e74c3c; margin-bottom: 15px;'
+      }));
     }
     
     // Calculate statistics from all attempts
@@ -2181,35 +2452,17 @@ async function showResultsModal(results) {
     const statsContainer = document.createElement('div');
     statsContainer.style.cssText = 'display: grid; grid-template-columns: 55% 40%; gap: 10px; margin-bottom: 20px;';
     
-    // Total Attempts
-    const attemptsLabel = document.createElement('div');
-    attemptsLabel.textContent = t('mods.rankPointer.totalAttempts');
-    attemptsLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    const attemptsValue = document.createElement('div');
-    attemptsValue.textContent = stats.totalAttempts.toString();
-    attemptsValue.style.cssText = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    
-    // Completion Rate
-    const completionRateLabel = document.createElement('div');
-    completionRateLabel.textContent = t('mods.rankPointer.completionRate');
-    completionRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    const completionRateValue = document.createElement('div');
-    completionRateValue.textContent = `${stats.completionRate}% (${stats.completedAttempts}/${stats.totalAttempts})`;
-    completionRateValue.style.cssText = 'text-align: right; color: #2ecc71; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    
-    // S+ Rate
-    if (stats.sPlusCount > 0) {
-      const sPlusRateLabel = document.createElement('div');
-      sPlusRateLabel.textContent = t('mods.rankPointer.sPlusRate');
-      sPlusRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      const sPlusRateValue = document.createElement('div');
-      sPlusRateValue.textContent = `${stats.sPlusRate}% (${stats.sPlusCount}/${stats.totalAttempts})`;
-      sPlusRateValue.style.cssText = 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      
-      statsContainer.appendChild(sPlusRateLabel);
-      statsContainer.appendChild(sPlusRateValue);
+    appendStatRow(statsContainer, t('mods.rankPointer.totalAttempts'), stats.totalAttempts.toString());
 
-      // Add S+ breakdown per rank points (S+1, S+2, ...), similar to Board Analyzer
+    appendStatRow(statsContainer, t('mods.rankPointer.completionRate'), `${stats.completionRate}% (${stats.completedAttempts}/${stats.totalAttempts})`, {
+      valueStyle: 'text-align: right; color: #2ecc71; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
+    });
+
+    if (stats.sPlusCount > 0) {
+      appendStatRow(statsContainer, t('mods.rankPointer.sPlusRate'), `${stats.sPlusRate}% (${stats.sPlusCount}/${stats.totalAttempts})`, {
+        valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
+      });
+
       try {
         const sPlusResults = attempts.filter(a => a.grade === 'S+' && a.rankPoints);
         if (sPlusResults.length > 0) {
@@ -2219,124 +2472,70 @@ async function showResultsModal(results) {
             rankPointsCounts[rp] = (rankPointsCounts[rp] || 0) + 1;
           });
           const sortedRankPoints = Object.keys(rankPointsCounts)
-            .map(n => parseInt(n))
+            .map(n => parseInt(n, 10))
             .sort((a, b) => b - a);
           const highestRankPoints = sortedRankPoints[0];
           sortedRankPoints.forEach(rp => {
             const count = rankPointsCounts[rp];
             const rate = stats.totalAttempts > 0 ? (count / stats.totalAttempts * 100).toFixed(2) : '0.00';
-            const label = document.createElement('div');
-            label.textContent = t('mods.rankPointer.sPlusPointsRate').replace('{points}', rp);
-            label.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;';
-            const value = document.createElement('div');
             const rankDifference = highestRankPoints - rp;
             const idx = Math.max(0, Math.min(rankDifference, S_PLUS_COLORS.length - 1));
             const textColor = S_PLUS_COLORS[idx];
-            value.textContent = `${rate}% (${count}/${stats.totalAttempts})`;
-            value.style.cssText = `text-align: right; color: ${textColor}; font-style: italic;`;
-            statsContainer.appendChild(label);
-            statsContainer.appendChild(value);
+
+            appendStatRow(statsContainer, t('mods.rankPointer.sPlusPointsRate').replace('{points}', rp), `${rate}% (${count}/${stats.totalAttempts})`, {
+              labelStyle: 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 10px; font-style: italic;',
+              valueStyle: `text-align: right; color: ${textColor}; font-style: italic;`
+            });
           });
         }
       } catch (e) {
         console.warn('[Rank Pointer] Error creating S+ breakdown:', e);
       }
     }
-    
-    // When stopped without victory, show progress toward target S+ rank
+
     if (!results.success) {
       try {
         const maxTeamSizeForTarget = getMaxTeamSize(null);
         const playerTeamSizeForTarget = getPlayerTeamSize();
         const targetRankPoints = Math.max(0, (2 * maxTeamSizeForTarget) - playerTeamSizeForTarget);
-        
-        const highestLabel = document.createElement('div');
-        highestLabel.textContent = t('mods.rankPointer.highestRankPoints');
-        highestLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        const highestValue = document.createElement('div');
-        highestValue.textContent = (stats.maxRankPoints || 0).toString();
-        highestValue.style.cssText = 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        statsContainer.appendChild(highestLabel);
-        statsContainer.appendChild(highestValue);
-        
-        const targetLabel = document.createElement('div');
-        targetLabel.textContent = t('mods.rankPointer.targetRank');
-        targetLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        const targetValue = document.createElement('div');
-        targetValue.textContent = `S+${targetRankPoints}`;
-        targetValue.style.cssText = 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-        statsContainer.appendChild(targetLabel);
-        statsContainer.appendChild(targetValue);
+
+        appendStatRow(statsContainer, t('mods.rankPointer.highestRankPoints'), (stats.maxRankPoints || 0).toString(), {
+          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
+        });
+
+        appendStatRow(statsContainer, t('mods.rankPointer.targetRank'), `S+${targetRankPoints}`, {
+          valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
+        });
       } catch (e) {
         console.warn('[Rank Pointer] Could not compute target rank points for display:', e);
       }
     }
-    
-    // Max Rank Points
-    if (stats.maxRankPoints > 0) {
-      const maxRankLabel = document.createElement('div');
-      maxRankLabel.textContent = t('mods.rankPointer.maxRankPoints');
-      maxRankLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      const maxRankValue = document.createElement('div');
-      maxRankValue.textContent = stats.maxRankPoints.toString();
-      maxRankValue.style.cssText = 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      
-      statsContainer.appendChild(maxRankLabel);
-      statsContainer.appendChild(maxRankValue);
-    }
-    
-    // Removed Min Ticks row for simplified single-run view
-    
-    // Remove ticks/time aggregates; instead show stamina and skips
-    const staminaLabel = document.createElement('div');
-    staminaLabel.textContent = t('mods.rankPointer.staminaSpent').replace(': {n}', ':');
-    staminaLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    const staminaValue = document.createElement('div');
-    staminaValue.textContent = (stats.staminaSpentTotal || 0).toString();
-    staminaValue.style.cssText = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    statsContainer.appendChild(staminaLabel);
-    statsContainer.appendChild(staminaValue);
 
-    const skipsLabel = document.createElement('div');
-    skipsLabel.textContent = t('mods.rankPointer.skips');
-    skipsLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    const skipsValue = document.createElement('div');
-    skipsValue.textContent = (stats.skips || 0).toString();
-    skipsValue.style.cssText = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    statsContainer.appendChild(skipsLabel);
-    statsContainer.appendChild(skipsValue);
+    if (stats.maxRankPoints > 0) {
+      appendStatRow(statsContainer, t('mods.rankPointer.maxRankPoints'), stats.maxRankPoints.toString(), {
+        valueStyle: 'text-align: right; color: #FFD700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
+      });
+    }
+
+    appendStatRow(statsContainer, t('mods.rankPointer.staminaSpent').replace(': {n}', ':'), (stats.staminaSpentTotal || 0).toString());
+
+    appendStatRow(statsContainer, t('mods.rankPointer.skips'), (stats.skips || 0).toString());
     
     // If victory, show success message
     if (results.success && results.finalResult) {
-      const successMsg = document.createElement('div');
-      successMsg.textContent = t('mods.rankPointer.victoryAchieved');
-      successMsg.style.cssText = 'text-align: center; color: #2ecc71; margin-bottom: 15px; font-size: 1.2em; font-weight: bold;';
-      content.appendChild(successMsg);
-      
-      // Add final result details
-      const finalResultLabel = document.createElement('div');
-      finalResultLabel.textContent = t('mods.rankPointer.finalResult');
-      finalResultLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      const finalResultValue = document.createElement('div');
-      
-      // Format: "S+1 (130 ticks)" or "S (130 ticks)" if no rankPoints
+      content.appendChild(createTextElement('div', {
+        text: t('mods.rankPointer.victoryAchieved'),
+        style: 'text-align: center; color: #2ecc71; margin-bottom: 15px; font-size: 1.2em; font-weight: bold;'
+      }));
+
       let finalResultText = results.finalResult.grade || 'N/A';
       if (results.finalResult.grade === 'S+' && results.finalResult.rankPoints) {
         finalResultText = `S+${results.finalResult.rankPoints}`;
       }
       finalResultText += ` (${results.finalResult.ticks} ticks)`;
-      
-      finalResultValue.textContent = finalResultText;
-      finalResultValue.style.cssText = 'text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-      
-      statsContainer.appendChild(finalResultLabel);
-      statsContainer.appendChild(finalResultValue);
+
+      appendStatRow(statsContainer, t('mods.rankPointer.finalResult'), finalResultText);
     }
-    
-    statsContainer.appendChild(attemptsLabel);
-    statsContainer.appendChild(attemptsValue);
-    statsContainer.appendChild(completionRateLabel);
-    statsContainer.appendChild(completionRateValue);
     
     content.appendChild(statsContainer);
 
@@ -2378,10 +2577,10 @@ async function showResultsModal(results) {
       replayContainer.appendChild(copyReplayBtn);
       content.appendChild(replayContainer);
     } else {
-      const noAttemptsMessage = document.createElement('p');
-      noAttemptsMessage.textContent = t('mods.rankPointer.noAttemptsYet');
-      noAttemptsMessage.style.cssText = 'text-align: center; color: #777; margin-top: 15px;';
-      content.appendChild(noAttemptsMessage);
+      content.appendChild(createTextElement('p', {
+        text: t('mods.rankPointer.noAttemptsYet'),
+        style: 'text-align: center; color: #777; margin-top: 15px;'
+      }));
     }
     
     const modal = api.ui.components.createModal({
@@ -2492,36 +2691,37 @@ async function runAnalysis() {
     }
     
     // Show running modal with target info
-    runningModal = showRunningAnalysisModal(0, 0, 0, targetRankPoints);
+    runningModal = showRunningAnalysisModal(
+      0,
+      0,
+      0,
+      0,
+      targetRankPoints,
+      config.stopWhenTicksReached > 0
+    );
     activeRunningModal = runningModal;
     
     // Run until victory with status updates
     console.log('[Rank Pointer] Starting runUntilVictory, about to await...');
     const results = await runUntilVictory(targetRankPoints, (status) => {
-      const progressEl = document.getElementById('rank-pointer-progress');
-      if (progressEl) {
-        progressEl.textContent = t('mods.rankPointer.attempt').replace('{n}', status.attempts);
+      updateTextContent('rank-pointer-progress', t('mods.rankPointer.attempt').replace('{n}', status.attempts));
+
+      if (typeof targetRankPoints === 'number') {
+        updateTextContent('rank-pointer-target', t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints));
+      } else {
+        updateTextContent('rank-pointer-target', t('mods.rankPointer.runningUntilVictory'));
       }
-      
-      const targetEl = document.getElementById('rank-pointer-target');
-      if (targetEl) {
-        if (typeof targetRankPoints === 'number') {
-          targetEl.textContent = t('mods.rankPointer.runningUntilTarget').replace('{points}', targetRankPoints);
-        } else {
-          targetEl.textContent = t('mods.rankPointer.runningUntilVictory');
-        }
+
+      if (status.victories !== undefined) {
+        updateTextContent('rank-pointer-victories', t('mods.rankPointer.victories').replace('{n}', status.victories));
       }
-      
-      // Update defeats display
-      const defeatsEl = document.getElementById('rank-pointer-defeats');
-      if (defeatsEl && status.defeats !== undefined) {
-        defeatsEl.textContent = t('mods.rankPointer.defeats').replace('{n}', status.defeats);
+
+      if (status.defeats !== undefined) {
+        updateTextContent('rank-pointer-defeats', t('mods.rankPointer.defeats').replace('{n}', status.defeats));
       }
-      
-      // Update stamina display
-      const staminaEl = document.getElementById('rank-pointer-stamina');
-      if (staminaEl && status.staminaSpent !== undefined) {
-        staminaEl.textContent = t('mods.rankPointer.staminaSpent').replace('{n}', status.staminaSpent);
+
+      if (status.staminaSpent !== undefined) {
+        updateTextContent('rank-pointer-stamina', t('mods.rankPointer.staminaSpent').replace('{n}', status.staminaSpent));
       }
     });
     
@@ -2666,6 +2866,7 @@ function cleanupRankPointer() {
     allAttempts = [];
     pendingServerResults.clear();
     defeatsCount = 0;
+    victoriesCount = 0;
     totalStaminaSpent = 0;
     skipCount = 0;
     skipInProgress = false;

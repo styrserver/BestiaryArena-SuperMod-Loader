@@ -1214,13 +1214,13 @@ async function importConfiguration(modal) {
         // Show success message using toast
         try {
           createToast({
-            message: `<span class="text-success">✅ Configuration imported successfully!</span><br><span class="text-whiteHighlight">📦 What was restored:</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 Please refresh the page to see all changes.</span>`,
+            message: `<span class="text-success">✅ Configuration imported successfully!</span><br><span class="text-whiteHighlight">📦 What was restored:</span><br>• ${importSummary.join('<br>• ')}<br><br><span class="text-warning">🔄 Refreshing browser in 1 second...</span>`,
             type: 'success',
             duration: 10000
           });
         } catch (toastError) {
           console.error('[Mod Settings] Could not show import success toast:', toastError);
-          alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Please refresh the page to see all changes.`);
+          alert(`✅ Configuration imported successfully!\n\n📦 What was restored:\n• ${importSummary.join('\n• ')}\n\n🔄 Refreshing browser in 1 second...`);
         }
        
         // Close the configurator modal
@@ -1235,6 +1235,11 @@ async function importConfiguration(modal) {
         } catch (closeError) {
           console.warn('[Mod Settings] Could not close modal:', closeError);
         }
+        
+        // Auto-refresh after 1 second
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
        
       } catch (error) {
         console.error('[Mod Settings] Error importing configuration:', error);
@@ -1276,6 +1281,191 @@ async function importConfiguration(modal) {
     } catch (toastError) {
       console.error('[Mod Settings] Could not show setup error toast:', toastError);
       alert(`Failed to set up import: ${error.message}`);
+    }
+  }
+}
+
+// Reset all settings function
+async function resetAllSettings(modal) {
+  try {
+    // Show confirmation modal
+    const confirmed = await new Promise(resolve => {
+      const confirmModal = api.ui.components.createModal({
+        title: 'Reset All Settings',
+        width: 450,
+        content: `
+          <div style="padding: 20px;">
+            <p style="color: #a6adc8; margin-bottom: 20px;">
+              This will reset all localStorage and extension settings to default (like a fresh installation).
+            </p>
+            <div style="background: rgba(0, 123, 255, 0.1); border: 1px solid rgba(0, 123, 255, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+              <p style="color: #4dabf7; margin: 0; font-size: 14px;">
+                <strong>💾 Recommendation:</strong> Make a backup using the Export button before resetting.
+              </p>
+            </div>
+            <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+              <p style="color: #ffc107; margin: 0; font-size: 14px;">
+                <strong>⚠️ Note:</strong> This does not reset the mods in popup (needs to be handled manually).
+              </p>
+            </div>
+            <div style="background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; padding: 12px;">
+              <p style="color: #e78284; margin: 0; font-size: 14px;">
+                <strong>⚠️ Warning:</strong> This action cannot be undone. All settings and game data will be lost.
+              </p>
+            </div>
+          </div>
+        `,
+        buttons: [
+          {
+            text: 'Cancel',
+            primary: false,
+            onClick: () => {
+              document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
+                safeRemoveElement(el);
+              });
+              resolve(false);
+            }
+          },
+          {
+            text: 'Reset All Settings',
+            primary: true,
+            onClick: () => {
+              document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
+                safeRemoveElement(el);
+              });
+              resolve(true);
+            }
+          }
+        ]
+      });
+    });
+    
+    if (!confirmed) return;
+    
+    // Show loading state
+    const resetBtn = document.getElementById('reset-all-settings-btn');
+    if (resetBtn) {
+      resetBtn.textContent = '⏳ Resetting...';
+      resetBtn.disabled = true;
+    }
+    
+    // Preserve mods in popup (manualMods and localMods)
+    let preservedManualMods = [];
+    let preservedLocalMods = [];
+    
+    if (window.browserAPI && window.browserAPI.storage) {
+      // Get manualMods and localMods before clearing
+      if (window.browserAPI.storage.local) {
+        const localData = await new Promise(resolve => {
+          window.browserAPI.storage.local.get(['manualMods', 'localMods'], result => {
+            resolve(result);
+          });
+        });
+        preservedManualMods = localData.manualMods || [];
+        preservedLocalMods = localData.localMods || [];
+      }
+      
+      // Clear all extension storage
+      if (window.browserAPI.storage.local) {
+        await new Promise(resolve => {
+          window.browserAPI.storage.local.clear(resolve);
+        });
+      }
+      
+      if (window.browserAPI.storage.sync) {
+        await new Promise(resolve => {
+          window.browserAPI.storage.sync.clear(resolve);
+        });
+      }
+      
+      // Restore preserved mods
+      if (preservedManualMods.length > 0 || preservedLocalMods.length > 0) {
+        const restoreData = {};
+        if (preservedManualMods.length > 0) {
+          restoreData.manualMods = preservedManualMods;
+        }
+        if (preservedLocalMods.length > 0) {
+          restoreData.localMods = preservedLocalMods;
+        }
+        
+        if (window.browserAPI.storage.local) {
+          await new Promise(resolve => {
+            window.browserAPI.storage.local.set(restoreData, resolve);
+          });
+        }
+        
+        if (window.browserAPI.storage.sync && preservedLocalMods.length > 0) {
+          await new Promise(resolve => {
+            window.browserAPI.storage.sync.set({ localMods: preservedLocalMods }, resolve);
+          });
+        }
+      }
+    }
+    
+    // Clear localStorage (game data)
+    try {
+      localStorage.clear();
+      console.log('[Mod Settings] Cleared localStorage');
+    } catch (error) {
+      console.warn('[Mod Settings] Could not clear localStorage:', error);
+    }
+    
+    // Reset button state
+    if (resetBtn) {
+      resetBtn.textContent = '🔄 Reset All Settings';
+      resetBtn.disabled = false;
+    }
+    
+    // Show success message
+    try {
+      createToast({
+        message: `<span class="text-success">✅ All settings reset successfully!</span><br><span class="text-whiteHighlight">All localStorage and extension settings have been reset to default.</span><br><span class="text-warning">⚠️ Mods in popup were preserved (${preservedManualMods.length + preservedLocalMods.length} mods).</span><br><br><span class="text-warning">🔄 Refreshing browser in 1 second...</span>`,
+        type: 'success',
+        duration: 10000
+      });
+    } catch (toastError) {
+      console.error('[Mod Settings] Could not show reset success toast:', toastError);
+      alert(`✅ All settings reset successfully!\n\nAll localStorage and extension settings have been reset to default.\n\n⚠️ Mods in popup were preserved (${preservedManualMods.length + preservedLocalMods.length} mods).\n\n🔄 Refreshing browser in 1 second...`);
+    }
+    
+    // Close the configurator modal
+    try {
+      if (modal && typeof modal.close === 'function') {
+        modal.close();
+      } else {
+        document.querySelectorAll('.modal-bg, .modal-content, .modal-overlay, [role="dialog"]').forEach(el => {
+          safeRemoveElement(el);
+        });
+      }
+    } catch (closeError) {
+      console.warn('[Mod Settings] Could not close modal:', closeError);
+    }
+    
+    // Auto-refresh after 1 second
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+    
+  } catch (error) {
+    console.error('[Mod Settings] Error resetting settings:', error);
+    
+    // Reset button state
+    const resetBtn = document.getElementById('reset-all-settings-btn');
+    if (resetBtn) {
+      resetBtn.textContent = '🔄 Reset All Settings';
+      resetBtn.disabled = false;
+    }
+    
+    // Show error message
+    try {
+      createToast({
+        message: `<span class="text-error">❌ Reset Failed</span><br><span class="text-whiteHighlight">Failed to reset settings: ${error.message}</span>`,
+        type: 'error',
+        duration: 6000
+      });
+    } catch (toastError) {
+      console.error('[Mod Settings] Could not show reset error toast:', toastError);
+      alert(`Failed to reset settings: ${error.message}`);
     }
   }
 }
@@ -1667,7 +1857,7 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('common.color')}</span>
-            <select id="color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
+            <select id="color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
               <option value="prismatic">Prismatic</option>
               <option value="demon" selected="">Demonic</option>
               <option value="ice">Frosty</option>
@@ -1684,7 +1874,7 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('common.color')}</span>
-            <select id="shiny-color-picker" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px;">
+            <select id="shiny-color-picker" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
               <option value="prismatic">Prismatic</option>
               <option value="demon">Demonic</option>
               <option value="ice">Frosty</option>
@@ -1708,7 +1898,7 @@ function showSettingsModal() {
             <label style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer;">
               <input type="checkbox" id="autoplay-refresh-toggle" checked="" style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.autoplayRefreshWarning')}">⚠️</span>
-              <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 13px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
+              <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
                 <option value="autoplay">${t('mods.betterUI.autoplaySessionText')}</option>
                 <option value="internal">${t('mods.betterUI.internalTimer')}</option>
               </select>
@@ -1748,8 +1938,19 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('mods.betterUI.huntThemeLabel')}</span>
-            <select id="hunt-analyzer-theme-selector" style="background: #333; color: #ccc; border: 1px solid #555; padding: 4px 8px; border-radius: 4px; width: 120px;">
-              <option value="original" selected="">Original</option>
+            <select id="hunt-analyzer-theme-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              ${(() => {
+                // Dynamically get available themes from Hunt Analyzer if available
+                let themeOptions = '<option value="original" selected="">Original</option>';
+                try {
+                  // Try to access HUNT_ANALYZER_THEMES from window if exposed, or use default
+                  if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
+                    // Themes are defined in Hunt Analyzer.js - if we can access them, list all
+                    // For now, we'll dynamically populate when the selector is initialized
+                  }
+                } catch (e) {}
+                return themeOptions;
+              })()}
             </select>
           </div>
         `;
@@ -1783,6 +1984,9 @@ function showSettingsModal() {
               </button>
               <button id="import-config-btn" class="btn btn-secondary">
                 📥 ${t('mods.betterUI.backupImportButton')}
+              </button>
+              <button id="reset-all-settings-btn" class="btn btn-secondary" style="color: #dc3545; margin-top: 8px;">
+                🔄 Reset All Settings
               </button>
             </div>
           </div>
@@ -2071,6 +2275,30 @@ function showSettingsModal() {
       
       const huntAnalyzerThemeSelector = content.querySelector('#hunt-analyzer-theme-selector');
       if (huntAnalyzerThemeSelector) {
+        // Dynamically populate theme options from Hunt Analyzer if available
+        try {
+          let availableThemes = ['original']; // Default fallback
+          
+          // Get available themes from Hunt Analyzer if exposed
+          if (window.HUNT_ANALYZER_THEMES) {
+            availableThemes = Object.keys(window.HUNT_ANALYZER_THEMES);
+          }
+          
+          // Clear existing options and add available themes
+          huntAnalyzerThemeSelector.innerHTML = '';
+          availableThemes.forEach(themeKey => {
+            const option = document.createElement('option');
+            option.value = themeKey;
+            // Use theme name if available, otherwise capitalize key
+            const themeName = window.HUNT_ANALYZER_THEMES?.[themeKey]?.name || 
+                             themeKey.charAt(0).toUpperCase() + themeKey.slice(1);
+            option.textContent = themeName;
+            huntAnalyzerThemeSelector.appendChild(option);
+          });
+        } catch (error) {
+          console.error('[Mod Settings] Error populating Hunt Analyzer themes:', error);
+        }
+        
         // Load current Hunt Analyzer theme
         try {
           const huntAnalyzerSettings = localStorage.getItem('huntAnalyzerSettings');
@@ -2098,6 +2326,12 @@ function showSettingsModal() {
           if (window.HuntAnalyzerState && window.HuntAnalyzerState.settings) {
             window.HuntAnalyzerState.settings.theme = newTheme;
             console.log('[Mod Settings] Updated Hunt Analyzer runtime theme');
+            
+            // Call applyTheme function if available for immediate update
+            if (window.applyHuntAnalyzerTheme && typeof window.applyHuntAnalyzerTheme === 'function') {
+              window.applyHuntAnalyzerTheme(newTheme, true);
+              console.log('[Mod Settings] Applied Hunt Analyzer theme immediately');
+            }
           }
         });
       }
@@ -2118,6 +2352,7 @@ function showSettingsModal() {
         // Check for Run Data and update info
         try {
           let runData = null;
+          let hasData = false;
           if (window.RunTrackerAPI) {
             runData = window.RunTrackerAPI.getAllRuns();
             if (runData && runData.metadata) {
@@ -2126,6 +2361,7 @@ function showSettingsModal() {
                 const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                 runDataInfo.style.display = 'block';
                 runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+                hasData = true;
               }
             }
           } else if (window.browserAPI && window.browserAPI.storage && window.browserAPI.storage.local) {
@@ -2137,12 +2373,27 @@ function showSettingsModal() {
                   const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                   runDataInfo.style.display = 'block';
                   runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+                } else {
+                  runDataInfo.style.display = 'block';
+                  runDataInfo.textContent = 'No data found';
                 }
+              } else {
+                runDataInfo.style.display = 'block';
+                runDataInfo.textContent = 'No data found';
               }
             });
+            return; // Early return for async case
+          }
+          
+          // Show "No data found" if no data was found
+          if (!hasData) {
+            runDataInfo.style.display = 'block';
+            runDataInfo.textContent = 'No data found';
           }
         } catch (e) {
           console.log('[Mod Settings] Could not check for Run Data:', e);
+          runDataInfo.style.display = 'block';
+          runDataInfo.textContent = 'No data found';
         }
       }
       
@@ -2200,6 +2451,13 @@ function showSettingsModal() {
       if (importBtn) {
         importBtn.addEventListener('click', () => {
           importConfiguration(modalRef);
+        });
+      }
+      
+      const resetBtn = content.querySelector('#reset-all-settings-btn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          resetAllSettings(modalRef);
         });
       }
     }
