@@ -166,12 +166,12 @@ function getRaidPriority(raidName) {
     try {
         const settings = loadSettings();
         const raidPriorities = settings.raidPriorities || {};
-        const defaultPriorityString = EVENT_TEXTS.includes(raidName) ? 'medium' : 'low';
+        const defaultPriorityString = EVENT_TEXTS.includes(raidName) ? 'medium' : 'high';
         const priorityString = raidPriorities[raidName] || defaultPriorityString;
         return priorityStringToNumber(priorityString);
     } catch (_) {
         // Default: static raids = MEDIUM, dynamic events = LOW
-        return EVENT_TEXTS.includes(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.LOW;
+        return EVENT_TEXTS.includes(raidName) ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.HIGH;
     }
 }
 
@@ -4695,7 +4695,7 @@ function createRaidMapSelection() {
             });
             // Set initial value from settings (default: medium for static raids, low for events)
             const raidPriorities = settings.raidPriorities || {};
-            const defaultPriority = EVENT_TEXTS.includes(raidName) ? 'medium' : 'low';
+            const defaultPriority = EVENT_TEXTS.includes(raidName) ? 'medium' : 'high';
             prioritySelect.value = raidPriorities[raidName] || defaultPriority;
             try { stylePrioritySelect(prioritySelect); } catch (_) {}
             prioritySelect.addEventListener('change', (e) => {

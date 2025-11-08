@@ -32,8 +32,8 @@ const HUNT_ANALYZER_THEMES = {
       textInfo: '#61AFEF',    // Info text (sessions, playtime)
       textGold: '#E5C07B',    // Gold color
       textDust: '#61AFEF',    // Dust color
-      textShiny: '#E5C07B',   // Shiny color (note: some uses #C678DD)
-      textRunes: '#98C379',   // Runes color (note: some uses #C678DD)
+      textShiny: '#C678DD',   // Shiny color 
+      textRunes: '#98C379',   // Runes color
       
       // Button colors
       buttonBackground: 'linear-gradient(to bottom, #4B5563, #343841)',
