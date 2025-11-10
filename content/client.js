@@ -293,6 +293,38 @@ if (typeof browserAPI === 'undefined') {
   let currentLocale = 'en-US';
   let translations = {};
   let translationsLoaded = false;
+  let languageDetectionAttempts = 0;
+  const MAX_DETECTION_ATTEMPTS = 5;
+  const DETECTION_DELAY = 500; // ms between retries
+  
+  function detectLanguage() {
+    // Primary detection methods (available immediately, most reliable)
+    const htmlLang = document.documentElement.lang;
+    const htmlLangQuery = document.querySelector('html[lang="pt"]');
+    const urlCheck = window.location.href.includes('/pt/');
+    
+    // If primary methods detect Portuguese, return immediately
+    if (htmlLang === 'pt' || htmlLangQuery || urlCheck) {
+      return { isPortuguese: true, method: 'primary' };
+    }
+    
+    // If URL clearly indicates English (no /pt/ and URL structure suggests English), no retry needed
+    const isClearlyEnglish = !urlCheck && (htmlLang === 'en' || htmlLang === '' || !htmlLang);
+    
+    // Secondary detection: Check for Portuguese text content (may not be available immediately)
+    // Only check text if we're uncertain about the language
+    if (document.body && !isClearlyEnglish) {
+      const bodyText = document.body.textContent || document.body.innerText || '';
+      const portugueseIndicators = ['Monstros', 'Iniciar', 'Bestiário', 'Selecionar mapa', 'Sala de Troféus'];
+      const hasPortugueseText = portugueseIndicators.some(text => bodyText.includes(text));
+      
+      if (hasPortugueseText) {
+        return { isPortuguese: true, method: 'text' };
+      }
+    }
+    
+    return { isPortuguese: false, method: isClearlyEnglish ? 'primary' : 'none', isCertain: isClearlyEnglish };
+  }
   
   async function loadTranslations() {
     try {
@@ -301,30 +333,116 @@ if (typeof browserAPI === 'undefined') {
       });
       
       if (response.success) {
-        // Always auto-detect from game language to match Mod Settings behavior
-        const htmlLang = document.documentElement.lang;
-        const htmlLangQuery = document.querySelector('html[lang="pt"]');
+        const detection = detectLanguage();
         const urlCheck = window.location.href.includes('/pt/');
+        const htmlLang = document.documentElement.lang;
+        const htmlLangQuery = !!document.querySelector('html[lang="pt"]');
         
-        console.log('[BestiaryModAPI] Language detection:', {
+        // If Portuguese detected (by any method), use it immediately
+        if (detection.isPortuguese) {
+          const previousLocale = currentLocale;
+          currentLocale = 'pt-BR';
+          translations = response.translations || {};
+          translationsLoaded = true;
+          
+          console.log('[BestiaryModAPI] Language detected:', {
+            htmlLang,
+            hasPortugueseAttr: htmlLangQuery,
+            urlHasPt: urlCheck,
+            method: detection.method,
+            locale: currentLocale,
+            attempts: languageDetectionAttempts,
+            previousLocale
+          });
+          
+          // Dispatch event (mods can handle locale changes)
+          document.dispatchEvent(new CustomEvent('bestiary-translations-loaded', { 
+            detail: { locale: currentLocale, translations } 
+          }));
+          return;
+        }
+        
+        // Portuguese not detected - determine if we need to retry
+        // If we're certain it's not Portuguese (clearly English from URL/lang), set locale immediately
+        const isCertainEnglish = detection.isCertain === true || detection.method === 'primary';
+        
+        if (isCertainEnglish) {
+          // Always use 'en-US' when English is detected from the page, ignore stored preference
+          // This prevents mixing languages when user switches between English and Portuguese pages
+          currentLocale = 'en-US';
+          translations = response.translations || {};
+          translationsLoaded = true;
+          
+          console.log('[BestiaryModAPI] Language detected (English/certain):', {
+            htmlLang,
+            urlHasPt: urlCheck,
+            hasPortugueseText: false,
+            method: detection.method,
+            locale: currentLocale,
+            isCertainEnglish,
+            storedLocale: response.locale
+          });
+          
+          document.dispatchEvent(new CustomEvent('bestiary-translations-loaded', { 
+            detail: { locale: currentLocale, translations } 
+          }));
+          return;
+        }
+        
+        // Uncertain - check if we should retry text detection
+        if (languageDetectionAttempts < MAX_DETECTION_ATTEMPTS) {
+          languageDetectionAttempts++;
+          
+          // Use 'en-US' as safe default when uncertain (Portuguese wasn't detected, so assume English)
+          // Don't use stored locale to avoid mixing languages
+          const fallbackLocale = 'en-US';
+          
+          // Only update and dispatch if this is the first attempt (to avoid multiple dispatches)
+          if (languageDetectionAttempts === 1) {
+            currentLocale = fallbackLocale;
+            translations = response.translations || {};
+            translationsLoaded = true;
+            
+            console.log('[BestiaryModAPI] Language detection attempt', languageDetectionAttempts, '(retrying):', {
+              htmlLang,
+              urlHasPt: urlCheck,
+              hasPortugueseText: false,
+              method: 'retrying',
+              locale: currentLocale,
+              storedLocale: response.locale
+            });
+            
+            // Dispatch event so mods can start with fallback locale
+            document.dispatchEvent(new CustomEvent('bestiary-translations-loaded', { 
+              detail: { locale: currentLocale, translations } 
+            }));
+          }
+          
+          // Schedule retry if we haven't exceeded max attempts
+          if (languageDetectionAttempts < MAX_DETECTION_ATTEMPTS) {
+            setTimeout(() => {
+              loadTranslations();
+            }, DETECTION_DELAY);
+          }
+          return;
+        }
+        
+        // Final: No Portuguese detected after all attempts (shouldn't reach here if certain)
+        // Always use 'en-US' since Portuguese wasn't detected, ignore stored preference
+        currentLocale = 'en-US';
+        translations = response.translations || {};
+        translationsLoaded = true;
+        
+        console.log('[BestiaryModAPI] Language detection final:', {
           htmlLang,
-          hasPortugueseAttr: !!htmlLangQuery,
-          url: window.location.href,
           urlHasPt: urlCheck,
+          hasPortugueseText: false,
+          method: 'fallback',
+          locale: currentLocale,
+          attempts: languageDetectionAttempts,
           storedLocale: response.locale
         });
         
-        const isPortuguese = htmlLang === 'pt' || htmlLangQuery || urlCheck;
-        
-        // Use detected language, fallback to stored preference, fallback to en-US
-        currentLocale = isPortuguese ? 'pt-BR' : (response.locale || 'en-US');
-        
-        translations = response.translations || {};
-        translationsLoaded = true;
-        console.log('[BestiaryModAPI] Final locale:', currentLocale, 'Portuguese detected:', isPortuguese);
-        console.log('[BestiaryModAPI] Translations loaded with', Object.keys(translations).length, 'locales');
-        
-        // Dispatch event so mods know translations are ready
         document.dispatchEvent(new CustomEvent('bestiary-translations-loaded', { 
           detail: { locale: currentLocale, translations } 
         }));

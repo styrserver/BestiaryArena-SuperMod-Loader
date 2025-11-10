@@ -3282,6 +3282,9 @@
   let hasLoggedInventoryNotFound = false;
   let observerDebounceTimeout = null;
   let lastObserverCheck = 0;
+  let buttonRetryTimeout = null;
+  const BUTTON_RETRY_MAX = 3;
+  const BUTTON_RETRY_DELAY = 250;
   const BUTTON_CHECK_INTERVAL = 1000;
   const BUTTON_CHECK_TIMEOUT = 10000;
   const LOG_AFTER_ATTEMPTS = 3;
@@ -3297,6 +3300,11 @@
     if (buttonCheckInterval) {
       clearInterval(buttonCheckInterval);
       buttonCheckInterval = null;
+    }
+    
+    if (buttonRetryTimeout) {
+      clearTimeout(buttonRetryTimeout);
+      buttonRetryTimeout = null;
     }
     
     if (observerDebounceTimeout) {
@@ -3378,17 +3386,26 @@
   }
   
   // Centralized cache clearing and button adding
-  function clearCachesAndAddButton() {
+  function clearCachesAndAddButton(retry = 0) {
+    if (buttonRetryTimeout) {
+      clearTimeout(buttonRetryTimeout);
+      buttonRetryTimeout = null;
+    }
     DOMCache.clearInventoryCache();
     DOM_ELEMENTS.clear();
-    addAutoscrollerButton();
+    const added = addAutoscrollerButton();
+    if (!added && retry < BUTTON_RETRY_MAX) {
+      buttonRetryTimeout = setTimeout(() => {
+        clearCachesAndAddButton(retry + 1);
+      }, BUTTON_RETRY_DELAY);
+    }
   }
   
   function addAutoscrollerButton() {
     if (document.querySelector('.autoscroller-inventory-button')) {
       failedAttempts = 0;
       hasLoggedInventoryNotFound = false;
-      return;
+      return true;
     }
     
     // Clear DOM cache when attempting to add button to ensure fresh lookups
@@ -3400,7 +3417,7 @@
                              window.location.pathname.includes('inventory');
     
     if (!isOnInventoryPage) {
-      return; // Don't try to add button if not on inventory page
+      return false; // Don't try to add button if not on inventory page
     }
     
     let inventoryContainer = getInventoryContainer();
@@ -3413,7 +3430,7 @@
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
         hasLoggedInventoryNotFound = true;
       }
-      return;
+      return false;
     }
     
     let summonScrollButtons = getSummonScrollButtons();
@@ -3432,7 +3449,7 @@
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
         hasLoggedInventoryNotFound = true;
       }
-      return;
+      return false;
     }
     
     let targetButton = null;
@@ -3492,12 +3509,19 @@
       if (failedAttempts >= LOG_AFTER_ATTEMPTS && !hasLoggedInventoryNotFound) {
         hasLoggedInventoryNotFound = true;
       }
-      return;
+      return false;
     }
     
     const autoButton = document.createElement('button');
     autoButton.className = 'focus-style-visible active:opacity-70 autoscroller-inventory-button';
-    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="has-rarity relative grid h-full place-items-center"><img alt="summon scroll" class="pixelated" width="32" height="32" src="https://bestiaryarena.com/assets/icons/summonscroll5.png"><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div></div></div>`;
+    const demonicBorderGradient = 'linear-gradient(135deg, #8b0000, #dc143c, #ff1744, #b71c1c)';
+    const demonicBorderStyle = [
+      'border: 2px solid',
+      `border-image: ${demonicBorderGradient} 1`,
+      'background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
+      'box-shadow: 0 0 6px rgba(220, 20, 60, 0.3), inset 0 0 6px rgba(220, 20, 60, 0.15)'
+    ].join('; ');
+    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="relative grid h-full place-items-center"><div class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="5" data-max-shinies="true" data-max-shinies-color="demon" style="${demonicBorderStyle}"></div><img alt="summon scroll" class="pixelated" width="32" height="32" src="https://bestiaryarena.com/assets/icons/summonscroll5.png"><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 2;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div></div></div>`;
         const handleAutoButtonClick = () => { showAutoscrollerModal(); };
     eventHandlers.add(autoButton, 'click', handleAutoButtonClick);
     
@@ -3512,7 +3536,10 @@
       }
     } catch (error) {
       console.error('[Autoscroller] Error adding button:', error);
+      return false;
     }
+    
+    return true;
   }
   
 // =======================

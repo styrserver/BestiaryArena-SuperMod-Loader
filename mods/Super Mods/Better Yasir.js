@@ -37,6 +37,7 @@
         DICE_MANIPULATOR_SPRITE: '.sprite.item',
         RARITY_ELEMENT: '[data-rarity]',
         EXALTATION_CHEST_IMG: 'img[src*="exaltation-chest"]',
+        RECYCLE_RUNE_IMG: 'img[src*="rune-recycle"]',
         DUST_IMG: 'img[src*="dust-large"]',
         STONE_OF_INSIGHT_SPRITE: '.sprite.item'
       };
@@ -448,6 +449,13 @@
             return null; // Will fall back to DOM method
           }
           
+          // For recycle rune, we need to check if it's available and get its price
+          if (itemKey === 'recycleRune') {
+            // Check if recycle rune is available in the API data
+            // For now, return a default price or check if it's in stock
+            return null; // Will fall back to DOM method
+          }
+          
           return null; // Will fall back to DOM method
         } catch (error) {
           handleError(error, 'Error getting item price from API');
@@ -571,6 +579,7 @@
             spriteItem: itemSlot.querySelector(SELECTORS.STONE_OF_INSIGHT_SPRITE),
             rarityElement: itemSlot.querySelector(SELECTORS.RARITY_ELEMENT),
             exaltationChestImg: itemSlot.querySelector(SELECTORS.EXALTATION_CHEST_IMG),
+            recycleRuneImg: itemSlot.querySelector(SELECTORS.RECYCLE_RUNE_IMG),
             dustImg: itemSlot.querySelector(SELECTORS.DUST_IMG),
             summonScrollImg: itemSlot.querySelector('img[src*="summonscroll"]')
           };
@@ -607,6 +616,10 @@
           // Check for Exaltation Chest
           else if (elements.exaltationChestImg) {
             detectedKey = 'exaltationChest';
+          }
+          // Check for Recycle Rune
+          else if (elements.recycleRuneImg) {
+            detectedKey = 'recycleRune';
           }
           // Check for Summon Scroll
           else if (elements.summonScrollImg) {
@@ -765,8 +778,8 @@
           let currencyIcon = '/assets/icons/dust.png';
           let currencyAlt = 'dust';
           
-          if (itemKey === 'exaltationChest') {
-            // Exaltation chest uses dust
+          if (itemKey === 'exaltationChest' || itemKey === 'recycleRune') {
+            // Exaltation chest and recycle rune use dust
             currencyIcon = '/assets/icons/dust.png';
             currencyAlt = 'dust';
           } else if (itemKey && itemKey.startsWith('diceManipulator')) {
@@ -802,9 +815,65 @@
       }
       
       // Show confirmation prompt inside Yasir tooltip
-      function getItemDisplayName(itemKey) {
+      function getItemDisplayName(itemKey, contextElement = null) {
+        // Try to get the name from the DOM first (will be in correct language)
+        let itemSlot = null;
+        
+        // If context element provided (like actionButton), use it to find the item slot
+        if (contextElement) {
+          const row = contextElement.closest('tr');
+          if (row) {
+            itemSlot = row.querySelector(`[data-item-key="${itemKey}"]`);
+          }
+        }
+        
+        // Fallback to document query
+        if (!itemSlot) {
+          itemSlot = document.querySelector(`[data-item-key="${itemKey}"]`);
+        }
+        
+        if (itemSlot) {
+          // Find the item name in the DOM structure
+          const container = itemSlot.closest('td')?.querySelector('div.flex.items-center.gap-1\\.5');
+          if (container) {
+            // The item name is typically in a div after the container-slot
+            // Try multiple approaches to find the name element
+            let nameElement = container.querySelector('div:not(.container-slot):not(.has-rarity):not(.better-yasir-right-side-wrapper)');
+            
+            // If that doesn't work, try finding all divs and pick the one with text
+            if (!nameElement || !nameElement.textContent.trim()) {
+              const allDivs = Array.from(container.querySelectorAll('div'));
+              for (const div of allDivs) {
+                if (!div.classList.contains('container-slot') && 
+                    !div.classList.contains('has-rarity') &&
+                    !div.classList.contains('better-yasir-right-side-wrapper') &&
+                    !div.closest('.container-slot') &&
+                    div.textContent.trim() &&
+                    div.textContent.trim().length > 0) {
+                  nameElement = div;
+                  break;
+                }
+              }
+            }
+            
+            if (nameElement) {
+              // Clone to avoid modifying the original, remove <p> tags, then get text
+              const clone = nameElement.cloneNode(true);
+              clone.querySelectorAll('p').forEach(p => p.remove());
+              const nameText = clone.textContent?.trim();
+              if (nameText) {
+                return nameText;
+              }
+            }
+          }
+        }
+        
+        // Fallback to hardcoded English names if DOM extraction fails
         if (itemKey === 'exaltationChest') {
           return 'Exaltation Chest';
+        }
+        if (itemKey === 'recycleRune') {
+          return 'Recycle Rune';
         }
         if (itemKey === 'dust') {
           return 'Dust';
@@ -845,7 +914,7 @@
             delete btn.dataset.confirm;
           });
     
-          const itemName = getItemDisplayName(itemKey);
+          const itemName = getItemDisplayName(itemKey, actionButton);
           const actionText = actionType === 'buy' ? t('mods.betterYasir.buy').toLowerCase() : t('mods.betterYasir.sell').toLowerCase();
           
           // Calculate the total cost
@@ -861,8 +930,8 @@
               const pricePerQuantityUnit = diceCost * minQuantity;
               totalCost = pricePerQuantityUnit * quantity;
               currency = 'gold';
-            } else if (itemKey === 'exaltationChest') {
-              // For exaltation chest, get price from DOM
+            } else if (itemKey === 'exaltationChest' || itemKey === 'recycleRune') {
+              // For exaltation chest and recycle rune, get price from DOM
               const container = actionButton.closest('td')?.previousElementSibling?.querySelector('div.flex.items-center.gap-1\\.5');
               if (container) {
                 totalCost = getItemPriceWithFallback(itemKey, container) * quantity;
@@ -1639,8 +1708,8 @@
                     const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                     isBuyAction = !isExchangeSection;
                   } else {
-                    // Fallback: determine by item type (Exaltation Chest is always buy)
-                    isBuyAction = slotItemKey === 'exaltationChest';
+                    // Fallback: determine by item type (Exaltation Chest and Recycle Rune are always buy)
+                    isBuyAction = slotItemKey === 'exaltationChest' || slotItemKey === 'recycleRune';
                   }
                 } else {
                   // Fallback: determine by table section
@@ -1653,8 +1722,8 @@
                     const isExchangeSection = headerText.includes('Exchange') || headerText.includes(sellText) || headerText.includes(exchangeText);
                     isBuyAction = !isExchangeSection;
                   } else {
-                    // Second fallback: determine by item type (Exaltation Chest is always buy)
-                    isBuyAction = slotItemKey === 'exaltationChest';
+                    // Second fallback: determine by item type (Exaltation Chest and Recycle Rune are always buy)
+                    isBuyAction = slotItemKey === 'exaltationChest' || slotItemKey === 'recycleRune';
                   }
                 }
                 

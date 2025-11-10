@@ -5855,10 +5855,19 @@
       
       const forgeButton = document.createElement('button');
       forgeButton.className = 'focus-style-visible active:opacity-70 better-forge-inventory-button';
+      const demonicBorderGradient = 'linear-gradient(135deg, #8b0000, #dc143c, #ff1744, #b71c1c)';
+      const demonicBorderStyle = [
+        'border: 2px solid',
+        `border-image: ${demonicBorderGradient} 1`,
+        'background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
+        'box-shadow: 0 0 6px rgba(220, 20, 60, 0.3), inset 0 0 6px rgba(220, 20, 60, 0.15)'
+      ].join('; ');
       forgeButton.innerHTML = `
         <div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image">
-          <div class="has-rarity relative grid h-full place-items-center">
-                       <img src="${SMITH_ICON_URL}" alt="Better Forge" style="width: 32px; height: 32px; object-fit: contain;">
+          <div class="relative grid h-full place-items-center">
+            <div class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="5" data-max-shinies="true" data-max-shinies-color="demon" style="${demonicBorderStyle}"></div>
+            <img src="${SMITH_ICON_URL}" alt="Better Forge" style="width: 32px; height: 32px; object-fit: contain; position: relative; z-index: 2;">
+            <div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 3;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div>
           </div>
         </div>
       `;
