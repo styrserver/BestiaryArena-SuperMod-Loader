@@ -2518,10 +2518,10 @@ function getEventNameForRoomId(roomId) {
 }
 
 // Language detection function
+// Only checks game language, not browser language
 function isPortuguese() {
     return document.documentElement.lang === 'pt-BR' || 
-           document.querySelector('html[lang="pt-BR"]') || 
-           navigator.language.startsWith('pt-BR') ||
+           document.querySelector('html[lang="pt-BR"]') ||
            window.location.href.includes('/pt/');
 }
 

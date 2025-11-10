@@ -64,10 +64,10 @@ const TASKER_BUTTON_ID = `${MOD_ID}-settings-button`;
 const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
 
 // Language detection function
+// Only checks game language, not browser language
 function isPortuguese() {
     return document.documentElement.lang === 'pt-BR' || 
-           document.querySelector('html[lang="pt-BR"]') || 
-           navigator.language.startsWith('pt-BR') ||
+           document.querySelector('html[lang="pt-BR"]') ||
            window.location.href.includes('/pt/');
 }
 

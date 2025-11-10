@@ -2,10 +2,11 @@
 // This file provides centralized language detection and translation utilities
 
 // Language detection function
+// Only checks game language, not browser language
 function isPortuguese() {
     return document.documentElement.lang === 'pt' || 
-           document.querySelector('html[lang="pt"]') || 
-           navigator.language.startsWith('pt');
+           document.querySelector('html[lang="pt"]') ||
+           window.location.href.includes('/pt/');
 }
 
 // Get localized text based on current language

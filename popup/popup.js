@@ -381,6 +381,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        // If value in KB is >= 1000, show in MB instead
+        if (i === 1 && bytes >= 1000 * k) {
+          return parseFloat((bytes / Math.pow(k, 2)).toFixed(2)) + ' ' + sizes[2];
+        }
+        
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
       };
       

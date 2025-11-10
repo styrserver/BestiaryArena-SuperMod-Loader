@@ -669,6 +669,15 @@ function updateToastPositions(container) {
   });
 }
 
+// Format storage size (KB to MB conversion when >= 1000 KB)
+function formatStorageSize(kb) {
+  if (kb >= 1000) {
+    const mb = (kb / 1024).toFixed(2);
+    return `${mb} MB`;
+  }
+  return `${kb} KB`;
+}
+
 // Utility function to generate user-friendly summary
 function generateConfigSummary(data, isImport = false) {
   const summary = [];
@@ -718,7 +727,7 @@ function generateConfigSummary(data, isImport = false) {
     const runStats = data.runData.metadata;
     if (runStats.totalRuns > 0) {
       const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
-      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`);
+      summary.push(`Run data: ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`);
     }
   }
   
@@ -728,7 +737,7 @@ function generateConfigSummary(data, isImport = false) {
     const sessionCount = huntData.sessions ? huntData.sessions.length : 0;
     if (sessionCount > 0) {
       const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
-      summary.push(`Hunt Analyzer: ${sessionCount} sessions (~${estimatedSizeKB} KB)`);
+      summary.push(`Hunt Analyzer: ${sessionCount} sessions (~${formatStorageSize(estimatedSizeKB)})`);
     }
   }
   
@@ -2360,7 +2369,7 @@ function showSettingsModal() {
               if (runStats.totalRuns > 0) {
                 const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                 runDataInfo.style.display = 'block';
-                runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+                runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`;
                 hasData = true;
               }
             }
@@ -2372,7 +2381,7 @@ function showSettingsModal() {
                 if (runStats.totalRuns > 0) {
                   const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                   runDataInfo.style.display = 'block';
-                  runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${estimatedSizeKB} KB)`;
+                  runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`;
                 } else {
                   runDataInfo.style.display = 'block';
                   runDataInfo.textContent = 'No data found';
@@ -2419,7 +2428,7 @@ function showSettingsModal() {
               if (sessionCount > 0) {
                 const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
                 huntAnalyzerInfo.style.display = 'block';
-                huntAnalyzerInfo.textContent = `Found ${sessionCount} sessions (~${estimatedSizeKB} KB)`;
+                huntAnalyzerInfo.textContent = `Found ${sessionCount} sessions (~${formatStorageSize(estimatedSizeKB)})`;
               } else {
                 huntAnalyzerInfo.style.display = 'block';
                 huntAnalyzerInfo.textContent = 'No sessions found';
