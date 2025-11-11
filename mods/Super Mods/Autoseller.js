@@ -3,12 +3,10 @@
 // =======================
 
 (function() {
-    console.log('[Autoseller] Script loading...');
-    
     if (window.__autosellerLoaded) return;
     window.__autosellerLoaded = true;
     
-    console.log('[Autoseller] Script initialized successfully');
+    console.log('[Autoseller] Script initialized');
 
     // =======================
     // 1. Configuration & Constants
@@ -251,14 +249,28 @@
         const hasDaycare = hasDaycareIconInInventory();
         let daycareMonsterIds = [];
         
-        if (hasDaycare && sellEnabled) {
+        if (hasDaycare && (sellEnabled || squeezeEnabled)) {
             daycareMonsterIds = await fetchDaycareData();
         }
+        
+        // Debug counters for squeeze eligibility
+        let squeezeDebugCounts = {
+            total: 0,
+            locked: 0,
+            shiny: 0,
+            daycare: 0,
+            geneRange: 0,
+            added: 0
+        };
+        
+        // Track gene values for debugging
+        let geneValueSamples = [];
         
         for (let i = 0; i < monsterCount; i++) {
             const monster = monsters[i];
             
             if (monster.locked) {
+                if (squeezeEnabled) squeezeDebugCounts.locked++;
                 continue;
             }
             
@@ -269,12 +281,40 @@
             const magicResist = monster.magicResist || 0;
             const genes = hp + ad + ap + armor + magicResist;
             
-            if (squeezeEnabled && genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
-                if (monster.shiny === true) {
-                    console.log(`[Autoseller] Skipping shiny creature: ${monster.name || 'unknown'}`);
-                    continue;
+            if (squeezeEnabled) {
+                squeezeDebugCounts.total++;
+                
+                // Collect sample gene values (first 20 unlocked monsters)
+                if (geneValueSamples.length < 20) {
+                    geneValueSamples.push({
+                        name: monster.name || 'unknown',
+                        id: monster.id,
+                        hp, ad, ap, armor, magicResist,
+                        genes,
+                        shiny: monster.shiny,
+                        locked: monster.locked
+                    });
                 }
-                toSqueeze.push(monster);
+                
+                if (genes >= squeezeMinGenes && genes <= squeezeMaxGenes) {
+                    squeezeDebugCounts.geneRange++;
+                    
+                    if (monster.shiny === true) {
+                        squeezeDebugCounts.shiny++;
+                        console.log(`[Autoseller] [Squeeze Debug] Skipping shiny creature: ${monster.name || 'unknown'} (genes: ${genes})`);
+                        continue;
+                    }
+                    if (hasDaycare && daycareMonsterIds.includes(monster.id)) {
+                        squeezeDebugCounts.daycare++;
+                        continue;
+                    }
+                    
+                    toSqueeze.push(monster);
+                    squeezeDebugCounts.added++;
+                    if (squeezeDebugCounts.added <= 5) {
+                        console.log(`[Autoseller] [Squeeze Debug] Added monster: ${monster.name || 'unknown'} (ID: ${monster.id}, genes: ${genes})`);
+                    }
+                }
             }
             else if (sellEnabled && genes >= sellMinGenes && genes <= sellMaxGenes) {
                 if (monster.shiny === true) {
@@ -295,6 +335,23 @@
         
         const finalToSqueeze = toSqueeze.length >= squeezeMinCount ? toSqueeze : [];
         const finalToSell = toSell.length >= sellMinCount ? toSell : [];
+        
+        if (squeezeEnabled) {
+            // Only log breakdown if no monsters found (for debugging)
+            if (finalToSqueeze.length === 0 && squeezeDebugCounts.total > 0) {
+                console.log(`[Autoseller] [Squeeze Debug] No monsters found in range ${squeezeMinGenes}-${squeezeMaxGenes}% (checked ${squeezeDebugCounts.total}, locked: ${squeezeDebugCounts.locked})`);
+                
+                // Show sample only if no monsters found
+                if (squeezeDebugCounts.geneRange === 0) {
+                    const allGeneValues = geneValueSamples.map(m => m.genes);
+                    if (allGeneValues.length > 0) {
+                        const minGenes = Math.min(...allGeneValues);
+                        const maxGenes = Math.max(...allGeneValues);
+                        console.log(`[Autoseller] [Squeeze Debug] Gene range in inventory: ${minGenes}% - ${maxGenes}%`);
+                    }
+                }
+            }
+        }
         
         return {
             toSqueeze: finalToSqueeze,
@@ -601,9 +658,8 @@
             
             const preCount = preState.context.monsters.length;
             const idsToRemoveSet = new Set(idsToRemove);
-            const expectedRemovedCount = preState.context.monsters.filter(m => idsToRemoveSet.has(m.id)).length;
             
-            console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Attempting to remove ${idsToRemove.length} IDs. Found ${expectedRemovedCount} in current inventory (${preCount} total monsters)`);
+            console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Attempting to remove ${idsToRemove.length} IDs. Found ${preState.context.monsters.filter(m => idsToRemoveSet.has(m.id)).length} in current inventory (${preCount} total monsters)`);
             
             // Perform state update
             player.send({
@@ -641,46 +697,16 @@
             }
             
             const postCount = postState.context.monsters.length;
+            const removedCount = preCount - postCount;
             
-            // Verify the removal was successful
-            const remainingIds = new Set(postState.context.monsters.map(m => m.id));
-            const actuallyRemoved = idsToRemove.filter(id => !remainingIds.has(id));
-            const notRemoved = idsToRemove.filter(id => remainingIds.has(id));
-            
-            if (actuallyRemoved.length === 0 && expectedRemovedCount > 0) {
-                // Nothing was removed but we expected removals - this is a failure
-                console.error(`[${modName}][ERROR][removeMonstersFromLocalInventory] Update failed - no monsters removed (expected ${expectedRemovedCount})`);
-                inventoryUpdateTracker.recordFailure();
-                
-                // Retry if we haven't exceeded max retries
-                if (retryCount < MAX_RETRIES) {
-                    console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
-                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
-                }
-                
-                return { success: false, removed: [] };
-            }
-            
-            // Log results
-            if (notRemoved.length > 0) {
-                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] ${notRemoved.length} IDs not found in inventory: ${notRemoved.join(', ')}`);
-            }
-            
-            if (actuallyRemoved.length > 0) {
-                console.log(`[${modName}][SUCCESS][removeMonstersFromLocalInventory] Removed ${actuallyRemoved.length} monsters. Inventory: ${preCount} -> ${postCount}`);
-                inventoryUpdateTracker.recordSuccess(actuallyRemoved.length);
-            }
-            
-            // Check if we should warn about too many failures
-            if (inventoryUpdateTracker.shouldForceRefresh()) {
-                console.warn(`[${modName}][WARN] Too many consecutive failures (${inventoryUpdateTracker.consecutiveFailures}). Consider refreshing inventory from server.`);
+            if (removedCount > 0) {
+                console.log(`[${modName}][SUCCESS][removeMonstersFromLocalInventory] Removed ${removedCount} monsters. Inventory: ${preCount} -> ${postCount}`);
+                inventoryUpdateTracker.recordSuccess(removedCount);
             }
             
             return { 
-                success: actuallyRemoved.length > 0, 
-                removed: actuallyRemoved,
-                notFound: notRemoved,
+                success: removedCount > 0, 
+                removed: idsToRemove,
                 preCount,
                 postCount
             };
@@ -1755,29 +1781,24 @@
                             const monsterName = monster?.metadata?.name || monster?.name;
                             
                             if (monster.shiny === true) {
-                                console.log('[Autoseller] Keeping shiny creature:', monsterName);
                                 return false;
                             }
                             
                             // Always devour creatures below absolute threshold (ignores ignore list) - only if enabled
                             if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
-                                console.log('[Autoseller] Devouring creature (genes ≤', alwaysDevourBelow + '):', monsterName, monster.totalGenes + '%');
                                 return true;
                             }
                             
                             // Keep creatures with minGenes or higher - only if enabled
                             if (keepGenesEnabled && monster.totalGenes >= minGenes) {
-                                console.log('[Autoseller] Keeping creature (genes ≥', minGenes + '):', monsterName, monster.totalGenes + '%');
                                 return false;
                             }
                             
                             // For creatures between thresholds (or all if keep genes disabled), check ignore list
                             if (monsterName && ignoreList.includes(monsterName)) {
-                                console.log('[Autoseller] Keeping ignored creature:', monsterName);
                                 return false;
                             }
                             
-                            console.log('[Autoseller] Devouring creature:', monsterName, monster.totalGenes + '%');
                             return true;
                         },
                     };
@@ -2036,8 +2057,6 @@
             
             // Check if this is a Dragon Plant API call
             if (typeof url === 'string' && url.includes('quest.plantEat')) {
-                console.log('[Autoseller] Dragon Plant API call detected:', url);
-                
                 return originalFetch.apply(this, args).then(response => {
                     // Clone the response so we can read it without affecting the original
                     const clonedResponse = response.clone();
@@ -2063,8 +2082,10 @@
                                     
                                     const goldReceived = result.goldValue;
                                     const currentPlantGold = getPlantGold();
+                                    const threshold = DRAGON_PLANT_CONFIG.GOLD_THRESHOLD;
+                                    const percentToThreshold = currentPlantGold ? Math.round((currentPlantGold / threshold) * 100) : 0;
                                     
-                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold | Plant total: ${currentPlantGold || 'unknown'} gold`);
+                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold | Total: ${currentPlantGold || 'unknown'} / ${threshold} (${percentToThreshold}%)`);
                                     stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
                                     
                                     // Check if we should autocollect now that plant gold has increased
@@ -2085,7 +2106,6 @@
             return originalFetch.apply(this, args);
         };
         
-        console.log('[Autoseller] Dragon Plant API monitor setup complete');
     }
     
     // Inventory update tracker for monitoring local inventory sync
@@ -2231,8 +2251,6 @@
                 }
             }
             
-            console.log(`[Autoseller] Processing ${type} for ${monsters?.length || 0} monsters...`);
-            
             if (!monsters) {
                 monsters = await fetchServerMonsters();
             }
@@ -2246,11 +2264,10 @@
             if (type === 'sell') {
                 toSell = toSell.filter(m => !stateManager.isProcessed(m.id));
                 if (!toSell.length) {
-                    console.log('[Autoseller] No eligible monsters to sell');
                     return;
                 }
                 
-                console.log(`[Autoseller] Selling ${toSell.length} monsters in batches of ${SELL_RATE_LIMIT.BATCH_SIZE}`);
+                console.log(`[Autoseller] Selling ${toSell.length} monsters`);
                 const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
                 for (let i = 0; i < toSell.length; i += batchSize) {
                     const batch = toSell.slice(i, i + batchSize);
@@ -2301,21 +2318,53 @@
                 }
             } else if (type === 'squeeze') {
                 if (!toSqueeze.length) {
-                    console.log('[Autoseller] No eligible monsters to squeeze');
                     return;
                 }
                 
-                console.log(`[Autoseller] Squeezing ${toSqueeze.length} monsters in batches of ${SELL_RATE_LIMIT.BATCH_SIZE}`);
+                console.log(`[Autoseller] Squeezing ${toSqueeze.length} monsters`);
                 for (let i = 0; i < toSqueeze.length; i += SELL_RATE_LIMIT.BATCH_SIZE) {
                     const batch = toSqueeze.slice(i, i + SELL_RATE_LIMIT.BATCH_SIZE);
-                    const ids = batch.map(m => m.id).filter(Boolean);
-                    if (!ids.length) continue;
+                    
+                    // Get IDs from LOCAL state, not server state
+                    // Match monsters by finding them in local state using gameId + stats
+                    const localState = globalThis.state?.player?.getSnapshot?.()?.context;
+                    const localMonsters = localState?.monsters || [];
+                    const ids = [];
+                    
+                    for (const serverMonster of batch) {
+                        // Find matching monster in local state by gameId and stats
+                        const localMonster = localMonsters.find(m => 
+                            m.gameId === serverMonster.gameId &&
+                            m.hp === serverMonster.hp &&
+                            m.ad === serverMonster.ad &&
+                            m.ap === serverMonster.ap &&
+                            m.armor === serverMonster.armor &&
+                            m.magicResist === serverMonster.magicResist &&
+                            !m.locked
+                        );
+                        
+                        if (localMonster && localMonster.id) {
+                            ids.push(localMonster.id);
+                        } else {
+                            // Fallback: try to match by server ID if it exists in local state
+                            if (localMonsters.find(m => m.id === serverMonster.id)) {
+                                ids.push(serverMonster.id);
+                            }
+                        }
+                    }
+                    
+                    if (!ids.length) {
+                        continue;
+                    }
                     
                     await apiRateLimiter.waitForSlot();
                     apiRateLimiter.recordRequest();
                     
                     const url = 'https://bestiaryarena.com/api/trpc/inventory.monsterSqueezer?batch=1';
-                    const body = { "0": { json: ids } };
+                    // Use server IDs for API call (API expects server IDs)
+                    const serverIds = batch.map(m => m.id).filter(Boolean);
+                    const body = { "0": { json: serverIds } };
+                    
                     const result = await apiRequest(url, { method: 'POST', body });
                     
                     const apiResponse = result.data;
@@ -2328,16 +2377,29 @@
                         const dustReceived = apiResponse[0].result.data.json.dustDiff;
                         const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
                         
+                        if (dustReceived === 0) {
+                            console.warn(`[Autoseller] ⚠️ WARNING: Squeeze returned 0 dust! API response:`, JSON.stringify(apiResponse, null, 2));
+                        } else {
+                            console.log(`[Autoseller] Squeezed ${squeezedCount} monsters for ${dustReceived} dust`);
+                        }
+                        
                         stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
-                        stateManager.markProcessed(ids);
-                        await removeMonstersFromLocalInventory(ids);
+                        stateManager.markProcessed(serverIds);
+                        
+                        // Remove using LOCAL state IDs (these are what exist in the UI)
+                        if (ids.length > 0) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            await removeMonstersFromLocalInventory(ids);
+                        }
                     } else if (!result.success && result.status === 404) {
                         // 404 means creatures no longer exist on server - always remove from local inventory
-                        stateManager.markProcessed(ids);
+                        stateManager.markProcessed(serverIds);
                         await removeMonstersFromLocalInventory(ids);
                     } else if (!result.success) {
                         console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
                         continue;
+                    } else {
+                        console.warn(`[Autoseller] ⚠️ Unexpected squeeze API response structure`);
                     }
                 
                     if (i + SELL_RATE_LIMIT.BATCH_SIZE < toSqueeze.length) {
@@ -2546,7 +2608,6 @@
     // =======================
     
     function addAutosellerNavButton() {
-        console.log('[Autoseller] Adding navigation button...');
         function tryInsert() {
             const nav = queryElement('nav.shrink-0');
             if (!nav) {
@@ -2574,7 +2635,6 @@
             li.appendChild(btn);
             ul.appendChild(li);
             
-            console.log('[Autoseller] Navigation button added successfully');
             updateAutosellerNavButtonColor();
         }
         tryInsert();
@@ -2819,7 +2879,6 @@
         
         // Add widget to the autoplay container
         autoplayContainer.appendChild(widget);
-        console.log('[Autoseller] Session widget created and added to UI');
     }
 
 
@@ -3019,7 +3078,6 @@
             // Add click event listener for immediate response to user clicks
             document.addEventListener('click', handleDragonPlantClick);
             
-            console.log(`[${modName}] Dragon Plant observer setup complete`);
         } else {
             console.warn(`[${modName}][WARN][setupDragonPlantObserver] MutationObserver not available`);
         }
@@ -3105,7 +3163,6 @@
                 
                 // Subscribe to world.onGameEnd which fires when battle animation completes
                 game.world.onGameEnd.once(() => {
-                    console.log(`[${modName}] Battle animation completed, creatures dropped - checking Dragon Plant...`);
                     // Wait 100ms for UI to settle before activating Dragon Plant
                     setTimeout(() => {
                         checkAndActivateDragonPlant();
@@ -3114,7 +3171,6 @@
             };
             globalThis.state.board.on('newGame', emitNewGameHandler1);
             
-            console.log(`[${modName}] Game end listener setup complete`);
         } else {
             console.warn(`[${modName}] Board state not available for game end listener`);
         }
@@ -3125,12 +3181,6 @@
         
         // Only proceed if autoplant is enabled
         if (!settings.autoplantChecked) return;
-        
-        // Log current plant gold
-        const plantGold = getPlantGold();
-        if (plantGold !== undefined && plantGold !== null) {
-            console.log(`[Autoseller] Dragon Plant current gold: ${plantGold}`);
-        }
         
         // Check if we're in an autoplay session
         const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
@@ -3173,7 +3223,6 @@
         
         // Only activate if not already enabled
         if (!isCurrentlyEnabled) {
-            console.log(`[${modName}] Auto-clicking Dragon Plant after battle`);
             setTimeout(() => {
                 dragonPlantButton.click();
             }, 100);
@@ -3221,8 +3270,6 @@
         if (plantGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
             console.log(`[Autoseller] Dragon Plant ready to collect: ${plantGold} gold (threshold: ${DRAGON_PLANT_CONFIG.GOLD_THRESHOLD})`);
             collectDragonPlant();
-        } else {
-            console.log(`[Autoseller] Dragon Plant gold: ${plantGold} / ${DRAGON_PLANT_CONFIG.GOLD_THRESHOLD} (${Math.round((plantGold / DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) * 100)}% to threshold)`);
         }
     }
     
@@ -3398,7 +3445,6 @@
             }
         });
         
-        console.log('[Autoseller] Dragon Plant autocollect monitoring initialized');
     }
 
     // =======================
@@ -3423,7 +3469,6 @@
         
         let lastProcessedBattleKey = null;
         if (globalThis.state.board && globalThis.state.board.subscribe) {
-            console.log('[Autoseller] Setting up board subscription for battle completion...');
             boardSubscription2 = globalThis.state.board.subscribe(async ({ context }) => {
                 const serverResults = context.serverResults;
                 if (!serverResults || !serverResults.rewardScreen || typeof serverResults.rewardScreen.gameTicks !== 'number') return;
@@ -3434,20 +3479,17 @@
                 if (battleKey === lastProcessedBattleKey) return;
                 lastProcessedBattleKey = battleKey;
                 
-                console.log(`[Autoseller] Battle completed (${seed}:${gameTicks}), processing inventory...`);
                 const inventorySnapshot = await fetchServerMonsters();
                 const waitSeconds = gameTicks / 16;
                 
                 setTimeout(async () => {
                     if (!stateManager.canRun()) {
-                        console.log('[Autoseller] Skipping processing - rate limit active');
                         return;
                     }
                     
                     const settings = getSettings();
                     
                     if (!settings.autoplantChecked && !settings.autosellChecked && !settings.autosqueezeChecked) {
-                        console.log('[Autoseller] Skipping processing - no features enabled');
                         return;
                     }
                     
@@ -3496,16 +3538,12 @@
                 stateManager.clearProcessedIds();
             },
             enableDragonPlant: () => {
-                console.log('[Autoseller] enableDragonPlant() called');
                 const currentSettings = getSettings();
                 
                 // Check if already enabled - don't toggle it
                 if (currentSettings.autoplantChecked) {
-                    console.log('[Autoseller] Dragon Plant already enabled, skipping');
                     return true;
                 }
-                
-                console.log('[Autoseller] Enabling Dragon Plant');
                 
                 // Handle mutual exclusivity - disable Autosell if enabled
                 const settingsUpdate = { autoplantChecked: true, lastActiveMode: 'autoplant' };

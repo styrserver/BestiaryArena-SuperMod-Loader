@@ -27,7 +27,8 @@ const defaultConfig = {
   alwaysOpenHuntAnalyzer: false,
   enablePlayercount: true,
   includeRunDataByDefault: true,
-  includeHuntDataByDefault: true
+  includeHuntDataByDefault: true,
+  inventoryBorderStyle: 'Original'
 };
 
 // Storage key for this mod
@@ -426,6 +427,41 @@ function generateMaxCreaturesCSS(colorOption, colorKey) {
 function generateMaxShiniesCSS(colorOption, colorKey) {
   return CSS_TEMPLATES.maxShinies(colorOption, colorKey);
 }
+
+// Helper function to get inventory border style HTML based on setting
+function getInventoryBorderStyle(borderStyleName) {
+  if (!borderStyleName || borderStyleName === 'Original') {
+    return '';
+  }
+  
+  // Map display names to COLOR_OPTIONS keys
+  const styleMap = {
+    'Demonic': 'demon',
+    'Frosty': 'ice',
+    'Venomous': 'poison',
+    'Divine': 'gold',
+    'Undead': 'undead',
+    'Prismatic': 'prismatic'
+  };
+  
+  const colorKey = styleMap[borderStyleName];
+  if (!colorKey || !COLOR_OPTIONS[colorKey]) {
+    return '';
+  }
+  
+  const colorOption = COLOR_OPTIONS[colorKey];
+  const borderStyle = [
+    'border: 2px solid',
+    `border-image: ${colorOption.borderGradient} 1`,
+    'background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
+    `box-shadow: 0 0 6px ${colorOption.textColor}30, inset 0 0 6px ${colorOption.textColor}15`
+  ].join('; ');
+  
+  return `<div class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="5" data-max-shinies="true" data-max-shinies-color="${colorKey}" style="${borderStyle}"></div>`;
+}
+
+// Expose globally for other mods
+window.getInventoryBorderStyle = getInventoryBorderStyle;
 
 // Parse stamina values from DOM elements
 function parseStaminaValues(parentSpan) {
@@ -1847,6 +1883,18 @@ function showSettingsModal() {
               <span>${t('mods.betterUI.hideWebsiteFooter')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.inventoryBorderStyle')}</span>
+            <select id="inventory-border-style-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="Original">Original</option>
+              <option value="Demonic">Demonic</option>
+              <option value="Frosty">Frosty</option>
+              <option value="Venomous">Venomous</option>
+              <option value="Divine">Divine</option>
+              <option value="Undead">Undead</option>
+              <option value="Prismatic">Prismatic</option>
+            </select>
+          </div>
         `;
         rightColumn.appendChild(uiContent);
       } else if (categoryId === 'creatures') {
@@ -2102,6 +2150,11 @@ function showSettingsModal() {
           hideWebsiteFooter,
           showWebsiteFooter
         )(removeFooterCheckbox);
+      }
+      
+      const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
+      if (inventoryBorderStyleSelector) {
+        createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
       }
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');

@@ -5457,8 +5457,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           speedrunRow.appendChild(yourSpeedrun);
           speedrunRow.appendChild(topSpeedrun);
 
+          const yourRank = yourRoom.rank || 0;
+          const yourRankTicks = yourRoom.rankTicks;
+          const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
+          const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
+          const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
+
+          const isRankTop = yourRank && topRank && yourRank === topRank && 
+            (yourRankTicks === topRankTicks || 
+             ((yourRankTicks === undefined || yourRankTicks === null) && (topRankTicks === undefined || topRankTicks === null)));
+
           const rankRow = document.createElement('div');
-          const isRankTop = yourRoom.rank && roomsHighscores?.rank?.[roomCode]?.rank && yourRoom.rank === roomsHighscores.rank[roomCode].rank;
           rankRow.style.cssText = `
             display: grid;
             grid-template-columns: 120px 120px;
@@ -5472,10 +5481,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             border-left: 3px solid #FF9800;
           `;
 
-          const yourRank = yourRoom.rank || 0;
-          const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
-          const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
-
           const yourRankData = document.createElement('div');
           yourRankData.style.cssText = `
             display: flex;
@@ -5488,7 +5493,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           yourRankData.innerHTML = `
             <span style="color: #8f8; font-weight: bold;">You:</span>
-            <span>${yourRank} points</span>
+            <span>${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</span>
           `;
 
           const topRankData = document.createElement('div');
@@ -5503,7 +5508,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           topRankData.innerHTML = `
             <span style="color: #ff8; font-weight: bold;">Top:</span>
-            <span>${topRank} points</span>
+            <span>${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</span>
           `;
 
           rankRow.appendChild(yourRankData);
@@ -5637,8 +5642,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           } else if (category === 'Rank Points') {
             const searchedRank = searchedRoom.rank || 0;
+            const searchedRankTicks = searchedRoom.rankTicks;
             const yourRank = yourRoom?.rank || 0;
+            const yourRankTicks = yourRoom?.rankTicks;
             const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
+            const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
             const topPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
 
             const dataRow = document.createElement('div');
@@ -5653,19 +5661,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const searchedData = document.createElement('div');
             searchedData.innerHTML = `
               <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</div>
-              <div>${searchedRank} points</div>
+              <div>${searchedRank}${searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)'}</div>
             `;
 
             const yourData = document.createElement('div');
             yourData.innerHTML = `
               <div style="color: #8f8; font-weight: bold;">You:</div>
-              <div>${yourRank} points</div>
+              <div>${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</div>
             `;
 
             const topData = document.createElement('div');
             topData.innerHTML = `
               <div style="color: #ff8; font-weight: bold;">Top:</div>
-              <div>${topRank} points</div>
+              <div>${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</div>
               <div style="font-size: 10px; color: #888;">by ${topPlayer}</div>
             `;
 
@@ -5930,10 +5938,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           const searchedRankScore = searchedRankPointsMap[roomCode];
           const searchedRank = searchedRankScore ? searchedRankScore.rank : null;
+          const searchedRankTicks = searchedRankScore?.rankTicks || searchedRooms[roomCode]?.rankTicks;
           const topRank = roomsHighscores?.rank?.[roomCode]?.rank || null;
+          const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
+
+          const isRankTop = searchedRank !== null && topRank !== null && searchedRank === topRank &&
+            (searchedRankTicks === topRankTicks ||
+             ((searchedRankTicks === undefined || searchedRankTicks === null) && (topRankTicks === undefined || topRankTicks === null)));
 
           const rankRow = document.createElement('div');
-          const isRankTop = searchedRank !== null && topRank !== null && searchedRank === topRank;
           rankRow.style.cssText = `
             display: grid;
             grid-template-columns: 120px 120px;
@@ -5959,7 +5972,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           searchedRankData.innerHTML = `
             <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</span>
-            <span>${searchedRank !== null && searchedRank >= 0 ? searchedRank + ' points' : '-'}</span>
+            <span>${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
           const topRankData = document.createElement('div');
@@ -5974,7 +5987,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           topRankData.innerHTML = `
             <span style="color: #ff8; font-weight: bold;">Top:</span>
-            <span>${topRank !== null ? topRank + ' points' : '-'}</span>
+            <span>${topRank !== null ? topRank + (topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
           rankRow.appendChild(searchedRankData);
@@ -9373,20 +9386,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           // Update rank points content
           const yourRankPoints = yourRooms?.[selectedMap]?.rank || 0;
+          const yourRankTicks = yourRooms?.[selectedMap]?.rankTicks;
           const bestRankPoints = roomsHighscores?.rank?.[selectedMap]?.rank || 0;
+          const bestRankTicks = roomsHighscores?.rank?.[selectedMap]?.ticks;
           const bestRankPlayer = roomsHighscores?.rank?.[selectedMap]?.userName || 'Unknown';
           
           let rankPointsHtml = '';
           if (bestRankPoints > 0) {
             rankPointsHtml = `
               <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
-              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">${bestRankPoints.toLocaleString()}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa;">(${bestRankTicks} ticks)</i>` : ' (null)'}</div>
               <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestRankPlayer}</div>
             `;
             if (yourRankPoints > 0) {
               rankPointsHtml += `
                 <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
-                <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}</div>
+                <div style="font-size: 12px; color: #ccc;">${yourRankPoints.toLocaleString()}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks} ticks)</i>` : ' (null)'}</div>
               `;
             }
           } else {

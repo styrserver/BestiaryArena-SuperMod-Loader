@@ -99,6 +99,7 @@
       "huntThemeLabel": "Theme",
       "antiIdleLabel": "⚠️ Anti-Idle Sounds",
       "antiIdleTooltip": "Prevents browser idle timeout by playing a muted audio loop. The audio is completely silent and won't disturb your browsing.",
+      "inventoryBorderStyle": "Inventory Mod Buttons",
       "staminaFullText": "Full",
       "favoriteMenuLabel": "Favorite"
     },

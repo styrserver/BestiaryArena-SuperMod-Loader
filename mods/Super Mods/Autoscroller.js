@@ -3514,14 +3514,9 @@
     
     const autoButton = document.createElement('button');
     autoButton.className = 'focus-style-visible active:opacity-70 autoscroller-inventory-button';
-    const demonicBorderGradient = 'linear-gradient(135deg, #8b0000, #dc143c, #ff1744, #b71c1c)';
-    const demonicBorderStyle = [
-      'border: 2px solid',
-      `border-image: ${demonicBorderGradient} 1`,
-      'background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
-      'box-shadow: 0 0 6px rgba(220, 20, 60, 0.3), inset 0 0 6px rgba(220, 20, 60, 0.15)'
-    ].join('; ');
-    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="relative grid h-full place-items-center"><div class="has-rarity absolute inset-0 z-1 opacity-80" data-rarity="5" data-max-shinies="true" data-max-shinies-color="demon" style="${demonicBorderStyle}"></div><img alt="summon scroll" class="pixelated" width="32" height="32" src="https://bestiaryarena.com/assets/icons/summonscroll5.png"><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 2;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div></div></div>`;
+    const inventoryBorderStyle = window.betterUIConfig?.inventoryBorderStyle || 'Original';
+    const borderDiv = window.getInventoryBorderStyle ? window.getInventoryBorderStyle(inventoryBorderStyle) : '';
+    autoButton.innerHTML = `<div data-hoverable="true" data-highlighted="false" data-disabled="false" class="container-slot surface-darker data-[disabled=true]:dithered data-[highlighted=true]:unset-border-image data-[hoverable=true]:hover:unset-border-image"><div class="relative grid h-full place-items-center">${borderDiv}<img alt="summon scroll" class="pixelated" width="32" height="32" src="https://bestiaryarena.com/assets/icons/summonscroll5.png"><div class="revert-pixel-font-spacing pointer-events-none absolute bottom-[3px] right-px flex h-2.5" style="z-index: 2;"><span class="relative" style="line-height: 1; font-size: 12px; color: #fff; font-family: 'Yalla', 'Trebuchet MS', Arial, sans-serif; letter-spacing: 0; font-weight: 600; text-shadow: -1px 0 0 #000, 1px 0 0 #000, 0 -1px 0 #000, 0 1px 0 #000; text-align: left; display: inline-block; width: 100%;" translate="no">Auto</span></div></div></div>`;
         const handleAutoButtonClick = () => { showAutoscrollerModal(); };
     eventHandlers.add(autoButton, 'click', handleAutoButtonClick);
     
