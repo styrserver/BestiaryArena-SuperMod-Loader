@@ -517,6 +517,9 @@
           const minQuantity = getMinimumQuantityFromDOM(itemSlot) || 10;
           const pricePerQuantityUnit = diceCost * minQuantity;
           return pricePerQuantityUnit > 0 ? Math.floor(currentGold / pricePerQuantityUnit) : 0;
+        } else if (itemKey === 'recycleRune') {
+          // For recycle rune, use gold
+          return itemPrice > 0 ? Math.floor(currentGold / itemPrice) : 0;
         } else {
           // For other items, use dust
           return itemPrice > 0 ? Math.floor(currentDust / itemPrice) : 0;
@@ -644,10 +647,11 @@
       
       // Unified price calculation utility
       const priceUtils = {
-        // Extract price from button text
+        // Extract price from button text (handles numbers with commas)
         extractPriceFromText(text) {
-          const priceMatch = text.match(/(\d+)/);
-          return priceMatch ? parseInt(priceMatch[1]) : 0;
+          // Remove all non-digit characters except commas, then remove commas and parse
+          const cleaned = text.replace(/[^\d,]/g, '').replace(/,/g, '');
+          return cleaned ? parseInt(cleaned, 10) : 0;
         },
         
       // Check if button indicates out of stock
@@ -778,12 +782,12 @@
           let currencyIcon = '/assets/icons/dust.png';
           let currencyAlt = 'dust';
           
-          if (itemKey === 'exaltationChest' || itemKey === 'recycleRune') {
-            // Exaltation chest and recycle rune use dust
+          if (itemKey === 'exaltationChest') {
+            // Exaltation chest uses dust
             currencyIcon = '/assets/icons/dust.png';
             currencyAlt = 'dust';
-          } else if (itemKey && itemKey.startsWith('diceManipulator')) {
-            // Dice manipulators use gold
+          } else if (itemKey === 'recycleRune' || (itemKey && itemKey.startsWith('diceManipulator'))) {
+            // Recycle rune and dice manipulators use gold
             currencyIcon = '/assets/icons/goldpile.png'; // Use the correct gold icon
             currencyAlt = 'gold';
           } else {
@@ -930,13 +934,20 @@
               const pricePerQuantityUnit = diceCost * minQuantity;
               totalCost = pricePerQuantityUnit * quantity;
               currency = 'gold';
-            } else if (itemKey === 'exaltationChest' || itemKey === 'recycleRune') {
-              // For exaltation chest and recycle rune, get price from DOM
+            } else if (itemKey === 'exaltationChest') {
+              // For exaltation chest, get price from DOM
               const container = actionButton.closest('td')?.previousElementSibling?.querySelector('div.flex.items-center.gap-1\\.5');
               if (container) {
                 totalCost = getItemPriceWithFallback(itemKey, container) * quantity;
               }
               currency = 'dust';
+            } else if (itemKey === 'recycleRune') {
+              // For recycle rune, get price from DOM (uses gold)
+              const container = actionButton.closest('td')?.previousElementSibling?.querySelector('div.flex.items-center.gap-1\\.5');
+              if (container) {
+                totalCost = getItemPriceWithFallback(itemKey, container) * quantity;
+              }
+              currency = 'gold';
             } else {
               // For other items, get price from DOM
               const container = actionButton.closest('td')?.previousElementSibling?.querySelector('div.flex.items-center.gap-1\\.5');
@@ -1499,8 +1510,8 @@
               let playerResource = 0;
               let resourceType = '';
               
-              if (itemKey && itemKey.startsWith('diceManipulator')) {
-                // Dice manipulators use gold
+              if (itemKey === 'recycleRune' || (itemKey && itemKey.startsWith('diceManipulator'))) {
+                // Recycle rune and dice manipulators use gold
                 playerResource = getPlayerGold();
                 resourceType = 'gold';
               } else {
@@ -1532,19 +1543,31 @@
             let payload = {};
             
             if (actionType === 'buy') {
-              // Based on HAR analysis, the buy API endpoint is:
-              endpoint = '/api/trpc/store.yasirDailyStock?batch=1';
-              
-              // Updated payload with new required parameters
-              payload = {
-                "0": {
-                  "json": {
-                    "itemKey": itemKey,
-                    "amount": actualQuantity,  // Use actual quantity (visual quantity × 10 for dice manipulators)
-                    "location": yasirLocation  // Added location parameter
+              // Recycle Rune uses a different endpoint and payload structure
+              if (itemKey === 'recycleRune') {
+                endpoint = '/api/trpc/store.buyRecycleRuneYasir?batch=1';
+                payload = {
+                  "0": {
+                    "json": {
+                      "amount": actualQuantity
+                    }
                   }
-                }
-              };
+                };
+              } else {
+                // Based on HAR analysis, the buy API endpoint is:
+                endpoint = '/api/trpc/store.yasirDailyStock?batch=1';
+                
+                // Updated payload with new required parameters
+                payload = {
+                  "0": {
+                    "json": {
+                      "itemKey": itemKey,
+                      "amount": actualQuantity,  // Use actual quantity (visual quantity × 10 for dice manipulators)
+                      "location": yasirLocation  // Added location parameter
+                    }
+                  }
+                };
+              }
               
             } else if (actionType === 'sell') {
               // Use a different API endpoint for dust exchange
