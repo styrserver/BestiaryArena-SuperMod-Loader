@@ -1759,14 +1759,12 @@
                   const safeMax = Math.max(1, maxQuantity);
                   input.max = safeMax;
                   
-                  // Get current value and ensure it's valid
-                  const currentValue = parseInt(input.value) || 1;
-                  const newValue = Math.min(currentValue, safeMax);
-                  input.value = newValue.toString();
+                  // Reset input to 1 after purchase
+                  input.value = '1';
                   
                   // Update the action button text
                   if (actionButton) {
-                    updateActionButtonText(actionButton, newValue, 'buy', itemPrice, slotItemKey);
+                    updateActionButtonText(actionButton, 1, 'buy', itemPrice, slotItemKey);
                   }
                 } else {
                   // For sell items, use available inventory quantity

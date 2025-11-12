@@ -20,7 +20,7 @@ const defaultConfig = {
   enableShinyEnemies: false,
   enableAutoplayRefresh: false,
   autoplayRefreshMinutes: 30,
-  useInternalTimer: false,
+  autoplayRefreshTimerMode: 'autoplay', // 'autoplay', 'internal', or 'both'
   disableAutoReload: false,
   enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
@@ -129,6 +129,15 @@ const TIMEOUT_DELAYS = {
 
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
+
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+  let text = t(key);
+  Object.entries(replacements).forEach(([placeholder, value]) => {
+    text = text.replace(`{${placeholder}}`, value);
+  });
+  return text;
+};
 
 // =======================
 // 3. Global State
@@ -1390,7 +1399,7 @@ async function resetAllSettings(modal) {
     // Show loading state
     const resetBtn = document.getElementById('reset-all-settings-btn');
     if (resetBtn) {
-      resetBtn.textContent = '⏳ Resetting...';
+      resetBtn.textContent = `⏳ ${t('mods.betterUI.resetting')}`;
       resetBtn.disabled = true;
     }
     
@@ -1457,7 +1466,7 @@ async function resetAllSettings(modal) {
     
     // Reset button state
     if (resetBtn) {
-      resetBtn.textContent = '🔄 Reset All Settings';
+      resetBtn.textContent = `🔄 ${t('mods.betterUI.resetAllSettings')}`;
       resetBtn.disabled = false;
     }
     
@@ -1497,7 +1506,7 @@ async function resetAllSettings(modal) {
     // Reset button state
     const resetBtn = document.getElementById('reset-all-settings-btn');
     if (resetBtn) {
-      resetBtn.textContent = '🔄 Reset All Settings';
+      resetBtn.textContent = `🔄 ${t('mods.betterUI.resetAllSettings')}`;
       resetBtn.disabled = false;
     }
     
@@ -1958,6 +1967,7 @@ function showSettingsModal() {
               <select id="autoplay-refresh-timer-mode" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;" title="${t('mods.betterUI.autoplayRefreshTimerModeWarning')}" onclick="event.stopPropagation();">
                 <option value="autoplay">${t('mods.betterUI.autoplaySessionText')}</option>
                 <option value="internal">${t('mods.betterUI.internalTimer')}</option>
+                <option value="both">${t('mods.betterUI.bothTimers')}</option>
               </select>
               <span style="color: #ccc;">${t('mods.betterUI.refreshesBrowserEvery')}</span>
               <input type="number" id="autoplay-refresh-minutes" value="30" min="1" max="120" style="width: 50px; padding: 4px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center; pointer-events: auto;" onclick="event.stopPropagation();">
@@ -2043,7 +2053,7 @@ function showSettingsModal() {
                 📥 ${t('mods.betterUI.backupImportButton')}
               </button>
               <button id="reset-all-settings-btn" class="btn btn-secondary" style="color: #dc3545; margin-top: 8px;">
-                🔄 Reset All Settings
+                🔄 ${t('mods.betterUI.resetAllSettings')}
               </button>
             </div>
           </div>
@@ -2192,12 +2202,20 @@ function showSettingsModal() {
     
     const autoplayRefreshTimerModeSelect = content.querySelector('#autoplay-refresh-timer-mode');
     if (autoplayRefreshTimerModeSelect) {
-      // Set initial value based on config
-      autoplayRefreshTimerModeSelect.value = config.useInternalTimer ? 'internal' : 'autoplay';
+      // Set initial value based on config (backward compatibility)
+      if (config.autoplayRefreshTimerMode) {
+        autoplayRefreshTimerModeSelect.value = config.autoplayRefreshTimerMode;
+      } else {
+        // Migrate old boolean config
+        autoplayRefreshTimerModeSelect.value = config.useInternalTimer ? 'internal' : 'autoplay';
+        config.autoplayRefreshTimerMode = autoplayRefreshTimerModeSelect.value;
+        delete config.useInternalTimer;
+        saveConfig();
+      }
       
       autoplayRefreshTimerModeSelect.addEventListener('change', () => {
         const selectedMode = autoplayRefreshTimerModeSelect.value;
-        config.useInternalTimer = (selectedMode === 'internal');
+        config.autoplayRefreshTimerMode = selectedMode;
         saveConfig();
         
         if (config.enableAutoplayRefresh) {
@@ -2422,7 +2440,11 @@ function showSettingsModal() {
               if (runStats.totalRuns > 0) {
                 const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                 runDataInfo.style.display = 'block';
-                runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`;
+                runDataInfo.textContent = tReplace('mods.betterUI.backupFoundRuns', {
+                  runs: runStats.totalRuns,
+                  maps: runStats.totalMaps,
+                  size: formatStorageSize(estimatedSizeKB)
+                });
                 hasData = true;
               }
             }
@@ -2434,14 +2456,18 @@ function showSettingsModal() {
                 if (runStats.totalRuns > 0) {
                   const estimatedSizeKB = Math.round((runStats.totalRuns * 1115) / 1024);
                   runDataInfo.style.display = 'block';
-                  runDataInfo.textContent = `Found ${runStats.totalRuns} runs across ${runStats.totalMaps} maps (~${formatStorageSize(estimatedSizeKB)})`;
+                  runDataInfo.textContent = tReplace('mods.betterUI.backupFoundRuns', {
+                    runs: runStats.totalRuns,
+                    maps: runStats.totalMaps,
+                    size: formatStorageSize(estimatedSizeKB)
+                  });
                 } else {
                   runDataInfo.style.display = 'block';
-                  runDataInfo.textContent = 'No data found';
+                  runDataInfo.textContent = t('mods.betterUI.backupNoDataFound');
                 }
               } else {
                 runDataInfo.style.display = 'block';
-                runDataInfo.textContent = 'No data found';
+                runDataInfo.textContent = t('mods.betterUI.backupNoDataFound');
               }
             });
             return; // Early return for async case
@@ -2450,12 +2476,12 @@ function showSettingsModal() {
           // Show "No data found" if no data was found
           if (!hasData) {
             runDataInfo.style.display = 'block';
-            runDataInfo.textContent = 'No data found';
+            runDataInfo.textContent = t('mods.betterUI.backupNoDataFound');
           }
         } catch (e) {
           console.log('[Mod Settings] Could not check for Run Data:', e);
           runDataInfo.style.display = 'block';
-          runDataInfo.textContent = 'No data found';
+          runDataInfo.textContent = t('mods.betterUI.backupNoDataFound');
         }
       }
       
@@ -2481,24 +2507,27 @@ function showSettingsModal() {
               if (sessionCount > 0) {
                 const estimatedSizeKB = Math.round((sessionCount * 864) / 1024);
                 huntAnalyzerInfo.style.display = 'block';
-                huntAnalyzerInfo.textContent = `Found ${sessionCount} sessions (~${formatStorageSize(estimatedSizeKB)})`;
+                huntAnalyzerInfo.textContent = tReplace('mods.betterUI.backupFoundSessions', {
+                  sessions: sessionCount,
+                  size: formatStorageSize(estimatedSizeKB)
+                });
               } else {
                 huntAnalyzerInfo.style.display = 'block';
-                huntAnalyzerInfo.textContent = 'No sessions found';
+                huntAnalyzerInfo.textContent = t('mods.betterUI.backupNoSessionsFound');
               }
             } catch (e) {
               console.log('[Mod Settings] Could not parse Hunt Analyzer data:', e);
               huntAnalyzerInfo.style.display = 'block';
-              huntAnalyzerInfo.textContent = 'No data found';
+              huntAnalyzerInfo.textContent = t('mods.betterUI.backupNoDataFound');
             }
           } else {
             huntAnalyzerInfo.style.display = 'block';
-            huntAnalyzerInfo.textContent = 'No data found';
+            huntAnalyzerInfo.textContent = t('mods.betterUI.backupNoDataFound');
           }
         } catch (e) {
           console.log('[Mod Settings] Could not check for Hunt Analyzer data:', e);
           huntAnalyzerInfo.style.display = 'block';
-          huntAnalyzerInfo.textContent = 'No data found';
+          huntAnalyzerInfo.textContent = t('mods.betterUI.backupNoDataFound');
         }
       }
       
@@ -4799,8 +4828,9 @@ function startAutoplayRefreshMonitor() {
         // Reset board activity timer on new game
         resetBoardActivityTimer();
         
-        // Reset internal timer on new game if using internal timer mode
-        if (config.useInternalTimer) {
+        // Reset internal timer on new game if using internal timer mode or both mode
+        const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
+        if (timerMode === 'internal' || timerMode === 'both') {
           resetInternalTimer();
         }
         
@@ -4818,8 +4848,9 @@ function startAutoplayRefreshMonitor() {
         console.log(`[Mod Settings] setPlayMode event - mode: ${event.mode}`);
         if (event.mode === 'autoplay') {
           console.log('[Mod Settings] Autoplay mode set - checking refresh threshold');
-          // Reset internal timer when switching to autoplay if using internal timer mode
-          if (config.useInternalTimer) {
+          // Reset internal timer when switching to autoplay if using internal timer mode or both mode
+          const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
+          if (timerMode === 'internal' || timerMode === 'both') {
             resetInternalTimer();
           }
           checkAutoplayRefreshThreshold();
@@ -4847,8 +4878,9 @@ function startAutoplayRefreshMonitor() {
     // Initialize board activity timer
     resetBoardActivityTimer();
     
-    // Initialize internal timer if using internal timer mode
-    if (config.useInternalTimer) {
+    // Initialize internal timer if using internal timer mode or both mode
+    const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
+    if (timerMode === 'internal' || timerMode === 'both') {
       resetInternalTimer();
     }
     
@@ -4923,7 +4955,40 @@ function checkAutoplayRefreshThreshold() {
     let thresholdReached = false;
     let reason = '';
     
-    if (config.useInternalTimer) {
+    // Get timer mode (backward compatibility)
+    const timerMode = config.autoplayRefreshTimerMode || (config.useInternalTimer ? 'internal' : 'autoplay');
+    
+    if (timerMode === 'both') {
+      // Combined mode - check both timers and refresh when whichever comes first
+      if (internalTimerStartTime === null) {
+        resetInternalTimer();
+      }
+      
+      const internalMinutes = (Date.now() - internalTimerStartTime) / (1000 * 60);
+      const sessionMinutes = getAutoplaySessionTime();
+      const inactivityMinutes = (Date.now() - lastBoardActivityTime) / (1000 * 60);
+      
+      console.log(`[Mod Settings] Autoplay refresh check (both timers): internal=${internalMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, session=${sessionMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes, inactivity=${inactivityMinutes.toFixed(1)}/${config.autoplayRefreshMinutes} minutes`);
+      
+      // Check internal timer threshold
+      const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
+      
+      // Check session time threshold
+      const sessionThresholdReached = sessionMinutes > 0 && sessionMinutes >= config.autoplayRefreshMinutes;
+      
+      // Check board inactivity threshold
+      const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
+      
+      thresholdReached = internalThresholdReached || sessionThresholdReached || inactivityThresholdReached;
+      
+      if (internalThresholdReached) {
+        reason = 'internal timer';
+      } else if (sessionThresholdReached) {
+        reason = 'session time';
+      } else {
+        reason = 'board inactivity';
+      }
+    } else if (timerMode === 'internal') {
       // Use internal timer mode - track time independently
       if (internalTimerStartTime === null) {
         // Initialize timer if not already set

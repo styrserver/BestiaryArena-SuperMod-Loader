@@ -10,6 +10,7 @@ const defaultConfig = {
   hideGameBoard: false,
   stopCondition: 'max', // 'max' = Maximum rank, 'any' = Any Victory
   enableAutoRefillStamina: false,
+  enableAutoSellCreatures: false,
   stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
 };
 
@@ -1279,6 +1280,54 @@ async function ensureGameStopped(maxChecks = 5, delayMs = 80) {
   }
 }
 
+// Function to auto-sell creatures from reward screen
+async function autoSellCreatures() {
+  console.log('[Rank Pointer] Attempting to auto-sell creatures...');
+  
+  // Wait a bit for reward screen to fully render
+  await sleep(300);
+  
+  // Find Sell or Squeeze button
+  // Check for both English and Portuguese text
+  const sellButtonTexts = ['Sell', 'Vender', 'Squeeze', 'Espremer'];
+  const allButtons = document.querySelectorAll('button');
+  let sellButton = null;
+  
+  for (const button of allButtons) {
+    const buttonText = button.textContent.trim();
+    const hasSellImg = button.querySelector('img[alt="Bag with gold"]');
+    
+    if (sellButtonTexts.includes(buttonText) || hasSellImg) {
+      sellButton = button;
+      console.log('[Rank Pointer] Found sell button:', buttonText);
+      break;
+    }
+  }
+  
+  if (!sellButton) {
+    console.warn('[Rank Pointer] Could not find Sell/Squeeze button');
+    return false;
+  }
+  
+  try {
+    // Click the sell button
+    console.log('[Rank Pointer] Clicking sell button...');
+    sellButton.click();
+    await sleep(500); // Wait for sell action to complete
+    
+    // Press ESC to close the reward screen
+    console.log('[Rank Pointer] Pressing ESC to close reward screen...');
+    dispatchEsc();
+    await sleep(200);
+    
+    console.log('[Rank Pointer] Auto-sell completed');
+    return true;
+  } catch (error) {
+    console.error('[Rank Pointer] Error during auto-sell:', error);
+    return false;
+  }
+}
+
 async function ensureRewardScreenHandled() {
   let isRewardScreenOpen = false;
   try {
@@ -1297,32 +1346,55 @@ async function ensureRewardScreenHandled() {
 
   await waitForModCoordinationTasks({ context: 'reward screen handling' });
 
-  const closeStart = performance.now();
-  console.log('[Rank Pointer] Closing reward screen after game completion...');
-  closeRewardScreen();
-  await sleep(200);
+  // Auto-sell creatures if enabled
+  let autoSellSuccess = false;
+  if (config.enableAutoSellCreatures) {
+    console.log('[Rank Pointer] Auto-sell enabled, attempting to sell creatures...');
+    autoSellSuccess = await autoSellCreatures();
+  }
 
-  const rewardClosed = await waitForRewardScreenToClose(2500);
-  const closeElapsed = Math.round(performance.now() - closeStart);
-  
-  if (!rewardClosed) {
-    console.warn(`[Rank Pointer] Reward screen did not close within timeout (${closeElapsed}ms), trying ESC key...`);
-    dispatchEsc();
-    await sleep(1000);
+  // If auto-sell didn't succeed or wasn't enabled, close reward screen normally
+  if (!autoSellSuccess) {
+    const closeStart = performance.now();
+    console.log('[Rank Pointer] Closing reward screen after game completion...');
+    closeRewardScreen();
+    await sleep(200);
+
+    const rewardClosed = await waitForRewardScreenToClose(2500);
+    const closeElapsed = Math.round(performance.now() - closeStart);
+    
+    if (!rewardClosed) {
+      console.warn(`[Rank Pointer] Reward screen did not close within timeout (${closeElapsed}ms), trying ESC key...`);
+      dispatchEsc();
+      await sleep(1000);
+      try {
+        const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
+        const isOpen = openRewards.getSnapshot();
+        if (isOpen) {
+          console.error('[Rank Pointer] Reward screen still open after ESC key - this may cause issues');
+        } else {
+          console.log('[Rank Pointer] Reward screen closed after ESC key');
+          rewardScreenOpen = false;
+        }
+      } catch (e) {
+        console.log('[Rank Pointer] Could not check reward screen state after ESC');
+      }
+    } else {
+      console.log(`[Rank Pointer] Reward screen closed successfully in ${closeElapsed}ms, processing result...`);
+    }
+  } else {
+    // Auto-sell handled closing, just verify it's closed
+    await sleep(300);
     try {
       const openRewards = globalThis.state.board.select((ctx) => ctx.openRewards);
       const isOpen = openRewards.getSnapshot();
-      if (isOpen) {
-        console.error('[Rank Pointer] Reward screen still open after ESC key - this may cause issues');
-      } else {
-        console.log('[Rank Pointer] Reward screen closed after ESC key');
+      if (!isOpen) {
         rewardScreenOpen = false;
+        console.log('[Rank Pointer] Reward screen closed after auto-sell');
       }
     } catch (e) {
-      console.log('[Rank Pointer] Could not check reward screen state after ESC');
+      console.log('[Rank Pointer] Could not verify reward screen state after auto-sell');
     }
-  } else {
-    console.log(`[Rank Pointer] Reward screen closed successfully in ${closeElapsed}ms, processing result...`);
   }
 }
 
@@ -2065,6 +2137,20 @@ function createConfigPanel() {
   refillContainer.appendChild(refillLabel);
   content.appendChild(refillContainer);
 
+  // Enable auto-sell creatures
+  const sellContainer = document.createElement('div');
+  sellContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  const sellInput = document.createElement('input');
+  sellInput.type = 'checkbox';
+  sellInput.id = `${CONFIG_PANEL_ID}-sell-input`;
+  sellInput.checked = Boolean(config.enableAutoSellCreatures);
+  const sellLabel = document.createElement('label');
+  sellLabel.htmlFor = sellInput.id;
+  sellLabel.textContent = t('mods.rankPointer.enableAutoSell');
+  sellContainer.appendChild(sellInput);
+  sellContainer.appendChild(sellLabel);
+  content.appendChild(sellContainer);
+
   // Check if board has ally creatures
   const hasAlly = hasAllyCreaturesOnBoard();
   
@@ -2110,6 +2196,7 @@ function createConfigPanel() {
         config.hideGameBoard = hideInput.checked;
         config.stopCondition = stopSelect.value === 'any' ? 'any' : 'max';
         config.enableAutoRefillStamina = refillInput.checked;
+        config.enableAutoSellCreatures = sellInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         // Save to localStorage (preferred method)
         saveConfig();
@@ -2118,12 +2205,14 @@ function createConfigPanel() {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
+          enableAutoSellCreatures: config.enableAutoSellCreatures,
           stopWhenTicksReached: config.stopWhenTicksReached
         });
         console.log('[Rank Pointer] Config saved on Start,', {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
+          enableAutoSellCreatures: config.enableAutoSellCreatures,
           stopWhenTicksReached: config.stopWhenTicksReached
         });
         
@@ -2149,6 +2238,7 @@ function createConfigPanel() {
         config.hideGameBoard = hideInput.checked;
         config.stopCondition = stopSelect.value === 'any' ? 'any' : 'max';
         config.enableAutoRefillStamina = refillInput.checked;
+        config.enableAutoSellCreatures = sellInput.checked;
         config.stopWhenTicksReached = parseInt(document.getElementById(`${CONFIG_PANEL_ID}-stop-when-ticks-input`).value, 10) || 0;
         // Save to localStorage (preferred method)
         saveConfig();
@@ -2157,12 +2247,14 @@ function createConfigPanel() {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
+          enableAutoSellCreatures: config.enableAutoSellCreatures,
           stopWhenTicksReached: config.stopWhenTicksReached
         });
         console.log('[Rank Pointer] Config saved', {
           hideGameBoard: config.hideGameBoard,
           stopCondition: config.stopCondition,
           enableAutoRefillStamina: config.enableAutoRefillStamina,
+          enableAutoSellCreatures: config.enableAutoSellCreatures,
           stopWhenTicksReached: config.stopWhenTicksReached
         });
       }
