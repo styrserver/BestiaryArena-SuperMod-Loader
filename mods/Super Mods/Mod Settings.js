@@ -1992,6 +1992,12 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.antiIdleTooltip')}">${t('mods.betterUI.antiIdleLabel')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="temporary-sandbox-floor-slider-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.temporarySandboxFloorSliderWarning')}">${t('mods.betterUI.temporarySandboxFloorSlider')}</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -2284,6 +2290,23 @@ function showSettingsModal() {
             enableAntiIdleSounds();
           } else {
             disableAntiIdleSounds();
+          }
+        });
+      }
+      
+      const temporarySandboxFloorSliderCheckbox = content.querySelector('#temporary-sandbox-floor-slider-toggle');
+      if (temporarySandboxFloorSliderCheckbox) {
+        temporarySandboxFloorSliderCheckbox.checked = config.enableTemporarySandboxFloorSlider || false;
+        
+        temporarySandboxFloorSliderCheckbox.addEventListener('change', () => {
+          config.enableTemporarySandboxFloorSlider = temporarySandboxFloorSliderCheckbox.checked;
+          saveConfig();
+          
+          try {
+            globalThis.state.clientConfig.trigger.setState({ fn: prev => ({...prev, _temporarySandboxFloorSlider: temporarySandboxFloorSliderCheckbox.checked }) });
+            console.log('[Mod Settings] Temporary sandbox floor slider', temporarySandboxFloorSliderCheckbox.checked ? 'enabled' : 'disabled');
+          } catch (error) {
+            console.error('[Mod Settings] Error toggling temporary sandbox floor slider:', error);
           }
         });
       }

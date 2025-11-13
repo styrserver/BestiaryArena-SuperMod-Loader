@@ -106,6 +106,8 @@
       "huntThemeLabel": "Tema",
       "antiIdleLabel": "⚠️ Sons Anti-Idle",
       "antiIdleTooltip": "Evita que o navegador fique ocioso reproduzindo um áudio silencioso em loop. O áudio é totalmente inaudível e não incomoda.",
+      "temporarySandboxFloorSlider": "⚠️ Controle Deslizante de Andar Sandbox Temporário",
+      "temporarySandboxFloorSliderWarning": "Ativar controle deslizante de andar sandbox temporário",
       "inventoryBorderStyle": "Botões de Mod do Inventário",
       "staminaFullText": "Cheio",
       "favoriteMenuLabel": "Favorito"
