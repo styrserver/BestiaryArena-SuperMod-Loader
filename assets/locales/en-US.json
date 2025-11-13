@@ -108,6 +108,7 @@
       "antiIdleTooltip": "Prevents browser idle timeout by playing a muted audio loop. The audio is completely silent and won't disturb your browsing.",
       "temporarySandboxFloorSlider": "⚠️ Temporary Sandbox Floor Slider",
       "temporarySandboxFloorSliderWarning": "Enable temporary sandbox floor slider",
+      "temporarySandboxFloorSliderLink": "Post your records here",
       "inventoryBorderStyle": "Inventory Mod Buttons",
       "staminaFullText": "Full",
       "favoriteMenuLabel": "Favorite"

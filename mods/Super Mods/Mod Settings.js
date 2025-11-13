@@ -1997,6 +1997,9 @@ function showSettingsModal() {
               <input type="checkbox" id="temporary-sandbox-floor-slider-toggle" style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.temporarySandboxFloorSliderWarning')}">${t('mods.betterUI.temporarySandboxFloorSlider')}</span>
             </label>
+            <div style="margin-left: 28px; margin-top: 5px;">
+              <a href="https://bestiaryarena.wiki.gg/wiki/Temporary_Sandbox_Floor_Slider" target="_blank" rel="noopener noreferrer" style="color: #4a9eff; text-decoration: none; font-size: 13px;">${t('mods.betterUI.temporarySandboxFloorSliderLink')}</a>
+            </div>
           </div>
         `;
         rightColumn.appendChild(advancedContent);
@@ -5380,6 +5383,29 @@ function initBetterUI() {
       scheduleTimeout(() => {
         hideWebsiteFooter();
       }, 1000); // Delay to ensure DOM is ready
+    }
+    
+    // Apply temporary sandbox floor slider state if enabled
+    if (config.enableTemporarySandboxFloorSlider) {
+      scheduleTimeout(() => {
+        try {
+          if (globalThis.state?.clientConfig?.trigger?.setState) {
+            globalThis.state.clientConfig.trigger.setState({ fn: prev => ({...prev, _temporarySandboxFloorSlider: true }) });
+            console.log('[Mod Settings] Temporary sandbox floor slider enabled on init');
+          } else {
+            console.warn('[Mod Settings] Game state not ready for temporary sandbox floor slider, retrying...');
+            // Retry after a longer delay if state isn't ready
+            scheduleTimeout(() => {
+              if (globalThis.state?.clientConfig?.trigger?.setState) {
+                globalThis.state.clientConfig.trigger.setState({ fn: prev => ({...prev, _temporarySandboxFloorSlider: true }) });
+                console.log('[Mod Settings] Temporary sandbox floor slider enabled on init (retry)');
+              }
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('[Mod Settings] Error applying temporary sandbox floor slider on init:', error);
+        }
+      }, 1000); // Delay to ensure game state is ready
     }
     
     console.log('[Mod Settings] Initialization completed');
