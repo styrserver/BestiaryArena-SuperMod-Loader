@@ -29,7 +29,8 @@ const defaultConfig = {
   includeRunDataByDefault: true,
   includeHuntDataByDefault: true,
   inventoryBorderStyle: 'Original',
-  enableMismatchRefresh: false
+  enableMismatchRefresh: false,
+  vipListInterface: 'modal' // 'modal' or 'panel'
 };
 
 // Storage key for this mod
@@ -1905,6 +1906,13 @@ function showSettingsModal() {
               <option value="Prismatic">Prismatic</option>
             </select>
           </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.vipListInterface')}</span>
+            <select id="vip-list-interface-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="modal">${t('mods.betterUI.vipListInterfaceModal')}</option>
+              <option value="panel">${t('mods.betterUI.vipListInterfacePanel')}</option>
+            </select>
+          </div>
         `;
         rightColumn.appendChild(uiContent);
       } else if (categoryId === 'creatures') {
@@ -2181,6 +2189,11 @@ function showSettingsModal() {
       const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
       if (inventoryBorderStyleSelector) {
         createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
+      }
+      
+      const vipListInterfaceSelector = content.querySelector('#vip-list-interface-selector');
+      if (vipListInterfaceSelector) {
+        createSettingsDropdownHandler('vipListInterface')(vipListInterfaceSelector);
       }
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');

@@ -17,11 +17,27 @@
     STATE_UPDATE_DELAY: 200,
     CAPACITY_UPDATE_DELAY: 200,
     EQUIPMENT_CHECK_DELAY: 100,
-    SUBSCRIPTION_UPDATE_DELAY: 50
+    SUBSCRIPTION_UPDATE_DELAY: 50,
+    EQUIPMENT_LOAD_MAX_RETRIES: 10,
+    EQUIPMENT_LOAD_RETRY_DELAY: 1000,
+    FEEDBACK_DISPLAY_DURATION: 2000
   };
   
   // Panel constants
   const EXALTATION_PANEL_WIDTH = 450;
+  
+  // Equipment that cannot be obtained from exaltation chests
+  const EXCLUDED_EQUIPMENT = [
+    'Amazon Armor',
+    'Amazon Helmet',
+    'Amazon Shield',
+    'Earthborn Titan Armor',
+    'Fireborn Giant Armor',
+    'Hailstorm Rod',
+    'Paladin Armor',
+    'Windborn Colossus Armor',
+    'Witch Hat'
+  ];
   
   // DOM selectors
   const SELECTORS = {
@@ -90,16 +106,23 @@
   let exaltationPanelInProgress = false;
   let lastPanelCall = 0;
   let modalObserver = null;
+  let cleanupInProgress = false;
   
   // Auto-opening state
   let autoOpenInterval = null;
   let modalCloseObserver = null;
   let repositionTimeout = null;
+  let saveEquipmentSetupTimeout = null;
+  let updateCapacityDisplayTimeout = null;
   
   // Equipment filtering state
   let lastOpenedEquipment = null;
   let equipmentCheckTimeout = null;
   let originalFetch = null;
+  
+  // Cached equipment list (preloaded when modal opens)
+  let cachedEquipmentList = null;
+  let equipmentPreloadInProgress = false;
   
   // Track pending timeouts for cleanup (memory leak prevention)
   const pendingTimeouts = new Set();
@@ -256,6 +279,34 @@
    * @param {number} num - The number to format
    * @returns {string} Formatted number string
    */
+  // Show feedback message to user
+  function showFeedbackMessage(message, isSuccess = true) {
+    const feedbackMessage = document.createElement('div');
+    feedbackMessage.textContent = message;
+    feedbackMessage.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: ${isSuccess ? '#98C379' : '#E06C75'};
+      color: #FFFFFF;
+      padding: 8px 12px;
+      border-radius: 5px;
+      z-index: 10001;
+      font-size: 12px;
+      font-weight: bold;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(feedbackMessage);
+    
+    // Remove feedback after duration
+    createTrackedTimeout(() => {
+      if (feedbackMessage.parentNode) {
+        feedbackMessage.parentNode.removeChild(feedbackMessage);
+      }
+    }, CONSTANTS.FEEDBACK_DISPLAY_DURATION);
+  }
+  
   function formatNumber(num) {
     return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
@@ -291,13 +342,31 @@
    * @param {number} delay - Delay in milliseconds (defaults to CAPACITY_UPDATE_DELAY)
    * @returns {number} Timeout ID for potential cleanup
    */
-  function delayedUpdateCapacityDisplay(delay = CONSTANTS.CAPACITY_UPDATE_DELAY) {
+  // Helper function to create tracked timeout (memory leak prevention)
+  function createTrackedTimeout(callback, delay) {
     const timeoutId = setTimeout(() => {
       pendingTimeouts.delete(timeoutId);
-      updateCapacityDisplay();
+      callback();
     }, delay);
     pendingTimeouts.add(timeoutId);
     return timeoutId;
+  }
+  
+  function delayedUpdateCapacityDisplay(delay = CONSTANTS.CAPACITY_UPDATE_DELAY) {
+    // Clear existing timeout to debounce multiple rapid calls
+    if (updateCapacityDisplayTimeout) {
+      clearTimeout(updateCapacityDisplayTimeout);
+      pendingTimeouts.delete(updateCapacityDisplayTimeout);
+    }
+    
+    // Debounce capacity display updates
+    updateCapacityDisplayTimeout = setTimeout(() => {
+      pendingTimeouts.delete(updateCapacityDisplayTimeout);
+      updateCapacityDisplayTimeout = null;
+      updateCapacityDisplay();
+    }, delay);
+    pendingTimeouts.add(updateCapacityDisplayTimeout);
+    return updateCapacityDisplayTimeout;
   }
   
   /**
@@ -1175,8 +1244,7 @@
     logArsenalStatus();
     
     // Check chest count after opening and stop if none left
-    const chestCheckTimeout = setTimeout(() => {
-      pendingTimeouts.delete(chestCheckTimeout);
+    createTrackedTimeout(() => {
       const chestCount = getExaltationChestCount();
       console.log(`[Better Exaltation Chest] Chests remaining after open: ${chestCount}`);
       if (autoModeEnabled && chestCount <= 0) {
@@ -1184,7 +1252,6 @@
         stopAutoOpeningAndUpdateButton();
       }
     }, CONSTANTS.STATE_UPDATE_DELAY);
-    pendingTimeouts.add(chestCheckTimeout);
     
     // Update capacity display after opening (with delay to ensure state has updated)
     delayedUpdateCapacityDisplay();
@@ -1352,6 +1419,13 @@
   // Cleanup function for panel state
   function cleanupExaltationPanel() {
     try {
+      // Prevent double cleanup calls
+      if (cleanupInProgress) {
+        console.log('[Better Exaltation Chest] cleanupExaltationPanel already in progress, skipping');
+        return;
+      }
+      cleanupInProgress = true;
+      
       console.log('[Better Exaltation Chest] cleanupExaltationPanel called, activeExaltationPanel:', activeExaltationPanel ? 'exists' : 'null');
       
       // Stop auto-opening when panel is closed
@@ -1404,10 +1478,12 @@
       // Reset panel state
       exaltationPanelInProgress = false;
       lastPanelCall = 0;
+      cleanupInProgress = false;
       
       console.log('[Better Exaltation Chest] Panel cleanup completed');
     } catch (error) {
       console.error('[Better Exaltation Chest] Error during panel cleanup:', error);
+      cleanupInProgress = false;
     }
   }
   
@@ -1989,32 +2065,7 @@
       const summaryText = generateSummaryLogText();
       console.log('[Better Exaltation Chest] Generated summary text:', summaryText);
       const success = await copyToClipboard(summaryText);
-      
-      // Provide visual feedback
-      const feedbackMessage = document.createElement('div');
-      feedbackMessage.textContent = success ? 'Log copied!' : 'Failed to copy!';
-      feedbackMessage.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: ${success ? '#98C379' : '#E06C75'};
-        color: #FFFFFF;
-        padding: 8px 12px;
-        border-radius: 5px;
-        z-index: 10001;
-        font-size: 12px;
-        font-weight: bold;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-      `;
-      document.body.appendChild(feedbackMessage);
-      
-      // Remove feedback after 2 seconds
-      setTimeout(() => {
-        if (feedbackMessage.parentNode) {
-          feedbackMessage.parentNode.removeChild(feedbackMessage);
-        }
-      }, 2000);
+      showFeedbackMessage(success ? 'Log copied!' : 'Failed to copy!', success);
     });
     
     // Clear Log button
@@ -2030,32 +2081,7 @@
       event.stopPropagation();
       clearEquipmentLog();
       updateStatusDisplay();
-      
-      // Provide visual feedback
-      const feedbackMessage = document.createElement('div');
-      feedbackMessage.textContent = 'Log cleared!';
-      feedbackMessage.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: #E06C75;
-        color: #FFFFFF;
-        padding: 8px 12px;
-        border-radius: 5px;
-        z-index: 10001;
-        font-size: 12px;
-        font-weight: bold;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-      `;
-      document.body.appendChild(feedbackMessage);
-      
-      // Remove feedback after 2 seconds
-      setTimeout(() => {
-        if (feedbackMessage.parentNode) {
-          feedbackMessage.parentNode.removeChild(feedbackMessage);
-        }
-      }, 2000);
+      showFeedbackMessage('Log cleared!', false);
     });
     
     logButtonsContainer.appendChild(copyLogButton);
@@ -2275,10 +2301,15 @@
       if (existingRows.length <= 1) {
         // Reset the last row to default values instead of deleting it
         console.log('[Better Exaltation Chest] Resetting last row to default values');
+        // Check if values actually changed before saving
+        const valuesChanged = equipmentSelect.value !== 'All' || tierSelect.value !== 'All' || statSelect.value !== 'All';
         equipmentSelect.value = 'All';
         tierSelect.value = 'All';
         statSelect.value = 'All';
-        saveEquipmentSetup();
+        // Only save if values actually changed (change event may not fire if values were already 'All')
+        if (valuesChanged) {
+          saveEquipmentSetup();
+        }
         disableAutoOpeningIfActive();
       } else {
         // Remove the row if it's not the last one
@@ -2316,70 +2347,142 @@
     container.appendChild(row);
   }
   
-  // Populate equipment dropdown with database
-  function populateEquipmentDropdown(select) {
-    // Add "All" option first
-    const allOption = document.createElement('option');
-    allOption.value = 'All';
-    allOption.textContent = 'All';
-    select.appendChild(allOption);
+  // Get equipment list from equipment database
+  function generateEquipmentList() {
+    // Use cached list if available
+    if (cachedEquipmentList && cachedEquipmentList.length > 0) {
+      return cachedEquipmentList;
+    }
     
-    // Equipment that cannot be obtained from exaltation chests
-    const excludedEquipment = [
-      'Amazon Armor',
-      'Amazon Helmet', 
-      'Amazon Shield',
-      'Earthborn Titan Armor',
-      'Fireborn Giant Armor',
-      'Hailstorm Rod',
-      'Paladin Armor',
-      'Windborn Colossus Armor'
-    ];
-    
-    // Get equipment from database
     const equipmentDatabase = window.equipmentDatabase;
-    if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT) {
-      equipmentDatabase.ALL_EQUIPMENT
-        .filter(equipment => !excludedEquipment.includes(equipment))
+    if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT && equipmentDatabase.ALL_EQUIPMENT.length > 0) {
+      // Cache it for future use
+      cachedEquipmentList = equipmentDatabase.ALL_EQUIPMENT;
+      return cachedEquipmentList;
+    }
+    return [];
+  }
+  
+  // Check if equipment database has been populated
+  function isEquipmentDatabaseReady() {
+    const db = window.equipmentDatabase;
+    return !!(db && db.ALL_EQUIPMENT && db.ALL_EQUIPMENT.length > 0);
+  }
+  
+  // Preload equipment list when modal opens
+  function preloadEquipmentList(retryCount = 0) {
+    // If already cached, no need to reload
+    if (cachedEquipmentList && cachedEquipmentList.length > 0) {
+      console.log('[Better Exaltation Chest] Equipment list already cached');
+      return;
+    }
+    
+    // If already preloading, don't start another
+    if (equipmentPreloadInProgress && retryCount === 0) {
+      return;
+    }
+    
+    equipmentPreloadInProgress = true;
+    const equipmentDatabase = window.equipmentDatabase;
+    
+    if (equipmentDatabase && equipmentDatabase.ALL_EQUIPMENT && equipmentDatabase.ALL_EQUIPMENT.length > 0) {
+      cachedEquipmentList = equipmentDatabase.ALL_EQUIPMENT;
+      equipmentPreloadInProgress = false;
+      console.log(`[Better Exaltation Chest] Preloaded ${cachedEquipmentList.length} equipment items`);
+    } else if (retryCount < CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES) {
+      // Database not ready yet, retry
+      createTrackedTimeout(() => {
+        preloadEquipmentList(retryCount + 1);
+      }, CONSTANTS.EQUIPMENT_LOAD_RETRY_DELAY);
+    } else {
+      equipmentPreloadInProgress = false;
+      console.warn('[Better Exaltation Chest] Failed to preload equipment list after', CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES, 'retries');
+    }
+  }
+  
+  // Populate equipment dropdown with retry logic
+  function populateEquipmentDropdown(select, retryCount = 0) {
+    
+    // Clear existing options except "All"
+    const allOption = select.querySelector('option[value="All"]');
+    select.innerHTML = '';
+    if (allOption) {
+      select.appendChild(allOption);
+    } else {
+      // Add "All" option first
+      const newAllOption = document.createElement('option');
+      newAllOption.value = 'All';
+      newAllOption.textContent = 'All';
+      select.appendChild(newAllOption);
+    }
+    
+    // Try to get equipment list from database
+    const equipmentList = generateEquipmentList();
+    
+    if (equipmentList && equipmentList.length > 0) {
+      // Successfully loaded equipment
+      equipmentList
+        .filter(equipment => !EXCLUDED_EQUIPMENT.includes(equipment))
         .forEach(equipment => {
           const option = document.createElement('option');
           option.value = equipment;
           option.textContent = equipment;
           select.appendChild(option);
         });
+      console.log(`[Better Exaltation Chest] Loaded ${equipmentList.length} equipment items into dropdown`);
+    } else if (retryCount < CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES) {
+      // Database not ready yet, retry
+      createTrackedTimeout(() => {
+        populateEquipmentDropdown(select, retryCount + 1);
+      }, CONSTANTS.EQUIPMENT_LOAD_RETRY_DELAY);
     } else {
-      // Fallback if database not available
+      // Max retries reached, show fallback message
       const fallbackOption = document.createElement('option');
       fallbackOption.value = '';
-      fallbackOption.textContent = 'Database not loaded';
+      fallbackOption.textContent = 'Loading equipment...';
       select.appendChild(fallbackOption);
+      console.warn('[Better Exaltation Chest] Failed to load equipment list after', CONSTANTS.EQUIPMENT_LOAD_MAX_RETRIES, 'retries');
+      console.warn('[Better Exaltation Chest] Database ready:', isEquipmentDatabaseReady());
     }
   }
   
-  // Save equipment setup to localStorage
+  // Save equipment setup to localStorage (debounced)
   function saveEquipmentSetup() {
-    const rowsContainer = document.getElementById('equipment-setup-rows');
-    if (!rowsContainer) return;
+    // Clear existing timeout
+    if (saveEquipmentSetupTimeout) {
+      clearTimeout(saveEquipmentSetupTimeout);
+      pendingTimeouts.delete(saveEquipmentSetupTimeout);
+    }
     
-    const rows = rowsContainer.querySelectorAll('div');
-    const newSetup = [];
-    
-    rows.forEach(row => {
-      const equipmentSelect = row.querySelector('select:nth-child(1)');
-      const tierSelect = row.querySelector('select:nth-child(2)');
-      const statSelect = row.querySelector('select:nth-child(3)');
+    // Debounce saves to reduce excessive localStorage writes
+    saveEquipmentSetupTimeout = setTimeout(() => {
+      pendingTimeouts.delete(saveEquipmentSetupTimeout);
+      saveEquipmentSetupTimeout = null;
       
-      if (equipmentSelect && tierSelect && statSelect) {
-        newSetup.push({
-          equipment: equipmentSelect.value,
-          tier: tierSelect.value,
-          stat: statSelect.value
-        });
-      }
-    });
-    
-    equipmentSetup = newSetup;
-    saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
+      const rowsContainer = document.getElementById('equipment-setup-rows');
+      if (!rowsContainer) return;
+      
+      const rows = rowsContainer.querySelectorAll('div');
+      const newSetup = [];
+      
+      rows.forEach(row => {
+        const equipmentSelect = row.querySelector('select:nth-child(1)');
+        const tierSelect = row.querySelector('select:nth-child(2)');
+        const statSelect = row.querySelector('select:nth-child(3)');
+        
+        if (equipmentSelect && tierSelect && statSelect) {
+          newSetup.push({
+            equipment: equipmentSelect.value,
+            tier: tierSelect.value,
+            stat: statSelect.value
+          });
+        }
+      });
+      
+      equipmentSetup = newSetup;
+      saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
+    }, CONSTANTS.DEBOUNCE_DELAY);
+    pendingTimeouts.add(saveEquipmentSetupTimeout);
   }
   
   // Reset equipment setup to default (single row with "All" selections)
@@ -2596,7 +2699,7 @@
         // Flash green when gaining dust
         if (difference > 0 && progress > 0.5) {
           dustAmountElement.style.color = '#32cd32';
-          setTimeout(() => {
+          createTrackedTimeout(() => {
             dustAmountElement.style.color = '';
           }, 300);
         }
@@ -2700,6 +2803,9 @@
     const chestCount = getExaltationChestCount();
     console.log(`[Better Exaltation Chest] Debug: User has ${chestCount} exaltation chest(s) available`);
     
+    // Preload equipment list when modal opens (gives more time before user clicks settings)
+    preloadEquipmentList();
+    
     try {
       console.log('Enhancing exaltation chest title');
       enhanceExaltationChestTitle();
@@ -2732,7 +2838,7 @@
       if (attempts < maxAttempts) {
         const delay = baseDelay * Math.pow(2, attempts - 1); // Exponential backoff
         console.log(`Retrying in ${delay}ms...`);
-        setTimeout(tryEnhance, delay);
+        createTrackedTimeout(tryEnhance, delay);
       } else {
         console.warn('[Better Exaltation Chest] Failed to enhance modal after maximum retry attempts');
       }
@@ -2740,7 +2846,7 @@
     
     // Add a small initial delay to ensure modal is fully rendered
     console.log('Starting retry mechanism with initial 50ms delay');
-    setTimeout(tryEnhance, 50);
+    createTrackedTimeout(tryEnhance, 50);
   }
   
   // =======================
@@ -2778,12 +2884,15 @@
       // Debounce processing
       if (observerTimeout) {
         clearTimeout(observerTimeout);
+        pendingTimeouts.delete(observerTimeout);
       }
       
       observerTimeout = setTimeout(() => {
+        pendingTimeouts.delete(observerTimeout);
         console.log('[Better Exaltation Chest] Exaltation chest modal detected, enhancing...');
         retryEnhanceExaltationChestModal();
       }, DEBOUNCE_DELAY);
+      pendingTimeouts.add(observerTimeout);
     });
     
     observer.observe(document.body, {

@@ -9796,7 +9796,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           countOverlay.style.borderRadius = '4px';
           countOverlay.style.border = '3px solid transparent';
           countOverlay.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 3 fill';
-          countOverlay.textContent = `Defeated ${defeatCount.toLocaleString()} times`;
+          countOverlay.textContent = `Defeated ${defeatCount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} times`;
           thumbnailContainer.appendChild(countOverlay);
         }
       } catch (error) {

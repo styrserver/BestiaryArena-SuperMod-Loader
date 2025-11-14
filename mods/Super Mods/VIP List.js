@@ -13,7 +13,8 @@ console.log('[VIP List] initializing...');
 const STORAGE_KEYS = {
   DATA: 'vip-list-data',
   CONFIG: 'vip-list-config',
-  SORT: 'vip-list-sort'
+  SORT: 'vip-list-sort',
+  PANEL_SETTINGS: 'vip-list-panel-settings'
 };
 
 // Timeout constants
@@ -28,8 +29,8 @@ const TIMEOUTS = {
   PLACEHOLDER_RESET: 3000
 };
 
-// Online status threshold (5 minutes in milliseconds)
-const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // 300000 ms
+// Online status threshold (15 minutes in milliseconds)
+const ONLINE_THRESHOLD_MS = 15 * 60 * 1000; // 900000 ms
 
 // CSS constants
 const CSS_CONSTANTS = {
@@ -54,6 +55,19 @@ const MODAL_DIMENSIONS = {
   HEIGHT: 360
 };
 
+// Panel dimensions
+const PANEL_DIMENSIONS = {
+  WIDTH: 500,
+  HEIGHT: 400,
+  MIN_WIDTH: 300,
+  MAX_WIDTH: 700,
+  MIN_HEIGHT: 250,
+  MAX_HEIGHT: 500
+};
+
+// Panel ID
+const PANEL_ID = 'vip-list-panel';
+
 // =======================
 // 3. State & Observers
 // =======================
@@ -61,6 +75,12 @@ const MODAL_DIMENSIONS = {
 let accountMenuObserver = null;
 const processedMenus = new WeakSet();
 let vipListModalInstance = null;
+let vipListPanelInstance = null;
+let vipListRefreshInterval = null;
+let panelResizeMouseMoveHandler = null;
+let panelResizeMouseUpHandler = null;
+let panelDragMouseMoveHandler = null;
+let panelDragMouseUpHandler = null;
 
 // Track timeouts for cleanup (memory leak prevention)
 const pendingTimeouts = new Set();
@@ -188,11 +208,22 @@ function clearAllPendingTimeouts() {
 }
 
 // =======================
-// 4. Translation Helpers
+// 4. Translation Helpers & Config
 // =======================
 
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
+
+// Get VIP List interface type from Mod Settings config
+function getVIPListInterfaceType() {
+  try {
+    const config = window.betterUIConfig || {};
+    return config.vipListInterface || 'modal'; // Default to 'modal'
+  } catch (error) {
+    console.warn('[VIP List] Error reading interface type, defaulting to modal:', error);
+    return 'modal';
+  }
+}
 
 // Helper for dynamic translation with placeholders
 const tReplace = (key, replacements) => {
@@ -313,6 +344,11 @@ function openCyclopediaForPlayer(playerName) {
       bubbles: true 
     }));
     vipListModalInstance = null;
+  }
+  
+  // Close VIP List panel
+  if (vipListPanelInstance) {
+    handlePanelCloseButtonClick(vipListPanelInstance);
   }
   
   // Helper to set cyclopedia state
@@ -603,7 +639,8 @@ function createAddPlayerHandler(searchInput, addButton, originalPlaceholder) {
 }
 
 // Create search input element
-function createSearchInput(originalPlaceholder) {
+function createSearchInput(originalPlaceholder, forPanel = false) {
+  const fontSize = forPanel ? '12px' : '14px'; // Reduce by 2px for panel
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.className = 'pixel-font-14 vip-search-input';
@@ -617,7 +654,7 @@ function createSearchInput(originalPlaceholder) {
     border: 4px solid transparent;
     border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
     color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    font-size: 14px;
+    font-size: ${fontSize};
     text-align: left;
     box-sizing: border-box;
     max-height: 21px;
@@ -657,9 +694,14 @@ function applyModalStyles(dialog) {
   }
 }
 
-// Setup search input in modal footer
-function setupModalSearchInput(buttonContainer) {
-  buttonContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px;';
+// Unified search input setup for both modal and panel
+function setupSearchInput(container, forPanel = false, insertBefore = null) {
+  // Style the container
+  if (forPanel) {
+    container.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px;';
+  } else {
+    container.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px;';
+  }
   
   // Create search input container
   const searchContainer = document.createElement('div');
@@ -670,19 +712,16 @@ function setupModalSearchInput(buttonContainer) {
   
   // Create search input
   const originalPlaceholder = t('mods.vipList.searchPlaceholder');
-  const searchInput = createSearchInput(originalPlaceholder);
+  const searchInput = createSearchInput(originalPlaceholder, forPanel);
   
   // Create Add button
   const addButton = document.createElement('button');
   addButton.textContent = t('mods.vipList.addButton');
   addButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-  addButton.style.cssText = `
-    cursor: pointer;
-    white-space: nowrap;
-    box-sizing: border-box;
-    max-height: 21px;
-    height: 21px;
-  `;
+  const buttonStyle = forPanel 
+    ? `cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 12px;`
+    : `cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px;`;
+  addButton.style.cssText = buttonStyle;
   
   // Create add player handler
   const addPlayer = createAddPlayerHandler(searchInput, addButton, originalPlaceholder);
@@ -699,8 +738,17 @@ function setupModalSearchInput(buttonContainer) {
   searchContainer.appendChild(searchInput);
   searchContainer.appendChild(addButton);
   
-  // Insert search container before Close button
-  buttonContainer.insertBefore(searchContainer, buttonContainer.firstChild);
+  // Insert search container (before first child for modal, append for panel)
+  if (insertBefore) {
+    container.insertBefore(searchContainer, insertBefore);
+  } else {
+    container.appendChild(searchContainer);
+  }
+}
+
+// Setup search input in modal footer (wrapper for backward compatibility)
+function setupModalSearchInput(buttonContainer) {
+  setupSearchInput(buttonContainer, false, buttonContainer.firstChild);
 }
 
 // =======================
@@ -928,7 +976,12 @@ function injectVIPListItem(menuElement) {
   // Add click handler
   vipListItem.addEventListener('click', (e) => {
     e.stopPropagation();
-    openVIPListModal();
+    const interfaceType = getVIPListInterfaceType();
+    if (interfaceType === 'panel') {
+      openVIPListPanel();
+    } else {
+      openVIPListModal();
+    }
     // Close the menu
     const timeoutId = setTimeout(() => {
       pendingTimeouts.delete(timeoutId);
@@ -1036,7 +1089,9 @@ function createVIPBox({headerRow, content}) {
   return box;
 }
 
-function createVIPHeaderRow() {
+function createVIPHeaderRow(forPanel = false) {
+  const fontSize = forPanel ? '11px' : '13px'; // Reduce by 2px for panel
+  const indicatorFontSize = forPanel ? '10px' : '12px'; // Reduce by 2px for panel
   const headerRow = document.createElement('div');
   headerRow.className = 'vip-header-row';
   headerRow.style.cssText = `
@@ -1049,14 +1104,14 @@ function createVIPHeaderRow() {
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
     font-weight: 600;
     font-family: system-ui, -apple-system, sans-serif;
-    font-size: 13px;
+    font-size: ${fontSize};
     letter-spacing: 0.2px;
     width: 100%;
   `;
   
   const createHeaderCell = (text, flex = '1', column = null, iconUrl = null) => {
     const cell = document.createElement('div');
-    cell.style.cssText = `flex: ${flex}; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; text-align: center; white-space: nowrap; position: relative; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2px;`;
+    cell.style.cssText = `flex: ${flex}; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; text-align: center; white-space: nowrap; position: relative; font-family: system-ui, -apple-system, sans-serif; font-size: ${fontSize}; font-weight: 600; letter-spacing: 0.2px;`;
     
     if (column) {
       // Make it clickable
@@ -1106,7 +1161,7 @@ function createVIPHeaderRow() {
       
       // Add sort indicator positioned to the right
       const indicator = document.createElement('span');
-      indicator.style.cssText = 'font-size: 12px; color: rgba(255, 255, 255, 0.7); margin-left: 4px;';
+      indicator.style.cssText = `font-size: ${indicatorFontSize}; color: rgba(255, 255, 255, 0.7); margin-left: 4px;`;
       
       if (currentSortState.column === column) {
         indicator.textContent = currentSortState.direction === 'asc' ? '↑' : '↓';
@@ -1139,8 +1194,14 @@ function createVIPHeaderRow() {
   return headerRow;
 }
 
-function createVIPListItem(vip) {
+function createVIPListItem(vip, forPanel = false) {
+  const dropdownFontSize = forPanel ? '12px' : '14px'; // Reduce by 2px for panel
+  const cellFontSize = forPanel ? '12px' : '14px'; // Reduce by 2px for panel
   const item = document.createElement('div');
+  // Only set font-size explicitly for panel; modal inherits from parent
+  const itemStyle = forPanel 
+    ? `font-size: ${cellFontSize};`
+    : '';
   item.style.cssText = `
     display: flex;
     flex-direction: row;
@@ -1149,6 +1210,7 @@ function createVIPListItem(vip) {
     margin-bottom: 4px;
     background: rgba(255, 255, 255, 0.05);
     width: 100%;
+    ${itemStyle}
   `;
   
   // Check if this VIP is the current player
@@ -1158,14 +1220,17 @@ function createVIPListItem(vip) {
   
   const createCell = (content, flex = '1', isLink = false, tooltip = null) => {
     const cell = document.createElement('div');
-    cell.style.cssText = `flex: ${flex}; text-align: center; position: relative;`;
+    // Only set font-size explicitly for panel; modal inherits from parent
+    const cellFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+    cell.style.cssText = `flex: ${flex}; text-align: center; position: relative; ${cellFontStyle}`;
     
     if (isLink) {
       const link = document.createElement('a');
       link.href = content.href;
       link.target = '_blank';
       link.textContent = content.text;
-      link.style.cssText = `color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer;`;
+      const linkFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+      link.style.cssText = `color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer; ${linkFontStyle}`;
       link.addEventListener('click', (e) => {
         e.preventDefault();
         window.open(content.href, '_blank');
@@ -1203,6 +1268,8 @@ function createVIPListItem(vip) {
   nameCell.style.cssText = 'flex: 2.0; text-align: center; position: relative;';
   
   const nameButton = document.createElement('button');
+  // Only set font-size explicitly for panel; modal inherits from parent
+  const buttonFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
   nameButton.style.cssText = `
     background: transparent;
     border: none;
@@ -1210,7 +1277,7 @@ function createVIPListItem(vip) {
     cursor: pointer;
     padding: 0;
     text-decoration: none;
-    font-size: inherit;
+    ${buttonFontStyle}
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1220,14 +1287,15 @@ function createVIPListItem(vip) {
   // Create player name span (underlined)
   const nameSpan = document.createElement('span');
   nameSpan.textContent = vip.name;
-  nameSpan.style.cssText = 'text-decoration: underline; margin-left: 15px;';
+  const spanFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+  nameSpan.style.cssText = `text-decoration: underline; margin-left: 15px; ${spanFontStyle}`;
   nameButton.appendChild(nameSpan);
   
   // Add "(you)" span if current player (not underlined, italic, light blue)
   if (isCurrentPlayer) {
     const youSpan = document.createElement('span');
     youSpan.textContent = ` ${t('mods.vipList.currentPlayerSuffix')}`;
-    youSpan.style.cssText = `text-decoration: none; font-style: italic; color: ${CSS_CONSTANTS.COLORS.LINK};`;
+    youSpan.style.cssText = `text-decoration: none; font-style: italic; color: ${CSS_CONSTANTS.COLORS.LINK}; ${spanFontStyle}`;
     nameButton.appendChild(youSpan);
   }
   
@@ -1252,11 +1320,13 @@ function createVIPListItem(vip) {
   const createDropdownItem = (text, onClick, color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY) => {
     const menuItem = document.createElement('div');
     menuItem.textContent = text;
+    // Only set font-size explicitly for panel; modal inherits from parent
+    const dropdownFontStyle = forPanel ? `font-size: ${dropdownFontSize};` : '';
     menuItem.style.cssText = `
       padding: 6px 12px;
       color: ${color};
       cursor: pointer;
-      font-size: 14px;
+      ${dropdownFontStyle}
       text-align: left;
     `;
     menuItem.addEventListener('mouseenter', () => {
@@ -1273,13 +1343,21 @@ function createVIPListItem(vip) {
     return menuItem;
   };
   
+  // Always create all three dropdown items (Profile, Cyclopedia, Remove VIP)
+  // This ensures consistency between modal and panel views
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownProfile'), () => {
     window.open(`/profile/${vip.profile}`, '_blank');
   }));
   
-  dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
+  // Create Cyclopedia item with data attribute to prevent Cyclopedia mod from hiding it
+  const cyclopediaMenuItem = createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
     openCyclopediaForPlayer(vip.name);
-  }));
+  });
+  cyclopediaMenuItem.setAttribute('data-vip-list-item', 'true');
+  cyclopediaMenuItem.setAttribute('data-cyclopedia-exclude', 'true'); // Prevent Cyclopedia mod from hiding this
+  // Ensure it's always visible
+  cyclopediaMenuItem.style.display = '';
+  dropdown.appendChild(cyclopediaMenuItem);
   
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownRemoveVIP'), () => {
     removeFromVIPList(vip.name);
@@ -1297,12 +1375,32 @@ function createVIPListItem(vip) {
     });
     
     if (!isVisible) {
-      const container = nameCell.closest('.column-content-wrapper');
+      // Find container - check for both modal and panel containers
+      const container = nameCell.closest('.column-content-wrapper') || 
+                       nameCell.closest('.vip-panel-content-wrapper');
       const openUpward = shouldDropdownOpenUpward(dropdown, nameButton, container);
+      
+      // Ensure Cyclopedia item is visible (prevent Cyclopedia mod from hiding it)
+      if (cyclopediaMenuItem) {
+        cyclopediaMenuItem.style.display = '';
+        cyclopediaMenuItem.style.visibility = 'visible';
+      }
       
       positionDropdown(dropdown, openUpward);
       dropdown.style.display = 'block';
       adjustDropdownPosition(dropdown, nameButton, openUpward);
+      
+      // Double-check Cyclopedia item visibility after a short delay (in case Cyclopedia mod hides it)
+      const timeoutId = setTimeout(() => {
+        pendingTimeouts.delete(timeoutId);
+        if (dropdown.style.display === 'block' && cyclopediaMenuItem) {
+          if (cyclopediaMenuItem.style.display === 'none') {
+            cyclopediaMenuItem.style.display = '';
+            cyclopediaMenuItem.style.visibility = 'visible';
+          }
+        }
+      }, 10);
+      trackTimeout(timeoutId);
     } else {
       dropdown.style.display = 'none';
     }
@@ -1336,7 +1434,7 @@ function createVIPListItem(vip) {
   return item;
 }
 
-function getVIPListContent() {
+function getVIPListContent(forPanel = false) {
   const vipList = getVIPList();
   
   // Sort VIP list using current sort state
@@ -1350,17 +1448,18 @@ function getVIPListContent() {
   // Add VIP items
   if (sortedList.length === 0) {
     const emptyMessage = document.createElement('div');
+    const emptyFontSize = forPanel ? '12px' : '14px'; // Reduce by 2px for panel
     emptyMessage.style.cssText = `
       padding: 20px;
       text-align: center;
       color: rgba(255, 255, 255, 0.6);
-      font-size: 14px;
+      font-size: ${emptyFontSize};
     `;
     emptyMessage.textContent = t('mods.vipList.emptyState');
     container.appendChild(emptyMessage);
   } else {
     sortedList.forEach(vip => {
-      const item = createVIPListItem(vip);
+      const item = createVIPListItem(vip, forPanel);
       container.appendChild(item);
     });
   }
@@ -1368,43 +1467,559 @@ function getVIPListContent() {
   return container;
 }
 
+// Refresh header row for a given container
+function refreshHeaderRow(container, forPanel) {
+  if (forPanel) {
+    // Panel: header is in a dedicated container
+    const headerContainer = container.querySelector('.vip-panel-header-row-container');
+    if (headerContainer) {
+      const existingHeader = headerContainer.querySelector('.vip-header-row');
+      if (existingHeader) {
+        existingHeader.remove();
+      }
+      const newHeaderRow = createVIPHeaderRow(true);
+      headerContainer.appendChild(newHeaderRow);
+    }
+  } else {
+    // Modal: header is in the title element
+    const vipBox = container.closest('div[style*="background"]');
+    if (vipBox) {
+      const titleEl = vipBox.querySelector('h2.widget-top.widget-top-text');
+      if (titleEl) {
+        const existingHeader = titleEl.querySelector('.vip-header-row');
+        if (existingHeader) {
+          existingHeader.remove();
+        }
+        const newHeaderRow = createVIPHeaderRow(false);
+        newHeaderRow.style.position = 'static';
+        newHeaderRow.style.top = 'auto';
+        newHeaderRow.style.zIndex = 'auto';
+        newHeaderRow.style.marginBottom = '0';
+        newHeaderRow.style.width = '100%';
+        // Ensure title element has proper font styling
+        titleEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        titleEl.style.fontSize = '14px';
+        titleEl.style.fontWeight = '600';
+        titleEl.style.letterSpacing = '0.3px';
+        titleEl.appendChild(newHeaderRow);
+      }
+    }
+  }
+}
+
+// Refresh content for a given container
+function refreshContent(container, forPanel) {
+  const contentWrapper = forPanel
+    ? container.querySelector('.vip-panel-content-wrapper')
+    : container.querySelector('.column-content-wrapper');
+  
+  if (contentWrapper) {
+    contentWrapper.innerHTML = '';
+    const newContent = getVIPListContent(forPanel);
+    contentWrapper.appendChild(newContent);
+  }
+}
+
 function refreshVIPListDisplay() {
+  // Refresh modal display
   if (vipListModalInstance) {
-    // Find the content wrapper first, then find its parent VIP box
     const vipListBox = vipListModalInstance.querySelector('.column-content-wrapper');
     if (vipListBox) {
-      // Find the VIP box parent (the div with background image)
-      const vipBox = vipListBox.closest('div[style*="background"]');
-      if (vipBox) {
-        // Find the h2 inside the VIP box (distinguished by being inside the VIP box)
-        const titleEl = vipBox.querySelector('h2.widget-top.widget-top-text');
-        if (titleEl) {
-          // Find and remove existing header row using class
-          const existingHeader = titleEl.querySelector('.vip-header-row');
-          if (existingHeader) {
-            existingHeader.remove();
-          }
-          
-          const newHeaderRow = createVIPHeaderRow();
-          newHeaderRow.style.position = 'static';
-          newHeaderRow.style.top = 'auto';
-          newHeaderRow.style.zIndex = 'auto';
-          newHeaderRow.style.marginBottom = '0';
-          newHeaderRow.style.width = '100%';
-          // Ensure title element has proper font styling
-          titleEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-          titleEl.style.fontSize = '14px';
-          titleEl.style.fontWeight = '600';
-          titleEl.style.letterSpacing = '0.3px';
-          titleEl.appendChild(newHeaderRow);
-        }
+      refreshHeaderRow(vipListBox, false);
+      refreshContent(vipListBox, false);
+    }
+  }
+  
+  // Refresh panel display
+  if (vipListPanelInstance) {
+    refreshHeaderRow(vipListPanelInstance, true);
+    refreshContent(vipListPanelInstance, true);
+  }
+}
+
+// Helper function to create styled icon button
+function createStyledIconButton(iconText, forPanel = false) {
+  const fontSize = forPanel ? '14px' : '16px'; // Reduce by 2px for panel
+  const button = document.createElement('button');
+  button.textContent = iconText;
+  button.style.cssText = `
+    background: transparent;
+    border: none;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: ${fontSize};
+    font-weight: bold;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+  `;
+  button.addEventListener('mouseenter', () => {
+    button.style.background = 'rgba(255, 255, 255, 0.15)';
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.background = 'transparent';
+  });
+  return button;
+}
+
+// Helper function to clamp value between min and max
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+// Save panel settings to localStorage
+function savePanelSettings(panel) {
+  if (!panel) return;
+  
+  try {
+    const rect = panel.getBoundingClientRect();
+    const settings = {
+      width: panel.style.width || `${PANEL_DIMENSIONS.WIDTH}px`,
+      height: panel.style.height || `${PANEL_DIMENSIONS.HEIGHT}px`,
+      top: rect.top + 'px',
+      left: rect.left + 'px'
+    };
+    
+    localStorage.setItem(STORAGE_KEYS.PANEL_SETTINGS, JSON.stringify(settings));
+    console.log('[VIP List] Panel settings saved:', settings);
+  } catch (error) {
+    console.error('[VIP List] Error saving panel settings:', error);
+  }
+}
+
+// Load panel settings from localStorage
+function loadPanelSettings() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.PANEL_SETTINGS);
+    if (saved) {
+      const settings = JSON.parse(saved);
+      console.log('[VIP List] Panel settings loaded:', settings);
+      return settings;
+    }
+  } catch (error) {
+    console.error('[VIP List] Error loading panel settings:', error);
+  }
+  
+  // Return default settings
+  return {
+    width: `${PANEL_DIMENSIONS.WIDTH}px`,
+    height: `${PANEL_DIMENSIONS.HEIGHT}px`,
+    top: '50px',
+    left: '10px'
+  };
+}
+
+// Apply panel settings to panel element
+function applyPanelSettings(panel, settings) {
+  if (!panel || !settings) return;
+  
+  try {
+    // Apply width (clamp to valid range)
+    if (settings.width) {
+      const width = parseInt(settings.width);
+      const clampedWidth = clamp(width, PANEL_DIMENSIONS.MIN_WIDTH, PANEL_DIMENSIONS.MAX_WIDTH);
+      panel.style.width = clampedWidth + 'px';
+    }
+    
+    // Apply height (clamp to valid range)
+    if (settings.height) {
+      const height = parseInt(settings.height);
+      const clampedHeight = clamp(height, PANEL_DIMENSIONS.MIN_HEIGHT, PANEL_DIMENSIONS.MAX_HEIGHT);
+      panel.style.height = clampedHeight + 'px';
+    }
+    
+    // Apply top position (ensure panel stays within viewport)
+    if (settings.top) {
+      const top = parseInt(settings.top);
+      const maxTop = window.innerHeight - PANEL_DIMENSIONS.MIN_HEIGHT;
+      const clampedTop = clamp(top, 0, Math.max(0, maxTop));
+      panel.style.top = clampedTop + 'px';
+    }
+    
+    // Apply left position (ensure panel stays within viewport)
+    if (settings.left) {
+      const left = parseInt(settings.left);
+      const maxLeft = window.innerWidth - PANEL_DIMENSIONS.MIN_WIDTH;
+      const clampedLeft = clamp(left, 0, Math.max(0, maxLeft));
+      panel.style.left = clampedLeft + 'px';
+    }
+    
+    console.log('[VIP List] Panel settings applied:', settings);
+  } catch (error) {
+    console.error('[VIP List] Error applying panel settings:', error);
+  }
+}
+
+// Setup search input in panel footer (wrapper for backward compatibility)
+function setupPanelSearchInput(panel) {
+  const footerContainer = panel.querySelector('.vip-panel-footer');
+  if (!footerContainer) return;
+  setupSearchInput(footerContainer, true);
+}
+
+// Unified auto-refresh setup for both modal and panel
+function setupAutoRefresh(type) {
+  // Clear existing interval
+  if (vipListRefreshInterval) {
+    clearInterval(vipListRefreshInterval);
+    vipListRefreshInterval = null;
+  }
+  
+  // Setup new interval
+  vipListRefreshInterval = setInterval(async () => {
+    // Check if instance is still open
+    const instance = type === 'panel' ? vipListPanelInstance : vipListModalInstance;
+    if (!instance || !document.contains(instance)) {
+      clearInterval(vipListRefreshInterval);
+      vipListRefreshInterval = null;
+      return;
+    }
+    
+    try {
+      await refreshAllVIPPlayerData();
+      refreshVIPListDisplay();
+    } catch (error) {
+      console.error(`[VIP List] Error refreshing ${type} data:`, error);
+    }
+  }, 60000); // 1 minute = 60000 ms
+}
+
+// Cleanup auto-refresh interval
+function cleanupAutoRefresh() {
+  if (vipListRefreshInterval) {
+    clearInterval(vipListRefreshInterval);
+    vipListRefreshInterval = null;
+  }
+}
+
+// Cleanup panel event listeners
+function cleanupPanelEventListeners() {
+  if (panelResizeMouseMoveHandler) {
+    document.removeEventListener('mousemove', panelResizeMouseMoveHandler);
+    panelResizeMouseMoveHandler = null;
+  }
+  if (panelResizeMouseUpHandler) {
+    document.removeEventListener('mouseup', panelResizeMouseUpHandler);
+    panelResizeMouseUpHandler = null;
+  }
+  if (panelDragMouseMoveHandler) {
+    document.removeEventListener('mousemove', panelDragMouseMoveHandler);
+    panelDragMouseMoveHandler = null;
+  }
+  if (panelDragMouseUpHandler) {
+    document.removeEventListener('mouseup', panelDragMouseUpHandler);
+    panelDragMouseUpHandler = null;
+  }
+}
+
+// Handle panel close button click
+function handlePanelCloseButtonClick(panel) {
+  // Save panel settings before closing
+  savePanelSettings(panel);
+  
+  // Remove document event listeners
+  cleanupPanelEventListeners();
+  
+  // Clear refresh interval
+  cleanupAutoRefresh();
+  
+  // Remove the panel
+  panel.remove();
+  vipListPanelInstance = null;
+  console.log('[VIP List] Panel closed');
+}
+
+// Create and open VIP List HTML panel
+async function openVIPListPanel() {
+  try {
+    // Check if panel already exists
+    const existingPanel = document.getElementById(PANEL_ID);
+    if (existingPanel) {
+      console.log('[VIP List] Panel already exists, focusing...');
+      existingPanel.style.zIndex = '9999';
+      return;
+    }
+    
+    // Refresh all VIP player data before opening panel
+    await refreshAllVIPPlayerData();
+    
+    // Load saved panel settings
+    const savedSettings = loadPanelSettings();
+    
+    // Create main panel container
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    panel.style.cssText = `
+      position: fixed;
+      top: ${savedSettings.top};
+      left: ${savedSettings.left};
+      width: ${savedSettings.width};
+      height: ${savedSettings.height};
+      min-width: ${PANEL_DIMENSIONS.MIN_WIDTH}px;
+      max-width: ${PANEL_DIMENSIONS.MAX_WIDTH}px;
+      min-height: ${PANEL_DIMENSIONS.MIN_HEIGHT}px;
+      max-height: ${PANEL_DIMENSIONS.MAX_HEIGHT}px;
+      background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+      border: 6px solid transparent;
+      border-image: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+      border-radius: 6px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    `;
+    
+    // Apply saved settings (validates and clamps values)
+    applyPanelSettings(panel, savedSettings);
+    
+    // Create header section
+    const headerContainer = document.createElement('div');
+    headerContainer.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+      flex-shrink: 0;
+    `;
+    
+    // Title and controls row
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = `
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      cursor: move;
+      user-select: none;
+    `;
+    
+    const title = document.createElement('h3');
+    title.textContent = t('mods.vipList.modalTitle');
+    title.style.cssText = `
+      margin: 0;
+      padding: 0;
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 14px;
+      font-weight: 600;
+      font-family: system-ui, -apple-system, sans-serif;
+    `;
+    
+    const headerControls = document.createElement('div');
+    headerControls.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+    
+    const closeBtn = createStyledIconButton('✕', true); // true = for panel
+    closeBtn.title = t('mods.vipList.closeButton');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handlePanelCloseButtonClick(panel);
+    });
+    
+    headerControls.appendChild(closeBtn);
+    titleRow.appendChild(title);
+    titleRow.appendChild(headerControls);
+    headerContainer.appendChild(titleRow);
+    
+    // Header row container (for sortable columns)
+    const headerRowContainer = document.createElement('div');
+    headerRowContainer.className = 'vip-panel-header-row-container';
+    headerRowContainer.style.cssText = `
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.1);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    `;
+    const headerRow = createVIPHeaderRow(true); // true = for panel
+    headerRowContainer.appendChild(headerRow);
+    headerContainer.appendChild(headerRowContainer);
+    
+    panel.appendChild(headerContainer);
+    
+    // Content wrapper
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'vip-panel-content-wrapper';
+    contentWrapper.style.cssText = `
+      flex: 1 1 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 8px;
+      min-height: 0;
+    `;
+    const content = getVIPListContent(true); // true = panel
+    contentWrapper.appendChild(content);
+    panel.appendChild(contentWrapper);
+    
+    // Footer with search input
+    const footerContainer = document.createElement('div');
+    footerContainer.className = 'vip-panel-footer';
+    footerContainer.style.cssText = `
+      border-top: 2px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      flex-shrink: 0;
+    `;
+    panel.appendChild(footerContainer);
+    setupPanelSearchInput(panel);
+    
+    // Add to document
+    document.body.appendChild(panel);
+    vipListPanelInstance = panel;
+    
+    // --- DRAGGABLE PANEL LOGIC ---
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    
+    titleRow.addEventListener('mousedown', function(e) {
+      if (e.target.tagName === 'BUTTON') return; // Don't drag if clicking a button
+      isDragging = true;
+      const rect = panel.getBoundingClientRect();
+      dragOffsetX = e.clientX - rect.left;
+      dragOffsetY = e.clientY - rect.top;
+      panel.style.cursor = 'move';
+      e.preventDefault();
+    });
+    
+    panelDragMouseMoveHandler = function(e) {
+      if (!isDragging) return;
+      const newLeft = e.clientX - dragOffsetX;
+      const newTop = e.clientY - dragOffsetY;
+      
+      // Clamp to viewport bounds
+      const maxLeft = window.innerWidth - panel.offsetWidth;
+      const maxTop = window.innerHeight - panel.offsetHeight;
+      
+      panel.style.left = clamp(newLeft, 0, maxLeft) + 'px';
+      panel.style.top = clamp(newTop, 0, maxTop) + 'px';
+      panel.style.transition = 'none';
+    };
+    document.addEventListener('mousemove', panelDragMouseMoveHandler);
+    
+    panelDragMouseUpHandler = function() {
+      if (isDragging) {
+        isDragging = false;
+        panel.style.cursor = '';
+        panel.style.transition = '';
+        // Save panel position after dragging ends
+        savePanelSettings(panel);
+      }
+    };
+    document.addEventListener('mouseup', panelDragMouseUpHandler);
+    // --- END DRAGGABLE PANEL LOGIC ---
+    
+    // --- RESIZABLE PANEL LOGIC ---
+    const edgeSize = 8; // px, area near edge/corner to trigger resize
+    let isResizing = false;
+    let resizeDir = '';
+    let resizeStartX = 0;
+    let resizeStartY = 0;
+    let startWidth = 0;
+    let startHeight = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    
+    function getResizeDirection(e) {
+      const rect = panel.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      let dir = '';
+      
+      if (y < edgeSize) dir += 'n';
+      else if (y > rect.height - edgeSize) dir += 's';
+      if (x < edgeSize) dir += 'w';
+      else if (x > rect.width - edgeSize) dir += 'e';
+      
+      return dir;
+    }
+    
+    panel.addEventListener('mousemove', function(e) {
+      if (isResizing) return;
+      const dir = getResizeDirection(e);
+      let cursor = '';
+      switch (dir) {
+        case 'n': cursor = 'ns-resize'; break;
+        case 's': cursor = 'ns-resize'; break;
+        case 'e': cursor = 'ew-resize'; break;
+        case 'w': cursor = 'ew-resize'; break;
+        case 'ne': cursor = 'nesw-resize'; break;
+        case 'nw': cursor = 'nwse-resize'; break;
+        case 'se': cursor = 'nwse-resize'; break;
+        case 'sw': cursor = 'nesw-resize'; break;
+        default: cursor = '';
+      }
+      panel.style.cursor = cursor || '';
+    });
+    
+    panel.addEventListener('mousedown', function(e) {
+      if (e.target.tagName === 'BUTTON' || titleRow.contains(e.target)) return;
+      const dir = getResizeDirection(e);
+      if (!dir) return;
+      isResizing = true;
+      resizeDir = dir;
+      resizeStartX = e.clientX;
+      resizeStartY = e.clientY;
+      const rect = panel.getBoundingClientRect();
+      startWidth = rect.width;
+      startHeight = rect.height;
+      startLeft = rect.left;
+      startTop = rect.top;
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    
+    panelResizeMouseMoveHandler = function(e) {
+      if (!isResizing) return;
+      let dx = e.clientX - resizeStartX;
+      let dy = e.clientY - resizeStartY;
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+      let newLeft = startLeft;
+      let newTop = startTop;
+      
+      if (resizeDir.includes('e')) {
+        newWidth = clamp(startWidth + dx, PANEL_DIMENSIONS.MIN_WIDTH, PANEL_DIMENSIONS.MAX_WIDTH);
+      }
+      if (resizeDir.includes('w')) {
+        newWidth = clamp(startWidth - dx, PANEL_DIMENSIONS.MIN_WIDTH, PANEL_DIMENSIONS.MAX_WIDTH);
+        newLeft = startLeft + dx;
+      }
+      if (resizeDir.includes('s')) {
+        newHeight = clamp(startHeight + dy, PANEL_DIMENSIONS.MIN_HEIGHT, PANEL_DIMENSIONS.MAX_HEIGHT);
+      }
+      if (resizeDir.includes('n')) {
+        newHeight = clamp(startHeight - dy, PANEL_DIMENSIONS.MIN_HEIGHT, PANEL_DIMENSIONS.MAX_HEIGHT);
+        newTop = startTop + dy;
       }
       
-      // Refresh content
-      vipListBox.innerHTML = '';
-      const newContent = getVIPListContent();
-      vipListBox.appendChild(newContent);
-    }
+      panel.style.width = newWidth + 'px';
+      panel.style.height = newHeight + 'px';
+      panel.style.left = newLeft + 'px';
+      panel.style.top = newTop + 'px';
+      panel.style.transition = 'none';
+    };
+    document.addEventListener('mousemove', panelResizeMouseMoveHandler);
+    
+    panelResizeMouseUpHandler = function() {
+      if (isResizing) {
+        isResizing = false;
+        document.body.style.userSelect = '';
+        panel.style.transition = '';
+        // Save panel size after resizing ends
+        savePanelSettings(panel);
+      }
+    };
+    document.addEventListener('mouseup', panelResizeMouseUpHandler);
+    // --- END RESIZABLE PANEL LOGIC ---
+    
+    // Setup auto-refresh every 1 minute
+    setupAutoRefresh('panel');
+    
+    console.log('[VIP List] Panel opened');
+    return panel;
+  } catch (error) {
+    console.error('[VIP List] Error opening panel:', error);
+    return false;
   }
 }
 
@@ -1445,6 +2060,8 @@ async function openVIPListModal() {
           text: t('mods.vipList.closeButton'), 
           primary: true,
           onClick: () => {
+            // Clear refresh interval
+            cleanupAutoRefresh();
             // Clear modal instance reference (memory leak prevention)
             vipListModalInstance = null;
           }
@@ -1473,6 +2090,20 @@ async function openVIPListModal() {
           if (buttonContainer) {
             setupModalSearchInput(buttonContainer);
           }
+          
+          // Setup auto-refresh every 1 minute
+          setupAutoRefresh('modal');
+          
+          // Watch for modal closing (via ESC or other methods)
+          const modalCloseObserver = new MutationObserver((mutations) => {
+            if (!document.contains(dialog) || dialog.getAttribute('data-state') === 'closed') {
+              cleanupAutoRefresh();
+              vipListModalInstance = null;
+              modalCloseObserver.disconnect();
+            }
+          });
+          modalCloseObserver.observe(dialog, { attributes: true, attributeFilter: ['data-state'] });
+          modalCloseObserver.observe(document.body, { childList: true, subtree: true });
         }
       }, TIMEOUTS.NORMAL);
       trackTimeout(timeout2);
@@ -1581,8 +2212,23 @@ exports = {
       // Clear all pending timeouts (memory leak prevention)
       clearAllPendingTimeouts();
       
+      // Clear refresh interval
+      cleanupAutoRefresh();
+      
+      // Remove document event listeners
+      cleanupPanelEventListeners();
+      
+      // Remove panel if it exists
+      const panel = document.getElementById(PANEL_ID);
+      if (panel) {
+        panel.remove();
+      }
+      
       // Clear modal instance reference
       vipListModalInstance = null;
+      
+      // Clear panel instance reference
+      vipListPanelInstance = null;
       
       // Remove injected menu items
       const vipListItems = document.querySelectorAll('.vip-list-menu-item');

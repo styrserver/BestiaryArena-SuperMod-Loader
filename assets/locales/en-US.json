@@ -112,6 +112,9 @@
       "refreshOnMismatch": "⚠️ Refresh on Mismatch",
       "refreshOnMismatchTooltip": "Automatically refresh the browser when a server/simulation mismatch is detected",
       "inventoryBorderStyle": "Inventory Mod Buttons",
+      "vipListInterface": "VIP List interface:",
+      "vipListInterfaceModal": "Modal",
+      "vipListInterfacePanel": "Panel",
       "staminaFullText": "Full",
       "favoriteMenuLabel": "Favorite"
     },
