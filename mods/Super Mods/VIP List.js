@@ -6,16 +6,60 @@
 console.log('[VIP List] initializing...');
 
 // =======================
-// 2. State & Observers
+// 2. Constants
+// =======================
+
+// Storage keys
+const STORAGE_KEYS = {
+  DATA: 'vip-list-data',
+  CONFIG: 'vip-list-config',
+  SORT: 'vip-list-sort'
+};
+
+// Timeout constants
+const TIMEOUTS = {
+  IMMEDIATE: 0,
+  SHORT: 10,
+  MEDIUM: 50,
+  NORMAL: 100,
+  LONG: 200,
+  LONGER: 300,
+  INITIAL_CHECK: 500,
+  PLACEHOLDER_RESET: 3000
+};
+
+// Online status threshold (5 minutes in milliseconds)
+const ONLINE_THRESHOLD_MS = 5 * 60 * 1000; // 300000 ms
+
+// CSS constants
+const CSS_CONSTANTS = {
+  BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
+  BORDER_4_FRAME: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
+  BORDER_1_FRAME: 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill',
+  COLORS: {
+    TEXT_PRIMARY: 'rgb(230, 215, 176)',
+    TEXT_WHITE: 'rgb(255, 255, 255)',
+    ONLINE: 'rgb(76, 175, 80)',
+    OFFLINE: 'rgb(255, 107, 107)',
+    LINK: 'rgb(100, 181, 246)',
+    ERROR: '#ff6b6b',
+    SUCCESS: '#4caf50',
+    DUPLICATE: '#888'
+  }
+};
+
+// Modal dimensions
+const MODAL_DIMENSIONS = {
+  WIDTH: 550,
+  HEIGHT: 360
+};
+
+// =======================
+// 3. State & Observers
 // =======================
 
 let accountMenuObserver = null;
 const processedMenus = new WeakSet();
-
-// VIP List storage key
-const VIP_LIST_STORAGE_KEY = 'vip-list-data';
-const VIP_LIST_CONFIG_STORAGE_KEY = 'vip-list-config';
-const VIP_LIST_SORT_STORAGE_KEY = 'vip-list-sort';
 let vipListModalInstance = null;
 
 // Sort state: { column: 'name'|'level'|'status'|'rankPoints'|'timeSum', direction: 'asc'|'desc' }
@@ -27,7 +71,7 @@ let currentSortState = {
 // Load sort preference from localStorage
 function loadSortPreference() {
   try {
-    const saved = localStorage.getItem(VIP_LIST_SORT_STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEYS.SORT);
     if (saved !== null) {
       const parsed = JSON.parse(saved);
       if (parsed.column && ['name', 'level', 'status', 'rankPoints', 'timeSum'].includes(parsed.column) &&
@@ -48,7 +92,7 @@ function loadSortPreference() {
 // Save sort preference to localStorage
 function saveSortPreference() {
   try {
-    localStorage.setItem(VIP_LIST_SORT_STORAGE_KEY, JSON.stringify(currentSortState));
+    localStorage.setItem(STORAGE_KEYS.SORT, JSON.stringify(currentSortState));
     console.log('[VIP List] Saved sort preference to localStorage:', currentSortState);
   } catch (error) {
     console.error('[VIP List] Error saving sort preference to localStorage:', error);
@@ -59,7 +103,7 @@ function saveSortPreference() {
 // Similar to Rank Pointer's approach - prioritize localStorage
 function loadVIPListConfig() {
   try {
-    const saved = localStorage.getItem(VIP_LIST_CONFIG_STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
     if (saved !== null) {
       const parsed = JSON.parse(saved);
       console.log('[VIP List] Loaded config from localStorage:', parsed);
@@ -81,7 +125,7 @@ function loadVIPListConfig() {
 // Save config to localStorage
 function saveVIPListConfig(config) {
   try {
-    localStorage.setItem(VIP_LIST_CONFIG_STORAGE_KEY, JSON.stringify(config));
+    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config));
     console.log('[VIP List] Saved config to localStorage:', config);
   } catch (error) {
     console.error('[VIP List] Error saving config to localStorage:', error);
@@ -115,7 +159,7 @@ function setupVIPDropdownClickHandler() {
 }
 
 // =======================
-// 3. Translation Helpers
+// 4. Translation Helpers
 // =======================
 
 // Use shared translation system via API
@@ -131,17 +175,513 @@ const tReplace = (key, replacements) => {
 };
 
 // =======================
-// 4. Helper Functions
+// 5. Player Data Helpers
+// =======================
+
+// Get current player's name from game state
+function getCurrentPlayerName() {
+  try {
+    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (playerState?.name) {
+      return playerState.name.toLowerCase();
+    }
+  } catch (error) {
+    // Silently fail if we can't get player state
+  }
+  return null;
+}
+
+// Calculate level from experience points (same as Cyclopedia)
+function calculateLevelFromExp(exp) {
+  return typeof exp === 'number' ? Math.floor(exp / 400) + 1 : 1;
+}
+
+// Calculate player status (Online/Offline)
+function calculatePlayerStatus(profileData, isCurrentPlayer) {
+  if (isCurrentPlayer) {
+    return t('mods.vipList.statusOnline');
+  }
+  
+  const lastUpdated = profileData.lastUpdatedAt;
+  
+  if (!lastUpdated) {
+    return t('mods.vipList.statusOffline');
+  }
+  
+  // Parse timestamp and check if within threshold
+  const lastUpdatedTime = new Date(lastUpdated).getTime();
+  const now = Date.now();
+  const timeDiff = now - lastUpdatedTime;
+  
+  return timeDiff <= ONLINE_THRESHOLD_MS 
+    ? t('mods.vipList.statusOnline') 
+    : t('mods.vipList.statusOffline');
+}
+
+// Format time difference for "last online" display
+function formatLastOnline(lastUpdatedAt) {
+  if (!lastUpdatedAt) return '';
+  
+  const lastUpdatedTime = new Date(lastUpdatedAt).getTime();
+  const now = Date.now();
+  const diffMs = now - lastUpdatedTime;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return t('mods.vipList.timeJustNow');
+  if (diffMins < 60) {
+    const plural = diffMins !== 1 ? t('mods.vipList.wordMinutes') : t('mods.vipList.wordMinute');
+    return tReplace('mods.vipList.timeMinutesAgo', { minutes: diffMins, plural: plural });
+  }
+  if (diffHours < 24) {
+    const plural = diffHours !== 1 ? t('mods.vipList.wordHours') : t('mods.vipList.wordHour');
+    return tReplace('mods.vipList.timeHoursAgo', { hours: diffHours, plural: plural });
+  }
+  if (diffDays < 7) {
+    const plural = diffDays !== 1 ? t('mods.vipList.wordDays') : t('mods.vipList.wordDay');
+    return tReplace('mods.vipList.timeDaysAgo', { days: diffDays, plural: plural });
+  }
+  
+  // For longer periods, show the date
+  const date = new Date(lastUpdatedAt);
+  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Extract player info from profile data
+function extractPlayerInfoFromProfile(profileData, playerName) {
+  const exp = profileData.exp || 0;
+  const level = calculateLevelFromExp(exp);
+  const currentPlayerName = getCurrentPlayerName();
+  const isCurrentPlayer = currentPlayerName && (profileData.name || playerName).toLowerCase() === currentPlayerName;
+  const status = calculatePlayerStatus(profileData, isCurrentPlayer);
+  const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
+  const timeSum = profileData.ticks !== undefined ? profileData.ticks : 0;
+  
+  return {
+    name: profileData.name || playerName,
+    level: level,
+    status: status,
+    rankPoints: rankPoints,
+    timeSum: timeSum,
+    profile: playerName.toLowerCase(),
+    lastUpdatedAt: profileData.lastUpdatedAt || null
+  };
+}
+
+// =======================
+// 6. Cyclopedia Integration
+// =======================
+
+// Open Cyclopedia modal for a specific player
+function openCyclopediaForPlayer(playerName) {
+  // Close VIP List modal
+  if (vipListModalInstance) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { 
+      key: 'Escape', 
+      code: 'Escape', 
+      keyCode: 27, 
+      bubbles: true 
+    }));
+    vipListModalInstance = null;
+  }
+  
+  // Helper to set cyclopedia state
+  const setCyclopediaState = (username) => {
+    if (typeof cyclopediaState !== 'undefined') {
+      cyclopediaState.searchedUsername = username;
+    } else if (typeof window !== 'undefined' && window.cyclopediaState) {
+      window.cyclopediaState.searchedUsername = username;
+    }
+  };
+  
+  // Wait a bit for modal to close, then open Cyclopedia
+  setTimeout(() => {
+    try {
+      // Set searched player name in cyclopediaState before opening
+      setCyclopediaState(playerName);
+      
+      // Set selected category to Leaderboards
+      if (typeof window !== 'undefined') {
+        window.selectedCharacterItem = 'Leaderboards';
+      }
+      
+      // Open Cyclopedia modal
+      if (typeof window !== 'undefined' && window.Cyclopedia && typeof window.Cyclopedia.show === 'function') {
+        window.Cyclopedia.show({});
+      } else if (typeof openCyclopediaModal === 'function') {
+        openCyclopediaModal({});
+      } else {
+        console.warn('[VIP List] Could not find openCyclopediaModal function');
+        return;
+      }
+      
+      // After opening, navigate to Characters tab and Leaderboards
+      setTimeout(() => {
+        setCyclopediaState(playerName);
+        
+        // Find Characters tab button
+        const tabButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
+          const text = btn.textContent?.trim() || '';
+          return text === 'Characters';
+        });
+        
+        // Click Characters tab
+        if (tabButtons.length > 0) {
+          const charactersTab = tabButtons.find((btn) => {
+            const parent = btn.closest('[role="tablist"], .flex, nav');
+            return parent !== null;
+          }) || tabButtons[0];
+          
+          charactersTab.click();
+        }
+        
+        // Wait for Characters tab to load, then click Leaderboards and trigger search
+        setTimeout(() => {
+          setCyclopediaState(playerName);
+          
+          // Set selected category to Leaderboards
+          if (typeof window !== 'undefined') {
+            window.selectedCharacterItem = 'Leaderboards';
+          }
+          
+          // Find and set search input value
+          const searchInput = document.querySelector('input[type="text"]');
+          if (searchInput) {
+            searchInput.value = playerName;
+            searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          
+          // Find and click Leaderboards button
+          const leaderboardsButton = Array.from(document.querySelectorAll('div')).find(div => {
+            const text = div.textContent?.trim() || '';
+            return text === 'Leaderboards';
+          });
+          
+          if (leaderboardsButton) {
+            leaderboardsButton.click();
+          }
+          
+          // Wait a bit, then trigger the search
+          setTimeout(() => {
+            const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
+              const text = btn.textContent?.trim() || '';
+              return text === 'Search';
+            });
+            
+            if (searchButton) {
+              searchButton.click();
+            }
+          }, TIMEOUTS.NORMAL);
+        }, TIMEOUTS.LONGER);
+      }, TIMEOUTS.LONG);
+    } catch (error) {
+      console.error('[VIP List] Error opening Cyclopedia:', error);
+    }
+  }, TIMEOUTS.SHORT);
+}
+
+// =======================
+// 7. Dropdown Positioning
+// =======================
+
+// Check if dropdown should open upward based on available space
+function shouldDropdownOpenUpward(dropdown, button, container) {
+  const buttonRect = button.getBoundingClientRect();
+  // Temporarily show dropdown to measure its height
+  const wasVisible = dropdown.style.display === 'block';
+  dropdown.style.visibility = 'hidden';
+  dropdown.style.display = 'block';
+  const dropdownHeight = dropdown.offsetHeight || 100;
+  dropdown.style.display = wasVisible ? 'block' : 'none';
+  dropdown.style.visibility = 'visible';
+  
+  let spaceBelow = window.innerHeight - buttonRect.bottom;
+  let spaceAbove = buttonRect.top;
+  
+  if (container) {
+    const containerRect = container.getBoundingClientRect();
+    const visibleBottom = Math.min(containerRect.bottom, window.innerHeight);
+    const visibleTop = Math.max(containerRect.top, 0);
+    spaceBelow = visibleBottom - buttonRect.bottom;
+    spaceAbove = buttonRect.top - visibleTop;
+  }
+  
+  const requiredSpace = dropdownHeight + 10;
+  return spaceBelow < requiredSpace && spaceAbove >= requiredSpace;
+}
+
+// Position dropdown above or below button
+function positionDropdown(dropdown, openUpward) {
+  if (openUpward) {
+    dropdown.style.top = 'auto';
+    dropdown.style.bottom = '100%';
+    dropdown.style.marginTop = '0';
+    dropdown.style.marginBottom = '4px';
+    dropdown.style.transform = 'translateX(-50%)';
+  } else {
+    dropdown.style.top = '100%';
+    dropdown.style.bottom = 'auto';
+    dropdown.style.marginTop = '4px';
+    dropdown.style.marginBottom = '0';
+    dropdown.style.transform = 'translateX(-50%)';
+  }
+}
+
+// Adjust dropdown position after rendering if it extends outside viewport
+function adjustDropdownPosition(dropdown, button, openUpward) {
+  setTimeout(() => {
+    const dropdownRect = dropdown.getBoundingClientRect();
+    const viewportBottom = window.innerHeight;
+    const viewportTop = 0;
+    
+    // If dropdown extends below viewport and we're opening downward, switch to upward
+    if (!openUpward && dropdownRect.bottom > viewportBottom) {
+      const buttonRect = button.getBoundingClientRect();
+      if (buttonRect.top >= dropdown.offsetHeight + 10) {
+        positionDropdown(dropdown, true);
+      }
+    }
+    
+    // If dropdown extends above viewport and we're opening upward, switch to downward
+    if (openUpward && dropdownRect.top < viewportTop) {
+      positionDropdown(dropdown, false);
+    }
+  }, TIMEOUTS.IMMEDIATE);
+}
+
+// =======================
+// 8. Search Input Management
+// =======================
+
+// Add search input styles if not already added
+function addSearchInputStyles() {
+  if (!document.getElementById('vip-search-input-styles')) {
+    const style = document.createElement('style');
+    style.id = 'vip-search-input-styles';
+    style.textContent = `
+      .vip-search-input.error::placeholder {
+        color: ${CSS_CONSTANTS.COLORS.ERROR} !important;
+        font-style: italic;
+      }
+      .vip-search-input.success::placeholder {
+        color: ${CSS_CONSTANTS.COLORS.SUCCESS} !important;
+        font-style: italic;
+      }
+      .vip-search-input.duplicate::placeholder {
+        color: ${CSS_CONSTANTS.COLORS.DUPLICATE} !important;
+        font-style: italic;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+// Show placeholder message with class styling
+function showPlaceholderMessage(searchInput, originalPlaceholder, message, className) {
+  searchInput.value = '';
+  searchInput.placeholder = message;
+  searchInput.classList.remove('error', 'success', 'duplicate');
+  searchInput.classList.add(className);
+  
+  setTimeout(() => {
+    searchInput.placeholder = originalPlaceholder;
+    searchInput.classList.remove(className);
+  }, TIMEOUTS.PLACEHOLDER_RESET);
+}
+
+// Create add player handler for search input
+function createAddPlayerHandler(searchInput, addButton, originalPlaceholder) {
+  return async () => {
+    const playerName = searchInput.value.trim();
+    if (!playerName) return;
+    
+    // Check if player is already in VIP list
+    const vipList = getVIPList();
+    const existingPlayer = vipList.find(vip => vip.name.toLowerCase() === playerName.toLowerCase());
+    
+    if (existingPlayer) {
+      showPlaceholderMessage(
+        searchInput,
+        originalPlaceholder,
+        tReplace('mods.vipList.errorDuplicate', { name: existingPlayer.name }),
+        'duplicate'
+      );
+      return;
+    }
+    
+    // Disable input and button while fetching
+    searchInput.disabled = true;
+    addButton.disabled = true;
+    const originalButtonText = addButton.textContent;
+    addButton.textContent = t('mods.vipList.addingButton');
+    
+    try {
+      const profileData = await fetchPlayerData(playerName);
+      
+      if (profileData === null) {
+        showPlaceholderMessage(
+          searchInput,
+          originalPlaceholder,
+          t('mods.vipList.errorPlayerNotFound'),
+          'error'
+        );
+        searchInput.disabled = false;
+        addButton.disabled = false;
+        addButton.textContent = originalButtonText;
+        return;
+      }
+      
+      // Extract player info using helper function
+      const playerInfo = extractPlayerInfoFromProfile(profileData, playerName);
+      
+      // Add to VIP list
+      addToVIPList(playerName, playerInfo);
+      
+      // Refresh display
+      refreshVIPListDisplay();
+      
+      // Show success message
+      showPlaceholderMessage(
+        searchInput,
+        originalPlaceholder,
+        tReplace('mods.vipList.successAdded', { name: playerInfo.name }),
+        'success'
+      );
+      
+      console.log('[VIP List] Added player:', playerName);
+    } catch (error) {
+      console.error('[VIP List] Error adding player:', error);
+      alert(`Failed to add player "${playerName}". Please try again.`);
+    } finally {
+      searchInput.disabled = false;
+      addButton.disabled = false;
+      addButton.textContent = originalButtonText;
+    }
+  };
+}
+
+// Create search input element
+function createSearchInput(originalPlaceholder) {
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.className = 'pixel-font-14 vip-search-input';
+  searchInput.placeholder = originalPlaceholder;
+  searchInput.style.cssText = `
+    flex: 1;
+    min-width: 0;
+    max-width: 200px;
+    padding: 2px 8px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 14px;
+    text-align: left;
+    box-sizing: border-box;
+    max-height: 21px;
+    height: 21px;
+    line-height: normal;
+  `;
+  return searchInput;
+}
+
+// =======================
+// 9. Modal Styling
+// =======================
+
+// Apply modal styles after creation
+function applyModalStyles(dialog) {
+  dialog.style.width = `${MODAL_DIMENSIONS.WIDTH}px`;
+  dialog.style.minWidth = `${MODAL_DIMENSIONS.WIDTH}px`;
+  dialog.style.maxWidth = `${MODAL_DIMENSIONS.WIDTH}px`;
+  dialog.style.height = `${MODAL_DIMENSIONS.HEIGHT}px`;
+  dialog.style.minHeight = `${MODAL_DIMENSIONS.HEIGHT}px`;
+  dialog.style.maxHeight = `${MODAL_DIMENSIONS.HEIGHT}px`;
+  
+  const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body, .widget-bottom');
+  if (contentElem) {
+    contentElem.style.width = `${MODAL_DIMENSIONS.WIDTH}px`;
+    contentElem.style.height = `${MODAL_DIMENSIONS.HEIGHT}px`;
+    contentElem.style.display = 'flex';
+    contentElem.style.flexDirection = 'column';
+    contentElem.style.flex = '1 1 0';
+    contentElem.style.minHeight = '0';
+  }
+  
+  // Update separator before footer
+  const separator = dialog.querySelector('.separator');
+  if (separator) {
+    separator.className = 'separator my-2.5';
+  }
+}
+
+// Setup search input in modal footer
+function setupModalSearchInput(buttonContainer) {
+  buttonContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px;';
+  
+  // Create search input container
+  const searchContainer = document.createElement('div');
+  searchContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
+  
+  // Add search input styles
+  addSearchInputStyles();
+  
+  // Create search input
+  const originalPlaceholder = t('mods.vipList.searchPlaceholder');
+  const searchInput = createSearchInput(originalPlaceholder);
+  
+  // Create Add button
+  const addButton = document.createElement('button');
+  addButton.textContent = t('mods.vipList.addButton');
+  addButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+  addButton.style.cssText = `
+    cursor: pointer;
+    white-space: nowrap;
+    box-sizing: border-box;
+    max-height: 21px;
+    height: 21px;
+  `;
+  
+  // Create add player handler
+  const addPlayer = createAddPlayerHandler(searchInput, addButton, originalPlaceholder);
+  addButton.addEventListener('click', addPlayer);
+  
+  // Add Enter key support
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addPlayer();
+    }
+  });
+  
+  searchContainer.appendChild(searchInput);
+  searchContainer.appendChild(addButton);
+  
+  // Insert search container before Close button
+  buttonContainer.insertBefore(searchContainer, buttonContainer.firstChild);
+}
+
+// =======================
+// 10. Helper Functions
 // =======================
 
 function getVIPList() {
   try {
-    const stored = localStorage.getItem(VIP_LIST_STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEYS.DATA);
     return stored ? JSON.parse(stored) : [];
   } catch (error) {
     console.error('[VIP List] Error loading VIP list:', error);
     return [];
   }
+}
+
+// Secondary sort by name helper
+function secondarySortByName(a, b, primaryComparison) {
+  if (primaryComparison !== 0) return primaryComparison;
+  const nameA = (a.name || '').toLowerCase();
+  const nameB = (b.name || '').toLowerCase();
+  return nameA.localeCompare(nameB);
 }
 
 function sortVIPList(vipList, sortColumn = null, sortDirection = null) {
@@ -160,13 +700,7 @@ function sortVIPList(vipList, sortColumn = null, sortDirection = null) {
       const levelA = parseInt(a.level) || 0;
       const levelB = parseInt(b.level) || 0;
       comparison = levelA - levelB;
-      
-      // Secondary sort by name if levels are equal
-      if (comparison === 0) {
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        comparison = nameA.localeCompare(nameB);
-      }
+      comparison = secondarySortByName(a, b, comparison);
     } else if (column === 'status') {
       // Sort: Online first, then Offline
       const statusA = (a.status || '').toLowerCase();
@@ -178,35 +712,17 @@ function sortVIPList(vipList, sortColumn = null, sortDirection = null) {
       } else {
         comparison = statusA.localeCompare(statusB);
       }
-      
-      // Secondary sort by name if statuses are equal
-      if (comparison === 0) {
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        comparison = nameA.localeCompare(nameB);
-      }
+      comparison = secondarySortByName(a, b, comparison);
     } else if (column === 'rankPoints') {
       const rankPointsA = parseInt(a.rankPoints) || 0;
       const rankPointsB = parseInt(b.rankPoints) || 0;
       comparison = rankPointsA - rankPointsB;
-      
-      // Secondary sort by name if rankPoints are equal
-      if (comparison === 0) {
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        comparison = nameA.localeCompare(nameB);
-      }
+      comparison = secondarySortByName(a, b, comparison);
     } else if (column === 'timeSum') {
       const timeSumA = parseInt(a.timeSum) || 0;
       const timeSumB = parseInt(b.timeSum) || 0;
       comparison = timeSumA - timeSumB;
-      
-      // Secondary sort by name if timeSums are equal
-      if (comparison === 0) {
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        comparison = nameA.localeCompare(nameB);
-      }
+      comparison = secondarySortByName(a, b, comparison);
     }
     
     // Apply direction
@@ -218,7 +734,7 @@ function saveVIPList(vipList) {
   try {
     // Sort before saving using current sort state
     const sortedList = sortVIPList(vipList);
-    localStorage.setItem(VIP_LIST_STORAGE_KEY, JSON.stringify(sortedList));
+    localStorage.setItem(STORAGE_KEYS.DATA, JSON.stringify(sortedList));
   } catch (error) {
     console.error('[VIP List] Error saving VIP list:', error);
   }
@@ -283,16 +799,7 @@ async function refreshAllVIPPlayerData() {
   
   console.log('[VIP List] Refreshing data for', vipList.length, 'VIP players...');
   
-  // Get current player's name
-  let currentPlayerName = null;
-  try {
-    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-    if (playerState?.name) {
-      currentPlayerName = playerState.name.toLowerCase();
-    }
-  } catch (error) {
-    // Silently fail if we can't get player state
-  }
+  const currentPlayerName = getCurrentPlayerName();
   
   // Fetch data for all players in parallel
   const refreshPromises = vipList.map(async (vip) => {
@@ -305,30 +812,11 @@ async function refreshAllVIPPlayerData() {
         return vip;
       }
       
-      // Calculate level from exp (same as Cyclopedia)
-      const exp = profileData.exp || 0;
-      const level = typeof exp === 'number' ? Math.floor(exp / 400) + 1 : 1;
-      
-      // Check if this is the current player
       const isCurrentPlayer = currentPlayerName && (profileData.name || vip.name).toLowerCase() === currentPlayerName;
+      const playerInfo = extractPlayerInfoFromProfile(profileData, vip.name || vip.profile);
+      playerInfo.profile = vip.profile || (profileData.name || vip.name).toLowerCase();
       
-      // Status: if current player, always Online; otherwise check updatedAt
-      const status = isCurrentPlayer 
-        ? t('mods.vipList.statusOnline') 
-        : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? t('mods.vipList.statusOffline') : t('mods.vipList.statusOnline');
-      
-      // Extract rankPoints and timeSum (timeSum is stored as 'ticks' in profileData)
-      const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
-      const timeSum = profileData.ticks !== undefined ? profileData.ticks : 0;
-      
-      return {
-        name: profileData.name || vip.name,
-        level: level,
-        status: status,
-        rankPoints: rankPoints,
-        timeSum: timeSum,
-        profile: vip.profile || (profileData.name || vip.name).toLowerCase()
-      };
+      return playerInfo;
     } catch (error) {
       console.error(`[VIP List] Error refreshing data for "${vip.name}":`, error);
       // Return old data if fetch fails
@@ -408,7 +896,7 @@ function injectVIPListItem(menuElement) {
         keyCode: 27, 
         bubbles: true 
       }));
-    }, 10);
+    }, TIMEOUTS.SHORT);
   });
   
   // Add hover effects
@@ -451,9 +939,9 @@ function createVIPBox({headerRow, content}) {
   box.style.padding = '0';
   box.style.minHeight = '0';
   box.style.height = '100%';
-  box.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+  box.style.background = `url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat`;
   box.style.border = '4px solid transparent';
-  box.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+  box.style.borderImage = CSS_CONSTANTS.BORDER_4_FRAME;
   box.style.borderRadius = '6px';
   box.style.overflow = 'hidden';
   
@@ -463,7 +951,7 @@ function createVIPBox({headerRow, content}) {
   titleEl.style.margin = '0';
   titleEl.style.padding = '0';
   titleEl.style.textAlign = 'center';
-  titleEl.style.color = 'rgb(255, 255, 255)';
+  titleEl.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
   titleEl.style.display = 'flex';
   titleEl.style.flexDirection = 'row';
   titleEl.style.alignItems = 'center';
@@ -525,7 +1013,7 @@ function createVIPHeaderRow() {
   
   const createHeaderCell = (text, flex = '1', column = null, iconUrl = null) => {
     const cell = document.createElement('div');
-    cell.style.cssText = `flex: ${flex}; color: rgb(255, 255, 255); text-align: center; white-space: nowrap; position: relative; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2px;`;
+    cell.style.cssText = `flex: ${flex}; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; text-align: center; white-space: nowrap; position: relative; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2px;`;
     
     if (column) {
       // Make it clickable
@@ -579,7 +1067,7 @@ function createVIPHeaderRow() {
       
       if (currentSortState.column === column) {
         indicator.textContent = currentSortState.direction === 'asc' ? '↑' : '↓';
-        indicator.style.color = 'rgb(100, 181, 246)';
+        indicator.style.color = CSS_CONSTANTS.COLORS.LINK;
       } else {
         indicator.textContent = '↕';
         indicator.style.opacity = '0.3';
@@ -620,31 +1108,21 @@ function createVIPListItem(vip) {
     width: 100%;
   `;
   
-  // Get current player's name to check if this VIP is the current player
-  let currentPlayerName = null;
-  try {
-    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-    if (playerState?.name) {
-      currentPlayerName = playerState.name.toLowerCase();
-    }
-  } catch (error) {
-    // Silently fail if we can't get player state
-  }
-  
   // Check if this VIP is the current player
+  const currentPlayerName = getCurrentPlayerName();
   const isCurrentPlayer = currentPlayerName && vip.name.toLowerCase() === currentPlayerName;
   const displayName = isCurrentPlayer ? `${vip.name} ${t('mods.vipList.currentPlayerSuffix')}` : vip.name;
   
-  const createCell = (content, flex = '1', isLink = false) => {
+  const createCell = (content, flex = '1', isLink = false, tooltip = null) => {
     const cell = document.createElement('div');
-    cell.style.cssText = `flex: ${flex}; text-align: center;`;
+    cell.style.cssText = `flex: ${flex}; text-align: center; position: relative;`;
     
     if (isLink) {
       const link = document.createElement('a');
       link.href = content.href;
       link.target = '_blank';
       link.textContent = content.text;
-      link.style.cssText = 'color: rgb(100, 181, 246); text-decoration: underline; cursor: pointer;';
+      link.style.cssText = `color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer;`;
       link.addEventListener('click', (e) => {
         e.preventDefault();
         window.open(content.href, '_blank');
@@ -655,10 +1133,16 @@ function createVIPListItem(vip) {
       const onlineText = t('mods.vipList.statusOnline');
       const offlineText = t('mods.vipList.statusOffline');
       cell.style.color = typeof content === 'string' && content === onlineText 
-        ? 'rgb(76, 175, 80)' 
+        ? CSS_CONSTANTS.COLORS.ONLINE
         : content === offlineText
-        ? 'rgb(255, 107, 107)'
-        : 'rgb(230, 215, 176)';
+        ? CSS_CONSTANTS.COLORS.OFFLINE
+        : CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
+      
+      // Add tooltip if provided
+      if (tooltip) {
+        cell.style.cursor = 'help';
+        cell.title = tooltip;
+      }
     }
     
     return cell;
@@ -679,7 +1163,7 @@ function createVIPListItem(vip) {
   nameButton.style.cssText = `
     background: transparent;
     border: none;
-    color: rgb(230, 215, 176);
+    color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
     cursor: pointer;
     padding: 0;
     text-decoration: none;
@@ -700,7 +1184,7 @@ function createVIPListItem(vip) {
   if (isCurrentPlayer) {
     const youSpan = document.createElement('span');
     youSpan.textContent = ` ${t('mods.vipList.currentPlayerSuffix')}`;
-    youSpan.style.cssText = 'text-decoration: none; font-style: italic; color: rgb(100, 181, 246);';
+    youSpan.style.cssText = `text-decoration: none; font-style: italic; color: ${CSS_CONSTANTS.COLORS.LINK};`;
     nameButton.appendChild(youSpan);
   }
   
@@ -712,51 +1196,22 @@ function createVIPListItem(vip) {
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
-    background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
     border: 4px solid transparent;
-    border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
     min-width: 120px;
     z-index: 1000;
     margin-top: 4px;
     padding: 4px;
   `;
   
-  // Function to check if dropdown should open upward
-  const shouldOpenUpward = () => {
-    const buttonRect = nameButton.getBoundingClientRect();
-    // Temporarily show dropdown to measure its height
-    const wasVisible = dropdown.style.display === 'block';
-    dropdown.style.visibility = 'hidden';
-    dropdown.style.display = 'block';
-    const dropdownHeight = dropdown.offsetHeight || 100; // Fallback to 100 if not measured
-    dropdown.style.display = wasVisible ? 'block' : 'none';
-    dropdown.style.visibility = 'visible';
-    
-    // Find the scrollable container
-    const container = nameCell.closest('.column-content-wrapper');
-    let spaceBelow = window.innerHeight - buttonRect.bottom;
-    let spaceAbove = buttonRect.top;
-    
-    if (container) {
-      const containerRect = container.getBoundingClientRect();
-      // Calculate space within the visible scrollable area
-      const visibleBottom = Math.min(containerRect.bottom, window.innerHeight);
-      const visibleTop = Math.max(containerRect.top, 0);
-      spaceBelow = visibleBottom - buttonRect.bottom;
-      spaceAbove = buttonRect.top - visibleTop;
-    }
-    
-    // Open upward if not enough space below (with some padding), and there's enough space above
-    const requiredSpace = dropdownHeight + 10;
-    return spaceBelow < requiredSpace && spaceAbove >= requiredSpace;
-  };
   
-  const createDropdownItem = (text, onClick) => {
+  const createDropdownItem = (text, onClick, color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY) => {
     const menuItem = document.createElement('div');
     menuItem.textContent = text;
     menuItem.style.cssText = `
       padding: 6px 12px;
-      color: rgb(230, 215, 176);
+      color: ${color};
       cursor: pointer;
       font-size: 14px;
       text-align: left;
@@ -780,127 +1235,13 @@ function createVIPListItem(vip) {
   }));
   
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
-    const playerName = vip.name;
-    
-    // Close VIP List modal
-    if (vipListModalInstance) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { 
-        key: 'Escape', 
-        code: 'Escape', 
-        keyCode: 27, 
-        bubbles: true 
-      }));
-      vipListModalInstance = null;
-    }
-    
-    // Wait a bit for modal to close, then open Cyclopedia (similar to how Cyclopedia does it)
-    setTimeout(() => {
-      try {
-        // Set searched player name in cyclopediaState before opening
-        if (typeof cyclopediaState !== 'undefined') {
-          cyclopediaState.searchedUsername = playerName;
-        } else if (typeof window !== 'undefined' && window.cyclopediaState) {
-          window.cyclopediaState.searchedUsername = playerName;
-        }
-        
-        // Set selected category to Leaderboards
-        if (typeof window !== 'undefined') {
-          window.selectedCharacterItem = 'Leaderboards';
-        }
-        
-        // Open Cyclopedia modal (similar to how Cyclopedia opens from context menu)
-        if (typeof window !== 'undefined' && window.Cyclopedia && typeof window.Cyclopedia.show === 'function') {
-          window.Cyclopedia.show({});
-        } else if (typeof openCyclopediaModal === 'function') {
-          openCyclopediaModal({});
-        } else {
-          console.warn('[VIP List] Could not find openCyclopediaModal function');
-          return;
-        }
-        
-        // After opening, navigate to Characters tab (index 1) and Leaderboards
-        setTimeout(() => {
-          // Set searched username again after modal opens
-          if (typeof cyclopediaState !== 'undefined') {
-            cyclopediaState.searchedUsername = playerName;
-          } else if (typeof window !== 'undefined' && window.cyclopediaState) {
-            window.cyclopediaState.searchedUsername = playerName;
-          }
-          
-          // Find Characters tab button (index 1) - look for button with text "Characters"
-          const tabButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
-            const text = btn.textContent?.trim() || '';
-            return text === 'Characters';
-          });
-          
-          // Click Characters tab (should be index 1, but find by text to be safe)
-          if (tabButtons.length > 0) {
-            // Characters tab is typically the second tab (index 1)
-            const charactersTab = tabButtons.find((btn, idx) => {
-              // Check if it's in a tab navigation area
-              const parent = btn.closest('[role="tablist"], .flex, nav');
-              return parent !== null;
-            }) || tabButtons[0];
-            
-            charactersTab.click();
-          }
-          
-          // Wait for Characters tab to load, then click Leaderboards and trigger search
-          setTimeout(() => {
-            // Set searched username one more time
-            if (typeof cyclopediaState !== 'undefined') {
-              cyclopediaState.searchedUsername = playerName;
-            } else if (typeof window !== 'undefined' && window.cyclopediaState) {
-              window.cyclopediaState.searchedUsername = playerName;
-            }
-            
-            // Set selected category to Leaderboards
-            if (typeof window !== 'undefined') {
-              window.selectedCharacterItem = 'Leaderboards';
-            }
-            
-            // Find and set search input value
-            const searchInput = document.querySelector('input[type="text"]');
-            if (searchInput) {
-              searchInput.value = playerName;
-              // Trigger input event to update the value
-              searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-            
-            // Find and click Leaderboards button (look in the Characters box)
-            const leaderboardsButton = Array.from(document.querySelectorAll('div')).find(div => {
-              const text = div.textContent?.trim() || '';
-              return text === 'Leaderboards';
-            });
-            
-            if (leaderboardsButton) {
-              leaderboardsButton.click();
-            }
-            
-            // Wait a bit, then trigger the search
-            setTimeout(() => {
-              // Find search button and click it to trigger search
-              const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
-                const text = btn.textContent?.trim() || '';
-                return text === 'Search';
-              });
-              
-              if (searchButton) {
-                searchButton.click();
-              }
-            }, 100);
-          }, 300);
-        }, 200);
-      } catch (error) {
-        console.error('[VIP List] Error opening Cyclopedia:', error);
-      }
-    }, 10);
+    openCyclopediaForPlayer(vip.name);
   }));
   
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownRemoveVIP'), () => {
     removeFromVIPList(vip.name);
     refreshVIPListDisplay();
-  }));
+  }, CSS_CONSTANTS.COLORS.OFFLINE));
   
   nameButton.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -913,52 +1254,12 @@ function createVIPListItem(vip) {
     });
     
     if (!isVisible) {
-      // Check if we should open upward
-      const openUpward = shouldOpenUpward();
+      const container = nameCell.closest('.column-content-wrapper');
+      const openUpward = shouldDropdownOpenUpward(dropdown, nameButton, container);
       
-      if (openUpward) {
-        // Position above the button
-        dropdown.style.top = 'auto';
-        dropdown.style.bottom = '100%';
-        dropdown.style.marginTop = '0';
-        dropdown.style.marginBottom = '4px';
-        dropdown.style.transform = 'translateX(-50%)';
-      } else {
-        // Position below the button (default)
-        dropdown.style.top = '100%';
-        dropdown.style.bottom = 'auto';
-        dropdown.style.marginTop = '4px';
-        dropdown.style.marginBottom = '0';
-        dropdown.style.transform = 'translateX(-50%)';
-      }
-      
+      positionDropdown(dropdown, openUpward);
       dropdown.style.display = 'block';
-      
-      // Double-check after rendering and adjust if needed
-      setTimeout(() => {
-        const dropdownRect = dropdown.getBoundingClientRect();
-        const viewportBottom = window.innerHeight;
-        const viewportTop = 0;
-        
-        // If dropdown extends below viewport and we're opening downward, switch to upward
-        if (!openUpward && dropdownRect.bottom > viewportBottom) {
-          const buttonRect = nameButton.getBoundingClientRect();
-          if (buttonRect.top >= dropdown.offsetHeight + 10) {
-            dropdown.style.top = 'auto';
-            dropdown.style.bottom = '100%';
-            dropdown.style.marginTop = '0';
-            dropdown.style.marginBottom = '4px';
-          }
-        }
-        
-        // If dropdown extends above viewport and we're opening upward, switch to downward
-        if (openUpward && dropdownRect.top < viewportTop) {
-          dropdown.style.top = '100%';
-          dropdown.style.bottom = 'auto';
-          dropdown.style.marginTop = '4px';
-          dropdown.style.marginBottom = '0';
-        }
-      }, 0);
+      adjustDropdownPosition(dropdown, nameButton, openUpward);
     } else {
       dropdown.style.display = 'none';
     }
@@ -973,7 +1274,13 @@ function createVIPListItem(vip) {
   
   item.appendChild(nameCell);
   item.appendChild(createCell(vip.level, '0.8'));
-  item.appendChild(createCell(vip.status, '0.9'));
+  
+  // Add tooltip for offline status
+  const offlineText = t('mods.vipList.statusOffline');
+  const statusTooltip = vip.status === offlineText && vip.lastUpdatedAt 
+    ? tReplace('mods.vipList.tooltipLastOnline', { time: formatLastOnline(vip.lastUpdatedAt) })
+    : null;
+  item.appendChild(createCell(vip.status, '0.9', false, statusTooltip));
   
   // Format rankPoints with locale string (e.g., 386)
   const rankPointsCell = createCell((vip.rankPoints !== undefined ? vip.rankPoints.toLocaleString() : '0'), '0.9');
@@ -1088,8 +1395,8 @@ async function openVIPListModal() {
       
       const modal = api.ui.components.createModal({
         title: t('mods.vipList.modalTitle'),
-        width: 550,
-        height: 360,
+        width: MODAL_DIMENSIONS.WIDTH,
+        height: MODAL_DIMENSIONS.HEIGHT,
         content: contentDiv,
         buttons: [{ 
           text: t('mods.vipList.closeButton'), 
@@ -1106,235 +1413,21 @@ async function openVIPListModal() {
         if (dialog) {
           vipListModalInstance = dialog;
         }
-      }, 50);
+      }, TIMEOUTS.MEDIUM);
       
-      // Adjust dialog styles after creation (like Better Forge)
+      // Adjust dialog styles after creation
       setTimeout(() => {
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
-          dialog.style.width = '550px';
-          dialog.style.minWidth = '550px';
-          dialog.style.maxWidth = '550px';
-          dialog.style.height = '360px';
-          dialog.style.minHeight = '360px';
-          dialog.style.maxHeight = '360px';
-          const contentElem = dialog.querySelector('.modal-content, [data-content], .content, .modal-body, .widget-bottom');
-          if (contentElem) {
-            contentElem.style.width = '550px';
-            contentElem.style.height = '360px';
-            contentElem.style.display = 'flex';
-            contentElem.style.flexDirection = 'column';
-            contentElem.style.flex = '1 1 0';
-            contentElem.style.minHeight = '0';
-          }
-          // Update separator before footer to match Better Forge style
-          const separator = dialog.querySelector('.separator');
-          if (separator) {
-            separator.className = 'separator my-2.5';
-          }
+          applyModalStyles(dialog);
           
           // Add search input and Add button to footer
           const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
           if (buttonContainer) {
-            // Change layout to space-between
-            buttonContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 8px;';
-            
-            // Create search input container
-            const searchContainer = document.createElement('div');
-            searchContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
-            
-            // Create search input
-            const searchInput = document.createElement('input');
-            searchInput.type = 'text';
-            searchInput.className = 'pixel-font-14 vip-search-input';
-            const originalPlaceholder = t('mods.vipList.searchPlaceholder');
-            searchInput.placeholder = originalPlaceholder;
-            searchInput.style.cssText = `
-              flex: 1;
-              min-width: 0;
-              max-width: 200px;
-              padding: 2px 8px;
-              background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
-              border: 4px solid transparent;
-              border-image: url('https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png') 4 fill;
-              color: rgb(255, 255, 255);
-              font-size: 14px;
-              text-align: left;
-              box-sizing: border-box;
-              max-height: 21px;
-              height: 21px;
-              line-height: normal;
-            `;
-            
-            // Add style for red placeholder (error), green placeholder (success), and grey placeholder (duplicate)
-            if (!document.getElementById('vip-search-input-styles')) {
-              const style = document.createElement('style');
-              style.id = 'vip-search-input-styles';
-              style.textContent = `
-                .vip-search-input.error::placeholder {
-                  color: #ff6b6b !important;
-                  font-style: italic;
-                }
-                .vip-search-input.success::placeholder {
-                  color: #4caf50 !important;
-                  font-style: italic;
-                }
-                .vip-search-input.duplicate::placeholder {
-                  color: #888 !important;
-                  font-style: italic;
-                }
-              `;
-              document.head.appendChild(style);
-            }
-            
-            // Function to add player
-            const addPlayer = async () => {
-              const playerName = searchInput.value.trim();
-              if (!playerName) return;
-              
-              // Check if player is already in VIP list
-              const vipList = getVIPList();
-              const existingPlayer = vipList.find(vip => vip.name.toLowerCase() === playerName.toLowerCase());
-              
-              if (existingPlayer) {
-                // Player already exists - show duplicate message in placeholder
-                searchInput.value = ''; // Clear input so placeholder shows
-                searchInput.placeholder = tReplace('mods.vipList.errorDuplicate', { name: existingPlayer.name });
-                searchInput.classList.remove('error', 'success'); // Remove other classes
-                searchInput.classList.add('duplicate'); // Add duplicate class for grey color
-                
-                // Restore original placeholder after 3 seconds
-                setTimeout(() => {
-                  searchInput.placeholder = originalPlaceholder;
-                  searchInput.classList.remove('duplicate');
-                }, 3000);
-                
-                return;
-              }
-              
-              // Disable input and button while fetching
-              searchInput.disabled = true;
-              addButton.disabled = true;
-              const originalButtonText = addButton.textContent;
-              addButton.textContent = t('mods.vipList.addingButton');
-              
-              try {
-                const profileData = await fetchPlayerData(playerName);
-                
-                if (profileData === null) {
-                  // Player doesn't exist - show error in placeholder
-                  searchInput.value = ''; // Clear input so placeholder shows
-                  searchInput.placeholder = t('mods.vipList.errorPlayerNotFound');
-                  searchInput.classList.remove('success', 'duplicate'); // Remove other classes
-                  searchInput.classList.add('error');
-                  
-                  // Restore original placeholder after 3 seconds
-                  setTimeout(() => {
-                    searchInput.placeholder = originalPlaceholder;
-                    searchInput.classList.remove('error');
-                  }, 3000);
-                  
-                  searchInput.disabled = false;
-                  addButton.disabled = false;
-                  addButton.textContent = originalButtonText;
-                  return;
-                }
-                
-                // Extract player info from profile data
-                // Calculate level from exp (same as Cyclopedia)
-                const exp = profileData.exp || 0;
-                const level = typeof exp === 'number' ? Math.floor(exp / 400) + 1 : 1;
-                
-                // Get current player's name to check if adding self
-                let currentPlayerName = null;
-                try {
-                  const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
-                  if (playerState?.name) {
-                    currentPlayerName = playerState.name.toLowerCase();
-                  }
-                } catch (error) {
-                  // Silently fail if we can't get player state
-                }
-                
-                // Check if this is the current player
-                const isCurrentPlayer = currentPlayerName && (profileData.name || playerName).toLowerCase() === currentPlayerName;
-                
-                // Status: if current player, always Online; otherwise check updatedAt
-                const status = isCurrentPlayer 
-                  ? t('mods.vipList.statusOnline') 
-                  : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? t('mods.vipList.statusOffline') : t('mods.vipList.statusOnline');
-                
-                // Extract rankPoints and timeSum (timeSum is stored as 'ticks' in profileData)
-                const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
-                const timeSum = profileData.ticks !== undefined ? profileData.ticks : 0;
-                
-                const playerInfo = {
-                  name: profileData.name || playerName,
-                  level: level,
-                  status: status,
-                  rankPoints: rankPoints,
-                  timeSum: timeSum,
-                  profile: playerName.toLowerCase()
-                };
-                
-                // Add to VIP list
-                addToVIPList(playerName, playerInfo);
-                
-                // Refresh display
-                refreshVIPListDisplay();
-                
-                // Show success message in placeholder
-                searchInput.value = ''; // Clear input so placeholder shows
-                searchInput.placeholder = tReplace('mods.vipList.successAdded', { name: playerInfo.name });
-                searchInput.classList.remove('error', 'duplicate'); // Remove other classes
-                searchInput.classList.add('success'); // Add success class for green color
-                
-                // Restore original placeholder after 3 seconds
-                setTimeout(() => {
-                  searchInput.placeholder = originalPlaceholder;
-                  searchInput.classList.remove('success');
-                }, 3000);
-                
-                console.log('[VIP List] Added player:', playerName);
-              } catch (error) {
-                console.error('[VIP List] Error adding player:', error);
-                alert(`Failed to add player "${playerName}". Please try again.`);
-              } finally {
-                searchInput.disabled = false;
-                addButton.disabled = false;
-                addButton.textContent = originalButtonText;
-              }
-            };
-            
-            // Add Enter key support
-            searchInput.addEventListener('keydown', (e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                addPlayer();
-              }
-            });
-            
-            // Create Add button
-            const addButton = document.createElement('button');
-            addButton.textContent = t('mods.vipList.addButton');
-            addButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
-            addButton.style.cssText = `
-              cursor: pointer;
-              white-space: nowrap;
-              box-sizing: border-box;
-              max-height: 21px;
-              height: 21px;
-            `;
-            addButton.addEventListener('click', addPlayer);
-            
-            searchContainer.appendChild(searchInput);
-            searchContainer.appendChild(addButton);
-            
-            // Insert search container before Close button
-            buttonContainer.insertBefore(searchContainer, buttonContainer.firstChild);
+            setupModalSearchInput(buttonContainer);
           }
         }
-      }, 100);
+      }, TIMEOUTS.NORMAL);
       
       console.log('[VIP List] Modal opened');
       return modal;
@@ -1377,7 +1470,7 @@ function startAccountMenuObserver() {
         if (menu) {
           setTimeout(() => {
             injectVIPListItem(menu);
-          }, 10);
+          }, TIMEOUTS.SHORT);
         }
       }
     }
@@ -1395,7 +1488,7 @@ function startAccountMenuObserver() {
     menus.forEach(menu => {
       injectVIPListItem(menu);
     });
-  }, 500);
+  }, TIMEOUTS.INITIAL_CHECK);
   
   console.log('[VIP List] Account menu observer started');
 }
@@ -1409,7 +1502,7 @@ function stopAccountMenuObserver() {
 }
 
 // =======================
-// 5. Exports & Lifecycle Management
+// 11. Exports & Lifecycle Management
 // =======================
 
 exports = {

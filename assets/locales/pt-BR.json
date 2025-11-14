@@ -448,7 +448,18 @@
       "emptyState": "Nenhum jogador VIP adicionado ainda. Use a caixa de busca abaixo para adicionar jogadores.",
       "errorPlayerNotFound": "Jogador não encontrado",
       "errorDuplicate": "{name} já está na sua Lista VIP",
-      "successAdded": "{name} adicionado à Lista VIP"
+      "successAdded": "{name} adicionado à Lista VIP",
+      "tooltipLastOnline": "Último online: {time}",
+      "timeJustNow": "Agora mesmo",
+      "timeMinutesAgo": "há {minutes} {plural}",
+      "timeHoursAgo": "há {hours} {plural}",
+      "timeDaysAgo": "há {days} {plural}",
+      "wordMinute": "minuto",
+      "wordMinutes": "minutos",
+      "wordHour": "hora",
+      "wordHours": "horas",
+      "wordDay": "dia",
+      "wordDays": "dias"
     }
   }
 }

@@ -447,7 +447,18 @@
       "emptyState": "No VIP players added yet. Use the search box below to add players.",
       "errorPlayerNotFound": "Player not found",
       "errorDuplicate": "{name} already in your VIP List",
-      "successAdded": "Added {name} to VIP List"
+      "successAdded": "Added {name} to VIP List",
+      "tooltipLastOnline": "Last online: {time}",
+      "timeJustNow": "Just now",
+      "timeMinutesAgo": "{minutes} {plural} ago",
+      "timeHoursAgo": "{hours} {plural} ago",
+      "timeDaysAgo": "{days} {plural} ago",
+      "wordMinute": "minute",
+      "wordMinutes": "minutes",
+      "wordHour": "hour",
+      "wordHours": "hours",
+      "wordDay": "day",
+      "wordDays": "days"
     }
   }
 }
