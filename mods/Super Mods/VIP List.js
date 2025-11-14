@@ -115,7 +115,23 @@ function setupVIPDropdownClickHandler() {
 }
 
 // =======================
-// 3. Helper Functions
+// 3. Translation Helpers
+// =======================
+
+// Use shared translation system via API
+const t = (key) => api.i18n.t(key);
+
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+  let text = t(key);
+  Object.entries(replacements).forEach(([placeholder, value]) => {
+    text = text.replace(`{${placeholder}}`, value);
+  });
+  return text;
+};
+
+// =======================
+// 4. Helper Functions
 // =======================
 
 function getVIPList() {
@@ -298,8 +314,8 @@ async function refreshAllVIPPlayerData() {
       
       // Status: if current player, always Online; otherwise check updatedAt
       const status = isCurrentPlayer 
-        ? 'Online' 
-        : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? 'Offline' : 'Online';
+        ? t('mods.vipList.statusOnline') 
+        : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? t('mods.vipList.statusOffline') : t('mods.vipList.statusOnline');
       
       // Extract rankPoints and timeSum (timeSum is stored as 'ticks' in profileData)
       const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
@@ -334,9 +350,10 @@ function injectVIPListItem(menuElement) {
     return false;
   }
   
-  // Check if this is the "My Account" menu
+  // Check if this is the "My Account" menu (support both English and Portuguese)
   const menuText = menuElement.textContent || '';
-  if (!menuText.toLowerCase().includes('my account')) {
+  const lowerMenuText = menuText.toLowerCase();
+  if (!lowerMenuText.includes('my account') && !lowerMenuText.includes('minha conta')) {
     return false;
   }
   
@@ -376,7 +393,7 @@ function injectVIPListItem(menuElement) {
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-star" aria-hidden="true">
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
     </svg>
-    VIP List
+    ${t('mods.vipList.menuItem')}
   `;
   
   // Add click handler
@@ -442,7 +459,7 @@ function createVIPBox({headerRow, content}) {
   
   // Replace title with header row
   const titleEl = document.createElement('h2');
-  titleEl.className = 'widget-top widget-top-text pixel-font-16';
+  titleEl.className = 'widget-top widget-top-text';
   titleEl.style.margin = '0';
   titleEl.style.padding = '0';
   titleEl.style.textAlign = 'center';
@@ -451,6 +468,10 @@ function createVIPBox({headerRow, content}) {
   titleEl.style.flexDirection = 'row';
   titleEl.style.alignItems = 'center';
   titleEl.style.width = '100%';
+  titleEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+  titleEl.style.fontSize = '14px';
+  titleEl.style.fontWeight = '600';
+  titleEl.style.letterSpacing = '0.3px';
   
   // Append header row directly to title area (not cloned to preserve event listeners)
   if (headerRow) {
@@ -495,13 +516,16 @@ function createVIPHeaderRow() {
     margin-bottom: 4px;
     background: rgba(255, 255, 255, 0.1);
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-    font-weight: bold;
+    font-weight: 600;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    letter-spacing: 0.2px;
     width: 100%;
   `;
   
   const createHeaderCell = (text, flex = '1', column = null, iconUrl = null) => {
     const cell = document.createElement('div');
-    cell.style.cssText = `flex: ${flex}; color: rgb(255, 255, 255); text-align: center; white-space: nowrap; position: relative;`;
+    cell.style.cssText = `flex: ${flex}; color: rgb(255, 255, 255); text-align: center; white-space: nowrap; position: relative; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.2px;`;
     
     if (column) {
       // Make it clickable
@@ -575,11 +599,11 @@ function createVIPHeaderRow() {
     return cell;
   };
   
-  headerRow.appendChild(createHeaderCell('Name', '2.0', 'name'));
-  headerRow.appendChild(createHeaderCell('Level', '0.8', 'level'));
-  headerRow.appendChild(createHeaderCell('Status', '0.9', 'status'));
-  headerRow.appendChild(createHeaderCell('Rank Points', '0.9', 'rankPoints', 'https://bestiaryarena.com/assets/icons/star-tier.png'));
-  headerRow.appendChild(createHeaderCell('Time Sum', '0.9', 'timeSum', 'https://bestiaryarena.com/assets/icons/speed.png'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnName'), '2.0', 'name'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnLevel'), '0.8', 'level'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnStatus'), '0.9', 'status'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnRankPoints'), '0.9', 'rankPoints', 'https://bestiaryarena.com/assets/icons/star-tier.png'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnTimeSum'), '0.9', 'timeSum', 'https://bestiaryarena.com/assets/icons/speed.png'));
   
   return headerRow;
 }
@@ -609,7 +633,7 @@ function createVIPListItem(vip) {
   
   // Check if this VIP is the current player
   const isCurrentPlayer = currentPlayerName && vip.name.toLowerCase() === currentPlayerName;
-  const displayName = isCurrentPlayer ? `${vip.name} (you)` : vip.name;
+  const displayName = isCurrentPlayer ? `${vip.name} ${t('mods.vipList.currentPlayerSuffix')}` : vip.name;
   
   const createCell = (content, flex = '1', isLink = false) => {
     const cell = document.createElement('div');
@@ -628,9 +652,11 @@ function createVIPListItem(vip) {
       cell.appendChild(link);
     } else {
       cell.textContent = content;
-      cell.style.color = typeof content === 'string' && content === 'Online' 
+      const onlineText = t('mods.vipList.statusOnline');
+      const offlineText = t('mods.vipList.statusOffline');
+      cell.style.color = typeof content === 'string' && content === onlineText 
         ? 'rgb(76, 175, 80)' 
-        : content === 'Offline'
+        : content === offlineText
         ? 'rgb(255, 107, 107)'
         : 'rgb(230, 215, 176)';
     }
@@ -673,7 +699,7 @@ function createVIPListItem(vip) {
   // Add "(you)" span if current player (not underlined, italic, light blue)
   if (isCurrentPlayer) {
     const youSpan = document.createElement('span');
-    youSpan.textContent = ' (you)';
+    youSpan.textContent = ` ${t('mods.vipList.currentPlayerSuffix')}`;
     youSpan.style.cssText = 'text-decoration: none; font-style: italic; color: rgb(100, 181, 246);';
     nameButton.appendChild(youSpan);
   }
@@ -749,11 +775,11 @@ function createVIPListItem(vip) {
     return menuItem;
   };
   
-  dropdown.appendChild(createDropdownItem('Profile', () => {
+  dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownProfile'), () => {
     window.open(`/profile/${vip.profile}`, '_blank');
   }));
   
-  dropdown.appendChild(createDropdownItem('Cyclopedia', () => {
+  dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
     const playerName = vip.name;
     
     // Close VIP List modal
@@ -871,7 +897,7 @@ function createVIPListItem(vip) {
     }, 10);
   }));
   
-  dropdown.appendChild(createDropdownItem('Remove VIP', () => {
+  dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownRemoveVIP'), () => {
     removeFromVIPList(vip.name);
     refreshVIPListDisplay();
   }));
@@ -980,7 +1006,7 @@ function getVIPListContent() {
       color: rgba(255, 255, 255, 0.6);
       font-size: 14px;
     `;
-    emptyMessage.textContent = 'No VIP players added yet. Use the search box below to add players.';
+    emptyMessage.textContent = t('mods.vipList.emptyState');
     container.appendChild(emptyMessage);
   } else {
     sortedList.forEach(vip => {
@@ -1000,9 +1026,8 @@ function refreshVIPListDisplay() {
       // Find the VIP box parent (the div with background image)
       const vipBox = vipListBox.closest('div[style*="background"]');
       if (vipBox) {
-        // Find the h2 inside the VIP box (must have pixel-font-16 class to distinguish from modal title)
-        // The modal title h2 only has 'widget-top widget-top-text', not 'pixel-font-16'
-        const titleEl = vipBox.querySelector('h2.widget-top.pixel-font-16');
+        // Find the h2 inside the VIP box (distinguished by being inside the VIP box)
+        const titleEl = vipBox.querySelector('h2.widget-top.widget-top-text');
         if (titleEl) {
           // Find and remove existing header row using class
           const existingHeader = titleEl.querySelector('.vip-header-row');
@@ -1016,6 +1041,11 @@ function refreshVIPListDisplay() {
           newHeaderRow.style.zIndex = 'auto';
           newHeaderRow.style.marginBottom = '0';
           newHeaderRow.style.width = '100%';
+          // Ensure title element has proper font styling
+          titleEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+          titleEl.style.fontSize = '14px';
+          titleEl.style.fontWeight = '600';
+          titleEl.style.letterSpacing = '0.3px';
           titleEl.appendChild(newHeaderRow);
         }
       }
@@ -1057,12 +1087,12 @@ async function openVIPListModal() {
       contentDiv.appendChild(vipListBox);
       
       const modal = api.ui.components.createModal({
-        title: 'VIP List',
+        title: t('mods.vipList.modalTitle'),
         width: 550,
         height: 360,
         content: contentDiv,
         buttons: [{ 
-          text: 'Close', 
+          text: t('mods.vipList.closeButton'), 
           primary: true,
           onClick: () => {
             vipListModalInstance = null;
@@ -1117,7 +1147,7 @@ async function openVIPListModal() {
             const searchInput = document.createElement('input');
             searchInput.type = 'text';
             searchInput.className = 'pixel-font-14 vip-search-input';
-            const originalPlaceholder = 'Search player...';
+            const originalPlaceholder = t('mods.vipList.searchPlaceholder');
             searchInput.placeholder = originalPlaceholder;
             searchInput.style.cssText = `
               flex: 1;
@@ -1169,7 +1199,7 @@ async function openVIPListModal() {
               if (existingPlayer) {
                 // Player already exists - show duplicate message in placeholder
                 searchInput.value = ''; // Clear input so placeholder shows
-                searchInput.placeholder = `${existingPlayer.name} already in your VIP List`;
+                searchInput.placeholder = tReplace('mods.vipList.errorDuplicate', { name: existingPlayer.name });
                 searchInput.classList.remove('error', 'success'); // Remove other classes
                 searchInput.classList.add('duplicate'); // Add duplicate class for grey color
                 
@@ -1186,7 +1216,7 @@ async function openVIPListModal() {
               searchInput.disabled = true;
               addButton.disabled = true;
               const originalButtonText = addButton.textContent;
-              addButton.textContent = 'Adding...';
+              addButton.textContent = t('mods.vipList.addingButton');
               
               try {
                 const profileData = await fetchPlayerData(playerName);
@@ -1194,7 +1224,7 @@ async function openVIPListModal() {
                 if (profileData === null) {
                   // Player doesn't exist - show error in placeholder
                   searchInput.value = ''; // Clear input so placeholder shows
-                  searchInput.placeholder = 'Player not found';
+                  searchInput.placeholder = t('mods.vipList.errorPlayerNotFound');
                   searchInput.classList.remove('success', 'duplicate'); // Remove other classes
                   searchInput.classList.add('error');
                   
@@ -1231,8 +1261,8 @@ async function openVIPListModal() {
                 
                 // Status: if current player, always Online; otherwise check updatedAt
                 const status = isCurrentPlayer 
-                  ? 'Online' 
-                  : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? 'Offline' : 'Online';
+                  ? t('mods.vipList.statusOnline') 
+                  : (profileData.updatedAt === null || profileData.updatedAt === undefined) ? t('mods.vipList.statusOffline') : t('mods.vipList.statusOnline');
                 
                 // Extract rankPoints and timeSum (timeSum is stored as 'ticks' in profileData)
                 const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
@@ -1255,7 +1285,7 @@ async function openVIPListModal() {
                 
                 // Show success message in placeholder
                 searchInput.value = ''; // Clear input so placeholder shows
-                searchInput.placeholder = `Added ${playerInfo.name} to VIP List`;
+                searchInput.placeholder = tReplace('mods.vipList.successAdded', { name: playerInfo.name });
                 searchInput.classList.remove('error', 'duplicate'); // Remove other classes
                 searchInput.classList.add('success'); // Add success class for green color
                 
@@ -1286,7 +1316,7 @@ async function openVIPListModal() {
             
             // Create Add button
             const addButton = document.createElement('button');
-            addButton.textContent = 'Add';
+            addButton.textContent = t('mods.vipList.addButton');
             addButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
             addButton.style.cssText = `
               cursor: pointer;
@@ -1312,9 +1342,9 @@ async function openVIPListModal() {
       // Fallback to window.BestiaryModAPI if available
       if (typeof window !== 'undefined' && window.BestiaryModAPI && window.BestiaryModAPI.showModal) {
         window.BestiaryModAPI.showModal({
-          title: 'VIP List',
+          title: t('mods.vipList.modalTitle'),
           content: '<p>VIP List content will go here.</p>',
-          buttons: [{ text: 'Close', primary: false }]
+          buttons: [{ text: t('mods.vipList.closeButton'), primary: false }]
         });
         console.log('[VIP List] Modal opened (fallback)');
         return true;
@@ -1379,7 +1409,7 @@ function stopAccountMenuObserver() {
 }
 
 // =======================
-// 4. Exports & Lifecycle Management
+// 5. Exports & Lifecycle Management
 // =======================
 
 exports = {

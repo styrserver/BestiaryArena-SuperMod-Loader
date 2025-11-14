@@ -425,6 +425,29 @@
       "currentStock": "Current stock",
       "exchangeItems": "Exchange your items for dust",
       "for": "for"
+    },
+    "vipList": {
+      "menuItem": "VIP List",
+      "modalTitle": "VIP List",
+      "closeButton": "Close",
+      "searchPlaceholder": "Search player...",
+      "addButton": "Add",
+      "addingButton": "Adding...",
+      "dropdownProfile": "Profile",
+      "dropdownCyclopedia": "Cyclopedia",
+      "dropdownRemoveVIP": "Remove VIP",
+      "columnName": "Name",
+      "columnLevel": "Level",
+      "columnStatus": "Status",
+      "columnRankPoints": "Rank Points",
+      "columnTimeSum": "Time Sum",
+      "statusOnline": "Online",
+      "statusOffline": "Offline",
+      "currentPlayerSuffix": "(you)",
+      "emptyState": "No VIP players added yet. Use the search box below to add players.",
+      "errorPlayerNotFound": "Player not found",
+      "errorDuplicate": "{name} already in your VIP List",
+      "successAdded": "Added {name} to VIP List"
     }
   }
 }

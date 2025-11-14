@@ -426,6 +426,29 @@
       "currentStock": "Produtos disponíveis",
       "exchangeItems": "Trocar seus itens por dust",
       "for": "por"
+    },
+    "vipList": {
+      "menuItem": "Lista VIP",
+      "modalTitle": "Lista VIP",
+      "closeButton": "Fechar",
+      "searchPlaceholder": "Buscar jogador...",
+      "addButton": "Adicionar",
+      "addingButton": "Adicionando...",
+      "dropdownProfile": "Perfil",
+      "dropdownCyclopedia": "Enciclopédia",
+      "dropdownRemoveVIP": "Remover VIP",
+      "columnName": "Nome",
+      "columnLevel": "Nível",
+      "columnStatus": "Status",
+      "columnRankPoints": "Pontos de Rank",
+      "columnTimeSum": "Soma de Tempo",
+      "statusOnline": "Online",
+      "statusOffline": "Offline",
+      "currentPlayerSuffix": "(você)",
+      "emptyState": "Nenhum jogador VIP adicionado ainda. Use a caixa de busca abaixo para adicionar jogadores.",
+      "errorPlayerNotFound": "Jogador não encontrado",
+      "errorDuplicate": "{name} já está na sua Lista VIP",
+      "successAdded": "{name} adicionado à Lista VIP"
     }
   }
 }
