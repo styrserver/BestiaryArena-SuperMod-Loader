@@ -28,7 +28,8 @@ const defaultConfig = {
   enablePlayercount: true,
   includeRunDataByDefault: true,
   includeHuntDataByDefault: true,
-  inventoryBorderStyle: 'Original'
+  inventoryBorderStyle: 'Original',
+  enableMismatchRefresh: false
 };
 
 // Storage key for this mod
@@ -2001,6 +2002,12 @@ function showSettingsModal() {
               <a href="https://bestiaryarena.wiki.gg/wiki/Temporary_Sandbox_Floor_Slider" target="_blank" rel="noopener noreferrer" style="color: #4a9eff; text-decoration: none; font-size: 13px;">${t('mods.betterUI.temporarySandboxFloorSliderLink')}</a>
             </div>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="mismatch-refresh-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Automatically refresh the browser when a server/simulation mismatch is detected">Refresh on Mismatch</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -2310,6 +2317,22 @@ function showSettingsModal() {
             console.log('[Mod Settings] Temporary sandbox floor slider', temporarySandboxFloorSliderCheckbox.checked ? 'enabled' : 'disabled');
           } catch (error) {
             console.error('[Mod Settings] Error toggling temporary sandbox floor slider:', error);
+          }
+        });
+      }
+      
+      const mismatchRefreshCheckbox = content.querySelector('#mismatch-refresh-toggle');
+      if (mismatchRefreshCheckbox) {
+        mismatchRefreshCheckbox.checked = config.enableMismatchRefresh || false;
+        
+        mismatchRefreshCheckbox.addEventListener('change', () => {
+          config.enableMismatchRefresh = mismatchRefreshCheckbox.checked;
+          saveConfig();
+          
+          if (mismatchRefreshCheckbox.checked) {
+            startMismatchRefreshMonitor();
+          } else {
+            stopMismatchRefreshMonitor();
           }
         });
       }
@@ -4787,6 +4810,10 @@ let autoplayRefreshCheckInterval = null;
 // Track last logged shiny enemies result to prevent duplicate logs
 let lastShinyEnemiesLogResult = null;
 
+// Mismatch refresh monitor state
+let mismatchRefreshMonitor = null;
+let originalFetchForMismatch = null;
+
 // Reset board activity timer when board state changes
 function resetBoardActivityTimer() {
   lastBoardActivityTime = Date.now();
@@ -5151,7 +5178,139 @@ function disableAntiIdleSounds() {
 }
 
 // =======================
-// 14. Playercount Functions
+// 14. Mismatch Refresh Monitor
+// =======================
+
+// Start monitoring for mismatch reports
+function startMismatchRefreshMonitor() {
+  if (mismatchRefreshMonitor) {
+    console.log('[Mod Settings] Mismatch refresh monitor already running');
+    return;
+  }
+  
+  if (!config.enableMismatchRefresh) {
+    return;
+  }
+  
+  console.log('[Mod Settings] Starting mismatch refresh monitor');
+  
+  // Store original fetch if not already stored
+  if (!originalFetchForMismatch) {
+    originalFetchForMismatch = window.fetch;
+  }
+  
+  // Intercept fetch requests to detect mismatch reports
+  window.fetch = async function(...args) {
+    // Check if this is a mismatch report request BEFORE making the request
+    let url = args[0];
+    let options = args[1] || {};
+    
+    // Handle Request object as first argument
+    if (url instanceof Request) {
+      // Extract URL from Request object
+      url = url.url;
+      // Merge options if second arg exists, otherwise use Request's properties
+      if (args[1]) {
+        options = { ...args[1] };
+      } else {
+        options = {};
+      }
+    }
+    
+    if (typeof url === 'string' && (url.includes('logMatch') || url.includes('reportMismatch'))) {
+      try {
+        // Check request body for mismatch type
+        let requestBody = options.body;
+        if (requestBody) {
+          let bodyText = null;
+          
+          // Handle different body types
+          if (typeof requestBody === 'string') {
+            bodyText = requestBody;
+          } else if (requestBody instanceof FormData || requestBody instanceof Blob) {
+            // Can't easily read these without consuming them
+            // Proceed with request and check response instead
+          } else if (requestBody instanceof ReadableStream) {
+            // Can't read stream without consuming it
+            // Proceed with request
+          } else {
+            // Try to stringify if it's an object
+            try {
+              bodyText = JSON.stringify(requestBody);
+            } catch (e) {
+              // Can't stringify, proceed with request
+            }
+          }
+          
+          // Parse nested JSON (mismatch reports are double-encoded)
+          if (bodyText) {
+            try {
+              const parsed = JSON.parse(bodyText);
+              let mismatchData = parsed;
+              
+              // Handle nested JSON structure
+              if (parsed['0']?.json) {
+                if (typeof parsed['0'].json === 'string') {
+                  mismatchData = JSON.parse(parsed['0'].json);
+                } else {
+                  mismatchData = parsed['0'].json;
+                }
+              }
+              
+              // Check if this is a mismatch report
+              if (mismatchData.type === 'mismatch') {
+                console.log('[Mod Settings] Mismatch detected! Refreshing browser in 1 second...');
+                
+                // Check if auto-reload is disabled
+                if (config.disableAutoReload) {
+                  console.log('[Mod Settings] Auto-reload disabled - skipping mismatch refresh');
+                } else {
+                  // Refresh browser after a short delay
+                  scheduleTimeout(() => {
+                    console.log('[Mod Settings] Refreshing browser due to mismatch...');
+                    location.reload();
+                  }, TIMEOUT_DELAYS.BROWSER_REFRESH);
+                }
+              }
+            } catch (parseError) {
+              // Ignore parse errors - not a mismatch report
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore errors when checking for mismatch
+        console.warn('[Mod Settings] Error checking for mismatch:', error);
+      }
+    }
+    
+    // Proceed with the original fetch request
+    return await originalFetchForMismatch.apply(this, args);
+  };
+  
+  mismatchRefreshMonitor = true;
+  console.log('[Mod Settings] Mismatch refresh monitor started');
+}
+
+// Stop monitoring for mismatch reports
+function stopMismatchRefreshMonitor() {
+  if (!mismatchRefreshMonitor) {
+    return;
+  }
+  
+  console.log('[Mod Settings] Stopping mismatch refresh monitor');
+  
+  // Restore original fetch
+  if (originalFetchForMismatch) {
+    window.fetch = originalFetchForMismatch;
+    originalFetchForMismatch = null;
+  }
+  
+  mismatchRefreshMonitor = null;
+  console.log('[Mod Settings] Mismatch refresh monitor stopped');
+}
+
+// =======================
+// 15. Playercount Functions
 // =======================
 
 // Fetch player count from API
@@ -5301,7 +5460,7 @@ function addPlayercountHeaderButton() {
 }
 
 // =======================
-// 15. Initialization
+// 16. Initialization
 // =======================
 
 function initBetterUI() {
@@ -5360,6 +5519,13 @@ function initBetterUI() {
       addPlayercountHeaderButton();
     } else {
       console.log('[Mod Settings] Playercount disabled in config');
+    }
+    
+    if (config.enableMismatchRefresh) {
+      console.log('[Mod Settings] Mismatch refresh enabled in config, starting monitor');
+      startMismatchRefreshMonitor();
+    } else {
+      console.log('[Mod Settings] Mismatch refresh disabled in config');
     }
     
     initTabObserver();
@@ -5488,6 +5654,7 @@ function cleanupBetterUI() {
     }
     
     stopAutoplayRefreshMonitor();
+    stopMismatchRefreshMonitor();
     disableAntiIdleSounds();
     
     // Cleanup playercount
@@ -5667,7 +5834,7 @@ function cleanupBetterUI() {
 }
 
 // =======================
-// 17. Exports & Lifecycle Management
+// 18. Exports & Lifecycle Management
 // =======================
 
 // Proper exports following mod development guide

@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 21 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -301,6 +301,14 @@ Local run data tracking and storage system:
 - Replay data management and storage
 - Integration with other mods for comprehensive tracking
 - Hidden mod that works behind the scenes
+
+#### VIP List
+Player management system for tracking favorite players:
+- Add players to your VIP list via search functionality
+- Display player information including level, status, rank points, and time sum with sortable columns
+- Quick access to player profiles and Cyclopedia from dropdown menu
+- Automatic data refresh when opening the VIP list modal
+- Accessible from the account menu for convenient management
 
 ### Official Mods
 

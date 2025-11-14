@@ -628,7 +628,8 @@ function renderLocalMods(mods) {
     'Outfiter.js',
     'Raid_Hunter.js',
     'Rank Pointer.js',
-    'RunTracker.js'
+    'RunTracker.js',
+    'VIP List.js'
   ];
 
 

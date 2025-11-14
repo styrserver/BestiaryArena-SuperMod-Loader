@@ -146,7 +146,8 @@ async function scanAndRegisterLocalMods() {
     { name: 'Mod Settings.js', enabled: true },
     { name: 'Raid_Hunter.js', enabled: true },
     { name: 'Rank Pointer.js', enabled: true },
-    { name: 'RunTracker.js', enabled: true }
+    { name: 'RunTracker.js', enabled: true },
+    { name: 'VIP List.js', enabled: true }
   ];
   // Build mod objects
   const mods = modFiles.map(({ name, enabled }) => ({
@@ -286,7 +287,8 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Outfiter.js',
     'Raid_Hunter.js',
     'Rank Pointer.js',
-    'RunTracker.js'
+    'RunTracker.js',
+    'VIP List.js'
   ];
 
 
