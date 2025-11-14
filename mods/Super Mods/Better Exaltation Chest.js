@@ -13,7 +13,11 @@
   const CONSTANTS = {
     DEBOUNCE_DELAY: 50,
     RETRY_MAX_ATTEMPTS: 5,
-    RETRY_BASE_DELAY: 100
+    RETRY_BASE_DELAY: 100,
+    STATE_UPDATE_DELAY: 200,
+    CAPACITY_UPDATE_DELAY: 200,
+    EQUIPMENT_CHECK_DELAY: 100,
+    SUBSCRIPTION_UPDATE_DELAY: 50
   };
   
   // Panel constants
@@ -96,6 +100,9 @@
   let lastOpenedEquipment = null;
   let equipmentCheckTimeout = null;
   let originalFetch = null;
+  
+  // Track pending timeouts for cleanup (memory leak prevention)
+  const pendingTimeouts = new Set();
   
   // Status tracking
   let equipmentStats = {
@@ -238,6 +245,73 @@
       console.warn(`[Better Exaltation Chest] Failed to load setting ${key}:`, error);
     }
     return defaultValue;
+  }
+  
+  // =======================
+  // Utility Helper Functions
+  // =======================
+  
+  /**
+   * Formats a number with comma separators (e.g., 1000 -> "1,000")
+   * @param {number} num - The number to format
+   * @returns {string} Formatted number string
+   */
+  function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  
+  /**
+   * Gets player context from state (using get() for latest state)
+   * @returns {object|null} Player context or null if unavailable
+   */
+  function getPlayerContext() {
+    try {
+      return globalThis.state?.player?.get()?.context || null;
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error getting player context:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Gets player context snapshot (using getSnapshot() for stable state)
+   * @returns {object|null} Player context snapshot or null if unavailable
+   */
+  function getPlayerContextSnapshot() {
+    try {
+      return globalThis.state?.player?.getSnapshot()?.context || null;
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error getting player context snapshot:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Updates capacity display with a delay to ensure state has updated
+   * @param {number} delay - Delay in milliseconds (defaults to CAPACITY_UPDATE_DELAY)
+   * @returns {number} Timeout ID for potential cleanup
+   */
+  function delayedUpdateCapacityDisplay(delay = CONSTANTS.CAPACITY_UPDATE_DELAY) {
+    const timeoutId = setTimeout(() => {
+      pendingTimeouts.delete(timeoutId);
+      updateCapacityDisplay();
+    }, delay);
+    pendingTimeouts.add(timeoutId);
+    return timeoutId;
+  }
+  
+  /**
+   * Clears all pending timeouts to prevent memory leaks
+   */
+  function clearAllPendingTimeouts() {
+    pendingTimeouts.forEach(timeoutId => {
+      try {
+        clearTimeout(timeoutId);
+      } catch (error) {
+        console.warn('[Better Exaltation Chest] Error clearing timeout:', error);
+      }
+    });
+    pendingTimeouts.clear();
   }
   
   // =======================
@@ -631,6 +705,7 @@
     // Clear any pending equipment checks
     if (equipmentCheckTimeout) {
       clearTimeout(equipmentCheckTimeout);
+      pendingTimeouts.delete(equipmentCheckTimeout);
       equipmentCheckTimeout = null;
     }
   }
@@ -642,8 +717,15 @@
         return;
       }
       
-      // Log arsenal status before opening
+      // Check if there are any chests left before clicking (only if auto-opening is active)
+      if (autoModeEnabled && checkAndStopIfNoChestsLeft()) {
+        return;
+      }
+      
+      // Log arsenal status and chest count before opening
       logArsenalStatus();
+      const chestCount = getExaltationChestCount();
+      console.log(`[Better Exaltation Chest] Chests remaining: ${chestCount}`);
       
       // Find the Open button in the current exaltation chest modal
       const openButton = findOpenButton();
@@ -686,7 +768,7 @@
   
   function getArsenalStatus() {
     try {
-      const playerContext = globalThis.state?.player?.get()?.context;
+      const playerContext = getPlayerContext();
       if (playerContext) {
         const monsterContainerTierCoin = playerContext.monsterContainerTierCoin || 0;
         const monsterContainerTierGold = playerContext.monsterContainerTierGold || 0;
@@ -721,6 +803,18 @@
     }
   }
   
+  function getExaltationChestCount() {
+    try {
+      const playerContext = getPlayerContext();
+      if (playerContext && playerContext.inventory) {
+        return Number(playerContext.inventory.equipChest) || 0;
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error getting chest count:', error);
+    }
+    return 0;
+  }
+  
   function checkAndStopIfArsenalFull() {
     const status = getArsenalStatus();
     if (!status || status.currentArsenalSize < status.maxCapArsenal) return false;
@@ -728,6 +822,16 @@
     console.log(`[Better Exaltation Chest] Arsenal full (${status.currentArsenalSize}/${status.maxCapArsenal}), stopping auto-opening`);
     stopAutoOpeningAndUpdateButton();
     return true;
+  }
+  
+  function checkAndStopIfNoChestsLeft() {
+    const chestCount = getExaltationChestCount();
+    if (chestCount <= 0) {
+      console.log(`[Better Exaltation Chest] No exaltation chests left (${chestCount}), stopping auto-opening`);
+      stopAutoOpeningAndUpdateButton();
+      return true;
+    }
+    return false;
   }
   
   function setupModalCloseObserver() {
@@ -1070,6 +1174,21 @@
     // Log arsenal status after opening (regardless of auto mode)
     logArsenalStatus();
     
+    // Check chest count after opening and stop if none left
+    const chestCheckTimeout = setTimeout(() => {
+      pendingTimeouts.delete(chestCheckTimeout);
+      const chestCount = getExaltationChestCount();
+      console.log(`[Better Exaltation Chest] Chests remaining after open: ${chestCount}`);
+      if (autoModeEnabled && chestCount <= 0) {
+        console.log('[Better Exaltation Chest] No chests left after opening, stopping auto-opening');
+        stopAutoOpeningAndUpdateButton();
+      }
+    }, CONSTANTS.STATE_UPDATE_DELAY);
+    pendingTimeouts.add(chestCheckTimeout);
+    
+    // Update capacity display after opening (with delay to ensure state has updated)
+    delayedUpdateCapacityDisplay();
+    
     // Check if arsenal is full after opening and stop auto-opening if active
     if (isArsenalFull()) {
       const status = getArsenalStatus();
@@ -1089,10 +1208,12 @@
     // Clear any existing timeout
     if (equipmentCheckTimeout) {
       clearTimeout(equipmentCheckTimeout);
+      pendingTimeouts.delete(equipmentCheckTimeout);
     }
     
     // Check equipment against settings immediately using chest response data
     equipmentCheckTimeout = setTimeout(() => {
+      pendingTimeouts.delete(equipmentCheckTimeout);
       const equipment = getEquipmentDetailsFromChestResponse(equipData);
       const checkResult = checkEquipmentAgainstSettings(equipment, { 
         updateStats: true, 
@@ -1132,6 +1253,9 @@
                 // Manually update dust display with animation (state updates don't reliably trigger subscription)
                 updateDustDisplayWithAnimation(result.dustGained);
                 
+                // Update capacity display after disenchanting (with delay to ensure state has updated)
+                delayedUpdateCapacityDisplay();
+                
                 // Update the log entry with dust gained
                 if (equipmentLog.length > 0) {
                   const lastEntry = equipmentLog[equipmentLog.length - 1];
@@ -1146,8 +1270,11 @@
           });
       } else {
         console.log('[Better Exaltation Chest] ✅ Equipment matches settings, keeping it');
+        // Update capacity display when equipment is kept (with delay to ensure state has updated)
+        delayedUpdateCapacityDisplay();
       }
-    }, 100); // Shorter delay since we don't need to wait for inventory update
+    }, CONSTANTS.EQUIPMENT_CHECK_DELAY); // Shorter delay since we don't need to wait for inventory update
+    pendingTimeouts.add(equipmentCheckTimeout);
   }
   
   // =======================
@@ -1261,6 +1388,7 @@
       // Clean up reposition timeout
       if (repositionTimeout) {
         clearTimeout(repositionTimeout);
+        pendingTimeouts.delete(repositionTimeout);
         repositionTimeout = null;
       }
       
@@ -1521,15 +1649,18 @@
           // Clear existing timeout
           if (repositionTimeout) {
             clearTimeout(repositionTimeout);
+            pendingTimeouts.delete(repositionTimeout);
           }
           
           // Debounce repositioning to reduce log spam
           repositionTimeout = setTimeout(() => {
+            pendingTimeouts.delete(repositionTimeout);
             if (activeExaltationPanel && modal.isConnected) {
               positionPanelInsideModal(activeExaltationPanel, modal);
             }
             repositionTimeout = null;
           }, 100); // Increased delay to reduce frequency
+          pendingTimeouts.add(repositionTimeout);
         }
       });
     });
@@ -2276,13 +2407,19 @@
     try {
       console.log('injectDustDisplayIntoModal called');
       
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      const playerContext = getPlayerContextSnapshot();
       const currentDust = Number(playerContext?.dust) || 0;
       console.log('Current dust:', currentDust);
       
       // Check if dust display already exists
       if (document.getElementById('better-exaltation-dust-display')) {
         console.log('Dust display already exists, skipping');
+        return;
+      }
+      
+      // Check if capacity display already exists
+      if (document.getElementById('better-exaltation-capacity-display')) {
+        console.log('Capacity display already exists, skipping');
         return;
       }
       
@@ -2297,13 +2434,41 @@
       
       const dustAmount = document.createElement('span');
       dustAmount.id = 'better-exaltation-dust-amount';
-      dustAmount.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      dustAmount.textContent = formatNumber(currentDust);
       
       dustDisplay.appendChild(dustIcon);
       dustDisplay.appendChild(dustAmount);
       
       // Insert dust display at the beginning of the footer
       footer.insertBefore(dustDisplay, footer.firstChild);
+      
+      // Create capacity display
+      const capacityStatus = getArsenalStatus();
+      const currentCapacity = capacityStatus ? capacityStatus.currentArsenalSize : 0;
+      const maxCapacity = capacityStatus ? capacityStatus.maxCapArsenal : 0;
+      
+      const capacityDisplay = document.createElement('div');
+      capacityDisplay.className = 'pixel-font-16 frame-pressed-1 surface-darker flex items-center justify-end gap-1 px-1.5 pb-px text-right text-whiteRegular';
+      capacityDisplay.id = 'better-exaltation-capacity-display';
+      capacityDisplay.style.marginLeft = '0';
+      capacityDisplay.style.marginRight = '40px';
+      
+      const capacityIcon = document.createElement('img');
+      capacityIcon.src = '/assets/icons/inventory.png';
+      capacityIcon.alt = 'Capacity';
+      capacityIcon.className = 'pixelated';
+      capacityIcon.style.width = '10px';
+      capacityIcon.style.height = '10px';
+      
+      const capacityAmount = document.createElement('span');
+      capacityAmount.id = 'better-exaltation-capacity-amount';
+      capacityAmount.textContent = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+      
+      capacityDisplay.appendChild(capacityIcon);
+      capacityDisplay.appendChild(capacityAmount);
+      
+      // Insert capacity display after dust display
+      footer.insertBefore(capacityDisplay, dustDisplay.nextSibling);
       
       // Subscribe to dust changes only (optimized with select)
       if (globalThis.state?.player?.select) {
@@ -2331,7 +2496,7 @@
               // Update display for dust decreases or other changes
               const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
               if (dustAmountElement) {
-                dustAmountElement.textContent = numericDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                dustAmountElement.textContent = formatNumber(numericDust);
               }
             }
             
@@ -2339,6 +2504,33 @@
           });
         
         dustDisplay._unsubscribe = subscription.unsubscribe;
+        
+        // Subscribe to capacity changes
+        let previousEquipsLength = currentCapacity;
+        let isFirstCapacityCallback = true;
+        
+        const capacitySubscription = globalThis.state.player
+          .select((state) => state.context?.equips?.length)
+          .subscribe((newLength) => {
+            const numericLength = Number(newLength) || 0;
+            
+            // Skip the initial callback
+            if (isFirstCapacityCallback) {
+              isFirstCapacityCallback = false;
+              previousEquipsLength = numericLength;
+              return;
+            }
+            
+            if (numericLength !== previousEquipsLength) {
+              console.log('[Better Exaltation Chest] Capacity changed detected via subscription:', previousEquipsLength, '->', numericLength);
+              // Use a small delay to ensure state is fully updated
+              delayedUpdateCapacityDisplay(CONSTANTS.SUBSCRIPTION_UPDATE_DELAY);
+            }
+            
+            previousEquipsLength = numericLength;
+          });
+        
+        capacityDisplay._unsubscribe = capacitySubscription.unsubscribe;
       }
       
       console.log('Dust display injected successfully');
@@ -2352,12 +2544,33 @@
     try {
       const dustAmountElement = document.getElementById('better-exaltation-dust-amount');
       if (dustAmountElement) {
-        const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+        const playerContext = getPlayerContextSnapshot();
         const currentDust = Number(playerContext?.dust) || 0;
-        dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatNumber(currentDust);
       }
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error updating dust display:', error);
+    }
+  }
+  
+  function updateCapacityDisplay() {
+    try {
+      const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+      if (capacityAmountElement) {
+        // Use get() instead of getSnapshot() to ensure we get the latest state
+        const capacityStatus = getArsenalStatus();
+        if (capacityStatus) {
+          const currentCapacity = capacityStatus.currentArsenalSize;
+          const maxCapacity = capacityStatus.maxCapArsenal;
+          const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+          capacityAmountElement.textContent = formattedText;
+          console.log('[Better Exaltation Chest] Capacity display updated:', formattedText);
+        }
+      } else {
+        console.warn('[Better Exaltation Chest] Capacity amount element not found');
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error updating capacity display:', error);
     }
   }
   
@@ -2374,7 +2587,7 @@
         const progress = Math.min(elapsed / duration, 1);
         const currentValue = Math.round(startValue + (difference * progress));
         
-        dustAmountElement.textContent = currentValue.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatNumber(currentValue);
         
         if (progress < 1) {
           requestAnimationFrame(updateCount);
@@ -2410,7 +2623,7 @@
         return;
       }
       
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+      const playerContext = getPlayerContextSnapshot();
       const currentDust = Number(playerContext?.dust) || 0;
       
       if (numericDustChange !== 0) {
@@ -2419,7 +2632,7 @@
         console.log('[Better Exaltation Chest] Animating dust from', startValue, 'to', endValue);
         animateDustCount(startValue, endValue, 800);
       } else {
-        dustAmountElement.textContent = currentDust.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        dustAmountElement.textContent = formatNumber(currentDust);
       }
       
     } catch (error) {
@@ -2434,6 +2647,12 @@
       if (dustDisplay && dustDisplay._unsubscribe) {
         dustDisplay._unsubscribe();
         dustDisplay._unsubscribe = null;
+      }
+      
+      const capacityDisplay = document.getElementById('better-exaltation-capacity-display');
+      if (capacityDisplay && capacityDisplay._unsubscribe) {
+        capacityDisplay._unsubscribe();
+        capacityDisplay._unsubscribe = null;
       }
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error cleaning up dust display:', error);
@@ -2476,6 +2695,10 @@
     
     // Log arsenal status when modal opens
     logArsenalStatus();
+    
+    // Debug: Log chest count when modal opens
+    const chestCount = getExaltationChestCount();
+    console.log(`[Better Exaltation Chest] Debug: User has ${chestCount} exaltation chest(s) available`);
     
     try {
       console.log('Enhancing exaltation chest title');
@@ -2573,17 +2796,42 @@
     // Clean up all managed event listeners first
     cleanupAllEventListeners();
     
+    // Clean up observer
     if (observer) {
       observer.disconnect();
       observer = null;
     }
     if (observerTimeout) {
       clearTimeout(observerTimeout);
+      pendingTimeouts.delete(observerTimeout);
       observerTimeout = null;
     }
     
-    // Stop auto-opening
+    // Stop auto-opening (cleans up interval, modalCloseObserver, equipmentCheckTimeout)
     stopAutoOpening();
+    
+    // Ensure modalCloseObserver is cleaned up (in case stopAutoOpening wasn't called)
+    if (modalCloseObserver) {
+      modalCloseObserver.disconnect();
+      modalCloseObserver = null;
+    }
+    
+    // Clear equipmentCheckTimeout if still pending
+    if (equipmentCheckTimeout) {
+      clearTimeout(equipmentCheckTimeout);
+      pendingTimeouts.delete(equipmentCheckTimeout);
+      equipmentCheckTimeout = null;
+    }
+    
+    // Clear repositionTimeout if still pending
+    if (repositionTimeout) {
+      clearTimeout(repositionTimeout);
+      pendingTimeouts.delete(repositionTimeout);
+      repositionTimeout = null;
+    }
+    
+    // Clear all pending timeouts (memory leak prevention)
+    clearAllPendingTimeouts();
     
     // Remove network interception
     removeNetworkInterception();

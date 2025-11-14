@@ -62,6 +62,9 @@ let accountMenuObserver = null;
 const processedMenus = new WeakSet();
 let vipListModalInstance = null;
 
+// Track timeouts for cleanup (memory leak prevention)
+const pendingTimeouts = new Set();
+
 // Sort state: { column: 'name'|'level'|'status'|'rankPoints'|'timeSum', direction: 'asc'|'desc' }
 let currentSortState = {
   column: 'name',
@@ -156,6 +159,32 @@ function setupVIPDropdownClickHandler() {
   };
   
   document.addEventListener('click', vipDropdownClickHandler);
+}
+
+// Remove global click handler (memory leak prevention)
+function removeVIPDropdownClickHandler() {
+  if (vipDropdownClickHandler) {
+    document.removeEventListener('click', vipDropdownClickHandler);
+    vipDropdownClickHandler = null;
+  }
+}
+
+// Track and clear timeouts (memory leak prevention)
+function trackTimeout(timeoutId) {
+  pendingTimeouts.add(timeoutId);
+  return timeoutId;
+}
+
+function clearTrackedTimeout(timeoutId) {
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    pendingTimeouts.delete(timeoutId);
+  }
+}
+
+function clearAllPendingTimeouts() {
+  pendingTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+  pendingTimeouts.clear();
 }
 
 // =======================
@@ -296,7 +325,8 @@ function openCyclopediaForPlayer(playerName) {
   };
   
   // Wait a bit for modal to close, then open Cyclopedia
-  setTimeout(() => {
+  const timeout1 = setTimeout(() => {
+    pendingTimeouts.delete(timeout1);
     try {
       // Set searched player name in cyclopediaState before opening
       setCyclopediaState(playerName);
@@ -317,7 +347,8 @@ function openCyclopediaForPlayer(playerName) {
       }
       
       // After opening, navigate to Characters tab and Leaderboards
-      setTimeout(() => {
+      const timeout2 = setTimeout(() => {
+        pendingTimeouts.delete(timeout2);
         setCyclopediaState(playerName);
         
         // Find Characters tab button
@@ -337,7 +368,8 @@ function openCyclopediaForPlayer(playerName) {
         }
         
         // Wait for Characters tab to load, then click Leaderboards and trigger search
-        setTimeout(() => {
+        const timeout3 = setTimeout(() => {
+          pendingTimeouts.delete(timeout3);
           setCyclopediaState(playerName);
           
           // Set selected category to Leaderboards
@@ -363,7 +395,8 @@ function openCyclopediaForPlayer(playerName) {
           }
           
           // Wait a bit, then trigger the search
-          setTimeout(() => {
+          const timeout4 = setTimeout(() => {
+            pendingTimeouts.delete(timeout4);
             const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
               const text = btn.textContent?.trim() || '';
               return text === 'Search';
@@ -373,12 +406,16 @@ function openCyclopediaForPlayer(playerName) {
               searchButton.click();
             }
           }, TIMEOUTS.NORMAL);
+          trackTimeout(timeout4);
         }, TIMEOUTS.LONGER);
+        trackTimeout(timeout3);
       }, TIMEOUTS.LONG);
+      trackTimeout(timeout2);
     } catch (error) {
       console.error('[VIP List] Error opening Cyclopedia:', error);
     }
   }, TIMEOUTS.SHORT);
+  trackTimeout(timeout1);
 }
 
 // =======================
@@ -430,7 +467,8 @@ function positionDropdown(dropdown, openUpward) {
 
 // Adjust dropdown position after rendering if it extends outside viewport
 function adjustDropdownPosition(dropdown, button, openUpward) {
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
+    pendingTimeouts.delete(timeoutId);
     const dropdownRect = dropdown.getBoundingClientRect();
     const viewportBottom = window.innerHeight;
     const viewportTop = 0;
@@ -448,6 +486,7 @@ function adjustDropdownPosition(dropdown, button, openUpward) {
       positionDropdown(dropdown, false);
     }
   }, TIMEOUTS.IMMEDIATE);
+  trackTimeout(timeoutId);
 }
 
 // =======================
@@ -484,10 +523,12 @@ function showPlaceholderMessage(searchInput, originalPlaceholder, message, class
   searchInput.classList.remove('error', 'success', 'duplicate');
   searchInput.classList.add(className);
   
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     searchInput.placeholder = originalPlaceholder;
     searchInput.classList.remove(className);
+    pendingTimeouts.delete(timeoutId);
   }, TIMEOUTS.PLACEHOLDER_RESET);
+  trackTimeout(timeoutId);
 }
 
 // Create add player handler for search input
@@ -889,7 +930,8 @@ function injectVIPListItem(menuElement) {
     e.stopPropagation();
     openVIPListModal();
     // Close the menu
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      pendingTimeouts.delete(timeoutId);
       document.dispatchEvent(new KeyboardEvent('keydown', { 
         key: 'Escape', 
         code: 'Escape', 
@@ -897,6 +939,7 @@ function injectVIPListItem(menuElement) {
         bubbles: true 
       }));
     }, TIMEOUTS.SHORT);
+    trackTimeout(timeoutId);
   });
   
   // Add hover effects
@@ -1402,21 +1445,25 @@ async function openVIPListModal() {
           text: t('mods.vipList.closeButton'), 
           primary: true,
           onClick: () => {
+            // Clear modal instance reference (memory leak prevention)
             vipListModalInstance = null;
           }
         }]
       });
       
       // Store modal instance for refreshing display
-      setTimeout(() => {
+      const timeout1 = setTimeout(() => {
+        pendingTimeouts.delete(timeout1);
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
           vipListModalInstance = dialog;
         }
       }, TIMEOUTS.MEDIUM);
+      trackTimeout(timeout1);
       
       // Adjust dialog styles after creation
-      setTimeout(() => {
+      const timeout2 = setTimeout(() => {
+        pendingTimeouts.delete(timeout2);
         const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
         if (dialog) {
           applyModalStyles(dialog);
@@ -1428,6 +1475,7 @@ async function openVIPListModal() {
           }
         }
       }, TIMEOUTS.NORMAL);
+      trackTimeout(timeout2);
       
       console.log('[VIP List] Modal opened');
       return modal;
@@ -1468,9 +1516,11 @@ function startAccountMenuObserver() {
         
         const menu = isMenu ? node : hasMenu;
         if (menu) {
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
+            pendingTimeouts.delete(timeoutId);
             injectVIPListItem(menu);
           }, TIMEOUTS.SHORT);
+          trackTimeout(timeoutId);
         }
       }
     }
@@ -1483,12 +1533,14 @@ function startAccountMenuObserver() {
   });
   
   // Also check for existing menus
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
+    pendingTimeouts.delete(timeoutId);
     const menus = document.querySelectorAll('[role="menu"]');
     menus.forEach(menu => {
       injectVIPListItem(menu);
     });
   }, TIMEOUTS.INITIAL_CHECK);
+  trackTimeout(timeoutId);
   
   console.log('[VIP List] Account menu observer started');
 }
@@ -1522,6 +1574,15 @@ exports = {
   cleanup: function() {
     try {
       stopAccountMenuObserver();
+      
+      // Remove global click handler (memory leak prevention)
+      removeVIPDropdownClickHandler();
+      
+      // Clear all pending timeouts (memory leak prevention)
+      clearAllPendingTimeouts();
+      
+      // Clear modal instance reference
+      vipListModalInstance = null;
       
       // Remove injected menu items
       const vipListItems = document.querySelectorAll('.vip-list-menu-item');
