@@ -109,6 +109,8 @@
       "temporarySandboxFloorSlider": "⚠️ Controle Deslizante de Andar Sandbox Temporário",
       "temporarySandboxFloorSliderWarning": "Ativar controle deslizante de andar sandbox temporário",
       "temporarySandboxFloorSliderLink": "Poste seus recordes aqui",
+      "refreshOnMismatch": "⚠️ Atualizar em Incompatibilidade",
+      "refreshOnMismatchTooltip": "Atualiza automaticamente o navegador quando uma incompatibilidade servidor/simulação é detectada",
       "inventoryBorderStyle": "Botões de Mod do Inventário",
       "staminaFullText": "Cheio",
       "favoriteMenuLabel": "Favorito"

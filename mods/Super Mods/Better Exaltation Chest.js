@@ -637,6 +637,14 @@
   
   function clickOpenButton() {
     try {
+      // Check if arsenal is full before clicking (only if auto-opening is active)
+      if (autoModeEnabled && checkAndStopIfArsenalFull()) {
+        return;
+      }
+      
+      // Log arsenal status before opening
+      logArsenalStatus();
+      
       // Find the Open button in the current exaltation chest modal
       const openButton = findOpenButton();
       
@@ -645,17 +653,11 @@
         openButton.click();
       } else {
         console.log('[Better Exaltation Chest] Open button not found, stopping auto-opening');
-        stopAutoOpening();
-        // Reset auto button to disabled state
-        autoModeEnabled = false;
-        const autoButton = document.getElementById('better-exaltation-auto-btn');
-        if (autoButton) {
-          updateAutoButtonState(autoButton);
-        }
+        stopAutoOpeningAndUpdateButton();
       }
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error clicking Open button:', error);
-      stopAutoOpening();
+      stopAutoOpeningAndUpdateButton();
     }
   }
   
@@ -676,6 +678,56 @@
     const openButton = exaltationModal.querySelector('button[data-state="closed"]');
     
     return openButton;
+  }
+  
+  // =======================
+  // Arsenal Capacity Functions
+  // =======================
+  
+  function getArsenalStatus() {
+    try {
+      const playerContext = globalThis.state?.player?.get()?.context;
+      if (playerContext) {
+        const monsterContainerTierCoin = playerContext.monsterContainerTierCoin || 0;
+        const monsterContainerTierGold = playerContext.monsterContainerTierGold || 0;
+        const maxCapArsenal = ((monsterContainerTierCoin + monsterContainerTierGold) * 10) + 40;
+        const currentArsenalSize = playerContext.equips?.length || 0;
+        return { currentArsenalSize, maxCapArsenal };
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error getting arsenal status:', error);
+    }
+    return null;
+  }
+  
+  function isArsenalFull() {
+    const status = getArsenalStatus();
+    return status ? status.currentArsenalSize >= status.maxCapArsenal : false;
+  }
+  
+  function logArsenalStatus() {
+    const status = getArsenalStatus();
+    if (status) {
+      console.log(`[Better Exaltation Chest] Arsenal: ${status.currentArsenalSize}/${status.maxCapArsenal}`);
+    }
+  }
+  
+  function stopAutoOpeningAndUpdateButton() {
+    stopAutoOpening();
+    autoModeEnabled = false;
+    const autoButton = document.getElementById('better-exaltation-auto-btn');
+    if (autoButton) {
+      updateAutoButtonState(autoButton);
+    }
+  }
+  
+  function checkAndStopIfArsenalFull() {
+    const status = getArsenalStatus();
+    if (!status || status.currentArsenalSize < status.maxCapArsenal) return false;
+    
+    console.log(`[Better Exaltation Chest] Arsenal full (${status.currentArsenalSize}/${status.maxCapArsenal}), stopping auto-opening`);
+    stopAutoOpeningAndUpdateButton();
+    return true;
   }
   
   function setupModalCloseObserver() {
@@ -705,62 +757,45 @@
         // Check if the modal was removed from the DOM
         if (mutation.type === 'childList') {
           mutation.removedNodes.forEach((node) => {
-            if (node === modal) {
+            if (node === modal || (node.nodeType === Node.ELEMENT_NODE && node.contains && node.contains(modal))) {
               console.log('[Better Exaltation Chest] Modal closed, stopping auto-opening');
-              stopAutoOpening();
-              // Reset auto button to disabled state
-              autoModeEnabled = false;
-              const autoButton = document.getElementById('better-exaltation-auto-btn');
-              if (autoButton) {
-                updateAutoButtonState(autoButton);
-              }
+              stopAutoOpeningAndUpdateButton();
             }
           });
         }
         
         // Check if the modal's data-state changed to closed
-        if (mutation.type === 'attributes' && mutation.attributeName === 'data-state') {
+        if (mutation.type === 'attributes' && mutation.attributeName === 'data-state' && mutation.target === modal) {
           const newState = modal.getAttribute('data-state');
           if (newState === 'closed' || !newState) {
             console.log('[Better Exaltation Chest] Modal state changed to closed, stopping auto-opening');
-            stopAutoOpening();
-            // Reset auto button to disabled state
-            autoModeEnabled = false;
-            const autoButton = document.getElementById('better-exaltation-auto-btn');
-            if (autoButton) {
-              updateAutoButtonState(autoButton);
-            }
+            stopAutoOpeningAndUpdateButton();
           }
         }
       });
     });
     
-    // Observe the modal and its parent for changes
-    modalCloseObserver.observe(document.body, {
+    // Observe the modal itself for state changes
+    modalCloseObserver.observe(modal, {
       childList: true,
-      subtree: true,
       attributes: true,
       attributeFilter: ['data-state']
     });
     
-    // Also observe the modal itself for attribute changes
-    modalCloseObserver.observe(modal, {
-      attributes: true,
-      attributeFilter: ['data-state']
+    // Also observe document.body for modal removal
+    // This is needed to detect when the modal is removed from DOM
+    // We use subtree: true to catch removal regardless of nesting level
+    modalCloseObserver.observe(document.body, {
+      childList: true,
+      subtree: true, // Need subtree to catch modal removal at any nesting level
+      attributes: false
     });
   }
   
   function disableAutoOpeningIfActive() {
     if (autoModeEnabled) {
       console.log('[Better Exaltation Chest] Settings changed, disabling auto-opening');
-      stopAutoOpening();
-      autoModeEnabled = false;
-      
-      // Update the auto button appearance
-      const autoButton = document.getElementById('better-exaltation-auto-btn');
-      if (autoButton) {
-        updateAutoButtonState(autoButton);
-      }
+      stopAutoOpeningAndUpdateButton();
     }
   }
   
@@ -816,6 +851,19 @@
     }
   }
   
+  // Calculate rule specificity (higher = more specific)
+  // More specific rules should be checked first
+  function calculateRuleSpecificity(setup) {
+    let specificity = 0;
+    // Equipment name specificity (most important)
+    if (setup.equipment !== 'All') specificity += 3;
+    // Tier specificity
+    if (setup.tier !== 'All') specificity += 2;
+    // Stat specificity
+    if (setup.stat !== 'All') specificity += 1;
+    return specificity;
+  }
+  
   // Unified equipment checking function
   function checkEquipmentAgainstSettings(equipment, options = {}) {
     const { 
@@ -862,10 +910,19 @@
         equipmentLog.push(logEntry);
       }
       
-      // Check against each equipment setup rule
-      for (const setup of equipmentSetup) {
-        // Check equipment type
-        if (setup.equipment !== 'All' && setup.equipment !== equipment.name) {
+      // Sort rules by specificity (most specific first) to prioritize specific rules over general ones
+      const sortedRules = [...equipmentSetup].sort((a, b) => {
+        const specificityA = calculateRuleSpecificity(a);
+        const specificityB = calculateRuleSpecificity(b);
+        return specificityB - specificityA; // Higher specificity first
+      });
+      
+      // Check against each equipment setup rule (most specific first)
+      for (const setup of sortedRules) {
+        // Check equipment type (trim whitespace for safety)
+        const setupEquipment = (setup.equipment || '').trim();
+        const equipmentName = (equipment.name || '').trim();
+        if (setupEquipment !== 'All' && setupEquipment !== equipmentName) {
           continue;
         }
         
@@ -877,13 +934,25 @@
           }
         }
         
-        // Check stat requirement
-        if (setup.stat !== 'All' && setup.stat !== equipment.stat) {
-          continue;
+        // Check stat requirement (case-insensitive comparison)
+        if (setup.stat !== 'All') {
+          const setupStat = (setup.stat || '').toUpperCase().trim();
+          const equipmentStat = (equipment.stat || '').toUpperCase().trim();
+          if (setupStat !== equipmentStat) {
+            continue;
+          }
         }
         
         // If we reach here, this setup rule matches
-        console.log('[Better Exaltation Chest] ✅ Equipment matches setup rule:', setup);
+        const specificity = calculateRuleSpecificity(setup);
+        console.log('[Better Exaltation Chest] ✅ Equipment matches setup rule (specificity: ' + specificity + '):', {
+          equipment: setup.equipment,
+          tier: setup.tier,
+          stat: setup.stat,
+          matchedEquipment: equipment.name,
+          matchedTier: equipment.tier,
+          matchedStat: equipment.stat
+        });
         
         if (updateStats) {
           equipmentStats.kept++;
@@ -998,6 +1067,21 @@
   
   
   function handleOpenedEquipmentFromChestResponse(equipData) {
+    // Log arsenal status after opening (regardless of auto mode)
+    logArsenalStatus();
+    
+    // Check if arsenal is full after opening and stop auto-opening if active
+    if (isArsenalFull()) {
+      const status = getArsenalStatus();
+      if (status) {
+        console.log(`[Better Exaltation Chest] Arsenal reached cap (${status.currentArsenalSize}/${status.maxCapArsenal}) after opening chest`);
+      }
+      if (autoModeEnabled) {
+        stopAutoOpeningAndUpdateButton();
+      }
+      return;
+    }
+    
     if (!autoModeEnabled) {
       return; // Only process if auto-opening is active
     }
@@ -2389,6 +2473,9 @@
       console.log('Modal already processed, returning true');
       return true;
     }
+    
+    // Log arsenal status when modal opens
+    logArsenalStatus();
     
     try {
       console.log('Enhancing exaltation chest title');

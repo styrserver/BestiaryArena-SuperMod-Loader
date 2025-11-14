@@ -2005,7 +2005,7 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="mismatch-refresh-toggle" style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="Automatically refresh the browser when a server/simulation mismatch is detected">Refresh on Mismatch</span>
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.refreshOnMismatchTooltip')}">${t('mods.betterUI.refreshOnMismatch')}</span>
             </label>
           </div>
         `;

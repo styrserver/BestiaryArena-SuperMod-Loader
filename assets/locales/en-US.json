@@ -109,6 +109,8 @@
       "temporarySandboxFloorSlider": "⚠️ Temporary Sandbox Floor Slider",
       "temporarySandboxFloorSliderWarning": "Enable temporary sandbox floor slider",
       "temporarySandboxFloorSliderLink": "Post your records here",
+      "refreshOnMismatch": "⚠️ Refresh on Mismatch",
+      "refreshOnMismatchTooltip": "Automatically refresh the browser when a server/simulation mismatch is detected",
       "inventoryBorderStyle": "Inventory Mod Buttons",
       "staminaFullText": "Full",
       "favoriteMenuLabel": "Favorite"
