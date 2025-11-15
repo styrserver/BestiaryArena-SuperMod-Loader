@@ -876,6 +876,7 @@ function snapshotIntoTotals() {
 
 // Storage keys for persistence
 const HUNT_ANALYZER_STORAGE_KEY = 'huntAnalyzerData';
+const HUNT_ANALYZER_PANEL_SETTINGS_KEY = 'hunt-analyzer-panel-settings';
 const HUNT_ANALYZER_STATE_KEY = 'huntAnalyzerState';
 const HUNT_ANALYZER_SETTINGS_KEY = 'huntAnalyzerSettings';
 
@@ -5013,10 +5014,11 @@ function createAutoplayAnalyzerPanel() {
     if (HuntAnalyzerState.settings.persistData) {
         saveHuntAnalyzerState();
     }
-    let currentLayoutMode = LAYOUT_MODES.VERTICAL; // Default to vertical layout
-
-    // Create main panel container
+    // Create main panel container (this loads and applies saved settings)
     const panel = createPanelContainer();
+    
+    // Sync currentLayoutMode with panelState.mode after settings are loaded
+    let currentLayoutMode = (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL;
     
     // Create header section
     const { topHeaderContainer, titleAndControlsRow, headerControls, roomIdDisplay, styleButton, minimizeBtn, closeBtn } = createHeaderSection();
@@ -5766,6 +5768,50 @@ function createAutoplayAnalyzerPanel() {
 
     document.body.appendChild(panel);
 
+    // Apply saved layout mode if available
+    if (panelState && panelState.mode) {
+        currentLayoutMode = panelState.mode;
+        // Apply layout mode to panel (preserveSize=true to keep saved width/height)
+        applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, true);
+        
+        // Re-apply saved size after layout mode to ensure it takes precedence
+        const savedSettings = loadPanelSettings();
+        if (savedSettings) {
+            if (savedSettings.width) {
+                const width = parseInt(savedSettings.width);
+                if (!isNaN(width)) {
+                    const layout = LAYOUT_DIMENSIONS[panelState.mode];
+                    const clampedWidth = clamp(width, layout.minWidth, layout.maxWidth);
+                    panel.style.width = clampedWidth + 'px';
+                }
+            }
+            if (savedSettings.height) {
+                const height = parseInt(savedSettings.height);
+                if (!isNaN(height)) {
+                    const layout = LAYOUT_DIMENSIONS[panelState.mode];
+                    const clampedHeight = clamp(height, layout.minHeight, layout.maxHeight);
+                    panel.style.height = clampedHeight + 'px';
+                }
+            }
+        }
+        
+        // Update button states based on saved layout mode
+        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+            styleButton.textContent = 'Horizontal';
+            styleButton.title = 'Switch to horizontal layout';
+            minimizeBtn.textContent = '—';
+            minimizeBtn.title = 'Minimize Analyzer';
+        } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
+            styleButton.textContent = 'Vertical';
+            styleButton.title = 'Switch to vertical layout';
+            minimizeBtn.textContent = '—';
+            minimizeBtn.title = 'Minimize Analyzer';
+        } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
+            minimizeBtn.textContent = '+';
+            minimizeBtn.title = 'Restore Analyzer';
+        }
+    }
+
     // Set up timer for per-hour metrics calculation (needs to update every second)
     if (updateIntervalId) {
         clearInterval(updateIntervalId);
@@ -6039,6 +6085,29 @@ function updatePanelPosition() {
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
 
+    // Check if panel has a saved position (has explicit top/left styles set)
+    // If it does, preserve it instead of auto-positioning
+    const hasSavedPosition = panel.style.top && panel.style.left && 
+                             panel.style.top !== 'auto' && panel.style.left !== 'auto' &&
+                             panel.style.top.trim() !== '' && panel.style.left.trim() !== '';
+    
+    if (hasSavedPosition) {
+        // Panel has a saved position, don't override it
+        // Just ensure it stays within viewport bounds
+        const rect = panel.getBoundingClientRect();
+        const maxLeft = window.innerWidth - panel.offsetWidth;
+        const maxTop = window.innerHeight - panel.offsetHeight;
+        
+        if (rect.left < 0) panel.style.left = '0px';
+        else if (rect.left > maxLeft) panel.style.left = Math.max(0, maxLeft) + 'px';
+        
+        if (rect.top < 0) panel.style.top = '0px';
+        else if (rect.top > maxTop) panel.style.top = Math.max(0, maxTop) + 'px';
+        
+        return;
+    }
+
+    // No saved position, use auto-positioning relative to main element
     const mainElement = document.querySelector('main');
     const panelWidth = panel.offsetWidth; // Get the actual rendered width of the panel
     const gap = 10; // Small gap in pixels between the panel and the main content
@@ -6104,14 +6173,24 @@ function toggleMinimize() {
     applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer);
     updatePanelLayout(panel);
     updatePanelPosition();
+    
+    // Save panel settings after layout mode change
+    savePanelSettings(panel);
 }
 
 // Add this helper function near the top (after LAYOUT_DIMENSIONS):
-function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer) {
+function applyLayoutMode(panel, mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, preserveSize = false) {
     const layout = LAYOUT_DIMENSIONS[mode];
     if (!layout) return;
-    panel.style.width = layout.width + 'px';
-    panel.style.height = layout.height + 'px';
+    
+    // Only set width/height if not preserving size (i.e., when user explicitly changes layout mode)
+    // When preserving size (on load), only set constraints
+    if (!preserveSize) {
+        panel.style.width = layout.width + 'px';
+        panel.style.height = layout.height + 'px';
+    }
+    
+    // Always apply constraints
     panel.style.minWidth = layout.minWidth + 'px';
     panel.style.maxWidth = layout.maxWidth + 'px';
     panel.style.minHeight = layout.minHeight + 'px';
@@ -6625,68 +6704,162 @@ document.addEventListener('bestiary-translations-loaded', translationEventHandle
 function savePanelSettings(panel) {
     if (!panel) return;
     
-    // Get current panel settings
-    const rect = panel.getBoundingClientRect();
-    const settings = {
-        width: panel.style.width,
-        maxWidth: panel.style.maxWidth,
-        minWidth: panel.style.minWidth,
-        height: panel.style.height,
-        maxHeight: panel.style.maxHeight,
-        top: rect.top + 'px',
-        left: rect.left + 'px',
-        isMinimized: false
-    };
-    
-    // Update config
-    config.panelSettings = settings;
-    
-    // Save configuration using the mod loader's system
-    api.service.updateScriptConfig(context.hash, config);
+    try {
+        // Get current panel settings
+        const rect = panel.getBoundingClientRect();
+        const settings = {
+            width: panel.style.width || `${LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL].width}px`,
+            maxWidth: panel.style.maxWidth,
+            minWidth: panel.style.minWidth,
+            height: panel.style.height || `${LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL].height}px`,
+            maxHeight: panel.style.maxHeight,
+            top: rect.top + 'px',
+            left: rect.left + 'px',
+            layoutMode: (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL,
+            isMinimized: false
+        };
+        
+        // Update config (for mod loader's config system)
+        config.panelSettings = settings;
+        
+        // Save configuration using the mod loader's system
+        api.service.updateScriptConfig(context.hash, config);
+        
+        // Also save to localStorage (like VIP List.js) so it persists across config exports/imports
+        localStorage.setItem(HUNT_ANALYZER_PANEL_SETTINGS_KEY, JSON.stringify(settings));
+        console.log('[Hunt Analyzer] Panel settings saved:', settings);
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error saving panel settings:', error);
+    }
 }
 
 function loadPanelSettings() {
-    // The settings are already loaded in the config object from context.config
-    return config.panelSettings;
+    try {
+        // Try to load from localStorage first (like VIP List.js)
+        const saved = localStorage.getItem(HUNT_ANALYZER_PANEL_SETTINGS_KEY);
+        if (saved) {
+            const settings = JSON.parse(saved);
+            // Validate that settings have required properties
+            if (settings && (settings.top || settings.left || settings.width || settings.height)) {
+                console.log('[Hunt Analyzer] Panel settings loaded:', settings);
+                // Also update config object for consistency
+                config.panelSettings = settings;
+                return settings;
+            }
+        }
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error loading panel settings:', error);
+    }
+    
+    // Fallback to config object (for backward compatibility)
+    if (config.panelSettings && (config.panelSettings.top || config.panelSettings.left || config.panelSettings.width || config.panelSettings.height)) {
+        return config.panelSettings;
+    }
+    
+    // Return null if no valid settings found (will use defaults)
+    return null;
 }
 
 function applyPanelSettings(panel, settings) {
     if (!panel || !settings) return;
     
-    // Apply all saved settings
-    if (settings.width) panel.style.width = settings.width;
-    if (settings.maxWidth) panel.style.maxWidth = settings.maxWidth;
-    if (settings.minWidth) panel.style.minWidth = settings.minWidth;
-    if (settings.height) panel.style.height = settings.height;
-    if (settings.maxHeight) panel.style.maxHeight = settings.maxHeight;
-    if (settings.top) panel.style.top = settings.top;
-    if (settings.left) panel.style.left = settings.left;
-    
-    // Apply minimized state if needed
-    if (settings.isMinimized !== undefined && settings.isMinimized !== false) {
-        const lootContainer = panel.querySelector('.loot-container');
-        const creatureDropContainer = panel.querySelector('.creature-drop-container');
-        const minimizeBtn = document.getElementById("mod-minimize-button");
-        const buttonContainer = panel.querySelector('.button-container');
-        if (lootContainer && creatureDropContainer && minimizeBtn) {
-            if (settings.isMinimized) {
-                lootContainer.style.display = 'none';
-                creatureDropContainer.style.display = 'none';
-                panel.style.height = 'fit-content';
-                panel.style.maxHeight = '200px';
-                minimizeBtn.textContent = '+';
-                minimizeBtn.title = 'Maximize Analyzer';
-            } else {
-                lootContainer.style.display = 'flex';
-                lootContainer.style.flexDirection = 'column';
-                creatureDropContainer.style.display = 'flex';
-                creatureDropContainer.style.flexDirection = 'column';
-                panel.style.height = '90vh';
-                panel.style.maxHeight = '750px';
-                minimizeBtn.textContent = '—';
-                minimizeBtn.title = 'Minimize Analyzer';
+    try {
+        // Apply layout mode first if saved
+        if (settings.layoutMode && panelState) {
+            const savedMode = settings.layoutMode;
+            // Validate mode is one of the valid options
+            if (savedMode === LAYOUT_MODES.VERTICAL || 
+                savedMode === LAYOUT_MODES.HORIZONTAL || 
+                savedMode === LAYOUT_MODES.MINIMIZED) {
+                panelState.mode = savedMode;
             }
         }
+        
+        // Get current layout constraints based on mode
+        const currentMode = (panelState && panelState.mode) || LAYOUT_MODES.VERTICAL;
+        const layout = LAYOUT_DIMENSIONS[currentMode];
+        
+        // Apply width (clamp to valid range)
+        if (settings.width) {
+            const width = parseInt(settings.width);
+            if (!isNaN(width)) {
+                const clampedWidth = clamp(width, layout.minWidth, layout.maxWidth);
+                panel.style.width = clampedWidth + 'px';
+            } else {
+                panel.style.width = settings.width; // Fallback to string value
+            }
+        }
+        
+        // Apply height (clamp to valid range)
+        if (settings.height) {
+            const height = parseInt(settings.height);
+            if (!isNaN(height)) {
+                const clampedHeight = clamp(height, layout.minHeight, layout.maxHeight);
+                panel.style.height = clampedHeight + 'px';
+            } else {
+                panel.style.height = settings.height; // Fallback to string value
+            }
+        }
+        
+        // Apply min/max constraints
+        if (settings.minWidth) panel.style.minWidth = settings.minWidth;
+        if (settings.maxWidth) panel.style.maxWidth = settings.maxWidth;
+        if (settings.maxHeight) panel.style.maxHeight = settings.maxHeight;
+        
+        // Apply top position (ensure panel stays within viewport)
+        if (settings.top) {
+            const top = parseInt(settings.top);
+            if (!isNaN(top)) {
+                const maxTop = window.innerHeight - layout.minHeight;
+                const clampedTop = clamp(top, 0, Math.max(0, maxTop));
+                panel.style.top = clampedTop + 'px';
+            } else {
+                panel.style.top = settings.top; // Fallback to string value
+            }
+        }
+        
+        // Apply left position (ensure panel stays within viewport)
+        if (settings.left) {
+            const left = parseInt(settings.left);
+            if (!isNaN(left)) {
+                const maxLeft = window.innerWidth - layout.minWidth;
+                const clampedLeft = clamp(left, 0, Math.max(0, maxLeft));
+                panel.style.left = clampedLeft + 'px';
+            } else {
+                panel.style.left = settings.left; // Fallback to string value
+            }
+        }
+        
+        // Apply minimized state if needed
+        if (settings.isMinimized !== undefined && settings.isMinimized !== false) {
+            const lootContainer = panel.querySelector('.loot-container');
+            const creatureDropContainer = panel.querySelector('.creature-drop-container');
+            const minimizeBtn = document.getElementById("mod-minimize-button");
+            const buttonContainer = panel.querySelector('.button-container');
+            if (lootContainer && creatureDropContainer && minimizeBtn) {
+                if (settings.isMinimized) {
+                    lootContainer.style.display = 'none';
+                    creatureDropContainer.style.display = 'none';
+                    panel.style.height = 'fit-content';
+                    panel.style.maxHeight = '200px';
+                    minimizeBtn.textContent = '+';
+                    minimizeBtn.title = 'Maximize Analyzer';
+                } else {
+                    lootContainer.style.display = 'flex';
+                    lootContainer.style.flexDirection = 'column';
+                    creatureDropContainer.style.display = 'flex';
+                    creatureDropContainer.style.flexDirection = 'column';
+                    panel.style.height = '90vh';
+                    panel.style.maxHeight = '750px';
+                    minimizeBtn.textContent = '—';
+                    minimizeBtn.title = 'Minimize Analyzer';
+                }
+            }
+        }
+        
+        console.log('[Hunt Analyzer] Panel settings applied:', settings);
+    } catch (error) {
+        console.error('[Hunt Analyzer] Error applying panel settings:', error);
     }
 }
 
@@ -6701,6 +6874,7 @@ const defaultConfig = {
     minHeight: "500px",
     top: "50px",
     left: "10px",
+    layoutMode: LAYOUT_MODES.VERTICAL,
     isMinimized: false
   }
 };
