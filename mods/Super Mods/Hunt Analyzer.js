@@ -4238,6 +4238,8 @@ function handleStyleButtonClick(panel, styleButton, minimizeBtn) {
         minimizeBtn.textContent = '–';
         minimizeBtn.title = 'Minimize Analyzer';
     }
+    // Save panel settings after layout change
+    savePanelSettings(panel);
 }
 
 // Handles the minimize button click
@@ -4270,6 +4272,8 @@ function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
         styleButton.textContent = 'Vertical';
         styleButton.title = 'Switch to vertical layout';
     }
+    // Save panel settings after minimize/restore
+    savePanelSettings(panel);
 }
 
 // Handles the close button click
@@ -4343,6 +4347,8 @@ function handlePanelResizeMouseUp(panel) {
         panelState.isResizing = false;
         document.body.style.userSelect = '';
         panel.style.transition = '';
+        // Save panel settings after resize
+        savePanelSettings(panel);
     }
 }
 
@@ -4366,6 +4372,8 @@ function handlePanelDragMouseUp(panel) {
         panelState.isDragging = false;
         document.body.style.userSelect = '';
         panel.style.transition = '';
+        // Save panel settings after drag
+        savePanelSettings(panel);
     }
 }
 
@@ -4862,14 +4870,24 @@ function createPanelContainer() {
     panel.id = PANEL_ID;
     panel.className = "ha-panel-container";
     
-    // Apply positioning and sizing (these need to remain inline for dynamic behavior)
-    panel.style.top = "50px";
-    panel.style.left = "10px";
-
+    // Load saved panel settings
+    const savedSettings = loadPanelSettings();
+    
     // Apply initial layout constraints
     const initialLayout = LAYOUT_DIMENSIONS[LAYOUT_MODES.VERTICAL];
-    panel.style.width = initialLayout.width + 'px';
-    panel.style.height = initialLayout.height + 'px';
+    
+    // Apply saved settings or defaults
+    if (savedSettings) {
+        applyPanelSettings(panel, savedSettings);
+    } else {
+        // Apply default positioning and sizing if no saved settings
+        panel.style.top = "50px";
+        panel.style.left = "10px";
+        panel.style.width = initialLayout.width + 'px';
+        panel.style.height = initialLayout.height + 'px';
+    }
+    
+    // Always apply layout constraints
     panel.style.minWidth = initialLayout.minWidth + 'px';
     panel.style.maxWidth = initialLayout.maxWidth + 'px';
     panel.style.minHeight = initialLayout.minHeight + 'px';
@@ -5131,6 +5149,8 @@ function createAutoplayAnalyzerPanel() {
             isResizing = false;
             document.body.style.userSelect = '';
             panel.style.transition = '';
+            // Save panel settings after resize
+            savePanelSettings(panel);
         }
     };
     document.addEventListener('mouseup', panelResizeMouseUpHandler);
@@ -5169,6 +5189,8 @@ function createAutoplayAnalyzerPanel() {
             isDragging = false;
             document.body.style.userSelect = '';
             panel.style.transition = '';
+            // Save panel settings after drag
+            savePanelSettings(panel);
         }
     };
     document.addEventListener('mouseup', panelDragMouseUpHandler);
@@ -6804,6 +6826,8 @@ globalResizeMouseUpHandler = function(e) {
         const panel = document.getElementById(PANEL_ID);
         if (panel) {
             panel.classList.remove('resizing');
+            // Save panel settings after resize
+            savePanelSettings(panel);
         }
         document.body.style.userSelect = '';
         panelState.resetResizeState();
@@ -6874,6 +6898,8 @@ const panelState = {
         } else {
             this.restoreLastSize(panel);
         }
+        // Save panel settings after maximize/restore
+        savePanelSettings(panel);
     }
 };
 

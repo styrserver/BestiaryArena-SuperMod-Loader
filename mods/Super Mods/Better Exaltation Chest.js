@@ -89,8 +89,31 @@
   // Auto mode state (always default: disabled, not saved to localStorage)
   let autoModeEnabled = false;
   
+  // Helper function to deduplicate equipment setup rules
+  function deduplicateRules(rules) {
+    const seen = new Set();
+    return rules.filter(rule => {
+      const key = `${rule.equipment || ''}|${rule.tier || ''}|${rule.stat || ''}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  }
+  
   // Equipment setup state (load from localStorage, default: empty array)
   let equipmentSetup = loadSetting(STORAGE_KEYS.EQUIPMENT_SETUP, []);
+  
+  // Deduplicate rules on load
+  if (equipmentSetup.length > 0) {
+    const originalLength = equipmentSetup.length;
+    equipmentSetup = deduplicateRules(equipmentSetup);
+    if (equipmentSetup.length !== originalLength) {
+      console.log(`[Better Exaltation Chest] Removed ${originalLength - equipmentSetup.length} duplicate rule(s) on load`);
+      saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
+    }
+  }
   
   // If no setup exists, create default "All" setup
   if (equipmentSetup.length === 0) {
@@ -193,6 +216,17 @@
     summary += `Equipment Kept: ${equipmentStats.kept}\n`;
     summary += `Equipment Disenchanted: ${equipmentStats.disenchanted}\n`;
     summary += `Total Dust Gained: ${equipmentStats.dustGained.toLocaleString()}\n`;
+    summary += `---------------------------\n\n`;
+    
+    // Setup Rules
+    summary += `--- Setup Rules ---\n`;
+    if (equipmentSetup.length === 0) {
+      summary += `No setup rules configured.\n`;
+    } else {
+      equipmentSetup.forEach((rule, index) => {
+        summary += `${index + 1}. ${rule.equipment}/${rule.tier}/${rule.stat}\n`;
+      });
+    }
     summary += `---------------------------\n\n`;
     
     // Equipment Details
@@ -1096,6 +1130,7 @@
         const setupEquipment = (setup.equipment || '').trim();
         const equipmentName = (equipment.name || '').trim();
         if (setupEquipment !== 'All' && setupEquipment !== equipmentName) {
+          console.log(`[Better Exaltation Chest] 🔍 Rule "${setupEquipment}/${setup.tier}/${setup.stat}" skipped: equipment name mismatch (${equipmentName})`);
           continue;
         }
         
@@ -1103,6 +1138,7 @@
         if (setup.tier !== 'All') {
           const tierMatch = checkTierRequirement(setup.tier, equipment.tier);
           if (!tierMatch) {
+            console.log(`[Better Exaltation Chest] 🔍 Rule "${setupEquipment}/${setup.tier}/${setup.stat}" skipped: tier mismatch (required: ${setup.tier}, got: T${equipment.tier})`);
             continue;
           }
         }
@@ -1112,6 +1148,7 @@
           const setupStat = (setup.stat || '').toUpperCase().trim();
           const equipmentStat = (equipment.stat || '').toUpperCase().trim();
           if (setupStat !== equipmentStat) {
+            console.log(`[Better Exaltation Chest] 🔍 Rule "${setupEquipment}/${setup.tier}/${setup.stat}" skipped: stat mismatch (required: ${setupStat}, got: ${equipmentStat})`);
             continue;
           }
         }
@@ -1145,7 +1182,7 @@
       }
       
       // No rules matched
-      console.log('[Better Exaltation Chest] ❌ Equipment does not match any setup rules');
+      console.log(`[Better Exaltation Chest] ❌ Equipment "${equipment.name}" (T${equipment.tier} ${equipment.stat.toUpperCase()}) does not match any of ${sortedRules.length} setup rule(s)`);
       
       if (updateStats) {
         equipmentStats.disenchanted++;
@@ -2479,7 +2516,14 @@
         }
       });
       
-      equipmentSetup = newSetup;
+      // Deduplicate rules before saving
+      const originalLength = newSetup.length;
+      const deduplicatedSetup = deduplicateRules(newSetup);
+      if (deduplicatedSetup.length !== originalLength) {
+        console.log(`[Better Exaltation Chest] Removed ${originalLength - deduplicatedSetup.length} duplicate rule(s) before saving`);
+      }
+      
+      equipmentSetup = deduplicatedSetup;
       saveSetting(STORAGE_KEYS.EQUIPMENT_SETUP, equipmentSetup);
     }, CONSTANTS.DEBOUNCE_DELAY);
     pendingTimeouts.add(saveEquipmentSetupTimeout);

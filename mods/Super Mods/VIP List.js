@@ -1572,7 +1572,7 @@ function clamp(val, min, max) {
 }
 
 // Save panel settings to localStorage
-function savePanelSettings(panel) {
+function savePanelSettings(panel, isOpen = true, closedManually = false) {
   if (!panel) return;
   
   try {
@@ -1581,7 +1581,9 @@ function savePanelSettings(panel) {
       width: panel.style.width || `${PANEL_DIMENSIONS.WIDTH}px`,
       height: panel.style.height || `${PANEL_DIMENSIONS.HEIGHT}px`,
       top: rect.top + 'px',
-      left: rect.left + 'px'
+      left: rect.left + 'px',
+      isOpen: isOpen,
+      closedManually: closedManually
     };
     
     localStorage.setItem(STORAGE_KEYS.PANEL_SETTINGS, JSON.stringify(settings));
@@ -1609,7 +1611,9 @@ function loadPanelSettings() {
     width: `${PANEL_DIMENSIONS.WIDTH}px`,
     height: `${PANEL_DIMENSIONS.HEIGHT}px`,
     top: '50px',
-    left: '10px'
+    left: '10px',
+    isOpen: false,
+    closedManually: false
   };
 }
 
@@ -1716,10 +1720,45 @@ function cleanupPanelEventListeners() {
   }
 }
 
+// Check if panel should be reopened after page refresh
+function shouldReopenVIPListPanel() {
+  const interfaceType = getVIPListInterfaceType();
+  if (interfaceType !== 'panel') {
+    console.log('[VIP List] Interface type is not panel, not auto-reopening');
+    return false;
+  }
+  
+  const savedSettings = loadPanelSettings();
+  console.log('[VIP List] Checking auto-reopen conditions:', {
+    savedSettings,
+    interfaceType: interfaceType
+  });
+  
+  // Auto-reopen if panel was open and not manually closed
+  return savedSettings.isOpen && !savedSettings.closedManually;
+}
+
+// Auto-reopen VIP List panel after page refresh
+function autoReopenVIPListPanel() {
+  if (shouldReopenVIPListPanel()) {
+    console.log('[VIP List] Auto-reopening panel after page refresh');
+    const timeoutId = setTimeout(() => {
+      pendingTimeouts.delete(timeoutId);
+      openVIPListPanel();
+    }, TIMEOUTS.INITIAL_CHECK); // Wait for page to fully load
+    trackTimeout(timeoutId);
+  } else {
+    console.log('[VIP List] Not auto-reopening panel:', {
+      interfaceType: getVIPListInterfaceType(),
+      savedSettings: loadPanelSettings()
+    });
+  }
+}
+
 // Handle panel close button click
 function handlePanelCloseButtonClick(panel) {
-  // Save panel settings before closing
-  savePanelSettings(panel);
+  // Save panel settings before closing (mark as closed manually)
+  savePanelSettings(panel, false, true);
   
   // Remove document event listeners
   cleanupPanelEventListeners();
@@ -1865,6 +1904,9 @@ async function openVIPListPanel() {
     // Add to document
     document.body.appendChild(panel);
     vipListPanelInstance = panel;
+    
+    // Save panel state as open
+    savePanelSettings(panel, true, false);
     
     // --- DRAGGABLE PANEL LOGIC ---
     let isDragging = false;
@@ -2195,6 +2237,10 @@ exports = {
       loadVIPListConfig();
       
       startAccountMenuObserver();
+      
+      // Auto-reopen panel if in panel mode and was previously open
+      autoReopenVIPListPanel();
+      
       return true;
     } catch (error) {
       console.error('[VIP List] Initialization error:', error);
