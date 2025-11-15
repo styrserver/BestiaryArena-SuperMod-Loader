@@ -1865,6 +1865,11 @@ function removeCyclopediaFromMenus() {
   // Process all cyclopedia elements
   document.querySelectorAll('div, li').forEach(el => {
     if (el.textContent.trim().toLowerCase() === 'cyclopedia') {
+      // Skip elements that should be excluded (e.g., from VIP List)
+      if (el.hasAttribute('data-cyclopedia-exclude') || el.hasAttribute('data-vip-list-item')) {
+        return;
+      }
+      
       const inMyAccount = isInMenu(el, 'My account') || isInAccountMenu(el);
       const inGameMode = isInMenu(el, 'Game mode') || isInGameModeMenu(el);
       const isHeader = isHeaderButton(el);

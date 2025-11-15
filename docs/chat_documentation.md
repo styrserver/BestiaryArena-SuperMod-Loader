@@ -1,0 +1,201 @@
+# VIP List Chat Documentation
+
+## Overview
+
+The VIP List mod includes a chat feature that allows players to send encrypted messages to each other. The chat system uses:
+- **End-to-end encryption** for message privacy
+- **Event-driven updates** for real-time message delivery
+- **Chat requests and privileges** for access control
+- **Message filtering** to control who can message you
+- **Replay link support** for sharing board configurations
+
+The Firebase Realtime Database is already configured and ready to use. You just need to enable the chat feature in Mod Settings.
+
+### Firebase Database
+- **Database URL**: `https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app`
+- **Database Type**: Realtime Database
+- **Status**: Pre-configured and ready to use
+
+## Getting Started
+
+### Enable Chat Feature
+
+1. **Open Mod Settings**
+   - Access the Mod Settings from the game interface
+
+2. **Enable VIP List Chat**
+   - Find the "Enable VIP List Chat" option
+   - Toggle it to `true` or `enabled`
+   - Your chat status will automatically sync to Firebase
+
+3. **Configure Message Filter (Optional)**
+   - Choose who can message you:
+     - `'all'` (default): Receive messages from everyone
+     - `'friends'`: Only receive messages from players in your VIP list
+   - Set via `vipListMessageFilter` in Mod Settings
+
+That's it! The chat feature is now enabled and ready to use.
+
+### Verify Chat is Working
+
+1. **Check browser console** (F12)
+   - Look for: `[VIP List] Chat enabled status synced to Firebase: true`
+   - If you see 401 errors, the Firebase rules may need adjustment (contact mod developer)
+
+2. **Test chat functionality**
+   - Try requesting chat with another player
+   - Send a test message
+   - Verify messages are received
+
+## How It Works
+
+The chat system uses Firebase Realtime Database with the following structure:
+
+- **`/messages`**: Stores encrypted chat messages between players
+- **`/chat-enabled`**: Tracks which players have chat enabled in their mod settings
+- **`/chat-requests`**: Stores pending chat privilege requests
+- **`/chat-privileges`**: Stores granted chat privileges between players
+- **`/blocked-players`**: Stores blocked players list (prevents blocked players from messaging or requesting chat)
+
+All data is stored in Firebase and synchronized across all players using the mod.
+
+## Troubleshooting
+
+### 401 Unauthorized Errors
+
+If you see 401 errors in the browser console, it means the Firebase security rules are blocking access. This is a server-side configuration issue that needs to be fixed by the mod developer.
+
+**What to do:**
+1. **Report the issue** to the mod developer
+2. **Check browser console** (F12) for error messages
+3. **Note the specific error** - it will help identify which Firebase path is blocked
+
+**Common causes:**
+- Firebase security rules not properly configured
+- Database access restrictions
+- Network/firewall blocking Firebase requests
+
+### Other Common Issues
+
+#### Chat Not Working
+- **Check if chat is enabled** in Mod Settings
+- **Verify browser console** for error messages
+- **Try refreshing the page** (hard refresh: `Ctrl+Shift+R` or `Cmd+Shift+R`)
+
+#### Messages Not Received
+- **Check message filter setting** - if set to `'friends'`, you'll only receive messages from VIP list players
+- **Verify recipient has chat enabled** in their Mod Settings
+- **Check if you have chat privileges** with the sender (may need to accept a chat request)
+
+#### Chat Requests Not Working
+- **Ensure both players have chat enabled** in Mod Settings
+- **Check if player is blocked** - blocked players cannot send requests
+- **Verify Firebase rules** allow chat-requests access (contact mod developer if 401 errors)
+
+### Common Error Codes
+
+- **401 Unauthorized**: Firebase security rules are blocking access (contact mod developer)
+- **403 Forbidden**: Database access issue (contact mod developer)
+- **404 Not Found**: Database path doesn't exist (usually temporary, should resolve automatically)
+
+## Chat Features
+
+### Chat Requests
+- Players must request chat privileges before messaging new players
+- Recipients can accept or decline requests
+- TestPlayer auto-accepts requests for testing purposes
+- Requests are checked frequently (every 1 second) when a panel is open with a pending request
+
+### Chat Privileges
+- Once granted, privileges work both ways
+- Privileges persist until manually revoked
+- Players can see their chat history even after closing the panel
+
+### Blocking Players
+- Players can block other players to prevent them from messaging or requesting chat
+- Blocked players cannot send messages or request chat privileges
+- Block/unblock option available in the VIP list dropdown menu and chat panel header
+- Blocking is one-way (if Player A blocks Player B, Player B cannot message Player A, but Player A can still message Player B if they have privileges)
+
+### Message Encryption
+- All messages are encrypted end-to-end using AES-GCM encryption
+- Only the sender and recipient can decrypt messages
+- Messages are stored encrypted in Firebase
+- Encryption key is derived from both player names using PBKDF2
+
+### Message Filtering
+- **Filter Options**: Available in Mod Settings
+  - `'all'` (default): Receive messages from everyone
+  - `'friends'`: Only receive messages from players in your VIP list
+- Filter is applied to incoming messages and notifications
+- Configure via `vipListMessageFilter` in Mod Settings
+
+### Replay Links
+- Messages can contain replay links in the format: `$replay({"region":"RegionName","map":"MapName"})`
+- Replay links are automatically detected and converted to clickable links
+- Clicking a replay link copies the replay code to clipboard
+- Useful for sharing board configurations with other players
+
+### Minimized Chats
+- Chat panels can be minimized to a sidebar
+- Minimized chats show player name and unread message count badge
+- Click minimized chat to restore the full panel
+- Minimized chats persist across page refreshes (saved to localStorage)
+- Close button (✕) appears on hover to remove minimized chat
+- Sidebar automatically positions next to the main game content area
+
+### Message Length Limit
+- Maximum message length: **500 characters**
+- Character counter shows current length and limit
+- Messages exceeding the limit cannot be sent
+- Counter turns red when approaching/exceeding limit
+
+## Configuration Options
+
+The chat feature can be configured in Mod Settings:
+
+### Enable VIP List Chat
+- **Setting**: `enableVipListChat`
+- **Type**: Boolean (true/false)
+- **Default**: `false`
+- **Description**: Enable or disable the chat feature
+- **When enabled**: Your chat status is synced to Firebase so other players know you're available
+
+### Message Filter
+- **Setting**: `vipListMessageFilter`
+- **Type**: String
+- **Options**: 
+  - `'all'` (default): Receive messages from everyone
+  - `'friends'`: Only receive messages from players in your VIP list
+- **Description**: Control who can send you messages
+- **Note**: Filter is applied to incoming messages and notifications
+
+## Message Delivery System
+
+### Event-Driven Updates (Primary)
+- Uses **EventSource** (Server-Sent Events) for real-time message delivery
+- Automatically receives new messages as they arrive
+- More efficient than polling (no constant requests)
+- Falls back to polling if EventSource fails
+
+### Polling (Fallback)
+- Used when EventSource is unavailable or fails
+- Checks for new messages every **5 seconds**
+- Automatically switches to polling when chat panels are open (for more frequent updates)
+- Switches back to event-driven when no panels are open (for efficiency)
+
+### Update Frequency
+- **No panels open**: Event-driven (real-time via EventSource)
+- **Panels open**: Polling every 5 seconds (more frequent updates for active conversations)
+- **Pending requests**: Checked every 1 second for accepted requests
+
+## Additional Notes
+
+- The Firebase database is pre-configured and ready to use - no setup required
+- Chat panels are draggable and resizable
+- Panel positions are saved and restored on page refresh
+- Unread message counts are displayed in badges on the VIP List menu item and minimized chats
+- Chat sidebar automatically repositions when window is resized
+- Conversation history persists and can be deleted via the delete button in chat panel header
+- All messages are encrypted end-to-end for privacy
+

@@ -30,7 +30,9 @@ const defaultConfig = {
   includeHuntDataByDefault: true,
   inventoryBorderStyle: 'Original',
   enableMismatchRefresh: false,
-  vipListInterface: 'modal' // 'modal' or 'panel'
+  vipListInterface: 'modal', // 'modal' or 'panel'
+  enableVipListChat: false, // Enable messaging/chat feature in VIP List
+  vipListMessageFilter: 'all' // 'all' or 'friends' - who can send messages
 };
 
 // Storage key for this mod
@@ -1800,6 +1802,7 @@ function showSettingsModal() {
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
       { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
+      { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
@@ -1904,13 +1907,6 @@ function showSettingsModal() {
               <option value="Divine">Divine</option>
               <option value="Undead">Undead</option>
               <option value="Prismatic">Prismatic</option>
-            </select>
-          </div>
-          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
-            <span style="color: #ccc;">${t('mods.betterUI.vipListInterface')}</span>
-            <select id="vip-list-interface-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
-              <option value="modal">${t('mods.betterUI.vipListInterfaceModal')}</option>
-              <option value="panel">${t('mods.betterUI.vipListInterfacePanel')}</option>
             </select>
           </div>
         `;
@@ -2046,6 +2042,31 @@ function showSettingsModal() {
           </div>
         `;
         rightColumn.appendChild(huntAnalyzerContent);
+      } else if (categoryId === 'vip-list') {
+        const vipListContent = document.createElement('div');
+        vipListContent.innerHTML = `
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.vipListInterface')}</span>
+            <select id="vip-list-interface-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="modal">${t('mods.betterUI.vipListInterfaceModal')}</option>
+              <option value="panel">${t('mods.betterUI.vipListInterfacePanel')}</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="enable-vip-list-chat-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableVipListChat')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+            <span style="color: #ccc;">${t('mods.betterUI.vipListMessageFilter')}</span>
+            <select id="vip-list-message-filter-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
+              <option value="all">${t('mods.betterUI.vipListMessageFilterAll')}</option>
+              <option value="friends">${t('mods.betterUI.vipListMessageFilterFriends')}</option>
+            </select>
+          </div>
+        `;
+        rightColumn.appendChild(vipListContent);
       } else if (categoryId === 'backup') {
         const backupContent = document.createElement('div');
         backupContent.innerHTML = `
@@ -2194,6 +2215,31 @@ function showSettingsModal() {
       const vipListInterfaceSelector = content.querySelector('#vip-list-interface-selector');
       if (vipListInterfaceSelector) {
         createSettingsDropdownHandler('vipListInterface')(vipListInterfaceSelector);
+      }
+      
+      const vipListMessageFilterSelector = content.querySelector('#vip-list-message-filter-selector');
+      if (vipListMessageFilterSelector) {
+        createSettingsDropdownHandler('vipListMessageFilter')(vipListMessageFilterSelector);
+      }
+      
+      const enableVipListChatCheckbox = content.querySelector('#enable-vip-list-chat-toggle');
+      if (enableVipListChatCheckbox) {
+        enableVipListChatCheckbox.checked = config.enableVipListChat;
+        
+        enableVipListChatCheckbox.addEventListener('change', () => {
+          config.enableVipListChat = enableVipListChatCheckbox.checked;
+          saveConfig();
+          
+          // Update VIP List mod's messaging config if available
+          if (window.VIPList && window.VIPList.updateMessagingConfig) {
+            window.VIPList.updateMessagingConfig({ enabled: enableVipListChatCheckbox.checked });
+          } else if (window.VIPList && window.VIPList.test) {
+            // Fallback: try to access MESSAGING_CONFIG directly if exposed
+            console.log('[Mod Settings] VIP List mod messaging config update attempted');
+          }
+          
+          console.log('[Mod Settings] VIP List chat', enableVipListChatCheckbox.checked ? 'enabled' : 'disabled');
+        });
       }
     
     const autoplayRefreshCheckbox = content.querySelector('#autoplay-refresh-toggle');

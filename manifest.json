@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "2.8.7",
+  "version": "2.8.8",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and comprehensive tools.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -60,7 +60,8 @@
   "host_permissions": [
     "*://*.gist.githubusercontent.com/*",
     "*://*.bestiaryarena.com/*",
-    "*://bestiaryarena.com/*"
+    "*://bestiaryarena.com/*",
+    "*://*.firebasedatabase.app/*"
   ],
   "web_accessible_resources": [
     {
