@@ -143,6 +143,9 @@
   let equipmentCheckTimeout = null;
   let originalFetch = null;
   
+  // Flag to ignore state-based capacity updates after initial modal load
+  let ignoreStateCapacityUpdates = false;
+  
   // Cached equipment list (preloaded when modal opens)
   let cachedEquipmentList = null;
   let equipmentPreloadInProgress = false;
@@ -886,6 +889,24 @@
   }
   
   function isArsenalFull() {
+    // Check the displayed capacity value (not stale state) to determine if full
+    try {
+      const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+      if (capacityAmountElement) {
+        const currentText = capacityAmountElement.textContent;
+        // Match numbers with optional commas (e.g., "1,150/1,150" or "1150/1150")
+        const match = currentText.match(/([\d,]+)\/([\d,]+)/);
+        if (match) {
+          // Remove commas and parse as integer
+          const currentCapacity = parseInt(match[1].replace(/,/g, ''), 10);
+          const maxCapacity = parseInt(match[2].replace(/,/g, ''), 10);
+          return currentCapacity >= maxCapacity;
+        }
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error checking if arsenal is full:', error);
+    }
+    // Fallback to state-based check if display element not found
     const status = getArsenalStatus();
     return status ? status.currentArsenalSize >= status.maxCapArsenal : false;
   }
@@ -919,6 +940,29 @@
   }
   
   function checkAndStopIfArsenalFull() {
+    // Check the displayed capacity value (not stale state) to determine if full
+    try {
+      const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+      if (capacityAmountElement) {
+        const currentText = capacityAmountElement.textContent;
+        // Match numbers with optional commas (e.g., "1,150/1,150" or "1150/1150")
+        const match = currentText.match(/([\d,]+)\/([\d,]+)/);
+        if (match) {
+          // Remove commas and parse as integer
+          const currentCapacity = parseInt(match[1].replace(/,/g, ''), 10);
+          const maxCapacity = parseInt(match[2].replace(/,/g, ''), 10);
+          if (currentCapacity >= maxCapacity) {
+            console.log(`[Better Exaltation Chest] Arsenal full (${currentCapacity}/${maxCapacity}), stopping auto-opening`);
+            stopAutoOpeningAndUpdateButton();
+            return true;
+          }
+          return false;
+        }
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error checking if arsenal is full:', error);
+    }
+    // Fallback to state-based check if display element not found
     const status = getArsenalStatus();
     if (!status || status.currentArsenalSize < status.maxCapArsenal) return false;
     
@@ -1290,14 +1334,27 @@
       }
     }, CONSTANTS.STATE_UPDATE_DELAY);
     
-    // Update capacity display after opening (with delay to ensure state has updated)
-    delayedUpdateCapacityDisplay();
+    // Capacity display is updated immediately via API interception, no need for delayed update
     
     // Check if arsenal is full after opening and stop auto-opening if active
     if (isArsenalFull()) {
-      const status = getArsenalStatus();
-      if (status) {
-        console.log(`[Better Exaltation Chest] Arsenal reached cap (${status.currentArsenalSize}/${status.maxCapArsenal}) after opening chest`);
+      // Get displayed capacity value for accurate logging
+      try {
+        const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+        if (capacityAmountElement) {
+          const currentText = capacityAmountElement.textContent;
+          console.log(`[Better Exaltation Chest] Arsenal reached cap (${currentText}) after opening chest`);
+        } else {
+          const status = getArsenalStatus();
+          if (status) {
+            console.log(`[Better Exaltation Chest] Arsenal reached cap (${status.currentArsenalSize}/${status.maxCapArsenal}) after opening chest`);
+          }
+        }
+      } catch (error) {
+        const status = getArsenalStatus();
+        if (status) {
+          console.log(`[Better Exaltation Chest] Arsenal reached cap (${status.currentArsenalSize}/${status.maxCapArsenal}) after opening chest`);
+        }
       }
       if (autoModeEnabled) {
         stopAutoOpeningAndUpdateButton();
@@ -1357,8 +1414,8 @@
                 // Manually update dust display with animation (state updates don't reliably trigger subscription)
                 updateDustDisplayWithAnimation(result.dustGained);
                 
-                // Update capacity display after disenchanting (with delay to ensure state has updated)
-                delayedUpdateCapacityDisplay();
+                // Update capacity display immediately after disenchanting (decrement by 1)
+                updateCapacityDisplayImmediatelyDecrement();
                 
                 // Update the log entry with dust gained
                 if (equipmentLog.length > 0) {
@@ -1374,8 +1431,7 @@
           });
       } else {
         console.log('[Better Exaltation Chest] ✅ Equipment matches settings, keeping it');
-        // Update capacity display when equipment is kept (with delay to ensure state has updated)
-        delayedUpdateCapacityDisplay();
+        // Capacity display already updated immediately via API interception, no need to update again
       }
     }, CONSTANTS.EQUIPMENT_CHECK_DELAY); // Shorter delay since we don't need to wait for inventory update
     pendingTimeouts.add(equipmentCheckTimeout);
@@ -1419,6 +1475,8 @@
                         stat: equipData.stat,
                         tier: equipData.tier
                       });
+                      // Update capacity display immediately (before animation completes)
+                      updateCapacityDisplayImmediately();
                       handleOpenedEquipmentFromChestResponse(equipData);
                     }
                   }
@@ -2610,6 +2668,10 @@
       const capacityAmount = document.createElement('span');
       capacityAmount.id = 'better-exaltation-capacity-amount';
       capacityAmount.textContent = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+      // Set color to red if full, otherwise use default
+      if (currentCapacity >= maxCapacity) {
+        capacityAmount.style.color = '#ff4444';
+      }
       
       capacityDisplay.appendChild(capacityIcon);
       capacityDisplay.appendChild(capacityAmount);
@@ -2652,19 +2714,27 @@
         
         dustDisplay._unsubscribe = subscription.unsubscribe;
         
-        // Subscribe to capacity changes
+        // Subscribe to capacity changes (only for initial load, then ignore state updates)
         let previousEquipsLength = currentCapacity;
         let isFirstCapacityCallback = true;
+        ignoreStateCapacityUpdates = false; // Reset flag when modal opens
         
         const capacitySubscription = globalThis.state.player
           .select((state) => state.context?.equips?.length)
           .subscribe((newLength) => {
             const numericLength = Number(newLength) || 0;
             
-            // Skip the initial callback
+            // Skip the initial callback (this sets the initial state)
             if (isFirstCapacityCallback) {
               isFirstCapacityCallback = false;
               previousEquipsLength = numericLength;
+              // After initial load, ignore all future state updates
+              ignoreStateCapacityUpdates = true;
+              return;
+            }
+            
+            // Ignore state updates after initial load (only use API interception updates)
+            if (ignoreStateCapacityUpdates) {
               return;
             }
             
@@ -2700,6 +2770,94 @@
     }
   }
   
+  function updateCapacityDisplayImmediately() {
+    try {
+      const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+      if (capacityAmountElement) {
+        // Get current displayed value and increment by 1 since a chest was just opened
+        const currentText = capacityAmountElement.textContent;
+        // Match numbers with optional commas (e.g., "1,150/1,150" or "1150/1150")
+        const match = currentText.match(/([\d,]+)\/([\d,]+)/);
+        if (match) {
+          // Remove commas and parse as integer
+          const currentCapacity = parseInt(match[1].replace(/,/g, ''), 10) + 1;
+          const maxCapacity = parseInt(match[2].replace(/,/g, ''), 10);
+          const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+          capacityAmountElement.textContent = formattedText;
+          // Set color to red if full, otherwise reset to default
+          if (currentCapacity >= maxCapacity) {
+            capacityAmountElement.style.color = '#ff4444';
+          } else {
+            capacityAmountElement.style.color = '';
+          }
+          console.log('[Better Exaltation Chest] Capacity display updated immediately:', formattedText);
+        } else {
+          // Fallback to state-based calculation if display format is unexpected
+          const capacityStatus = getArsenalStatus();
+          if (capacityStatus) {
+            const currentCapacity = capacityStatus.currentArsenalSize + 1;
+            const maxCapacity = capacityStatus.maxCapArsenal;
+            const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+            capacityAmountElement.textContent = formattedText;
+            // Set color to red if full, otherwise reset to default
+            if (currentCapacity >= maxCapacity) {
+              capacityAmountElement.style.color = '#ff4444';
+            } else {
+              capacityAmountElement.style.color = '';
+            }
+            console.log('[Better Exaltation Chest] Capacity display updated immediately (fallback):', formattedText);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error updating capacity display immediately:', error);
+    }
+  }
+  
+  function updateCapacityDisplayImmediatelyDecrement() {
+    try {
+      const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
+      if (capacityAmountElement) {
+        // Get current displayed value and decrement by 1 since equipment was disenchanted
+        const currentText = capacityAmountElement.textContent;
+        // Match numbers with optional commas (e.g., "1,150/1,150" or "1150/1150")
+        const match = currentText.match(/([\d,]+)\/([\d,]+)/);
+        if (match) {
+          // Remove commas and parse as integer
+          const currentCapacity = Math.max(0, parseInt(match[1].replace(/,/g, ''), 10) - 1);
+          const maxCapacity = parseInt(match[2].replace(/,/g, ''), 10);
+          const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+          capacityAmountElement.textContent = formattedText;
+          // Set color to red if full, otherwise reset to default
+          if (currentCapacity >= maxCapacity) {
+            capacityAmountElement.style.color = '#ff4444';
+          } else {
+            capacityAmountElement.style.color = '';
+          }
+          console.log('[Better Exaltation Chest] Capacity display decremented immediately:', formattedText);
+        } else {
+          // Fallback to state-based calculation if display format is unexpected
+          const capacityStatus = getArsenalStatus();
+          if (capacityStatus) {
+            const currentCapacity = Math.max(0, capacityStatus.currentArsenalSize - 1);
+            const maxCapacity = capacityStatus.maxCapArsenal;
+            const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
+            capacityAmountElement.textContent = formattedText;
+            // Set color to red if full, otherwise reset to default
+            if (currentCapacity >= maxCapacity) {
+              capacityAmountElement.style.color = '#ff4444';
+            } else {
+              capacityAmountElement.style.color = '';
+            }
+            console.log('[Better Exaltation Chest] Capacity display decremented immediately (fallback):', formattedText);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Better Exaltation Chest] Error decrementing capacity display immediately:', error);
+    }
+  }
+  
   function updateCapacityDisplay() {
     try {
       const capacityAmountElement = document.getElementById('better-exaltation-capacity-amount');
@@ -2711,6 +2869,12 @@
           const maxCapacity = capacityStatus.maxCapArsenal;
           const formattedText = `${formatNumber(currentCapacity)}/${formatNumber(maxCapacity)}`;
           capacityAmountElement.textContent = formattedText;
+          // Set color to red if full, otherwise reset to default
+          if (currentCapacity >= maxCapacity) {
+            capacityAmountElement.style.color = '#ff4444';
+          } else {
+            capacityAmountElement.style.color = '';
+          }
           console.log('[Better Exaltation Chest] Capacity display updated:', formattedText);
         }
       } else {

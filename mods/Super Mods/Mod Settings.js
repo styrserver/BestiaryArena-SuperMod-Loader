@@ -2065,6 +2065,9 @@ function showSettingsModal() {
               <option value="friends">${t('mods.betterUI.vipListMessageFilterFriends')}</option>
             </select>
           </div>
+          <div style="margin-top: 10px; margin-bottom: 15px;">
+            <a href="https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/chat_documentation.md" target="_blank" rel="noopener noreferrer" style="color: #4a9eff; text-decoration: none; font-size: 13px;">📖 ${t('mods.betterUI.vipListChatDocumentation')}</a>
+          </div>
         `;
         rightColumn.appendChild(vipListContent);
       } else if (categoryId === 'backup') {

@@ -98,7 +98,7 @@ const MESSAGING_CONFIG = {
     return getMessagingEnabled();
   },
   firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app',
-  checkInterval: 5000, // Fallback polling interval (only used if EventSource fails)
+  checkInterval: 5000, // Polling interval for message checking
   maxMessageLength: 500
 };
 
@@ -152,7 +152,7 @@ let panelDragMouseMoveHandler = null;
 let panelDragMouseUpHandler = null;
 
 // Messaging state
-let messageCheckInterval = null; // Fallback polling interval (if EventSource fails)
+let messageCheckInterval = null; // Polling interval for message checking
 let unreadMessageCount = 0;
 let lastMessageCheckTime = 0;
 // Track last known message timestamps per conversation for event-driven change detection
@@ -163,12 +163,6 @@ let openChatPanels = new Map(); // Map of playerName -> open chat panel element
 let firebase401WarningShown = false; // Track if 401 warning has been shown
 let pendingRequestCheckIntervals = new Map(); // Map of playerName -> intervalId for frequent privilege checks
 
-// Event-driven listeners
-let messageEventSource = null; // EventSource for real-time message updates
-let chatRequestEventSource = null; // EventSource for real-time chat request updates
-let privilegeEventSources = new Map(); // Map<playerName, EventSource> for privilege status updates
-let eventSourceRetryCount = 0;
-const MAX_EVENTSOURCE_RETRIES = 3;
 let modalCloseObserver = null; // Modal close observer for cleanup
 
 // Track timeouts for cleanup (memory leak prevention)
@@ -1987,114 +1981,15 @@ function stopPendingRequestCheck(playerName) {
   }
 }
 
-// Setup event-driven message listeners using Firebase Realtime Database streaming
-function setupEventDrivenListeners() {
-  if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
-    return;
+// Setup polling for message checking (adaptive interval based on panel state)
+function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
+  // Clear existing interval if any
+  if (messageCheckInterval) {
+    clearInterval(messageCheckInterval);
+    messageCheckInterval = null;
   }
   
-  const currentPlayer = getCurrentPlayerName();
-  if (!currentPlayer) {
-    return;
-  }
-  
-  const currentPlayerLower = currentPlayer.toLowerCase();
-  
-  // Clean up existing listeners
-  cleanupEventDrivenListeners();
-  
-  // Setup message listener using EventSource (Firebase REST API with SSE)
-  try {
-    const messagesUrl = `${getMessagingApiUrl()}/${currentPlayerLower}.json?format=event-stream`;
-    messageEventSource = new EventSource(messagesUrl);
-    
-    messageEventSource.onmessage = async (event) => {
-      try {
-        // Firebase sends data in format: "event: put\ndata: {...}"
-        const data = JSON.parse(event.data);
-        if (data && typeof data === 'object') {
-          // Convert Firebase object to array
-          const messages = await Promise.all(
-            Object.entries(data).map(async ([id, msg]) => {
-              if (!msg || msg.read === false) {
-                if (msg && msg.encrypted && msg.text && msg.from) {
-                  try {
-                    const decryptedText = await decryptMessage(msg.text, msg.from, currentPlayer);
-                    return { id, ...msg, text: decryptedText };
-                  } catch (error) {
-                    console.warn('[VIP List] Failed to decrypt message:', error);
-                    return { id, ...msg };
-                  }
-                }
-                return { id, ...msg };
-              }
-              return null;
-            })
-          );
-          let unreadMessages = messages.filter(m => m !== null);
-          
-          // Apply message filter: if set to 'friends', only show messages from VIP list
-          const messageFilter = getMessageFilter();
-          if (messageFilter === 'friends') {
-            unreadMessages = unreadMessages.filter(msg => {
-              if (!msg.from) return false;
-              return isPlayerInVIPList(msg.from);
-            });
-          }
-          
-          await processNewMessages(unreadMessages);
-        }
-      } catch (error) {
-        console.warn('[VIP List] Error processing message event:', error);
-      }
-    };
-    
-    messageEventSource.onerror = (error) => {
-      console.warn('[VIP List] Message EventSource error, falling back to polling:', error);
-      messageEventSource.close();
-      messageEventSource = null;
-      setupFallbackPolling();
-    };
-    
-    console.log('[VIP List] Event-driven message listener established');
-  } catch (error) {
-    console.warn('[VIP List] Failed to setup EventSource for messages, using polling:', error);
-    setupFallbackPolling();
-  }
-  
-  // Setup chat request listener
-  try {
-    const requestsUrl = `${getChatRequestsApiUrl()}/${currentPlayerLower}.json?format=event-stream`;
-    chatRequestEventSource = new EventSource(requestsUrl);
-    
-    chatRequestEventSource.onmessage = async (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data && typeof data === 'object') {
-          const requests = Object.entries(data)
-            .map(([id, req]) => {
-              if (req && req.status === 'pending' && req.from) {
-                return { id, ...req };
-              }
-              return null;
-            })
-            .filter(req => req !== null);
-          await processChatRequests(requests);
-        }
-      } catch (error) {
-        console.warn('[VIP List] Error processing chat request event:', error);
-      }
-    };
-    
-    chatRequestEventSource.onerror = (error) => {
-      console.warn('[VIP List] Chat request EventSource error:', error);
-      // Don't fallback for requests, just log the error
-    };
-    
-    console.log('[VIP List] Event-driven chat request listener established');
-  } catch (error) {
-    console.warn('[VIP List] Failed to setup EventSource for chat requests:', error);
-  }
+  console.log('[VIP List] Using polling for messages (interval:', interval, 'ms)');
   
   // Initial load
   checkForMessages().then(messages => {
@@ -2105,19 +2000,6 @@ function setupEventDrivenListeners() {
     });
   });
   
-  // Check for accepted requests periodically (less frequent, only for open panels)
-  // This is still needed because privilege changes aren't easily trackable via events
-  setInterval(checkAcceptedRequests, 10000); // Check every 10 seconds
-}
-
-// Setup polling for when chat panels are open (more frequent updates)
-function setupPolling() {
-  if (messageCheckInterval) {
-    return; // Already polling
-  }
-  
-  console.log('[VIP List] Using polling for messages (chat panels open)');
-  
   messageCheckInterval = setInterval(async () => {
     const messages = await checkForMessages();
     await processNewMessages(messages);
@@ -2126,15 +2008,10 @@ function setupPolling() {
     await processChatRequests(requests);
     
     await checkAcceptedRequests();
-  }, MESSAGING_CONFIG.checkInterval);
+  }, interval);
 }
 
-// Fallback to polling if EventSource fails
-function setupFallbackPolling() {
-  setupPolling();
-}
-
-// Switch between polling and event-driven based on whether panels are open
+// Switch polling interval based on whether panels are open
 function updateMessageCheckingMode() {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
     return;
@@ -2142,65 +2019,26 @@ function updateMessageCheckingMode() {
   
   const hasOpenPanels = openChatPanels.size > 0;
   
-  if (hasOpenPanels) {
-    // Panels are open - use polling for more frequent updates
-    if (!messageCheckInterval) {
-      // Stop event-driven if active
-      cleanupEventDrivenListeners();
-      // Start polling
-      setupPolling();
-    }
-  } else {
-    // No panels open - use event-driven for efficiency
-    if (messageCheckInterval) {
-      // Stop polling
-      if (messageCheckInterval) {
-        clearInterval(messageCheckInterval);
-        messageCheckInterval = null;
-      }
-      // Start event-driven
-      setupEventDrivenListeners();
-    } else if (!messageEventSource && !chatRequestEventSource) {
-      // Neither is active, start event-driven
-      setupEventDrivenListeners();
-    }
-  }
+  // Use shorter interval (5s) when panels are open for more responsive updates
+  // Use longer interval (30s) when no panels are open for better efficiency
+  const interval = hasOpenPanels ? 5000 : 30000;
+  
+  // Restart polling with appropriate interval
+  setupPolling(interval);
 }
 
-// Setup message checking (starts with event-driven, switches to polling when panels open)
+// Setup message checking (uses polling with adaptive intervals)
 function setupMessageChecking() {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
     return;
   }
   
-  // Start with event-driven (efficient when no panels are open)
-  // Will switch to polling automatically when panels are opened
-  setupEventDrivenListeners();
-}
-
-// Cleanup event-driven listeners
-function cleanupEventDrivenListeners() {
-  if (messageEventSource) {
-    messageEventSource.close();
-    messageEventSource = null;
-  }
-  
-  if (chatRequestEventSource) {
-    chatRequestEventSource.close();
-    chatRequestEventSource = null;
-  }
-  
-  // Clean up privilege event sources
-  privilegeEventSources.forEach((eventSource, playerName) => {
-    eventSource.close();
-  });
-  privilegeEventSources.clear();
+  // Start with longer interval (no panels open)
+  setupPolling(30000);
 }
 
 // Cleanup message checking
 function cleanupMessageChecking() {
-  cleanupEventDrivenListeners();
-  
   if (messageCheckInterval) {
     clearInterval(messageCheckInterval);
     messageCheckInterval = null;
@@ -3675,8 +3513,7 @@ async function openChatPanel(toPlayer) {
     }
   });
   
-  // No longer need per-panel polling - event-driven listeners handle updates
-  // Conversation updates are handled by the global message EventSource listener
+  // Conversation updates are handled by the global polling interval
   
   // Add to document
   document.body.appendChild(panel);
@@ -5917,7 +5754,7 @@ exports = {
       // 4. Clear refresh interval
       cleanupAutoRefresh();
       
-      // 5. Cleanup message checking (EventSources, intervals)
+      // 5. Cleanup message checking (polling intervals)
       cleanupMessageChecking();
       
       // 6. Clear pending request check intervals

@@ -120,6 +120,7 @@
       "vipListMessageFilter": "Receive messages from:",
       "vipListMessageFilterAll": "All",
       "vipListMessageFilterFriends": "Friends",
+      "vipListChatDocumentation": "Learn how chat works",
       "staminaFullText": "Full",
       "favoriteMenuLabel": "Favorite"
     },
