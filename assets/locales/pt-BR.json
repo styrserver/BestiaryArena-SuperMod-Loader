@@ -117,6 +117,7 @@
       "vipListInterfaceModal": "Modal",
       "vipListInterfacePanel": "Painel",
       "enableVipListChat": "Habilitar Chat",
+      "enableGlobalChat": "Habilitar Chat Global",
       "vipListMessageFilter": "Receber mensagens de:",
       "vipListMessageFilterAll": "Todos",
       "vipListMessageFilterFriends": "Amigos",
@@ -508,7 +509,12 @@
       "delete": "Deletar",
       "noMessagesYet": "Nenhuma mensagem ainda. Inicie a conversa!",
       "deleteConversationError": "Falha ao deletar conversa. Tente novamente.",
-      "sentYouReplay": "enviou um replay para você"
+      "sentYouReplay": "enviou um replay para você",
+      "allChatTitle": "Chat Global",
+      "allChatEmptyState": "Nenhuma mensagem no Chat Global ainda",
+      "allChatPlaceholder": "Digite uma mensagem para o Chat Global...",
+      "allChatNotAvailable": "Chat Global não está disponível: as regras de segurança do Firebase precisam ser configuradas. Entre em contato com o desenvolvedor do mod.",
+      "enableChatPlaceholder": "Habilite o chat nas configurações para enviar mensagens"
     }
   }
 }

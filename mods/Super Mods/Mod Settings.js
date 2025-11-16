@@ -32,7 +32,8 @@ const defaultConfig = {
   enableMismatchRefresh: false,
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List
-  vipListMessageFilter: 'all' // 'all' or 'friends' - who can send messages
+  vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
+  enableGlobalChat: false // Enable Global Chat (All Chat) feature
 };
 
 // Storage key for this mod
@@ -2058,6 +2059,12 @@ function showSettingsModal() {
               <span>${t('mods.betterUI.enableVipListChat')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="enable-global-chat-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.enableGlobalChat')}</span>
+            </label>
+          </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
             <span style="color: #ccc;">${t('mods.betterUI.vipListMessageFilter')}</span>
             <select id="vip-list-message-filter-selector" style="width: fit-content; background: #333; color: #ccc; border: 1px solid #555; padding: 4px 20px 4px 10px; border-radius: 4px; pointer-events: auto;">
@@ -2247,6 +2254,29 @@ function showSettingsModal() {
           }
           
           console.log('[Mod Settings] VIP List chat', enableVipListChatCheckbox.checked ? 'enabled' : 'disabled');
+        });
+      }
+      
+      const enableGlobalChatCheckbox = content.querySelector('#enable-global-chat-toggle');
+      if (enableGlobalChatCheckbox) {
+        enableGlobalChatCheckbox.checked = config.enableGlobalChat;
+        
+        enableGlobalChatCheckbox.addEventListener('change', () => {
+          config.enableGlobalChat = enableGlobalChatCheckbox.checked;
+          saveConfig();
+          
+          // Update VIP List mod's Global Chat state
+          if (window.VIPList && typeof window.VIPList.updateGlobalChatState === 'function') {
+            window.VIPList.updateGlobalChatState(enableGlobalChatCheckbox.checked);
+          } else {
+            // Fallback: trigger sidebar update by calling getChatSidebar
+            // This will check the setting and add/remove All Chat accordingly
+            if (window.VIPList && typeof window.VIPList.getChatSidebar === 'function') {
+              window.VIPList.getChatSidebar();
+            }
+          }
+          
+          console.log('[Mod Settings] Global Chat', enableGlobalChatCheckbox.checked ? 'enabled' : 'disabled');
         });
       }
     

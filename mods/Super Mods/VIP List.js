@@ -87,6 +87,14 @@ const getMessageFilter = () => {
   return 'all'; // Default to 'all' (receive from everyone)
 };
 
+// Read Global Chat (All Chat) enabled state from Mod Settings config if available, default to false
+const getGlobalChatEnabled = () => {
+  if (window.betterUIConfig && typeof window.betterUIConfig.enableGlobalChat === 'boolean') {
+    return window.betterUIConfig.enableGlobalChat;
+  }
+  return false; // Default to disabled
+};
+
 // Check if a player is in the VIP list
 function isPlayerInVIPList(playerName) {
   const vipList = getVIPList();
@@ -137,6 +145,13 @@ const getBlockedPlayersApiUrl = () => {
     : null;
 };
 
+// All-chat messages API URL (public channel)
+const getAllChatApiUrl = () => {
+  return MESSAGING_CONFIG.enabled 
+    ? `${MESSAGING_CONFIG.firebaseUrl}/all-chat`
+    : null;
+};
+
 // =======================
 // 3. State & Observers
 // =======================
@@ -162,6 +177,8 @@ let minimizedChats = new Map(); // Map of playerName -> minimized chat element
 let openChatPanels = new Map(); // Map of playerName -> open chat panel element
 let firebase401WarningShown = false; // Track if 401 warning has been shown
 let pendingRequestCheckIntervals = new Map(); // Map of playerName -> intervalId for frequent privilege checks
+// Track when chat panel was last opened per player - only show notifications for messages that arrived after panel was closed
+const panelLastOpenedAt = new Map(); // Map<playerName.toLowerCase(), number> - timestamp when panel was last opened
 
 let modalCloseObserver = null; // Modal close observer for cleanup
 
@@ -256,15 +273,7 @@ function setupVIPDropdownClickHandler() {
     
     if (!clickedDropdown && !clickedNameButton) {
       document.querySelectorAll('.vip-dropdown-menu').forEach(menu => {
-        menu.style.display = 'none';
-        // Reset all positioning styles when closing to ensure consistent measurement next time
-        menu.style.top = '';
-        menu.style.bottom = '';
-        menu.style.left = '';
-        menu.style.marginTop = '';
-        menu.style.marginBottom = '';
-        menu.style.transform = '';
-        menu.style.position = '';
+        resetDropdownStyles(menu);
       });
     }
   };
@@ -1770,6 +1779,72 @@ async function sendMessage(toPlayer, text) {
   }
 }
 
+// Send message to All Chat (public channel)
+async function sendAllChatMessage(text) {
+  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
+    console.warn('[VIP List] All Chat not enabled');
+    return false;
+  }
+  
+  if (!text || text.trim().length === 0) {
+    return false;
+  }
+  
+  if (text.length > MESSAGING_CONFIG.maxMessageLength) {
+    console.warn('[VIP List] Message too long');
+    return false;
+  }
+  
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      throw new Error('Could not get current player name');
+    }
+    
+    // Check if current player has chat enabled (verify with Firebase)
+    const hasChatEnabled = await checkRecipientChatEnabled(currentPlayer);
+    if (!hasChatEnabled) {
+      console.warn('[VIP List] Cannot send to All Chat: you do not have chat enabled');
+      return false;
+    }
+    
+    // Store plain text for public channel (no encryption needed)
+    const message = {
+      from: currentPlayer, // Plain text username
+      text: text.trim(), // Plain text message
+      timestamp: Date.now(),
+      read: false
+    };
+    
+    const messageId = Date.now().toString();
+    const response = await fetch(`${getAllChatApiUrl()}/${messageId}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message)
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Firebase security rules prevent write access - need to configure rules
+        console.warn('[VIP List] Cannot send All Chat message: Firebase write access denied (401). All Chat requires Firebase security rules to be configured for the /all-chat path.');
+        throw new Error('FIREBASE_401'); // Special error code for UI handling
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    console.log('[VIP List] Message sent to All Chat');
+    
+    return true;
+  } catch (error) {
+    if (error.message === 'FIREBASE_401') {
+      // Re-throw with special code for UI handling
+      throw error;
+    }
+    console.error('[VIP List] Error sending All Chat message:', error);
+    return false;
+  }
+}
+
 // Check for new messages
 async function checkForMessages() {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
@@ -1939,6 +2014,139 @@ async function checkForMessages() {
   }
 }
 
+// Check for new All Chat messages
+async function checkForAllChatMessages() {
+  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
+    return [];
+  }
+  
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      return [];
+    }
+    
+    // Fetch all All Chat messages
+    let response = await fetch(`${getAllChatApiUrl()}.json`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return []; // No messages yet
+      }
+      if (response.status === 401) {
+        // Firebase security rules prevent read access - fail gracefully
+        return [];
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data || typeof data !== 'object') {
+      return [];
+    }
+    
+    // Convert Firebase object to array and filter blocked players
+    const messages = [];
+    for (const [id, msg] of Object.entries(data)) {
+      if (!msg) continue;
+      
+      // Filter out messages from blocked players
+      if (msg.from) {
+        const isBlocked = await isPlayerBlocked(msg.from);
+        if (isBlocked) continue;
+        
+        const isBlockedBy = await isBlockedByPlayer(msg.from);
+        if (isBlockedBy) continue;
+      }
+      
+      messages.push({ id, ...msg });
+    }
+    
+    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    
+    // Apply message filter: if set to 'friends', only show messages from VIP list
+    const messageFilter = getMessageFilter();
+    if (messageFilter === 'friends') {
+      return messages.filter(msg => {
+        if (!msg.from) return false;
+        return isPlayerInVIPList(msg.from);
+      });
+    }
+    
+    return messages;
+  } catch (error) {
+    console.error('[VIP List] Error checking for All Chat messages:', error);
+    return [];
+  }
+}
+
+// Get all All Chat messages (for displaying in panel)
+async function getAllChatMessages() {
+  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
+    return [];
+  }
+  
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      return [];
+    }
+    
+    // Fetch all All Chat messages
+    let response = await fetch(`${getAllChatApiUrl()}.json`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return [];
+      }
+      if (response.status === 401) {
+        return [];
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data || typeof data !== 'object') {
+      return [];
+    }
+    
+    // Convert Firebase object to array and filter blocked players
+    const messages = [];
+    for (const [id, msg] of Object.entries(data)) {
+      if (!msg) continue;
+      
+      // Filter out messages from blocked players
+      if (msg.from) {
+        const isBlocked = await isPlayerBlocked(msg.from);
+        if (isBlocked) continue;
+        
+        const isBlockedBy = await isBlockedByPlayer(msg.from);
+        if (isBlockedBy) continue;
+      }
+      
+      messages.push({ id, ...msg });
+    }
+    
+    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    
+    // Apply message filter: if set to 'friends', only show messages from VIP list
+    const messageFilter = getMessageFilter();
+    if (messageFilter === 'friends') {
+      return messages.filter(msg => {
+        if (!msg.from) return false;
+        return isPlayerInVIPList(msg.from);
+      });
+    }
+    
+    return messages;
+  } catch (error) {
+    console.error('[VIP List] Error getting All Chat messages:', error);
+    return [];
+  }
+}
+
 // Mark message as read
 async function markMessageAsRead(messageId, fromPlayer = null) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
@@ -1951,10 +2159,20 @@ async function markMessageAsRead(messageId, fromPlayer = null) {
       return;
     }
     
+    // Hash username for Firebase path (use hashed path, same as messages)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    const currentPlayerLower = currentPlayer.toLowerCase();
+    
     // If fromPlayer not provided, fetch the message to get sender
     let senderName = fromPlayer;
     if (!senderName) {
-      const response = await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}/${messageId}.json`);
+      // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
+      let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}/${messageId}.json`);
+      
+      if (!response.ok && response.status === 404) {
+        // Try non-hashed path for backward compatibility
+        response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}/${messageId}.json`);
+      }
       if (response.ok) {
         const msg = await response.json();
         if (msg && msg.from) {
@@ -1998,11 +2216,22 @@ async function markMessageAsRead(messageId, fromPlayer = null) {
       }
     }
     
-    await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}/${messageId}/read.json`, {
+    // Store read status using hashed path (same as messages)
+    // Try hashed path first, fallback to non-hashed for backward compatibility
+    let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}/${messageId}/read.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(encryptedReadStatus)
     });
+    
+    // If hashed path fails with 404, try non-hashed path (backward compatibility)
+    if (!response.ok && response.status === 404) {
+      response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}/${messageId}/read.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(encryptedReadStatus)
+      });
+    }
   } catch (error) {
     console.error('[VIP List] Error marking message as read:', error);
   }
@@ -2020,8 +2249,18 @@ async function markAllMessagesAsReadFromPlayer(playerName) {
       return;
     }
     
-    // Get all messages for current player
-    const response = await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}.json`);
+    // Hash username for Firebase path (use hashed path, same as messages)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    const currentPlayerLower = currentPlayer.toLowerCase();
+    
+    // Get all messages for current player (try hashed path first, fallback to non-hashed)
+    let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
+    
+    if (!response.ok && response.status === 404) {
+      // Try non-hashed path for backward compatibility
+      response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
+    }
+    
     if (!response.ok) {
       if (response.status === 401) {
         // Silent fail - warning already shown by checkForMessages
@@ -2064,13 +2303,20 @@ async function markAllMessagesAsReadFromPlayer(playerName) {
     
     await Promise.all(markPromises);
     
-    // Update the minimized chat badge
+    // Update the minimized chat badge to 0 (messages are marked as read)
     updateMinimizedChatUnread(playerName, 0);
     
-    // Update global unread count
-    const messages = await checkForMessages();
-    unreadMessageCount = messages.length;
+    // Update global unread count - recalculate after marking messages as read
+    const messagesAfterRead = await checkForMessages();
+    unreadMessageCount = messagesAfterRead.filter(msg => !msg.read).length;
     updateMessageBadge();
+    
+    // Ensure badge stays at 0 (don't recalculate - we just marked everything as read)
+    // Only update if panel is not open (if panel is open, updateMinimizedChatUnread will handle it)
+    const isPanelOpen = openChatPanels.has(playerName.toLowerCase());
+    if (!isPanelOpen) {
+      updateMinimizedChatUnread(playerName, 0);
+    }
   } catch (error) {
     console.error('[VIP List] Error marking all messages as read:', error);
   }
@@ -2101,6 +2347,16 @@ function formatMessageTime(timestamp) {
   }
   
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Format datetime for All Chat (time only format)
+function formatAllChatDateTime(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  // Format: HH:MM (time only, no date or seconds)
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
 }
 
 // Copy text to clipboard
@@ -2254,20 +2510,26 @@ function embedReplayLinks(text) {
   return parts;
 }
 
-// Show message notification
+// Update minimized chat for new message (only updates unread count, no popup notification)
 function showMessageNotification(message) {
+  // Never show notifications for All Chat messages (public channel)
+  // All Chat is always available and doesn't need notifications
+  if (!message || !message.from) {
+    return;
+  }
+  
   // Create minimized chat for this player if it doesn't exist
   const playerName = message.from;
   const existingPanel = openChatPanels.get(playerName.toLowerCase());
   
-  // Don't show notification if chat panel is already open for this player
+  // Don't update if chat panel is already open for this player
   if (existingPanel) {
     // Chat is open, clear badge (user is reading messages immediately)
     updateMinimizedChatUnread(playerName, 0);
-    return; // Exit early - don't show notification popup
+    return;
   }
   
-  // Only create minimized chat if panel is not open
+  // Only create/update minimized chat if panel is not open
   // Get unread count for this player
   checkForMessages().then(async messages => {
     const unreadCount = getPlayerUnreadCount(messages, playerName);
@@ -2275,57 +2537,6 @@ function showMessageNotification(message) {
   }).catch(async () => {
     await createMinimizedChat(playerName, 1);
   });
-  
-  // Show a temporary notification popup (only if chat is not open)
-  const notification = document.createElement('div');
-  notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 90px;
-    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
-    border: 4px solid transparent;
-    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
-    padding: 12px 16px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    z-index: 10000;
-    max-width: 300px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    cursor: pointer;
-  `;
-  
-  // Check if message contains a replay
-  const hasReplay = message.text && message.text.includes('$replay(');
-  const displayText = hasReplay ? t('mods.vipList.sentYouReplay') : message.text;
-  
-  notification.innerHTML = `
-    <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-      ${message.from}
-    </div>
-    <div style="font-size: 12px; color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};">
-      ${displayText}
-    </div>
-    <div style="font-size: 10px; color: rgba(255, 255, 255, 0.6); margin-top: 4px;">
-      ${formatMessageTime(message.timestamp)}
-    </div>
-  `;
-  
-  notification.addEventListener('click', () => {
-    notification.remove();
-    markMessageAsRead(message.id);
-    unreadMessageCount = Math.max(0, unreadMessageCount - 1);
-    updateMessageBadge();
-    // Open chat panel
-    openChatPanel(playerName);
-  });
-  
-  document.body.appendChild(notification);
-  
-  // Auto-remove after 10 seconds
-  const timeoutId = setTimeout(() => {
-    notification.remove();
-    pendingTimeouts.delete(timeoutId);
-  }, 10000);
-  trackTimeout(timeoutId);
 }
 
 // Update message badge
@@ -2371,6 +2582,11 @@ async function checkForConversationDeletions() {
   // Check all open chat panels for message count changes
   for (const [playerName, panel] of openChatPanels.entries()) {
     if (!panel || panel.nodeType !== 1) {
+      continue;
+    }
+    
+    // Skip All Chat - it has its own update mechanism
+    if (playerName === 'all-chat') {
       continue;
     }
     
@@ -2424,8 +2640,9 @@ async function processNewMessages(messages) {
   const markReadPromises = [];
   messagesBySender.forEach((playerMessages, sender) => {
     const panel = openChatPanels.get(sender.toLowerCase());
+    const senderKey = sender.toLowerCase();
     if (panel) {
-      // Chat panel is open, mark all unread messages from this sender as read
+      // Chat panel is open, mark all unread messages from this sender as read in Firebase
       playerMessages.forEach(msg => {
         if (!msg.read && msg.id) {
           markReadPromises.push(markMessageAsRead(msg.id, sender));
@@ -2450,12 +2667,17 @@ async function processNewMessages(messages) {
   unreadMessageCount = messages.filter(msg => !msg.read).length;
   updateMessageBadge();
   
-  // Show notifications for new messages (only if unread and chat panel is NOT open)
-  // Check panel status first, then check read status
+  // Update minimized chat badges for new messages (only if unread, panel is NOT open, and message arrived after panel was closed)
   newMessages.forEach(msg => {
     const panel = openChatPanels.get(msg.from.toLowerCase());
-    // Only show notification if panel is not open AND message is unread
-    if (!panel && !msg.read) {
+    const senderKey = msg.from.toLowerCase();
+    const panelOpenedAt = panelLastOpenedAt.get(senderKey) || 0;
+    
+    // Only update minimized chat if:
+    // 1. Panel is not currently open
+    // 2. Message is unread (checked in Firebase)
+    // 3. Message timestamp is after the last time we opened the panel (message arrived after we closed it)
+    if (!panel && !msg.read && msg.timestamp > panelOpenedAt) {
       showMessageNotification(msg);
     }
   });
@@ -2616,7 +2838,7 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
   checkForMessages().then(messages => {
     unreadMessageCount = messages.filter(msg => !msg.read).length;
     updateMessageBadge();
-    // Only show notifications for unread messages where panel is not open
+    // Update minimized chat badges for unread messages where panel is not open
     messages.forEach(msg => {
       if (!msg.read) {
         const panel = openChatPanels.get(msg.from.toLowerCase());
@@ -2630,6 +2852,32 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
   messageCheckInterval = setInterval(async () => {
     const messages = await checkForMessages();
     await processNewMessages(messages);
+    
+    // Check for All Chat messages and update if panel is open
+    const allChatPanel = openChatPanels.get('all-chat');
+    if (allChatPanel && typeof loadAllChatConversation === 'function') {
+      const messagesArea = allChatPanel.querySelector('#chat-messages-all-chat');
+      if (messagesArea) {
+        // Check for new messages
+        try {
+          const allChatMessages = await getAllChatMessages();
+          const latestTimestamp = allChatMessages.length > 0 ? allChatMessages[allChatMessages.length - 1]?.timestamp : null;
+          const storedTimestamp = allChatPanel._lastTimestamp;
+          
+          if (storedTimestamp === null || latestTimestamp === null) {
+            allChatPanel._lastTimestamp = latestTimestamp;
+          } else if (latestTimestamp > storedTimestamp || allChatMessages.length !== (allChatPanel._lastMessageCount || 0)) {
+            allChatPanel._lastTimestamp = latestTimestamp;
+            allChatPanel._lastMessageCount = allChatMessages.length;
+            await loadAllChatConversation(messagesArea);
+          }
+        } catch (error) {
+          if (error.message && !error.message.includes('401')) {
+            console.warn('[VIP List] Error checking All Chat messages:', error);
+          }
+        }
+      }
+    }
     
     // Check for conversation deletions and refresh open panels
     await checkForConversationDeletions();
@@ -3242,6 +3490,11 @@ function getChatSidebar() {
       chatSidebar._resizeTimeout = null; // Will be set by resizeHandler
       
       document.body.appendChild(chatSidebar);
+      
+      // Add All Chat to sidebar initially if enabled
+      if (getGlobalChatEnabled()) {
+        createAllChatMinimizedChat(0);
+      }
     } else {
       // Sidebar already exists, update its position
       if (chatSidebar._updatePosition) {
@@ -3262,6 +3515,14 @@ function getChatSidebar() {
         };
         updateSidebarPosition();
         chatSidebar._updatePosition = updateSidebarPosition;
+      }
+      
+      // Ensure All Chat is in sidebar if it doesn't exist and is enabled
+      if (getGlobalChatEnabled() && !minimizedChats.has('all-chat')) {
+        createAllChatMinimizedChat(0);
+      } else if (!getGlobalChatEnabled() && minimizedChats.has('all-chat')) {
+        // Remove All Chat if it's disabled
+        removeAllChatMinimizedChat();
       }
     }
   }
@@ -3467,13 +3728,171 @@ async function createMinimizedChat(playerName, unreadCount = 0) {
     removeMinimizedChat(playerName);
   });
   
-  sidebar.appendChild(minimizedChat);
+  // Place regular chats after All Chat (if it exists)
+  const allChatItem = minimizedChats.get('all-chat');
+  if (allChatItem && allChatItem.parentNode === sidebar) {
+    // Insert after All Chat
+    const nextSibling = allChatItem.nextSibling;
+    if (nextSibling) {
+      sidebar.insertBefore(minimizedChat, nextSibling);
+    } else {
+      sidebar.appendChild(minimizedChat);
+    }
+  } else {
+    // No All Chat, append normally
+    sidebar.appendChild(minimizedChat);
+  }
   minimizedChats.set(playerName.toLowerCase(), minimizedChat);
   
   // Save to localStorage
   saveMinimizedChatsToStorage();
   
   return minimizedChat;
+}
+
+// Create minimized All Chat item
+async function createAllChatMinimizedChat(unreadCount = 0) {
+  const sidebar = getChatSidebar();
+  const allChatKey = 'all-chat';
+  const existingMinimized = minimizedChats.get(allChatKey);
+  if (existingMinimized) {
+    // Update unread count
+    const badge = existingMinimized.querySelector('.minimized-chat-badge');
+    if (badge) {
+      badge.textContent = formatBadgeCount(unreadCount);
+      badge.style.display = unreadCount > 0 ? 'flex' : 'none';
+    }
+    return existingMinimized;
+  }
+  
+  const minimizedChat = document.createElement('div');
+  minimizedChat.className = 'minimized-chat-item';
+  minimizedChat.dataset.playerName = t('mods.vipList.allChatTitle');
+  minimizedChat.style.cssText = `
+    position: relative;
+    width: 42px;
+    background: transparent;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    overflow: visible;
+    touch-action: none;
+    gap: 0;
+  `;
+  
+  // All Chat label at the top
+  const nameLabel = document.createElement('div');
+  nameLabel.textContent = t('mods.vipList.allChatTitle').split(' ')[0]; // Get first word for compact display
+  nameLabel.style.cssText = `
+    font-size: 8px;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 42px;
+    line-height: 1;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+    margin-top: 4px;
+    margin-bottom: 2px;
+  `;
+  
+  // Simple chat icon (using text instead of sprite for simplicity)
+  const iconContainer = document.createElement('div');
+  iconContainer.style.cssText = `
+    position: relative;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(100, 181, 246, 0.2);
+    border: 2px solid ${CSS_CONSTANTS.COLORS.LINK};
+    border-radius: 4px;
+    margin: 0;
+  `;
+  
+  const iconText = document.createElement('div');
+  iconText.textContent = '💬';
+  iconText.style.cssText = `
+    font-size: 24px;
+    line-height: 1;
+  `;
+  
+  iconContainer.appendChild(iconText);
+  
+  // Unread badge
+  const badge = document.createElement('div');
+  badge.className = 'minimized-chat-badge';
+  badge.style.cssText = `
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    background: ${CSS_CONSTANTS.COLORS.ERROR};
+    color: white;
+    border-radius: 50%;
+    width: 14px;
+    height: 14px;
+    display: ${unreadCount > 0 ? 'flex' : 'none'};
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: bold;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    z-index: 2;
+  `;
+  badge.textContent = formatBadgeCount(unreadCount);
+  
+  minimizedChat.appendChild(nameLabel);
+  minimizedChat.appendChild(iconContainer);
+  minimizedChat.appendChild(badge);
+  
+  // Prevent text selection and dragging
+  minimizedChat.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+  });
+  
+  minimizedChat.addEventListener('selectstart', (e) => {
+    e.preventDefault();
+  });
+  
+  minimizedChat.addEventListener('dragstart', (e) => {
+    e.preventDefault();
+  });
+  
+  // Click to open All Chat
+  minimizedChat.addEventListener('click', () => {
+    openAllChatPanel();
+  });
+  
+  // Always place All Chat at the top of the sidebar
+  const firstChild = sidebar.firstChild;
+  if (firstChild) {
+    sidebar.insertBefore(minimizedChat, firstChild);
+  } else {
+    sidebar.appendChild(minimizedChat);
+  }
+  minimizedChats.set(allChatKey, minimizedChat);
+  
+  return minimizedChat;
+}
+
+// Remove All Chat minimized chat
+function removeAllChatMinimizedChat() {
+  const minimized = minimizedChats.get('all-chat');
+  if (minimized) {
+    minimized.remove();
+    minimizedChats.delete('all-chat');
+  }
 }
 
 // Save minimized chats to localStorage
@@ -3555,9 +3974,17 @@ async function restoreMinimizedChats() {
     const messages = await checkForMessages();
     const messagesBySender = groupMessagesBySender(messages);
     
-    // Restore each minimized chat
+    // Restore each minimized chat (skip All Chat - it's handled separately)
     for (const chat of savedChats) {
       const playerName = chat.playerName;
+      
+      // Skip All Chat - it's handled separately and always at top
+      // Check for both English, translated version, and the key
+      const allChatTitle = t('mods.vipList.allChatTitle');
+      if (playerName === 'All Chat' || playerName === allChatTitle || playerName.toLowerCase() === 'all-chat') {
+        continue;
+      }
+      
       const savedUnreadCount = chat.unreadCount || 0;
       
       // Get actual unread count if available
@@ -3569,6 +3996,21 @@ async function restoreMinimizedChats() {
       // Only restore if panel is not already open
       if (!openChatPanels.has(playerName.toLowerCase())) {
         await createMinimizedChat(playerName, actualUnreadCount);
+      }
+    }
+    
+    // Ensure All Chat is at the top after restoring other chats
+    if (getGlobalChatEnabled()) {
+      const allChatItem = minimizedChats.get('all-chat');
+      const sidebar = getChatSidebar();
+      if (allChatItem && allChatItem.parentNode === sidebar) {
+        const firstChild = sidebar.firstChild;
+        if (firstChild !== allChatItem) {
+          sidebar.insertBefore(allChatItem, firstChild);
+        }
+      } else if (!allChatItem) {
+        // Create All Chat if it doesn't exist but is enabled
+        await createAllChatMinimizedChat(0);
       }
     }
   } catch (error) {
@@ -3651,8 +4093,12 @@ async function openChatPanel(toPlayer) {
     }
   }
   
-  // Mark all messages from this player as read when opening chat
+  // Mark all messages from this player as read in Firebase when opening chat
   await markAllMessagesAsReadFromPlayer(toPlayer);
+  
+  // Track when we opened the panel - only show notifications for messages that arrive after this
+  const playerKey = toPlayer.toLowerCase();
+  panelLastOpenedAt.set(playerKey, Date.now());
   
   // Check if panel already exists
   const existingPanel = document.getElementById(chatPanelId);
@@ -3661,9 +4107,11 @@ async function openChatPanel(toPlayer) {
     existingPanel.style.zIndex = '10000';
     existingPanel.style.display = 'flex';
     // Ensure panel is in the map
-    if (!openChatPanels.has(toPlayer.toLowerCase())) {
-      openChatPanels.set(toPlayer.toLowerCase(), existingPanel);
+    if (!openChatPanels.has(playerKey)) {
+      openChatPanels.set(playerKey, existingPanel);
     }
+    // Track when we opened the panel (update timestamp if reopening)
+    panelLastOpenedAt.set(playerKey, Date.now());
     // Switch to polling if not already (panel is open)
     updateMessageCheckingMode();
     // Clear badge when panel is open (user is reading messages)
@@ -4348,15 +4796,688 @@ async function openChatPanel(toPlayer) {
   trackTimeout(timeoutId);
 }
 
+// Create clickable player name with dropdown menu for All Chat
+async function createAllChatPlayerNameButton(username, isFromCurrentPlayer, container) {
+  const nameWrapper = document.createElement('span');
+  nameWrapper.style.cssText = 'position: relative; display: inline-block;';
+  
+  const nameButton = document.createElement('button');
+  nameButton.type = 'button';
+  const nameColor = isFromCurrentPlayer ? CSS_CONSTANTS.COLORS.LINK : CSS_CONSTANTS.COLORS.TEXT_WHITE;
+  
+  // Check if player is blocked
+  const isBlocked = MESSAGING_CONFIG.enabled ? await isPlayerBlocked(username) : false;
+  const finalNameColor = isBlocked ? CSS_CONSTANTS.COLORS.ERROR : nameColor;
+  
+  nameButton.style.cssText = `
+    background: transparent;
+    border: none;
+    color: ${finalNameColor};
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    font-size: 13px;
+    font-weight: bold;
+    display: inline;
+    line-height: 1.4;
+  `;
+  nameButton.textContent = username;
+  
+  // Dropdown menu
+  const dropdown = createDropdownElement();
+  
+  // Get profile URL (default to lowercase username if no profile data available)
+  const profileUrl = username.toLowerCase();
+  
+  // Create dropdown items
+  dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownProfile'), () => {
+    window.open(`/profile/${profileUrl}`, '_blank');
+  }, dropdown, { fontSize: '13px' }));
+  
+  const cyclopediaMenuItem = createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
+    openCyclopediaForPlayer(username);
+  }, dropdown, {
+    dataAttributes: {
+      'data-vip-list-item': 'true',
+      'data-cyclopedia-exclude': 'true'
+    }
+  });
+  cyclopediaMenuItem.style.display = '';
+  dropdown.appendChild(cyclopediaMenuItem);
+  
+  // Add Send Message option (only if not current player and messaging enabled)
+  if (!isFromCurrentPlayer && MESSAGING_CONFIG.enabled) {
+    dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownSendMessage'), () => {
+      openMessageDialog(username);
+    }, dropdown, { color: CSS_CONSTANTS.COLORS.LINK, fontSize: '13px' }));
+  }
+  
+  // Add to VIP option (only if not already in VIP list and not current player)
+  if (!isFromCurrentPlayer && !isPlayerInVIPList(username)) {
+    dropdown.appendChild(createDropdownItem(t('mods.vipList.addToVIPList'), async () => {
+      try {
+        const profileData = await fetchPlayerData(username);
+        if (profileData) {
+          const playerInfo = extractPlayerInfoFromProfile(profileData, username);
+          playerInfo.profile = profileData.name?.toLowerCase() || username.toLowerCase();
+          addToVIPList(username, playerInfo);
+          await refreshVIPListDisplay();
+        }
+      } catch (error) {
+        console.error('[VIP List] Error adding player to VIP list:', error);
+      }
+    }, dropdown, { color: CSS_CONSTANTS.COLORS.SUCCESS, fontSize: '13px' }));
+  }
+  
+  nameButton.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const scrollContainer = findDropdownContainer(container) || container;
+    toggleDropdown(dropdown, nameButton, scrollContainer, {
+      cyclopediaMenuItem: cyclopediaMenuItem
+    });
+  });
+  
+  setupVIPDropdownClickHandler();
+  
+  nameWrapper.appendChild(nameButton);
+  nameWrapper.appendChild(dropdown);
+  
+  return nameWrapper;
+}
+
+// Load and display All Chat conversation
+async function loadAllChatConversation(container, forceScrollToBottom = false) {
+  const messages = await getAllChatMessages();
+  
+  // Get previous message count from container's data attribute or panel
+  const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
+  const previousMessageCount = panel?._previousMessageCount || 0;
+  
+  // Check if new messages arrived (count increased)
+  const hasNewMessages = messages.length > previousMessageCount;
+  const shouldScrollToBottom = forceScrollToBottom || hasNewMessages;
+  
+  container.innerHTML = '';
+  
+  if (messages.length === 0) {
+    const emptyMsg = document.createElement('div');
+    emptyMsg.style.cssText = `
+      text-align: center;
+      color: rgba(255, 255, 255, 0.5);
+      padding: 15px;
+      font-style: italic;
+      font-size: 12px;
+    `;
+    emptyMsg.textContent = t('mods.vipList.allChatEmptyState');
+    container.appendChild(emptyMsg);
+    
+    if (panel) panel._previousMessageCount = 0;
+    return;
+  }
+  
+  // Process messages in parallel for better performance
+  const messagePromises = messages.map(async (msg) => {
+    const messageDiv = document.createElement('div');
+    const currentPlayer = getCurrentPlayerName();
+    const isFromCurrentPlayer = msg.from && msg.from.toLowerCase() === currentPlayer?.toLowerCase();
+    
+    messageDiv.style.cssText = `
+      padding: 6px 10px;
+      margin: 2px 0;
+      border-radius: 4px;
+      word-wrap: break-word;
+      max-width: 100%;
+      font-size: 13px;
+      line-height: 1.4;
+      ${isFromCurrentPlayer ? 'background: rgba(100, 181, 246, 0.15);' : 'background: rgba(255, 255, 255, 0.05);'}
+    `;
+    
+    // Format: [Datetime] [Username]: [Message]
+    const datetime = formatAllChatDateTime(msg.timestamp);
+    const username = msg.from || 'Unknown';
+    let messageText = msg.text || '';
+    
+    // Check for replay links
+    const replayRegex = /\$replay\(\{.*?\}\)/g;
+    messageText = messageText.replace(replayRegex, (match) => {
+      const linkId = `replay-link-${Date.now()}-${Math.random()}`;
+      return `<a href="#" class="replay-link" data-replay="${encodeURIComponent(match)}" id="${linkId}" style="color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer;">${match}</a>`;
+    });
+    
+    // Create message structure with clickable player name
+    const datetimeSpan = document.createElement('span');
+    datetimeSpan.textContent = `[${datetime}] `;
+    
+    const nameButton = await createAllChatPlayerNameButton(username, isFromCurrentPlayer, container);
+    
+    const colonSpan = document.createElement('span');
+    colonSpan.textContent = ': ';
+    
+    const messageSpan = document.createElement('span');
+    messageSpan.innerHTML = messageText;
+    
+    messageDiv.appendChild(datetimeSpan);
+    messageDiv.appendChild(nameButton);
+    messageDiv.appendChild(colonSpan);
+    messageDiv.appendChild(messageSpan);
+    
+    messageDiv.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
+    messageDiv.style.whiteSpace = 'pre-wrap';
+    
+    // Add click handlers for replay links
+    messageDiv.querySelectorAll('.replay-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const replayCode = decodeURIComponent(link.dataset.replay);
+        navigator.clipboard.writeText(replayCode).then(() => {
+          const originalText = link.textContent;
+          link.textContent = 'Copied!';
+          setTimeout(() => {
+            link.textContent = originalText;
+          }, 2000);
+        });
+      });
+    });
+    
+    return messageDiv;
+  });
+  
+  const messageDivs = await Promise.all(messagePromises);
+  messageDivs.forEach(messageDiv => container.appendChild(messageDiv));
+  
+  if (panel) panel._previousMessageCount = messages.length;
+  
+  // Scroll to bottom if needed
+  if (shouldScrollToBottom) {
+    const timeoutId = setTimeout(() => {
+      container.scrollTop = container.scrollHeight;
+      pendingTimeouts.delete(timeoutId);
+    }, 100);
+    trackTimeout(timeoutId);
+  }
+}
+
+// Open All Chat panel
+async function openAllChatPanel() {
+  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled || !getGlobalChatEnabled()) {
+    return;
+  }
+  
+  const currentPlayer = getCurrentPlayerName();
+  if (!currentPlayer) {
+    return;
+  }
+  
+  const chatPanelId = 'vip-chat-panel-all-chat';
+  
+  // Check if current player has chat enabled
+  const hasChatEnabled = await checkRecipientChatEnabled(currentPlayer);
+  
+  // Check if panel already exists
+  const existingPanel = document.getElementById(chatPanelId);
+  if (existingPanel) {
+    console.log('[VIP List] All Chat panel already exists, focusing...');
+    existingPanel.style.zIndex = '10000';
+    existingPanel.style.display = 'flex';
+    // Switch to polling if not already (panel is open)
+    updateMessageCheckingMode();
+    return;
+  }
+  
+  // Load saved position for All Chat panel
+  const savedPosition = loadChatPanelPosition('all-chat');
+  const defaultTop = savedPosition?.top ?? 100;
+  const defaultRight = savedPosition?.right ?? 20;
+  const defaultLeft = savedPosition?.left ?? null;
+  
+  // Create main panel container
+  const panel = document.createElement('div');
+  panel.id = chatPanelId;
+  const positionStyle = defaultLeft !== null 
+    ? `left: ${defaultLeft}px; top: ${defaultTop}px;`
+    : `top: ${defaultTop}px; right: ${defaultRight}px;`;
+  panel.style.cssText = `
+    position: fixed;
+    ${positionStyle}
+    width: 500px;
+    height: ${CHAT_PANEL_DIMENSIONS.DEFAULT_HEIGHT}px;
+    min-width: ${CHAT_PANEL_DIMENSIONS.MIN_WIDTH}px;
+    max-width: 500px;
+    min-height: ${CHAT_PANEL_DIMENSIONS.MIN_HEIGHT}px;
+    max-height: ${CHAT_PANEL_DIMENSIONS.MAX_HEIGHT}px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 6px solid transparent;
+    border-image: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+    border-radius: 6px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  `;
+  
+  // Create header section
+  const headerContainer = document.createElement('div');
+  headerContainer.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+  `;
+  
+  // Close button (left side)
+  const closeBtn = createStyledIconButton('✕', true);
+  closeBtn.title = t('mods.vipList.closeButton');
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    minimizeAllChatPanel();
+  });
+  
+  const title = document.createElement('h3');
+  title.textContent = t('mods.vipList.allChatTitle');
+  title.style.cssText = `
+    margin: 0;
+    padding: 0;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 13px;
+    font-weight: 600;
+    font-family: system-ui, -apple-system, sans-serif;
+    flex: 1;
+    text-align: center;
+  `;
+  
+  headerContainer.appendChild(closeBtn);
+  headerContainer.appendChild(title);
+  
+  // Messages area
+  const messagesArea = document.createElement('div');
+  messagesArea.id = 'chat-messages-all-chat';
+  messagesArea.style.cssText = `
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    min-height: 0;
+  `;
+  
+  // Input area
+  const inputArea = document.createElement('div');
+  inputArea.style.cssText = `
+    padding: 8px;
+    border-top: 2px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  `;
+  
+  const inputRow = document.createElement('div');
+  inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+  
+  const canChat = hasChatEnabled;
+  
+  const textarea = document.createElement('textarea');
+  textarea.className = 'vip-chat-input';
+  textarea.placeholder = canChat ? t('mods.vipList.allChatPlaceholder') : t('mods.vipList.enableChatPlaceholder');
+  textarea.disabled = !canChat;
+  textarea.style.cssText = `
+    flex: 1;
+    min-height: 45px;
+    max-height: 90px;
+    padding: 6px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    color: ${canChat ? CSS_CONSTANTS.COLORS.TEXT_WHITE : 'rgba(255, 255, 255, 0.5)'};
+    font-family: inherit;
+    font-size: 13px;
+    resize: none;
+    box-sizing: border-box;
+    ${!canChat ? 'cursor: not-allowed; opacity: 0.6;' : ''}
+  `;
+  
+  const sendButton = document.createElement('button');
+  sendButton.textContent = t('mods.vipList.sendButton');
+  sendButton.className = 'primary';
+  sendButton.disabled = !canChat;
+  sendButton.style.cssText = `
+    padding: 6px 12px;
+    white-space: nowrap;
+    font-size: 13px;
+    ${!canChat ? 'opacity: 0.6; cursor: not-allowed;' : ''}
+  `;
+  
+  const charCount = document.createElement('div');
+  charCount.style.cssText = `font-size: 10px; color: rgba(255, 255, 255, 0.6); text-align: right;`;
+  charCount.textContent = `0 / ${MESSAGING_CONFIG.maxMessageLength}`;
+  
+  // Character counter
+  textarea.addEventListener('input', () => {
+    const length = textarea.value.length;
+    charCount.textContent = `${length} / ${MESSAGING_CONFIG.maxMessageLength}`;
+    if (length > MESSAGING_CONFIG.maxMessageLength) {
+      charCount.style.color = CSS_CONSTANTS.COLORS.ERROR;
+    } else {
+      charCount.style.color = 'rgba(255, 255, 255, 0.6)';
+    }
+  });
+  
+  // Send message function
+  const sendMessageHandler = async () => {
+    if (!canChat) {
+      return;
+    }
+    
+    const text = textarea.value.trim();
+    if (!text || text.length === 0) {
+      return;
+    }
+    
+    if (text.length > MESSAGING_CONFIG.maxMessageLength) {
+      return;
+    }
+    
+    // Clear input
+    textarea.value = '';
+    charCount.textContent = `0 / ${MESSAGING_CONFIG.maxMessageLength}`;
+    charCount.style.color = 'rgba(255, 255, 255, 0.6)';
+    
+    // Send message
+    try {
+      const success = await sendAllChatMessage(text);
+      if (success) {
+        // Reload conversation to show new message
+        await loadAllChatConversation(messagesArea, true);
+      } else {
+        // Restore text on failure
+        textarea.value = text;
+        const length = text.length;
+        charCount.textContent = `${length} / ${MESSAGING_CONFIG.maxMessageLength}`;
+        if (length > MESSAGING_CONFIG.maxMessageLength) {
+          charCount.style.color = CSS_CONSTANTS.COLORS.ERROR;
+        }
+      }
+    } catch (error) {
+      // Handle Firebase 401 error specifically
+      if (error.message === 'FIREBASE_401') {
+        // Restore text
+        textarea.value = text;
+        const length = text.length;
+        charCount.textContent = `${length} / ${MESSAGING_CONFIG.maxMessageLength}`;
+        
+        // Show user-friendly error message
+        const errorMsg = document.createElement('div');
+        errorMsg.style.cssText = `
+          position: fixed;
+          top: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(255, 107, 107, 0.95);
+          border: 2px solid ${CSS_CONSTANTS.COLORS.ERROR};
+          border-radius: 4px;
+          padding: 12px 20px;
+          color: white;
+          font-size: 13px;
+          z-index: 10001;
+          max-width: 500px;
+          text-align: center;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        `;
+        errorMsg.textContent = t('mods.vipList.allChatNotAvailable');
+        document.body.appendChild(errorMsg);
+        
+        // Auto-remove after 5 seconds
+        const timeoutId = setTimeout(() => {
+          errorMsg.remove();
+          pendingTimeouts.delete(timeoutId);
+        }, 5000);
+        trackTimeout(timeoutId);
+      } else {
+        // Restore text on other errors
+        textarea.value = text;
+        const length = text.length;
+        charCount.textContent = `${length} / ${MESSAGING_CONFIG.maxMessageLength}`;
+        if (length > MESSAGING_CONFIG.maxMessageLength) {
+          charCount.style.color = CSS_CONSTANTS.COLORS.ERROR;
+        }
+      }
+    }
+  };
+  
+  sendButton.addEventListener('click', sendMessageHandler);
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessageHandler();
+    }
+  });
+  
+  inputRow.appendChild(textarea);
+  inputRow.appendChild(sendButton);
+  inputArea.appendChild(inputRow);
+  inputArea.appendChild(charCount);
+  
+  panel.appendChild(headerContainer);
+  panel.appendChild(messagesArea);
+  panel.appendChild(inputArea);
+  
+  // Load initial conversation
+  loadAllChatConversation(messagesArea, true).then(async () => {
+    const timeoutId = setTimeout(() => {
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+      pendingTimeouts.delete(timeoutId);
+    }, 100);
+    trackTimeout(timeoutId);
+    
+    // Initialize message count
+    const messages = await getAllChatMessages();
+    if (messages.length > 0) {
+      panel._lastMessageCount = messages.length;
+      panel._previousMessageCount = messages.length;
+    } else {
+      panel._lastMessageCount = 0;
+      panel._previousMessageCount = 0;
+    }
+  });
+  
+  // Check for new messages periodically
+  panel._checkInterval = setInterval(async () => {
+    try {
+      const messages = await getAllChatMessages();
+      const latestTimestamp = messages.length > 0 ? messages[messages.length - 1]?.timestamp : null;
+      const storedTimestamp = panel._lastTimestamp;
+      
+      if (storedTimestamp === null || latestTimestamp === null) {
+        // First check - initialize timestamp
+        panel._lastTimestamp = latestTimestamp;
+      } else if (latestTimestamp > storedTimestamp || messages.length !== (panel._lastMessageCount || 0)) {
+        // New messages detected - refresh UI
+        panel._lastTimestamp = latestTimestamp;
+        panel._lastMessageCount = messages.length;
+        await loadAllChatConversation(messagesArea);
+      }
+    } catch (error) {
+      if (error.message && !error.message.includes('401')) {
+        console.warn('[VIP List] Error checking All Chat changes:', error);
+      }
+    }
+  }, 5000); // Check every 5 seconds
+  
+  // Add to document
+  document.body.appendChild(panel);
+  openChatPanels.set('all-chat', panel);
+  
+  // Switch to polling when panel opens (for more frequent updates)
+  updateMessageCheckingMode();
+  
+  // Make panel draggable (same as regular chat panels)
+  let isDragging = false;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+  
+  headerContainer.addEventListener('mousedown', function(e) {
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+    isDragging = true;
+    const rect = panel.getBoundingClientRect();
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
+    // Ensure we're using left/top positioning for dragging
+    if (panel.style.right && !panel.style.left) {
+      panel.style.left = rect.left + 'px';
+      panel.style.right = 'auto';
+    }
+    panel.style.cursor = 'move';
+    e.preventDefault();
+  });
+  
+  const panelDragMouseMoveHandler = function(e) {
+    if (!isDragging) return;
+    const newLeft = e.clientX - dragOffsetX;
+    const newTop = e.clientY - dragOffsetY;
+    
+    const maxLeft = window.innerWidth - panel.offsetWidth;
+    const maxTop = window.innerHeight - panel.offsetHeight;
+    
+    const clampedLeft = clamp(newLeft, 0, maxLeft);
+    const clampedTop = clamp(newTop, 0, maxTop);
+    
+    panel.style.left = clampedLeft + 'px';
+    panel.style.top = clampedTop + 'px';
+    panel.style.right = 'auto';
+    panel.style.transition = 'none';
+    
+    // Save position
+    saveChatPanelPosition('all-chat', panel);
+  };
+  document.addEventListener('mousemove', panelDragMouseMoveHandler);
+  
+  const panelDragMouseUpHandler = function() {
+    if (isDragging) {
+      isDragging = false;
+      panel.style.cursor = '';
+      panel.style.transition = '';
+      saveChatPanelPosition('all-chat', panel);
+    }
+  };
+  document.addEventListener('mouseup', panelDragMouseUpHandler);
+  
+  // Store handlers for cleanup
+  panel._dragHandler = panelDragMouseMoveHandler;
+  panel._dragUpHandler = panelDragMouseUpHandler;
+  panel._lastTimestamp = null;
+  
+  // Make panel resizable (same as regular chat panels)
+  const resizeHandle = document.createElement('div');
+  resizeHandle.style.cssText = `
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+    background: transparent;
+  `;
+  panel.appendChild(resizeHandle);
+  
+  let isResizing = false;
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  
+  const panelResizeMouseMoveHandler = (e) => {
+    if (!isResizing) return;
+    const rect = panel.getBoundingClientRect();
+    const newWidth = e.clientX - rect.left;
+    const newHeight = e.clientY - rect.top;
+    
+    // All Chat panel: fixed at 500px width
+    const clampedWidth = clamp(newWidth, CHAT_PANEL_DIMENSIONS.MIN_WIDTH, 500);
+    const clampedHeight = clamp(newHeight, CHAT_PANEL_DIMENSIONS.MIN_HEIGHT, CHAT_PANEL_DIMENSIONS.MAX_HEIGHT);
+    
+    panel.style.width = clampedWidth + 'px';
+    panel.style.height = clampedHeight + 'px';
+    panel.style.transition = 'none';
+  };
+  
+  const panelResizeMouseUpHandler = () => {
+    if (isResizing) {
+      isResizing = false;
+      panel.style.transition = '';
+      saveChatPanelPosition('all-chat', panel);
+    }
+  };
+  
+  document.addEventListener('mousemove', panelResizeMouseMoveHandler);
+  document.addEventListener('mouseup', panelResizeMouseUpHandler);
+  
+  panel._resizeHandler = panelResizeMouseMoveHandler;
+  panel._resizeUpHandler = panelResizeMouseUpHandler;
+  
+  // Focus textarea
+  const timeoutId = setTimeout(() => {
+    textarea.focus();
+    pendingTimeouts.delete(timeoutId);
+  }, 100);
+  trackTimeout(timeoutId);
+}
+
+// Minimize All Chat panel
+async function minimizeAllChatPanel() {
+  const chatPanelId = 'vip-chat-panel-all-chat';
+  const panel = document.getElementById(chatPanelId);
+  
+  if (panel) {
+    // Cleanup panel resources
+    if (panel._checkInterval) {
+      clearInterval(panel._checkInterval);
+      panel._checkInterval = null;
+    }
+    
+    // Remove event listeners
+    if (panel._dragHandler) {
+      document.removeEventListener('mousemove', panel._dragHandler);
+    }
+    if (panel._dragUpHandler) {
+      document.removeEventListener('mouseup', panel._dragUpHandler);
+    }
+    if (panel._resizeHandler) {
+      document.removeEventListener('mousemove', panel._resizeHandler);
+    }
+    if (panel._resizeUpHandler) {
+      document.removeEventListener('mouseup', panel._resizeUpHandler);
+    }
+    
+    // Hide panel
+    panel.style.display = 'none';
+    openChatPanels.delete('all-chat');
+    
+    // Switch polling mode if no panels open
+    updateMessageCheckingMode();
+    
+    // Create minimized chat item
+    await createAllChatMinimizedChat();
+  }
+}
+
 // Minimize chat panel (restore to minimized state)
 async function minimizeChatPanel(playerName) {
   const chatPanelId = getChatPanelId(playerName);
   const panel = document.getElementById(chatPanelId);
   
   if (panel) {
-    // Mark all messages from this player as read before closing
-    // This prevents notifications for already-read messages
+    // Mark all messages from this player as read in Firebase before closing
     await markAllMessagesAsReadFromPlayer(playerName);
+    
+    // Keep the panel open timestamp - we won't show notifications for messages that arrived before we closed
+    // (panelLastOpenedAt already set when panel was opened, no need to update on close)
     
     // Cleanup panel resources
     // Clean up conversation timestamp tracking
@@ -4381,14 +5502,9 @@ async function minimizeChatPanel(playerName) {
     // Switch to event-driven if no panels are open (more efficient)
     updateMessageCheckingMode();
     
-    // Create minimized chat
-    // Get unread count for this player (should be 0 since we just marked as read)
-    checkForMessages().then(async messages => {
-      const unreadCount = getPlayerUnreadCount(messages, playerName);
-      await createMinimizedChat(playerName, unreadCount);
-    }).catch(async () => {
-      await createMinimizedChat(playerName, 0);
-    });
+    // Create minimized chat with 0 unread count (we just marked all messages as read)
+    // Don't recalculate - messages are marked as read, so count should be 0
+    await createMinimizedChat(playerName, 0);
   }
 }
 
@@ -4673,8 +5789,7 @@ function adjustDropdownPosition(dropdown, button, openUpward) {
     const dropdownHeight = dropdown.offsetHeight;
     
     // Get container to determine positioning strategy
-    const container = button.closest('.column-content-wrapper') || 
-                     button.closest('.vip-panel-content-wrapper');
+    const container = findDropdownContainer(button);
     const isModal = container && container.classList.contains('column-content-wrapper');
     
     // Only adjust for fixed positioning (panel), not absolute (modal)
@@ -4726,6 +5841,176 @@ function adjustDropdownPosition(dropdown, button, openUpward) {
     }
   }, TIMEOUTS.IMMEDIATE);
   trackTimeout(timeoutId);
+}
+
+// =======================
+// 8.1. Shared Dropdown Helper Functions
+// =======================
+
+// Reset dropdown positioning styles
+function resetDropdownStyles(dropdown) {
+  dropdown.style.display = 'none';
+  dropdown.style.top = '';
+  dropdown.style.bottom = '';
+  dropdown.style.left = '';
+  dropdown.style.marginTop = '';
+  dropdown.style.marginBottom = '';
+  dropdown.style.transform = '';
+  dropdown.style.position = '';
+}
+
+// Close all dropdowns except the specified one
+function closeAllDropdownsExcept(excludeDropdown) {
+  document.querySelectorAll('.vip-dropdown-menu').forEach(menu => {
+    if (menu !== excludeDropdown) {
+      resetDropdownStyles(menu);
+    }
+  });
+}
+
+// Create dropdown element with base styling
+function createDropdownElement() {
+  const dropdown = document.createElement('div');
+  dropdown.className = 'vip-dropdown-menu';
+  dropdown.style.cssText = `
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    transform: none;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    min-width: 120px;
+    z-index: 10001;
+    margin-top: 4px;
+    padding: 4px;
+    pointer-events: auto;
+  `;
+  return dropdown;
+}
+
+// Create dropdown menu item
+function createDropdownItem(text, onClick, dropdown, options = {}) {
+  const {
+    color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY,
+    fontSize = '',
+    dataAttributes = {}
+  } = options;
+  
+  const menuItem = document.createElement('div');
+  menuItem.textContent = text;
+  menuItem.style.cssText = `
+    padding: 6px 12px;
+    color: ${color};
+    cursor: pointer;
+    ${fontSize ? `font-size: ${fontSize};` : ''}
+    text-align: left;
+  `;
+  
+  // Apply data attributes
+  Object.entries(dataAttributes).forEach(([key, value]) => {
+    menuItem.setAttribute(key, value);
+  });
+  
+  addHoverEffect(menuItem);
+  menuItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick();
+    dropdown.style.display = 'none';
+  });
+  
+  return menuItem;
+}
+
+// Toggle dropdown visibility with positioning
+function toggleDropdown(dropdown, button, container, options = {}) {
+  const {
+    onOpen = null,
+    cyclopediaMenuItem = null
+  } = options;
+  
+  const isVisible = dropdown.style.display === 'block';
+  closeAllDropdownsExcept(dropdown);
+  
+  if (!isVisible) {
+    const openUpward = shouldDropdownOpenUpward(dropdown, button, container);
+    
+    if (cyclopediaMenuItem) {
+      cyclopediaMenuItem.style.display = '';
+      cyclopediaMenuItem.style.visibility = 'visible';
+    }
+    
+    dropdown.style.display = 'block';
+    void dropdown.offsetHeight; // Force layout calculation
+    positionDropdown(dropdown, button, openUpward, container);
+    adjustDropdownPosition(dropdown, button, openUpward);
+    
+    if (onOpen) {
+      onOpen();
+    }
+    
+    // Double-check Cyclopedia item visibility after a short delay
+    if (cyclopediaMenuItem) {
+      const timeoutId = setTimeout(() => {
+        pendingTimeouts.delete(timeoutId);
+        if (dropdown.style.display === 'block' && cyclopediaMenuItem) {
+          if (cyclopediaMenuItem.style.display === 'none') {
+            cyclopediaMenuItem.style.display = '';
+            cyclopediaMenuItem.style.visibility = 'visible';
+          }
+        }
+      }, 10);
+      trackTimeout(timeoutId);
+    }
+  } else {
+    resetDropdownStyles(dropdown);
+  }
+}
+
+// =======================
+// 8.2. Additional Shared Helper Functions
+// =======================
+
+// Find container (modal, panel, or scrollable parent)
+function findDropdownContainer(element) {
+  return element.closest('.column-content-wrapper') || 
+         element.closest('.vip-panel-content-wrapper') ||
+         element.closest('[style*="overflow"]') ||
+         element.closest('[class*="scroll"]');
+}
+
+// Get font size style string (empty for modal, fontSize for panel)
+function getFontSizeStyle(fontSize, forPanel) {
+  return forPanel ? `font-size: ${fontSize};` : '';
+}
+
+// Query for open dialog element
+function getOpenDialog() {
+  return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+// Add hover effect to element
+function addHoverEffect(element, hoverBackground = 'rgba(255, 255, 255, 0.1)') {
+  element.addEventListener('mouseenter', () => {
+    element.style.background = hoverBackground;
+  });
+  element.addEventListener('mouseleave', () => {
+    element.style.background = 'transparent';
+  });
+}
+
+// Get status color based on status text
+function getStatusColor(statusText) {
+  const onlineText = t('mods.vipList.statusOnline');
+  const offlineText = t('mods.vipList.statusOffline');
+  
+  if (statusText === onlineText) {
+    return CSS_CONSTANTS.COLORS.ONLINE;
+  } else if (statusText === offlineText) {
+    return CSS_CONSTANTS.COLORS.OFFLINE;
+  }
+  return CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
 }
 
 // =======================
@@ -5418,9 +6703,7 @@ async function createVIPListItem(vip, forPanel = false) {
   const cellFontSize = getFontSize(14, forPanel);
   const item = document.createElement('div');
   // Only set font-size explicitly for panel; modal inherits from parent
-  const itemStyle = forPanel 
-    ? `font-size: ${cellFontSize};`
-    : '';
+  const itemStyle = getFontSizeStyle(cellFontSize, forPanel);
   item.style.cssText = `
     display: flex;
     flex-direction: row;
@@ -5440,7 +6723,7 @@ async function createVIPListItem(vip, forPanel = false) {
   const createCell = (content, flex = '1', isLink = false, tooltip = null) => {
     const cell = document.createElement('div');
     // Only set font-size explicitly for panel; modal inherits from parent
-    const cellFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+    const cellFontStyle = getFontSizeStyle(cellFontSize, forPanel);
     cell.style.cssText = `flex: ${flex}; text-align: center; position: relative; ${cellFontStyle}`;
     
     if (isLink) {
@@ -5448,7 +6731,7 @@ async function createVIPListItem(vip, forPanel = false) {
       link.href = content.href;
       link.target = '_blank';
       link.textContent = content.text;
-      const linkFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+      const linkFontStyle = getFontSizeStyle(cellFontSize, forPanel);
       link.style.cssText = `color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer; ${linkFontStyle}`;
       link.addEventListener('click', (e) => {
         e.preventDefault();
@@ -5457,13 +6740,7 @@ async function createVIPListItem(vip, forPanel = false) {
       cell.appendChild(link);
     } else {
       cell.textContent = content;
-      const onlineText = t('mods.vipList.statusOnline');
-      const offlineText = t('mods.vipList.statusOffline');
-      cell.style.color = typeof content === 'string' && content === onlineText 
-        ? CSS_CONSTANTS.COLORS.ONLINE
-        : content === offlineText
-        ? CSS_CONSTANTS.COLORS.OFFLINE
-        : CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
+      cell.style.color = typeof content === 'string' ? getStatusColor(content) : CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
       
       // Add tooltip if provided
       if (tooltip) {
@@ -5494,7 +6771,7 @@ async function createVIPListItem(vip, forPanel = false) {
   const nameColor = isBlocked ? CSS_CONSTANTS.COLORS.ERROR : CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
   
   // Only set font-size explicitly for panel; modal inherits from parent
-  const buttonFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+  const buttonFontStyle = getFontSizeStyle(cellFontSize, forPanel);
   nameButton.style.cssText = `
     background: transparent;
     border: none;
@@ -5512,7 +6789,7 @@ async function createVIPListItem(vip, forPanel = false) {
   // Create player name span (underlined)
   const nameSpan = document.createElement('span');
   nameSpan.textContent = vip.name;
-  const spanFontStyle = forPanel ? `font-size: ${cellFontSize};` : '';
+  const spanFontStyle = getFontSizeStyle(cellFontSize, forPanel);
   nameSpan.style.cssText = `text-decoration: underline; margin-left: 15px; color: ${nameColor}; ${spanFontStyle}`;
   nameButton.appendChild(nameSpan);
   
@@ -5525,63 +6802,27 @@ async function createVIPListItem(vip, forPanel = false) {
   }
   
   // Dropdown menu
-  const dropdown = document.createElement('div');
-  dropdown.style.cssText = `
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    transform: none;
-    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
-    border: 4px solid transparent;
-    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
-    min-width: 120px;
-    z-index: 10001;
-    margin-top: 4px;
-    padding: 4px;
-    pointer-events: auto;
-  `;
+  const dropdown = createDropdownElement();
   
-  
-  const createDropdownItem = (text, onClick, color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY) => {
-    const menuItem = document.createElement('div');
-    menuItem.textContent = text;
-    // Only set font-size explicitly for panel; modal inherits from parent
-    const dropdownFontStyle = forPanel ? `font-size: ${dropdownFontSize};` : '';
-    menuItem.style.cssText = `
-      padding: 6px 12px;
-      color: ${color};
-      cursor: pointer;
-      ${dropdownFontStyle}
-      text-align: left;
-    `;
-    menuItem.addEventListener('mouseenter', () => {
-      menuItem.style.background = 'rgba(255, 255, 255, 0.1)';
-    });
-    menuItem.addEventListener('mouseleave', () => {
-      menuItem.style.background = 'transparent';
-    });
-    menuItem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onClick();
-      dropdown.style.display = 'none';
-    });
-    return menuItem;
-  };
+  // Only set font-size explicitly for panel; modal inherits from parent
+  const dropdownFontSizeOption = forPanel ? dropdownFontSize : '';
   
   // Always create all dropdown items (Profile, Cyclopedia, Send Message, Remove VIP)
   // This ensures consistency between modal and panel views
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownProfile'), () => {
     window.open(`/profile/${vip.profile}`, '_blank');
-  }));
+  }, dropdown, { fontSize: dropdownFontSizeOption }));
   
   // Create Cyclopedia item with data attribute to prevent Cyclopedia mod from hiding it
   const cyclopediaMenuItem = createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
     openCyclopediaForPlayer(vip.name);
+  }, dropdown, {
+    fontSize: dropdownFontSizeOption,
+    dataAttributes: {
+      'data-vip-list-item': 'true',
+      'data-cyclopedia-exclude': 'true'
+    }
   });
-  cyclopediaMenuItem.setAttribute('data-vip-list-item', 'true');
-  cyclopediaMenuItem.setAttribute('data-cyclopedia-exclude', 'true'); // Prevent Cyclopedia mod from hiding this
-  // Ensure it's always visible
   cyclopediaMenuItem.style.display = '';
   dropdown.appendChild(cyclopediaMenuItem);
   
@@ -5589,73 +6830,26 @@ async function createVIPListItem(vip, forPanel = false) {
   if (!isCurrentPlayer && MESSAGING_CONFIG.enabled) {
     dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownSendMessage'), () => {
       openMessageDialog(vip.name);
-    }, CSS_CONSTANTS.COLORS.LINK));
+    }, dropdown, { color: CSS_CONSTANTS.COLORS.LINK, fontSize: dropdownFontSizeOption }));
   }
   
   dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownRemoveVIP'), async () => {
     removeFromVIPList(vip.name);
     await refreshVIPListDisplay();
-  }, CSS_CONSTANTS.COLORS.OFFLINE));
+  }, dropdown, { color: CSS_CONSTANTS.COLORS.OFFLINE, fontSize: dropdownFontSizeOption }));
   
   nameButton.addEventListener('click', (e) => {
     e.preventDefault(); // Prevent default button behavior
     e.stopPropagation(); // Prevent event bubbling
-    const isVisible = dropdown.style.display === 'block';
-    // Close all other dropdowns
-    document.querySelectorAll('.vip-dropdown-menu').forEach(menu => {
-      if (menu !== dropdown) {
-        menu.style.display = 'none';
-      }
+    // Find container - check for both modal and panel containers, and scrollable parents
+    const container = findDropdownContainer(nameCell);
+    toggleDropdown(dropdown, nameButton, container, {
+      cyclopediaMenuItem: cyclopediaMenuItem
     });
-    
-    if (!isVisible) {
-      // Find container - check for both modal and panel containers, and scrollable parents
-      const container = nameCell.closest('.column-content-wrapper') || 
-                       nameCell.closest('.vip-panel-content-wrapper') ||
-                       nameCell.closest('[style*="overflow"]') ||
-                       nameCell.closest('[class*="scroll"]');
-      const openUpward = shouldDropdownOpenUpward(dropdown, nameButton, container);
-      
-      // Ensure Cyclopedia item is visible (prevent Cyclopedia mod from hiding it)
-      if (cyclopediaMenuItem) {
-        cyclopediaMenuItem.style.display = '';
-        cyclopediaMenuItem.style.visibility = 'visible';
-      }
-      
-      dropdown.style.display = 'block';
-      // Force layout calculation before positioning
-      void dropdown.offsetHeight;
-      positionDropdown(dropdown, nameButton, openUpward, container);
-      adjustDropdownPosition(dropdown, nameButton, openUpward);
-      
-      // Double-check Cyclopedia item visibility after a short delay (in case Cyclopedia mod hides it)
-      const timeoutId = setTimeout(() => {
-        pendingTimeouts.delete(timeoutId);
-        if (dropdown.style.display === 'block' && cyclopediaMenuItem) {
-          if (cyclopediaMenuItem.style.display === 'none') {
-            cyclopediaMenuItem.style.display = '';
-            cyclopediaMenuItem.style.visibility = 'visible';
-          }
-        }
-      }, 10);
-      trackTimeout(timeoutId);
-    } else {
-      // Reset all positioning styles when closing to ensure consistent measurement next time
-      dropdown.style.display = 'none';
-      dropdown.style.top = '';
-      dropdown.style.bottom = '';
-      dropdown.style.left = '';
-      dropdown.style.marginTop = '';
-      dropdown.style.marginBottom = '';
-      dropdown.style.transform = '';
-      dropdown.style.position = '';
-    }
   });
   
   // Setup global click handler for closing dropdowns (only once)
   setupVIPDropdownClickHandler();
-  
-  dropdown.className = 'vip-dropdown-menu';
   nameCell.appendChild(nameButton);
   nameCell.appendChild(dropdown);
   
@@ -5810,12 +7004,7 @@ function createStyledIconButton(iconText, forPanel = false) {
     min-width: 24px;
     height: 24px;
   `;
-  button.addEventListener('mouseenter', () => {
-    button.style.background = 'rgba(255, 255, 255, 0.15)';
-  });
-  button.addEventListener('mouseleave', () => {
-    button.style.background = 'transparent';
-  });
+  addHoverEffect(button, 'rgba(255, 255, 255, 0.15)');
   return button;
 }
 
@@ -6366,7 +7555,7 @@ async function openVIPListModal() {
       // Store modal instance for refreshing display
       const timeout1 = setTimeout(() => {
         pendingTimeouts.delete(timeout1);
-        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+        const dialog = getOpenDialog();
         if (dialog) {
           vipListModalInstance = dialog;
         }
@@ -6376,7 +7565,7 @@ async function openVIPListModal() {
       // Adjust dialog styles after creation
       const timeout2 = setTimeout(() => {
         pendingTimeouts.delete(timeout2);
-        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+        const dialog = getOpenDialog();
         if (dialog) {
           applyModalStyles(dialog);
           
@@ -6655,7 +7844,43 @@ if (typeof window !== 'undefined') {
         console.error('[VIP List] Error updating messaging config:', error);
         return false;
       }
-    }
+    },
+    // Update Global Chat state
+    updateGlobalChatState: function(enabled) {
+      try {
+        const sidebar = getChatSidebar();
+        if (enabled) {
+          // Add All Chat to sidebar if it doesn't exist (will be placed at top automatically)
+          if (!minimizedChats.has('all-chat')) {
+            createAllChatMinimizedChat(0);
+          } else {
+            // If All Chat already exists, ensure it's at the top
+            const existingAllChat = minimizedChats.get('all-chat');
+            if (existingAllChat && existingAllChat.parentNode === sidebar) {
+              const firstChild = sidebar.firstChild;
+              if (firstChild !== existingAllChat) {
+                sidebar.insertBefore(existingAllChat, firstChild);
+              }
+            }
+          }
+        } else {
+          // Remove All Chat from sidebar
+          removeAllChatMinimizedChat();
+          // Close All Chat panel if open
+          const panel = document.getElementById('vip-chat-panel-all-chat');
+          if (panel) {
+            minimizeAllChatPanel();
+          }
+        }
+        console.log('[VIP List] Global Chat', enabled ? 'enabled' : 'disabled');
+        return true;
+      } catch (error) {
+        console.error('[VIP List] Error updating Global Chat state:', error);
+        return false;
+      }
+    },
+    // Expose getChatSidebar for Mod Settings
+    getChatSidebar: getChatSidebar
   };
 }
 
