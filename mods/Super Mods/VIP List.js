@@ -901,10 +901,10 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
       blockedMessage.remove();
     }
     
-    // Update or add privilege/request message (only if not blocked)
+    // Update or add privilege/request message (only if not blocked and recipient has chat enabled)
     let privilegeMessage = messagesArea.querySelector('.chat-privilege-message');
     
-    if (!hasPrivilege && !isBlocked && !isBlockedBy) {
+    if (!hasPrivilege && !isBlocked && !isBlockedBy && (recipientHasChatEnabled || hasIncomingRequest)) {
       // Remove existing privilege message if it exists and recreate it
       if (privilegeMessage) {
         privilegeMessage.remove();
@@ -1038,14 +1038,14 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
       }
       
       messagesArea.insertBefore(privilegeMessage, messagesArea.firstChild);
-    } else if (hasPrivilege && privilegeMessage) {
-      // Remove privilege message if privilege exists
+    } else if ((hasPrivilege || (!recipientHasChatEnabled && !hasIncomingRequest)) && privilegeMessage) {
+      // Remove privilege message if privilege exists or recipient doesn't have chat enabled
       privilegeMessage.remove();
     }
     
-    // Update or add warning message (only if we have privilege)
+    // Update or add warning message (show if recipient doesn't have chat enabled)
     let warningMessage = messagesArea.querySelector('.chat-disabled-warning');
-    if (!recipientHasChatEnabled && hasPrivilege && !warningMessage) {
+    if (!recipientHasChatEnabled && !isBlocked && !isBlockedBy && !warningMessage) {
       warningMessage = document.createElement('div');
       warningMessage.className = 'chat-disabled-warning';
       warningMessage.style.cssText = `
@@ -1084,8 +1084,17 @@ async function hasChatPrivilege(player1, player2) {
     const player1Lower = player1.toLowerCase();
     const player2Lower = player2.toLowerCase();
     
-    // Check if player1 has privilege with player2
-    const response = await fetch(`${getChatPrivilegesApiUrl()}/${player1Lower}/${player2Lower}.json`);
+    // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
+    const hashedPlayer1 = await hashUsername(player1);
+    const hashedPlayer2 = await hashUsername(player2);
+    
+    // Check if player1 has privilege with player2 (try hashed path first)
+    let response = await fetch(`${getChatPrivilegesApiUrl()}/${hashedPlayer1}/${hashedPlayer2}.json`);
+    
+    if (!response.ok && response.status === 404) {
+      // Try non-hashed path for backward compatibility
+      response = await fetch(`${getChatPrivilegesApiUrl()}/${player1Lower}/${player2Lower}.json`);
+    }
     
     if (!response.ok) {
       if (response.status === 401) {
@@ -1173,6 +1182,10 @@ async function acceptChatRequest(fromPlayer) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const fromPlayerLower = fromPlayer.toLowerCase();
     
+    // Hash usernames for Firebase paths (consistent with messages and requests)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    const hashedFromPlayer = await hashUsername(fromPlayer);
+    
     // Grant privilege for both directions
     const privilege1 = {
       granted: true,
@@ -1183,22 +1196,21 @@ async function acceptChatRequest(fromPlayer) {
       grantedAt: Date.now()
     };
     
-    // Grant privilege: currentPlayer can chat with fromPlayer
-    await fetch(`${getChatPrivilegesApiUrl()}/${currentPlayerLower}/${fromPlayerLower}.json`, {
+    // Grant privilege: currentPlayer can chat with fromPlayer (using hashed paths)
+    await fetch(`${getChatPrivilegesApiUrl()}/${hashedCurrentPlayer}/${hashedFromPlayer}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(privilege1)
     });
     
-    // Grant privilege: fromPlayer can chat with currentPlayer
-    await fetch(`${getChatPrivilegesApiUrl()}/${fromPlayerLower}/${currentPlayerLower}.json`, {
+    // Grant privilege: fromPlayer can chat with currentPlayer (using hashed paths)
+    await fetch(`${getChatPrivilegesApiUrl()}/${hashedFromPlayer}/${hashedCurrentPlayer}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(privilege2)
     });
     
     // Remove all pending requests between these two players (try both hashed and non-hashed paths for backward compatibility)
-    const hashedCurrentPlayer = await hashUsername(currentPlayer);
     let requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedCurrentPlayer}.json`);
     if (!requestsResponse.ok && requestsResponse.status === 404) {
       // Try non-hashed path for backward compatibility
@@ -2381,9 +2393,19 @@ async function getConversationMessages(otherPlayer) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const otherPlayerLower = otherPlayer.toLowerCase();
     
-    // Fetch messages sent TO the other player (stored under their name)
-    const sentResponse = await fetch(`${getMessagingApiUrl()}/${otherPlayerLower}.json`);
+    // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
+    const hashedOtherPlayer = await hashUsername(otherPlayer);
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    
+    // Fetch messages sent TO the other player (stored under their hashed name)
+    let sentResponse = await fetch(`${getMessagingApiUrl()}/${hashedOtherPlayer}.json`);
     let sentData = {};
+    
+    if (!sentResponse.ok && sentResponse.status === 404) {
+      // Try non-hashed path for backward compatibility
+      sentResponse = await fetch(`${getMessagingApiUrl()}/${otherPlayerLower}.json`);
+    }
+    
     if (sentResponse.ok) {
       sentData = await sentResponse.json();
     } else if (sentResponse.status === 401) {
@@ -2391,9 +2413,15 @@ async function getConversationMessages(otherPlayer) {
       sentData = {};
     }
     
-    // Fetch messages received FROM the other player (stored under current player's name)
-    const receivedResponse = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
+    // Fetch messages received FROM the other player (stored under current player's hashed name)
+    let receivedResponse = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
     let receivedData = {};
+    
+    if (!receivedResponse.ok && receivedResponse.status === 404) {
+      // Try non-hashed path for backward compatibility
+      receivedResponse = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
+    }
+    
     if (receivedResponse.ok) {
       receivedData = await receivedResponse.json();
     } else if (receivedResponse.status === 401) {
@@ -2407,15 +2435,42 @@ async function getConversationMessages(otherPlayer) {
     // Add sent messages and decrypt
     if (sentData && typeof sentData === 'object') {
       for (const [id, msg] of Object.entries(sentData)) {
-        if (msg && msg.from && msg.from.toLowerCase() === currentPlayerLower) {
+        if (!msg) continue;
+        
+        // Check if message is from current player using fromHash (for encrypted) or from field (for plain text)
+        let isFromCurrentPlayer = false;
+        if (msg.usernamesEncrypted && msg.fromHash) {
+          // Use hash comparison for encrypted usernames
+          isFromCurrentPlayer = msg.fromHash === hashedCurrentPlayer;
+        } else if (msg.from) {
+          // Plain text comparison (backward compatibility)
+          try {
+            // Try to decrypt and compare
+            const decryptedFrom = await decryptUsername(msg.from, currentPlayer, otherPlayer);
+            isFromCurrentPlayer = decryptedFrom && decryptedFrom.toLowerCase() === currentPlayerLower;
+          } catch (error) {
+            // If decryption fails, try direct comparison
+            isFromCurrentPlayer = msg.from.toLowerCase() === currentPlayerLower;
+          }
+        }
+        
+        if (isFromCurrentPlayer) {
           let decryptedMsg = { id, ...msg, isFromMe: true };
-          // Decrypt if encrypted
+          // Decrypt message text if encrypted
           if (msg.encrypted && msg.text) {
             try {
-              const decryptedText = await decryptMessage(msg.text, currentPlayerLower, otherPlayerLower);
+              const decryptedText = await decryptMessage(msg.text, currentPlayer, otherPlayer);
               decryptedMsg.text = decryptedText;
             } catch (error) {
               console.warn('[VIP List] Failed to decrypt sent message:', error);
+            }
+          }
+          // Decrypt username if encrypted
+          if (msg.usernamesEncrypted && msg.from) {
+            try {
+              decryptedMsg.from = await decryptUsername(msg.from, currentPlayer, otherPlayer);
+            } catch (error) {
+              decryptedMsg.from = currentPlayer;
             }
           }
           allMessages.push(decryptedMsg);
@@ -2426,15 +2481,42 @@ async function getConversationMessages(otherPlayer) {
     // Add received messages and decrypt
     if (receivedData && typeof receivedData === 'object') {
       for (const [id, msg] of Object.entries(receivedData)) {
-        if (msg && msg.from && msg.from.toLowerCase() === otherPlayerLower) {
+        if (!msg) continue;
+        
+        // Check if message is from other player using fromHash (for encrypted) or from field (for plain text)
+        let isFromOtherPlayer = false;
+        if (msg.usernamesEncrypted && msg.fromHash) {
+          // Use hash comparison for encrypted usernames
+          isFromOtherPlayer = msg.fromHash === hashedOtherPlayer;
+        } else if (msg.from) {
+          // Plain text comparison (backward compatibility)
+          try {
+            // Try to decrypt and compare
+            const decryptedFrom = await decryptUsername(msg.from, otherPlayer, currentPlayer);
+            isFromOtherPlayer = decryptedFrom && decryptedFrom.toLowerCase() === otherPlayerLower;
+          } catch (error) {
+            // If decryption fails, try direct comparison
+            isFromOtherPlayer = msg.from.toLowerCase() === otherPlayerLower;
+          }
+        }
+        
+        if (isFromOtherPlayer) {
           let decryptedMsg = { id, ...msg, isFromMe: false };
-          // Decrypt if encrypted
+          // Decrypt message text if encrypted
           if (msg.encrypted && msg.text) {
             try {
-              const decryptedText = await decryptMessage(msg.text, otherPlayerLower, currentPlayerLower);
+              const decryptedText = await decryptMessage(msg.text, otherPlayer, currentPlayer);
               decryptedMsg.text = decryptedText;
             } catch (error) {
               console.warn('[VIP List] Failed to decrypt received message:', error);
+            }
+          }
+          // Decrypt username if encrypted
+          if (msg.usernamesEncrypted && msg.from) {
+            try {
+              decryptedMsg.from = await decryptUsername(msg.from, otherPlayer, currentPlayer);
+            } catch (error) {
+              decryptedMsg.from = otherPlayer;
             }
           }
           allMessages.push(decryptedMsg);
@@ -3202,13 +3284,43 @@ async function openChatPanel(toPlayer) {
   let hasOutgoingRequest = false;
   if (!hasPrivilege && !hasIncomingRequest) {
     try {
-      const recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${toPlayer.toLowerCase()}.json`);
+      // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
+      const hashedToPlayer = await hashUsername(toPlayer);
+      let recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedToPlayer}.json`);
+      
+      if (!recipientRequestsResponse.ok && recipientRequestsResponse.status === 404) {
+        // Try non-hashed path for backward compatibility
+        recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${toPlayer.toLowerCase()}.json`);
+      }
+      
       if (recipientRequestsResponse.ok) {
         const recipientRequests = await recipientRequestsResponse.json();
         if (recipientRequests && typeof recipientRequests === 'object') {
-          hasOutgoingRequest = Object.values(recipientRequests).some(req => 
-            req && req.from && req.from.toLowerCase() === currentPlayer.toLowerCase() && req.status === 'pending'
-          );
+          // Check all requests to see if any are from current player
+          const currentPlayerHash = await hashUsername(currentPlayer);
+          hasOutgoingRequest = await Promise.all(
+            Object.values(recipientRequests).map(async (req) => {
+              if (!req || req.status !== 'pending') return false;
+              
+              // If usernames are encrypted, decrypt and compare
+              if (req.usernamesEncrypted && req.from && req.fromHash) {
+                if (req.fromHash === currentPlayerHash) {
+                  // This request is from current player
+                  try {
+                    const decryptedFrom = await decryptUsername(req.from, currentPlayer, toPlayer);
+                    return decryptedFrom && decryptedFrom.toLowerCase() === currentPlayer.toLowerCase();
+                  } catch (error) {
+                    // If decryption fails, fromHash match is sufficient
+                    return true;
+                  }
+                }
+                return false;
+              } else {
+                // Plain text comparison (backward compatibility)
+                return req.from && req.from.toLowerCase() === currentPlayer.toLowerCase();
+              }
+            })
+          ).then(results => results.some(result => result === true));
         }
       }
     } catch (error) {
@@ -3474,8 +3586,8 @@ async function openChatPanel(toPlayer) {
     messagesArea.appendChild(blockedMessage);
   }
   
-  // Show privilege/request UI (only if not blocked)
-  if (!hasPrivilege && !isBlocked && !isBlockedBy) {
+  // Show privilege/request UI (only if not blocked and recipient has chat enabled)
+  if (!hasPrivilege && !isBlocked && !isBlockedBy && (recipientHasChatEnabled || hasIncomingRequest)) {
     const privilegeMessage = document.createElement('div');
     privilegeMessage.className = 'chat-privilege-message';
     privilegeMessage.style.cssText = `
@@ -3607,8 +3719,8 @@ async function openChatPanel(toPlayer) {
     messagesArea.appendChild(privilegeMessage);
   }
   
-  // Show warning if recipient doesn't have chat enabled (but only if we have privilege)
-  if (!recipientHasChatEnabled && hasPrivilege) {
+  // Show warning if recipient doesn't have chat enabled
+  if (!recipientHasChatEnabled && !isBlocked && !isBlockedBy) {
     const warningMessage = document.createElement('div');
     warningMessage.className = 'chat-disabled-warning';
     warningMessage.style.cssText = `
@@ -5320,10 +5432,18 @@ async function refreshContent(container, forPanel) {
 async function refreshVIPListDisplay() {
   // Refresh modal display
   if (vipListModalInstance) {
-    const vipListBox = vipListModalInstance.querySelector('.column-content-wrapper');
+    // Find the VIP box container (parent of .column-content-wrapper)
+    const vipListBox = vipListModalInstance.querySelector('.column-content-wrapper')?.closest('div[style*="background"]');
     if (vipListBox) {
       refreshHeaderRow(vipListBox, false);
       await refreshContent(vipListBox, false);
+    } else {
+      // Fallback: try to find it another way
+      const contentWrapper = vipListModalInstance.querySelector('.column-content-wrapper');
+      if (contentWrapper) {
+        refreshHeaderRow(contentWrapper, false);
+        await refreshContent(contentWrapper, false);
+      }
     }
   }
   
