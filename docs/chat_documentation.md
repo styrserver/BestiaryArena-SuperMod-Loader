@@ -4,6 +4,8 @@
 
 The VIP List mod includes a chat feature that allows players to send encrypted messages to each other. The chat system uses:
 - **End-to-end encryption** for message privacy
+- **Username encryption** for additional privacy protection
+- **Username hashing** for secure Firebase paths
 - **Event-driven updates** for real-time message delivery
 - **Chat requests and privileges** for access control
 - **Message filtering** to control who can message you
@@ -51,13 +53,13 @@ That's it! The chat feature is now enabled and ready to use.
 
 The chat system uses Firebase Realtime Database with the following structure:
 
-- **`/messages`**: Stores encrypted chat messages between players
-- **`/chat-enabled`**: Tracks which players have chat enabled in their mod settings
-- **`/chat-requests`**: Stores pending chat privilege requests
+- **`/messages`**: Stores encrypted chat messages between players (usernames are hashed in paths and encrypted in message bodies)
+- **`/chat-enabled`**: Tracks which players have chat enabled in their mod settings (usernames are hashed in paths)
+- **`/chat-requests`**: Stores pending chat privilege requests (usernames are hashed in paths and encrypted in request bodies)
 - **`/chat-privileges`**: Stores granted chat privileges between players
 - **`/blocked-players`**: Stores blocked players list (prevents blocked players from messaging or requesting chat)
 
-All data is stored in Firebase and synchronized across all players using the mod.
+All data is stored in Firebase and synchronized across all players using the mod. Usernames are protected through encryption and hashing for enhanced privacy.
 
 ## Troubleshooting
 
@@ -122,6 +124,26 @@ If you see 401 errors in the browser console, it means the Firebase security rul
 - Only the sender and recipient can decrypt messages
 - Messages are stored encrypted in Firebase
 - Encryption key is derived from both player names using PBKDF2
+
+### Username Encryption & Hashing
+- **Username Hashing**: Usernames in Firebase database paths are hashed using SHA-256 (one-way, deterministic)
+  - Firebase paths use hashed usernames instead of plain text (e.g., `/messages/{hashed-username}/`)
+  - This prevents username exposure in database paths while maintaining functionality
+  - Hashes are deterministic - the same username always produces the same hash
+  
+- **Username Encryption**: Usernames in message and request bodies are encrypted using AES-GCM
+  - The `from` and `to` fields in messages and requests are encrypted before storage
+  - Encryption key is derived from both player names using PBKDF2 with a separate salt
+  - Only the sender and recipient can decrypt usernames
+  
+- **Hash Hints**: Messages and requests include a hash hint (`fromHash`) for efficient sender identification
+  - Allows quick matching without trying to decrypt all possible senders
+  - Hash hints are one-way - cannot be reversed to reveal the original username
+  
+- **Backward Compatibility**: The system supports both encrypted and unencrypted data
+  - New messages/requests use encryption automatically
+  - Old unencrypted data continues to work seamlessly
+  - Functions try both hashed and non-hashed paths when reading data
 
 ### Message Filtering
 - **Filter Options**: Available in Mod Settings
@@ -189,6 +211,42 @@ The chat feature can be configured in Mod Settings:
 - **Panels open**: Polling every 5 seconds (more frequent updates for active conversations)
 - **Pending requests**: Checked every 1 second for accepted requests
 
+## Security Features
+
+### Encryption & Hashing Overview
+
+The chat system implements multiple layers of security to protect user privacy:
+
+1. **Message Text Encryption**
+   - All message content is encrypted using AES-GCM
+   - Encryption keys are derived from both player names
+   - Messages are stored encrypted in Firebase and only decrypted by the recipient
+
+2. **Username Hashing (Database Paths)**
+   - Usernames in Firebase paths are hashed using SHA-256
+   - This prevents username exposure in database structure
+   - Hashes are deterministic (same username = same hash) for consistency
+   - Example: `/messages/a1b2c3d4.../` instead of `/messages/PlayerName/`
+
+3. **Username Encryption (Message Bodies)**
+   - Usernames in message and request bodies are encrypted using AES-GCM
+   - Separate encryption keys are used for usernames vs message text
+   - Only the sender and recipient can decrypt usernames
+   - Includes hash hints for efficient decryption without brute-force attempts
+
+4. **Backward Compatibility**
+   - System automatically detects and handles both encrypted and unencrypted data
+   - Functions try both hashed and non-hashed paths when reading
+   - Existing unencrypted data continues to work without issues
+   - New data automatically uses the latest encryption
+
+### Privacy Benefits
+
+- **Reduced Username Exposure**: Usernames are hashed in database paths, making them less visible
+- **End-to-End Encryption**: Both message content and usernames are encrypted
+- **No Server-Side Decryption**: Firebase never sees plain text usernames or messages
+- **Deterministic Operations**: Same usernames produce same hashes/keys for consistency
+
 ## Additional Notes
 
 - The Firebase database is pre-configured and ready to use - no setup required
@@ -197,5 +255,6 @@ The chat feature can be configured in Mod Settings:
 - Unread message counts are displayed in badges on the VIP List menu item and minimized chats
 - Chat sidebar automatically repositions when window is resized
 - Conversation history persists and can be deleted via the delete button in chat panel header
-- All messages are encrypted end-to-end for privacy
+- All messages and usernames are encrypted end-to-end for privacy
+- Usernames are hashed in database paths for additional privacy protection
 

@@ -137,6 +137,7 @@
   let repositionTimeout = null;
   let saveEquipmentSetupTimeout = null;
   let updateCapacityDisplayTimeout = null;
+  let chestOpenInProgress = false; // Track if a chest open request is pending
   
   // Equipment filtering state
   let lastOpenedEquipment = null;
@@ -814,10 +815,19 @@
       pendingTimeouts.delete(equipmentCheckTimeout);
       equipmentCheckTimeout = null;
     }
+    
+    // Clear chest open in progress flag
+    chestOpenInProgress = false;
   }
   
   function clickOpenButton() {
     try {
+      // Prevent multiple clicks if a chest open request is already in progress
+      if (chestOpenInProgress) {
+        console.log('[Better Exaltation Chest] Chest open already in progress, skipping click');
+        return;
+      }
+      
       // Check if arsenal is full before clicking (only if auto-opening is active)
       if (autoModeEnabled && checkAndStopIfArsenalFull()) {
         return;
@@ -838,6 +848,7 @@
       
       if (openButton) {
         console.log('[Better Exaltation Chest] Clicking Open button');
+        chestOpenInProgress = true; // Mark that a chest open request is in progress
         openButton.click();
       } else {
         console.log('[Better Exaltation Chest] Open button not found, stopping auto-opening');
@@ -845,6 +856,7 @@
       }
     } catch (error) {
       console.warn('[Better Exaltation Chest] Error clicking Open button:', error);
+      chestOpenInProgress = false; // Clear flag on error
       stopAutoOpeningAndUpdateButton();
     }
   }
@@ -1321,6 +1333,9 @@
   
   
   function handleOpenedEquipmentFromChestResponse(equipData) {
+    // Clear the chest open in progress flag now that the response is received
+    chestOpenInProgress = false;
+    
     // Log arsenal status after opening (regardless of auto mode)
     logArsenalStatus();
     
@@ -1478,17 +1493,30 @@
                       // Update capacity display immediately (before animation completes)
                       updateCapacityDisplayImmediately();
                       handleOpenedEquipmentFromChestResponse(equipData);
+                    } else {
+                      // Response received but no equipment data - clear the flag
+                      chestOpenInProgress = false;
                     }
+                  } else {
+                    // Response received but unexpected format - clear the flag
+                    chestOpenInProgress = false;
                   }
                 } catch (error) {
                   console.warn('[Better Exaltation Chest] Error parsing chest response:', error);
+                  chestOpenInProgress = false; // Clear flag on parse error
                 }
               })
               .catch(error => {
                 console.warn('[Better Exaltation Chest] Error reading chest response:', error);
+                chestOpenInProgress = false; // Clear flag on read error
               });
             
             return response;
+          })
+          .catch(error => {
+            console.warn('[Better Exaltation Chest] Error opening chest (fetch failed):', error);
+            chestOpenInProgress = false; // Clear flag if fetch fails
+            throw error; // Re-throw to maintain original error behavior
           });
       }
       

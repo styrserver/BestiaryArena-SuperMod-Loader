@@ -504,6 +504,133 @@ function getPlayerUnreadCount(messages, playerName) {
 }
 
 // Encryption/Decryption Functions
+// Hash username for use in Firebase paths (deterministic, one-way)
+async function hashUsername(username) {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(username.toLowerCase());
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex.substring(0, 32); // Use first 32 chars (64 hex chars = 32 bytes)
+  } catch (error) {
+    console.error('[VIP List] Username hashing error:', error);
+    // Fallback to plain username if hashing fails
+    return username.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  }
+}
+
+// Encrypt username for storage in message/request bodies
+async function encryptUsername(username, player1, player2) {
+  try {
+    const key = await deriveUsernameKey(player1, player2);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(username);
+    
+    // Generate a random IV for each encryption
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      data
+    );
+    
+    // Combine IV and encrypted data, then encode as base64
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    // Convert to base64 for Firebase storage
+    return btoa(String.fromCharCode(...combined));
+  } catch (error) {
+    console.error('[VIP List] Username encryption error:', error);
+    throw error;
+  }
+}
+
+// Decrypt username from message/request bodies
+async function decryptUsername(encryptedUsername, player1, player2) {
+  try {
+    // Check if it looks like encrypted data
+    if (!encryptedUsername || typeof encryptedUsername !== 'string') {
+      return encryptedUsername; // Return as-is if not a string
+    }
+    
+    // Try to decode base64 - if it fails, it's probably not encrypted
+    let combined;
+    try {
+      combined = Uint8Array.from(atob(encryptedUsername), c => c.charCodeAt(0));
+    } catch (e) {
+      // Not valid base64, probably unencrypted username (backward compatibility)
+      return encryptedUsername;
+    }
+    
+    // Check if we have enough data (at least 12 bytes for IV + some encrypted data)
+    if (combined.length < 13) {
+      // Too short to be encrypted, probably unencrypted username
+      return encryptedUsername;
+    }
+    
+    const key = await deriveUsernameKey(player1, player2);
+    
+    // Extract IV (first 12 bytes) and encrypted data
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encrypted
+    );
+    
+    const decoder = new TextDecoder();
+    return decoder.decode(decrypted);
+  } catch (error) {
+    // If decryption fails, return original (for backward compatibility)
+    if (!error.message.includes('invalid') && !error.message.includes('String contains')) {
+      console.warn('[VIP List] Username decryption error (may be unencrypted):', error.message);
+    }
+    return encryptedUsername;
+  }
+}
+
+// Derive a shared encryption key for usernames from two player names (deterministic)
+async function deriveUsernameKey(player1, player2) {
+  // Sort names alphabetically to ensure both players derive the same key
+  const sortedNames = [player1.toLowerCase(), player2.toLowerCase()].sort();
+  const combined = sortedNames.join('|') + '|username';
+  
+  // Use Web Crypto API to derive a key from the combined names using PBKDF2
+  const encoder = new TextEncoder();
+  const password = encoder.encode(combined);
+  
+  // Import password as a raw key material
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    password,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits', 'deriveKey']
+  );
+  
+  const salt = encoder.encode('vip-list-username-salt'); // Different salt for username encryption
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  
+  return key;
+}
+
 // Derive a shared encryption key from two player names (deterministic)
 async function deriveChatKey(player1, player2) {
   // Sort names alphabetically to ensure both players derive the same key
@@ -628,7 +755,9 @@ async function syncChatEnabledStatus(enabled) {
       return;
     }
     
-    const response = await fetch(`${getChatEnabledApiUrl()}/${currentPlayer.toLowerCase()}.json`, {
+    // Hash username for Firebase path
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    const response = await fetch(`${getChatEnabledApiUrl()}/${hashedCurrentPlayer}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -662,7 +791,14 @@ async function checkRecipientChatEnabled(recipientName) {
   }
   
   try {
-    const response = await fetch(`${getChatEnabledApiUrl()}/${recipientName.toLowerCase()}.json`);
+    // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
+    const hashedRecipientName = await hashUsername(recipientName);
+    let response = await fetch(`${getChatEnabledApiUrl()}/${hashedRecipientName}.json`);
+    
+    if (!response.ok && response.status === 404) {
+      // Try non-hashed path for backward compatibility
+      response = await fetch(`${getChatEnabledApiUrl()}/${recipientName.toLowerCase()}.json`);
+    }
     
     if (!response.ok) {
       if (response.status === 401) {
@@ -984,16 +1120,26 @@ async function requestChatPrivilege(toPlayer) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const toPlayerLower = toPlayer.toLowerCase();
     
-    // Create request under recipient's name
+    // Encrypt usernames in request body
+    const encryptedFrom = await encryptUsername(currentPlayer, currentPlayer, toPlayer);
+    const encryptedTo = await encryptUsername(toPlayer, currentPlayer, toPlayer);
+    
+    // Hash username for Firebase path (deterministic)
+    const hashedToPlayer = await hashUsername(toPlayer);
+    const hashedFromPlayer = await hashUsername(currentPlayer); // Hash hint for sender identification
+    
+    // Create request under recipient's hashed name
     const request = {
-      from: currentPlayer,
-      to: toPlayer,
+      from: encryptedFrom, // Encrypted username
+      to: encryptedTo, // Encrypted username
+      fromHash: hashedFromPlayer, // Hash hint for sender identification
       timestamp: Date.now(),
-      status: 'pending'
+      status: 'pending',
+      usernamesEncrypted: true // Flag to indicate username encryption
     };
     
-    const requestId = `${currentPlayerLower}_${Date.now()}`;
-    const response = await fetch(`${getChatRequestsApiUrl()}/${toPlayerLower}/${requestId}.json`, {
+    const requestId = `${await hashUsername(currentPlayer)}_${Date.now()}`;
+    const response = await fetch(`${getChatRequestsApiUrl()}/${hashedToPlayer}/${requestId}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
@@ -1051,15 +1197,34 @@ async function acceptChatRequest(fromPlayer) {
       body: JSON.stringify(privilege2)
     });
     
-    // Remove all pending requests between these two players
-    const requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}.json`);
+    // Remove all pending requests between these two players (try both hashed and non-hashed paths for backward compatibility)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    let requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedCurrentPlayer}.json`);
+    if (!requestsResponse.ok && requestsResponse.status === 404) {
+      // Try non-hashed path for backward compatibility
+      requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}.json`);
+    }
+    
     if (requestsResponse.ok) {
       const requests = await requestsResponse.json();
       if (requests && typeof requests === 'object') {
         await Promise.all(
           Object.entries(requests).map(async ([id, req]) => {
-            if (req && req.from && req.from.toLowerCase() === fromPlayerLower && req.status === 'pending') {
-              await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}/${id}.json`, {
+            let fromMatches = false;
+            
+            // Check if usernames are encrypted
+            if (req && req.usernamesEncrypted && req.fromHash) {
+              // Use hash hint to match
+              const fromPlayerHash = await hashUsername(fromPlayer);
+              fromMatches = req.fromHash === fromPlayerHash;
+            } else {
+              // Backward compatibility: check unencrypted username
+              fromMatches = req && req.from && req.from.toLowerCase() === fromPlayerLower;
+            }
+            
+            if (fromMatches && req.status === 'pending') {
+              const pathToUse = requestsResponse.url.includes(hashedCurrentPlayer) ? hashedCurrentPlayer : currentPlayerLower;
+              await fetch(`${getChatRequestsApiUrl()}/${pathToUse}/${id}.json`, {
                 method: 'DELETE'
               });
             }
@@ -1091,15 +1256,34 @@ async function declineChatRequest(fromPlayer) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const fromPlayerLower = fromPlayer.toLowerCase();
     
-    // Remove all pending requests from this player
-    const requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}.json`);
+    // Remove all pending requests from this player (try both hashed and non-hashed paths for backward compatibility)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    let requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedCurrentPlayer}.json`);
+    if (!requestsResponse.ok && requestsResponse.status === 404) {
+      // Try non-hashed path for backward compatibility
+      requestsResponse = await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}.json`);
+    }
+    
     if (requestsResponse.ok) {
       const requests = await requestsResponse.json();
       if (requests && typeof requests === 'object') {
         await Promise.all(
           Object.entries(requests).map(async ([id, req]) => {
-            if (req && req.from && req.from.toLowerCase() === fromPlayerLower && req.status === 'pending') {
-              await fetch(`${getChatRequestsApiUrl()}/${currentPlayerLower}/${id}.json`, {
+            let fromMatches = false;
+            
+            // Check if usernames are encrypted
+            if (req && req.usernamesEncrypted && req.fromHash) {
+              // Use hash hint to match
+              const fromPlayerHash = await hashUsername(fromPlayer);
+              fromMatches = req.fromHash === fromPlayerHash;
+            } else {
+              // Backward compatibility: check unencrypted username
+              fromMatches = req && req.from && req.from.toLowerCase() === fromPlayerLower;
+            }
+            
+            if (fromMatches && req.status === 'pending') {
+              const pathToUse = requestsResponse.url.includes(hashedCurrentPlayer) ? hashedCurrentPlayer : currentPlayerLower;
+              await fetch(`${getChatRequestsApiUrl()}/${pathToUse}/${id}.json`, {
                 method: 'DELETE'
               });
             }
@@ -1128,7 +1312,14 @@ async function checkForChatRequests() {
       return [];
     }
     
-    const response = await fetch(`${getChatRequestsApiUrl()}/${currentPlayer.toLowerCase()}.json`);
+    // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    let response = await fetch(`${getChatRequestsApiUrl()}/${hashedCurrentPlayer}.json`);
+    
+    if (!response.ok && response.status === 404) {
+      // Try non-hashed path for backward compatibility
+      response = await fetch(`${getChatRequestsApiUrl()}/${currentPlayer.toLowerCase()}.json`);
+    }
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -1147,17 +1338,60 @@ async function checkForChatRequests() {
       return [];
     }
     
-    // Convert Firebase object to array and filter pending requests
-    const requests = Object.entries(data)
-      .map(([id, req]) => {
-        if (req && req.status === 'pending' && req.from) {
-          return { id, ...req };
-        }
-        return null;
-      })
-      .filter(req => req !== null);
+    // Convert Firebase object to array, decrypt usernames, and filter pending requests
+    const requests = await Promise.all(
+      Object.entries(data)
+        .map(async ([id, req]) => {
+          if (req && req.status === 'pending' && req.from) {
+            let decryptedReq = { id, ...req };
+            
+            // Decrypt usernames if encrypted
+            if (req.usernamesEncrypted && req.from && req.fromHash) {
+              try {
+                // Use hash hint to efficiently identify the sender
+                const vipList = getVIPList();
+                for (const vip of vipList) {
+                  try {
+                    const testHash = await hashUsername(vip.name);
+                    if (testHash === req.fromHash) {
+                      // Found matching sender, decrypt usernames
+                      decryptedReq.from = await decryptUsername(req.from, vip.name, currentPlayer);
+                      decryptedReq.to = await decryptUsername(req.to, vip.name, currentPlayer);
+                      break;
+                    }
+                  } catch (e) {
+                    // Continue trying other senders
+                  }
+                }
+                
+                // If still not decrypted, try with recent conversations
+                if (decryptedReq.from === req.from && conversationLastTimestamps.size > 0) {
+                  for (const [playerName, timestamp] of conversationLastTimestamps.entries()) {
+                    try {
+                      const testHash = await hashUsername(playerName);
+                      if (testHash === req.fromHash) {
+                        decryptedReq.from = await decryptUsername(req.from, playerName, currentPlayer);
+                        decryptedReq.to = await decryptUsername(req.to, playerName, currentPlayer);
+                        break;
+                      }
+                    } catch (e) {
+                      // Continue trying
+                    }
+                  }
+                }
+              } catch (error) {
+                console.warn('[VIP List] Failed to decrypt request usernames:', error);
+                // Keep encrypted values if decryption fails
+              }
+            }
+            
+            return decryptedReq;
+          }
+          return null;
+        })
+    );
     
-    return requests;
+    return requests.filter(req => req !== null && req.from);
   } catch (error) {
     console.error('[VIP List] Error checking for chat requests:', error);
     return [];
@@ -1352,17 +1586,27 @@ async function sendMessage(toPlayer, text) {
     // Encrypt message text
     const encryptedText = await encryptMessage(text.trim(), currentPlayer, toPlayer);
     
+    // Encrypt usernames in message body
+    const encryptedFrom = await encryptUsername(currentPlayer, currentPlayer, toPlayer);
+    const encryptedTo = await encryptUsername(toPlayer.toLowerCase(), currentPlayer, toPlayer);
+    
+    // Hash usernames for Firebase path (deterministic) and sender hint
+    const hashedToPlayer = await hashUsername(toPlayer);
+    const hashedFromPlayer = await hashUsername(currentPlayer); // Store hash hint for efficient decryption
+    
     const message = {
-      from: currentPlayer,
-      to: toPlayer.toLowerCase(),
+      from: encryptedFrom, // Encrypted username
+      to: encryptedTo, // Encrypted username
+      fromHash: hashedFromPlayer, // Hash hint for sender identification (one-way, cannot be reversed to username)
       text: encryptedText, // Store encrypted text
       encrypted: true, // Flag to indicate encryption
+      usernamesEncrypted: true, // Flag to indicate username encryption
       timestamp: Date.now(),
       read: false
     };
     
     const messageId = Date.now().toString();
-    const response = await fetch(`${getMessagingApiUrl()}/${toPlayer.toLowerCase()}/${messageId}.json`, {
+    const response = await fetch(`${getMessagingApiUrl()}/${hashedToPlayer}/${messageId}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(message)
@@ -1393,8 +1637,18 @@ async function checkForMessages() {
       return [];
     }
     
-    // Fetch all messages for the player (Firebase queries require indexing, so we filter client-side)
-    const response = await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}.json`);
+    // Hash username for Firebase path (try both hashed and non-hashed for backward compatibility)
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    const currentPlayerLower = currentPlayer.toLowerCase();
+    
+    // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
+    let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
+    let data = null;
+    
+    if (!response.ok && response.status === 404) {
+      // Try non-hashed path for backward compatibility
+      response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
+    }
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -1411,28 +1665,95 @@ async function checkForMessages() {
       throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
+    data = await response.json();
     
     if (!data || typeof data !== 'object') {
       return [];
     }
     
-    // Convert Firebase object to array, decrypt messages, and filter unread messages
+    // Convert Firebase object to array, decrypt messages and usernames, and filter unread messages
     const messages = await Promise.all(
       Object.entries(data)
         .map(async ([id, msg]) => {
           if (!msg || msg.read === false) {
-            // Decrypt message text if encrypted
-            if (msg && msg.encrypted && msg.text && msg.from) {
+            let decryptedMsg = { id, ...msg };
+            
+            // Decrypt usernames if encrypted
+            if (msg && msg.usernamesEncrypted && msg.from && msg.to) {
               try {
-                const decryptedText = await decryptMessage(msg.text, msg.from, currentPlayer);
-                return { id, ...msg, text: decryptedText };
+                let decryptedFrom = msg.from;
+                let decryptedTo = msg.to;
+                
+                // Use fromHash hint to efficiently identify the sender
+                if (msg.fromHash) {
+                  // Try decrypting with each VIP list member and match the hash
+                  const vipList = getVIPList();
+                  for (const vip of vipList) {
+                    try {
+                      const testHash = await hashUsername(vip.name);
+                      if (testHash === msg.fromHash) {
+                        // Found matching sender, decrypt usernames
+                        decryptedFrom = await decryptUsername(msg.from, vip.name, currentPlayer);
+                        decryptedTo = await decryptUsername(msg.to, vip.name, currentPlayer);
+                        break;
+                      }
+                    } catch (e) {
+                      // Continue trying other senders
+                    }
+                  }
+                  
+                  // If not found in VIP list, try all users from recent conversations
+                  if (decryptedFrom === msg.from && conversationLastTimestamps.size > 0) {
+                    for (const [playerName, timestamp] of conversationLastTimestamps.entries()) {
+                      try {
+                        const testHash = await hashUsername(playerName);
+                        if (testHash === msg.fromHash) {
+                          decryptedFrom = await decryptUsername(msg.from, playerName, currentPlayer);
+                          decryptedTo = await decryptUsername(msg.to, playerName, currentPlayer);
+                          break;
+                        }
+                      } catch (e) {
+                        // Continue trying
+                      }
+                    }
+                  }
+                } else {
+                  // No hash hint (backward compatibility) - try VIP list members
+                  const vipList = getVIPList();
+                  for (const vip of vipList) {
+                    try {
+                      const testDecrypted = await decryptUsername(msg.from, vip.name, currentPlayer);
+                      if (testDecrypted && testDecrypted !== msg.from && testDecrypted.toLowerCase() === vip.name.toLowerCase()) {
+                        decryptedFrom = testDecrypted;
+                        decryptedTo = await decryptUsername(msg.to, vip.name, currentPlayer);
+                        break;
+                      }
+                    } catch (e) {
+                      // Continue trying other senders
+                    }
+                  }
+                }
+                
+                decryptedMsg.from = decryptedFrom;
+                decryptedMsg.to = decryptedTo;
               } catch (error) {
-                console.warn('[VIP List] Failed to decrypt message:', error);
-                return { id, ...msg }; // Return original if decryption fails
+                console.warn('[VIP List] Failed to decrypt usernames:', error);
+                // Keep encrypted values if decryption fails
               }
             }
-            return { id, ...msg };
+            
+            // Decrypt message text if encrypted
+            if (msg && msg.encrypted && msg.text && decryptedMsg.from) {
+              try {
+                const decryptedText = await decryptMessage(msg.text, decryptedMsg.from, currentPlayer);
+                decryptedMsg.text = decryptedText;
+              } catch (error) {
+                console.warn('[VIP List] Failed to decrypt message:', error);
+                // Keep encrypted text if decryption fails
+              }
+            }
+            
+            return decryptedMsg;
           }
           return null;
         })
