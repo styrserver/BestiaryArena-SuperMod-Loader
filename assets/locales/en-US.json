@@ -506,7 +506,8 @@
       "deleteConversationMessage": "Are you sure you want to delete all messages with {name}?<br>This will delete the conversation for both you and {name}.<br>This action cannot be undone.",
       "delete": "Delete",
       "noMessagesYet": "No messages yet. Start the conversation!",
-      "deleteConversationError": "Failed to delete conversation. Please try again."
+      "deleteConversationError": "Failed to delete conversation. Please try again.",
+      "sentYouReplay": "sent you a replay"
     }
   }
 }

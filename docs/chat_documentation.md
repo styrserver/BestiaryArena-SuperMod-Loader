@@ -5,6 +5,7 @@
 The VIP List mod includes a chat feature that allows players to send encrypted messages to each other. The chat system uses:
 - **End-to-end encryption** for message privacy
 - **Username encryption** for additional privacy protection
+- **Read status encryption** for message read status privacy
 - **Username hashing** for secure Firebase paths
 - **Event-driven updates** for real-time message delivery
 - **Chat requests and privileges** for access control
@@ -125,6 +126,13 @@ If you see 401 errors in the browser console, it means the Firebase security rul
 - Messages are stored encrypted in Firebase
 - Encryption key is derived from both player names using PBKDF2
 
+### Read Status Encryption
+- Message read status (read/unread) is encrypted using AES-GCM encryption
+- Only the sender and recipient can decrypt read status
+- Read status is stored encrypted in Firebase
+- Uses a separate encryption key derived from both player names using PBKDF2 with a different salt
+- Backward compatible with unencrypted read status values
+
 ### Username Encryption & Hashing
 - **Username Hashing**: Usernames in Firebase database paths are hashed using SHA-256 (one-way, deterministic)
   - Firebase paths use hashed usernames instead of plain text (e.g., `/messages/{hashed-username}/`)
@@ -219,22 +227,28 @@ The chat system implements multiple layers of security to protect user privacy:
 
 1. **Message Text Encryption**
    - All message content is encrypted using AES-GCM
-   - Encryption keys are derived from both player names
+   - Encryption keys are derived from both player names using PBKDF2
    - Messages are stored encrypted in Firebase and only decrypted by the recipient
 
-2. **Username Hashing (Database Paths)**
+2. **Read Status Encryption**
+   - Message read status (read/unread) is encrypted using AES-GCM
+   - Uses a separate encryption key derived from both player names using PBKDF2 with a different salt
+   - Read status is stored encrypted in Firebase and only decrypted by the recipient
+   - Backward compatible with unencrypted read status values
+
+3. **Username Hashing (Database Paths)**
    - Usernames in Firebase paths are hashed using SHA-256
    - This prevents username exposure in database structure
    - Hashes are deterministic (same username = same hash) for consistency
    - Example: `/messages/a1b2c3d4.../` instead of `/messages/PlayerName/`
 
-3. **Username Encryption (Message Bodies)**
+4. **Username Encryption (Message Bodies)**
    - Usernames in message and request bodies are encrypted using AES-GCM
-   - Separate encryption keys are used for usernames vs message text
+   - Separate encryption keys are used for usernames vs message text vs read status
    - Only the sender and recipient can decrypt usernames
    - Includes hash hints for efficient decryption without brute-force attempts
 
-4. **Backward Compatibility**
+5. **Backward Compatibility**
    - System automatically detects and handles both encrypted and unencrypted data
    - Functions try both hashed and non-hashed paths when reading
    - Existing unencrypted data continues to work without issues
@@ -243,9 +257,10 @@ The chat system implements multiple layers of security to protect user privacy:
 ### Privacy Benefits
 
 - **Reduced Username Exposure**: Usernames are hashed in database paths, making them less visible
-- **End-to-End Encryption**: Both message content and usernames are encrypted
-- **No Server-Side Decryption**: Firebase never sees plain text usernames or messages
+- **End-to-End Encryption**: Message content, usernames, and read status are all encrypted
+- **No Server-Side Decryption**: Firebase never sees plain text usernames, messages, or read status
 - **Deterministic Operations**: Same usernames produce same hashes/keys for consistency
+- **Separate Encryption Keys**: Different keys for messages, usernames, and read status provide additional security
 
 ## Additional Notes
 
@@ -255,6 +270,7 @@ The chat system implements multiple layers of security to protect user privacy:
 - Unread message counts are displayed in badges on the VIP List menu item and minimized chats
 - Chat sidebar automatically repositions when window is resized
 - Conversation history persists and can be deleted via the delete button in chat panel header
-- All messages and usernames are encrypted end-to-end for privacy
+- All messages, usernames, and read status are encrypted end-to-end for privacy
 - Usernames are hashed in database paths for additional privacy protection
+- Separate encryption keys are used for messages, usernames, and read status
 

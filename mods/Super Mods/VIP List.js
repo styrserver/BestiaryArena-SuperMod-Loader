@@ -595,6 +595,139 @@ async function decryptUsername(encryptedUsername, player1, player2) {
   }
 }
 
+// Encrypt read status for storage in Firebase
+async function encryptReadStatus(readStatus, player1, player2) {
+  try {
+    const key = await deriveReadStatusKey(player1, player2);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(readStatus ? 'true' : 'false');
+    
+    // Generate a random IV for each encryption
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      data
+    );
+    
+    // Combine IV and encrypted data, then encode as base64
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    // Convert to base64 for Firebase storage
+    return btoa(String.fromCharCode(...combined));
+  } catch (error) {
+    console.error('[VIP List] Read status encryption error:', error);
+    throw error;
+  }
+}
+
+// Decrypt read status from Firebase
+async function decryptReadStatus(encryptedReadStatus, player1, player2) {
+  try {
+    // Check if it looks like encrypted data
+    if (!encryptedReadStatus || typeof encryptedReadStatus !== 'string') {
+      // Backward compatibility: if it's a boolean, return it
+      if (typeof encryptedReadStatus === 'boolean') {
+        return encryptedReadStatus;
+      }
+      // If it's the string "true" or "false", convert to boolean
+      if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
+        return true;
+      }
+      if (encryptedReadStatus === 'false' || encryptedReadStatus === false) {
+        return false;
+      }
+      return false; // Default to false for unread
+    }
+    
+    // Try to decode base64 - if it fails, it's probably not encrypted
+    let combined;
+    try {
+      combined = Uint8Array.from(atob(encryptedReadStatus), c => c.charCodeAt(0));
+    } catch (e) {
+      // Not valid base64, probably unencrypted (backward compatibility)
+      if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
+        return true;
+      }
+      return false;
+    }
+    
+    // Check if we have enough data (at least 12 bytes for IV + some encrypted data)
+    if (combined.length < 13) {
+      // Too short to be encrypted, probably unencrypted (backward compatibility)
+      if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
+        return true;
+      }
+      return false;
+    }
+    
+    const key = await deriveReadStatusKey(player1, player2);
+    
+    // Extract IV (first 12 bytes) and encrypted data
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encrypted
+    );
+    
+    const decoder = new TextDecoder();
+    const decryptedString = decoder.decode(decrypted);
+    return decryptedString === 'true';
+  } catch (error) {
+    // If decryption fails, return false for backward compatibility
+    if (!error.message.includes('invalid') && !error.message.includes('String contains')) {
+      console.warn('[VIP List] Read status decryption error (may be unencrypted):', error.message);
+    }
+    // Backward compatibility: try to parse as boolean/string
+    if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
+      return true;
+    }
+    return false;
+  }
+}
+
+// Derive a shared encryption key for read status from two player names (deterministic)
+async function deriveReadStatusKey(player1, player2) {
+  // Sort names alphabetically to ensure both players derive the same key
+  const sortedNames = [player1.toLowerCase(), player2.toLowerCase()].sort();
+  const combined = sortedNames.join('|') + '|readstatus';
+  
+  // Use Web Crypto API to derive a key from the combined names using PBKDF2
+  const encoder = new TextEncoder();
+  const password = encoder.encode(combined);
+  
+  // Import password as a raw key material
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    password,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits', 'deriveKey']
+  );
+  
+  const salt = encoder.encode('vip-list-readstatus-salt'); // Different salt for read status encryption
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  
+  return key;
+}
+
 // Derive a shared encryption key for usernames from two player names (deterministic)
 async function deriveUsernameKey(player1, player2) {
   // Sort names alphabetically to ensure both players derive the same key
@@ -878,19 +1011,19 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
       if (isBlocked) {
         blockedMessage.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-            Player Blocked
+            ${t('mods.vipList.playerBlocked')}
           </div>
           <div>
-            You have blocked ${toPlayer}. Unblock them to send messages.
+            ${tReplace('mods.vipList.playerBlockedMessage', { name: toPlayer })}
           </div>
         `;
       } else {
         blockedMessage.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-            You Are Blocked
+            ${t('mods.vipList.youAreBlocked')}
           </div>
           <div>
-            ${toPlayer} has blocked you. You cannot send messages or request chat.
+            ${tReplace('mods.vipList.youAreBlockedMessage', { name: toPlayer })}
           </div>
         `;
       }
@@ -928,10 +1061,10 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
         // Show accept/decline buttons
         privilegeMessage.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-            Chat Request from ${toPlayer}
+            ${tReplace('mods.vipList.chatRequestFrom', { name: toPlayer })}
           </div>
           <div style="margin-bottom: 8px;">
-            ${toPlayer} wants to chat with you.
+            ${tReplace('mods.vipList.chatRequestMessage', { name: toPlayer })}
           </div>
           <div style="display: flex; gap: 8px; justify-content: center;">
             <button class="accept-chat-request-btn" style="
@@ -943,7 +1076,7 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
               cursor: pointer;
               font-size: 12px;
               font-weight: 600;
-            ">Accept</button>
+            ">${t('mods.vipList.accept')}</button>
             <button class="decline-chat-request-btn" style="
               padding: 6px 16px;
               background: ${CSS_CONSTANTS.COLORS.ERROR};
@@ -953,7 +1086,7 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
               cursor: pointer;
               font-size: 12px;
               font-weight: 600;
-            ">Decline</button>
+            ">${t('mods.vipList.decline')}</button>
           </div>
         `;
         
@@ -989,20 +1122,20 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
         // Show pending request message
         privilegeMessage.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-            Chat Request Pending
+            ${t('mods.vipList.chatRequestPending')}
           </div>
           <div>
-            Waiting for ${toPlayer} to accept your chat request.
+            ${tReplace('mods.vipList.waitingForAccept', { name: toPlayer })}
           </div>
         `;
       } else {
         // Show request button
         privilegeMessage.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-            Request Chat Privileges
+            ${t('mods.vipList.requestChatPrivileges')}
           </div>
           <div style="margin-bottom: 8px;">
-            You need to request chat privileges before messaging ${toPlayer}.
+            ${tReplace('mods.vipList.requestChatPrivilegesMessage', { name: toPlayer })}
           </div>
           <button class="request-chat-btn" style="
             padding: 6px 16px;
@@ -1013,7 +1146,7 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
-          ">Request Chat</button>
+          ">${t('mods.vipList.requestChat')}</button>
         `;
         
         const requestBtn = privilegeMessage.querySelector('.request-chat-btn');
@@ -1023,10 +1156,10 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
           if (success) {
             privilegeMessage.innerHTML = `
               <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-                Chat Request Sent
+                ${t('mods.vipList.chatRequestSent')}
               </div>
               <div>
-                Waiting for ${toPlayer} to accept your chat request.
+                ${tReplace('mods.vipList.waitingForAccept', { name: toPlayer })}
               </div>
             `;
             // Start frequent checking for this player
@@ -1061,10 +1194,10 @@ async function updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPr
       `;
       warningMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-          Chat Not Available
+          ${t('mods.vipList.chatNotAvailable')}
         </div>
         <div>
-          ${toPlayer} does not have chat enabled in their mod settings.
+          ${tReplace('mods.vipList.chatNotAvailableMessage', { name: toPlayer })}
         </div>
       `;
       messagesArea.insertBefore(warningMessage, messagesArea.firstChild);
@@ -1687,8 +1820,10 @@ async function checkForMessages() {
     const messages = await Promise.all(
       Object.entries(data)
         .map(async ([id, msg]) => {
-          if (!msg || msg.read === false) {
-            let decryptedMsg = { id, ...msg };
+          if (!msg) {
+            return null;
+          }
+          let decryptedMsg = { id, ...msg };
             
             // Decrypt usernames if encrypted
             if (msg && msg.usernamesEncrypted && msg.from && msg.to) {
@@ -1765,9 +1900,21 @@ async function checkForMessages() {
               }
             }
             
+            // Decrypt read status if we have sender name
+            if (decryptedMsg.from && msg.read !== undefined) {
+              try {
+                decryptedMsg.read = await decryptReadStatus(msg.read, decryptedMsg.from, currentPlayer);
+              } catch (error) {
+                console.warn('[VIP List] Failed to decrypt read status:', error);
+                // Fallback: try to parse as boolean/string
+                decryptedMsg.read = msg.read === true || msg.read === 'true';
+              }
+            } else {
+              // Default to unread if read status is missing
+              decryptedMsg.read = false;
+            }
+            
             return decryptedMsg;
-          }
-          return null;
         })
     );
     
@@ -1793,7 +1940,7 @@ async function checkForMessages() {
 }
 
 // Mark message as read
-async function markMessageAsRead(messageId) {
+async function markMessageAsRead(messageId, fromPlayer = null) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
     return;
   }
@@ -1804,10 +1951,57 @@ async function markMessageAsRead(messageId) {
       return;
     }
     
+    // If fromPlayer not provided, fetch the message to get sender
+    let senderName = fromPlayer;
+    if (!senderName) {
+      const response = await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}/${messageId}.json`);
+      if (response.ok) {
+        const msg = await response.json();
+        if (msg && msg.from) {
+          // Decrypt sender name if encrypted
+          if (msg.usernamesEncrypted && msg.fromHash) {
+            const vipList = getVIPList();
+            for (const vip of vipList) {
+              try {
+                const testHash = await hashUsername(vip.name);
+                if (testHash === msg.fromHash) {
+                  senderName = await decryptUsername(msg.from, vip.name, currentPlayer);
+                  break;
+                }
+              } catch (e) {
+                // Continue trying other senders
+              }
+            }
+            // If not found in VIP list, try to decrypt with current player (fallback)
+            if (!senderName || senderName === msg.from) {
+              try {
+                senderName = await decryptUsername(msg.from, currentPlayer, currentPlayer);
+              } catch (e) {
+                senderName = msg.from; // Use encrypted value as fallback
+              }
+            }
+          } else {
+            senderName = msg.from;
+          }
+        }
+      }
+    }
+    
+    // Encrypt read status if we have sender name
+    let encryptedReadStatus = 'true';
+    if (senderName) {
+      try {
+        encryptedReadStatus = await encryptReadStatus(true, senderName, currentPlayer);
+      } catch (error) {
+        console.warn('[VIP List] Failed to encrypt read status, using plain text:', error);
+        encryptedReadStatus = 'true'; // Fallback to plain text
+      }
+    }
+    
     await fetch(`${getMessagingApiUrl()}/${currentPlayer.toLowerCase()}/${messageId}/read.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: 'true'
+      body: JSON.stringify(encryptedReadStatus)
     });
   } catch (error) {
     console.error('[VIP List] Error marking message as read:', error);
@@ -1844,11 +2038,29 @@ async function markAllMessagesAsReadFromPlayer(playerName) {
     const playerNameLower = playerName.toLowerCase();
     const markPromises = [];
     
-    Object.entries(data).forEach(([id, msg]) => {
-      if (msg && msg.from && msg.from.toLowerCase() === playerNameLower && msg.read === false) {
-        markPromises.push(markMessageAsRead(id));
+    for (const [id, msg] of Object.entries(data)) {
+      if (msg && msg.from) {
+        // Check if sender matches (handle encrypted usernames)
+        let senderMatches = false;
+        if (msg.usernamesEncrypted && msg.fromHash) {
+          // Check if fromHash matches playerName
+          const hash = await hashUsername(playerName);
+          if (hash === msg.fromHash) {
+            senderMatches = true;
+          }
+        } else if (msg.from.toLowerCase() === playerNameLower) {
+          senderMatches = true;
+        }
+        
+        if (senderMatches) {
+          // Decrypt read status to check if unread
+          const isRead = await decryptReadStatus(msg.read, playerName, currentPlayer);
+          if (!isRead) {
+            markPromises.push(markMessageAsRead(id, playerName));
+          }
+        }
       }
-    });
+    }
     
     await Promise.all(markPromises);
     
@@ -1986,7 +2198,7 @@ function embedReplayLinks(text) {
               link.textContent = `${region} - ${map}`;
               link.href = '#';
               link.style.cssText = `
-                color: ${CSS_CONSTANTS.COLORS.LINK};
+                color: rgb(25, 118, 210);
                 text-decoration: underline;
                 cursor: pointer;
               `;
@@ -2001,7 +2213,7 @@ function embedReplayLinks(text) {
                   link.style.color = CSS_CONSTANTS.COLORS.SUCCESS;
                   setTimeout(() => {
                     link.textContent = originalText;
-                    link.style.color = CSS_CONSTANTS.COLORS.LINK;
+                    link.style.color = 'rgb(25, 118, 210)';
                   }, 2000);
                 }
               });
@@ -2083,7 +2295,7 @@ function showMessageNotification(message) {
   
   // Check if message contains a replay
   const hasReplay = message.text && message.text.includes('$replay(');
-  const displayText = hasReplay ? 'sent you a replay' : message.text;
+  const displayText = hasReplay ? t('mods.vipList.sentYouReplay') : message.text;
   
   notification.innerHTML = `
     <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
@@ -2150,24 +2362,100 @@ function updateMessageBadge() {
   }
 }
 
+// Check for conversation deletions and refresh open panels
+async function checkForConversationDeletions() {
+  if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
+    return;
+  }
+  
+  // Check all open chat panels for message count changes
+  for (const [playerName, panel] of openChatPanels.entries()) {
+    if (!panel || panel.nodeType !== 1) {
+      continue;
+    }
+    
+    try {
+      const messagesArea = panel.querySelector(`#chat-messages-${playerName.toLowerCase()}`);
+      if (!messagesArea) {
+        continue;
+      }
+      
+      // Get current conversation messages
+      const messages = await getConversationMessages(playerName);
+      const currentCount = messages.length;
+      const previousCount = panel._lastMessageCount || 0;
+      
+      // If message count decreased, refresh the conversation
+      if (currentCount < previousCount) {
+        console.log(`[VIP List] Detected message deletion for ${playerName}, refreshing conversation...`);
+        await loadConversation(playerName, messagesArea, false);
+        panel._lastMessageCount = currentCount;
+        
+        // Update timestamp tracking
+        const conversationKey = playerName.toLowerCase();
+        if (messages.length === 0) {
+          conversationLastTimestamps.delete(conversationKey);
+        } else {
+          const latestMessage = messages[messages.length - 1];
+          conversationLastTimestamps.set(conversationKey, latestMessage?.timestamp || Date.now());
+        }
+      } else if (currentCount !== previousCount) {
+        // Update count even if it increased (handled by processNewMessages, but update tracking)
+        panel._lastMessageCount = currentCount;
+      }
+    } catch (error) {
+      // Silently handle errors - don't spam console
+      if (error.message && !error.message.includes('401')) {
+        console.warn(`[VIP List] Error checking conversation deletions for ${playerName}:`, error);
+      }
+    }
+  }
+}
+
 // Process new messages (called by event listeners)
 async function processNewMessages(messages) {
   const newMessages = messages.filter(msg => msg.timestamp > lastMessageCheckTime);
   lastMessageCheckTime = Math.max(...messages.map(m => m.timestamp || 0), lastMessageCheckTime);
   
-  // Group messages by sender and update minimized chat badges
+  // Group messages by sender
   const messagesBySender = groupMessagesBySender(messages);
+  
+  // Mark messages as read if chat panel is open for that sender
+  const markReadPromises = [];
+  messagesBySender.forEach((playerMessages, sender) => {
+    const panel = openChatPanels.get(sender.toLowerCase());
+    if (panel) {
+      // Chat panel is open, mark all unread messages from this sender as read
+      playerMessages.forEach(msg => {
+        if (!msg.read && msg.id) {
+          markReadPromises.push(markMessageAsRead(msg.id, sender));
+          // Update message read status locally to avoid re-fetching
+          msg.read = true;
+        }
+      });
+    }
+  });
+  
+  // Wait for all read status updates to complete
+  if (markReadPromises.length > 0) {
+    await Promise.all(markReadPromises);
+  }
+  
+  // Update minimized chat badges
   messagesBySender.forEach((playerMessages, sender) => {
     const unreadCount = playerMessages.filter(msg => !msg.read).length;
     updateMinimizedChatUnread(sender, unreadCount);
   });
   
-  unreadMessageCount = messages.length;
+  unreadMessageCount = messages.filter(msg => !msg.read).length;
   updateMessageBadge();
   
-  // Show notifications for new messages (only if unread)
+  // Show notifications for new messages (only if unread and chat panel is NOT open)
+  // Check panel status first, then check read status
   newMessages.forEach(msg => {
-    if (!msg.read) {
+    const panel = openChatPanels.get(msg.from.toLowerCase());
+    // Only show notification if panel is not open AND message is unread
+    if (!panel && !msg.read) {
       showMessageNotification(msg);
     }
   });
@@ -2326,16 +2614,25 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
   
   // Initial load
   checkForMessages().then(messages => {
-    unreadMessageCount = messages.length;
+    unreadMessageCount = messages.filter(msg => !msg.read).length;
     updateMessageBadge();
+    // Only show notifications for unread messages where panel is not open
     messages.forEach(msg => {
-      showMessageNotification(msg);
+      if (!msg.read) {
+        const panel = openChatPanels.get(msg.from.toLowerCase());
+        if (!panel) {
+          showMessageNotification(msg);
+        }
+      }
     });
   });
   
   messageCheckInterval = setInterval(async () => {
     const messages = await checkForMessages();
     await processNewMessages(messages);
+    
+    // Check for conversation deletions and refresh open panels
+    await checkForConversationDeletions();
     
     const requests = await checkForChatRequests();
     await processChatRequests(requests);
@@ -2553,12 +2850,7 @@ async function loadConversation(player, container, forceScrollToBottom = false) 
   const deleteConfirmation = container.querySelector('.delete-confirmation');
   container.innerHTML = '';
   
-  // Add blocked message first (if exists) - highest priority
-  if (blockedMessage) {
-    container.appendChild(blockedMessage);
-  }
-  
-  // Add privilege message next (if exists)
+  // Add privilege message first (if exists)
   if (privilegeMessage) {
     container.appendChild(privilegeMessage);
   }
@@ -2577,12 +2869,17 @@ async function loadConversation(player, container, forceScrollToBottom = false) 
       font-style: italic;
       font-size: 12px;
     `;
-    emptyMsg.textContent = `No messages yet. Start the conversation!`;
+    emptyMsg.textContent = t('mods.vipList.noMessagesYet');
     container.appendChild(emptyMsg);
     
     // Add delete confirmation after empty message (if exists)
     if (deleteConfirmation) {
       container.appendChild(deleteConfirmation);
+    }
+    
+    // Add blocked message at bottom (if exists)
+    if (blockedMessage) {
+      container.appendChild(blockedMessage);
     }
     
     if (panel) panel._previousMessageCount = 0;
@@ -2655,6 +2952,11 @@ async function loadConversation(player, container, forceScrollToBottom = false) 
     container.appendChild(deleteConfirmation);
   }
   
+  // Add blocked message at bottom (if exists)
+  if (blockedMessage) {
+    container.appendChild(blockedMessage);
+  }
+  
   // Update message count on panel
   if (panel) panel._previousMessageCount = messages.length;
   
@@ -2704,12 +3006,10 @@ function showDeleteConfirmation(panel, otherPlayer) {
   
   confirmation.innerHTML = `
     <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-      Delete Conversation?
+      ${t('mods.vipList.deleteConversationTitle')}
     </div>
     <div style="margin-bottom: 12px;">
-      Are you sure you want to delete all messages with ${otherPlayer}?<br>
-      This will delete the conversation for both you and ${otherPlayer}.<br>
-      This action cannot be undone.
+      ${tReplace('mods.vipList.deleteConversationMessage', { name: otherPlayer })}
     </div>
     <div style="display: flex; gap: 8px; justify-content: center;">
       <button class="confirm-delete-btn" style="
@@ -2721,7 +3021,7 @@ function showDeleteConfirmation(panel, otherPlayer) {
         cursor: pointer;
         font-size: 12px;
         font-weight: 600;
-      ">Delete</button>
+      ">${t('mods.vipList.delete')}</button>
       <button class="cancel-delete-btn" style="
         padding: 6px 16px;
         background: rgba(255, 255, 255, 0.1);
@@ -2731,7 +3031,7 @@ function showDeleteConfirmation(panel, otherPlayer) {
         cursor: pointer;
         font-size: 12px;
         font-weight: 600;
-      ">Cancel</button>
+      ">${t('mods.vipList.cancelButton')}</button>
     </div>
   `;
   
@@ -2765,6 +3065,13 @@ function showDeleteConfirmation(panel, otherPlayer) {
       confirmation.remove();
       // Refresh the chat panel to show empty state
       await loadConversation(otherPlayer, messagesArea);
+      // Update message count tracking
+      const panel = messagesArea.closest('[id^="vip-chat-panel-"]');
+      if (panel) {
+        panel._lastMessageCount = 0;
+        const conversationKey = otherPlayer.toLowerCase();
+        conversationLastTimestamps.delete(conversationKey);
+      }
     } else {
       // Re-enable buttons if deletion failed
       confirmation.style.opacity = '1';
@@ -2799,6 +3106,10 @@ async function deleteConversation(otherPlayer) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const otherPlayerLower = otherPlayer.toLowerCase();
     
+    // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
+    const hashedOtherPlayer = await hashUsername(otherPlayer);
+    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    
     // Get all messages in the conversation
     const conversationMessages = await getConversationMessages(otherPlayer);
     
@@ -2810,33 +3121,45 @@ async function deleteConversation(otherPlayer) {
     console.log(`[VIP List] Deleting ${conversationMessages.length} messages...`);
     
     // Delete messages from both players' collections
-    // Messages are stored under the recipient's name in Firebase
+    // Messages are stored under the recipient's hashed name in Firebase
     const deletePromises = [];
     
     for (const msg of conversationMessages) {
       if (msg.isFromMe) {
-        // Message sent by current player - stored under otherPlayer's name
-        const deleteUrl = `${getMessagingApiUrl()}/${otherPlayerLower}/${msg.id}.json`;
+        // Message sent by current player - stored under otherPlayer's hashed name
+        // Try hashed path first, then fallback to non-hashed for backward compatibility
+        let deleteUrl = `${getMessagingApiUrl()}/${hashedOtherPlayer}/${msg.id}.json`;
         deletePromises.push(
           fetch(deleteUrl, { method: 'DELETE' })
             .then(response => {
-              if (!response.ok && response.status !== 404) {
+              if (!response.ok && response.status === 404) {
+                // Try non-hashed path for backward compatibility
+                const fallbackUrl = `${getMessagingApiUrl()}/${otherPlayerLower}/${msg.id}.json`;
+                return fetch(fallbackUrl, { method: 'DELETE' });
+              } else if (!response.ok) {
                 console.warn(`[VIP List] Failed to delete sent message ${msg.id}:`, response.status);
               }
+              return response;
             })
             .catch(error => {
               console.warn(`[VIP List] Error deleting sent message ${msg.id}:`, error);
             })
         );
       } else {
-        // Message received from otherPlayer - stored under currentPlayer's name
-        const deleteUrl = `${getMessagingApiUrl()}/${currentPlayerLower}/${msg.id}.json`;
+        // Message received from otherPlayer - stored under currentPlayer's hashed name
+        // Try hashed path first, then fallback to non-hashed for backward compatibility
+        let deleteUrl = `${getMessagingApiUrl()}/${hashedCurrentPlayer}/${msg.id}.json`;
         deletePromises.push(
           fetch(deleteUrl, { method: 'DELETE' })
             .then(response => {
-              if (!response.ok && response.status !== 404) {
+              if (!response.ok && response.status === 404) {
+                // Try non-hashed path for backward compatibility
+                const fallbackUrl = `${getMessagingApiUrl()}/${currentPlayerLower}/${msg.id}.json`;
+                return fetch(fallbackUrl, { method: 'DELETE' });
+              } else if (!response.ok) {
                 console.warn(`[VIP List] Failed to delete received message ${msg.id}:`, response.status);
               }
+              return response;
             })
             .catch(error => {
               console.warn(`[VIP List] Error deleting received message ${msg.id}:`, error);
@@ -2856,7 +3179,7 @@ async function deleteConversation(otherPlayer) {
     return true;
   } catch (error) {
     console.error('[VIP List] Error deleting conversation:', error);
-    alert('Failed to delete conversation. Please try again.');
+    alert(t('mods.vipList.deleteConversationError'));
     return false;
   }
 }
@@ -2874,13 +3197,13 @@ function getChatSidebar() {
         const mainElement = document.querySelector('main');
         if (mainElement) {
           const mainRect = mainElement.getBoundingClientRect();
-          const sidebarLeft = mainRect.right + 20; // 20px spacing from main
+          const sidebarLeft = mainRect.left - 57; // 5px spacing + 52px sidebar width from left side of main
           chatSidebar.style.left = sidebarLeft + 'px';
           chatSidebar.style.right = 'auto';
         } else {
-          // Fallback to right edge if main not found
-          chatSidebar.style.right = '20px';
-          chatSidebar.style.left = 'auto';
+          // Fallback to left edge if main not found
+          chatSidebar.style.left = '20px';
+          chatSidebar.style.right = 'auto';
         }
       };
       
@@ -2929,12 +3252,12 @@ function getChatSidebar() {
           const mainElement = document.querySelector('main');
           if (mainElement) {
             const mainRect = mainElement.getBoundingClientRect();
-            const sidebarLeft = mainRect.right + 20;
+            const sidebarLeft = mainRect.left - 57; // 5px spacing + 52px sidebar width from left side of main
             chatSidebar.style.left = sidebarLeft + 'px';
             chatSidebar.style.right = 'auto';
           } else {
-            chatSidebar.style.right = '20px';
-            chatSidebar.style.left = 'auto';
+            chatSidebar.style.left = '20px';
+            chatSidebar.style.right = 'auto';
           }
         };
         updateSidebarPosition();
@@ -3087,14 +3410,14 @@ async function createMinimizedChat(playerName, unreadCount = 0) {
     position: absolute;
     top: 0px;
     left: 0px;
-    width: 12px;
-    height: 12px;
-    background: rgba(0, 0, 0, 0.7);
+    width: 18px;
+    height: 18px;
+    background: ${CSS_CONSTANTS.COLORS.ERROR};
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 8px;
+    font-size: 12px;
     color: white;
     cursor: pointer;
     opacity: 0;
@@ -3410,8 +3733,17 @@ async function openChatPanel(toPlayer) {
     flex-shrink: 0;
   `;
   
+  // Minimize button (left side)
+  const closeBtn = createStyledIconButton('✕', true);
+  closeBtn.title = t('mods.vipList.closeButton');
+  closeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Minimize instead of closing
+    minimizeChatPanel(toPlayer);
+  });
+  
   const title = document.createElement('h3');
-  title.textContent = `Chat with ${toPlayer}`;
+  title.textContent = tReplace('mods.vipList.chatWith', { name: toPlayer });
   title.style.cssText = `
     margin: 0;
     padding: 0;
@@ -3419,15 +3751,17 @@ async function openChatPanel(toPlayer) {
     font-size: 13px;
     font-weight: 600;
     font-family: system-ui, -apple-system, sans-serif;
+    flex: 1;
+    text-align: center;
   `;
   
-  // Header controls container
+  // Header controls container (right side)
   const headerControls = document.createElement('div');
   headerControls.style.cssText = 'display: flex; gap: 4px; align-items: center;';
   
   // Delete conversation button (trash bin)
   const deleteBtn = createStyledIconButton('🗑', true);
-  deleteBtn.title = 'Delete conversation';
+  deleteBtn.title = t('mods.vipList.deleteConversation');
   deleteBtn.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
   deleteBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -3438,15 +3772,19 @@ async function openChatPanel(toPlayer) {
   // Block/Unblock button
   const playerIsBlocked = await isPlayerBlocked(toPlayer);
   const blockBtn = createStyledIconButton(playerIsBlocked ? '🔓' : '🚫', true);
-  blockBtn.title = playerIsBlocked ? 'Unblock Player' : 'Block Player';
+  blockBtn.title = playerIsBlocked ? t('mods.vipList.unblockPlayer') : t('mods.vipList.blockPlayer');
   blockBtn.style.color = playerIsBlocked ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.ERROR;
   blockBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (playerIsBlocked) {
+    // Check current blocked status
+    const currentBlockedStatus = await isPlayerBlocked(toPlayer);
+    if (currentBlockedStatus) {
+      // Currently blocked, so unblock
       const success = await unblockPlayer(toPlayer);
       if (success) {
+        // Update button to show unblocked state
         blockBtn.textContent = '🚫';
-        blockBtn.title = 'Block Player';
+        blockBtn.title = t('mods.vipList.blockPlayer');
         blockBtn.style.color = CSS_CONSTANTS.COLORS.ERROR;
         // Refresh UI
         const recipientHasChatEnabled = await checkRecipientChatEnabled(toPlayer);
@@ -3454,10 +3792,12 @@ async function openChatPanel(toPlayer) {
         await updateChatPanelUI(panel, toPlayer, recipientHasChatEnabled, hasPrivilege, false, false);
       }
     } else {
+      // Currently unblocked, so block
       const success = await blockPlayer(toPlayer);
       if (success) {
+        // Update button to show blocked state
         blockBtn.textContent = '🔓';
-        blockBtn.title = 'Unblock Player';
+        blockBtn.title = t('mods.vipList.unblockPlayer');
         blockBtn.style.color = CSS_CONSTANTS.COLORS.SUCCESS;
         // Refresh UI to disable chat
         await updateChatPanelUI(panel, toPlayer, false, false, false, false);
@@ -3517,19 +3857,11 @@ async function openChatPanel(toPlayer) {
     addVIPBtn.style.opacity = '0.6';
   }
   
-  const closeBtn = createStyledIconButton('✕', true);
-  closeBtn.title = t('mods.vipList.closeButton');
-  closeBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Minimize instead of closing
-    minimizeChatPanel(toPlayer);
-  });
-  
   headerControls.appendChild(deleteBtn);
   headerControls.appendChild(blockBtn);
   headerControls.appendChild(addVIPBtn);
-  headerControls.appendChild(closeBtn);
   
+  headerContainer.appendChild(closeBtn);
   headerContainer.appendChild(title);
   headerContainer.appendChild(headerControls);
   panel.appendChild(headerContainer);
@@ -3547,9 +3879,10 @@ async function openChatPanel(toPlayer) {
     min-height: 0;
   `;
   
-  // Show blocked message if player is blocked or you're blocked by them
+  // Create blocked message if player is blocked or you're blocked by them (will be appended at bottom after messages load)
+  let blockedMessage = null;
   if (isBlocked || isBlockedBy) {
-    const blockedMessage = document.createElement('div');
+    blockedMessage = document.createElement('div');
     blockedMessage.className = 'chat-blocked-message';
     blockedMessage.style.cssText = `
       padding: 12px;
@@ -3566,24 +3899,22 @@ async function openChatPanel(toPlayer) {
     if (isBlocked) {
       blockedMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-          Player Blocked
+          ${t('mods.vipList.playerBlocked')}
         </div>
         <div>
-          You have blocked ${toPlayer}. Unblock them to send messages.
+          ${tReplace('mods.vipList.playerBlockedMessage', { name: toPlayer })}
         </div>
       `;
     } else {
       blockedMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-          You Are Blocked
+          ${t('mods.vipList.youAreBlocked')}
         </div>
         <div>
-          ${toPlayer} has blocked you. You cannot send messages or request chat.
+          ${tReplace('mods.vipList.youAreBlockedMessage', { name: toPlayer })}
         </div>
       `;
     }
-    
-    messagesArea.appendChild(blockedMessage);
   }
   
   // Show privilege/request UI (only if not blocked and recipient has chat enabled)
@@ -3606,10 +3937,10 @@ async function openChatPanel(toPlayer) {
       // Show accept/decline buttons
       privilegeMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-          Chat Request from ${toPlayer}
+          ${tReplace('mods.vipList.chatRequestFrom', { name: toPlayer })}
         </div>
         <div style="margin-bottom: 8px;">
-          ${toPlayer} wants to chat with you.
+          ${tReplace('mods.vipList.chatRequestMessage', { name: toPlayer })}
         </div>
         <div style="display: flex; gap: 8px; justify-content: center;">
           <button class="accept-chat-request-btn" style="
@@ -3621,7 +3952,7 @@ async function openChatPanel(toPlayer) {
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
-          ">Accept</button>
+          ">${t('mods.vipList.accept')}</button>
           <button class="decline-chat-request-btn" style="
             padding: 6px 16px;
             background: ${CSS_CONSTANTS.COLORS.ERROR};
@@ -3631,7 +3962,7 @@ async function openChatPanel(toPlayer) {
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
-          ">Decline</button>
+          ">${t('mods.vipList.decline')}</button>
         </div>
       `;
       
@@ -3664,10 +3995,10 @@ async function openChatPanel(toPlayer) {
       // Show pending request message
       privilegeMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-          Chat Request Pending
+          ${t('mods.vipList.chatRequestPending')}
         </div>
         <div>
-          Waiting for ${toPlayer} to accept your chat request.
+          ${tReplace('mods.vipList.waitingForAccept', { name: toPlayer })}
         </div>
       `;
       // Start frequent checking for this player
@@ -3676,10 +4007,10 @@ async function openChatPanel(toPlayer) {
       // Show request button
       privilegeMessage.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 8px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-          Request Chat Privileges
+          ${t('mods.vipList.requestChatPrivileges')}
         </div>
         <div style="margin-bottom: 8px;">
-          You need to request chat privileges before messaging ${toPlayer}.
+          ${tReplace('mods.vipList.requestChatPrivilegesMessage', { name: toPlayer })}
         </div>
         <button class="request-chat-btn" style="
           padding: 6px 16px;
@@ -3690,7 +4021,7 @@ async function openChatPanel(toPlayer) {
           cursor: pointer;
           font-size: 12px;
           font-weight: 600;
-        ">Request Chat</button>
+        ">${t('mods.vipList.requestChat')}</button>
       `;
       
       const requestBtn = privilegeMessage.querySelector('.request-chat-btn');
@@ -3701,10 +4032,10 @@ async function openChatPanel(toPlayer) {
           // Show pending message first
           privilegeMessage.innerHTML = `
             <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.LINK};">
-              Chat Request Sent
+              ${t('mods.vipList.chatRequestSent')}
             </div>
             <div>
-              Waiting for ${toPlayer} to accept your chat request.
+              ${tReplace('mods.vipList.waitingForAccept', { name: toPlayer })}
             </div>
           `;
           
@@ -3736,10 +4067,10 @@ async function openChatPanel(toPlayer) {
     `;
     warningMessage.innerHTML = `
       <div style="font-weight: bold; margin-bottom: 4px; color: ${CSS_CONSTANTS.COLORS.ERROR};">
-        Chat Not Available
+        ${t('mods.vipList.chatNotAvailable')}
       </div>
       <div>
-        ${toPlayer} does not have chat enabled in their mod settings.
+        ${tReplace('mods.vipList.chatNotAvailableMessage', { name: toPlayer })}
       </div>
     `;
     messagesArea.appendChild(warningMessage);
@@ -3924,6 +4255,11 @@ async function openChatPanel(toPlayer) {
       }
     }
   };
+  
+  // Append blocked message to messagesArea before loading conversation so it can be preserved and moved to bottom
+  if (blockedMessage) {
+    messagesArea.appendChild(blockedMessage);
+  }
   
   // Load initial conversation and initialize count
   loadConversation(toPlayer, messagesArea, true).then(async () => {

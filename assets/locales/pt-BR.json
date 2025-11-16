@@ -507,7 +507,8 @@
       "deleteConversationMessage": "Tem certeza que deseja deletar todas as mensagens com {name}?<br>Isso deletará a conversa para você e {name}.<br>Esta ação não pode ser desfeita.",
       "delete": "Deletar",
       "noMessagesYet": "Nenhuma mensagem ainda. Inicie a conversa!",
-      "deleteConversationError": "Falha ao deletar conversa. Tente novamente."
+      "deleteConversationError": "Falha ao deletar conversa. Tente novamente.",
+      "sentYouReplay": "enviou um replay para você"
     }
   }
 }
