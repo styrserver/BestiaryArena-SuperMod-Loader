@@ -2,15 +2,17 @@
 
 ## Overview
 
-The VIP List mod includes a chat feature that allows players to send encrypted messages to each other. The chat system uses:
-- **End-to-end encryption** for message privacy
+The VIP List mod includes a chat feature that allows players to send messages to each other. The chat system includes:
+- **Private Chat**: Encrypted one-on-one messages between players
+- **All Chat**: Public channel for community-wide messaging
+- **End-to-end encryption** for private message privacy
 - **Username encryption** for additional privacy protection
 - **Read status encryption** for message read status privacy
 - **Username hashing** for secure Firebase paths
-- **Event-driven updates** for real-time message delivery
 - **Chat requests and privileges** for access control
 - **Message filtering** to control who can message you
 - **Replay link support** for sharing board configurations
+- **Tab-based interface** for managing multiple conversations
 
 The Firebase Realtime Database is already configured and ready to use. You just need to enable the chat feature in Mod Settings.
 
@@ -54,7 +56,8 @@ That's it! The chat feature is now enabled and ready to use.
 
 The chat system uses Firebase Realtime Database with the following structure:
 
-- **`/messages`**: Stores encrypted chat messages between players (usernames are hashed in paths and encrypted in message bodies)
+- **`/messages`**: Stores encrypted private chat messages between players (usernames are hashed in paths and encrypted in message bodies)
+- **`/all-chat`**: Stores public All Chat messages (plain text, no encryption)
 - **`/chat-enabled`**: Tracks which players have chat enabled in their mod settings (usernames are hashed in paths)
 - **`/chat-requests`**: Stores pending chat privilege requests (usernames are hashed in paths and encrypted in request bodies)
 - **`/chat-privileges`**: Stores granted chat privileges between players
@@ -121,10 +124,11 @@ If you see 401 errors in the browser console, it means the Firebase security rul
 - Blocking is one-way (if Player A blocks Player B, Player B cannot message Player A, but Player A can still message Player B if they have privileges)
 
 ### Message Encryption
-- All messages are encrypted end-to-end using AES-GCM encryption
-- Only the sender and recipient can decrypt messages
-- Messages are stored encrypted in Firebase
+- **Private messages** are encrypted end-to-end using AES-GCM encryption
+- Only the sender and recipient can decrypt private messages
+- Private messages are stored encrypted in Firebase
 - Encryption key is derived from both player names using PBKDF2
+- **All Chat messages** are **not encrypted** (plain text) since it's a public channel
 
 ### Read Status Encryption
 - Message read status (read/unread) is encrypted using AES-GCM encryption
@@ -166,6 +170,24 @@ If you see 401 errors in the browser console, it means the Firebase security rul
 - Clicking a replay link copies the replay code to clipboard
 - Useful for sharing board configurations with other players
 
+### All Chat (Public Channel)
+- **Public messaging channel** accessible to all players with chat enabled
+- Messages are **not encrypted** (plain text) since it's a public channel
+- All Chat panel includes a tab-based interface
+- Private conversations open as **tabs within the All Chat panel**
+- Each tab represents a conversation with a different player
+- "All Chat" tab is always available for public messages
+- Message filter applies to All Chat (can filter to VIP list only)
+- Blocked players' messages are automatically filtered out
+
+### Tab-Based Interface
+- Private chats open as **tabs** in the All Chat panel (not separate panels)
+- Each tab shows the player name and unread message count badge
+- Click a tab to switch between conversations
+- Close button (✕) on each tab to close that conversation
+- Tab positions and active tab are saved and restored on page refresh
+- All Chat tab cannot be closed (always available)
+
 ### Minimized Chats
 - Chat panels can be minimized to a sidebar
 - Minimized chats show player name and unread message count badge
@@ -175,7 +197,7 @@ If you see 401 errors in the browser console, it means the Firebase security rul
 - Sidebar automatically positions next to the main game content area
 
 ### Message Length Limit
-- Maximum message length: **500 characters**
+- Maximum message length: **1000 characters**
 - Character counter shows current length and limit
 - Messages exceeding the limit cannot be sent
 - Counter turns red when approaching/exceeding limit
@@ -202,22 +224,16 @@ The chat feature can be configured in Mod Settings:
 
 ## Message Delivery System
 
-### Event-Driven Updates (Primary)
-- Uses **EventSource** (Server-Sent Events) for real-time message delivery
-- Automatically receives new messages as they arrive
-- More efficient than polling (no constant requests)
-- Falls back to polling if EventSource fails
-
-### Polling (Fallback)
-- Used when EventSource is unavailable or fails
-- Checks for new messages every **5 seconds**
-- Automatically switches to polling when chat panels are open (for more frequent updates)
-- Switches back to event-driven when no panels are open (for efficiency)
+### Polling-Based Updates
+- Uses **polling** to check for new messages at regular intervals
+- Adaptive polling intervals based on panel state for efficiency
+- Automatically adjusts frequency based on user activity
 
 ### Update Frequency
-- **No panels open**: Event-driven (real-time via EventSource)
-- **Panels open**: Polling every 5 seconds (more frequent updates for active conversations)
+- **No panels open**: Polling every **30 seconds** (efficient background checking)
+- **Panels open**: Polling every **5 seconds** (more frequent updates for active conversations)
 - **Pending requests**: Checked every 1 second for accepted requests
+- All Chat messages are checked when the All Chat panel is open
 
 ## Security Features
 
@@ -256,11 +272,12 @@ The chat system implements multiple layers of security to protect user privacy:
 
 ### Privacy Benefits
 
-- **Reduced Username Exposure**: Usernames are hashed in database paths, making them less visible
-- **End-to-End Encryption**: Message content, usernames, and read status are all encrypted
-- **No Server-Side Decryption**: Firebase never sees plain text usernames, messages, or read status
+- **Reduced Username Exposure**: Usernames are hashed in database paths for private messages, making them less visible
+- **End-to-End Encryption**: Private message content, usernames, and read status are all encrypted
+- **No Server-Side Decryption**: Firebase never sees plain text usernames, private messages, or read status
 - **Deterministic Operations**: Same usernames produce same hashes/keys for consistency
 - **Separate Encryption Keys**: Different keys for messages, usernames, and read status provide additional security
+- **Note**: All Chat messages are public and not encrypted (plain text), as they are intended for community-wide communication
 
 ## Additional Notes
 
@@ -270,7 +287,9 @@ The chat system implements multiple layers of security to protect user privacy:
 - Unread message counts are displayed in badges on the VIP List menu item and minimized chats
 - Chat sidebar automatically repositions when window is resized
 - Conversation history persists and can be deleted via the delete button in chat panel header
-- All messages, usernames, and read status are encrypted end-to-end for privacy
+- **Private messages**, usernames, and read status are encrypted end-to-end for privacy
+- **All Chat messages** are plain text (not encrypted) since it's a public channel
 - Usernames are hashed in database paths for additional privacy protection
-- Separate encryption keys are used for messages, usernames, and read status
+- Separate encryption keys are used for private messages, usernames, and read status
+- Private conversations open as tabs in the All Chat panel for unified chat management
 
