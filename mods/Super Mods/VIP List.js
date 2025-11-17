@@ -107,7 +107,7 @@ const MESSAGING_CONFIG = {
   },
   firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app',
   checkInterval: 5000, // Polling interval for message checking
-  maxMessageLength: 500
+  maxMessageLength: 1000 // Increased to support long replay links
 };
 
 // Messaging API URL (computed dynamically)
@@ -165,6 +165,9 @@ let panelResizeMouseMoveHandler = null;
 let panelResizeMouseUpHandler = null;
 let panelDragMouseMoveHandler = null;
 let panelDragMouseUpHandler = null;
+let vipListPanelTitleRowMousedownHandler = null;
+let vipListPanelMousemoveHandler = null;
+let vipListPanelMousedownHandler = null;
 
 // Messaging state
 let messageCheckInterval = null; // Polling interval for message checking
@@ -488,6 +491,106 @@ function loadAllChatPanelPositions() {
     console.error('[VIP List] Error loading chat panel positions:', error);
     return {};
   }
+}
+
+// Make a panel draggable (shared function for all chat panels)
+function makePanelDraggable(panel, headerContainer, savePositionCallback) {
+  // Initialize drag state on panel object
+  panel._isDragging = false;
+  panel._dragOffsetX = 0;
+  panel._dragOffsetY = 0;
+  
+  // Remove old handlers if they exist (for reattachment)
+  if (panel._dragHandler) {
+    document.removeEventListener('mousemove', panel._dragHandler);
+  }
+  if (panel._dragUpHandler) {
+    document.removeEventListener('mouseup', panel._dragUpHandler);
+  }
+  if (panel._mousedownHandler) {
+    headerContainer.removeEventListener('mousedown', panel._mousedownHandler);
+  }
+  
+  // Mousedown handler
+  const mousedownHandler = function(e) {
+    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+    panel._isDragging = true;
+    const rect = panel.getBoundingClientRect();
+    panel._dragOffsetX = e.clientX - rect.left;
+    panel._dragOffsetY = e.clientY - rect.top;
+    // Ensure we're using left/top positioning for dragging
+    if (panel.style.right && !panel.style.left) {
+      panel.style.left = rect.left + 'px';
+      panel.style.right = 'auto';
+    }
+    panel.style.cursor = 'move';
+    e.preventDefault();
+  };
+  
+  // Mousemove handler
+  const panelDragMouseMoveHandler = function(e) {
+    if (!panel._isDragging) return;
+    const newLeft = e.clientX - panel._dragOffsetX;
+    const newTop = e.clientY - panel._dragOffsetY;
+    
+    const maxLeft = window.innerWidth - panel.offsetWidth;
+    const maxTop = window.innerHeight - panel.offsetHeight;
+    
+    const clampedLeft = clamp(newLeft, 0, maxLeft);
+    const clampedTop = clamp(newTop, 0, maxTop);
+    
+    panel.style.left = clampedLeft + 'px';
+    panel.style.top = clampedTop + 'px';
+    panel.style.right = 'auto';
+    panel.style.transition = 'none';
+    
+    // Save position during drag
+    if (savePositionCallback) {
+      savePositionCallback();
+    }
+  };
+  
+  // Mouseup handler
+  const panelDragMouseUpHandler = function() {
+    if (panel._isDragging) {
+      panel._isDragging = false;
+      panel.style.cursor = '';
+      panel.style.transition = '';
+      // Save position after drag ends
+      if (savePositionCallback) {
+        savePositionCallback();
+      }
+    }
+  };
+  
+  // Attach handlers
+  headerContainer.addEventListener('mousedown', mousedownHandler);
+  document.addEventListener('mousemove', panelDragMouseMoveHandler);
+  document.addEventListener('mouseup', panelDragMouseUpHandler);
+  
+  // Store handlers for cleanup
+  panel._dragHandler = panelDragMouseMoveHandler;
+  panel._dragUpHandler = panelDragMouseUpHandler;
+  panel._mousedownHandler = mousedownHandler;
+  panel._dragHandlersAttached = true;
+}
+
+// Remove drag handlers from a panel (for cleanup)
+function removePanelDragHandlers(panel, headerContainer) {
+  if (panel._dragHandler) {
+    document.removeEventListener('mousemove', panel._dragHandler);
+  }
+  // Handle both naming conventions for backward compatibility
+  if (panel._dragUpHandler) {
+    document.removeEventListener('mouseup', panel._dragUpHandler);
+  }
+  if (panel._upHandler) {
+    document.removeEventListener('mouseup', panel._upHandler);
+  }
+  if (panel._mousedownHandler && headerContainer) {
+    headerContainer.removeEventListener('mousedown', panel._mousedownHandler);
+  }
+  panel._dragHandlersAttached = false;
 }
 
 function formatBadgeCount(count) {
@@ -2216,21 +2319,16 @@ async function markMessageAsRead(messageId, fromPlayer = null) {
       }
     }
     
-    // Store read status using hashed path (same as messages)
-    // Try hashed path first, fallback to non-hashed for backward compatibility
-    let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}/${messageId}/read.json`, {
+    // Store read status using hashed path (always use hashed path for new writes to prevent unencrypted usernames)
+    // Only use hashed path - never write to plain username paths to maintain privacy
+    const response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}/${messageId}/read.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(encryptedReadStatus)
     });
     
-    // If hashed path fails with 404, try non-hashed path (backward compatibility)
-    if (!response.ok && response.status === 404) {
-      response = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}/${messageId}/read.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(encryptedReadStatus)
-      });
+    if (!response.ok && response.status !== 404) {
+      console.warn('[VIP List] Failed to store read status:', response.status, response.statusText);
     }
   } catch (error) {
     console.error('[VIP List] Error marking message as read:', error);
@@ -2357,6 +2455,38 @@ function formatAllChatDateTime(timestamp) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
+}
+
+// Format date for separator (shows "Today", "Yesterday", or date)
+function formatDateSeparator(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  if (messageDate.getTime() === today.getTime()) {
+    return 'Today';
+  } else if (messageDate.getTime() === yesterday.getTime()) {
+    return 'Yesterday';
+  } else {
+    // Format: Month Day, Year (e.g., "January 15, 2024")
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${monthNames[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  }
+}
+
+// Get date key for comparison (YYYY-MM-DD format)
+function getDateKey(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // Copy text to clipboard
@@ -3692,35 +3822,51 @@ async function createMinimizedChat(playerName, unreadCount = 0) {
   minimizedChat.appendChild(badge);
   minimizedChat.appendChild(closeBtn);
   
-  // Prevent text selection and dragging
-  minimizedChat.addEventListener('mousedown', (e) => {
+  // Store event handlers for cleanup (memory leak prevention)
+  const mousedownHandler = (e) => {
     e.preventDefault(); // Prevent text selection and default drag behavior
-  });
-  
-  minimizedChat.addEventListener('selectstart', (e) => {
+  };
+  const selectstartHandler = (e) => {
     e.preventDefault(); // Prevent text selection
-  });
-  
-  minimizedChat.addEventListener('dragstart', (e) => {
+  };
+  const dragstartHandler = (e) => {
     e.preventDefault(); // Prevent dragging
-  });
-  
-  // Click to open chat
-  minimizedChat.addEventListener('click', (e) => {
+  };
+  const clickHandler = (e) => {
     // Don't open if clicking the close button
     if (e.target === closeBtn || closeBtn.contains(e.target)) {
       return;
     }
     openChatPanel(playerName);
-  });
+  };
+  const mouseenterHandler = () => {
+    closeBtn.style.opacity = '1';
+  };
+  const mouseleaveHandler = () => {
+    closeBtn.style.opacity = '0';
+  };
+  
+  // Prevent text selection and dragging
+  minimizedChat.addEventListener('mousedown', mousedownHandler);
+  minimizedChat.addEventListener('selectstart', selectstartHandler);
+  minimizedChat.addEventListener('dragstart', dragstartHandler);
+  
+  // Click to open chat
+  minimizedChat.addEventListener('click', clickHandler);
   
   // Hover effect - show close button on hover (no scale animation to prevent scrollbars)
-  minimizedChat.addEventListener('mouseenter', () => {
-    closeBtn.style.opacity = '1';
-  });
-  minimizedChat.addEventListener('mouseleave', () => {
-    closeBtn.style.opacity = '0';
-  });
+  minimizedChat.addEventListener('mouseenter', mouseenterHandler);
+  minimizedChat.addEventListener('mouseleave', mouseleaveHandler);
+  
+  // Store handlers for cleanup
+  minimizedChat._eventHandlers = {
+    mousedown: mousedownHandler,
+    selectstart: selectstartHandler,
+    dragstart: dragstartHandler,
+    click: clickHandler,
+    mouseenter: mouseenterHandler,
+    mouseleave: mouseleaveHandler
+  };
   
   // Close button click handler
   closeBtn.addEventListener('click', (e) => {
@@ -3856,23 +4002,35 @@ async function createAllChatMinimizedChat(unreadCount = 0) {
   minimizedChat.appendChild(iconContainer);
   minimizedChat.appendChild(badge);
   
+  // Store event handlers for cleanup (memory leak prevention)
+  const mousedownHandler = (e) => {
+    e.preventDefault();
+  };
+  const selectstartHandler = (e) => {
+    e.preventDefault();
+  };
+  const dragstartHandler = (e) => {
+    e.preventDefault();
+  };
+  const clickHandler = () => {
+    openAllChatPanel();
+  };
+  
   // Prevent text selection and dragging
-  minimizedChat.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-  });
-  
-  minimizedChat.addEventListener('selectstart', (e) => {
-    e.preventDefault();
-  });
-  
-  minimizedChat.addEventListener('dragstart', (e) => {
-    e.preventDefault();
-  });
+  minimizedChat.addEventListener('mousedown', mousedownHandler);
+  minimizedChat.addEventListener('selectstart', selectstartHandler);
+  minimizedChat.addEventListener('dragstart', dragstartHandler);
   
   // Click to open All Chat
-  minimizedChat.addEventListener('click', () => {
-    openAllChatPanel();
-  });
+  minimizedChat.addEventListener('click', clickHandler);
+  
+  // Store handlers for cleanup
+  minimizedChat._eventHandlers = {
+    mousedown: mousedownHandler,
+    selectstart: selectstartHandler,
+    dragstart: dragstartHandler,
+    click: clickHandler
+  };
   
   // Always place All Chat at the top of the sidebar
   const firstChild = sidebar.firstChild;
@@ -3933,6 +4091,16 @@ function loadMinimizedChatsFromStorage() {
 function removeMinimizedChat(playerName) {
   const minimized = minimizedChats.get(playerName.toLowerCase());
   if (minimized) {
+    // Remove event listeners before removing element (memory leak prevention)
+    if (minimized._eventHandlers) {
+      minimized.removeEventListener('mousedown', minimized._eventHandlers.mousedown);
+      minimized.removeEventListener('selectstart', minimized._eventHandlers.selectstart);
+      minimized.removeEventListener('dragstart', minimized._eventHandlers.dragstart);
+      minimized.removeEventListener('click', minimized._eventHandlers.click);
+      minimized.removeEventListener('mouseenter', minimized._eventHandlers.mouseenter);
+      minimized.removeEventListener('mouseleave', minimized._eventHandlers.mouseleave);
+      minimized._eventHandlers = null;
+    }
     minimized.remove();
     minimizedChats.delete(playerName.toLowerCase());
     saveMinimizedChatsToStorage();
@@ -4740,53 +4908,9 @@ async function openChatPanel(toPlayer) {
   updateMessageCheckingMode();
   
   // Make panel draggable
-  let isDragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-  
-  headerContainer.addEventListener('mousedown', function(e) {
-    if (e.target.tagName === 'BUTTON') return;
-    isDragging = true;
-    const rect = panel.getBoundingClientRect();
-    dragOffsetX = e.clientX - rect.left;
-    dragOffsetY = e.clientY - rect.top;
-    panel.style.cursor = 'move';
-    e.preventDefault();
+  makePanelDraggable(panel, headerContainer, () => {
+    saveChatPanelPosition(toPlayer, panel);
   });
-  
-  const panelDragMouseMoveHandler = function(e) {
-    if (!isDragging) return;
-    const newLeft = e.clientX - dragOffsetX;
-    const newTop = e.clientY - dragOffsetY;
-    
-    const maxLeft = window.innerWidth - panel.offsetWidth;
-    const maxTop = window.innerHeight - panel.offsetHeight;
-    
-    const clampedLeft = clamp(newLeft, 0, maxLeft);
-    const clampedTop = clamp(newTop, 0, maxTop);
-    
-    // Always use left/top for positioning when dragging (more reliable than right)
-    panel.style.left = clampedLeft + 'px';
-    panel.style.top = clampedTop + 'px';
-    panel.style.right = 'auto'; // Clear right positioning
-    panel.style.transition = 'none';
-  };
-  document.addEventListener('mousemove', panelDragMouseMoveHandler);
-  
-  const panelDragMouseUpHandler = function() {
-    if (isDragging) {
-      isDragging = false;
-      panel.style.cursor = '';
-      panel.style.transition = '';
-      // Save panel position after dragging ends
-      saveChatPanelPosition(toPlayer, panel);
-    }
-  };
-  document.addEventListener('mouseup', panelDragMouseUpHandler);
-  
-  // Store handlers and interval directly on panel object (not dataset - dataset only stores strings)
-  panel._dragHandler = panelDragMouseMoveHandler;
-  panel._upHandler = panelDragMouseUpHandler;
   
   // Focus textarea
   const timeoutId = setTimeout(() => {
@@ -4916,8 +5040,59 @@ async function loadAllChatConversation(container, forceScrollToBottom = false) {
     return;
   }
   
-  // Process messages in parallel for better performance
-  const messagePromises = messages.map(async (msg) => {
+  // Process messages and add date separators
+  let lastDateKey = null;
+  const elementsToAppend = [];
+  
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const currentDateKey = getDateKey(msg.timestamp);
+    
+    // Add date separator if date changed
+    if (currentDateKey !== lastDateKey) {
+      const separator = document.createElement('div');
+      separator.style.cssText = `
+        display: flex;
+        align-items: center;
+        margin: 12px 0;
+        padding: 4px 0;
+      `;
+      
+      const line = document.createElement('div');
+      line.style.cssText = `
+        flex: 1;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.2);
+      `;
+      
+      const label = document.createElement('div');
+      label.style.cssText = `
+        padding: 0 12px;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 11px;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+      `;
+      label.textContent = formatDateSeparator(msg.timestamp);
+      
+      const line2 = document.createElement('div');
+      line2.style.cssText = `
+        flex: 1;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.2);
+      `;
+      
+      separator.appendChild(line);
+      separator.appendChild(label);
+      separator.appendChild(line2);
+      
+      elementsToAppend.push(separator);
+      lastDateKey = currentDateKey;
+    }
+    
+    // Create message element
     const messageDiv = document.createElement('div');
     const currentPlayer = getCurrentPlayerName();
     const isFromCurrentPlayer = msg.from && msg.from.toLowerCase() === currentPlayer?.toLowerCase();
@@ -4936,14 +5111,7 @@ async function loadAllChatConversation(container, forceScrollToBottom = false) {
     // Format: [Datetime] [Username]: [Message]
     const datetime = formatAllChatDateTime(msg.timestamp);
     const username = msg.from || 'Unknown';
-    let messageText = msg.text || '';
-    
-    // Check for replay links
-    const replayRegex = /\$replay\(\{.*?\}\)/g;
-    messageText = messageText.replace(replayRegex, (match) => {
-      const linkId = `replay-link-${Date.now()}-${Math.random()}`;
-      return `<a href="#" class="replay-link" data-replay="${encodeURIComponent(match)}" id="${linkId}" style="color: ${CSS_CONSTANTS.COLORS.LINK}; text-decoration: underline; cursor: pointer;">${match}</a>`;
-    });
+    const messageText = msg.text || '';
     
     // Create message structure with clickable player name
     const datetimeSpan = document.createElement('span');
@@ -4955,7 +5123,14 @@ async function loadAllChatConversation(container, forceScrollToBottom = false) {
     colonSpan.textContent = ': ';
     
     const messageSpan = document.createElement('span');
-    messageSpan.innerHTML = messageText;
+    
+    // Use embedReplayLinks to properly parse and embed replay links (same as normal chat)
+    const replayParts = embedReplayLinks(messageText);
+    if (replayParts) {
+      replayParts.forEach(part => messageSpan.appendChild(part));
+    } else {
+      messageSpan.textContent = messageText;
+    }
     
     messageDiv.appendChild(datetimeSpan);
     messageDiv.appendChild(nameButton);
@@ -4965,26 +5140,11 @@ async function loadAllChatConversation(container, forceScrollToBottom = false) {
     messageDiv.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
     messageDiv.style.whiteSpace = 'pre-wrap';
     
-    // Add click handlers for replay links
-    messageDiv.querySelectorAll('.replay-link').forEach(link => {
-      link.addEventListener('click', (e) => {
-        e.preventDefault();
-        const replayCode = decodeURIComponent(link.dataset.replay);
-        navigator.clipboard.writeText(replayCode).then(() => {
-          const originalText = link.textContent;
-          link.textContent = 'Copied!';
-          setTimeout(() => {
-            link.textContent = originalText;
-          }, 2000);
-        });
-      });
-    });
-    
-    return messageDiv;
-  });
+    elementsToAppend.push(messageDiv);
+  }
   
-  const messageDivs = await Promise.all(messagePromises);
-  messageDivs.forEach(messageDiv => container.appendChild(messageDiv));
+  // Append all elements (separators and messages) to container
+  elementsToAppend.forEach(element => container.appendChild(element));
   
   if (panel) panel._previousMessageCount = messages.length;
   
@@ -5020,6 +5180,15 @@ async function openAllChatPanel() {
     console.log('[VIP List] All Chat panel already exists, focusing...');
     existingPanel.style.zIndex = '10000';
     existingPanel.style.display = 'flex';
+    
+    // Re-attach drag handlers (they were removed when panel was minimized)
+    const headerContainer = existingPanel.querySelector('div:first-child');
+    if (headerContainer && !existingPanel._dragHandlersAttached) {
+      makePanelDraggable(existingPanel, headerContainer, () => {
+        saveChatPanelPosition('all-chat', existingPanel);
+      });
+    }
+    
     // Switch to polling if not already (panel is open)
     updateMessageCheckingMode();
     return;
@@ -5317,59 +5486,9 @@ async function openAllChatPanel() {
   updateMessageCheckingMode();
   
   // Make panel draggable (same as regular chat panels)
-  let isDragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-  
-  headerContainer.addEventListener('mousedown', function(e) {
-    if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-    isDragging = true;
-    const rect = panel.getBoundingClientRect();
-    dragOffsetX = e.clientX - rect.left;
-    dragOffsetY = e.clientY - rect.top;
-    // Ensure we're using left/top positioning for dragging
-    if (panel.style.right && !panel.style.left) {
-      panel.style.left = rect.left + 'px';
-      panel.style.right = 'auto';
-    }
-    panel.style.cursor = 'move';
-    e.preventDefault();
-  });
-  
-  const panelDragMouseMoveHandler = function(e) {
-    if (!isDragging) return;
-    const newLeft = e.clientX - dragOffsetX;
-    const newTop = e.clientY - dragOffsetY;
-    
-    const maxLeft = window.innerWidth - panel.offsetWidth;
-    const maxTop = window.innerHeight - panel.offsetHeight;
-    
-    const clampedLeft = clamp(newLeft, 0, maxLeft);
-    const clampedTop = clamp(newTop, 0, maxTop);
-    
-    panel.style.left = clampedLeft + 'px';
-    panel.style.top = clampedTop + 'px';
-    panel.style.right = 'auto';
-    panel.style.transition = 'none';
-    
-    // Save position
+  makePanelDraggable(panel, headerContainer, () => {
     saveChatPanelPosition('all-chat', panel);
-  };
-  document.addEventListener('mousemove', panelDragMouseMoveHandler);
-  
-  const panelDragMouseUpHandler = function() {
-    if (isDragging) {
-      isDragging = false;
-      panel.style.cursor = '';
-      panel.style.transition = '';
-      saveChatPanelPosition('all-chat', panel);
-    }
-  };
-  document.addEventListener('mouseup', panelDragMouseUpHandler);
-  
-  // Store handlers for cleanup
-  panel._dragHandler = panelDragMouseMoveHandler;
-  panel._dragUpHandler = panelDragMouseUpHandler;
+  });
   panel._lastTimestamp = null;
   
   // Make panel resizable (same as regular chat panels)
@@ -5386,11 +5505,15 @@ async function openAllChatPanel() {
   panel.appendChild(resizeHandle);
   
   let isResizing = false;
-  resizeHandle.addEventListener('mousedown', (e) => {
+  const resizeHandleMousedownHandler = (e) => {
     isResizing = true;
     e.preventDefault();
     e.stopPropagation();
-  });
+  };
+  resizeHandle.addEventListener('mousedown', resizeHandleMousedownHandler);
+  
+  // Store handler for cleanup
+  panel._resizeHandleMousedownHandler = resizeHandleMousedownHandler;
   
   const panelResizeMouseMoveHandler = (e) => {
     if (!isResizing) return;
@@ -5442,17 +5565,20 @@ async function minimizeAllChatPanel() {
     }
     
     // Remove event listeners
-    if (panel._dragHandler) {
-      document.removeEventListener('mousemove', panel._dragHandler);
-    }
-    if (panel._dragUpHandler) {
-      document.removeEventListener('mouseup', panel._dragUpHandler);
-    }
+    const headerContainer = panel.querySelector('div:first-child');
+    removePanelDragHandlers(panel, headerContainer);
+    
     if (panel._resizeHandler) {
       document.removeEventListener('mousemove', panel._resizeHandler);
     }
     if (panel._resizeUpHandler) {
       document.removeEventListener('mouseup', panel._resizeUpHandler);
+    }
+    // Remove resize handle mousedown handler
+    const resizeHandle = panel.querySelector('.chat-panel-resize-handle');
+    if (resizeHandle && panel._resizeHandleMousedownHandler) {
+      resizeHandle.removeEventListener('mousedown', panel._resizeHandleMousedownHandler);
+      panel._resizeHandleMousedownHandler = null;
     }
     
     // Hide panel
@@ -5488,12 +5614,8 @@ async function minimizeChatPanel(playerName) {
     stopPendingRequestCheck(playerName);
     
     // Remove event listeners (stored directly on panel object)
-    if (panel._dragHandler) {
-      document.removeEventListener('mousemove', panel._dragHandler);
-    }
-    if (panel._upHandler) {
-      document.removeEventListener('mouseup', panel._upHandler);
-    }
+    const headerContainer = panel.querySelector('div:first-child');
+    removePanelDragHandlers(panel, headerContainer);
     
     // Remove panel
     panel.remove();
@@ -7160,6 +7282,24 @@ function cleanupPanelEventListeners() {
     document.removeEventListener('mouseup', panelDragMouseUpHandler);
     panelDragMouseUpHandler = null;
   }
+  // Clean up VIP List panel event listeners (memory leak prevention)
+  if (vipListPanelInstance) {
+    if (vipListPanelTitleRowMousedownHandler) {
+      const titleRow = vipListPanelInstance.querySelector('.vip-list-panel-title-row');
+      if (titleRow) {
+        titleRow.removeEventListener('mousedown', vipListPanelTitleRowMousedownHandler);
+      }
+      vipListPanelTitleRowMousedownHandler = null;
+    }
+    if (vipListPanelMousemoveHandler) {
+      vipListPanelInstance.removeEventListener('mousemove', vipListPanelMousemoveHandler);
+      vipListPanelMousemoveHandler = null;
+    }
+    if (vipListPanelMousedownHandler) {
+      vipListPanelInstance.removeEventListener('mousedown', vipListPanelMousedownHandler);
+      vipListPanelMousedownHandler = null;
+    }
+  }
 }
 
 // Check if panel should be reopened after page refresh
@@ -7207,6 +7347,23 @@ function handlePanelCloseButtonClick(panel) {
   
   // Clear refresh interval
   cleanupAutoRefresh();
+  
+  // Remove panel-specific event listeners before removing panel (memory leak prevention)
+  if (vipListPanelTitleRowMousedownHandler) {
+    const titleRow = panel.querySelector('.vip-list-panel-title-row');
+    if (titleRow) {
+      titleRow.removeEventListener('mousedown', vipListPanelTitleRowMousedownHandler);
+    }
+    vipListPanelTitleRowMousedownHandler = null;
+  }
+  if (vipListPanelMousemoveHandler) {
+    panel.removeEventListener('mousemove', vipListPanelMousemoveHandler);
+    vipListPanelMousemoveHandler = null;
+  }
+  if (vipListPanelMousedownHandler) {
+    panel.removeEventListener('mousedown', vipListPanelMousedownHandler);
+    vipListPanelMousedownHandler = null;
+  }
   
   // Remove the panel
   panel.remove();
@@ -7355,7 +7512,7 @@ async function openVIPListPanel() {
     let dragOffsetX = 0;
     let dragOffsetY = 0;
     
-    titleRow.addEventListener('mousedown', function(e) {
+    vipListPanelTitleRowMousedownHandler = function(e) {
       if (e.target.tagName === 'BUTTON') return; // Don't drag if clicking a button
       isDragging = true;
       const rect = panel.getBoundingClientRect();
@@ -7363,7 +7520,8 @@ async function openVIPListPanel() {
       dragOffsetY = e.clientY - rect.top;
       panel.style.cursor = 'move';
       e.preventDefault();
-    });
+    };
+    titleRow.addEventListener('mousedown', vipListPanelTitleRowMousedownHandler);
     
     panelDragMouseMoveHandler = function(e) {
       if (!isDragging) return;
@@ -7417,7 +7575,7 @@ async function openVIPListPanel() {
       return dir;
     }
     
-    panel.addEventListener('mousemove', function(e) {
+    vipListPanelMousemoveHandler = function(e) {
       if (isResizing) return;
       const dir = getResizeDirection(e);
       let cursor = '';
@@ -7433,9 +7591,10 @@ async function openVIPListPanel() {
         default: cursor = '';
       }
       panel.style.cursor = cursor || '';
-    });
+    };
+    panel.addEventListener('mousemove', vipListPanelMousemoveHandler);
     
-    panel.addEventListener('mousedown', function(e) {
+    vipListPanelMousedownHandler = function(e) {
       if (e.target.tagName === 'BUTTON' || titleRow.contains(e.target)) return;
       const dir = getResizeDirection(e);
       if (!dir) return;
@@ -7450,7 +7609,8 @@ async function openVIPListPanel() {
       startTop = rect.top;
       document.body.style.userSelect = 'none';
       e.preventDefault();
-    });
+    };
+    panel.addEventListener('mousedown', vipListPanelMousedownHandler);
     
     panelResizeMouseMoveHandler = function(e) {
       if (!isResizing) return;
@@ -7735,12 +7895,31 @@ exports = {
       // 8. Clean up all open chat panels
       for (const [playerName, panel] of openChatPanels.entries()) {
         if (panel && panel.nodeType === 1) {
-          // Remove event listeners
+          // Remove event listeners (memory leak prevention)
           if (panel._dragHandler) {
             document.removeEventListener('mousemove', panel._dragHandler);
           }
           if (panel._upHandler) {
             document.removeEventListener('mouseup', panel._upHandler);
+          }
+          if (panel._dragUpHandler) {
+            document.removeEventListener('mouseup', panel._dragUpHandler);
+          }
+          if (panel._resizeHandler) {
+            document.removeEventListener('mousemove', panel._resizeHandler);
+          }
+          if (panel._resizeUpHandler) {
+            document.removeEventListener('mouseup', panel._resizeUpHandler);
+          }
+          // Remove resize handle handler if exists
+          const resizeHandle = panel.querySelector('.chat-panel-resize-handle');
+          if (resizeHandle && panel._resizeHandleMousedownHandler) {
+            resizeHandle.removeEventListener('mousedown', panel._resizeHandleMousedownHandler);
+          }
+          // Remove panel drag handlers
+          const headerContainer = panel.querySelector('div:first-child');
+          if (headerContainer && panel._mousedownHandler) {
+            headerContainer.removeEventListener('mousedown', panel._mousedownHandler);
           }
           // Remove panel
           panel.remove();
@@ -7751,6 +7930,20 @@ exports = {
       // 9. Clean up minimized chats
       for (const [playerName, minimized] of minimizedChats.entries()) {
         if (minimized && minimized.parentNode) {
+          // Remove event listeners before removing element (memory leak prevention)
+          if (minimized._eventHandlers) {
+            minimized.removeEventListener('mousedown', minimized._eventHandlers.mousedown);
+            minimized.removeEventListener('selectstart', minimized._eventHandlers.selectstart);
+            minimized.removeEventListener('dragstart', minimized._eventHandlers.dragstart);
+            minimized.removeEventListener('click', minimized._eventHandlers.click);
+            if (minimized._eventHandlers.mouseenter) {
+              minimized.removeEventListener('mouseenter', minimized._eventHandlers.mouseenter);
+            }
+            if (minimized._eventHandlers.mouseleave) {
+              minimized.removeEventListener('mouseleave', minimized._eventHandlers.mouseleave);
+            }
+            minimized._eventHandlers = null;
+          }
           minimized.remove();
         }
       }
@@ -7774,9 +7967,25 @@ exports = {
       // 11. Remove document event listeners
       cleanupPanelEventListeners();
       
-      // 12. Remove panel if it exists
+      // 12. Remove panel if it exists (clean up event listeners first)
       const panel = document.getElementById(PANEL_ID);
       if (panel) {
+        // Remove panel-specific event listeners before removing panel
+        if (vipListPanelTitleRowMousedownHandler) {
+          const titleRow = panel.querySelector('.vip-list-panel-title-row');
+          if (titleRow) {
+            titleRow.removeEventListener('mousedown', vipListPanelTitleRowMousedownHandler);
+          }
+          vipListPanelTitleRowMousedownHandler = null;
+        }
+        if (vipListPanelMousemoveHandler) {
+          panel.removeEventListener('mousemove', vipListPanelMousemoveHandler);
+          vipListPanelMousemoveHandler = null;
+        }
+        if (vipListPanelMousedownHandler) {
+          panel.removeEventListener('mousedown', vipListPanelMousedownHandler);
+          vipListPanelMousedownHandler = null;
+        }
         panel.remove();
       }
       
