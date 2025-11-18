@@ -1021,7 +1021,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const modCounts = {
           database: 5,
           official: 11,
-          super: 22
+          super: 23
         };
         
         sendResponse({ success: true, counts: modCounts });

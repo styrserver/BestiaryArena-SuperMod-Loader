@@ -131,7 +131,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 The extension comes with several powerful mods that demonstrate different features:
 
 === Super Mods ===
-These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
 
 ==== Autoscroller ====
 Automates summon scroll usage to collect specific creatures:
@@ -260,6 +260,14 @@ Automates dice rolling for stat rerolling:
 * Stops rolling when a desired stat value is reached
 * Displays roll count and status in a custom panel
 * Configurable target thresholds for optimal stat optimization
+
+==== Guilds ====
+Social guild system for creating and managing player communities:
+* Create, join, and manage guilds with role-based permissions (Leader, Officer, Member)
+* Encrypted guild chat with real-time messaging and system notifications
+* Member management with invite, kick, promote, and demote functionality
+* Guild browser to search and discover available guilds
+* Transfer leadership and edit guild information with comprehensive settings
 
 ==== Hunt Analyzer ====
 Advanced autoplay and loot tracking system:

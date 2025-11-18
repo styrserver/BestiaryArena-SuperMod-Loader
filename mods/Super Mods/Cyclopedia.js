@@ -1163,6 +1163,10 @@ function setCachedRankingsData(data) { cyclopediaState.setLeaderboardData('ranki
 function clearCharactersTabCache() { cyclopediaState.clearCache('all'); }
 function clearLeaderboardCache() { cyclopediaState.clearCache('leaderboardData'); }
 function clearSearchedUsername() { cyclopediaState.searchedUsername = null; }
+function truncatePlayerName(name) {
+  if (!name || typeof name !== 'string') return name || '';
+  return name.length > 8 ? name.substring(0, 8) + '...' : name;
+}
 
 // RunTracker integration functions
 // Helper function to resolve map ID to map name (same as RunTracker)
@@ -5284,6 +5288,74 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         return region.id ? (GAME_DATA.REGION_NAME_MAP[region.id.toLowerCase()] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
       }
 
+      // Helper function to create allRooms object from ROOM_NAMES
+      function createAllRoomsObject(ROOM_NAMES) {
+        const allRooms = {};
+        Object.keys(ROOM_NAMES).forEach(roomCode => {
+          allRooms[roomCode] = true;
+        });
+        return allRooms;
+      }
+
+      // Helper function to create completion count element
+      function createCompletionCountElement(count) {
+        const defeatCount = document.createElement('div');
+        const actualCount = count || 0;
+        defeatCount.style.cssText = `
+          font-size: 10px;
+          color: ${actualCount === 0 ? '#ff4444' : '#aaa'};
+          text-align: center;
+          width: 100%;
+          margin-top: 2px;
+        `;
+        const formattedCount = actualCount >= 1000 ? `${(actualCount / 1000).toFixed(1)}k` : actualCount;
+        defeatCount.textContent = `${formattedCount} completions`;
+        return defeatCount;
+      }
+
+      // Helper function to create map column (icon + name + completion count)
+      function createMapColumn(roomCode, roomName, completionCount) {
+        const mapColumn = document.createElement('div');
+        mapColumn.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+          width: 80px;
+          min-width: 80px;
+          max-width: 80px;
+        `;
+
+        const mapIcon = document.createElement('div');
+        mapIcon.style.cssText = `
+          width: 32px;
+          height: 32px;
+          border-radius: 4px;
+          overflow: hidden;
+        `;
+        const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
+        thumbnail.style.width = '100%';
+        thumbnail.style.height = '100%';
+        mapIcon.appendChild(thumbnail);
+
+        const mapName = document.createElement('div');
+        mapName.style.cssText = `
+          font-size: 12px;
+          font-weight: bold;
+          color: ${COLOR_CONSTANTS.PRIMARY};
+          text-align: center;
+          width: 100%;
+          word-wrap: break-word;
+        `;
+        mapName.textContent = roomName;
+
+        mapColumn.appendChild(mapIcon);
+        mapColumn.appendChild(mapName);
+        mapColumn.appendChild(createCompletionCountElement(completionCount));
+
+        return mapColumn;
+      }
+
       function displayUserCombinedLeaderboardsData(playerName, rooms, ROOM_NAMES, best, roomsHighscores, container) {
         function formatTime(ms) {
           if (!ms || isNaN(ms) || ms < 0) return '--:--.---';
@@ -5314,7 +5386,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           max-width: 100%;
         `;
 
-        const organizedRooms = organizeRoomsByRegion(rooms, ROOM_NAMES);
+        // Organize rooms by region (show all maps)
+        const organizedRooms = organizeRoomsByRegion(createAllRoomsObject(ROOM_NAMES), ROOM_NAMES);
 
         Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
           const regionHeader = DOMUtils.createTitle(`${regionName} (${regionRooms.length} maps)`, FONT_CONSTANTS.SIZES.SMALL);
@@ -5346,59 +5419,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             max-width: 100%;
           `;
 
-          // Column 1: Map Icon + Map Name (stacked vertically)
-          const mapColumn = document.createElement('div');
-          mapColumn.style.cssText = `
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            width: 80px;
-            min-width: 80px; /* Prevent shrinking */
-            max-width: 80px; /* Prevent expanding */
-          `;
-
-          // Map icon
-          const mapIcon = document.createElement('div');
-          mapIcon.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border-radius: 4px;
-            overflow: hidden;
-          `;
-          const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
-          thumbnail.style.width = '100%';
-          thumbnail.style.height = '100%';
-          mapIcon.appendChild(thumbnail);
-
-          const mapName = document.createElement('div');
-          mapName.style.cssText = `
-            font-size: 12px;
-            font-weight: bold;
-            color: ${COLOR_CONSTANTS.PRIMARY};
-            text-align: center;
-            width: 100%;
-            word-wrap: break-word;
-          `;
-          mapName.textContent = roomName;
-
-          mapColumn.appendChild(mapIcon);
-          mapColumn.appendChild(mapName);
-
-          // Add defeat count
-          if (yourRoom?.count) {
-            const defeatCount = document.createElement('div');
-            defeatCount.style.cssText = `
-              font-size: 10px;
-              color: #aaa;
-              text-align: center;
-              width: 100%;
-              margin-top: 2px;
-            `;
-            const formattedCount = yourRoom.count >= 1000 ? `${(yourRoom.count / 1000).toFixed(1)}k` : yourRoom.count;
-            defeatCount.textContent = `${formattedCount} completions`;
-            mapColumn.appendChild(defeatCount);
-          }
+          // Column 1: Map Icon + Map Name + Completion Count
+          const mapColumn = createMapColumn(roomCode, roomName, yourRoom?.count);
 
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `
@@ -5411,7 +5433,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
 
           const speedrunRow = document.createElement('div');
-          const isSpeedrunTop = yourRoom.ticks && best?.[roomCode]?.ticks && yourRoom.ticks === best[roomCode].ticks;
+          const isSpeedrunTop = yourRoom?.ticks && best?.[roomCode]?.ticks && yourRoom?.ticks === best[roomCode].ticks;
           speedrunRow.style.cssText = `
             display: grid;
             grid-template-columns: 120px 120px;
@@ -5425,7 +5447,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             max-width: 100%;
           `;
 
-          const yourTicks = yourRoom.ticks || 0;
+          const yourTicks = yourRoom?.ticks || 0;
           const topTicks = best?.[roomCode]?.ticks || 0;
           const topPlayer = best?.[roomCode]?.userName || 'Unknown';
 
@@ -5462,8 +5484,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           speedrunRow.appendChild(yourSpeedrun);
           speedrunRow.appendChild(topSpeedrun);
 
-          const yourRank = yourRoom.rank || 0;
-          const yourRankTicks = yourRoom.rankTicks;
+          const yourRank = yourRoom?.rank || 0;
+          const yourRankTicks = yourRoom?.rankTicks;
           const topRank = roomsHighscores?.rank?.[roomCode]?.rank || 0;
           const topRankTicks = roomsHighscores?.rank?.[roomCode]?.ticks;
           const topRankPlayer = roomsHighscores?.rank?.[roomCode]?.userName || 'Unknown';
@@ -5556,7 +5578,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           background: rgba(255, 224, 102, 0.1);
           border-radius: 8px;
         `;
-        header.textContent = `${playerName}'s ${category} Data`;
+        header.textContent = `${truncatePlayerName(playerName)}'s ${category} Data`;
         containerDiv.appendChild(header);
 
         const contentContainer = document.createElement('div');
@@ -5571,8 +5593,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const roomName = ROOM_NAMES[roomCode];
           const searchedRoom = searchedRooms[roomCode];
           const yourRoom = yourRooms[roomCode];
-
-          if (!searchedRoom) return; // Skip if searched player doesn't have this room
 
           const roomEntry = document.createElement('div');
           roomEntry.style.cssText = `
@@ -5623,7 +5643,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
             const searchedData = document.createElement('div');
             searchedData.innerHTML = `
-              <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</div>
+              <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
               <div>${searchedTicks} ticks</div>
             `;
 
@@ -5637,7 +5657,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             bestData.innerHTML = `
               <div style="color: #ff8; font-weight: bold;">Best:</div>
               <div>${bestTicks} ticks</div>
-              <div style="font-size: 10px; color: #888;">by ${bestPlayer}</div>
+              <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(bestPlayer)}</div>
             `;
 
             dataRow.appendChild(searchedData);
@@ -5665,7 +5685,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
             const searchedData = document.createElement('div');
             searchedData.innerHTML = `
-              <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</div>
+              <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
               <div>${searchedRank}${searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)'}</div>
             `;
 
@@ -5679,7 +5699,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             topData.innerHTML = `
               <div style="color: #ff8; font-weight: bold;">Top:</div>
               <div>${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</div>
-              <div style="font-size: 10px; color: #888;">by ${topPlayer}</div>
+              <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(topPlayer)}</div>
             `;
 
             dataRow.appendChild(searchedData);
@@ -5788,8 +5808,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           max-width: 100%;
         `;
 
-        // Organize rooms by region
-        const organizedRooms = organizeRoomsByRegion(ROOM_NAMES, ROOM_NAMES);
+        // Organize rooms by region (show all maps)
+        const organizedRooms = organizeRoomsByRegion(createAllRoomsObject(ROOM_NAMES), ROOM_NAMES);
 
         // Create room entries organized by region
         Object.entries(organizedRooms).forEach(([regionName, regionRooms]) => {
@@ -5828,57 +5848,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               max-width: 100%;
             `;
 
-          const mapColumn = document.createElement('div');
-          mapColumn.style.cssText = `
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            width: 80px;
-            min-width: 80px;
-            max-width: 80px;
-          `;
-
-          const mapIcon = document.createElement('div');
-          mapIcon.style.cssText = `
-            width: 32px;
-            height: 32px;
-            border-radius: 4px;
-            overflow: hidden;
-          `;
-          const thumbnail = RoomThumbnailCache.createThumbnail(roomCode, roomName, 32);
-          thumbnail.style.width = '100%';
-          thumbnail.style.height = '100%';
-          mapIcon.appendChild(thumbnail);
-
-          const mapName = document.createElement('div');
-          mapName.style.cssText = `
-            font-size: 12px;
-            font-weight: bold;
-            color: ${COLOR_CONSTANTS.PRIMARY};
-            text-align: center;
-            width: 100%;
-            word-wrap: break-word;
-          `;
-          mapName.textContent = roomName;
-
-          mapColumn.appendChild(mapIcon);
-          mapColumn.appendChild(mapName);
-
-          // Add defeat count for searched player
-          if (searchedRoom?.count) {
-            const defeatCount = document.createElement('div');
-            defeatCount.style.cssText = `
-              font-size: 10px;
-              color: #aaa;
-              text-align: center;
-              width: 100%;
-              margin-top: 2px;
-            `;
-            const formattedCount = searchedRoom.count >= 1000 ? `${(searchedRoom.count / 1000).toFixed(1)}k` : searchedRoom.count;
-            defeatCount.textContent = `${formattedCount} completions`;
-            mapColumn.appendChild(defeatCount);
-          }
+          const mapColumn = createMapColumn(roomCode, roomName, searchedRoom?.count);
 
           const dataColumn = document.createElement('div');
           dataColumn.style.cssText = `
@@ -5919,7 +5889,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-weight: ${isSpeedrunTop ? 'bold' : 'normal'};
           `;
           searchedSpeedrun.innerHTML = `
-            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</span>
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
             <span>${searchedTicks !== null && searchedTicks >= 0 ? searchedTicks + ' ticks' : '-'}</span>
           `;
 
@@ -5976,7 +5946,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             font-weight: ${isRankTop ? 'bold' : 'normal'};
           `;
           searchedRankData.innerHTML = `
-            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${playerName}:</span>
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
             <span>${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
@@ -6427,7 +6397,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
                       <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                       <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
-                      <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${searchTerm}</div>
+                      <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${truncatePlayerName(searchTerm)}</div>
                       <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
                     </div>
                   `;
@@ -6455,7 +6425,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
                         <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                         <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
-                        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${searchTerm}</div>
+                        <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${truncatePlayerName(searchTerm)}</div>
                         <div style="font-size: 12px; color: #666;">Please try again later.</div>
                       </div>
                     `;
@@ -6819,7 +6789,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.TEXT}; text-align: center; padding: 20px;">
                           <div style="font-size: 24px; margin-bottom: 16px;">📊</div>
                           <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Loading Leaderboards...</div>
-                          <div style="font-size: 14px; color: #888;">Preparing ${cyclopediaState.searchedUsername}'s data</div>
+                          <div style="font-size: 14px; color: #888;">Preparing ${truncatePlayerName(cyclopediaState.searchedUsername)}'s data</div>
                         </div>
                       `;
                       
@@ -6893,7 +6863,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
                               <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                               <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Player doesn't exist</div>
-                              <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${cyclopediaState.searchedUsername}</div>
+                              <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not find player: ${truncatePlayerName(cyclopediaState.searchedUsername)}</div>
                               <div style="font-size: 12px; color: #666;">Please check the spelling and try again.</div>
                             </div>
                           `;
@@ -6904,7 +6874,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: ${COLOR_CONSTANTS.ERROR}; text-align: center; padding: 20px;">
                             <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                             <div style="font-size: 18px; margin-bottom: 8px; font-weight: bold;">Search Error</div>
-                            <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${cyclopediaState.searchedUsername}</div>
+                            <div style="font-size: 14px; margin-bottom: 16px; color: #888;">Could not search for: ${truncatePlayerName(cyclopediaState.searchedUsername)}</div>
                             <div style="font-size: 12px; color: #666;">Please try again later.</div>
                           </div>
                         `;
@@ -12597,4 +12567,5 @@ if (typeof window !== 'undefined') {
 if (typeof context !== 'undefined' && context.api) {
   exports.init();
 }
+
 

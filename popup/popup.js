@@ -623,6 +623,7 @@ function renderLocalMods(mods) {
     'Board Advisor.js',
     'Cyclopedia.js',
     'Dice_Roller.js',
+    'Guilds.js',
     'Hunt Analyzer.js',
     'Mod Settings.js',
     'Outfiter.js',

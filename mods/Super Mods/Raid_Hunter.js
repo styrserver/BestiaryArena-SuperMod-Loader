@@ -338,10 +338,67 @@ function cancelCurrentRaid(reason = 'unknown') {
     console.log(`[Raid Hunter] Cancelling raid: ${reason}`);
     isCurrentlyRaiding = false;
     currentRaidInfo = null;
+    performRaidCleanup();
+}
+
+// Helper function to perform standard raid cleanup (quest button, monitoring stops)
+function performRaidCleanup() {
     restoreQuestButtonAppearance();
     stopAutoplayStateMonitoring();
     stopQuestButtonValidation();
     stopStaminaTooltipMonitoring();
+}
+
+// Helper function to disable Bestiary Automator settings if not blocked by Better Tasker
+function disableBestiaryAutomatorSettingsIfSafe() {
+    // Check if Better Tasker is active before disabling Bestiary Automator settings
+    if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
+        console.log('[Raid Hunter] Better Tasker is active - skipping Bestiary Automator settings reset to avoid conflicts');
+        return;
+    }
+    
+    // Disable Bestiary Automator's autorefill stamina when raid ends
+    const settings = loadSettings();
+    if (settings.autoRefillStamina) {
+        console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
+        disableBestiaryAutomatorStaminaRefill();
+    }
+    if (settings.fasterAutoplay) {
+        console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
+        disableBestiaryAutomatorFasterAutoplay();
+    }
+}
+
+// Helper function to sort raid queue by priority and expiration time
+function sortRaidQueue() {
+    raidQueue.sort((a, b) => {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+        // If priorities are equal, sort by time remaining (earliest expiring first)
+        return a.expiresAt - b.expiresAt;
+    });
+}
+
+// Helper function to validate raid exists in game state
+function validateRaidExists(raid) {
+    try {
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        const currentRaidList = raidState?.context?.list || [];
+        return currentRaidList.some(r => r.roomId === raid.roomId);
+    } catch (error) {
+        console.error('[Raid Hunter] Error validating raid existence:', error);
+        return false; // Fail-safe: return false on error
+    }
+}
+
+// Helper function to skip invalid raid and retry next one
+function skipInvalidRaidAndRetry(reason, allowInterrupt = false) {
+    raidQueue.shift();
+    if (raidQueue.length > 0) {
+        console.log(`[Raid Hunter] ${reason} - trying next raid in queue`);
+        setTimeout(() => processNextRaid(allowInterrupt), 500);
+    }
 }
 
 // Static raid list (dynamic events are detected automatically from active raids not in this list)
@@ -1654,7 +1711,7 @@ function updateRaidState() {
     }
 }
 
-// Update raid queue with available raids
+// Update raid queue with available raids (robust implementation with better state tracking)
 function updateRaidQueue() {
     try {
         const settings = loadSettings();
@@ -1662,70 +1719,106 @@ function updateRaidQueue() {
         
         console.log(`[Raid Hunter] updateRaidQueue() - enabledMaps.length: ${enabledMaps.length}`);
         
-        // Clear existing queue
-        raidQueue = [];
-        
-        // If no maps are enabled, show a helpful message and don't process raids
+        // If no maps are enabled, show a helpful message and clear queue
         if (enabledMaps.length === 0) {
-            console.log('[Raid Hunter] No raid maps enabled in settings - please configure which raids to auto-raid');
+            console.log('[Raid Hunter] No raid maps enabled in settings - clearing queue');
+            raidQueue = [];
             return;
         }
         
         // Get current raid state to check for available raids via API
-        const raidState = globalThis.state.raids.getSnapshot();
+        const raidState = globalThis.state?.raids?.getSnapshot?.();
+        if (!raidState) {
+            console.log('[Raid Hunter] Raid state not available - skipping queue update');
+            return;
+        }
+        
         const currentRaidList = raidState.context.list || [];
         
         console.log(`[Raid Hunter] updateRaidQueue() - currentRaidList.length: ${currentRaidList.length}`);
-        console.log('[Raid Hunter] updateRaidQueue() - currentRaidList:', currentRaidList);
+        if (currentRaidList.length > 0) {
+            console.log('[Raid Hunter] updateRaidQueue() - currentRaidList:', currentRaidList.map(r => ({
+                roomId: r.roomId,
+                name: getEventNameForRoomId(r.roomId),
+                expiresAt: r.expiresAt
+            })));
+        }
+        
+        // Store current queue state for comparison (preserve raids that are being processed)
+        const previousQueue = [...raidQueue];
+        
+        // Clear existing queue (will rebuild)
+        raidQueue = [];
         
         if (currentRaidList.length > 0) {
             // Add available raids to queue using API data with priority
             currentRaidList.forEach(raid => {
                 const raidName = getEventNameForRoomId(raid.roomId);
-                console.log(`[Raid Hunter] Checking raid: ${raidName} (roomId: ${raid.roomId})`);
-                console.log(`[Raid Hunter] Is ${raidName} in enabledMaps? ${enabledMaps.includes(raidName)}`);
                 
-                // Include current raid in queue for priority comparison
-                if (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId) {
-                    console.log(`[Raid Hunter] Including current raid ${raidName} in queue for priority comparison`);
-                    // Continue to add it to queue instead of skipping
+                // Skip if raid name is invalid
+                if (!raidName || raidName.startsWith('Unknown')) {
+                    console.log(`[Raid Hunter] Skipped invalid raid: ${raid.roomId}`);
+                    return;
                 }
                 
-                if (enabledMaps.includes(raidName)) {
-                    const priority = getRaidPriority(raidName);
-                    raidQueue.push({
-                        name: raidName,
-                        roomId: raid.roomId,
-                        button: null, // No UI button needed for API access
-                        priority: priority,
-                        isCurrentRaid: (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId),
-                        expiresAt: raid.expiresAt || Infinity // Add expiration time for tie-breaking
-                    });
-                    // Only log if we're not already raiding this specific raid
-                    if (!isCurrentlyRaiding || currentRaidInfo?.roomId !== raid.roomId) {
-                        const priorityLabel = getPriorityLabel(priority);
-                        console.log(`[Raid Hunter] Added ${raidName} to queue via API (Priority: ${priorityLabel})`);
-                    }
-                } else {
+                // Only add if enabled in settings
+                if (!enabledMaps.includes(raidName)) {
                     console.log(`[Raid Hunter] Skipped ${raidName} - not in enabled maps`);
+                    return;
                 }
+                
+                // CRITICAL: Exclude current raid from queue if we're actively raiding it
+                // This prevents the same raid from being processed twice
+                if (isCurrentlyRaiding && currentRaidInfo && currentRaidInfo.roomId === raid.roomId) {
+                    console.log(`[Raid Hunter] Excluding current raid ${raidName} from queue (already processing)`);
+                    return; // Don't add current raid to queue
+                }
+                
+                // Check if raid has expired (additional safety check)
+                if (raid.expiresAt && raid.expiresAt < Date.now()) {
+                    console.log(`[Raid Hunter] Skipped expired raid: ${raidName}`);
+                    return;
+                }
+                
+                const priority = getRaidPriority(raidName);
+                raidQueue.push({
+                    name: raidName,
+                    roomId: raid.roomId,
+                    button: null, // No UI button needed for API access
+                    priority: priority,
+                    isCurrentRaid: false, // Never true since we exclude current raid above
+                    expiresAt: raid.expiresAt || Infinity // Add expiration time for tie-breaking
+                });
+                
+                const priorityLabel = getPriorityLabel(priority);
+                console.log(`[Raid Hunter] Added ${raidName} to queue via API (Priority: ${priorityLabel})`);
             });
             
             // Sort queue by priority (lower number = higher priority), then by expiration time (least time left first)
-            raidQueue.sort((a, b) => {
-                if (a.priority !== b.priority) {
-                    return a.priority - b.priority;
-                }
-                // If priorities are equal, sort by time remaining (earliest expiring first)
-                return a.expiresAt - b.expiresAt;
-            });
+            sortRaidQueue();
+            
+            // Log queue changes for debugging
+            if (previousQueue.length !== raidQueue.length) {
+                console.log(`[Raid Hunter] Queue size changed: ${previousQueue.length} -> ${raidQueue.length}`);
+            }
         } else {
             console.log('[Raid Hunter] No raids available in currentRaidList');
         }
         
         console.log(`[Raid Hunter] Raid queue updated: ${raidQueue.length} raids available`);
+        if (raidQueue.length > 0) {
+            console.log('[Raid Hunter] Queue contents:', raidQueue.map(r => `${r.name} (${getPriorityLabel(r.priority)})`).join(', '));
+        }
     } catch (error) {
         console.error('[Raid Hunter] Error updating raid queue:', error);
+        // On error, restore previous queue if we're currently raiding to prevent losing queue state
+        if (isCurrentlyRaiding && currentRaidInfo && previousQueue && previousQueue.length > 0) {
+            console.log('[Raid Hunter] Error during queue update - restoring previous queue');
+            raidQueue = [...previousQueue]; // Restore previous queue state
+        } else if (raidQueue.length === 0) {
+            // If queue is empty after error and we're not raiding, that's fine - queue will be rebuilt next time
+            console.log('[Raid Hunter] Queue empty after error - will be rebuilt on next update');
+        }
     }
 }
 
@@ -1744,14 +1837,19 @@ function closeOpenModals() {
     }
 }
 
-// Process next raid in queue
+// Process next raid in queue (robust implementation inspired by Bestiary Automator)
 function processNextRaid(allowInterrupt = false) {
+    // CRITICAL: Refresh queue state before processing (like Bestiary Automator does)
+    updateRaidState();
+    
     if (raidQueue.length === 0) {
+        console.log('[Raid Hunter] Queue is empty - nothing to process');
         return;
     }
     
     // If currently raiding and not allowing interrupt, don't process
     if (isCurrentlyRaiding && !allowInterrupt) {
+        console.log('[Raid Hunter] Already raiding and interrupt not allowed');
         return;
     }
     
@@ -1768,16 +1866,19 @@ function processNextRaid(allowInterrupt = false) {
     }
     
     // Sort queue by priority before processing (ensure correct order), then by expiration time
-    raidQueue.sort((a, b) => {
-        if (a.priority !== b.priority) {
-            return a.priority - b.priority;
-        }
-        return a.expiresAt - b.expiresAt;
-    });
+    sortRaidQueue();
     
     // Peek at next raid (don't remove yet)
     const nextRaid = raidQueue[0];
     if (!nextRaid) {
+        console.log('[Raid Hunter] No valid raid found in queue after sorting');
+        return;
+    }
+    
+    // CRITICAL: Verify raid still exists in game state before processing (like Bestiary Automator)
+    if (!validateRaidExists(nextRaid)) {
+        console.log(`[Raid Hunter] Raid ${nextRaid.name} no longer exists in game state - removing from queue and trying next`);
+        skipInvalidRaidAndRetry('Raid no longer exists', allowInterrupt);
         return;
     }
     
@@ -1796,19 +1897,28 @@ function processNextRaid(allowInterrupt = false) {
         return;
     }
     
-    // Now remove from queue since we're processing it
-    raidQueue.shift();
-    
-    // Double-check that this raid is still enabled (safety check)
+    // Double-check that this raid is still enabled (safety check before removing from queue)
     const settings = loadSettings();
     const enabledMaps = settings.enabledRaidMaps || [];
     if (!enabledMaps.includes(nextRaid.name)) {
-        console.log(`[Raid Hunter] Safety check failed - ${nextRaid.name} is no longer enabled, skipping`);
+        console.log(`[Raid Hunter] Safety check failed - ${nextRaid.name} is no longer enabled, removing from queue`);
+        skipInvalidRaidAndRetry('Raid no longer enabled', allowInterrupt);
         return;
     }
     
+    // Now remove from queue since we're processing it (only after all validation passes)
+    raidQueue.shift();
+    
     const priorityLabel = getPriorityLabel(nextRaid.priority);
-    console.log(`[Raid Hunter] Starting next raid: ${nextRaid.name} (Priority: ${priorityLabel})`);
+    console.log(`[Raid Hunter] ═══════════════════════════════════════════════════════════`);
+    console.log(`[Raid Hunter] Starting next raid from queue`);
+    console.log(`[Raid Hunter]   - Raid Name: ${nextRaid.name}`);
+    console.log(`[Raid Hunter]   - Room ID: ${nextRaid.roomId}`);
+    console.log(`[Raid Hunter]   - Priority: ${priorityLabel}`);
+    console.log(`[Raid Hunter]   - Remaining in queue: ${raidQueue.length}`);
+    console.log(`[Raid Hunter] ═══════════════════════════════════════════════════════════`);
+    
+    // Set state BEFORE starting raid processing (important for queue management)
     currentRaidInfo = nextRaid;
     isCurrentlyRaiding = true;
     raidRetryCount = 0; // Reset retry count for new raid
@@ -1818,16 +1928,54 @@ function processNextRaid(allowInterrupt = false) {
     
     // Close any open modals first, then start the raid
     closeOpenModals().then(() => {
-        // Double-check automation is still enabled before proceeding
-        if (isAutomationEnabled === AUTOMATION_DISABLED) {
-            console.log('[Raid Hunter] Automation disabled');
+        // Triple-check automation is still enabled before proceeding (robust validation)
+        if (!isAutomationActive()) {
+            console.log('[Raid Hunter] Automation disabled during modal close');
             isCurrentlyRaiding = false;
             currentRaidInfo = null;
-            restoreQuestButtonAppearance();
-            stopQuestButtonValidation();
+            performRaidCleanup();
+            
+            // If automation was disabled, try to process remaining queue if automation is re-enabled
+            // This allows queue to be preserved if user quickly re-enables
+            setTimeout(() => {
+                if (isAutomationActive() && raidQueue.length > 0) {
+                    console.log('[Raid Hunter] Automation re-enabled - retrying queue processing');
+                    processNextRaid();
+                }
+            }, 1000);
             return;
         }
+        
+        // Final validation: ensure raid still exists before starting
+        if (!validateRaidExists(nextRaid)) {
+            console.log(`[Raid Hunter] Raid ${nextRaid.name} expired during processing - checking for next raid`);
+            isCurrentlyRaiding = false;
+            currentRaidInfo = null;
+            
+            // Try next raid in queue if available
+            if (raidQueue.length > 0) {
+                setTimeout(() => processNextRaid(allowInterrupt), 500);
+            } else {
+                // No more raids - check for new ones
+                updateRaidState();
+                if (raidQueue.length > 0) {
+                    setTimeout(() => processNextRaid(allowInterrupt), 500);
+                }
+            }
+            return;
+        }
+        
         handleEventOrRaid(nextRaid.roomId);
+    }).catch(error => {
+        console.error('[Raid Hunter] Error in processNextRaid modal handling:', error);
+        // Reset state on error
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        
+        // Retry processing next raid if available
+        if (raidQueue.length > 0) {
+            setTimeout(() => processNextRaid(allowInterrupt), 2000);
+        }
     });
 }
 
@@ -2754,90 +2902,100 @@ function stopAutoplayOnRaidEnd() {
     try {
         console.log('[Raid Hunter] Raid ended - checking for more raids in queue');
         
-        // Update raid state to refresh queue before checking
+        // CRITICAL: Reset state FIRST to ensure queue rebuild excludes current raid
+        isCurrentlyRaiding = false;
+        currentRaidInfo = null;
+        
+        // Update raid state to refresh queue after state reset (queue will be rebuilt without current raid)
         updateRaidState();
         
-        // Check if there are more raids in the queue
-        if (raidQueue.length > 0) {
-            console.log(`[Raid Hunter] Found ${raidQueue.length} raid(s) in queue - navigating to next raid instead of reloading`);
+        // CRITICAL: Double-check queue after a brief delay to ensure state is stable (like Bestiary Automator)
+        setTimeout(() => {
+            // Refresh queue one more time to ensure it's up-to-date
+            updateRaidState();
             
-            // Reset current raid state (but preserve queue)
-            isCurrentlyRaiding = false;
-            currentRaidInfo = null;
-            raidRetryCount = 0;
-            lastRaidTime = 0;
-            
-            // Restore quest button appearance
-            restoreQuestButtonAppearance();
-            
-            // Stop quest button validation monitoring
-            stopAutoplayStateMonitoring();
-            stopQuestButtonValidation();
-            
-            // Stop stamina tooltip monitoring
-            stopStaminaTooltipMonitoring();
-            
-            // Stop raid end checking
-            stopRaidEndChecking();
-            
-            // Check if Better Tasker is active before disabling Bestiary Automator settings
-            if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
-                console.log('[Raid Hunter] Better Tasker is active - skipping Bestiary Automator settings reset to avoid conflicts');
+            // Check if there are more raids in the queue
+            if (raidQueue.length > 0) {
+                console.log(`[Raid Hunter] Found ${raidQueue.length} raid(s) in queue after state refresh - navigating to next raid instead of reloading`);
+                
+                // Reset remaining state
+                raidRetryCount = 0;
+                lastRaidTime = 0;
+                
+                // Restore quest button appearance
+                restoreQuestButtonAppearance();
+                
+                // Stop quest button validation monitoring
+                stopAutoplayStateMonitoring();
+                stopQuestButtonValidation();
+                
+                // Stop stamina tooltip monitoring
+                stopStaminaTooltipMonitoring();
+                
+                // Stop raid end checking
+                stopRaidEndChecking();
+                
+                // Disable Bestiary Automator settings if safe to do so
+                disableBestiaryAutomatorSettingsIfSafe();
+                
+                // Navigate to next raid after cleanup delay (reduced from 2000ms for faster processing)
+                setTimeout(() => {
+                    // Triple-check automation and queue before processing (robust validation like Bestiary Automator)
+                    if (!isAutomationActive()) {
+                        console.log('[Raid Hunter] Automation disabled during queue processing');
+                        return;
+                    }
+                    
+                    // Refresh queue one final time before processing
+                    updateRaidState();
+                    
+                    if (raidQueue.length > 0) {
+                        console.log(`[Raid Hunter] Processing next raid from queue (${raidQueue.length} available)`);
+                        processNextRaid();
+                    } else {
+                        console.log('[Raid Hunter] Queue became empty during processing - no more raids to process');
+                        // Fall through to reload logic below
+                        handleNoMoreRaids();
+                    }
+                }, 1000); // Reduced delay for faster queue processing
+                
+                return; // Exit early - don't reload
             } else {
-                // Disable Bestiary Automator's autorefill stamina when raid ends
-                const settings = loadSettings();
-                if (settings.autoRefillStamina) {
-                    console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
-                    disableBestiaryAutomatorStaminaRefill();
-                }
-                if (settings.fasterAutoplay) {
-                    console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
-                    disableBestiaryAutomatorFasterAutoplay();
-                }
+                // Queue is empty - proceed with normal cleanup
+                console.log('[Raid Hunter] No raids in queue after state refresh - proceeding with cleanup');
+                handleNoMoreRaids();
             }
-            
-            // Navigate to next raid after cleanup delay
-            setTimeout(() => {
-                if (isAutomationActive() && raidQueue.length > 0) {
-                    console.log('[Raid Hunter] Processing next raid from queue');
-                    processNextRaid();
-                }
-            }, 2000); // 2 second delay to allow cleanup
-            
-            return; // Exit early - don't reload
-        }
+        }, 300); // Brief delay to ensure game state is stable
         
-        // No more raids in queue - proceed with normal cleanup and reload
+        // Early return to prevent immediate reload - actual handling happens in setTimeout above
+        return;
+        
+    } catch (error) {
+        console.error('[Raid Hunter] Error stopping autoplay on raid end:', error);
+        // Fallback: try to continue with next raid on error
+        setTimeout(() => {
+            updateRaidState();
+            if (raidQueue.length > 0 && isAutomationActive()) {
+                console.log('[Raid Hunter] Error recovery: Attempting to process next raid');
+                processNextRaid();
+            }
+        }, 1000);
+    }
+}
+
+// Helper function to handle cleanup when no more raids are available
+function handleNoMoreRaids() {
+    try {
         console.log('[Raid Hunter] No more raids in queue - reloading page');
         
         // Reset raid state
         resetState('raid');
         
-        // Restore quest button appearance
-        restoreQuestButtonAppearance();
+        // Perform standard raid cleanup
+        performRaidCleanup();
         
-        // Stop quest button validation monitoring
-        stopAutoplayStateMonitoring();
-        stopQuestButtonValidation();
-        
-        // Stop stamina tooltip monitoring
-        stopStaminaTooltipMonitoring();
-        
-        // Check if Better Tasker is active before disabling Bestiary Automator settings
-        if (window.betterTaskerState && window.betterTaskerState.isTaskerEnabled) {
-            console.log('[Raid Hunter] Better Tasker is active - skipping Bestiary Automator settings reset to avoid conflicts');
-        } else {
-            // Disable Bestiary Automator's autorefill stamina when raid ends
-            const settings = loadSettings();
-            if (settings.autoRefillStamina) {
-                console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator autorefill stamina...');
-                disableBestiaryAutomatorStaminaRefill();
-            }
-            if (settings.fasterAutoplay) {
-                console.log('[Raid Hunter] Raid ended - disabling Bestiary Automator faster autoplay...');
-                disableBestiaryAutomatorFasterAutoplay();
-            }
-        }
+        // Disable Bestiary Automator settings if safe to do so
+        disableBestiaryAutomatorSettingsIfSafe();
         
         // Reload page after cleanup to reset cache, DOM, and check for more raids
         setTimeout(() => {
@@ -2849,11 +3007,11 @@ function stopAutoplayOnRaidEnd() {
             }
             location.reload();
         }, 2000); // 2 second delay to allow cleanup
-        
     } catch (error) {
-        console.error('[Raid Hunter] Error stopping autoplay on raid end:', error);
+        console.error('[Raid Hunter] Error handling no more raids:', error);
     }
 }
+        
 
 
 // Monitors raid list changes to detect when raids end
@@ -2902,12 +3060,7 @@ function setupRaidListMonitoring() {
                             if (isCurrentlyRaiding && currentRaidInfo) {
                                 // Get highest priority from updated queue
                                 if (raidQueue.length > 0) {
-                                    raidQueue.sort((a, b) => {
-                                        if (a.priority !== b.priority) {
-                                            return a.priority - b.priority;
-                                        }
-                                        return a.expiresAt - b.expiresAt;
-                                    });
+                                    sortRaidQueue();
                                     const nextRaid = raidQueue[0];
                                     
                                     // Only interrupt if new raid has HIGHER priority than current raid, or same priority but expires sooner
@@ -3006,12 +3159,7 @@ function startRaidEndChecking() {
                 // Check if there's a better raid in the queue than the current one
                 if (currentRaidInfo && raidQueue.length > 0) {
                     // Sort queue and check if there's a better raid
-                    raidQueue.sort((a, b) => {
-                        if (a.priority !== b.priority) {
-                            return a.priority - b.priority;
-                        }
-                        return a.expiresAt - b.expiresAt;
-                    });
+                    sortRaidQueue();
                     const bestRaid = raidQueue[0];
                     
                     const shouldSwitch = (bestRaid.priority < currentRaidInfo.priority) || 
