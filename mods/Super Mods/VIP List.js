@@ -442,7 +442,12 @@ function injectVIPListStyles() {
 // =======================
 
 // Use shared translation system via API
-const t = (key) => api.i18n.t(key);
+const t = (key) => {
+  if (typeof api !== 'undefined' && api.i18n && api.i18n.t) {
+    return api.i18n.t(key);
+  }
+  return key;
+};
 
 // Get VIP List interface type from Mod Settings config
 function getVIPListInterfaceType() {
@@ -687,14 +692,11 @@ async function autoReopenChatPanel() {
         return;
       }
       
-      // Load saved settings BEFORE opening panel (to preserve tabs)
+      // Load saved settings to get active tab preference
       const savedSettings = loadChatPanelSettings();
-      const tabsToRestore = savedSettings.openTabs || [];
       const activeTabToRestore = savedSettings.activeTab || 'all-chat';
       
-      console.log('[VIP List] Will restore tabs after panel opens:', tabsToRestore, 'activeTab:', activeTabToRestore);
-      
-      // Temporarily disable saving during panel creation and restoration
+      // Temporarily disable saving during panel creation
       window._vipListChatAutoReopening = true;
       
       await openAllChatPanel();
@@ -705,88 +707,27 @@ async function autoReopenChatPanel() {
         panel._isAutoReopening = true;
       }
       
-      // Restore open tabs - wait a bit for panel to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Wait for panel to be fully ready and tabs to be opened
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      if (tabsToRestore.length > 0) {
-        console.log('[VIP List] Restoring open tabs:', tabsToRestore);
-        
-        // Filter out guild tabs for non-existent guilds
-        const validTabsToRestore = [];
-        for (const tabName of tabsToRestore) {
-          if (isGuildChatTab(tabName)) {
-            const guildId = extractGuildIdFromTabName(tabName);
-            if (guildId) {
-              const exists = await guildExists(guildId);
-              if (exists) {
-                validTabsToRestore.push(tabName);
-              } else {
-                console.log(`[VIP List] Skipping restoration of guild tab for non-existent guild: ${guildId}`);
-              }
-            }
-          } else {
-            validTabsToRestore.push(tabName);
-          }
-        }
-        
-        // Restore each tab
-        for (const playerName of validTabsToRestore) {
-          try {
-            if (isGuildChatTab(playerName)) {
-              // Restore guild chat tab
-              const guildId = extractGuildIdFromTabName(playerName);
-              if (guildId) {
-                const playerGuild = getPlayerGuild();
-                if (playerGuild && playerGuild.id === guildId && playerGuild.abbreviation) {
-                  await addAllChatTab(playerName, playerGuild.abbreviation, 0);
-                }
-              }
-            } else {
-              // Restore player chat tab
-              const messages = await getConversationMessages(playerName);
-              const unreadCount = await getPlayerUnreadCount(messages, playerName);
-              await addAllChatTab(playerName, playerName, unreadCount);
-            }
-          } catch (error) {
-            console.error(`[VIP List] Error restoring tab for ${playerName}:`, error);
-          }
-        }
-        
-        // Batch update all tab statuses with rate limiting after restoring tabs
-        await updateAllChatTabsStatus();
-        
-        // Restore active tab (use validTabsToRestore instead of tabsToRestore)
-        if (activeTabToRestore && (activeTabToRestore === 'all-chat' || validTabsToRestore.includes(activeTabToRestore))) {
-          await switchAllChatTab(activeTabToRestore);
-        } else if (validTabsToRestore.length > 0) {
-          // If saved active tab is invalid, switch to first open tab
-          await switchAllChatTab(validTabsToRestore[0]);
-        }
+      // On init, tabs are synced from Firebase (source of truth):
+      // 1. All Chat (always created)
+      // 2. Guild chat (if user has guild)
+      // 3. Unread messages from Firebase
+      // 4. Chat requests from Firebase
+      // No stale tabs are restored from localStorage
+      
+      // Switch to saved active tab if it still exists
+      if (activeTabToRestore === 'all-chat' || allChatTabs.has(activeTabToRestore)) {
+        await switchAllChatTab(activeTabToRestore);
       } else {
-        // Even if no tabs to restore, make sure we switch to the saved active tab (likely 'all-chat')
-        if (activeTabToRestore) {
-          await switchAllChatTab(activeTabToRestore);
-        }
-      }
-      
-      // Verify that the active tab matches the loaded messages after restoration
-      // Wait a moment for any pending loads to complete, then verify
-      await new Promise(resolve => setTimeout(resolve, 200));
-      const finalPanel = document.getElementById('vip-chat-panel-all-chat');
-      if (finalPanel && activeAllChatTab) {
-        const messagesArea = finalPanel.querySelector('#chat-messages-all-chat');
-        if (messagesArea) {
-          // Verify the active tab is still the expected one (in case it changed during loading)
-          const expectedTab = activeTabToRestore || (tabsToRestore.length > 0 ? tabsToRestore[0] : 'all-chat');
-          if (activeAllChatTab !== expectedTab) {
-            console.log('[VIP List] Active tab mismatch detected during restoration, switching to correct tab');
-            await switchAllChatTab(expectedTab);
-          }
-        }
+        // Default to all-chat
+        await switchAllChatTab('all-chat');
       }
       
       // Re-enable saving and save final state
       window._vipListChatAutoReopening = false;
+      const finalPanel = document.getElementById('vip-chat-panel-all-chat');
       if (finalPanel) {
         finalPanel._isAutoReopening = false;
         saveChatPanelSettings(true, false);
@@ -4876,6 +4817,55 @@ async function processNewMessages(messages) {
   });
 }
 
+// Auto-open tabs based on Firebase state (unread messages, chat requests, guild chat)
+// This is called on init and when opening the panel to ensure tabs reflect current Firebase state
+async function autoOpenTabsFromFirebase(updateTabStatus = true) {
+  try {
+    // Get all unread messages (always check Firebase for unread messages)
+    const unreadMessages = await checkForMessages();
+    
+    // Group unread messages by sender
+    const unreadBySender = new Map();
+    unreadMessages.forEach(msg => {
+      if (msg && msg.from && !msg.read) {
+        const sender = msg.from;
+        if (!unreadBySender.has(sender)) {
+          unreadBySender.set(sender, []);
+        }
+        unreadBySender.get(sender).push(msg);
+      }
+    });
+    
+    // Open tabs for each sender with unread messages
+    for (const [sender, messages] of unreadBySender) {
+      if (!allChatTabs.has(sender)) {
+        const unreadCount = messages.length;
+        await addAllChatTab(sender, sender, unreadCount);
+      }
+    }
+    
+    // Get all message requests (always open tabs for requests)
+    const requests = await checkForChatRequests();
+    
+    // Open tabs for each requester
+    for (const req of requests) {
+      if (req && req.from && !allChatTabs.has(req.from)) {
+        await addAllChatTab(req.from, req.from, 0);
+      }
+    }
+    
+    // Add guild chat tab if player is in a guild
+    await addGuildChatTab();
+    
+    // Batch update all tab statuses with rate limiting (optional, for performance)
+    if (updateTabStatus) {
+      await updateAllChatTabsStatus();
+    }
+  } catch (error) {
+    console.error('[VIP List] Error auto-opening tabs:', error);
+  }
+}
+
 // Process chat requests (called by event listeners)
 async function processChatRequests(requests) {
   if (requests.length === 0) return;
@@ -6071,6 +6061,23 @@ async function getPlayerLevel(playerName, isFromCurrentPlayer) {
     // Cache it
     playerLevelCache.set(playerNameLower, { level: vipInfo.level, timestamp: Date.now() });
     return vipInfo.level;
+  }
+  
+  // If not in VIP list, try to fetch from profile
+  try {
+    const profileData = await fetchPlayerData(playerName);
+    if (profileData) {
+      const playerInfo = extractPlayerInfoFromProfile(profileData, playerName);
+      if (playerInfo.level != null) {
+        // Cache it
+        playerLevelCache.set(playerNameLower, { level: playerInfo.level, timestamp: Date.now() });
+        return playerInfo.level;
+      }
+    }
+  } catch (error) {
+    // Silently fail - player might not exist or API might be unavailable
+    // Cache null to avoid repeated failed requests
+    playerLevelCache.set(playerNameLower, { level: null, timestamp: Date.now() });
   }
   
   return null;
@@ -7755,51 +7762,8 @@ async function openAllChatPanel() {
     // Switch to polling if not already (panel is open)
     updateMessageCheckingMode();
     
-    // Automatically open tabs for unread messages and message requests
-    (async () => {
-      try {
-        // Get all unread messages
-        const unreadMessages = await checkForMessages();
-        
-        // Group unread messages by sender
-        const unreadBySender = new Map();
-        unreadMessages.forEach(msg => {
-          if (msg && msg.from && !msg.read) {
-            const sender = msg.from;
-            if (!unreadBySender.has(sender)) {
-              unreadBySender.set(sender, []);
-            }
-            unreadBySender.get(sender).push(msg);
-          }
-        });
-        
-        // Open tabs for each sender with unread messages
-        for (const [sender, messages] of unreadBySender) {
-          if (!allChatTabs.has(sender)) {
-            const unreadCount = messages.length;
-            await addAllChatTab(sender, sender, unreadCount);
-          }
-        }
-        
-        // Get all message requests
-        const requests = await checkForChatRequests();
-        
-        // Open tabs for each requester
-        for (const req of requests) {
-          if (req && req.from && !allChatTabs.has(req.from)) {
-            await addAllChatTab(req.from, req.from, 0);
-          }
-        }
-        
-        // Add guild chat tab if player is in a guild
-        await addGuildChatTab();
-        
-        // Batch update all tab statuses with rate limiting
-        await updateAllChatTabsStatus();
-      } catch (error) {
-        console.error('[VIP List] Error auto-opening tabs:', error);
-      }
-    })();
+    // Automatically open tabs based on Firebase state (unread messages, requests, guild chat)
+    autoOpenTabsFromFirebase();
     
     return;
   }
@@ -8433,48 +8397,9 @@ async function openAllChatPanel() {
   }, 100);
   trackTimeout(timeoutId);
   
-  // Automatically open tabs for unread messages and message requests
-  (async () => {
-    try {
-      // Get all unread messages
-      const unreadMessages = await checkForMessages();
-      
-      // Group unread messages by sender
-      const unreadBySender = new Map();
-      unreadMessages.forEach(msg => {
-        if (msg && msg.from && !msg.read) {
-          const sender = msg.from;
-          if (!unreadBySender.has(sender)) {
-            unreadBySender.set(sender, []);
-          }
-          unreadBySender.get(sender).push(msg);
-        }
-      });
-      
-      // Open tabs for each sender with unread messages
-      for (const [sender, messages] of unreadBySender) {
-        if (!allChatTabs.has(sender)) {
-          const unreadCount = messages.length;
-          await addAllChatTab(sender, sender, unreadCount);
-        }
-      }
-      
-      // Get all message requests
-      const requests = await checkForChatRequests();
-      
-      // Open tabs for each requester
-      for (const req of requests) {
-        if (req && req.from && !allChatTabs.has(req.from)) {
-          await addAllChatTab(req.from, req.from, 0);
-        }
-      }
-      
-      // Add guild chat tab if player is in a guild
-      await addGuildChatTab();
-    } catch (error) {
-      console.error('[VIP List] Error auto-opening tabs:', error);
-    }
-  })();
+  // Automatically open tabs based on Firebase state (unread messages, requests, guild chat)
+  // Skip tab status update here (done after panel creation) for better performance
+  autoOpenTabsFromFirebase(false);
 }
 
 // Minimize All Chat panel
@@ -9515,6 +9440,12 @@ const PlayerDataFetcher = {
     
     const now = Date.now();
     if (cached.data && cached.data.error) {
+      // Don't use cached request_failed errors - they're transient and should retry immediately
+      if (cached.data.error === 'request_failed') {
+        this.cache.delete(key);
+        return null;
+      }
+      // Only cache rate_limited errors for a short period
       const errorTTL = cached.data.error === 'rate_limited' ? 30000 : 60000;
       if (now - cached.timestamp < errorTTL) {
         return cached.data;
@@ -9537,6 +9468,14 @@ const PlayerDataFetcher = {
       data,
       timestamp: Date.now()
     });
+  },
+  
+  clearCache() {
+    this.cache.clear();
+    this.pendingRequests.clear();
+    this.rateLimit.requestCount = 0;
+    this.rateLimit.windowStart = 0;
+    this.rateLimit.lastRequestTime = 0;
   },
   
   async waitForRateLimit() {
@@ -9619,9 +9558,8 @@ const PlayerDataFetcher = {
         this.setCached(key, profileData);
         return profileData;
       } catch (error) {
-        if (!error.message.includes('rate_limited')) {
-          this.setCached(key, { error: 'request_failed', timestamp: Date.now() });
-        }
+        // Don't cache request_failed errors - they're transient and should retry immediately
+        // Only cache rate_limited errors (handled separately above)
         throw error;
       } finally {
         this.pendingRequests.delete(key);
@@ -9641,7 +9579,11 @@ async function fetchPlayerData(playerName) {
     if (error.message && error.message.includes('HTTP 404')) {
       throw error; // Re-throw without logging
     }
-    // Only log unexpected errors
+    // Don't log transient network errors - they'll retry automatically
+    if (error.message && (error.message === 'request_failed' || error.message.includes('Failed to fetch'))) {
+      throw error; // Re-throw without logging
+    }
+    // Only log unexpected errors (rate limiting, auth issues, etc.)
     console.error('[VIP List] Error fetching player data:', error);
     throw error;
   }
@@ -11144,6 +11086,9 @@ function createChatHeaderButton() {
 exports = {
   init: function() {
     try {
+      // Clear any stale cache entries from previous sessions
+      PlayerDataFetcher.clearCache();
+      
       // Ensure config is loaded from localStorage first (prioritize localStorage like Rank Pointer)
       loadVIPListConfig();
       

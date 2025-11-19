@@ -26,6 +26,13 @@ const GUILD_CONFIG = {
   maxMembers: 50
 };
 
+const POINTS_CONFIG = {
+  LEVELS_PER_POINT: 100,
+  RANK_POINTS_PER_POINT: 1,
+  TIME_SUM_PENALTY_DIVISOR: 10000,
+  WORLD_RECORD_BONUS: 5
+};
+
 const GUILD_ROLES = {
   LEADER: 'leader',
   OFFICER: 'officer',
@@ -429,6 +436,19 @@ async function checkMemberWorldRecord(username) {
   }
 }
 
+// Point calculation helper functions
+function calculateLevelPoints(level) {
+  return Math.floor(level / POINTS_CONFIG.LEVELS_PER_POINT);
+}
+
+function calculateRankPoints(rankPointsValue) {
+  return Math.floor(rankPointsValue / POINTS_CONFIG.RANK_POINTS_PER_POINT);
+}
+
+function calculateTimeSumPenalty(timeSum) {
+  return Math.floor(timeSum / POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR);
+}
+
 // Calculate individual member points and get detailed breakdown
 async function calculateMemberPoints(username) {
   try {
@@ -450,15 +470,15 @@ async function calculateMemberPoints(username) {
     // Calculate level from exp
     const exp = profile.exp || 0;
     const level = calculateLevelFromExp(exp);
-    const levelPoints = Math.floor(level / 100);
+    const levelPoints = calculateLevelPoints(level);
     
-    // Get rank points (every 2 rank points = 1 point)
+    // Get rank points
     const rankPointsValue = profile.rankPoints || 0;
-    const rankPoints = Math.floor(rankPointsValue / 2);
+    const rankPoints = calculateRankPoints(rankPointsValue);
     
-    // Get time sum (ticks) - every 3000 ticks removes 1 point
+    // Get time sum (ticks)
     const timeSum = profile.ticks || 0;
-    const timeSumPenalty = Math.floor(timeSum / 3000);
+    const timeSumPenalty = calculateTimeSumPenalty(timeSum);
     
     // Check if member holds a world record (individual check, but bonus is guild-wide)
     const hasWorldRecord = await checkMemberWorldRecord(username);
@@ -534,19 +554,15 @@ async function calculateGuildPoints(guildId) {
       totalTimeSum += timeSum;
     }
     
-    // Calculate points:
-    // - Each 100 levels = 1 point
-    // - Every 2 rank points = 1 point
-    // - Every 3000 time sum removes 1 point
-    // - +10 points if any member holds a world record
-    const levelPoints = Math.floor(totalLevels / 100);
-    const rankPoints = Math.floor(totalRankPoints / 2);
-    const timeSumPenalty = Math.floor(totalTimeSum / 3000);
+    // Calculate points using helper functions
+    const levelPoints = calculateLevelPoints(totalLevels);
+    const rankPoints = calculateRankPoints(totalRankPoints);
+    const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
     
     // Check if any member holds a world record
     const memberUsernames = members.map(m => m.username).filter(Boolean);
     const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
-    const worldRecordBonus = hasWorldRecord ? 10 : 0;
+    const worldRecordBonus = hasWorldRecord ? POINTS_CONFIG.WORLD_RECORD_BONUS : 0;
     
     const totalPoints = levelPoints + rankPoints - timeSumPenalty + worldRecordBonus;
     
@@ -3588,9 +3604,9 @@ async function openGuildPanel() {
       addDetail('Level Points', `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
       addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
       addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
-      addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every 2 = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
       addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
-      addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every 3000 = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
       
       if (pointsData.hasWorldRecord) {
         const wrNote = document.createElement('div');
@@ -4735,12 +4751,40 @@ async function initializeGuilds() {
   startAccountMenuObserver();
 }
 
-// Initialize when mod loads
-if (typeof window !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeGuilds);
-  } else {
-    initializeGuilds();
+// =======================
+// Exports & Lifecycle Management
+// =======================
+
+exports = {
+  init: function() {
+    try {
+      initializeGuilds();
+      return true;
+    } catch (error) {
+      console.error('[Guilds] Initialization error:', error);
+      return false;
+    }
+  },
+  
+  cleanup: function() {
+    try {
+      // Stop account menu observer
+      if (accountMenuObserver) {
+        accountMenuObserver.disconnect();
+        accountMenuObserver = null;
+      }
+      
+      console.log('[Guilds] Cleaned up successfully');
+      return true;
+    } catch (error) {
+      console.error('[Guilds] Cleanup error:', error);
+      return false;
+    }
   }
+};
+
+// Auto-initialize if running in mod context
+if (typeof context !== 'undefined' && context.api) {
+  exports.init();
 }
 
