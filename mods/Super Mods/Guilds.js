@@ -351,6 +351,148 @@ function calculateLevelFromExp(exp) {
   return Math.floor(exp / 400) + 1;
 }
 
+// Fetch TRPC data
+async function fetchTRPC(method) {
+  try {
+    const inp = encodeURIComponent(JSON.stringify({ 0: { json: null, meta: { values: ["undefined"] } } }));
+    const res = await fetch(`/pt/api/trpc/${method}?batch=1&input=${inp}`, {
+      headers: { 
+        'Accept': '*/*', 
+        'Content-Type': 'application/json', 
+        'X-Game-Version': '1' 
+      }
+    });
+    
+    if (!res.ok) {
+      throw new Error(`${method} → ${res.status}`);
+    }
+    
+    const json = await res.json();
+    return json[0].result.data.json;
+  } catch (error) {
+    console.error('[Guilds] Error fetching from TRPC:', error);
+    throw error;
+  }
+}
+
+// Check if any guild member holds a world record
+async function checkGuildWorldRecords(memberUsernames) {
+  try {
+    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    if (!leaderboardData || !leaderboardData.ticks) {
+      return false;
+    }
+    
+    // Create a set of member usernames for quick lookup (case-insensitive)
+    const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
+    
+    // Check all maps for world records
+    for (const mapCode in leaderboardData.ticks) {
+      const worldRecord = leaderboardData.ticks[mapCode];
+      if (worldRecord && worldRecord.userName) {
+        // Check if any guild member holds this world record
+        if (memberSet.has(worldRecord.userName.toLowerCase())) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[Guilds] Error checking world records:', error);
+    return false;
+  }
+}
+
+// Check if a specific member holds a world record
+async function checkMemberWorldRecord(username) {
+  try {
+    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    if (!leaderboardData || !leaderboardData.ticks) {
+      return false;
+    }
+    
+    const usernameLower = username.toLowerCase();
+    
+    // Check all maps for world records
+    for (const mapCode in leaderboardData.ticks) {
+      const worldRecord = leaderboardData.ticks[mapCode];
+      if (worldRecord && worldRecord.userName && worldRecord.userName.toLowerCase() === usernameLower) {
+        return true;
+      }
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[Guilds] Error checking member world record:', error);
+    return false;
+  }
+}
+
+// Calculate individual member points and get detailed breakdown
+async function calculateMemberPoints(username) {
+  try {
+    const profile = await fetchPlayerProfile(username);
+    if (!profile) {
+      return {
+        total: 0,
+        levelPoints: 0,
+        rankPoints: 0,
+        timeSumPenalty: 0,
+        level: 0,
+        exp: 0,
+        rankPointsValue: 0,
+        timeSum: 0,
+        hasWorldRecord: false
+      };
+    }
+    
+    // Calculate level from exp
+    const exp = profile.exp || 0;
+    const level = calculateLevelFromExp(exp);
+    const levelPoints = Math.floor(level / 100);
+    
+    // Get rank points (every 2 rank points = 1 point)
+    const rankPointsValue = profile.rankPoints || 0;
+    const rankPoints = Math.floor(rankPointsValue / 2);
+    
+    // Get time sum (ticks) - every 3000 ticks removes 1 point
+    const timeSum = profile.ticks || 0;
+    const timeSumPenalty = Math.floor(timeSum / 3000);
+    
+    // Check if member holds a world record (individual check, but bonus is guild-wide)
+    const hasWorldRecord = await checkMemberWorldRecord(username);
+    
+    // Individual member points (without world record bonus, as that's guild-wide)
+    const total = levelPoints + rankPoints - timeSumPenalty;
+    
+    return {
+      total: Math.max(0, Math.floor(total)),
+      levelPoints,
+      rankPoints,
+      timeSumPenalty,
+      level,
+      exp,
+      rankPointsValue,
+      timeSum,
+      hasWorldRecord
+    };
+  } catch (error) {
+    console.error('[Guilds] Error calculating member points:', error);
+    return {
+      total: 0,
+      levelPoints: 0,
+      rankPoints: 0,
+      timeSumPenalty: 0,
+      level: 0,
+      exp: 0,
+      rankPointsValue: 0,
+      timeSum: 0,
+      hasWorldRecord: false
+    };
+  }
+}
+
 // Calculate guild points based on member data
 async function calculateGuildPoints(guildId) {
   try {
@@ -394,13 +536,19 @@ async function calculateGuildPoints(guildId) {
     
     // Calculate points:
     // - Each 100 levels = 1 point
-    // - Each rank point = 1 point
-    // - Each 1000 time sum removes 1 point
+    // - Every 2 rank points = 1 point
+    // - Every 3000 time sum removes 1 point
+    // - +10 points if any member holds a world record
     const levelPoints = Math.floor(totalLevels / 100);
-    const rankPoints = totalRankPoints;
-    const timeSumPenalty = Math.floor(totalTimeSum / 1000);
+    const rankPoints = Math.floor(totalRankPoints / 2);
+    const timeSumPenalty = Math.floor(totalTimeSum / 3000);
     
-    const totalPoints = levelPoints + rankPoints - timeSumPenalty;
+    // Check if any member holds a world record
+    const memberUsernames = members.map(m => m.username).filter(Boolean);
+    const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
+    const worldRecordBonus = hasWorldRecord ? 10 : 0;
+    
+    const totalPoints = levelPoints + rankPoints - timeSumPenalty + worldRecordBonus;
     
     // Ensure points are never negative - minimum is 0
     const points = Math.max(0, Math.floor(totalPoints));
@@ -2927,7 +3075,7 @@ async function showGuildBrowser() {
   headerRow.appendChild(createHeaderCell(t('mods.guilds.columnMembers'), '0.8 1 0%', true, 'members'));
   headerRow.appendChild(createHeaderCell(t('mods.guilds.columnPoints'), '0.8 1 0%', true, 'points'));
   headerRow.appendChild(createHeaderCell(t('mods.guilds.columnLeader'), '1.2 1 0%'));
-  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnAction'), '1 1 0%'));
+  headerRow.appendChild(createHeaderCell('', '1 1 0%'));
 
   // Update all sort indicators to reflect default sort (points descending)
   sortIndicators.forEach((indicator, key) => {
@@ -3154,7 +3302,62 @@ async function showMemberManagementModal(guild, currentMember, targetMember) {
 async function openGuildPanel() {
   if (!ensureModalApi()) return;
 
-  const playerGuild = getPlayerGuild();
+  // First, verify actual guild state from Firebase
+  let verifiedGuild = null;
+  const currentPlayer = getCurrentPlayerName();
+  try {
+    if (currentPlayer) {
+      const hashedPlayer = await hashUsername(currentPlayer);
+      const playerGuildResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+      if (playerGuildResponse.ok) {
+        const playerGuildData = await playerGuildResponse.json();
+        if (playerGuildData && playerGuildData.guildId) {
+          // Firebase says user is in a guild - verify it exists and user is actually a member
+          const guild = await getGuild(playerGuildData.guildId);
+          if (guild) {
+            const members = await getGuildMembers(guild.id);
+            const isActuallyMember = members.some(m => m.usernameHashed === hashedPlayer);
+            if (isActuallyMember) {
+              // User is actually a member - use this as truth
+              verifiedGuild = guild;
+              savePlayerGuild(guild); // Sync localStorage
+            } else {
+              // Firebase reference exists but user is not actually a member - clean up
+              console.warn('[Guilds] Player has guild reference in Firebase but is not a member - cleaning up');
+              await updatePlayerGuildReference(hashedPlayer, null, null);
+              clearPlayerGuild();
+            }
+          } else {
+            // Firebase reference exists but guild doesn't exist - clean up
+            console.warn('[Guilds] Player has guild reference in Firebase but guild does not exist - cleaning up');
+            await updatePlayerGuildReference(hashedPlayer, null, null);
+            clearPlayerGuild();
+          }
+        } else {
+          // Firebase says user is not in a guild - clear localStorage if it says otherwise
+          const localGuild = getPlayerGuild();
+          if (localGuild) {
+            console.warn('[Guilds] localStorage has guild but Firebase does not - clearing localStorage');
+            clearPlayerGuild();
+          }
+        }
+      } else if (playerGuildResponse.status === 404) {
+        // No Firebase reference - clear localStorage if it says otherwise
+        const localGuild = getPlayerGuild();
+        if (localGuild) {
+          console.warn('[Guilds] localStorage has guild but Firebase does not - clearing localStorage');
+          clearPlayerGuild();
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[Guilds] Error verifying guild state from Firebase:', error);
+    // Fall back to localStorage check if Firebase check fails
+    verifiedGuild = getPlayerGuild();
+  }
+
+  // Use verified guild (from Firebase) or fall back to localStorage
+  const playerGuild = verifiedGuild || getPlayerGuild();
   if (!playerGuild) {
     const invites = await getPlayerInvites();
     if (invites.length > 0) {
@@ -3173,8 +3376,21 @@ async function openGuildPanel() {
   }
 
   const members = await getGuildMembers(guild.id);
-  const currentPlayer = getCurrentPlayerName();
+  if (!currentPlayer) {
+    console.warn('[Guilds] No current player - redirecting to browser');
+    showGuildBrowser();
+    return;
+  }
   const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
+  
+  // Final verification - if user is not actually a member, redirect to browser
+  if (!currentMember) {
+    console.warn('[Guilds] Player has guild in localStorage but is not a member - redirecting to browser');
+    await updatePlayerGuildReference(await hashUsername(currentPlayer), null, null);
+    clearPlayerGuild();
+    showGuildBrowser();
+    return;
+  }
 
   const contentDiv = document.createElement('div');
   contentDiv.style.width = '100%';
@@ -3283,6 +3499,183 @@ async function openGuildPanel() {
     memberInfo.appendChild(memberName);
     memberInfo.appendChild(memberRole);
     memberItem.appendChild(memberInfo);
+
+    // Add points display with tooltip
+    const pointsContainer = document.createElement('div');
+    pointsContainer.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      margin-left: 8px;
+      position: relative;
+    `;
+
+    const pointsDisplay = document.createElement('div');
+    pointsDisplay.textContent = '...';
+    pointsDisplay.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+      font-size: 12px;
+      font-weight: 600;
+      cursor: help;
+      min-width: 40px;
+      text-align: right;
+    `;
+
+    // Create tooltip with game-native styling
+    const tooltip = document.createElement('div');
+    tooltip.style.cssText = `
+      position: fixed;
+      padding: 8px 10px;
+      background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+      border-width: 4px;
+      border-style: solid;
+      border-color: transparent;
+      border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 11px;
+      white-space: nowrap;
+      z-index: 10002;
+      display: none;
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+      font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+    `;
+    document.body.appendChild(tooltip);
+
+    // Calculate and display points
+    calculateMemberPoints(member.username).then(pointsData => {
+      pointsDisplay.textContent = formatNumber(pointsData.total);
+      
+      // Build tooltip content with game-native styling
+      const tooltipContent = document.createElement('div');
+      tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+      
+      const title = document.createElement('div');
+      title.textContent = `${member.username}'s Points`;
+      title.style.cssText = `
+        font-weight: 600;
+        font-size: 12px;
+        margin-bottom: 2px;
+        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        padding-bottom: 6px;
+        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+      `;
+      tooltipContent.appendChild(title);
+      
+      const addDetail = (label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) => {
+        const detail = document.createElement('div');
+        detail.style.cssText = `
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          color: ${color};
+          font-size: 11px;
+          line-height: 1.4;
+        `;
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = label;
+        labelSpan.style.opacity = '0.9';
+        const valueSpan = document.createElement('span');
+        valueSpan.textContent = value;
+        valueSpan.style.fontWeight = '600';
+        valueSpan.style.color = color;
+        detail.appendChild(labelSpan);
+        detail.appendChild(valueSpan);
+        tooltipContent.appendChild(detail);
+      };
+      
+      addDetail('Level Points', `+${pointsData.levelPoints}`, CSS_CONSTANTS.COLORS.SUCCESS);
+      addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
+      addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
+      addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every 2 = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
+      addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every 3000 = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      
+      if (pointsData.hasWorldRecord) {
+        const wrNote = document.createElement('div');
+        wrNote.textContent = '⭐ Holds World Record';
+        wrNote.style.cssText = `
+          color: ${CSS_CONSTANTS.COLORS.ROLE_LEADER};
+          font-weight: 600;
+          margin-top: 2px;
+          padding-top: 6px;
+          border-top: 2px solid rgba(255, 255, 255, 0.2);
+          font-size: 11px;
+        `;
+        tooltipContent.appendChild(wrNote);
+      }
+      
+      const total = document.createElement('div');
+      total.style.cssText = `
+        margin-top: 2px;
+        padding-top: 6px;
+        border-top: 2px solid rgba(255, 255, 255, 0.3);
+        font-weight: 600;
+        font-size: 12px;
+        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+      `;
+      total.textContent = `Total: ${formatNumber(pointsData.total)}`;
+      tooltipContent.appendChild(total);
+      
+      tooltip.appendChild(tooltipContent);
+    }).catch(() => {
+      pointsDisplay.textContent = '0';
+    });
+
+    // Show/hide tooltip on hover with smart positioning
+    let tooltipTimeout;
+    const updateTooltipPosition = () => {
+      const rect = pointsContainer.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const spacing = 8;
+      
+      // Calculate available space above and below
+      const spaceAbove = rect.top;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const tooltipHeight = tooltipRect.height + spacing;
+      
+      // Position vertically: choose direction with more space
+      if (spaceBelow >= tooltipHeight || spaceBelow >= spaceAbove) {
+        // Position below (more space below or equal)
+        tooltip.style.top = `${rect.bottom + spacing}px`;
+        tooltip.style.bottom = 'auto';
+      } else {
+        // Position above (more space above)
+        tooltip.style.bottom = `${window.innerHeight - rect.top + spacing}px`;
+        tooltip.style.top = 'auto';
+      }
+      
+      // Position horizontally: always align to right edge of container
+      tooltip.style.left = `${rect.right}px`;
+      tooltip.style.right = 'auto';
+      tooltip.style.transform = 'translateX(-100%)';
+    };
+    
+    pointsDisplay.addEventListener('mouseenter', () => {
+      clearTimeout(tooltipTimeout);
+      tooltip.style.display = 'block';
+      // Use requestAnimationFrame to ensure tooltip is rendered before calculating position
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          updateTooltipPosition();
+        });
+      });
+    });
+    pointsDisplay.addEventListener('mouseleave', () => {
+      tooltipTimeout = setTimeout(() => {
+        tooltip.style.display = 'none';
+      }, 100);
+    });
+    tooltip.addEventListener('mouseenter', () => {
+      clearTimeout(tooltipTimeout);
+    });
+    tooltip.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+
+    pointsContainer.appendChild(pointsDisplay);
+    memberItem.appendChild(pointsContainer);
 
     if (currentMember && member.username.toLowerCase() !== currentPlayer.toLowerCase()) {
       const buttonContainer = document.createElement('div');

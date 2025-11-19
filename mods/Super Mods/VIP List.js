@@ -4408,9 +4408,9 @@ function extractUsernamesFromSystemMessage(text) {
   }
   
   const usernames = [];
-  const commonWords = ['the', 'guild', 'was', 'created', 'and', 'or', 'a', 'an', 'to', 'by', 'joined', 'left', 'promoted', 'demoted', 'transferred', 'leadership', 'invited', 'kicked', 'from', 'changed', 'updated', 'description', 'type'];
+  const commonWords = ['the', 'guild', 'was', 'created', 'and', 'or', 'a', 'an', 'to', 'by', 'joined', 'left', 'promoted', 'demoted', 'transferred', 'leadership', 'invited', 'kicked', 'from', 'changed', 'updated', 'description', 'type', 'cancelled', 'invite'];
   const roleWords = ['officer', 'member', 'leader', 'admin'];
-  const actionWords = ['promoted', 'demoted', 'joined', 'left', 'created', 'transferred', 'invited', 'kicked', 'changed', 'updated'];
+  const actionWords = ['promoted', 'demoted', 'joined', 'left', 'created', 'transferred', 'invited', 'kicked', 'changed', 'updated', 'cancelled'];
   
   // Extract and protect quoted strings (guild names)
   const quotedStrings = [];
@@ -4482,8 +4482,15 @@ function extractUsernamesFromSystemMessage(text) {
       const beforeTo = immediateBefore.substring(0, toIndex).trim();
       return beforeTo.endsWith(' ' + action) || beforeTo.endsWith(action) || beforeTo.includes(' ' + action + ' ');
     });
+    const isAfterFor = beforeText.endsWith('for ') || beforeText.endsWith(' for ');
+    const isAfterForWithAction = isAfterFor && actionWords.some(action => {
+      const forIndex = immediateBefore.lastIndexOf('for');
+      if (forIndex === -1) return false;
+      const beforeFor = immediateBefore.substring(0, forIndex).trim();
+      return beforeFor.endsWith(' ' + action) || beforeFor.endsWith(action) || beforeFor.includes(' ' + action + ' ') || beforeFor.includes('invite');
+    });
     
-    const isValidContext = isAtStart || isAfterBy || isBeforeAction || isAfterAction || isAfterToWithAction;
+    const isValidContext = isAtStart || isAfterBy || isBeforeAction || isAfterAction || isAfterToWithAction || isAfterForWithAction;
     
     if (isValidContext) {
       usernameMatches.push({
@@ -4551,6 +4558,17 @@ function translateSystemMessage(text) {
   const invitedMatch = text.match(/^(.+) invited (.+) to the guild$/);
   if (invitedMatch) {
     return tReplace('mods.guilds.playerInvitedToGuild', { player: invitedMatch[1], invitedPlayer: invitedMatch[2] });
+  }
+  
+  // Pattern: {player} cancelled the invite for {playerName}
+  const cancelledInviteMatch = text.match(/^(.+) cancelled the invite for (.+)$/);
+  if (cancelledInviteMatch) {
+    // Fallback to English if translation key doesn't exist
+    const translation = t('mods.guilds.playerCancelledInvite');
+    if (translation === 'mods.guilds.playerCancelledInvite') {
+      return text; // No translation available, return original
+    }
+    return tReplace('mods.guilds.playerCancelledInvite', { player: cancelledInviteMatch[1], playerName: cancelledInviteMatch[2] });
   }
   
   // Pattern: {player} promoted {member} to Officer
@@ -7704,6 +7722,10 @@ async function openAllChatPanel() {
     // Clean up any orphaned tabs before proceeding
     cleanupOrphanedChatTabs();
     
+    // Check if panel was manually closed - if so, this is a user-initiated reopen, so reset the flag
+    const savedSettings = loadChatPanelSettings();
+    const wasManuallyClosed = savedSettings.closedManually && !savedSettings.isOpen;
+    
     existingPanel.style.zIndex = '10000';
     existingPanel.style.display = 'flex';
     
@@ -7726,7 +7748,9 @@ async function openAllChatPanel() {
     }
     
     // Save panel state (open)
-    saveChatPanelSettings(true, false);
+    // If panel was manually closed, this is a user-initiated reopen, so reset closedManually to false
+    // Otherwise, preserve the existing closedManually state (should be false if panel was already open)
+    saveChatPanelSettings(true, wasManuallyClosed ? false : savedSettings.closedManually);
     
     // Switch to polling if not already (panel is open)
     updateMessageCheckingMode();
@@ -8606,7 +8630,10 @@ async function openMessageDialog(toPlayer) {
     allChatPanel.style.zIndex = '10000';
     allChatPanel.style.display = 'flex';
     // Save panel state (open)
-    saveChatPanelSettings(true, false);
+    // Check if panel was manually closed - if so, this is a user-initiated reopen, so reset the flag
+    const savedSettings = loadChatPanelSettings();
+    const wasManuallyClosed = savedSettings.closedManually && !savedSettings.isOpen;
+    saveChatPanelSettings(true, wasManuallyClosed ? false : savedSettings.closedManually);
   }
   
   // Add tab for this player if it doesn't exist

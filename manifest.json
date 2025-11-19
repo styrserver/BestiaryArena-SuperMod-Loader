@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "2.9.6",
-  "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and comprehensive tools.",
+  "version": "2.9.7",
+  "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
     "32": "assets/icons/icon-32.png",
@@ -31,7 +31,8 @@
         "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/injector.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
       "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
@@ -42,7 +43,8 @@
         "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/utility_injector.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     },
     {
       "matches": ["*://*.bestiaryarena.com/*", "*://bestiaryarena.com/*"],
@@ -53,12 +55,16 @@
         "*://bestiaryarena.com/_next/*"
       ],
       "js": ["content/dashboard_bridge.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "permissions": ["storage", "unlimitedStorage", "scripting", "tabs", "activeTab"],
   "host_permissions": [
     "*://*.gist.githubusercontent.com/*",
+    "*://gist.githubusercontent.com/*",
+    "*://*.raw.githubusercontent.com/*",
+    "*://raw.githubusercontent.com/*",
     "*://*.bestiaryarena.com/*",
     "*://bestiaryarena.com/*",
     "*://*.firebasedatabase.app/*"
