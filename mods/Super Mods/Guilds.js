@@ -48,6 +48,11 @@ const MODAL_DIMENSIONS = {
   HEIGHT: 360
 };
 
+const GUILD_PANEL_DIMENSIONS = {
+  WIDTH: 650,  // 550 + 100 (50px each side)
+  HEIGHT: 460  // 360 + 100 (50px each side)
+};
+
 const PANEL_DIMENSIONS = {
   WIDTH: 600,
   HEIGHT: 500,
@@ -269,6 +274,143 @@ async function playerExists(playerName) {
       console.error('[Guilds] Error checking if player exists:', error);
     }
     return false; // Return false but don't cache it
+  }
+}
+
+// Player profile cache (1 hour TTL)
+const playerProfileCache = createTTLCache(60 * 60 * 1000);
+
+// Guild points cache (5 minutes TTL)
+const guildPointsCache = createTTLCache(5 * 60 * 1000);
+
+// Format number with compact notation (k, M)
+function formatNumber(num) {
+  if (typeof num !== 'number') return '0';
+  if (num < 1000) return num.toString();
+  if (num < 1000000) {
+    const k = num / 1000;
+    return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  const m = num / 1000000;
+  return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+}
+
+// Fetch player profile data
+async function fetchPlayerProfile(playerName) {
+  if (!playerName || typeof playerName !== 'string') {
+    return null;
+  }
+  
+  // Check cache first
+  const cached = playerProfileCache.get(playerName);
+  if (cached !== null) {
+    return cached;
+  }
+  
+  try {
+    const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+    
+    const response = await fetch(apiUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      playerProfileCache.set(playerName, null);
+      return null;
+    }
+    
+    const data = await response.json();
+    let profileData = null;
+    
+    if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
+      profileData = data[0].result.data.json;
+      if (data[0]?.result?.error || !profileData || (typeof profileData === 'object' && !profileData.name)) {
+        profileData = null;
+      }
+    } else {
+      profileData = data;
+      if (!profileData || (typeof profileData === 'object' && !profileData.name)) {
+        profileData = null;
+      }
+    }
+    
+    // Cache the result
+    playerProfileCache.set(playerName, profileData);
+    return profileData;
+  } catch (error) {
+    if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
+      console.error('[Guilds] Error fetching player profile:', error);
+    }
+    return null;
+  }
+}
+
+// Calculate level from experience
+function calculateLevelFromExp(exp) {
+  if (typeof exp !== 'number' || exp < 0) return 0;
+  return Math.floor(exp / 400) + 1;
+}
+
+// Calculate guild points based on member data
+async function calculateGuildPoints(guildId) {
+  try {
+    // Check cache first
+    const cached = guildPointsCache.get(guildId);
+    if (cached !== null) {
+      return cached;
+    }
+    
+    const members = await getGuildMembers(guildId);
+    if (!members || members.length === 0) {
+      const points = 0;
+      guildPointsCache.set(guildId, points);
+      return points;
+    }
+    
+    let totalLevels = 0;
+    let totalRankPoints = 0;
+    let totalTimeSum = 0;
+    
+    // Fetch profile data for all members (with rate limiting consideration)
+    const profilePromises = members.map(member => fetchPlayerProfile(member.username));
+    const profiles = await Promise.all(profilePromises);
+    
+    for (const profile of profiles) {
+      if (!profile) continue;
+      
+      // Calculate level from exp
+      const exp = profile.exp || 0;
+      const level = calculateLevelFromExp(exp);
+      totalLevels += level;
+      
+      // Get rank points
+      const rankPoints = profile.rankPoints || 0;
+      totalRankPoints += rankPoints;
+      
+      // Get time sum (ticks)
+      const timeSum = profile.ticks || 0;
+      totalTimeSum += timeSum;
+    }
+    
+    // Calculate points:
+    // - Each 100 levels = 1 point
+    // - Each rank point = 1 point
+    // - Each 1000 time sum removes 1 point
+    const levelPoints = Math.floor(totalLevels / 100);
+    const rankPoints = totalRankPoints;
+    const timeSumPenalty = Math.floor(totalTimeSum / 1000);
+    
+    const totalPoints = levelPoints + rankPoints - timeSumPenalty;
+    
+    // Ensure points are never negative - minimum is 0
+    const points = Math.max(0, Math.floor(totalPoints));
+    
+    // Cache the result
+    guildPointsCache.set(guildId, points);
+    return points;
+  } catch (error) {
+    console.error('[Guilds] Error calculating guild points:', error);
+    return 0;
   }
 }
 
@@ -2426,7 +2568,11 @@ async function showGuildBrowser() {
     flex-direction: column;
   `;
 
-  async function loadGuilds(searchTerm = '') {
+  // Sorting state - default to points descending (highest to lowest)
+  let sortBy = 'points';
+  let sortDirection = 'desc';
+
+  async function loadGuilds(searchTerm = '', sortColumn = null, direction = 'asc') {
     const allGuilds = await getAllGuilds();
     const currentPlayer = getCurrentPlayerName();
     const playerGuild = getPlayerGuild();
@@ -2442,6 +2588,45 @@ async function showGuildBrowser() {
         (guild.abbreviation && guild.abbreviation.toLowerCase().includes(term)) ||
         (guild.description && guild.description.toLowerCase().includes(term))
       );
+    }
+
+    // Fetch points for all guilds to calculate rankings
+    const pointsPromises = filteredGuilds.map(async (guild) => {
+      const points = await calculateGuildPoints(guild.id);
+      return { guild, points };
+    });
+    const guildsWithPoints = await Promise.all(pointsPromises);
+    filteredGuilds = guildsWithPoints.map(item => ({ ...item.guild, _points: item.points }));
+
+    // Calculate rankings based on points (descending)
+    const sortedByPoints = [...filteredGuilds].sort((a, b) => (b._points || 0) - (a._points || 0));
+    const rankings = new Map();
+    sortedByPoints.forEach((guild, index) => {
+      rankings.set(guild.id, index + 1);
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filteredGuilds.sort((a, b) => {
+        let aVal, bVal;
+        
+        if (sortColumn === 'name') {
+          aVal = (a.name || '').toLowerCase();
+          bVal = (b.name || '').toLowerCase();
+        } else if (sortColumn === 'members') {
+          aVal = a.memberCount || 0;
+          bVal = b.memberCount || 0;
+        } else if (sortColumn === 'points') {
+          aVal = a._points || 0;
+          bVal = b._points || 0;
+        } else {
+          return 0;
+        }
+        
+        if (aVal < bVal) return direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
     }
 
     if (filteredGuilds.length === 0) {
@@ -2469,6 +2654,20 @@ async function showGuildBrowser() {
     }
 
     for (const guild of filteredGuilds) {
+      const rank = rankings.get(guild.id) || 999;
+      
+      // Get background color based on rank
+      let bgColor = 'rgba(255, 255, 255, 0.05)'; // Default
+      if (rank === 1) {
+        bgColor = 'rgba(255, 215, 0, 0.15)'; // Gold for 1st
+      } else if (rank === 2) {
+        bgColor = 'rgba(192, 192, 192, 0.15)'; // Silver for 2nd
+      } else if (rank === 3) {
+        bgColor = 'rgba(205, 127, 50, 0.15)'; // Bronze for 3rd
+      } else if (rank <= 10) {
+        bgColor = 'rgba(200, 200, 255, 0.1)'; // Light blue for top 10
+      }
+      
       const guildItem = document.createElement('div');
       guildItem.style.cssText = `
         display: flex;
@@ -2476,7 +2675,7 @@ async function showGuildBrowser() {
         align-items: center;
         padding: 8px 0;
         margin-bottom: 4px;
-        background: rgba(255, 255, 255, 0.05);
+        background: ${bgColor};
         width: 100%;
       `;
 
@@ -2529,6 +2728,28 @@ async function showGuildBrowser() {
       `;
       memberCountCell.textContent = `${guild.memberCount || 0}/${GUILD_CONFIG.maxMembers}`;
 
+      const pointsCell = document.createElement('div');
+      pointsCell.style.cssText = `
+        flex: 0.8 1 0%;
+        text-align: center;
+        position: relative;
+        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 600;
+      `;
+      
+      // Use cached points if available, otherwise calculate
+      if (guild._points !== undefined) {
+        pointsCell.textContent = formatNumber(guild._points);
+      } else {
+        pointsCell.textContent = '...';
+        calculateGuildPoints(guild.id).then(points => {
+          pointsCell.textContent = formatNumber(points);
+        }).catch(() => {
+          pointsCell.textContent = '0';
+        });
+      }
+      
       const leaderCell = document.createElement('div');
       leaderCell.style.cssText = `
         flex: 1.2 1 0%;
@@ -2606,6 +2827,7 @@ async function showGuildBrowser() {
 
       guildItem.appendChild(guildNameCell);
       guildItem.appendChild(memberCountCell);
+      guildItem.appendChild(pointsCell);
       guildItem.appendChild(leaderCell);
       guildItem.appendChild(actionCell);
 
@@ -2630,9 +2852,11 @@ async function showGuildBrowser() {
     width: 100%;
   `;
 
-  const createHeaderCell = (text, flex = '1') => {
+  // Store sort indicators for updating
+  const sortIndicators = new Map();
+
+  const createHeaderCell = (text, flex = '1', sortable = false, sortKey = null) => {
     const cell = document.createElement('div');
-    cell.textContent = text;
     cell.style.cssText = `
       flex: ${flex};
       color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
@@ -2643,14 +2867,78 @@ async function showGuildBrowser() {
       font-size: 13px;
       font-weight: 600;
       letter-spacing: 0.2px;
+      ${sortable ? 'cursor: pointer; user-select: none;' : ''}
     `;
+    
+    const textSpan = document.createElement('span');
+    textSpan.textContent = text;
+    cell.appendChild(textSpan);
+    
+    if (sortable) {
+      const sortIndicator = document.createElement('span');
+      sortIndicator.style.cssText = `
+        margin-left: 4px;
+        opacity: 0.6;
+        font-size: 10px;
+      `;
+      cell.appendChild(sortIndicator);
+      
+      sortIndicators.set(sortKey, sortIndicator);
+      
+      const updateSortIndicator = () => {
+        if (sortBy === sortKey) {
+          sortIndicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
+          sortIndicator.style.opacity = '1';
+        } else {
+          sortIndicator.textContent = '⇅';
+          sortIndicator.style.opacity = '0.4';
+        }
+      };
+      
+      updateSortIndicator();
+      
+      cell.addEventListener('click', () => {
+        if (sortBy === sortKey) {
+          sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          sortBy = sortKey;
+          sortDirection = 'asc';
+        }
+        
+        // Update all sort indicators
+        sortIndicators.forEach((indicator, key) => {
+          if (key === sortBy) {
+            indicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
+            indicator.style.opacity = '1';
+          } else {
+            indicator.textContent = '⇅';
+            indicator.style.opacity = '0.4';
+          }
+        });
+        
+        loadGuilds(searchInput ? searchInput.value : '', sortBy, sortDirection);
+      });
+    }
+    
     return cell;
   };
 
-  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnName'), '2 1 0%'));
-  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnMembers'), '0.8 1 0%'));
+  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnName'), '2 1 0%', true, 'name'));
+  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnMembers'), '0.8 1 0%', true, 'members'));
+  headerRow.appendChild(createHeaderCell(t('mods.guilds.columnPoints'), '0.8 1 0%', true, 'points'));
   headerRow.appendChild(createHeaderCell(t('mods.guilds.columnLeader'), '1.2 1 0%'));
   headerRow.appendChild(createHeaderCell(t('mods.guilds.columnAction'), '1 1 0%'));
+
+  // Update all sort indicators to reflect default sort (points descending)
+  sortIndicators.forEach((indicator, key) => {
+    if (key === sortBy) {
+      indicator.textContent = sortDirection === 'asc' ? '▲' : '▼';
+      indicator.style.opacity = '1';
+    } else {
+      indicator.textContent = '⇅';
+      indicator.style.opacity = '0.4';
+    }
+  });
 
   const guildBox = createGuildBox({
     headerRow: headerRow,
@@ -2702,7 +2990,7 @@ async function showGuildBrowser() {
     });
 
     searchInput.addEventListener('input', (e) => {
-      loadGuilds(e.target.value);
+      loadGuilds(e.target.value, sortBy, sortDirection);
     });
 
     searchContainer.appendChild(searchInput);
@@ -2729,7 +3017,7 @@ async function showGuildBrowser() {
       const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
       if (buttonContainer) {
         setupFooter(buttonContainer);
-        await loadGuilds();
+        await loadGuilds('', sortBy, sortDirection);
         if (searchInput) searchInput.focus();
       }
     }
@@ -3069,10 +3357,11 @@ async function openGuildPanel() {
         })(),
         buttons: [
           {
-            text: t('mods.guilds.cancel'),
-            onClick: () => {
+            text: t('mods.guilds.back'),
+            onClick: async () => {
               const dialog = getOpenDialog();
               if (dialog) dialog.remove();
+              await openGuildPanel();
             }
           },
           {
@@ -3147,7 +3436,7 @@ async function openGuildPanel() {
         }
       
       const title = document.createElement('div');
-      title.textContent = 'Invited Players:';
+      title.textContent = t('mods.guilds.invitedPlayers');
       title.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px; opacity: 0.7; margin-bottom: 4px;`;
       invitedPlayersContainer.appendChild(title);
       
@@ -3171,12 +3460,50 @@ async function openGuildPanel() {
         playerName.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px;`;
         
         const invitedBy = document.createElement('span');
-        invitedBy.textContent = `Invited by ${invite.invitedBy}`;
+        invitedBy.textContent = tReplace('mods.guilds.invitedBy', { name: invite.invitedBy });
         invitedBy.style.cssText = `font-size: 9px; opacity: 0.6; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; margin-top: 2px;`;
         
         playerInfo.appendChild(playerName);
         playerInfo.appendChild(invitedBy);
         inviteItem.appendChild(playerInfo);
+        
+        // Add remove button if user has invite permission
+        if (currentMember && hasPermission(currentMember.role, 'invite')) {
+          const removeBtn = document.createElement('button');
+          removeBtn.textContent = '×';
+          removeBtn.style.cssText = `
+            background: rgba(255, 107, 107, 0.3);
+            border: 1px solid rgba(255, 107, 107, 0.5);
+            color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 8px;
+            flex-shrink: 0;
+          `;
+          removeBtn.title = t('mods.guilds.removeInvite');
+          removeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              await removeInviteFromFirebase(guild.id, invite.playerNameHashed);
+              // Post system message
+              await sendGuildSystemMessage(guild.id, `${currentPlayer} cancelled the invite for ${invite.playerName}`);
+              // Refresh invite list
+              await loadInvitedPlayers();
+            } catch (error) {
+              console.error('[Guilds] Error removing invite:', error);
+              showWarningModal(t('mods.guilds.error'), error.message || t('mods.guilds.failedToRemoveInvite'));
+            }
+          });
+          inviteItem.appendChild(removeBtn);
+        }
         
         invitedPlayersContainer.appendChild(inviteItem);
       });
@@ -3294,10 +3621,11 @@ async function openGuildPanel() {
         })(),
         buttons: [
           {
-            text: t('mods.guilds.cancel'),
-            onClick: () => {
+            text: t('mods.guilds.back'),
+            onClick: async () => {
               const dialog = getOpenDialog();
               if (dialog) dialog.remove();
+              await openGuildPanel();
             }
           },
           {
@@ -3521,10 +3849,11 @@ async function openGuildPanel() {
         })(),
         buttons: [
           {
-            text: t('mods.guilds.cancel'),
-            onClick: () => {
+            text: t('mods.guilds.back'),
+            onClick: async () => {
               const dialog = getOpenDialog();
               if (dialog) dialog.remove();
+              await openGuildPanel();
             }
           },
           {
@@ -3594,6 +3923,36 @@ async function openGuildPanel() {
     adminContainer.appendChild(joinTypeSection);
   }
 
+  // Guild Points (visible to all members)
+  const pointsSection = document.createElement('div');
+  pointsSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
+  
+  const pointsLabel = document.createElement('label');
+  pointsLabel.textContent = t('mods.guilds.guildPoints');
+  pointsLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
+  
+  const currentPoints = document.createElement('div');
+  currentPoints.textContent = '...';
+  currentPoints.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 12px;
+    opacity: 0.8;
+    padding: 4px;
+    min-height: 20px;
+    font-weight: 600;
+  `;
+  
+  // Calculate and display points
+  calculateGuildPoints(guild.id).then(points => {
+    currentPoints.textContent = formatNumber(points);
+  }).catch(() => {
+    currentPoints.textContent = '0';
+  });
+  
+  pointsSection.appendChild(pointsLabel);
+  pointsSection.appendChild(currentPoints);
+  adminContainer.appendChild(pointsSection);
+
   // Delete Guild (Leader only, when they are the only member)
   if (isLeader && members.length === 1) {
     const deleteSection = document.createElement('div');
@@ -3629,10 +3988,11 @@ async function openGuildPanel() {
         })(),
         buttons: [
           {
-            text: t('mods.guilds.cancel'),
-            onClick: () => {
+            text: t('mods.guilds.back'),
+            onClick: async () => {
               const dialog = getOpenDialog();
               if (dialog) dialog.remove();
+              await openGuildPanel();
             }
           },
           {
@@ -3786,8 +4146,8 @@ async function openGuildPanel() {
   const modalTitle = guild.abbreviation ? `${guild.name} [${guild.abbreviation}]` : guild.name;
   const modal = api.ui.components.createModal({
     title: modalTitle,
-    width: MODAL_DIMENSIONS.WIDTH,
-    height: MODAL_DIMENSIONS.HEIGHT,
+    width: GUILD_PANEL_DIMENSIONS.WIDTH,
+    height: GUILD_PANEL_DIMENSIONS.HEIGHT,
     content: contentDiv,
     buttons: [{
       text: t('mods.guilds.close'),
@@ -3799,7 +4159,7 @@ async function openGuildPanel() {
   setTimeout(() => {
     const dialog = getOpenDialog();
     if (dialog) {
-      applyModalStyles(dialog, MODAL_DIMENSIONS.WIDTH, MODAL_DIMENSIONS.HEIGHT);
+      applyModalStyles(dialog, GUILD_PANEL_DIMENSIONS.WIDTH, GUILD_PANEL_DIMENSIONS.HEIGHT);
       const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
       if (buttonContainer) {
         setupFooter(buttonContainer);

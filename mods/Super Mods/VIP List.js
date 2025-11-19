@@ -465,7 +465,7 @@ const tReplace = (key, replacements) => {
 };
 
 // =======================
-// 5. Player Data Helpers
+// 6. Player Data Helpers
 // =======================
 
 // Get current player's name from game state
@@ -572,7 +572,7 @@ function extractPlayerInfoFromProfile(profileData, playerName) {
 }
 
 // =======================
-// 6. Messaging/Chat Functions
+// 7. Messaging/Chat Functions
 // =======================
 
 const CHAT_PANEL_ID_PREFIX = 'vip-chat-panel-';
@@ -6265,18 +6265,24 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
           }
         });
         
-        // Check ALL messages (not just new ones) for date changes
-        // This catches cases where older messages from different dates are in allMessages
-        const allMessageDateKeys = new Set();
-        allMessages.forEach(msg => {
-          if (msg.timestamp) {
-            allMessageDateKeys.add(getDateKey(msg.timestamp));
+        // Get the last displayed message's date key (for checking if new messages cross date boundaries)
+        let lastDisplayedDateKey = null;
+        if (displayedMsgElements.length > 0) {
+          const lastMsgElement = displayedMsgElements[displayedMsgElements.length - 1];
+          const lastMsgId = lastMsgElement.getAttribute('data-message-id');
+          if (lastMsgId) {
+            const lastMsg = allMessages.find(msg => msg.id === lastMsgId);
+            if (lastMsg && lastMsg.timestamp) {
+              lastDisplayedDateKey = getDateKey(lastMsg.timestamp);
+            }
           }
-        });
+        }
         
-        // Check if allMessages contains date keys that aren't in displayed messages
-        // This means we have messages from different dates that need to be inserted
-        const hasDateChange = Array.from(allMessageDateKeys).some(dateKey => !displayedDateKeys.has(dateKey));
+        // Check NEW messages (not already displayed) for date changes
+        // Only rebuild if new messages have different dates than the last displayed message
+        const newMessages = allMessages.filter(msg => !allDisplayedIds.includes(msg.id));
+        const hasDateChange = newMessages.length > 0 && lastDisplayedDateKey !== null && 
+          newMessages.some(msg => msg.timestamp && getDateKey(msg.timestamp) !== lastDisplayedDateKey);
         
         // Check if any message in allMessages has an earlier timestamp than the first displayed message
         // This means we have older messages that need to be inserted at the top
@@ -6299,7 +6305,7 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
         }
         
         // Only rebuild if:
-        // 1. Date changed (messages from different dates need proper date dividers)
+        // 1. Date changed in NEW messages (new messages from different dates need proper date dividers)
         // 2. Older messages detected (need to insert at the top, can't just append)
         // Don't rebuild just because there are newer messages - those can be appended normally
         if (hasDateChange || hasOlderMessages) {
@@ -6348,18 +6354,20 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       return;
     }
     
+    // IMPORTANT: If no messages and not initial load, return early BEFORE clearing container
+    // This prevents clearing the container when API fails or all messages are filtered out
+    if (messages.length === 0 && !isInitialLoad) {
+      // No new messages and not initial load - just update count
+      if (panel) panel._previousMessageCount = currentDisplayedCount;
+      return;
+    }
+    
     if (needsFullRebuild) {
       container.innerHTML = '';
       // Reset oldest loaded message ID on rebuild
       if (messages.length > 0) {
         panel._oldestLoadedMessageId = messages[0].id;
       }
-    }
-    
-    if (messages.length === 0 && !isInitialLoad) {
-      // No new messages and not initial load - just update count
-      if (panel) panel._previousMessageCount = currentDisplayedCount;
-      return;
     }
     
     if (messages.length === 0 && isInitialLoad) {
@@ -8614,7 +8622,7 @@ async function openMessageDialog(toPlayer) {
 }
 
 // =======================
-// 7. Cyclopedia Integration
+// 8. Cyclopedia Integration
 // =======================
 
 // Open Cyclopedia modal for a specific player
@@ -8795,7 +8803,7 @@ function openCyclopediaForPlayer(playerName) {
 }
 
 // =======================
-// 8. Dropdown Positioning
+// 9. Dropdown Positioning
 // =======================
 
 // Check if dropdown should open upward based on available space
@@ -8978,7 +8986,7 @@ function adjustDropdownPosition(dropdown, button, openUpward) {
 }
 
 // =======================
-// 8.1. Shared Dropdown Helper Functions
+// 9.1. Shared Dropdown Helper Functions
 // =======================
 
 // Reset dropdown positioning styles
@@ -9103,7 +9111,7 @@ function toggleDropdown(dropdown, button, container, options = {}) {
 }
 
 // =======================
-// 8.2. Additional Shared Helper Functions
+// 9.2. Additional Shared Helper Functions
 // =======================
 
 // Find container (modal, panel, or scrollable parent)
@@ -9148,7 +9156,7 @@ function getStatusColor(statusText) {
 }
 
 // =======================
-// 9. Search Input Management
+// 10. Search Input Management
 // =======================
 
 // Add search input styles if not already added
@@ -9269,7 +9277,7 @@ function createSearchInput(originalPlaceholder, forPanel = false) {
 }
 
 // =======================
-// 10. Modal Styling
+// 11. Modal Styling
 // =======================
 
 // Apply modal styles after creation
@@ -9355,7 +9363,7 @@ function setupModalSearchInput(buttonContainer) {
 }
 
 // =======================
-// 11. VIP List Core Functions
+// 12. VIP List Core Functions
 // =======================
 
 // Get font size based on interface type (panel vs modal)
@@ -11103,7 +11111,7 @@ function createChatHeaderButton() {
 }
 
 // =======================
-// 12. Exports & Lifecycle Management
+// 13. Exports & Lifecycle Management
 // =======================
 
 exports = {
