@@ -32,6 +32,11 @@ const GUILD_ROLES = {
   MEMBER: 'member'
 };
 
+const GUILD_JOIN_TYPES = {
+  OPEN: 'open',
+  INVITE_ONLY: 'invite_only'
+};
+
 const ROLE_PERMISSIONS = {
   [GUILD_ROLES.LEADER]: ['invite', 'kick', 'promote', 'demote', 'edit', 'delete', 'chat'],
   [GUILD_ROLES.OFFICER]: ['invite', 'kick', 'chat'],
@@ -121,13 +126,150 @@ async function hashUsername(username) {
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return hashHex.substring(0, 32);
   } catch (error) {
-    console.error('[Guilds] Username hashing error:', error);
+    // crypto.subtle should always be available in modern browsers
+    // This fallback is only for edge cases (very old browsers, non-browser environments)
+    console.warn('[Guilds] Username hashing failed, using fallback (this should not happen in modern browsers):', error);
+    // Fallback: sanitize username (not cryptographically secure, but better than nothing)
     return username.toLowerCase().replace(/[^a-z0-9_]/g, '_');
   }
 }
 
 async function hashGuildId(guildName) {
   return await hashUsername(guildName);
+}
+
+// =======================
+// Generic Cache Utility
+// =======================
+
+// Generic TTL cache implementation that can be reused for different data types
+function createTTLCache(defaultTTL = 10 * 60 * 1000) {
+  const cache = new Map();
+  
+  return {
+    get(key, customTTL = null) {
+      if (!key) return null;
+      const normalizedKey = typeof key === 'string' ? key.toLowerCase() : key;
+      const cached = cache.get(normalizedKey);
+      if (!cached) return null;
+      
+      const ttl = customTTL !== null ? customTTL : defaultTTL;
+      const now = Date.now();
+      if (now - cached.timestamp < ttl) {
+        return cached.value;
+      }
+      
+      // Cache expired, remove it
+      cache.delete(normalizedKey);
+      return null;
+    },
+    
+    set(key, value, customTTL = null) {
+      if (key === null || key === undefined) return;
+      const normalizedKey = typeof key === 'string' ? key.toLowerCase() : key;
+      cache.set(normalizedKey, {
+        value,
+        timestamp: Date.now(),
+        ttl: customTTL !== null ? customTTL : defaultTTL
+      });
+    },
+    
+    has(key) {
+      if (!key) return false;
+      const normalizedKey = typeof key === 'string' ? key.toLowerCase() : key;
+      if (!cache.has(normalizedKey)) return false;
+      
+      const cached = cache.get(normalizedKey);
+      const now = Date.now();
+      if (now - cached.timestamp < cached.ttl) {
+        return true;
+      }
+      
+      // Cache expired, remove it
+      cache.delete(normalizedKey);
+      return false;
+    },
+    
+    delete(key) {
+      if (!key) return false;
+      const normalizedKey = typeof key === 'string' ? key.toLowerCase() : key;
+      return cache.delete(normalizedKey);
+    },
+    
+    clear() {
+      cache.clear();
+    },
+    
+    size() {
+      return cache.size;
+    },
+    
+    // Clean up expired entries (useful for periodic cleanup)
+    cleanup() {
+      const now = Date.now();
+      for (const [key, cached] of cache.entries()) {
+        if (now - cached.timestamp >= cached.ttl) {
+          cache.delete(key);
+        }
+      }
+    }
+  };
+}
+
+// Cache for player existence checks (10 minutes TTL)
+const playerExistsCache = createTTLCache(10 * 60 * 1000);
+
+// Check if a player exists by fetching their profile data (with caching)
+async function playerExists(playerName) {
+  if (!playerName || typeof playerName !== 'string') {
+    return false;
+  }
+  
+  // Check cache first
+  const cached = playerExistsCache.get(playerName);
+  if (cached !== null) {
+    return cached;
+  }
+  
+  try {
+    const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+    
+    const response = await fetch(apiUrl, {
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (!response.ok) {
+      const exists = false;
+      playerExistsCache.set(playerName, exists);
+      return exists;
+    }
+    
+    const data = await response.json();
+    
+    // Check if player data exists
+    let exists = false;
+    
+    if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
+      const profileData = data[0].result.data.json;
+      // Check if the result contains an error (player doesn't exist)
+      exists = !data[0]?.result?.error && profileData && (typeof profileData !== 'object' || profileData.name);
+    } else {
+      const profileData = data;
+      // Check if data is null or doesn't have a name (player doesn't exist)
+      exists = profileData && (typeof profileData !== 'object' || profileData.name);
+    }
+    
+    // Cache the result
+    playerExistsCache.set(playerName, exists);
+    return exists;
+  } catch (error) {
+    // Network or parsing errors - don't cache false, let it retry next time
+    // Only log unexpected errors (not network timeouts which are common)
+    if (!error.message || (!error.message.includes('fetch') && !error.message.includes('network'))) {
+      console.error('[Guilds] Error checking if player exists:', error);
+    }
+    return false; // Return false but don't cache it
+  }
 }
 
 // =======================
@@ -228,6 +370,71 @@ function createStyledInput({ type = 'text', placeholder = '', maxLength, classNa
   return input;
 }
 
+// Create styled select element
+function createStyledSelect({ className = 'pixel-font-14', style = {} } = {}) {
+  const select = document.createElement('select');
+  select.className = className;
+  
+  const baseStyle = `
+    width: 100%;
+    padding: 4px 8px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border-width: 4px;
+    border-style: solid;
+    border-color: transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 14px;
+    min-height: 35px;
+    height: auto;
+    line-height: 1.4;
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  `;
+  
+  const customStyle = Object.entries(style).map(([k, v]) => `${k}: ${v}`).join('; ');
+  select.style.cssText = baseStyle + (customStyle ? ` ${customStyle}` : '');
+  
+  // Ensure global style for select options is added
+  if (!document.getElementById('guild-select-options-style')) {
+    const styleElement = document.createElement('style');
+    styleElement.id = 'guild-select-options-style';
+    styleElement.textContent = `
+      select option {
+        background: #1a1a1a !important;
+        color: rgb(255, 255, 255) !important;
+      }
+      select option:checked {
+        background: #1a1a1a !important;
+        color: rgb(255, 255, 255) !important;
+      }
+      select:focus option:checked {
+        background: rgba(100, 181, 246, 0.3) !important;
+        color: rgb(255, 255, 255) !important;
+      }
+      select option:hover {
+        background: rgba(100, 181, 246, 0.2) !important;
+        color: rgb(255, 255, 255) !important;
+      }
+    `;
+    document.head.appendChild(styleElement);
+  }
+  
+  return select;
+}
+
+// Create styled option element
+function createStyledOption({ value, text, selected = false }) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = text;
+  option.selected = selected;
+  option.style.cssText = `background: #1a1a1a; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};`;
+  return option;
+}
+
 // Create form field with label
 function createFormField(labelText, inputElement) {
   const container = document.createElement('div');
@@ -253,17 +460,34 @@ function showWarningModal(title, message, width = 450) {
   `;
   warningContent.textContent = message;
   
-  api.ui.components.createModal({
+  createStyledModal({
     title,
     width,
     content: warningContent,
     buttons: [{ text: 'OK', primary: true, onClick: () => {} }]
   });
+}
+
+// Show confirmation modal
+function showConfirmModal(title, message, onConfirm, width = 450) {
+  const confirmContent = document.createElement('div');
+  confirmContent.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 14px;
+    padding: 8px;
+    text-align: center;
+  `;
+  confirmContent.textContent = message;
   
-  setTimeout(() => {
-    const dialog = getOpenDialog();
-    if (dialog) applyModalStyles(dialog, width, null);
-  }, 100);
+  createStyledModal({
+    title,
+    width,
+    content: confirmContent,
+    buttons: [
+      createCloseDialogButton(t('mods.guilds.cancel'), false),
+      createCloseDialogButton('OK', true, onConfirm)
+    ]
+  });
 }
 
 // =======================
@@ -404,7 +628,7 @@ function clearPlayerGuild() {
 // Firebase Operations
 // =======================
 
-async function createGuild(guildName, description = '', abbreviation = '') {
+async function createGuild(guildName, description = '', abbreviation = '', joinType = GUILD_JOIN_TYPES.OPEN) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
@@ -455,7 +679,8 @@ async function createGuild(guildName, description = '', abbreviation = '') {
       leader: currentPlayer,
       leaderHashed: hashedPlayer,
       createdAt: timestamp,
-      memberCount: 1
+      memberCount: 1,
+      joinType: joinType || GUILD_JOIN_TYPES.OPEN
     };
 
     // Create guild in Firebase
@@ -492,6 +717,11 @@ async function createGuild(guildName, description = '', abbreviation = '') {
 
     // Save locally
     savePlayerGuild(guildData);
+
+    // Sync guild chat tab if VIP List mod is loaded
+    if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+      window.syncGuildChatTab();
+    }
 
     // Post system message
     await sendGuildSystemMessage(guildId, `Guild "${guildName.trim()}" was created by ${currentPlayer}`);
@@ -556,6 +786,12 @@ async function joinGuild(guildId) {
       throw new Error('Guild not found');
     }
 
+    // Check if guild is invite-only
+    const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
+    if (joinType === GUILD_JOIN_TYPES.INVITE_ONLY) {
+      throw new Error('This guild is invite-only. You need an invitation to join.');
+    }
+
     const members = await getGuildMembers(guildId);
     if (members.length >= GUILD_CONFIG.maxMembers) {
       throw new Error('Guild is full');
@@ -591,6 +827,11 @@ async function joinGuild(guildId) {
     await updatePlayerGuildReference(hashedPlayer, guildId, guild.name);
 
     savePlayerGuild(guild);
+
+    // Sync guild chat tab if VIP List mod is loaded
+    if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+      window.syncGuildChatTab();
+    }
 
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} joined the guild`);
@@ -632,12 +873,63 @@ async function leaveGuild(guildId) {
 
     clearPlayerGuild();
 
+    // Sync guild chat tab (will remove it since player has no guild) if VIP List mod is loaded
+    if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+      window.syncGuildChatTab();
+    }
+
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} left the guild`);
 
     return true;
   } catch (error) {
     console.error('[Guilds] Error leaving guild:', error);
+    throw error;
+  }
+}
+
+// Update guild join type
+async function updateGuildJoinType(guildId, newJoinType) {
+  try {
+    const currentPlayer = validateCurrentPlayer();
+
+    const guild = await getGuild(guildId);
+    if (!guild) {
+      throw new Error('Guild not found');
+    }
+
+    if (guild.leader.toLowerCase() !== currentPlayer.toLowerCase()) {
+      throw new Error('Only the guild leader can update the join type');
+    }
+
+    if (newJoinType !== GUILD_JOIN_TYPES.OPEN && newJoinType !== GUILD_JOIN_TYPES.INVITE_ONLY) {
+      throw new Error('Invalid join type');
+    }
+
+    const response = await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ joinType: newJoinType })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to update join type: ${response.status}`);
+    }
+
+    // Update local storage
+    const playerGuild = getPlayerGuild();
+    if (playerGuild && playerGuild.id === guildId) {
+      playerGuild.joinType = newJoinType;
+      savePlayerGuild(playerGuild);
+    }
+
+    // Post system message
+    const joinTypeText = newJoinType === GUILD_JOIN_TYPES.OPEN ? 'open' : 'invite-only';
+    await sendGuildSystemMessage(guildId, `${currentPlayer} changed the guild join type to ${joinTypeText}`);
+
+    return true;
+  } catch (error) {
+    console.error('[Guilds] Error updating join type:', error);
     throw error;
   }
 }
@@ -889,6 +1181,14 @@ async function kickMember(guildId, memberUsername) {
     // Remove player's guild reference
     await updatePlayerGuildReference(hashedMember, null, null);
 
+    // Sync guild chat tab if the kicked member is the current player and VIP List mod is loaded
+    if (targetMember.username.toLowerCase() === currentPlayer.toLowerCase()) {
+      clearPlayerGuild();
+      if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+        window.syncGuildChatTab();
+      }
+    }
+
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} kicked ${memberUsername} from the guild`);
 
@@ -949,6 +1249,11 @@ async function deleteGuild(guildId) {
     // Clear local storage
     clearPlayerGuild();
 
+    // Sync guild chat tab (will remove it since player has no guild) if VIP List mod is loaded
+    if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+      window.syncGuildChatTab();
+    }
+
     return true;
   } catch (error) {
     console.error('[Guilds] Error deleting guild:', error);
@@ -980,21 +1285,37 @@ async function invitePlayer(guildId, playerName) {
       throw new Error('Guild is full');
     }
 
+    // Check if player exists before inviting
+    const playerExistsCheck = await playerExists(playerName);
+    if (!playerExistsCheck) {
+      throw new Error('Player does not exist');
+    }
+
     const hashedPlayer = await hashUsername(playerName);
     const existingMember = members.find(m => m.usernameHashed === hashedPlayer);
     if (existingMember) {
       throw new Error('Player is already a member');
     }
 
+    // Check if invite already exists (prevent duplicates)
+    // This check prevents duplicate invites from being created
+    const existingInviteResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}.json`);
+    if (existingInviteResponse.ok) {
+      const existingInvite = await existingInviteResponse.json();
+      if (existingInvite) {
+        throw new Error('Player has already been invited');
+      }
+    }
+
     const inviteData = {
       guildId,
       guildName: guild.name,
+      playerName, // Store plain text player name
       invitedBy: currentPlayer,
       invitedByHashed: await hashUsername(currentPlayer),
       invitedAt: Date.now()
     };
 
-    // Store invite in player's invites path
     const response = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1005,11 +1326,44 @@ async function invitePlayer(guildId, playerName) {
       throw new Error(`Failed to send invite: ${response.status}`);
     }
 
+    // Also store invite in guild's invites path for tracking (check for duplicates here too)
+    const guildInviteCheck = await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`);
+    if (guildInviteCheck.ok) {
+      const existingGuildInvite = await guildInviteCheck.json();
+      if (existingGuildInvite) {
+        // Invite already exists in guild tracking, but we just created it in player path
+        // This is fine - just update the guild invite with latest info
+      }
+    }
+
+    const guildInviteData = {
+      playerName,
+      playerNameHashed: hashedPlayer,
+      invitedBy: currentPlayer,
+      invitedByHashed: await hashUsername(currentPlayer),
+      invitedAt: Date.now()
+    };
+    
+    await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(guildInviteData)
+    });
+
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} invited ${playerName} to the guild`);
 
     return true;
   } catch (error) {
+    // Don't log expected validation errors as errors
+    if (error.message && (
+      error.message.includes('already been invited') ||
+      error.message.includes('already a member') ||
+      error.message.includes('Guild is full') ||
+      error.message.includes('does not exist')
+    )) {
+      throw error; // Re-throw without logging
+    }
     console.error('[Guilds] Error inviting player:', error);
     throw error;
   }
@@ -1024,6 +1378,10 @@ async function acceptInvite(guildId) {
     if (currentPlayer) {
       const hashedPlayer = await hashUsername(currentPlayer);
       await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}.json`, {
+        method: 'DELETE'
+      });
+      // Also remove from guild's invites tracking
+      await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`, {
         method: 'DELETE'
       });
     }
@@ -1050,6 +1408,11 @@ async function declineInvite(guildId) {
       throw new Error(`Failed to decline invite: ${response.status}`);
     }
     
+    // Also remove from guild's invites tracking
+    await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`, {
+      method: 'DELETE'
+    });
+    
     return true;
   } catch (error) {
     console.error('[Guilds] Error declining invite:', error);
@@ -1074,6 +1437,123 @@ async function getPlayerInvites() {
   } catch (error) {
     console.error('[Guilds] Error getting player invites:', error);
     return [];
+  }
+}
+
+// Remove an invite from Firebase (both guild and player paths)
+async function removeInviteFromFirebase(guildId, hashedPlayer) {
+  try {
+    // Remove from guild invites path
+    await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`, {
+      method: 'DELETE'
+    });
+    
+    // Remove from player invites path
+    await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}.json`, {
+      method: 'DELETE'
+    });
+  } catch (error) {
+    console.error('[Guilds] Error removing invite from Firebase:', error);
+  }
+}
+
+async function getGuildInvites(guildId) {
+  try {
+    const invites = [];
+    const inviteMap = new Map(); // Track by playerNameHashed to avoid duplicates
+    
+    // Get invites from new guild invites path
+    const response = await fetch(`${getGuildInvitesApiUrl(guildId)}.json`);
+    const data = await handleFirebaseResponse(response, 'get guild invites', []);
+    if (data && typeof data === 'object') {
+      Object.values(data).forEach(invite => {
+        if (invite && invite.playerNameHashed) {
+          inviteMap.set(invite.playerNameHashed, invite);
+        }
+      });
+    }
+    
+    // Also check for old invites in players path and migrate them
+    try {
+      const playersResponse = await fetch(`${getPlayerGuildApiUrl()}.json`);
+      if (playersResponse.ok) {
+        const playersData = await playersResponse.json();
+        if (playersData && typeof playersData === 'object') {
+          // Check each player's invites
+          for (const [hashedPlayer, playerData] of Object.entries(playersData)) {
+            if (playerData && playerData.invites && playerData.invites[guildId]) {
+              const oldInvite = playerData.invites[guildId];
+              // If not already in new format, migrate it
+              if (!inviteMap.has(hashedPlayer)) {
+                // Get player name from old invite (should be stored in plain text now)
+                const playerName = oldInvite.playerName || 'Unknown Player';
+                
+                await migrateInviteToGuildPath(guildId, playerName, hashedPlayer, oldInvite);
+                
+                // Add to invites list
+                inviteMap.set(hashedPlayer, {
+                  playerName,
+                  playerNameHashed: hashedPlayer,
+                  invitedBy: oldInvite.invitedBy || 'Unknown',
+                  invitedByHashed: oldInvite.invitedByHashed || '',
+                  invitedAt: oldInvite.invitedAt || Date.now()
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - old invites check is optional
+    }
+    
+    // Validate invites and remove ones for non-existent players
+    const validInvites = [];
+    for (const invite of inviteMap.values()) {
+      if (invite && invite.playerName && invite.playerNameHashed) {
+        // Check if player exists
+        const exists = await playerExists(invite.playerName);
+        if (exists) {
+          validInvites.push(invite);
+        } else {
+          // Player doesn't exist, remove invite from Firebase
+          console.log(`[Guilds] Removing invite for non-existent player: ${invite.playerName}`);
+          await removeInviteFromFirebase(guildId, invite.playerNameHashed);
+        }
+      } else {
+        // Invalid invite data, skip it
+        if (invite && invite.playerNameHashed) {
+          console.log(`[Guilds] Removing invite with invalid data: ${invite.playerNameHashed}`);
+          await removeInviteFromFirebase(guildId, invite.playerNameHashed);
+        }
+      }
+    }
+    
+    return validInvites;
+  } catch (error) {
+    console.error('[Guilds] Error getting guild invites:', error);
+    return [];
+  }
+}
+
+// Migrate old invite from player path to guild path
+async function migrateInviteToGuildPath(guildId, playerName, hashedPlayer, inviteData) {
+  try {
+    const guildInviteData = {
+      playerName,
+      playerNameHashed: hashedPlayer,
+      invitedBy: inviteData.invitedBy || 'Unknown',
+      invitedByHashed: inviteData.invitedByHashed || '',
+      invitedAt: inviteData.invitedAt || Date.now()
+    };
+    
+    await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(guildInviteData)
+    });
+  } catch (error) {
+    console.error('[Guilds] Error migrating invite:', error);
   }
 }
 
@@ -1226,9 +1706,204 @@ const CSS_CONSTANTS = {
     TEXT_PRIMARY: 'rgb(230, 215, 176)',
     TEXT_WHITE: 'rgb(255, 255, 255)',
     ERROR: '#ff6b6b',
-    SUCCESS: '#4caf50'
+    SUCCESS: '#4caf50',
+    ROLE_LEADER: '#ffd700', // Gold for leader
+    ROLE_OFFICER: '#64b5f6', // Blue for officer
+    ROLE_MEMBER: '#a5d6a7' // Green for member
   }
 };
+
+// =======================
+// Dropdown Menu Functions (VIP List style)
+// =======================
+
+// Add hover effect to element
+function addHoverEffect(element, hoverBackground = 'rgba(255, 255, 255, 0.1)') {
+  element.addEventListener('mouseenter', () => {
+    element.style.background = hoverBackground;
+  });
+  element.addEventListener('mouseleave', () => {
+    element.style.background = 'transparent';
+  });
+}
+
+// Find container (modal, panel, or scrollable parent)
+function findDropdownContainer(element) {
+  return element.closest('.column-content-wrapper') || 
+         element.closest('[style*="overflow"]') ||
+         element.closest('[class*="scroll"]');
+}
+
+// Check if dropdown should open upward based on available space
+function shouldDropdownOpenUpward(dropdown, button, container) {
+  const buttonRect = button.getBoundingClientRect();
+  
+  const wasVisible = dropdown.style.display === 'block';
+  dropdown.style.position = 'fixed';
+  dropdown.style.visibility = 'hidden';
+  dropdown.style.display = 'block';
+  dropdown.style.top = '-9999px';
+  dropdown.style.left = '-9999px';
+  
+  void dropdown.offsetHeight;
+  const dropdownHeight = dropdown.offsetHeight || 150;
+  
+  dropdown.style.display = wasVisible ? 'block' : 'none';
+  dropdown.style.position = '';
+  dropdown.style.visibility = '';
+  dropdown.style.top = '';
+  dropdown.style.left = '';
+  
+  let spaceBelow, spaceAbove, containerBottom, containerTop;
+  
+  if (container) {
+    const containerRect = container.getBoundingClientRect();
+    containerBottom = Math.min(containerRect.bottom, window.innerHeight);
+    containerTop = Math.max(containerRect.top, 0);
+    spaceBelow = containerBottom - buttonRect.bottom;
+    spaceAbove = buttonRect.top - containerTop;
+  } else {
+    containerBottom = window.innerHeight;
+    containerTop = 0;
+    spaceBelow = containerBottom - buttonRect.bottom;
+    spaceAbove = buttonRect.top;
+  }
+  
+  const requiredSpace = dropdownHeight + 20;
+  return (spaceBelow < requiredSpace && spaceAbove >= requiredSpace) ||
+         (spaceAbove > spaceBelow && spaceAbove >= requiredSpace);
+}
+
+// Position dropdown above or below button
+function positionDropdown(dropdown, button, openUpward, container) {
+  // Check if button's parent has position: relative
+  const relativeParent = button.closest('div[style*="position: relative"]') || 
+                         (button.parentElement && getComputedStyle(button.parentElement).position === 'relative' ? button.parentElement : null);
+  
+  if (relativeParent) {
+    // Use absolute positioning relative to the positioned parent
+    dropdown.style.position = 'absolute';
+    if (openUpward) {
+      dropdown.style.top = 'auto';
+      dropdown.style.bottom = '100%';
+      dropdown.style.marginTop = '0';
+      dropdown.style.marginBottom = '4px';
+    } else {
+      dropdown.style.top = '100%';
+      dropdown.style.bottom = 'auto';
+      dropdown.style.marginTop = '4px';
+      dropdown.style.marginBottom = '0';
+    }
+    dropdown.style.left = '0';
+    dropdown.style.right = 'auto';
+    dropdown.style.transform = 'none';
+  } else {
+    // Fallback to fixed positioning
+    const buttonRect = button.getBoundingClientRect();
+    
+    if (openUpward) {
+      dropdown.style.position = 'fixed';
+      dropdown.style.top = `${buttonRect.top - dropdown.offsetHeight - 4}px`;
+      dropdown.style.bottom = 'auto';
+      dropdown.style.left = `${buttonRect.left}px`;
+    } else {
+      dropdown.style.position = 'fixed';
+      dropdown.style.top = `${buttonRect.bottom + 4}px`;
+      dropdown.style.bottom = 'auto';
+      dropdown.style.left = `${buttonRect.left}px`;
+    }
+    dropdown.style.marginTop = '0';
+    dropdown.style.marginBottom = '0';
+    dropdown.style.transform = 'none';
+  }
+}
+
+// Reset dropdown positioning styles
+function resetDropdownStyles(dropdown) {
+  dropdown.style.display = 'none';
+  dropdown.style.top = '';
+  dropdown.style.bottom = '';
+  dropdown.style.left = '';
+  dropdown.style.marginTop = '';
+  dropdown.style.marginBottom = '';
+  dropdown.style.transform = '';
+  dropdown.style.position = '';
+}
+
+// Close all dropdowns except the specified one
+function closeAllDropdownsExcept(excludeDropdown) {
+  document.querySelectorAll('.guild-dropdown-menu').forEach(menu => {
+    if (menu !== excludeDropdown) {
+      resetDropdownStyles(menu);
+    }
+  });
+}
+
+// Create dropdown element with base styling
+function createDropdownElement() {
+  const dropdown = document.createElement('div');
+  dropdown.className = 'guild-dropdown-menu';
+  dropdown.style.cssText = `
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    transform: none;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    min-width: 120px;
+    z-index: 10001;
+    margin-top: 4px;
+    padding: 4px;
+    pointer-events: auto;
+  `;
+  return dropdown;
+}
+
+// Create dropdown menu item
+function createDropdownItem(text, onClick, dropdown, options = {}) {
+  const {
+    color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY,
+    fontSize = '',
+    selected = false
+  } = options;
+  
+  const menuItem = document.createElement('div');
+  menuItem.textContent = text;
+  menuItem.style.cssText = `
+    padding: 6px 12px;
+    color: ${color};
+    cursor: pointer;
+    ${fontSize ? `font-size: ${fontSize};` : ''}
+    text-align: left;
+    ${selected ? 'background: rgba(100, 181, 246, 0.2);' : ''}
+  `;
+  
+  addHoverEffect(menuItem);
+  menuItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick();
+    dropdown.style.display = 'none';
+  });
+  
+  return menuItem;
+}
+
+// Toggle dropdown visibility with positioning
+function toggleDropdown(dropdown, button, container) {
+  const isVisible = dropdown.style.display === 'block';
+  closeAllDropdownsExcept(dropdown);
+  
+  if (!isVisible) {
+    const openUpward = shouldDropdownOpenUpward(dropdown, button, container);
+    dropdown.style.display = 'block';
+    void dropdown.offsetHeight;
+    positionDropdown(dropdown, button, openUpward, container);
+  } else {
+    resetDropdownStyles(dropdown);
+  }
+}
 
 function formatTime(timestamp) {
   const date = new Date(timestamp);
@@ -1247,6 +1922,61 @@ function formatTime(timestamp) {
 
 function getOpenDialog() {
   return document.querySelector('div[role="dialog"][data-state="open"]');
+}
+
+// Close the currently open dialog
+function closeDialog() {
+  const dialog = getOpenDialog();
+  if (dialog) dialog.remove();
+}
+
+// Check if modal API is available
+function isModalApiAvailable() {
+  return typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal;
+}
+
+// Ensure modal API is available, show error and return false if not
+function ensureModalApi() {
+  if (!isModalApiAvailable()) {
+    console.error('[Guilds] Modal API not available');
+    return false;
+  }
+  return true;
+}
+
+// Create modal with automatic styling application
+function createStyledModal({ title, width, height, content, buttons, onAfterCreate }) {
+  if (!ensureModalApi()) return null;
+  
+  const modal = api.ui.components.createModal({
+    title,
+    width,
+    height: height !== undefined ? height : null,
+    content,
+    buttons
+  });
+  
+  setTimeout(() => {
+    const dialog = getOpenDialog();
+    if (dialog) {
+      applyModalStyles(dialog, width, height);
+      if (onAfterCreate) onAfterCreate(dialog);
+    }
+  }, 100);
+  
+  return modal;
+}
+
+// Create a button that closes dialog on click
+function createCloseDialogButton(text, primary = false, onClick = null) {
+  return {
+    text,
+    primary,
+    onClick: () => {
+      closeDialog();
+      if (onClick) onClick();
+    }
+  };
 }
 
 function applyModalStyles(dialog, width, height) {
@@ -1366,10 +2096,7 @@ function createGuildBox({headerRow, content}) {
 }
 
 async function showCreateGuildDialog() {
-  if (typeof api === 'undefined' || !api.ui || !api.ui.components || !api.ui.components.createModal) {
-    console.error('[Guilds] Modal API not available');
-    return;
-  }
+  if (!ensureModalApi()) return;
 
   // Check if player is already in a guild
   try {
@@ -1434,6 +2161,27 @@ async function showCreateGuildDialog() {
   const descContainer = createFormField(t('mods.guilds.descriptionLabel'), descInput);
   descContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-height: 0;';
 
+  // Join Type selector
+  const joinTypeContainer = document.createElement('div');
+  joinTypeContainer.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+  
+  const joinTypeLabel = document.createElement('label');
+  joinTypeLabel.textContent = t('mods.guilds.joinTypeLabel');
+  joinTypeLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 14px; margin-bottom: 4px;`;
+  
+  const joinTypeSelect = createStyledSelect();
+  joinTypeSelect.appendChild(createStyledOption({
+    value: GUILD_JOIN_TYPES.OPEN,
+    text: t('mods.guilds.joinTypeOpen')
+  }));
+  joinTypeSelect.appendChild(createStyledOption({
+    value: GUILD_JOIN_TYPES.INVITE_ONLY,
+    text: t('mods.guilds.joinTypeInviteOnly')
+  }));
+  
+  joinTypeContainer.appendChild(joinTypeLabel);
+  joinTypeContainer.appendChild(joinTypeSelect);
+
   const errorMsg = document.createElement('div');
   errorMsg.style.cssText = `
     color: ${CSS_CONSTANTS.COLORS.ERROR};
@@ -1446,13 +2194,14 @@ async function showCreateGuildDialog() {
   contentDiv.appendChild(nameContainer);
   contentDiv.appendChild(abbrevContainer);
   contentDiv.appendChild(descContainer);
+  contentDiv.appendChild(joinTypeContainer);
   contentDiv.appendChild(errorMsg);
 
   let createBtnRef = null;
   const modal = api.ui.components.createModal({
     title: t('mods.guilds.createGuildTitle'),
     width: 450,
-    height: 320,
+    height: null,
     content: contentDiv,
     buttons: [
       {
@@ -1467,6 +2216,7 @@ async function showCreateGuildDialog() {
           const name = nameInput.value.trim();
           const abbrev = abbrevInput.value.trim().toUpperCase();
           const desc = descInput.value.trim();
+          const joinType = joinTypeSelect.value;
 
           if (!name) {
             errorMsg.textContent = t('mods.guilds.guildNameRequired');
@@ -1486,7 +2236,7 @@ async function showCreateGuildDialog() {
           }
 
           try {
-            await createGuild(name, desc, abbrev);
+            await createGuild(name, desc, abbrev, joinType);
             const dialog = getOpenDialog();
             if (dialog) dialog.remove();
             await showGuildBrowser();
@@ -1506,7 +2256,7 @@ async function showCreateGuildDialog() {
   setTimeout(() => {
     const dialog = getOpenDialog();
     if (dialog) {
-      applyModalStyles(dialog, 450, 320);
+      applyModalStyles(dialog, 450, null);
       const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
       if (buttonContainer) {
         createBtnRef = buttonContainer.querySelector('button:last-child');
@@ -1533,52 +2283,37 @@ async function showCreateGuildDialog() {
 }
 
 async function showInvitesDialog() {
+  if (!ensureModalApi()) return;
+
   const invites = await getPlayerInvites();
   if (invites.length === 0) {
-    alert(t('mods.guilds.noPendingInvites'));
+    showWarningModal(t('mods.guilds.invitesTitle'), t('mods.guilds.noPendingInvites'));
     return;
   }
 
-  const dialog = document.createElement('div');
-  dialog.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
-    border: 6px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
-    padding: 20px;
-    z-index: 10000;
-    min-width: 400px;
-    max-width: 500px;
-    max-height: 500px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  const contentDiv = document.createElement('div');
+  contentDiv.style.cssText = `
+    width: 100%;
     display: flex;
     flex-direction: column;
-  `;
-
-  const title = document.createElement('h3');
-  title.textContent = t('mods.guilds.invitesTitle');
-  title.style.cssText = `
-    margin: 0 0 16px 0;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    font-size: 16px;
-    font-weight: 600;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
   `;
 
   const invitesList = document.createElement('div');
   invitesList.style.cssText = `
-    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 400px;
     overflow-y: auto;
-    margin-bottom: 16px;
   `;
 
   invites.forEach(invite => {
     const inviteItem = document.createElement('div');
     inviteItem.style.cssText = `
       padding: 12px;
-      margin-bottom: 8px;
       background: rgba(255, 255, 255, 0.05);
       border-radius: 4px;
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1606,24 +2341,34 @@ async function showInvitesDialog() {
     buttonContainer.style.cssText = 'display: flex; gap: 8px;';
 
     const acceptBtn = createButton(t('mods.guilds.accept'), async () => {
+      closeDialog();
       try {
         await acceptInvite(invite.guildId);
-        document.body.removeChild(dialog);
+        // Refresh invite list in guild panel if it's open
+        const guildPanel = document.querySelector('.guild-invited-players-container');
+        if (guildPanel && guildPanel.refreshInvites) {
+          await guildPanel.refreshInvites();
+        }
         await openGuildPanel();
       } catch (error) {
-        alert(error.message);
+        showWarningModal(t('mods.guilds.error'), error.message);
       }
     }, { background: 'rgba(76, 175, 80, 0.3)', flex: '1' });
 
     const declineBtn = createButton(t('mods.guilds.decline'), async () => {
       try {
         await declineInvite(invite.guildId);
-        document.body.removeChild(dialog);
+        // Refresh invite list in guild panel if it's open
+        const guildPanel = document.querySelector('.guild-invited-players-container');
+        if (guildPanel && guildPanel.refreshInvites) {
+          await guildPanel.refreshInvites();
+        }
+        closeDialog();
         if (invites.length > 1) {
           showInvitesDialog();
         }
       } catch (error) {
-        alert(error.message);
+        showWarningModal(t('mods.guilds.error'), error.message);
       }
     }, { background: 'rgba(255, 107, 107, 0.3)', flex: '1' });
 
@@ -1636,30 +2381,32 @@ async function showInvitesDialog() {
     invitesList.appendChild(inviteItem);
   });
 
-  const closeBtn = createButton(t('mods.guilds.close'), () => {
-    document.body.removeChild(dialog);
-  }, { width: '100%' });
+  contentDiv.appendChild(invitesList);
 
-  dialog.appendChild(title);
-  dialog.appendChild(invitesList);
-  dialog.appendChild(closeBtn);
-
-  document.body.appendChild(dialog);
-
-  const escHandler = (e) => {
-    if (e.key === 'Escape' && document.contains(dialog)) {
-      document.body.removeChild(dialog);
-      document.removeEventListener('keydown', escHandler);
+  createStyledModal({
+    title: t('mods.guilds.invitesTitle'),
+    width: 450,
+    content: contentDiv,
+    buttons: [{
+      text: t('mods.guilds.close'),
+      primary: true,
+      onClick: () => {}
+    }],
+    onAfterCreate: (dialog) => {
+      // Add ESC key support to close modal
+      const handleEsc = (e) => {
+        if (e.key === 'Escape' || e.keyCode === 27) {
+          dialog.remove();
+          document.removeEventListener('keydown', handleEsc);
+        }
+      };
+      document.addEventListener('keydown', handleEsc);
     }
-  };
-  document.addEventListener('keydown', escHandler);
+  });
 }
 
 async function showGuildBrowser() {
-  if (typeof api === 'undefined' || !api.ui || !api.ui.components || !api.ui.components.createModal) {
-    console.error('[Guilds] Modal API not available');
-    return;
-  }
+  if (!ensureModalApi()) return;
 
   const contentDiv = document.createElement('div');
   contentDiv.style.width = '100%';
@@ -1758,6 +2505,19 @@ async function showGuildBrowser() {
         `;
         guildName.appendChild(abbrevSpan);
       }
+      const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
+      if (joinType === GUILD_JOIN_TYPES.INVITE_ONLY) {
+        const inviteOnlyBadge = document.createElement('span');
+        inviteOnlyBadge.textContent = ` (${t('mods.guilds.inviteOnly')})`;
+        inviteOnlyBadge.style.cssText = `
+          color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+          opacity: 0.6;
+          font-size: 11px;
+          font-weight: normal;
+          font-style: italic;
+        `;
+        guildName.appendChild(inviteOnlyBadge);
+      }
       guildNameCell.appendChild(guildName);
 
       const memberCountCell = document.createElement('div');
@@ -1820,20 +2580,27 @@ async function showGuildBrowser() {
         actionBtn.style.cssText = 'background: rgba(128, 128, 128, 0.3); border-color: rgba(128, 128, 128, 0.5); opacity: 0.6;';
         actionBtn.disabled = true;
       } else {
-        actionBtn.textContent = t('mods.guilds.join');
-        actionBtn.style.cssText = 'background: rgba(76, 175, 80, 0.3); border-color: rgba(76, 175, 80, 0.5);';
-        actionBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          try {
-            await joinGuild(guild.id);
-            const dialog = getOpenDialog();
-            if (dialog) dialog.remove();
-            await openGuildPanel();
-          } catch (error) {
-            alert(error.message);
-            loadGuilds(searchInput.value);
-          }
-        });
+        const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
+        if (joinType === GUILD_JOIN_TYPES.INVITE_ONLY) {
+          actionBtn.textContent = t('mods.guilds.inviteOnly');
+          actionBtn.style.cssText = 'background: rgba(128, 128, 128, 0.3); border-color: rgba(128, 128, 128, 0.5); opacity: 0.6;';
+          actionBtn.disabled = true;
+        } else {
+          actionBtn.textContent = t('mods.guilds.join');
+          actionBtn.style.cssText = 'background: rgba(76, 175, 80, 0.3); border-color: rgba(76, 175, 80, 0.5);';
+          actionBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              await joinGuild(guild.id);
+              const dialog = getOpenDialog();
+              if (dialog) dialog.remove();
+              await openGuildPanel();
+            } catch (error) {
+              showWarningModal(t('mods.guilds.error'), error.message);
+              loadGuilds(searchInput.value);
+            }
+          });
+        }
       }
       actionCell.appendChild(actionBtn);
 
@@ -1969,20 +2736,142 @@ async function showGuildBrowser() {
   }, 100);
 }
 
-async function openGuildPanel() {
-  if (typeof api === 'undefined' || !api.ui || !api.ui.components || !api.ui.components.createModal) {
-    console.error('[Guilds] Modal API not available');
-    return;
+async function showMemberManagementModal(guild, currentMember, targetMember) {
+  const currentPlayer = validateCurrentPlayer();
+  const isLeader = currentMember.role === GUILD_ROLES.LEADER;
+  const isTargetSelf = targetMember.username.toLowerCase() === currentPlayer.toLowerCase();
+  const canPromote = !isTargetSelf && isLeader && targetMember.role === GUILD_ROLES.MEMBER;
+  const canDemote = !isTargetSelf && isLeader && targetMember.role === GUILD_ROLES.OFFICER;
+  const canKick = !isTargetSelf && canPerformAction(currentMember.role, targetMember.role, 'kick');
+  const canTransfer = !isTargetSelf && isLeader;
+
+  const modalContent = document.createElement('div');
+  modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 8px;';
+
+  const memberInfo = document.createElement('div');
+  memberInfo.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 14px; margin-bottom: 8px;`;
+  const roleKey = `mods.guilds.role${targetMember.role.charAt(0).toUpperCase() + targetMember.role.slice(1)}`;
+  memberInfo.textContent = `${targetMember.username} (${t(roleKey)})`;
+  modalContent.appendChild(memberInfo);
+
+  if (canTransfer) {
+    const transferBtn = createButton(t('mods.guilds.transferLeadership'), async () => {
+      showConfirmModal(
+        t('mods.guilds.transferLeadership'),
+        tReplace('mods.guilds.transferLeadershipConfirm', { name: targetMember.username }),
+        async () => {
+          try {
+            await transferLeadership(guild.id, targetMember.username);
+            const dialog = getOpenDialog();
+            if (dialog) dialog.remove();
+            showWarningModal(t('mods.guilds.success'), t('mods.guilds.leadershipTransferred'));
+            await openGuildPanel();
+          } catch (error) {
+            showWarningModal(t('mods.guilds.error'), error.message);
+          }
+        }
+      );
+    }, { width: '100%', background: 'rgba(255, 193, 7, 0.3)' });
+    modalContent.appendChild(transferBtn);
   }
+
+  if (canPromote) {
+    const promoteBtn = createButton(t('mods.guilds.promote'), async () => {
+      try {
+        await promoteMember(guild.id, targetMember.username);
+        const dialog = getOpenDialog();
+        if (dialog) dialog.remove();
+        showWarningModal(t('mods.guilds.success'), tReplace('mods.guilds.promotedToOfficer', { name: targetMember.username }));
+        await openGuildPanel();
+      } catch (error) {
+        showWarningModal(t('mods.guilds.error'), error.message);
+      }
+    }, { width: '100%' });
+    modalContent.appendChild(promoteBtn);
+  }
+
+  if (canDemote) {
+    const demoteBtn = createButton(t('mods.guilds.demote'), async () => {
+      try {
+        await demoteMember(guild.id, targetMember.username);
+        const dialog = getOpenDialog();
+        if (dialog) dialog.remove();
+        showWarningModal(t('mods.guilds.success'), `${targetMember.username} ${t('mods.guilds.demote').toLowerCase()}d to ${t('mods.guilds.roleMember').toLowerCase()}`);
+        await openGuildPanel();
+      } catch (error) {
+        showWarningModal(t('mods.guilds.error'), error.message);
+      }
+    }, { width: '100%' });
+    modalContent.appendChild(demoteBtn);
+  }
+
+  if (canKick) {
+    const kickBtn = createButton(t('mods.guilds.kick'), async () => {
+      showConfirmModal(
+        t('mods.guilds.kick'),
+        tReplace('mods.guilds.kickConfirm', { name: targetMember.username }),
+        async () => {
+          try {
+            await kickMember(guild.id, targetMember.username);
+            const dialog = getOpenDialog();
+            if (dialog) dialog.remove();
+            await openGuildPanel();
+          } catch (error) {
+            showWarningModal(t('mods.guilds.error'), error.message);
+          }
+        }
+      );
+    }, { width: '100%', background: 'rgba(255, 107, 107, 0.3)' });
+    modalContent.appendChild(kickBtn);
+  }
+
+  if (!canTransfer && !canPromote && !canDemote && !canKick) {
+    const noActionsMsg = document.createElement('div');
+    noActionsMsg.textContent = t('mods.guilds.noActionsAvailable') || 'No actions available for this member.';
+    noActionsMsg.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px; opacity: 0.7; text-align: center; padding: 8px;`;
+    modalContent.appendChild(noActionsMsg);
+  }
+
+  const modal = api.ui.components.createModal({
+    title: t('mods.guilds.manageMember') || 'Manage Member',
+    width: 350,
+    height: null,
+    content: modalContent,
+    buttons: [{
+      text: t('mods.guilds.close') || 'Close',
+      onClick: () => {
+        const dialog = getOpenDialog();
+        if (dialog) dialog.remove();
+      }
+    }]
+  });
+
+  setTimeout(() => {
+    const dialog = getOpenDialog();
+    if (dialog) {
+      applyModalStyles(dialog, 350, null);
+      
+      // Add ESC key support to close modal
+      const handleEsc = (e) => {
+        if (e.key === 'Escape' || e.keyCode === 27) {
+          dialog.remove();
+          document.removeEventListener('keydown', handleEsc);
+        }
+      };
+      document.addEventListener('keydown', handleEsc);
+    }
+  }, 100);
+}
+
+async function openGuildPanel() {
+  if (!ensureModalApi()) return;
 
   const playerGuild = getPlayerGuild();
   if (!playerGuild) {
     const invites = await getPlayerInvites();
     if (invites.length > 0) {
-      if (confirm(tReplace('mods.guilds.pendingInvitesConfirm', { count: invites.length }))) {
-        showInvitesDialog();
-        return;
-      }
+      showInvitesDialog();
+      return;
     }
     showGuildBrowser();
     return;
@@ -2055,10 +2944,11 @@ async function openGuildPanel() {
       display: flex;
       flex-direction: row;
       align-items: center;
-      padding: 8px 0;
-      margin-bottom: 4px;
+      padding: 10px 8px;
+      margin-bottom: 6px;
       background: rgba(255, 255, 255, 0.05);
       width: 100%;
+      border-radius: 2px;
     `;
 
     const memberInfo = document.createElement('div');
@@ -2066,6 +2956,7 @@ async function openGuildPanel() {
       flex: 1;
       display: flex;
       flex-direction: column;
+      gap: 4px;
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
     `;
     
@@ -2074,32 +2965,78 @@ async function openGuildPanel() {
     if (member.username.toLowerCase() === currentPlayer.toLowerCase()) {
       memberName.textContent += ' ' + t('mods.guilds.youSuffix');
     }
-    memberName.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};`;
+    memberName.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.4;
+    `;
     
     const memberRole = document.createElement('span');
     const roleKey = `mods.guilds.role${member.role.charAt(0).toUpperCase() + member.role.slice(1)}`;
     memberRole.textContent = t(roleKey);
-    memberRole.style.cssText = `font-size: 10px; opacity: 0.7; color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};`;
+    
+    // Get role color
+    let roleColor = CSS_CONSTANTS.COLORS.ROLE_MEMBER;
+    if (member.role === GUILD_ROLES.LEADER) {
+      roleColor = CSS_CONSTANTS.COLORS.ROLE_LEADER;
+    } else if (member.role === GUILD_ROLES.OFFICER) {
+      roleColor = CSS_CONSTANTS.COLORS.ROLE_OFFICER;
+    }
+    
+    memberRole.style.cssText = `
+      font-size: 11px;
+      opacity: 0.9;
+      color: ${roleColor};
+      line-height: 1.3;
+      font-weight: 500;
+    `;
     
     memberInfo.appendChild(memberName);
     memberInfo.appendChild(memberRole);
     memberItem.appendChild(memberInfo);
 
-    if (currentMember && canPerformAction(currentMember.role, member.role, 'kick') && 
-        member.username.toLowerCase() !== currentPlayer.toLowerCase()) {
-      const kickBtn = createButton(t('mods.guilds.kick'), async () => {
-        if (confirm(tReplace('mods.guilds.kickConfirm', { name: member.username }))) {
-          try {
-            await kickMember(guild.id, member.username);
-            const dialog = getOpenDialog();
-            if (dialog) dialog.remove();
-            await openGuildPanel();
-          } catch (error) {
-            alert(error.message);
-          }
-        }
-      }, { background: 'rgba(255, 107, 107, 0.3)', padding: '2px 6px', fontSize: '10px' });
-      memberItem.appendChild(kickBtn);
+    if (currentMember && member.username.toLowerCase() !== currentPlayer.toLowerCase()) {
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+
+      const isLeader = currentMember.role === GUILD_ROLES.LEADER;
+      const canPromote = isLeader && member.role === GUILD_ROLES.MEMBER;
+      const canDemote = isLeader && member.role === GUILD_ROLES.OFFICER;
+      const canKick = canPerformAction(currentMember.role, member.role, 'kick');
+      const canTransfer = isLeader;
+      const hasAnyAction = canPromote || canDemote || canKick || canTransfer;
+
+      if (hasAnyAction) {
+        const editBtn = createButton(t('mods.guilds.edit') || 'Edit', async () => {
+          await showMemberManagementModal(guild, currentMember, member);
+        }, { background: 'rgba(100, 181, 246, 0.3)', padding: '2px 6px', fontSize: '10px' });
+        buttonContainer.appendChild(editBtn);
+      }
+
+      if (canKick) {
+        const kickBtn = createButton(t('mods.guilds.kick'), async () => {
+          showConfirmModal(
+            t('mods.guilds.kick'),
+            tReplace('mods.guilds.kickConfirm', { name: member.username }),
+            async () => {
+              try {
+                await kickMember(guild.id, member.username);
+                const dialog = getOpenDialog();
+                if (dialog) dialog.remove();
+                await openGuildPanel();
+              } catch (error) {
+                showWarningModal(t('mods.guilds.error'), error.message);
+              }
+            }
+          );
+        }, { background: 'rgba(255, 107, 107, 0.3)', padding: '2px 6px', fontSize: '10px' });
+        buttonContainer.appendChild(kickBtn);
+      }
+
+      if (buttonContainer.children.length > 0) {
+        memberItem.appendChild(buttonContainer);
+      }
     }
 
     membersList.appendChild(memberItem);
@@ -2110,6 +3047,7 @@ async function openGuildPanel() {
       const inviteModal = api.ui.components.createModal({
         title: t('mods.guilds.invitePlayerTitle'),
         width: 400,
+        height: null,
         content: (() => {
           const modalContent = document.createElement('div');
           modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 8px;';
@@ -2144,19 +3082,32 @@ async function openGuildPanel() {
               const dialog = getOpenDialog();
               const input = dialog.querySelector('input[type="text"]');
               if (!input || !input.value.trim()) {
-                alert(t('mods.guilds.enterPlayerName'));
+                const errorDialog = getOpenDialog();
+                if (errorDialog) errorDialog.remove();
+                showWarningModal(t('mods.guilds.error'), t('mods.guilds.enterPlayerName'));
                 return;
               }
               
               try {
                 await invitePlayer(guild.id, input.value.trim());
-                alert(tReplace('mods.guilds.inviteSent', { name: input.value.trim() }));
-                dialog.remove();
+                const currentDialog = getOpenDialog();
+                if (currentDialog) currentDialog.remove();
+                // Refresh invite list in guild panel if it's open
+                const guildPanel = document.querySelector('.guild-invited-players-container');
+                if (guildPanel && guildPanel.refreshInvites) {
+                  await guildPanel.refreshInvites();
+                }
                 const mainDialog = getOpenDialog();
                 if (mainDialog) mainDialog.remove();
+                showWarningModal(t('mods.guilds.success'), tReplace('mods.guilds.inviteSent', { name: input.value.trim() }));
+                // Refresh the panel to show the new invite
                 await openGuildPanel();
               } catch (error) {
-                alert(error.message);
+                const errorDialog = getOpenDialog();
+                if (errorDialog) errorDialog.remove();
+                // Show user-friendly message - expected validation errors are not logged as errors
+                const message = error.message || t('mods.guilds.error');
+                showWarningModal(t('mods.guilds.error'), message);
               }
             }
           }
@@ -2175,6 +3126,70 @@ async function openGuildPanel() {
       }, 100);
     }, { width: '100%', marginTop: '8px' });
     membersList.appendChild(inviteBtn);
+    
+    // Display invited players
+    const invitedPlayersContainer = document.createElement('div');
+    invitedPlayersContainer.className = 'guild-invited-players-container';
+    invitedPlayersContainer.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
+    
+    async function loadInvitedPlayers() {
+      try {
+        invitedPlayersContainer.innerHTML = '';
+        const invites = await getGuildInvites(guild.id);
+        const members = await getGuildMembers(guild.id);
+        const memberHashes = new Set(members.map(m => m.usernameHashed));
+        
+        // Filter out invites for players who are already members
+        const pendingInvites = invites.filter(invite => invite && invite.playerNameHashed && !memberHashes.has(invite.playerNameHashed));
+        
+        if (pendingInvites.length === 0) {
+          return;
+        }
+      
+      const title = document.createElement('div');
+      title.textContent = 'Invited Players:';
+      title.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px; opacity: 0.7; margin-bottom: 4px;`;
+      invitedPlayersContainer.appendChild(title);
+      
+      pendingInvites.forEach(async (invite) => {
+        const inviteItem = document.createElement('div');
+        inviteItem.style.cssText = `
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          padding: 6px 8px;
+          margin-bottom: 2px;
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: 2px;
+        `;
+        
+        const playerInfo = document.createElement('div');
+        playerInfo.style.cssText = 'flex: 1 1 0%; display: flex; flex-direction: column;';
+        
+        const playerName = document.createElement('span');
+        playerName.textContent = invite.playerName;
+        playerName.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px;`;
+        
+        const invitedBy = document.createElement('span');
+        invitedBy.textContent = `Invited by ${invite.invitedBy}`;
+        invitedBy.style.cssText = `font-size: 9px; opacity: 0.6; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; margin-top: 2px;`;
+        
+        playerInfo.appendChild(playerName);
+        playerInfo.appendChild(invitedBy);
+        inviteItem.appendChild(playerInfo);
+        
+        invitedPlayersContainer.appendChild(inviteItem);
+      });
+      } catch (error) {
+        console.error('[Guilds] Error loading invited players:', error);
+      }
+    }
+    
+    // Store refresh function on container for external access
+    invitedPlayersContainer.refreshInvites = loadInvitedPlayers;
+    
+    await loadInvitedPlayers();
+    membersList.appendChild(invitedPlayersContainer);
   }
 
   leftPanel.appendChild(membersList);
@@ -2246,6 +3261,7 @@ async function openGuildPanel() {
       const editModal = api.ui.components.createModal({
         title: t('mods.guilds.editDescription'),
         width: 450,
+        height: null,
         content: (() => {
           const modalContent = document.createElement('div');
           modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 8px;';
@@ -2311,6 +3327,7 @@ async function openGuildPanel() {
                 const successModal = api.ui.components.createModal({
                   title: t('mods.guilds.success'),
                   width: 400,
+                  height: null,
                   content: successContent,
                   buttons: [{
                     text: 'OK',
@@ -2330,7 +3347,9 @@ async function openGuildPanel() {
                   }
                 }, 100);
               } catch (error) {
-                alert(error.message);
+                const errorDialog = getOpenDialog();
+                if (errorDialog) errorDialog.remove();
+                showWarningModal(t('mods.guilds.error'), error.message);
               }
             }
           }
@@ -2354,201 +3373,225 @@ async function openGuildPanel() {
     descSection.appendChild(currentDesc);
     descSection.appendChild(descBtn);
     adminContainer.appendChild(descSection);
-  }
 
-  // Transfer Leadership (Leader only)
-  if (isLeader) {
-    const transferSection = document.createElement('div');
-    transferSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+    // Join Type setting (Leader only)
+    const joinTypeSection = document.createElement('div');
+    joinTypeSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
     
-    const transferLabel = document.createElement('label');
-    transferLabel.textContent = t('mods.guilds.transferLeadership');
-    transferLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
+    const joinTypeLabel = document.createElement('label');
+    joinTypeLabel.textContent = t('mods.guilds.joinTypeLabel');
+    joinTypeLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
     
-    const otherMembers = members.filter(m => m.username.toLowerCase() !== currentPlayer.toLowerCase());
+    const currentJoinType = document.createElement('div');
+    const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
+    currentJoinType.textContent = joinType === GUILD_JOIN_TYPES.OPEN 
+      ? t('mods.guilds.joinTypeOpen') 
+      : t('mods.guilds.joinTypeInviteOnly');
+    currentJoinType.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 12px;
+      opacity: 0.8;
+      padding: 4px;
+      min-height: 20px;
+    `;
     
-    if (otherMembers.length > 0) {
-      const transferSelect = document.createElement('select');
-      transferSelect.className = 'pixel-font-14';
-      transferSelect.style.cssText = `
-        width: 100%;
-        padding: 4px 8px;
-        background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
-        border-width: 4px;
-        border-style: solid;
-        border-color: transparent;
-        border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
-        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-        font-size: 12px;
-        box-sizing: border-box;
-      `;
+    const joinTypeBtn = createButton(t('mods.guilds.changeJoinType'), async () => {
+      let selectedJoinType = joinType;
       
-      otherMembers.forEach(member => {
-        const option = document.createElement('option');
-        option.value = member.username;
-        const roleKey = `mods.guilds.role${member.role.charAt(0).toUpperCase() + member.role.slice(1)}`;
-        option.textContent = `${member.username} (${t(roleKey)})`;
-        transferSelect.appendChild(option);
-      });
-      
-      const transferBtn = createButton(t('mods.guilds.transferLeadershipButton'), async () => {
-        if (confirm(tReplace('mods.guilds.transferLeadershipConfirm', { name: transferSelect.value }))) {
-          try {
-            await transferLeadership(guild.id, transferSelect.value);
-            alert(t('mods.guilds.leadershipTransferred'));
+      const editModal = api.ui.components.createModal({
+        title: t('mods.guilds.changeJoinType'),
+        width: 400,
+        height: null,
+        content: (() => {
+          const modalContent = document.createElement('div');
+          modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 8px;';
+          
+          const label = document.createElement('label');
+          label.textContent = t('mods.guilds.joinTypeLabel');
+          label.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
+          
+          // Create dropdown button container (must be position: relative for absolute positioning)
+          const dropdownContainer = document.createElement('div');
+          dropdownContainer.style.cssText = 'position: relative; width: 100%;';
+          dropdownContainer.style.position = 'relative';
+          
+          // Create dropdown button
+          const dropdownButton = document.createElement('button');
+          dropdownButton.type = 'button';
+          dropdownButton.className = 'pixel-font-14';
+          dropdownButton.style.cssText = `
+            width: 100%;
+            padding: 4px 8px;
+            background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+            border-width: 4px;
+            border-style: solid;
+            border-color: transparent;
+            border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+            color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+            font-size: 14px;
+            min-height: 35px;
+            height: auto;
+            line-height: 1.4;
+            box-sizing: border-box;
+            text-align: left;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          `;
+          
+          const buttonText = document.createElement('span');
+          buttonText.textContent = selectedJoinType === GUILD_JOIN_TYPES.OPEN 
+            ? t('mods.guilds.joinTypeOpen') 
+            : t('mods.guilds.joinTypeInviteOnly');
+          
+          const buttonArrow = document.createElement('span');
+          buttonArrow.textContent = '▼';
+          buttonArrow.style.cssText = 'font-size: 10px; opacity: 0.7; margin-left: 8px;';
+          
+          dropdownButton.appendChild(buttonText);
+          dropdownButton.appendChild(buttonArrow);
+          
+          // Create dropdown menu
+          const dropdown = createDropdownElement();
+          
+          const openOption = createDropdownItem(t('mods.guilds.joinTypeOpen'), () => {
+            selectedJoinType = GUILD_JOIN_TYPES.OPEN;
+            buttonText.textContent = t('mods.guilds.joinTypeOpen');
+            resetDropdownStyles(dropdown);
+          }, dropdown, {
+            selected: selectedJoinType === GUILD_JOIN_TYPES.OPEN
+          });
+          
+          const inviteOnlyOption = createDropdownItem(t('mods.guilds.joinTypeInviteOnly'), () => {
+            selectedJoinType = GUILD_JOIN_TYPES.INVITE_ONLY;
+            buttonText.textContent = t('mods.guilds.joinTypeInviteOnly');
+            resetDropdownStyles(dropdown);
+          }, dropdown, {
+            selected: selectedJoinType === GUILD_JOIN_TYPES.INVITE_ONLY
+          });
+          
+          dropdown.appendChild(openOption);
+          dropdown.appendChild(inviteOnlyOption);
+          
+          // Handle button click
+          dropdownButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const container = findDropdownContainer(dropdownButton) || modalContent;
+            toggleDropdown(dropdown, dropdownButton, container);
+          });
+          
+          dropdownContainer.appendChild(dropdownButton);
+          dropdownContainer.appendChild(dropdown);
+          
+          modalContent.appendChild(label);
+          modalContent.appendChild(dropdownContainer);
+          
+          // Close dropdown when clicking outside or pressing ESC
+          const handleClickOutside = (e) => {
+            if (!dropdownContainer.contains(e.target) && dropdown.style.display === 'block') {
+              resetDropdownStyles(dropdown);
+            }
+          };
+          
+          const handleEsc = (e) => {
+            if ((e.key === 'Escape' || e.keyCode === 27) && dropdown.style.display === 'block') {
+              resetDropdownStyles(dropdown);
+            }
+          };
+          
+          setTimeout(() => {
+            document.addEventListener('click', handleClickOutside);
+            document.addEventListener('keydown', handleEsc);
+            // Clean up on modal close
             const dialog = getOpenDialog();
-            if (dialog) dialog.remove();
-            await openGuildPanel();
-          } catch (error) {
-            alert(error.message);
-          }
-        }
-      }, { width: '100%', marginTop: '4px', background: 'rgba(255, 193, 7, 0.3)' });
-      
-      transferSection.appendChild(transferLabel);
-      transferSection.appendChild(transferSelect);
-      transferSection.appendChild(transferBtn);
-    } else {
-      const noMembersMsg = document.createElement('div');
-      noMembersMsg.textContent = t('mods.guilds.noMembersToTransfer');
-      noMembersMsg.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px; opacity: 0.7; padding: 4px;`;
-      transferSection.appendChild(transferLabel);
-      transferSection.appendChild(noMembersMsg);
-    }
-    
-    adminContainer.appendChild(transferSection);
-  }
-
-  // Member Management (Leader only)
-  if (isLeader) {
-    const memberMgmtSection = document.createElement('div');
-    memberMgmtSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
-    
-    const memberMgmtLabel = document.createElement('label');
-    memberMgmtLabel.textContent = t('mods.guilds.manageMembers');
-    memberMgmtLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
-    
-    const regularMembers = members.filter(m => 
-      m.username.toLowerCase() !== currentPlayer.toLowerCase() && 
-      m.role === GUILD_ROLES.MEMBER
-    );
-    const officers = members.filter(m => 
-      m.username.toLowerCase() !== currentPlayer.toLowerCase() && 
-      m.role === GUILD_ROLES.OFFICER
-    );
-    
-    if (regularMembers.length > 0 || officers.length > 0) {
-      const memberSelect = document.createElement('select');
-      memberSelect.className = 'pixel-font-14';
-      memberSelect.style.cssText = `
-        width: 100%;
-        padding: 4px 8px;
-        background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
-        border-width: 4px;
-        border-style: solid;
-        border-color: transparent;
-        border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
-        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-        font-size: 12px;
-        box-sizing: border-box;
-      `;
-      
-      if (regularMembers.length > 0) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = t('mods.guilds.membersGroup');
-        regularMembers.forEach(member => {
-          const option = document.createElement('option');
-          option.value = member.username;
-          option.textContent = member.username;
-          option.dataset.role = member.role;
-          optgroup.appendChild(option);
-        });
-        memberSelect.appendChild(optgroup);
-      }
-      
-      if (officers.length > 0) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = t('mods.guilds.officersGroup');
-        officers.forEach(member => {
-          const option = document.createElement('option');
-          option.value = member.username;
-          option.textContent = member.username;
-          option.dataset.role = member.role;
-          optgroup.appendChild(option);
-        });
-        memberSelect.appendChild(optgroup);
-      }
-      
-      const actionButtons = document.createElement('div');
-      actionButtons.style.cssText = 'display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;';
-      
-      const promoteBtn = createButton(t('mods.guilds.promote'), async () => {
-        const selected = memberSelect.options[memberSelect.selectedIndex];
-        if (selected && selected.dataset.role === GUILD_ROLES.MEMBER) {
-          try {
-            await promoteMember(guild.id, selected.value);
-            alert(tReplace('mods.guilds.promotedToOfficer', { name: selected.value }));
-            const dialog = getOpenDialog();
-            if (dialog) dialog.remove();
-            await openGuildPanel();
-          } catch (error) {
-            alert(error.message);
-          }
-        } else {
-          alert(t('mods.guilds.canOnlyPromoteMembers'));
-        }
-      }, { flex: '1', minWidth: '80px' });
-      
-      const demoteBtn = createButton(t('mods.guilds.demote'), async () => {
-        const selected = memberSelect.options[memberSelect.selectedIndex];
-        if (selected && selected.dataset.role === GUILD_ROLES.OFFICER) {
-          try {
-            await demoteMember(guild.id, selected.value);
-            alert(`${selected.value} ${t('mods.guilds.demote').toLowerCase()}d to ${t('mods.guilds.roleMember').toLowerCase()}`);
-            const dialog = getOpenDialog();
-            if (dialog) dialog.remove();
-            await openGuildPanel();
-          } catch (error) {
-            alert(error.message);
-          }
-        } else {
-          alert(t('mods.guilds.demote') + ' - can only demote officers');
-        }
-      }, { flex: '1', minWidth: '80px' });
-      
-      const kickBtn = createButton(t('mods.guilds.kick'), async () => {
-        const selected = memberSelect.options[memberSelect.selectedIndex];
-        if (selected) {
-          if (confirm(tReplace('mods.guilds.kickConfirm', { name: selected.value }))) {
-            try {
-              await kickMember(guild.id, selected.value);
-              alert(tReplace('mods.guilds.kickedFromGuild', { name: selected.value }));
+            if (dialog) {
+              const observer = new MutationObserver(() => {
+                if (!document.contains(dialog)) {
+                  document.removeEventListener('click', handleClickOutside);
+                  document.removeEventListener('keydown', handleEsc);
+                  observer.disconnect();
+                }
+              });
+              observer.observe(document.body, { childList: true, subtree: true });
+            }
+          }, 100);
+          
+          return modalContent;
+        })(),
+        buttons: [
+          {
+            text: t('mods.guilds.cancel'),
+            onClick: () => {
               const dialog = getOpenDialog();
               if (dialog) dialog.remove();
-              await openGuildPanel();
-            } catch (error) {
-              alert(error.message);
+            }
+          },
+          {
+            text: t('common.save'),
+            primary: true,
+            onClick: async () => {
+              const dialog = getOpenDialog();
+              try {
+                await updateGuildJoinType(guild.id, selectedJoinType);
+                if (dialog) dialog.remove();
+                const mainDialog = getOpenDialog();
+                if (mainDialog) mainDialog.remove();
+                
+                // Show success modal
+                const successContent = document.createElement('div');
+                successContent.style.cssText = `
+                  color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+                  font-size: 14px;
+                  padding: 8px;
+                  text-align: center;
+                `;
+                successContent.textContent = t('mods.guilds.joinTypeUpdated');
+                
+                const successModal = api.ui.components.createModal({
+                  title: t('mods.guilds.success'),
+                  width: 400,
+                  height: null,
+                  content: successContent,
+                  buttons: [{
+                    text: 'OK',
+                    primary: true,
+                    onClick: async () => {
+                      const successDialog = getOpenDialog();
+                      if (successDialog) successDialog.remove();
+                      await openGuildPanel();
+                    }
+                  }]
+                });
+                
+                setTimeout(() => {
+                  const successDialog = getOpenDialog();
+                  if (successDialog) {
+                    applyModalStyles(successDialog, 400, null);
+                  }
+                }, 100);
+              } catch (error) {
+                const errorDialog = getOpenDialog();
+                if (errorDialog) errorDialog.remove();
+                showWarningModal(t('mods.guilds.error'), error.message);
+              }
             }
           }
+        ]
+      });
+      
+      setTimeout(() => {
+        const dialog = getOpenDialog();
+        if (dialog) {
+          applyModalStyles(dialog, 400, null);
         }
-      }, { flex: '1', minWidth: '80px', background: 'rgba(255, 107, 107, 0.3)' });
-      
-      actionButtons.appendChild(promoteBtn);
-      actionButtons.appendChild(demoteBtn);
-      actionButtons.appendChild(kickBtn);
-      
-      memberMgmtSection.appendChild(memberMgmtLabel);
-      memberMgmtSection.appendChild(memberSelect);
-      memberMgmtSection.appendChild(actionButtons);
-    } else {
-      const noMembersMsg = document.createElement('div');
-      noMembersMsg.textContent = t('mods.guilds.noMembersToManage');
-      noMembersMsg.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 11px; opacity: 0.7; padding: 4px;`;
-      memberMgmtSection.appendChild(memberMgmtLabel);
-      memberMgmtSection.appendChild(noMembersMsg);
-    }
+      }, 100);
+    }, { width: '100%' });
     
-    adminContainer.appendChild(memberMgmtSection);
+    joinTypeSection.appendChild(joinTypeLabel);
+    joinTypeSection.appendChild(currentJoinType);
+    joinTypeSection.appendChild(joinTypeBtn);
+    adminContainer.appendChild(joinTypeSection);
   }
 
   // Delete Guild (Leader only, when they are the only member)
@@ -2560,6 +3603,7 @@ async function openGuildPanel() {
       const confirmModal = api.ui.components.createModal({
         title: t('mods.guilds.deleteGuild'),
         width: 450,
+        height: null,
         content: (() => {
           const modalContent = document.createElement('div');
           modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 8px;';
@@ -2615,6 +3659,7 @@ async function openGuildPanel() {
                 api.ui.components.createModal({
                   title: t('mods.guilds.success'),
                   width: 400,
+                  height: null,
                   content: successContent,
                   buttons: [{
                     text: t('controls.ok'),
@@ -2648,6 +3693,7 @@ async function openGuildPanel() {
                 api.ui.components.createModal({
                   title: t('mods.guilds.error'),
                   width: 400,
+                  height: null,
                   content: errorContent,
                   buttons: [{
                     text: t('controls.ok'),
@@ -2697,17 +3743,21 @@ async function openGuildPanel() {
   // Leave Guild (Not for leader)
   if (currentMember && !isLeader) {
     const leaveBtn = createButton(t('mods.guilds.leaveGuild'), async () => {
-      if (confirm(t('mods.guilds.leaveGuildConfirm'))) {
-        try {
-          await leaveGuild(guild.id);
-          alert(t('mods.guilds.leftGuild'));
-          const dialog = getOpenDialog();
-          if (dialog) dialog.remove();
-          showGuildBrowser();
-        } catch (error) {
-          alert(error.message);
+      showConfirmModal(
+        t('mods.guilds.leaveGuild'),
+        t('mods.guilds.leaveGuildConfirm'),
+        async () => {
+          try {
+            await leaveGuild(guild.id);
+            const dialog = getOpenDialog();
+            if (dialog) dialog.remove();
+            showWarningModal(t('mods.guilds.success'), t('mods.guilds.leftGuild'));
+            showGuildBrowser();
+          } catch (error) {
+            showWarningModal(t('mods.guilds.error'), error.message);
+          }
         }
-      }
+      );
     }, { 
       width: '100%', 
       marginTop: '8px',

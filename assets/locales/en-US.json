@@ -571,6 +571,9 @@
       "description": "Description:",
       "noDescription": "No description",
       "editDescription": "Edit Description",
+      "edit": "Edit",
+      "manageMember": "Manage Member",
+      "noActionsAvailable": "No actions available for this member.",
       "descriptionUpdated": "Description updated successfully",
       "success": "Success",
       "transferLeadership": "Transfer Leadership:",
@@ -612,7 +615,23 @@
       "kickedFromGuild": "{name} has been kicked from the guild",
       "leaveGuildConfirm": "Are you sure you want to leave this guild?",
       "leftGuild": "You have left the guild",
-      "pendingInvitesConfirm": "You have {count} pending guild invite(s). View invites?"
+      "pendingInvitesConfirm": "You have {count} pending guild invite(s). View invites?",
+      "joinTypeLabel": "Join Type:",
+      "joinTypeOpen": "Open (Anyone can join)",
+      "joinTypeInviteOnly": "Invite Only",
+      "inviteOnly": "Invite Only",
+      "changeJoinType": "Change Join Type",
+      "joinTypeUpdated": "Join type updated successfully",
+      "guildCreatedBy": "Guild \"{name}\" was created by {player}",
+      "playerJoinedGuild": "{player} joined the guild",
+      "playerLeftGuild": "{player} left the guild",
+      "playerTransferredLeadership": "{player} transferred leadership to {newLeader}",
+      "playerInvitedToGuild": "{player} invited {invitedPlayer} to the guild",
+      "playerPromotedToOfficer": "{player} promoted {member} to Officer",
+      "playerDemotedToMember": "{player} demoted {member} to Member",
+      "playerKickedFromGuild": "{player} kicked {member} from the guild",
+      "playerChangedJoinType": "{player} changed the guild join type to {type}",
+      "playerUpdatedDescription": "{player} updated the guild description"
     }
   }
 }

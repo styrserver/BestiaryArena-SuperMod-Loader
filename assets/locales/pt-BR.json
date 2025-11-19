@@ -572,6 +572,9 @@
       "description": "Descrição:",
       "noDescription": "Sem descrição",
       "editDescription": "Editar Descrição",
+      "edit": "Editar",
+      "manageMember": "Gerenciar Membro",
+      "noActionsAvailable": "Nenhuma ação disponível para este membro.",
       "descriptionUpdated": "Descrição atualizada com sucesso",
       "success": "Sucesso",
       "transferLeadership": "Transferir Liderança:",
@@ -613,7 +616,23 @@
       "kickedFromGuild": "{name} foi expulso da guilda",
       "leaveGuildConfirm": "Tem certeza de que deseja deixar esta guilda?",
       "leftGuild": "Você deixou a guilda",
-      "pendingInvitesConfirm": "Você tem {count} convite(s) de guilda pendente(s). Ver convites?"
+      "pendingInvitesConfirm": "Você tem {count} convite(s) de guilda pendente(s). Ver convites?",
+      "joinTypeLabel": "Tipo de Entrada:",
+      "joinTypeOpen": "Aberto (Qualquer um pode entrar)",
+      "joinTypeInviteOnly": "Apenas Convite",
+      "inviteOnly": "Apenas Convite",
+      "changeJoinType": "Alterar Tipo de Entrada",
+      "joinTypeUpdated": "Tipo de entrada atualizado com sucesso",
+      "guildCreatedBy": "Guilda \"{name}\" foi criada por {player}",
+      "playerJoinedGuild": "{player} entrou na guilda",
+      "playerLeftGuild": "{player} deixou a guilda",
+      "playerTransferredLeadership": "{player} transferiu a liderança para {newLeader}",
+      "playerInvitedToGuild": "{player} convidou {invitedPlayer} para a guilda",
+      "playerPromotedToOfficer": "{player} promoveu {member} a Oficial",
+      "playerDemotedToMember": "{player} rebaixou {member} a Membro",
+      "playerKickedFromGuild": "{player} expulsou {member} da guilda",
+      "playerChangedJoinType": "{player} alterou o tipo de entrada da guilda para {type}",
+      "playerUpdatedDescription": "{player} atualizou a descrição da guilda"
     }
   }
 }

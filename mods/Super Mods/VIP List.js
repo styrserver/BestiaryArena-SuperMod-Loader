@@ -39,6 +39,10 @@ const CSS_CONSTANTS = {
   BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
   BORDER_4_FRAME: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
   BORDER_1_FRAME: 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill',
+  BORDER_1_FRAME_PRESSED: 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill',
+  BORDER_3_FRAME: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+  FONT_FAMILY: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+  FONT_FAMILY_SYSTEM: 'system-ui, -apple-system, sans-serif',
   COLORS: {
     TEXT_PRIMARY: 'rgb(230, 215, 176)',
     TEXT_WHITE: 'rgb(255, 255, 255)',
@@ -47,7 +51,25 @@ const CSS_CONSTANTS = {
     LINK: 'rgb(100, 181, 246)',
     ERROR: '#ff6b6b',
     SUCCESS: '#4caf50',
-    DUPLICATE: '#888'
+    DUPLICATE: '#888',
+    // Opacity variants
+    WHITE_50: 'rgba(255, 255, 255, 0.5)',
+    WHITE_60: 'rgba(255, 255, 255, 0.6)',
+    WHITE_70: 'rgba(255, 255, 255, 0.7)',
+    WHITE_05: 'rgba(255, 255, 255, 0.05)',
+    WHITE_10: 'rgba(255, 255, 255, 0.1)',
+    WHITE_20: 'rgba(255, 255, 255, 0.2)',
+    BLACK_20: 'rgba(0, 0, 0, 0.2)',
+    BLACK_30: 'rgba(0, 0, 0, 0.3)',
+    LINK_15: 'rgba(100, 181, 246, 0.15)'
+  },
+  FONT_SIZES: {
+    XS: '10px',
+    SM: '11px',
+    BASE: '12px',
+    MD: '13px',
+    LG: '14px',
+    XL: '16px'
   }
 };
 
@@ -84,10 +106,6 @@ const getMessagingEnabled = () => getConfigValue('enableVipListChat', false, 'bo
 
 // Read message filter setting from Mod Settings config if available, default to 'all'
 const getMessageFilter = () => getConfigValue('vipListMessageFilter', 'all');
-
-// Read Global Chat (All Chat) enabled state from Mod Settings config if available, default to false
-// Now controlled by enableVipListChat (Enable Chat setting)
-const getGlobalChatEnabled = () => getConfigValue('enableVipListChat', false, 'boolean');
 
 // Check if a player is in the VIP list
 function isPlayerInVIPList(playerName) {
@@ -143,19 +161,142 @@ let openChatPanels = new Map();
 let allChatTabs = new Map();
 let vipListItems = new Map(); // Map of playerName -> VIP list item element
 let activeAllChatTab = 'all-chat';
+let currentTabSwitchPromise = null; // Track ongoing tab switch to cancel if needed
 let firebase401WarningShown = false;
 let pendingRequestCheckIntervals = new Map();
+let conversationUpdateTimeouts = new Map(); // Debounce rapid conversation updates
+let allChatUpdateTimeout = null; // Debounce All Chat updates
 let modalCloseObserver = null;
 const playerLevelCache = new Map(); // Cache for player levels (playerName -> { level, timestamp })
 const allChatCache = { messages: null, timestamp: 0, expiresAt: 0 }; // Cache for All Chat messages
 const conversationCache = new Map(); // Cache for conversations (playerName -> { messages, timestamp, expiresAt })
-const CACHE_TTL = 5000; // Cache time-to-live: 5 seconds
-const playerGuildCache = new Map(); // Cache for player guild abbreviations (playerName -> { abbreviation, timestamp })
+const CACHE_TTL = 30000; // Cache time-to-live: 30 seconds (optimized for faster tab switching)
+const playerGuildCache = new Map(); // Cache for player guild info (playerName -> { abbreviation, guildId, timestamp })
 const GUILD_CACHE_TTL = 3600000; // Cache guild info for 1 hour
 const MESSAGES_PER_PAGE = 20; // Number of messages to load per page for pagination
 
 // Track timeouts for cleanup (memory leak prevention)
 const pendingTimeouts = new Set();
+
+// =======================
+// Storage Helpers
+// =======================
+
+// localStorage abstraction helpers
+const storage = {
+  get(key, defaultValue = null) {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+    } catch (error) {
+      console.error(`[VIP List] Error loading ${key} from localStorage:`, error);
+    }
+    return defaultValue;
+  },
+  
+  set(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (error) {
+      console.error(`[VIP List] Error saving ${key} to localStorage:`, error);
+      return false;
+    }
+  }
+};
+
+// =======================
+// Firebase API Helpers
+// =======================
+
+// Firebase API wrapper (preserves exact paths and query parameters)
+const firebaseApi = {
+  async get(path, options = {}) {
+    if (!path) return null;
+    
+    // Handle query parameters - if path already has ?, use as-is, otherwise add .json and query
+    let url = path;
+    if (!path.includes('?')) {
+      url = path.endsWith('.json') ? path : `${path}.json`;
+      if (options.query) {
+        url += (url.includes('?') ? '&' : '?') + options.query;
+      }
+    }
+    
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        if (response.status === 401) {
+          if (!firebase401WarningShown) {
+            console.warn('[VIP List] Firebase access denied (401). Some features may be limited.');
+            firebase401WarningShown = true;
+          }
+          return null;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`[VIP List] Firebase GET error for ${path}:`, error);
+      return null;
+    }
+  },
+  
+  async put(path, data) {
+    if (!path) return false;
+    
+    const url = path.endsWith('.json') ? path : `${path}.json`;
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      
+      if (response.ok) {
+        return true;
+      } else if (response.status === 401) {
+        if (!firebase401WarningShown) {
+          console.warn('[VIP List] Firebase write access denied (401). Some features may be limited.');
+          firebase401WarningShown = true;
+        }
+        return false;
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    } catch (error) {
+      console.error(`[VIP List] Firebase PUT error for ${path}:`, error);
+      return false;
+    }
+  },
+  
+  async delete(path) {
+    if (!path) return false;
+    
+    const url = path.endsWith('.json') ? path : `${path}.json`;
+    try {
+      const response = await fetch(url, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok || response.status === 404) {
+        return true;
+      } else if (response.status === 401) {
+        if (!firebase401WarningShown) {
+          console.warn('[VIP List] Firebase delete access denied (401). Some features may be limited.');
+          firebase401WarningShown = true;
+        }
+        return false;
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    } catch (error) {
+      console.error(`[VIP List] Firebase DELETE error for ${path}:`, error);
+      return false;
+    }
+  }
+};
 
 // Sort state: { column: 'name'|'level'|'status'|'rankPoints'|'timeSum', direction: 'asc'|'desc' }
 let currentSortState = {
@@ -165,19 +306,12 @@ let currentSortState = {
 
 // Load sort preference from localStorage
 function loadSortPreference() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEYS.SORT);
-    if (saved !== null) {
-      const parsed = JSON.parse(saved);
-      if (parsed.column && ['name', 'level', 'status', 'rankPoints', 'timeSum'].includes(parsed.column) &&
-          parsed.direction && ['asc', 'desc'].includes(parsed.direction)) {
-        currentSortState = parsed;
-        console.log('[VIP List] Loaded sort preference from localStorage:', currentSortState);
-        return currentSortState;
-      }
-    }
-  } catch (error) {
-    console.error('[VIP List] Error loading sort preference from localStorage:', error);
+  const saved = storage.get(STORAGE_KEYS.SORT);
+  if (saved && saved.column && ['name', 'level', 'status', 'rankPoints', 'timeSum'].includes(saved.column) &&
+      saved.direction && ['asc', 'desc'].includes(saved.direction)) {
+    currentSortState = saved;
+    console.log('[VIP List] Loaded sort preference from localStorage:', currentSortState);
+    return currentSortState;
   }
   // Default: sort by name ascending
   currentSortState = { column: 'name', direction: 'asc' };
@@ -186,30 +320,22 @@ function loadSortPreference() {
 
 // Save sort preference to localStorage
 function saveSortPreference() {
-  try {
-    localStorage.setItem(STORAGE_KEYS.SORT, JSON.stringify(currentSortState));
+  if (storage.set(STORAGE_KEYS.SORT, currentSortState)) {
     console.log('[VIP List] Saved sort preference to localStorage:', currentSortState);
-  } catch (error) {
-    console.error('[VIP List] Error saving sort preference to localStorage:', error);
   }
 }
 
 // Load config from localStorage (preferred) or context.config
 // Similar to Rank Pointer's approach - prioritize localStorage
 function loadVIPListConfig() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
-    if (saved !== null) {
-      const parsed = JSON.parse(saved);
-      console.log('[VIP List] Loaded config from localStorage:', parsed);
-      // Update context.config if available
-      if (typeof context !== 'undefined' && context.config) {
-        Object.assign(context.config, parsed);
-      }
-      return parsed;
+  const saved = storage.get(STORAGE_KEYS.CONFIG);
+  if (saved !== null) {
+    console.log('[VIP List] Loaded config from localStorage:', saved);
+    // Update context.config if available
+    if (typeof context !== 'undefined' && context.config) {
+      Object.assign(context.config, saved);
     }
-  } catch (error) {
-    console.error('[VIP List] Error loading config from localStorage:', error);
+    return saved;
   }
   
   // Fallback to context.config if localStorage is empty
@@ -219,11 +345,8 @@ function loadVIPListConfig() {
 
 // Save config to localStorage
 function saveVIPListConfig(config) {
-  try {
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config));
+  if (storage.set(STORAGE_KEYS.CONFIG, config)) {
     console.log('[VIP List] Saved config to localStorage:', config);
-  } catch (error) {
-    console.error('[VIP List] Error saving config to localStorage:', error);
   }
 }
 
@@ -280,7 +403,42 @@ function clearAllPendingTimeouts() {
 }
 
 // =======================
-// 4. Translation Helpers & Config
+// 4. Style Injection
+// =======================
+
+// Inject all CSS styles once (consolidated stylesheet)
+function injectVIPListStyles() {
+  if (document.getElementById('vip-list-consolidated-styles')) {
+    return; // Already injected
+  }
+  
+  const style = document.createElement('style');
+  style.id = 'vip-list-consolidated-styles';
+  style.textContent = `
+    @keyframes vip-chat-spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .vip-search-input.error::placeholder {
+      color: ${CSS_CONSTANTS.COLORS.ERROR} !important;
+      font-style: italic;
+    }
+    .vip-search-input.success::placeholder {
+      color: ${CSS_CONSTANTS.COLORS.SUCCESS} !important;
+      font-style: italic;
+    }
+    .vip-search-input.duplicate::placeholder {
+      color: ${CSS_CONSTANTS.COLORS.DUPLICATE} !important;
+      font-style: italic;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+// =======================
+// 5. Translation Helpers & Config
 // =======================
 
 // Use shared translation system via API
@@ -300,7 +458,6 @@ function getVIPListInterfaceType() {
 const tReplace = (key, replacements) => {
   let text = t(key);
   Object.entries(replacements).forEach(([placeholder, value]) => {
-    // Use global replace to replace all occurrences of the placeholder
     const regex = new RegExp(`\\{${placeholder}\\}`, 'g');
     text = text.replace(regex, value);
   });
@@ -354,7 +511,6 @@ function calculatePlayerStatus(profileData, isCurrentPlayer) {
     return t('mods.vipList.statusOffline');
   }
   
-  // Parse timestamp and check if within threshold
   const lastUpdatedTime = new Date(lastUpdated).getTime();
   const now = Date.now();
   const timeDiff = now - lastUpdatedTime;
@@ -434,84 +590,61 @@ function getChatPanelId(playerName) {
 }
 
 function saveChatPanelPosition(playerName, panel) {
-  try {
-    const positions = loadAllChatPanelPositions();
-    const rect = panel.getBoundingClientRect();
-    
-    positions[playerName.toLowerCase()] = {
-      left: rect.left,
-      top: rect.top,
-      right: window.innerWidth - rect.right,
-      width: rect.width,
-      height: rect.height
-    };
-    
-    localStorage.setItem(STORAGE_KEYS.CHAT_PANEL_POSITIONS, JSON.stringify(positions));
-  } catch (error) {
-    console.error(`[VIP List] Error saving chat panel position for ${playerName}:`, error);
-  }
+  const positions = loadAllChatPanelPositions();
+  const rect = panel.getBoundingClientRect();
+  
+  positions[playerName.toLowerCase()] = {
+    left: rect.left,
+    top: rect.top,
+    right: window.innerWidth - rect.right,
+    width: rect.width,
+    height: rect.height
+  };
+  
+  storage.set(STORAGE_KEYS.CHAT_PANEL_POSITIONS, positions);
 }
 
 // Load chat panel position from localStorage
 function loadChatPanelPosition(playerName) {
-  try {
-    const positions = loadAllChatPanelPositions();
-    return positions[playerName.toLowerCase()] || null;
-  } catch (error) {
-    console.error(`[VIP List] Error loading chat panel position for ${playerName}:`, error);
-    return null;
-  }
+  const positions = loadAllChatPanelPositions();
+  return positions[playerName.toLowerCase()] || null;
 }
 
 // Load all chat panel positions from localStorage
 function loadAllChatPanelPositions() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEYS.CHAT_PANEL_POSITIONS);
-    return saved ? JSON.parse(saved) : {};
-  } catch (error) {
-    console.error('[VIP List] Error loading chat panel positions:', error);
-    return {};
-  }
+  return storage.get(STORAGE_KEYS.CHAT_PANEL_POSITIONS, {});
 }
 
 function saveChatPanelSettings(isOpen = true, closedManually = false) {
-  try {
-    // Don't save during auto-reopen to prevent overwriting tabs before restoration
-    if (window._vipListChatAutoReopening) {
-      return;
-    }
-    const panel = document.getElementById('vip-chat-panel-all-chat');
-    if (panel && panel._isAutoReopening) {
-      return;
-    }
-    
-    // Get list of open tabs (excluding 'all-chat' as it's always created)
-    const openTabs = Array.from(allChatTabs.keys()).filter(name => name !== 'all-chat');
-    
-    const settings = {
-      isOpen: isOpen,
-      closedManually: closedManually,
-      openTabs: openTabs,
-      activeTab: activeAllChatTab || 'all-chat'
-    };
-    localStorage.setItem(STORAGE_KEYS.CHAT_PANEL_SETTINGS, JSON.stringify(settings));
+  // Don't save during auto-reopen to prevent overwriting tabs before restoration
+  if (window._vipListChatAutoReopening) {
+    return;
+  }
+  const panel = document.getElementById('vip-chat-panel-all-chat');
+  if (panel && panel._isAutoReopening) {
+    return;
+  }
+  
+  // Get list of open tabs (excluding 'all-chat' as it's always created)
+  const openTabs = Array.from(allChatTabs.keys()).filter(name => name !== 'all-chat');
+  
+  const settings = {
+    isOpen: isOpen,
+    closedManually: closedManually,
+    openTabs: openTabs,
+    activeTab: activeAllChatTab || 'all-chat'
+  };
+  if (storage.set(STORAGE_KEYS.CHAT_PANEL_SETTINGS, settings)) {
     console.log('[VIP List] Chat panel settings saved:', settings);
-  } catch (error) {
-    console.error('[VIP List] Error saving chat panel settings:', error);
   }
 }
 
 // Load chat panel settings from localStorage
 function loadChatPanelSettings() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEYS.CHAT_PANEL_SETTINGS);
-    if (saved) {
-      const settings = JSON.parse(saved);
-      console.log('[VIP List] Chat panel settings loaded:', settings);
-      return settings;
-    }
-  } catch (error) {
-    console.error('[VIP List] Error loading chat panel settings:', error);
+  const saved = storage.get(STORAGE_KEYS.CHAT_PANEL_SETTINGS);
+  if (saved) {
+    console.log('[VIP List] Chat panel settings loaded:', saved);
+    return saved;
   }
   
   // Return default settings
@@ -578,23 +711,56 @@ async function autoReopenChatPanel() {
       if (tabsToRestore.length > 0) {
         console.log('[VIP List] Restoring open tabs:', tabsToRestore);
         
+        // Filter out guild tabs for non-existent guilds
+        const validTabsToRestore = [];
+        for (const tabName of tabsToRestore) {
+          if (isGuildChatTab(tabName)) {
+            const guildId = extractGuildIdFromTabName(tabName);
+            if (guildId) {
+              const exists = await guildExists(guildId);
+              if (exists) {
+                validTabsToRestore.push(tabName);
+              } else {
+                console.log(`[VIP List] Skipping restoration of guild tab for non-existent guild: ${guildId}`);
+              }
+            }
+          } else {
+            validTabsToRestore.push(tabName);
+          }
+        }
+        
         // Restore each tab
-        for (const playerName of tabsToRestore) {
+        for (const playerName of validTabsToRestore) {
           try {
-            const messages = await getConversationMessages(playerName);
-            const unreadCount = await getPlayerUnreadCount(messages, playerName);
-            await addAllChatTab(playerName, playerName, unreadCount);
+            if (isGuildChatTab(playerName)) {
+              // Restore guild chat tab
+              const guildId = extractGuildIdFromTabName(playerName);
+              if (guildId) {
+                const playerGuild = getPlayerGuild();
+                if (playerGuild && playerGuild.id === guildId && playerGuild.abbreviation) {
+                  await addAllChatTab(playerName, playerGuild.abbreviation, 0);
+                }
+              }
+            } else {
+              // Restore player chat tab
+              const messages = await getConversationMessages(playerName);
+              const unreadCount = await getPlayerUnreadCount(messages, playerName);
+              await addAllChatTab(playerName, playerName, unreadCount);
+            }
           } catch (error) {
             console.error(`[VIP List] Error restoring tab for ${playerName}:`, error);
           }
         }
         
-        // Restore active tab
-        if (activeTabToRestore && (activeTabToRestore === 'all-chat' || tabsToRestore.includes(activeTabToRestore))) {
+        // Batch update all tab statuses with rate limiting after restoring tabs
+        await updateAllChatTabsStatus();
+        
+        // Restore active tab (use validTabsToRestore instead of tabsToRestore)
+        if (activeTabToRestore && (activeTabToRestore === 'all-chat' || validTabsToRestore.includes(activeTabToRestore))) {
           await switchAllChatTab(activeTabToRestore);
-        } else if (tabsToRestore.length > 0) {
+        } else if (validTabsToRestore.length > 0) {
           // If saved active tab is invalid, switch to first open tab
-          await switchAllChatTab(tabsToRestore[0]);
+          await switchAllChatTab(validTabsToRestore[0]);
         }
       } else {
         // Even if no tabs to restore, make sure we switch to the saved active tab (likely 'all-chat')
@@ -603,9 +769,24 @@ async function autoReopenChatPanel() {
         }
       }
       
+      // Verify that the active tab matches the loaded messages after restoration
+      // Wait a moment for any pending loads to complete, then verify
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const finalPanel = document.getElementById('vip-chat-panel-all-chat');
+      if (finalPanel && activeAllChatTab) {
+        const messagesArea = finalPanel.querySelector('#chat-messages-all-chat');
+        if (messagesArea) {
+          // Verify the active tab is still the expected one (in case it changed during loading)
+          const expectedTab = activeTabToRestore || (tabsToRestore.length > 0 ? tabsToRestore[0] : 'all-chat');
+          if (activeAllChatTab !== expectedTab) {
+            console.log('[VIP List] Active tab mismatch detected during restoration, switching to correct tab');
+            await switchAllChatTab(expectedTab);
+          }
+        }
+      }
+      
       // Re-enable saving and save final state
       window._vipListChatAutoReopening = false;
-      const finalPanel = document.getElementById('vip-chat-panel-all-chat');
       if (finalPanel) {
         finalPanel._isAutoReopening = false;
         saveChatPanelSettings(true, false);
@@ -838,7 +1019,6 @@ function removePanelDragHandlers(panel, headerContainer) {
   if (panel._dragHandler) {
     document.removeEventListener('mousemove', panel._dragHandler);
   }
-  // Handle both naming conventions for backward compatibility
   if (panel._dragUpHandler) {
     document.removeEventListener('mouseup', panel._dragUpHandler);
   }
@@ -873,19 +1053,141 @@ function getPlayerUnreadCount(messages, playerName) {
   ).length;
 }
 
+// =======================
+// Encryption Utilities
+// =======================
+
+// Base64 encoding/decoding utilities for encryption
+const cryptoUtils = {
+  // Encode IV + encrypted data as base64
+  encodeWithIV(iv, encryptedData) {
+    const combined = new Uint8Array(iv.length + encryptedData.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encryptedData), iv.length);
+    return btoa(String.fromCharCode(...combined));
+  },
+  
+  // Decode base64 to IV + encrypted data
+  decodeWithIV(encoded) {
+    try {
+      return Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
+    } catch (e) {
+      return null;
+    }
+  },
+  
+  // Extract IV and encrypted data from combined array
+  extractIVAndData(combined) {
+    if (!combined || combined.length < 13) return null;
+    return {
+      iv: combined.slice(0, 12),
+      encrypted: combined.slice(12)
+    };
+  }
+};
+
+// Generic key derivation function
+async function deriveKey(salt, password) {
+  const encoder = new TextEncoder();
+  const passwordBytes = encoder.encode(password);
+  
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    passwordBytes,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits', 'deriveKey']
+  );
+  
+  const saltBytes = encoder.encode(salt);
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: saltBytes,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  
+  return key;
+}
+
+// Generic encryption function
+async function encryptData(data, key) {
+  const encoder = new TextEncoder();
+  const dataBytes = encoder.encode(data);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    dataBytes
+  );
+  
+  return cryptoUtils.encodeWithIV(iv, encrypted);
+}
+
+// Generic decryption function
+async function decryptData(encoded, key) {
+  const combined = cryptoUtils.decodeWithIV(encoded);
+  if (!combined) return null;
+  
+  const extracted = cryptoUtils.extractIVAndData(combined);
+  if (!extracted) return null;
+  
+  try {
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: extracted.iv },
+      key,
+      extracted.encrypted
+    );
+    
+    const decoder = new TextDecoder();
+    return decoder.decode(decrypted);
+  } catch (error) {
+    return null;
+  }
+}
+
+// =======================
+// Username Hashing
+// =======================
+
 // Hash username for use in Firebase paths (deterministic, one-way)
+// Cache for username hashes (usernames don't change, so cache permanently)
+const usernameHashCache = new Map();
+
 async function hashUsername(username) {
+  if (!username) return '';
+  
+  const key = username.toLowerCase();
+  
+  // Check cache first
+  if (usernameHashCache.has(key)) {
+    return usernameHashCache.get(key);
+  }
+  
   try {
     const encoder = new TextEncoder();
-    const data = encoder.encode(username.toLowerCase());
+    const data = encoder.encode(key);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return hashHex.substring(0, 32); // Use first 32 chars (64 hex chars = 32 bytes)
+    const hash = hashHex.substring(0, 32); // Use first 32 chars (64 hex chars = 32 bytes)
+    
+    // Cache the hash
+    usernameHashCache.set(key, hash);
+    return hash;
   } catch (error) {
     console.error('[VIP List] Username hashing error:', error);
     // Fallback to plain username if hashing fails
-    return username.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const fallback = key.replace(/[^a-z0-9_]/g, '_');
+    usernameHashCache.set(key, fallback);
+    return fallback;
   }
 }
 
@@ -893,25 +1195,7 @@ async function hashUsername(username) {
 async function encryptUsername(username, player1, player2) {
   try {
     const key = await deriveUsernameKey(player1, player2);
-    const encoder = new TextEncoder();
-    const data = encoder.encode(username);
-    
-    // Generate a random IV for each encryption
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      data
-    );
-    
-    // Combine IV and encrypted data, then encode as base64
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    // Convert to base64 for Firebase storage
-    return btoa(String.fromCharCode(...combined));
+    return await encryptData(username, key);
   } catch (error) {
     console.error('[VIP List] Username encryption error:', error);
     throw error;
@@ -927,10 +1211,8 @@ async function decryptUsername(encryptedUsername, player1, player2) {
     }
     
     // Try to decode base64 - if it fails, it's probably not encrypted
-    let combined;
-    try {
-      combined = Uint8Array.from(atob(encryptedUsername), c => c.charCodeAt(0));
-    } catch (e) {
+    const combined = cryptoUtils.decodeWithIV(encryptedUsername);
+    if (!combined) {
       // Not valid base64, probably unencrypted username (backward compatibility)
       return encryptedUsername;
     }
@@ -942,19 +1224,10 @@ async function decryptUsername(encryptedUsername, player1, player2) {
     }
     
     const key = await deriveUsernameKey(player1, player2);
+    const decrypted = await decryptData(encryptedUsername, key);
     
-    // Extract IV (first 12 bytes) and encrypted data
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      encrypted
-    );
-    
-    const decoder = new TextDecoder();
-    return decoder.decode(decrypted);
+    // If decryption fails, return original (for backward compatibility)
+    return decrypted !== null ? decrypted : encryptedUsername;
   } catch (error) {
     // If decryption fails, return original (for backward compatibility)
     if (!error.message.includes('invalid') && !error.message.includes('String contains')) {
@@ -968,25 +1241,7 @@ async function decryptUsername(encryptedUsername, player1, player2) {
 async function encryptReadStatus(readStatus, player1, player2) {
   try {
     const key = await deriveReadStatusKey(player1, player2);
-    const encoder = new TextEncoder();
-    const data = encoder.encode(readStatus ? 'true' : 'false');
-    
-    // Generate a random IV for each encryption
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      data
-    );
-    
-    // Combine IV and encrypted data, then encode as base64
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    // Convert to base64 for Firebase storage
-    return btoa(String.fromCharCode(...combined));
+    return await encryptData(readStatus ? 'true' : 'false', key);
   } catch (error) {
     console.error('[VIP List] Read status encryption error:', error);
     throw error;
@@ -1013,10 +1268,8 @@ async function decryptReadStatus(encryptedReadStatus, player1, player2) {
     }
     
     // Try to decode base64 - if it fails, it's probably not encrypted
-    let combined;
-    try {
-      combined = Uint8Array.from(atob(encryptedReadStatus), c => c.charCodeAt(0));
-    } catch (e) {
+    const combined = cryptoUtils.decodeWithIV(encryptedReadStatus);
+    if (!combined) {
       // Not valid base64, probably unencrypted (backward compatibility)
       if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
         return true;
@@ -1034,20 +1287,17 @@ async function decryptReadStatus(encryptedReadStatus, player1, player2) {
     }
     
     const key = await deriveReadStatusKey(player1, player2);
+    const decrypted = await decryptData(encryptedReadStatus, key);
     
-    // Extract IV (first 12 bytes) and encrypted data
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
+    // If decryption fails, return false for backward compatibility
+    if (decrypted === null) {
+      if (encryptedReadStatus === 'true' || encryptedReadStatus === true) {
+        return true;
+      }
+      return false;
+    }
     
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      encrypted
-    );
-    
-    const decoder = new TextDecoder();
-    const decryptedString = decoder.decode(decrypted);
-    return decryptedString === 'true';
+    return decrypted === 'true';
   } catch (error) {
     // If decryption fails, return false for backward compatibility
     if (!error.message.includes('invalid') && !error.message.includes('String contains')) {
@@ -1063,135 +1313,30 @@ async function decryptReadStatus(encryptedReadStatus, player1, player2) {
 
 // Derive a shared encryption key for read status from two player names (deterministic)
 async function deriveReadStatusKey(player1, player2) {
-  // Sort names alphabetically to ensure both players derive the same key
   const sortedNames = [player1.toLowerCase(), player2.toLowerCase()].sort();
-  const combined = sortedNames.join('|') + '|readstatus';
-  
-  // Use Web Crypto API to derive a key from the combined names using PBKDF2
-  const encoder = new TextEncoder();
-  const password = encoder.encode(combined);
-  
-  // Import password as a raw key material
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    password,
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits', 'deriveKey']
-  );
-  
-  const salt = encoder.encode('vip-list-readstatus-salt'); // Different salt for read status encryption
-  const key = await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-  
-  return key;
+  const password = sortedNames.join('|') + '|readstatus';
+  return deriveKey('vip-list-readstatus-salt', password);
 }
 
 // Derive a shared encryption key for usernames from two player names (deterministic)
 async function deriveUsernameKey(player1, player2) {
-  // Sort names alphabetically to ensure both players derive the same key
   const sortedNames = [player1.toLowerCase(), player2.toLowerCase()].sort();
-  const combined = sortedNames.join('|') + '|username';
-  
-  // Use Web Crypto API to derive a key from the combined names using PBKDF2
-  const encoder = new TextEncoder();
-  const password = encoder.encode(combined);
-  
-  // Import password as a raw key material
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    password,
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits', 'deriveKey']
-  );
-  
-  const salt = encoder.encode('vip-list-username-salt'); // Different salt for username encryption
-  const key = await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-  
-  return key;
+  const password = sortedNames.join('|') + '|username';
+  return deriveKey('vip-list-username-salt', password);
 }
 
 // Derive a shared encryption key from two player names (deterministic)
 async function deriveChatKey(player1, player2) {
-  // Sort names alphabetically to ensure both players derive the same key
   const sortedNames = [player1.toLowerCase(), player2.toLowerCase()].sort();
-  const combined = sortedNames.join('|');
-  
-  // Use Web Crypto API to derive a key from the combined names using PBKDF2
-  const encoder = new TextEncoder();
-  const password = encoder.encode(combined);
-  
-  // Import password as a raw key material
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    password,
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits', 'deriveKey']
-  );
-  
-  const salt = encoder.encode('vip-list-chat-salt'); // Fixed salt for deterministic keys
-  const key = await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt,
-      iterations: 100000,
-      hash: 'SHA-256'
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-  
-  return key;
+  const password = sortedNames.join('|');
+  return deriveKey('vip-list-chat-salt', password);
 }
 
 // Encrypt message text
 async function encryptMessage(text, player1, player2) {
   try {
     const key = await deriveChatKey(player1, player2);
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text);
-    
-    // Generate a random IV for each message
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      data
-    );
-    
-    // Combine IV and encrypted data, then encode as base64
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    // Convert to base64 for Firebase storage
-    return btoa(String.fromCharCode(...combined));
+    return await encryptData(text, key);
   } catch (error) {
     console.error('[VIP List] Encryption error:', error);
     throw error;
@@ -1207,10 +1352,8 @@ async function decryptMessage(encryptedText, player1, player2) {
     }
     
     // Try to decode base64 - if it fails, it's probably not encrypted
-    let combined;
-    try {
-      combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-    } catch (e) {
+    const combined = cryptoUtils.decodeWithIV(encryptedText);
+    if (!combined) {
       // Not valid base64, probably unencrypted message
       return encryptedText;
     }
@@ -1222,19 +1365,10 @@ async function decryptMessage(encryptedText, player1, player2) {
     }
     
     const key = await deriveChatKey(player1, player2);
+    const decrypted = await decryptData(encryptedText, key);
     
-    // Extract IV (first 12 bytes) and encrypted data
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      encrypted
-    );
-    
-    const decoder = new TextDecoder();
-    return decoder.decode(decrypted);
+    // If decryption fails, return original text (for backward compatibility)
+    return decrypted !== null ? decrypted : encryptedText;
   } catch (error) {
     // If decryption fails, return original text (for backward compatibility with unencrypted messages)
     // Only log if it's not a common error (like invalid base64)
@@ -1251,49 +1385,61 @@ async function decryptMessage(encryptedText, player1, player2) {
 
 // Get guild chat API URL
 function getGuildChatApiUrl(guildId) {
-  const firebaseUrl = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app';
+  const firebaseUrl = MESSAGING_CONFIG.firebaseUrl;
   return `${firebaseUrl}/guilds/chat/${guildId}`;
 }
 
 // Get player's guild from localStorage (set by Guilds mod)
 function getPlayerGuild() {
+  return storage.get('guilds-data', null);
+}
+
+// Extract guild ID from tab name (e.g., "guild-abc123" -> "abc123")
+function extractGuildIdFromTabName(tabName) {
+  if (!tabName || !tabName.startsWith('guild-')) return null;
+  return tabName.replace('guild-', '');
+}
+
+// Check if a tab name is a guild chat tab
+function isGuildChatTab(tabName) {
+  return tabName && tabName.startsWith('guild-');
+}
+
+// Switch away from a guild tab to All Chat or first available tab
+function switchAwayFromGuildTab() {
+  if (activeAllChatTab && isGuildChatTab(activeAllChatTab)) {
+    if (allChatTabs.has('all-chat')) {
+      switchAllChatTab('all-chat');
+    } else if (allChatTabs.size > 0) {
+      const firstTab = allChatTabs.keys().next().value;
+      if (firstTab) {
+        switchAllChatTab(firstTab);
+      }
+    }
+  }
+}
+
+// Check if a guild exists in Firebase
+async function guildExists(guildId) {
+  if (!guildId) return false;
   try {
-    const stored = localStorage.getItem('guilds-data');
-    return stored ? JSON.parse(stored) : null;
+    const firebaseUrl = MESSAGING_CONFIG.firebaseUrl;
+    const response = await fetch(`${firebaseUrl}/guilds/list/${guildId}.json`);
+    if (!response.ok) {
+      return false;
+    }
+    const guild = await response.json();
+    return guild !== null && typeof guild === 'object';
   } catch (error) {
-    return null;
+    console.error('[VIP List] Error checking if guild exists:', error);
+    return false;
   }
 }
 
 // Derive an encryption key from guild ID (deterministic - all members use same key)
 async function deriveGuildChatKey(guildId) {
   try {
-    const encoder = new TextEncoder();
-    const password = encoder.encode(guildId);
-    
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      password,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits', 'deriveKey']
-    );
-    
-    const salt = encoder.encode('guild-chat-salt');
-    const key = await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: salt,
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    
-    return key;
+    return deriveKey('guild-chat-salt', guildId);
   } catch (error) {
     console.error('[VIP List] Error deriving guild chat key:', error);
     throw error;
@@ -1304,22 +1450,7 @@ async function deriveGuildChatKey(guildId) {
 async function encryptGuildMessage(text, guildId) {
   try {
     const key = await deriveGuildChatKey(guildId);
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text);
-    
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      data
-    );
-    
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    
-    return btoa(String.fromCharCode(...combined));
+    return await encryptData(text, key);
   } catch (error) {
     console.error('[VIP List] Error encrypting guild message:', error);
     throw error;
@@ -1333,30 +1464,16 @@ async function decryptGuildMessage(encryptedText, guildId) {
       return encryptedText;
     }
     
-    let combined;
-    try {
-      combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-    } catch (e) {
-      return encryptedText;
-    }
-    
-    if (combined.length < 13) {
+    const combined = cryptoUtils.decodeWithIV(encryptedText);
+    if (!combined || combined.length < 13) {
       return encryptedText;
     }
     
     const key = await deriveGuildChatKey(guildId);
+    const decrypted = await decryptData(encryptedText, key);
     
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      encrypted
-    );
-    
-    const decoder = new TextDecoder();
-    return decoder.decode(decrypted);
+    // If decryption fails, return original (for backward compatibility)
+    return decrypted !== null ? decrypted : encryptedText;
   } catch (error) {
     if (!error.message.includes('invalid') && !error.message.includes('String contains')) {
       console.warn('[VIP List] Guild message decryption error (may be unencrypted):', error.message);
@@ -1459,59 +1576,235 @@ async function getGuildChatMessages(guildId, limit = MESSAGES_PER_PAGE, endBefor
   }
 }
 
-// Add guild chat tab
-async function addGuildChatTab() {
+// Sync guild chat tab - ensures only one guild chat tab exists, placed after All Chat
+async function syncGuildChatTab() {
+  const panel = document.getElementById('vip-chat-panel-all-chat');
+  if (!panel) return;
+  
+  const headerContainer = panel.querySelector('#all-chat-tabs-container');
+  if (!headerContainer) return;
+  
+  const tabsContainer = headerContainer.querySelector('div:first-child');
+  if (!tabsContainer) return;
+  
+  // Remove all existing guild chat tabs
+  const guildTabNames = Array.from(allChatTabs.keys()).filter(name => isGuildChatTab(name));
+  for (const tabName of guildTabNames) {
+    const tab = allChatTabs.get(tabName);
+    if (tab) {
+      tab.remove();
+      allChatTabs.delete(tabName);
+    }
+  }
+  
+  // If user has no guild, we're done (guild chat is hidden)
   const playerGuild = getPlayerGuild();
   if (!playerGuild || !playerGuild.abbreviation) {
-    return; // No guild or no abbreviation
-  }
-
-  const guildId = playerGuild.id;
-  const tabName = `guild-${guildId}`;
-  const displayName = playerGuild.abbreviation;
-
-  // Check if tab already exists
-  if (allChatTabs.has(tabName)) {
-    return;
-  }
-
-  await addAllChatTab(tabName, displayName, 0);
-}
-
-// Load older guild chat messages when scrolling to top (pagination)
-async function loadOlderGuildChatMessages(container, guildId) {
-  const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
-  if (!panel || panel._isLoadingOlderGuildChat) {
+    switchAwayFromGuildTab();
+    
+    // Save panel settings
+    if (panel.style.display !== 'none') {
+      saveChatPanelSettings(true, false);
+    }
     return;
   }
   
-  // Get the oldest loaded message ID for this guild
-  const guildKey = `guild-${guildId}`;
-  const oldestMessageId = panel[`_oldestLoadedMessageId_${guildKey}`];
+  // Verify guild exists before creating tab
+  const guildId = playerGuild.id;
+  const guildExistsCheck = await guildExists(guildId);
+  if (!guildExistsCheck) {
+    // Guild doesn't exist, switch away from guild tab if active
+    switchAwayFromGuildTab();
+    
+    // Save panel settings
+    if (panel.style.display !== 'none') {
+      saveChatPanelSettings(true, false);
+    }
+    return;
+  }
+  
+  // Add guild chat tab after All Chat tab
+  const tabName = `guild-${guildId}`;
+  const displayName = playerGuild.abbreviation;
+  
+  // Find All Chat tab to insert after it
+  const allChatTab = tabsContainer.querySelector('[data-player-name="all-chat"]');
+  const guildChatTab = await createAllChatTab(tabName, displayName, 0, false);
+  
+  if (allChatTab && allChatTab.nextSibling) {
+    // Insert after All Chat tab
+    tabsContainer.insertBefore(guildChatTab, allChatTab.nextSibling);
+  } else if (allChatTab) {
+    // All Chat is last, append guild chat
+    tabsContainer.appendChild(guildChatTab);
+  } else {
+    // No All Chat tab, just append
+    tabsContainer.appendChild(guildChatTab);
+  }
+  
+  allChatTabs.set(tabName, guildChatTab);
+  
+  // Save panel settings
+  if (panel.style.display !== 'none') {
+    saveChatPanelSettings(true, false);
+  }
+}
+
+// Add guild chat tab (legacy function, now uses syncGuildChatTab)
+async function addGuildChatTab() {
+  await syncGuildChatTab();
+}
+
+// Show loading indicator at top of chat container
+function showLoadingIndicator(container) {
+  // Remove existing indicator if any
+  const existingIndicator = container.querySelector('.vip-chat-loading-indicator');
+  if (existingIndicator) {
+    return existingIndicator;
+  }
+  
+  const indicator = document.createElement('div');
+  indicator.className = 'vip-chat-loading-indicator';
+  indicator.style.cssText = `
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    color: ${CSS_CONSTANTS.COLORS.WHITE_70};
+    font-size: 12px;
+    gap: 8px;
+    user-select: none;
+  `;
+  
+  // Create spinner
+  const spinner = document.createElement('div');
+  spinner.style.cssText = `
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    animation: vip-chat-spin 0.8s linear infinite;
+  `;
+  
+  // Inject styles (consolidated)
+  injectVIPListStyles();
+  
+  const text = document.createElement('span');
+  text.textContent = 'Loading older messages...';
+  
+  indicator.appendChild(spinner);
+  indicator.appendChild(text);
+  
+  // Insert at the top of container
+  container.insertBefore(indicator, container.firstChild);
+  
+  return indicator;
+}
+
+// Hide loading indicator
+function hideLoadingIndicator(container) {
+  const indicator = container.querySelector('.vip-chat-loading-indicator');
+  if (indicator) {
+    indicator.remove();
+  }
+}
+
+// Show "beginning of conversation" indicator at top of chat container
+function showBeginningIndicator(container) {
+  // Remove existing indicator if any
+  const existingIndicator = container.querySelector('.vip-chat-beginning-indicator');
+  if (existingIndicator) {
+    return existingIndicator;
+  }
+  
+  const indicator = document.createElement('div');
+  indicator.className = 'vip-chat-beginning-indicator';
+  indicator.style.cssText = `
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    color: ${CSS_CONSTANTS.COLORS.WHITE_50};
+    font-size: 12px;
+    user-select: none;
+    font-style: italic;
+  `;
+  
+  const text = document.createElement('span');
+  text.textContent = 'Beginning of conversation';
+  
+  indicator.appendChild(text);
+  
+  // Insert at the top of container (after loading indicator if it exists)
+  const loadingIndicator = container.querySelector('.vip-chat-loading-indicator');
+  if (loadingIndicator) {
+    container.insertBefore(indicator, loadingIndicator.nextSibling);
+  } else {
+    container.insertBefore(indicator, container.firstChild);
+  }
+  
+  return indicator;
+}
+
+// Hide "beginning of conversation" indicator
+function hideBeginningIndicator(container) {
+  const indicator = container.querySelector('.vip-chat-beginning-indicator');
+  if (indicator) {
+    indicator.remove();
+  }
+}
+
+// Generic function to load older messages when scrolling to top (pagination)
+// fetchFunction: function that fetches messages (e.g., getAllChatMessages, getGuildChatMessages, getConversationMessages)
+// config: { loadingFlag, oldestIdKey, fetchArgs, playerName? } - playerName is optional, used for runs-only filter
+async function loadOlderMessages(container, fetchFunction, config) {
+  const panel = container.closest('[id^="vip-chat-panel-"]');
+  if (!panel || panel[config.loadingFlag]) {
+    return;
+  }
+  
+  const oldestMessageId = panel[config.oldestIdKey];
   if (!oldestMessageId) {
+    // Hide loading indicator if visible
+    hideLoadingIndicator(container);
+    // Show "beginning of conversation" indicator if not already shown
+    showBeginningIndicator(container);
     return; // No more messages to load
   }
   
-  panel._isLoadingOlderGuildChat = true;
+  // Hide "beginning of conversation" indicator if we're loading more messages
+  hideBeginningIndicator(container);
+  
+  panel[config.loadingFlag] = true;
+  
+  // Get scroll element and current scroll position (before showing indicator)
+  let scrollElement = container;
+  if (panel._scrollContainer && panel._scrollContainer.scrollView) {
+    scrollElement = panel._scrollContainer.scrollView;
+  } else {
+    const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
+    const scrollView = contentWrapper?.querySelector('.scroll-view');
+    if (scrollView) scrollElement = scrollView;
+  }
+  
+  // Show loading indicator and get its height
+  const loadingIndicator = showLoadingIndicator(container);
+  const indicatorHeight = loadingIndicator ? loadingIndicator.offsetHeight : 0;
+  
+  // Measure scroll height after showing indicator
+  const scrollHeightBefore = scrollElement.scrollHeight;
   
   try {
-    // Get scroll element and current scroll position
-    let scrollElement = container;
-    if (panel._scrollContainer && panel._scrollContainer.scrollView) {
-      scrollElement = panel._scrollContainer.scrollView;
-    } else {
-      const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
-      const scrollView = contentWrapper?.querySelector('.scroll-view');
-      if (scrollView) scrollElement = scrollView;
-    }
-    
-    const scrollHeightBefore = scrollElement.scrollHeight;
-    
-    // Fetch older messages
-    const olderMessages = await getGuildChatMessages(guildId, MESSAGES_PER_PAGE * 2, oldestMessageId);
+    // Fetch older messages using provided function and args
+    const olderMessages = await fetchFunction(...config.fetchArgs(oldestMessageId));
     
     if (olderMessages.length === 0) {
-      panel[`_oldestLoadedMessageId_${guildKey}`] = null;
+      panel[config.oldestIdKey] = null;
+      // Hide loading indicator
+      hideLoadingIndicator(container);
+      // Show "beginning of conversation" indicator
+      showBeginningIndicator(container);
       return;
     }
     
@@ -1520,7 +1813,7 @@ async function loadOlderGuildChatMessages(container, guildId) {
     
     // Filter to get only messages older than the oldest we have
     const oldestIdNum = parseInt(oldestMessageId) || 0;
-    const newMessages = olderMessages.filter(msg => {
+    let newMessages = olderMessages.filter(msg => {
       const msgId = msg.id || null;
       if (!msgId || displayedMessageIds.has(msgId)) {
         return false;
@@ -1529,35 +1822,94 @@ async function loadOlderGuildChatMessages(container, guildId) {
       return msgIdNum < oldestIdNum;
     });
     
+    // Apply runs-only filter if active (for conversation messages)
+    if (config.playerName) {
+      const filterKey = `runsOnlyFilter_${config.playerName.toLowerCase()}`;
+      const isRunsOnlyActive = panel.getAttribute(`data-${filterKey}`) === 'true';
+      if (isRunsOnlyActive) {
+        const originalCount = newMessages.length;
+        newMessages = newMessages.filter(msg => {
+          const text = msg.text || '';
+          return text.includes('$replay(');
+        });
+        console.log(`[VIP List] Runs-only filter applied to older messages: ${originalCount} -> ${newMessages.length} messages`);
+      }
+    }
+    
     if (newMessages.length === 0) {
-      panel[`_oldestLoadedMessageId_${guildKey}`] = null;
+      panel[config.oldestIdKey] = null;
+      // Hide loading indicator
+      hideLoadingIndicator(container);
+      // Show "beginning of conversation" indicator
+      showBeginningIndicator(container);
       return;
     }
     
     // Sort new messages (should already be sorted, but ensure)
     newMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     
-    // Get first message element for date separator logic
+    // Get first existing message for boundary date check
     const firstExistingMessage = container.querySelector('[data-message-id]');
-    const lastDateKey = firstExistingMessage ? 
-      getDateKeyFromElement(firstExistingMessage) : null;
+    let firstExistingDateKey = null;
+    if (firstExistingMessage) {
+      // Get timestamp directly from data attribute (most reliable)
+      const firstTimestamp = firstExistingMessage.getAttribute('data-timestamp');
+      if (firstTimestamp) {
+        firstExistingDateKey = getDateKey(parseInt(firstTimestamp));
+      } else {
+        // Fallback: try to get from element
+        firstExistingDateKey = getDateKeyFromElement(firstExistingMessage);
+      }
+    }
     
     // Process messages and create elements
+    // Start with null to add separator for first message's date
     const elementsToPrepend = [];
-    let currentDateKey = lastDateKey;
+    let currentDateKey = null;
     
     for (const msg of newMessages) {
       const msgDateKey = getDateKey(msg.timestamp);
       
-      // Add date separator if date changed
-      if (currentDateKey !== msgDateKey) {
+      // Add date separator if date changed (within new messages)
+      if (currentDateKey !== null && currentDateKey !== msgDateKey) {
         elementsToPrepend.push(createDateSeparator(msg.timestamp));
+        currentDateKey = msgDateKey;
+      } else if (currentDateKey === null) {
+        // First message - set current date key
         currentDateKey = msgDateKey;
       }
       
       // Create message element
-      const messageElement = await createChatMessageElement(msg, container, msg.id || `guild-msg-${msg.timestamp}`);
-      elementsToPrepend.push(messageElement);
+      const messageId = msg.id || `msg-${msg.timestamp}`;
+      const messageElement = await createChatMessageElement(msg, container, messageId);
+      if (messageElement) {
+        elementsToPrepend.push(messageElement);
+      }
+    }
+    
+    // Check if we need a date separator at the boundary between new and existing messages
+    // (the newest new message will be at the top after reverse, right before first existing)
+    if (newMessages.length > 0 && firstExistingMessage && firstExistingDateKey) {
+      const newestNewMessage = newMessages[newMessages.length - 1]; // Newest of the new messages
+      const newestNewDateKey = getDateKey(newestNewMessage.timestamp);
+      
+      // If dates differ, we need a separator at the boundary
+      if (newestNewDateKey !== firstExistingDateKey) {
+        // Check if there's already a separator before the first existing message
+        const firstExistingPrev = firstExistingMessage.previousElementSibling;
+        const hasSeparator = firstExistingPrev && 
+          firstExistingPrev.querySelector('div[style*="text-transform: uppercase"]');
+        
+        // If no separator exists, add one before prepending
+        if (!hasSeparator) {
+          // Add separator for the first existing message's date
+          elementsToPrepend.push(createDateSeparator(
+            firstExistingMessage.getAttribute('data-timestamp') ? 
+              parseInt(firstExistingMessage.getAttribute('data-timestamp')) : 
+              Date.now()
+          ));
+        }
+      }
     }
     
     // Insert elements at the beginning of container (preserve scroll position)
@@ -1567,151 +1919,333 @@ async function loadOlderGuildChatMessages(container, guildId) {
     });
     
     // Update oldest loaded message ID
-    panel[`_oldestLoadedMessageId_${guildKey}`] = newMessages[0].id;
+    if (newMessages.length > 0) {
+      panel[config.oldestIdKey] = newMessages[0].id;
+    } else {
+      panel[config.oldestIdKey] = null;
+    }
     
-    // Preserve scroll position
+    // Hide loading indicator before adjusting scroll position
+    hideLoadingIndicator(container);
+    
+    // Hide beginning indicator since we successfully loaded messages
+    hideBeginningIndicator(container);
+    
+    // Preserve scroll position (calculate after hiding indicator)
+    // Account for indicator height in the calculation
     const scrollHeightAfter = scrollElement.scrollHeight;
-    const scrollDiff = scrollHeightAfter - scrollHeightBefore;
+    const scrollDiff = scrollHeightAfter - scrollHeightBefore + indicatorHeight;
     scrollElement.scrollTop += scrollDiff;
     
   } catch (error) {
-    console.error('[VIP List] Error loading older guild chat messages:', error);
+    console.error('[VIP List] Error loading older messages:', error);
+    // Hide loading indicator on error too
+    hideLoadingIndicator(container);
   } finally {
-    panel._isLoadingOlderGuildChat = false;
+    panel[config.loadingFlag] = false;
   }
 }
 
-// Setup scroll detection for guild chat (same as All Chat)
-function setupGuildChatScrollDetection(panel, messagesArea, scrollElement, guildId) {
+// Load older guild chat messages when scrolling to top (pagination)
+async function loadOlderGuildChatMessages(container, guildId) {
+  const guildKey = `guild-${guildId}`;
+  await loadOlderMessages(container, getGuildChatMessages, {
+    loadingFlag: '_isLoadingOlderGuildChat',
+    oldestIdKey: `_oldestLoadedMessageId_${guildKey}`,
+    fetchArgs: (oldestMessageId) => [guildId, MESSAGES_PER_PAGE * 2, oldestMessageId]
+  });
+}
+
+// Generic function to setup scroll detection for loading older messages
+// config: { handlerKey, oldestIdKey, loadingFlag, loadFunction, loadArgs }
+function setupScrollDetection(panel, messagesArea, scrollElement, config) {
   if (!panel || !scrollElement) {
     return;
   }
   
-  const guildKey = `guild-${guildId}`;
-  const handlerKey = `_scrollHandler_${guildKey}`;
-  
-  if (panel[handlerKey]) {
+  // Check if already setup (using handlerKey)
+  if (panel[config.handlerKey]) {
     return; // Already setup
   }
   
-  let scrollTimeout = null;
+  // Store scroll timeout on panel for cleanup (memory leak prevention)
+  const timeoutKey = `${config.handlerKey}_timeout`;
+  panel[timeoutKey] = null;
   
   const scrollHandler = async () => {
-    if (scrollTimeout) {
-      clearTimeout(scrollTimeout);
+    if (panel[timeoutKey]) {
+      clearTimeout(panel[timeoutKey]);
+      panel[timeoutKey] = null;
     }
     
-    scrollTimeout = setTimeout(() => {
+    panel[timeoutKey] = setTimeout(() => {
+      panel[timeoutKey] = null;
       const scrollTop = scrollElement.scrollTop;
       const scrollThreshold = 100;
-      const oldestMessageId = panel[`_oldestLoadedMessageId_${guildKey}`];
+      const oldestMessageId = panel[config.oldestIdKey];
       
-      if (scrollTop <= scrollThreshold && oldestMessageId && !panel._isLoadingOlderGuildChat) {
-        loadOlderGuildChatMessages(messagesArea, guildId);
+      if (scrollTop <= scrollThreshold && oldestMessageId && !panel[config.loadingFlag]) {
+        config.loadFunction(...config.loadArgs);
       }
     }, 100);
   };
   
   scrollElement.addEventListener('scroll', scrollHandler, { passive: true });
-  panel[handlerKey] = scrollHandler;
+  panel[config.handlerKey] = scrollHandler;
+  panel[`${config.handlerKey}_element`] = scrollElement; // Store element reference for cleanup
+}
+
+// Remove scroll detection handlers (memory leak prevention)
+function removeScrollDetection(panel, config) {
+  if (!panel || !config) {
+    return;
+  }
+  
+  const handlerKey = config.handlerKey || config;
+  const scrollHandler = panel[handlerKey];
+  const scrollElement = panel[`${handlerKey}_element`];
+  const timeoutKey = `${handlerKey}_timeout`;
+  
+  if (scrollElement && scrollHandler) {
+    scrollElement.removeEventListener('scroll', scrollHandler);
+  }
+  
+  if (panel[timeoutKey]) {
+    clearTimeout(panel[timeoutKey]);
+    panel[timeoutKey] = null;
+  }
+  
+  // Clean up references
+  delete panel[handlerKey];
+  delete panel[`${handlerKey}_element`];
+  delete panel[timeoutKey];
+}
+
+// Setup scroll detection for guild chat
+function setupGuildChatScrollDetection(panel, messagesArea, scrollElement, guildId) {
+  const guildKey = `guild-${guildId}`;
+  setupScrollDetection(panel, messagesArea, scrollElement, {
+    handlerKey: `_scrollHandler_${guildKey}`,
+    oldestIdKey: `_oldestLoadedMessageId_${guildKey}`,
+    loadingFlag: '_isLoadingOlderGuildChat',
+    loadFunction: loadOlderGuildChatMessages,
+    loadArgs: [messagesArea, guildId]
+  });
 }
 
 // Load guild chat conversation
-async function loadGuildChatConversation(container, guildId, forceScrollToBottom = false) {
+async function loadGuildChatConversation(container, guildId, forceScrollToBottom = false, checkCancelled = null) {
   const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
   const guildKey = `guild-${guildId}`;
+  const expectedTab = `guild-${guildId}`;
   
-  // Check if initial load or refresh
-  const existingMessages = container.querySelectorAll('[data-message-id]');
-  const isInitialLoad = existingMessages.length === 0;
-  
-  // Load only the most recent 20 messages initially
-  const messages = await getGuildChatMessages(guildId, MESSAGES_PER_PAGE);
-  
-  if (isInitialLoad) {
-    container.innerHTML = '';
-    
-    // Track oldest loaded message for pagination
-    if (messages.length > 0) {
-      panel[`_oldestLoadedMessageId_${guildKey}`] = messages[0].id;
-    } else {
-      panel[`_oldestLoadedMessageId_${guildKey}`] = null;
-    }
-  }
-
-  if (messages.length === 0) {
-    if (isInitialLoad) {
-      const emptyMsg = document.createElement('div');
-      emptyMsg.style.cssText = `
-        text-align: center;
-        color: rgba(255, 255, 255, 0.5);
-        padding: 15px;
-        font-style: italic;
-        font-size: 12px;
-      `;
-      emptyMsg.textContent = 'No messages yet';
-      container.appendChild(emptyMsg);
-    }
+  // Prevent concurrent loading
+  if (panel?.[`_isLoadingGuildChat_${guildKey}`]) {
     return;
   }
-
-  // Filter out messages we already have displayed
-  const displayedMessageIds = getDisplayedMessageIds(container);
-  const newMessages = messages.filter(msg => !displayedMessageIds.has(msg.id));
+  panel[`_isLoadingGuildChat_${guildKey}`] = true;
   
-  if (newMessages.length === 0 && !isInitialLoad) {
-    return; // No new messages
-  }
-
-  // Process messages and add date separators (same format as All Chat)
-  let lastDateKey = null;
-  const elementsToAppend = [];
-  
-  // Get last date key from existing messages if appending
-  if (!isInitialLoad && container.querySelector('[data-message-id]')) {
-    const lastMsg = Array.from(container.querySelectorAll('[data-message-id]')).pop();
-    if (lastMsg) {
-      lastDateKey = getDateKeyFromElement(lastMsg) || null;
-    }
-  }
-  
-  for (let i = 0; i < newMessages.length; i++) {
-    const msg = newMessages[i];
-    const currentDateKey = getDateKey(msg.timestamp);
-    
-    // Add date separator if date changed
-    if (currentDateKey !== lastDateKey) {
-      elementsToAppend.push(createDateSeparator(msg.timestamp));
-      lastDateKey = currentDateKey;
+  try {
+    // Check if cancelled before starting
+    if (checkCancelled && checkCancelled()) {
+      return;
     }
     
-    // Create message element using helper function
-    const messageDiv = await createChatMessageElement(msg, container, msg.id || `guild-msg-${i}`);
-    elementsToAppend.push(messageDiv);
-  }
-  
-  // Append all elements (separators and messages) to container
-  elementsToAppend.forEach(element => container.appendChild(element));
-
-  // Setup scroll detection if initial load
-  if (isInitialLoad && panel) {
-    let scrollElement = container;
-    if (panel._scrollContainer && panel._scrollContainer.scrollView) {
-      scrollElement = panel._scrollContainer.scrollView;
+    // Check if initial load or refresh
+    const existingMessages = container.querySelectorAll('[data-message-id]');
+    const isInitialLoad = existingMessages.length === 0;
+    
+    // Load messages (all for updates, limited for initial load)
+    const messages = await getGuildChatMessages(guildId, isInitialLoad ? MESSAGES_PER_PAGE : undefined);
+    
+    // Check if cancelled after loading messages
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    
+    // Verify active tab still matches expected guild tab
+    if (activeAllChatTab !== expectedTab) {
+      return;
+    }
+    
+    if (isInitialLoad) {
+      container.innerHTML = '';
+      
+      // Track oldest loaded message for pagination
+      if (messages.length > 0) {
+        panel[`_oldestLoadedMessageId_${guildKey}`] = messages[0].id;
+        panel[`_lastTimestamp_${guildKey}`] = messages[messages.length - 1]?.timestamp || null;
+        panel[`_lastMessageCount_${guildKey}`] = messages.length;
+      } else {
+        panel[`_oldestLoadedMessageId_${guildKey}`] = null;
+        panel[`_lastTimestamp_${guildKey}`] = null;
+        panel[`_lastMessageCount_${guildKey}`] = 0;
+      }
     } else {
-      const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
-      const scrollView = contentWrapper?.querySelector('.scroll-view');
-      if (scrollView) scrollElement = scrollView;
+      // For updates, check if there are new messages
+      const latestTimestamp = messages.length > 0 ? messages[messages.length - 1]?.timestamp : null;
+      const storedTimestamp = panel[`_lastTimestamp_${guildKey}`];
+      
+      if (storedTimestamp === null || latestTimestamp === null) {
+        panel[`_lastTimestamp_${guildKey}`] = latestTimestamp;
+        panel[`_lastMessageCount_${guildKey}`] = messages.length;
+      } else if (latestTimestamp <= storedTimestamp && messages.length === (panel[`_lastMessageCount_${guildKey}`] || 0)) {
+        // No new messages - but still scroll if forceScrollToBottom is true (tab switching)
+        if (forceScrollToBottom) {
+          handleChatScroll(panel, container, true, false);
+        }
+        return;
+      } else {
+        // Update timestamp and count
+        panel[`_lastTimestamp_${guildKey}`] = latestTimestamp;
+        panel[`_lastMessageCount_${guildKey}`] = messages.length;
+      }
     }
-    setupGuildChatScrollDetection(panel, container, scrollElement, guildId);
-  }
 
-  if (forceScrollToBottom) {
+    if (messages.length === 0) {
+      if (isInitialLoad) {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.style.cssText = `
+          text-align: center;
+          color: ${CSS_CONSTANTS.COLORS.WHITE_50};
+          padding: 15px;
+          font-style: italic;
+          font-size: 12px;
+        `;
+        emptyMsg.textContent = 'No messages yet';
+        container.appendChild(emptyMsg);
+      }
+      // Still scroll to bottom if forceScrollToBottom is true (tab switching)
+      if (forceScrollToBottom) {
+        handleChatScroll(panel, container, true, false);
+      }
+      return;
+    }
+
+    // Get previous message count
+    const previousMessageCount = panel?.[`_previousMessageCount_${guildKey}`] || 0;
+    
+    // Track displayed message IDs to prevent duplicates
+    const displayedMessageIds = getDisplayedMessageIds(container);
+    
+    // Determine if we need a full rebuild
+    const needsFullRebuild = isInitialLoad || shouldRebuildChat(messages, previousMessageCount, existingMessages);
+    
+    // Check if cancelled before modifying DOM
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    
+    // Verify active tab still matches expected guild tab
+    if (activeAllChatTab !== expectedTab) {
+      return;
+    }
+    
+    if (needsFullRebuild) {
+      container.innerHTML = '';
+    }
+    
+    if (messages.length === 0) {
+      if (needsFullRebuild) {
+        const emptyMsg = createEmptyChatMessage('No messages yet');
+        container.appendChild(emptyMsg);
+      }
+      if (panel) panel[`_previousMessageCount_${guildKey}`] = 0;
+      // Still scroll to bottom if forceScrollToBottom is true (tab switching)
+      if (forceScrollToBottom) {
+        handleChatScroll(panel, container, true, needsFullRebuild);
+      }
+      return;
+    }
+    
+    // Get last date key for separator logic
+    // When appending new messages, get the date key from the last displayed message in DOM
+    let lastDateKey = null;
+    if (needsFullRebuild) {
+      lastDateKey = getLastDateKeyFromMessages(messages, previousMessageCount, needsFullRebuild);
+    } else {
+      // Get last date key from the last message element in the DOM
+      const lastMessageElement = Array.from(container.querySelectorAll('[data-message-id]')).pop();
+      if (lastMessageElement) {
+        // Look backwards from the last message to find the date separator that applies to it
+        let prevElement = lastMessageElement.previousElementSibling;
+        while (prevElement) {
+          const dateText = prevElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+          if (dateText) {
+            lastDateKey = getDateKeyFromElement(prevElement);
+            break;
+          }
+          prevElement = prevElement.previousElementSibling;
+        }
+        // If no date separator found before the last message, check if there's one at the very beginning
+        if (!lastDateKey) {
+          const firstElement = container.firstElementChild;
+          if (firstElement) {
+            const firstDateText = firstElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+            if (firstDateText) {
+              lastDateKey = getDateKeyFromElement(firstElement);
+            }
+          }
+        }
+      }
+    }
+    
+    // Only process new messages if not rebuilding
+    const messagesToProcess = needsFullRebuild ? messages : messages.slice(previousMessageCount);
+    
+    // Message ID generator function
+    const getMessageId = (msg) => msg.id || null;
+    
+    // Process messages using unified helper (handles date separators only on full rebuild)
+    const elementsToAppend = await processMessagesForChat(
+      messages,
+      messagesToProcess,
+      needsFullRebuild,
+      displayedMessageIds,
+      container,
+      getMessageId,
+      needsFullRebuild ? lastDateKey : null
+    );
+    
+    // Final check: verify active tab still matches expected guild tab before appending messages
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    if (activeAllChatTab !== expectedTab) {
+      return;
+    }
+    
+    // Append elements using DocumentFragment (reduces flicker)
+    appendElementsToContainer(container, elementsToAppend);
+    
+    // Update message count
     if (panel) {
-      scrollChatToBottom(panel);
-    } else {
-      container.scrollTop = container.scrollHeight;
+      const totalDisplayed = container.querySelectorAll('[data-message-id]').length;
+      panel[`_previousMessageCount_${guildKey}`] = totalDisplayed;
     }
+
+    // Setup scroll detection if initial load
+    if (isInitialLoad && panel) {
+      let scrollElement = container;
+      if (panel._scrollContainer && panel._scrollContainer.scrollView) {
+        scrollElement = panel._scrollContainer.scrollView;
+      } else {
+        const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
+        const scrollView = contentWrapper?.querySelector('.scroll-view');
+        if (scrollView) scrollElement = scrollView;
+      }
+      setupGuildChatScrollDetection(panel, container, scrollElement, guildId);
+    }
+
+    // Determine if we should scroll to bottom (consistent with other chat types)
+    const hasNewMessages = !isInitialLoad && messagesToProcess.length > 0;
+    const shouldScrollToBottom = forceScrollToBottom || hasNewMessages;
+    
+    // Handle scrolling using unified function (consistent with all-chat and private chats)
+    handleChatScroll(panel, container, shouldScrollToBottom, needsFullRebuild);
+  } finally {
+    // Always clear loading flag
+    if (panel) panel[`_isLoadingGuildChat_${guildKey}`] = false;
   }
 }
 
@@ -1825,7 +2359,7 @@ function createMessageBoxStyle(borderColor, backgroundColor = null) {
     border-radius: 4px;
     color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
     text-align: center;
-    font-size: 12px;
+    font-size: ${CSS_CONSTANTS.FONT_SIZES.BASE};
     line-height: 1.4;
   `;
 }
@@ -1838,8 +2372,55 @@ function createButtonStyle(backgroundColor) {
     border-radius: 4px;
     color: white;
     cursor: pointer;
-    font-size: 12px;
+    font-size: ${CSS_CONSTANTS.FONT_SIZES.BASE};
     font-weight: 600;
+  `;
+}
+
+// Create action button style (for delete, block, VIP, runs-only buttons)
+function createActionButtonStyle(color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY, fontSize = CSS_CONSTANTS.FONT_SIZES.BASE) {
+  return `
+    padding: 6px 12px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border: 4px solid transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    color: ${color};
+    cursor: pointer;
+    font-size: ${fontSize};
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    transition: color 0.2s, border-image 0.1s;
+    font-family: ${CSS_CONSTANTS.FONT_FAMILY};
+    box-sizing: border-box;
+    border-radius: 0;
+  `;
+}
+
+// Setup button hover/press handlers
+function setupActionButtonHandlers(button, hoverColor = null, defaultColor = CSS_CONSTANTS.COLORS.TEXT_PRIMARY) {
+  button.addEventListener('mouseenter', () => {
+    if (hoverColor) button.style.color = hoverColor;
+  });
+  button.addEventListener('mouseleave', () => {
+    button.style.color = defaultColor;
+  });
+  button.addEventListener('mousedown', () => {
+    button.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME_PRESSED;
+  });
+  button.addEventListener('mouseup', () => {
+    button.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME;
+  });
+}
+
+// Create flex container style
+function createFlexContainerStyle(direction = 'row', align = 'center', justify = 'flex-start', gap = '0') {
+  return `
+    display: flex;
+    flex-direction: ${direction};
+    align-items: ${align};
+    justify-content: ${justify};
+    gap: ${gap};
   `;
 }
 
@@ -1853,7 +2434,7 @@ function updateChatInputState(textarea, sendButton, canChat, hasPrivilege, recip
         ? tReplace('mods.vipList.messagePlaceholder', { name: toPlayer })
         : `${toPlayer} does not have chat enabled`;
     }
-    textarea.style.color = canChat ? CSS_CONSTANTS.COLORS.TEXT_WHITE : 'rgba(255, 255, 255, 0.5)';
+    textarea.style.color = canChat ? CSS_CONSTANTS.COLORS.TEXT_WHITE : CSS_CONSTANTS.COLORS.WHITE_50;
     textarea.style.cursor = canChat ? '' : 'not-allowed';
     textarea.style.opacity = canChat ? '1' : '0.6';
   }
@@ -2693,10 +3274,9 @@ async function sendAllChatMessage(text) {
     
     console.log('[VIP List] Message sent to All Chat');
     
-    // Invalidate All Chat cache
-    allChatCache.messages = null;
-    allChatCache.timestamp = 0;
-    allChatCache.expiresAt = 0;
+    // Don't invalidate cache - we're updating it optimistically
+    // The cache will be updated when the message is added optimistically
+    // This prevents unnecessary reloads
     
     return true;
   } catch (error) {
@@ -2890,8 +3470,8 @@ async function checkForAllChatMessages() {
       return [];
     }
     
-    // Fetch all All Chat messages
-    let response = await fetch(`${getAllChatApiUrl()}.json`);
+    // Fetch all All Chat messages - use orderBy to ensure chronological order
+    let response = await fetch(`${getAllChatApiUrl()}.json?orderBy="$key"`);
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -2970,23 +3550,17 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       return allChatCache.messages;
     }
     
-    // Build query URL with pagination if needed
-    let queryUrl = `${getAllChatApiUrl()}.json`;
-    const queryParams = [];
+    // Build query URL - always use orderBy to ensure chronological order
+    let queryUrl = `${getAllChatApiUrl()}.json?orderBy="$key"`;
     
     if (limit !== null) {
       // For pagination, use limitToLast to get most recent messages
-      queryParams.push(`orderBy="$key"`);
-      queryParams.push(`limitToLast=${limit}`);
+      queryUrl += `&limitToLast=${limit}`;
       
       // If endBefore is provided, use endAt to get messages before that key
       if (endBefore !== null) {
-        queryParams.push(`endAt="${endBefore}"`);
+        queryUrl += `&endAt="${endBefore}"`;
       }
-    }
-    
-    if (queryParams.length > 0) {
-      queryUrl += '?' + queryParams.join('&');
     }
     
     // Fetch All Chat messages
@@ -3247,7 +3821,7 @@ function createDateSeparator(timestamp) {
   line.style.cssText = `
     flex: 1;
     height: 1px;
-    background: rgba(255, 255, 255, 0.2);
+    background: ${CSS_CONSTANTS.COLORS.WHITE_20};
   `;
   
   const label = document.createElement('div');
@@ -3266,7 +3840,7 @@ function createDateSeparator(timestamp) {
   line2.style.cssText = `
     flex: 1;
     height: 1px;
-    background: rgba(255, 255, 255, 0.2);
+    background: ${CSS_CONSTANTS.COLORS.WHITE_20};
   `;
   
   separator.appendChild(line);
@@ -3277,9 +3851,13 @@ function createDateSeparator(timestamp) {
 }
 
 // Create message element (used by all chat types)
-async function createChatMessageElement(msg, container, messageId = null) {
+async function createChatMessageElement(msg, container, messageId = null, cachedLevel = null) {
   const messageDiv = document.createElement('div');
   messageDiv.setAttribute('data-message-id', messageId || msg.id || `msg-${Date.now()}`);
+  // Store timestamp for date boundary detection when prepending older messages
+  if (msg.timestamp) {
+    messageDiv.setAttribute('data-timestamp', msg.timestamp.toString());
+  }
   
   const currentPlayer = getCurrentPlayerName();
   const isFromCurrentPlayer = msg.isFromMe || (msg.from && msg.from.toLowerCase() === currentPlayer?.toLowerCase());
@@ -3302,8 +3880,11 @@ async function createChatMessageElement(msg, container, messageId = null) {
   const username = msg.isFromMe ? currentPlayer : (msg.from || 'Unknown');
   const messageText = msg.text || '';
   
-  // Get player level
-  const playerLevel = await getPlayerLevel(username, isFromCurrentPlayer);
+  // Use cached level if provided (from batch processing), otherwise fetch
+  let playerLevel = cachedLevel;
+  if (playerLevel === null || playerLevel === undefined) {
+    playerLevel = await getPlayerLevel(username, isFromCurrentPlayer);
+  }
   
   // Create message structure with clickable player name
   const datetimeSpan = document.createElement('span');
@@ -3316,12 +3897,24 @@ async function createChatMessageElement(msg, container, messageId = null) {
   
   const messageSpan = document.createElement('span');
   
-  // Use embedReplayLinks to properly parse and embed replay links
-  const replayParts = embedReplayLinks(messageText);
-  if (replayParts) {
-    replayParts.forEach(part => messageSpan.appendChild(part));
+  // For system messages, parse and make usernames clickable
+  if (username && username.toLowerCase() === 'system') {
+    const systemParts = await embedSystemMessageUsernames(messageText, container);
+    if (systemParts) {
+      systemParts.forEach(part => messageSpan.appendChild(part));
+    } else {
+      // Still translate even if no usernames found
+      const translatedText = translateSystemMessage(messageText);
+      messageSpan.textContent = translatedText;
+    }
   } else {
-    messageSpan.textContent = messageText;
+    // Use embedReplayLinks to properly parse and embed replay links
+    const replayParts = embedReplayLinks(messageText);
+    if (replayParts) {
+      replayParts.forEach(part => messageSpan.appendChild(part));
+    } else {
+      messageSpan.textContent = messageText;
+    }
   }
   
   messageDiv.appendChild(datetimeSpan);
@@ -3384,10 +3977,15 @@ function getLastDateKeyFromMessages(messages, previousCount, needsFullRebuild) {
   return lastPreviousMsg ? getDateKey(lastPreviousMsg.timestamp) : null;
 }
 
-// Process messages and create elements with date separators
-async function processMessagesWithSeparators(messages, messagesToProcess, needsFullRebuild, displayedIds, container, getMessageIdFn, initialLastDateKey = null) {
+// Unified helper to process messages for any chat type
+// Returns array of elements to append (messages and optionally date separators)
+async function processMessagesForChat(messages, messagesToProcess, needsFullRebuild, displayedIds, container, getMessageIdFn, initialLastDateKey = null) {
   const elementsToAppend = [];
   let lastDateKey = initialLastDateKey;
+  
+  // Collect messages to process (filter out already displayed)
+  const messagesToCreate = [];
+  const messageIndices = [];
   
   for (let i = 0; i < messagesToProcess.length; i++) {
     const msg = messagesToProcess[i];
@@ -3398,17 +3996,85 @@ async function processMessagesWithSeparators(messages, messagesToProcess, needsF
       continue;
     }
     
-    const currentDateKey = getDateKey(msg.timestamp);
-    
-    // Add date separator if date changed
-    if (currentDateKey !== lastDateKey) {
-      elementsToAppend.push(createDateSeparator(msg.timestamp));
-      lastDateKey = currentDateKey;
+    messagesToCreate.push(msg);
+    messageIndices.push(i);
+  }
+  
+  if (messagesToCreate.length === 0) {
+    return elementsToAppend;
+  }
+  
+  // Batch fetch player levels for all unique usernames in parallel
+  const currentPlayer = getCurrentPlayerName();
+  const uniqueUsernames = new Set();
+  messagesToCreate.forEach(msg => {
+    const username = msg.isFromMe ? currentPlayer : (msg.from || 'Unknown');
+    if (username && username.toLowerCase() !== 'system') {
+      uniqueUsernames.add(username);
     }
+  });
+  
+  // Pre-fetch all player levels in parallel
+  const levelPromises = new Map();
+  uniqueUsernames.forEach(username => {
+    const isFromCurrentPlayer = username === currentPlayer;
+    levelPromises.set(username, getPlayerLevel(username, isFromCurrentPlayer));
+  });
+  
+  // Wait for all levels to be fetched (don't block if some fail)
+  const levelCache = new Map();
+  await Promise.allSettled(
+    Array.from(levelPromises.entries()).map(async ([username, promise]) => {
+      try {
+        const level = await promise;
+        levelCache.set(username, level);
+      } catch (error) {
+        levelCache.set(username, null);
+      }
+    })
+  );
+  
+  // Create message elements in batches (parallel processing)
+  const BATCH_SIZE = 10; // Process 10 messages at a time in parallel
+  for (let batchStart = 0; batchStart < messagesToCreate.length; batchStart += BATCH_SIZE) {
+    const batch = messagesToCreate.slice(batchStart, batchStart + BATCH_SIZE);
+    const batchIndices = messageIndices.slice(batchStart, batchStart + BATCH_SIZE);
     
-    // Create message element
-    const messageDiv = await createChatMessageElement(msg, container, msgId);
-    elementsToAppend.push(messageDiv);
+    // Process batch in parallel
+    const batchElements = await Promise.all(
+      batch.map(async (msg, batchIndex) => {
+        const originalIndex = batchIndices[batchIndex];
+        const msgId = getMessageIdFn(msg, messages, originalIndex) || msg.id;
+        const currentDateKey = getDateKey(msg.timestamp);
+        
+        // Create message element with pre-fetched level
+        const username = msg.isFromMe ? currentPlayer : (msg.from || 'Unknown');
+        const isFromCurrentPlayer = username === currentPlayer;
+        const playerLevel = levelCache.get(username) || null;
+        
+        // Create element (cache level to avoid re-fetching)
+        msg._cachedLevel = playerLevel;
+        const messageDiv = await createChatMessageElement(msg, container, msgId, playerLevel);
+        
+        return { element: messageDiv, dateKey: currentDateKey, index: batchStart + batchIndex };
+      })
+    );
+    
+    // Add date separators and elements in order
+    for (let batchIndex = 0; batchIndex < batchElements.length; batchIndex++) {
+      const { element, dateKey } = batchElements[batchIndex];
+      const originalIndex = batchStart + batchIndex;
+      
+      // Only add date separator on full rebuild (initial load)
+      // When appending new messages, skip date separators for simplicity
+      if (needsFullRebuild && dateKey !== lastDateKey) {
+        const msg = messagesToCreate[originalIndex];
+        elementsToAppend.push(createDateSeparator(msg.timestamp));
+        lastDateKey = dateKey;
+      }
+      
+      elementsToAppend.push(element);
+    }
   }
   
   return elementsToAppend;
@@ -3420,6 +4086,121 @@ function appendElementsToContainer(container, elements) {
   const fragment = document.createDocumentFragment();
   elements.forEach(element => fragment.appendChild(element));
   container.appendChild(fragment);
+}
+
+// Optimistically add a single message to All Chat without reloading
+async function addMessageToAllChatOptimistically(message, container, panel) {
+  if (!container || !message) return;
+  
+  const messageId = message.id || `msg-${message.timestamp}`;
+  
+  // Check if message already exists in DOM
+  const existingMessage = container.querySelector(`[data-message-id="${messageId}"]`);
+  if (existingMessage) {
+    return; // Already displayed
+  }
+  
+  // Get last displayed message to check if we need a date separator
+  const displayedMessages = Array.from(container.querySelectorAll('[data-message-id]'));
+  const lastMessage = displayedMessages.length > 0 ? displayedMessages[displayedMessages.length - 1] : null;
+  
+  let lastDateKey = null;
+  if (lastMessage) {
+    // Try to get date key from cache first (most reliable)
+    const lastMsgId = lastMessage.getAttribute('data-message-id');
+    if (allChatCache.messages && lastMsgId) {
+      const lastMsg = allChatCache.messages.find(msg => msg.id === lastMsgId);
+      if (lastMsg && lastMsg.timestamp) {
+        lastDateKey = getDateKey(lastMsg.timestamp);
+      }
+    }
+    
+    // Fallback: try to find date separator
+    if (!lastDateKey) {
+      let prevElement = lastMessage.previousElementSibling;
+      while (prevElement) {
+        const dateText = prevElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+        if (dateText) {
+          lastDateKey = getDateKeyFromElement(prevElement);
+          break;
+        }
+        prevElement = prevElement.previousElementSibling;
+      }
+    }
+  }
+  
+  const newMessageDateKey = getDateKey(message.timestamp);
+  const needsDateSeparator = lastDateKey && lastDateKey !== newMessageDateKey;
+  
+  // Create elements to append
+  const elementsToAppend = [];
+  
+  // Add date separator if needed
+  if (needsDateSeparator) {
+    elementsToAppend.push(createDateSeparator(message.timestamp));
+  }
+  
+  // Create message element
+  const messageElement = await createChatMessageElement(message, container, messageId);
+  if (messageElement) {
+    elementsToAppend.push(messageElement);
+  }
+  
+  // Append to container
+  if (elementsToAppend.length > 0) {
+    appendElementsToContainer(container, elementsToAppend);
+    
+    // Update cache if it exists
+    if (allChatCache.messages) {
+      // Add message to cache if not already there
+      const existsInCache = allChatCache.messages.some(msg => msg.id === messageId);
+      if (!existsInCache) {
+        allChatCache.messages.push(message);
+        allChatCache.messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        // Update cache timestamp to keep it fresh
+        const now = Date.now();
+        allChatCache.timestamp = now;
+        allChatCache.expiresAt = now + CACHE_TTL;
+      }
+    }
+    
+    // Update message count
+    if (panel) {
+      const totalDisplayed = container.querySelectorAll('[data-message-id]').length;
+      panel._previousMessageCount = totalDisplayed;
+    }
+    
+    // Scroll to bottom
+    scrollChatToBottom(panel);
+  }
+}
+
+// Optimistically add a single message to private conversation without reloading
+async function addMessageToConversationOptimistically(message, container, panel) {
+  if (!container || !message) return;
+  
+  const messageId = message.id || `msg-${message.timestamp}`;
+  
+  // Check if message already exists in DOM
+  const existingMessage = container.querySelector(`[data-message-id="${messageId}"]`);
+  if (existingMessage) {
+    return; // Already displayed
+  }
+  
+  // Simply append the message without date separators or complex logic
+  const messageElement = await createChatMessageElement(message, container, messageId);
+  if (messageElement) {
+    container.appendChild(messageElement);
+    
+    // Update message count
+    if (panel) {
+      const totalDisplayed = container.querySelectorAll('[data-message-id]').length;
+      panel._previousMessageCount = totalDisplayed;
+    }
+    
+    // Scroll to bottom
+    scrollChatToBottom(panel);
+  }
 }
 
 // Handle chat scrolling logic
@@ -3450,7 +4231,7 @@ function createEmptyChatMessage(text) {
   const emptyMsg = document.createElement('div');
   emptyMsg.style.cssText = `
     text-align: center;
-    color: rgba(255, 255, 255, 0.5);
+    color: ${CSS_CONSTANTS.COLORS.WHITE_50};
     padding: 15px;
     font-style: italic;
     font-size: 12px;
@@ -3620,6 +4401,292 @@ function embedReplayLinks(text) {
   return parts;
 }
 
+// Extract usernames from English system message text
+function extractUsernamesFromSystemMessage(text) {
+  if (!text || typeof text !== 'string') {
+    return { usernames: [], textWithPlaceholders: text };
+  }
+  
+  const usernames = [];
+  const commonWords = ['the', 'guild', 'was', 'created', 'and', 'or', 'a', 'an', 'to', 'by', 'joined', 'left', 'promoted', 'demoted', 'transferred', 'leadership', 'invited', 'kicked', 'from', 'changed', 'updated', 'description', 'type'];
+  const roleWords = ['officer', 'member', 'leader', 'admin'];
+  const actionWords = ['promoted', 'demoted', 'joined', 'left', 'created', 'transferred', 'invited', 'kicked', 'changed', 'updated'];
+  
+  // Extract and protect quoted strings (guild names)
+  const quotedStrings = [];
+  const quotePattern = /"([^"]+)"/g;
+  let quoteMatch;
+  while ((quoteMatch = quotePattern.exec(text)) !== null) {
+    const start = quoteMatch.index;
+    const end = start + quoteMatch[0].length;
+    quotedStrings.push({ start, end, content: quoteMatch[0] });
+  }
+  
+  // Build protected text
+  let protectedText = text;
+  for (let i = quotedStrings.length - 1; i >= 0; i--) {
+    const q = quotedStrings[i];
+    const spaces = ' '.repeat(q.end - q.start);
+    protectedText = protectedText.substring(0, q.start) + spaces + protectedText.substring(q.end);
+  }
+  
+  // Find all potential usernames
+  const usernamePattern = /\b([a-zA-Z0-9_\-]{1,30})\b/g;
+  const usernameMatches = [];
+  let match;
+  
+  while ((match = usernamePattern.exec(protectedText)) !== null) {
+    const username = match[1];
+    const usernameLower = username.toLowerCase();
+    const matchStart = match.index;
+    const matchEnd = matchStart + match[0].length;
+    
+    // Skip if inside quoted string
+    if (quotedStrings.some(q => matchStart >= q.start && matchEnd <= q.end)) {
+      continue;
+    }
+    
+    // Skip common words
+    if (commonWords.includes(usernameLower)) {
+      continue;
+    }
+    
+    // Skip action words
+    if (actionWords.includes(usernameLower)) {
+      continue;
+    }
+    
+    // Skip role words after "to"
+    if (roleWords.includes(usernameLower)) {
+      const beforeText = protectedText.substring(Math.max(0, matchStart - 10), matchStart).toLowerCase();
+      if (beforeText.includes(' to ')) {
+        continue;
+      }
+    }
+    
+    // Context validation
+    const beforeText = protectedText.substring(Math.max(0, matchStart - 30), matchStart).toLowerCase();
+    const afterText = protectedText.substring(matchEnd, Math.min(protectedText.length, matchEnd + 30)).toLowerCase();
+    
+    const isAtStart = matchStart === 0;
+    const isAfterBy = beforeText.endsWith('by ') || beforeText.endsWith('by');
+    const isBeforeAction = actionWords.some(action => afterText.startsWith(action + ' ') || afterText.startsWith(action));
+    const immediateBefore = protectedText.substring(Math.max(0, matchStart - 30), matchStart).toLowerCase();
+    const isAfterAction = actionWords.some(action => {
+      return immediateBefore.endsWith(' ' + action + ' ') || immediateBefore.endsWith(action + ' ');
+    });
+    const isAfterTo = beforeText.endsWith('to ') || beforeText.endsWith(' to ');
+    const isAfterToWithAction = isAfterTo && actionWords.some(action => {
+      const toIndex = immediateBefore.lastIndexOf('to');
+      if (toIndex === -1) return false;
+      const beforeTo = immediateBefore.substring(0, toIndex).trim();
+      return beforeTo.endsWith(' ' + action) || beforeTo.endsWith(action) || beforeTo.includes(' ' + action + ' ');
+    });
+    
+    const isValidContext = isAtStart || isAfterBy || isBeforeAction || isAfterAction || isAfterToWithAction;
+    
+    if (isValidContext) {
+      usernameMatches.push({
+        start: matchStart,
+        end: matchEnd,
+        username: username
+      });
+    }
+  }
+  
+  // Sort by position (reverse order for replacement)
+  usernameMatches.sort((a, b) => b.start - a.start);
+  
+  // Replace usernames with placeholders
+  let textWithPlaceholders = text;
+  usernameMatches.forEach((match, index) => {
+    const placeholder = `__USERNAME_${index}__`;
+    usernames.unshift(match.username); // Add to beginning to maintain order
+    textWithPlaceholders = textWithPlaceholders.substring(0, match.start) + placeholder + textWithPlaceholders.substring(match.end);
+  });
+  
+  return { usernames, textWithPlaceholders };
+}
+
+// Translate system messages from English (stored in Firebase) to current language
+// Can accept text with placeholders (__USERNAME_0__, etc.) or actual usernames
+function translateSystemMessage(text) {
+  if (!text || typeof text !== 'string') {
+    return text;
+  }
+  
+  // Check if text contains placeholders - if so, we need to handle it differently
+  const hasPlaceholders = /__USERNAME_\d+__/.test(text);
+  
+  // Pattern: Guild "{name}" was created by {player}
+  const createdByMatch = text.match(/^Guild "([^"]+)" was created by (.+)$/);
+  if (createdByMatch) {
+    const result = tReplace('mods.guilds.guildCreatedBy', { name: createdByMatch[1], player: createdByMatch[2] });
+    // If original had placeholders, preserve them in the result
+    if (hasPlaceholders && createdByMatch[2].startsWith('__USERNAME_')) {
+      return result.replace(createdByMatch[2], createdByMatch[2]);
+    }
+    return result;
+  }
+  
+  // Pattern: {player} joined the guild
+  const joinedMatch = text.match(/^(.+) joined the guild$/);
+  if (joinedMatch) {
+    return tReplace('mods.guilds.playerJoinedGuild', { player: joinedMatch[1] });
+  }
+  
+  // Pattern: {player} left the guild
+  const leftMatch = text.match(/^(.+) left the guild$/);
+  if (leftMatch) {
+    return tReplace('mods.guilds.playerLeftGuild', { player: leftMatch[1] });
+  }
+  
+  // Pattern: {player} transferred leadership to {newLeader}
+  const transferredMatch = text.match(/^(.+) transferred leadership to (.+)$/);
+  if (transferredMatch) {
+    return tReplace('mods.guilds.playerTransferredLeadership', { player: transferredMatch[1], newLeader: transferredMatch[2] });
+  }
+  
+  // Pattern: {player} invited {invitedPlayer} to the guild
+  const invitedMatch = text.match(/^(.+) invited (.+) to the guild$/);
+  if (invitedMatch) {
+    return tReplace('mods.guilds.playerInvitedToGuild', { player: invitedMatch[1], invitedPlayer: invitedMatch[2] });
+  }
+  
+  // Pattern: {player} promoted {member} to Officer
+  const promotedMatch = text.match(/^(.+) promoted (.+) to Officer$/);
+  if (promotedMatch) {
+    return tReplace('mods.guilds.playerPromotedToOfficer', { player: promotedMatch[1], member: promotedMatch[2] });
+  }
+  
+  // Pattern: {player} demoted {member} to Member
+  const demotedMatch = text.match(/^(.+) demoted (.+) to Member$/);
+  if (demotedMatch) {
+    return tReplace('mods.guilds.playerDemotedToMember', { player: demotedMatch[1], member: demotedMatch[2] });
+  }
+  
+  // Pattern: {player} kicked {member} from the guild
+  const kickedMatch = text.match(/^(.+) kicked (.+) from the guild$/);
+  if (kickedMatch) {
+    // Fallback to English if translation key doesn't exist
+    const translation = t('mods.guilds.playerKickedFromGuild');
+    if (translation === 'mods.guilds.playerKickedFromGuild') {
+      return text; // No translation available, return original
+    }
+    return tReplace('mods.guilds.playerKickedFromGuild', { player: kickedMatch[1], member: kickedMatch[2] });
+  }
+  
+  // Pattern: {player} changed the guild join type to {type}
+  const joinTypeMatch = text.match(/^(.+) changed the guild join type to (.+)$/);
+  if (joinTypeMatch) {
+    const translation = t('mods.guilds.playerChangedJoinType');
+    if (translation === 'mods.guilds.playerChangedJoinType') {
+      return text; // No translation available, return original
+    }
+    return tReplace('mods.guilds.playerChangedJoinType', { player: joinTypeMatch[1], type: joinTypeMatch[2] });
+  }
+  
+  // Pattern: {player} updated the guild description
+  const descriptionMatch = text.match(/^(.+) updated the guild description$/);
+  if (descriptionMatch) {
+    const translation = t('mods.guilds.playerUpdatedDescription');
+    if (translation === 'mods.guilds.playerUpdatedDescription') {
+      return text; // No translation available, return original
+    }
+    return tReplace('mods.guilds.playerUpdatedDescription', { player: descriptionMatch[1] });
+  }
+  
+  // No pattern matched, return original text
+  return text;
+}
+
+async function embedSystemMessageUsernames(text, container) {
+  if (!text || typeof text !== 'string') {
+    return null;
+  }
+  
+  // Extract usernames from original English text first
+  const { usernames } = extractUsernamesFromSystemMessage(text);
+  
+  // If no usernames found, just return null to use textContent
+  if (usernames.length === 0) {
+    return null;
+  }
+  
+  // Translate the original message (usernames will be in the translated text)
+  const translatedText = translateSystemMessage(text);
+  
+  // Now find and replace usernames in the translated text with clickable buttons
+  const parts = [];
+  let lastIndex = 0;
+  
+  // Sort usernames by length (longest first) to avoid partial matches
+  const sortedUsernames = [...usernames].sort((a, b) => b.length - a.length);
+  
+  // Find all username positions in translated text
+  const usernamePositions = [];
+  for (const username of sortedUsernames) {
+    // Use word boundaries to match whole usernames only
+    const regex = new RegExp(`\\b${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+    let match;
+    while ((match = regex.exec(translatedText)) !== null) {
+      usernamePositions.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        username: username
+      });
+    }
+  }
+  
+  // Sort by position and remove overlaps (keep first occurrence)
+  usernamePositions.sort((a, b) => a.start - b.start);
+  const nonOverlappingPositions = [];
+  for (const pos of usernamePositions) {
+    if (nonOverlappingPositions.length === 0 || pos.start >= nonOverlappingPositions[nonOverlappingPositions.length - 1].end) {
+      nonOverlappingPositions.push(pos);
+    }
+  }
+  
+  // Build parts array
+  for (const pos of nonOverlappingPositions) {
+    // Add text before username
+    if (pos.start > lastIndex) {
+      parts.push(document.createTextNode(translatedText.substring(lastIndex, pos.start)));
+    }
+    
+    // Create clickable username button
+    try {
+      const nameButton = await createAllChatPlayerNameButton(pos.username, false, container);
+      const button = nameButton.querySelector('button');
+      if (button) {
+        button.style.textDecoration = 'underline';
+      }
+      parts.push(nameButton);
+    } catch (error) {
+      parts.push(document.createTextNode(pos.username));
+    }
+    
+    lastIndex = pos.end;
+  }
+  
+  // Add remaining text after last username
+  if (lastIndex < translatedText.length) {
+    parts.push(document.createTextNode(translatedText.substring(lastIndex)));
+  }
+  
+  // If no parts created, return null
+  if (parts.length === 0) {
+    return null;
+  }
+  
+  // If only one text node, return null to use textContent instead
+  if (parts.length === 1 && parts[0].nodeType === Node.TEXT_NODE) {
+    return null;
+  }
+  
+  return parts;
+}
+
 
 // Update message badge
 function updateMessageBadge() {
@@ -3752,26 +4819,42 @@ async function processNewMessages(messages) {
   unreadMessageCount = messages.filter(msg => !msg.read).length;
   updateMessageBadge();
   
-  // Update all-chat tab badges for new messages
-  for (const msg of newMessages) {
-    if (!msg.read) {
-      const sender = msg.from;
-      const messages = await getConversationMessages(sender);
-      const unreadCount = await getPlayerUnreadCount(messages, sender);
-      updateAllChatTabUnread(sender, unreadCount);
-      updateVIPListChatIcon(sender, unreadCount);
-    }
-  }
-  
-  // Update open chat panels with new messages
+  // Update open chat panels with new messages (debounced to prevent rapid updates)
   messagesBySender.forEach((playerMessages, sender) => {
-    const panel = openChatPanels.get(sender.toLowerCase());
-    if (panel && typeof loadConversation === 'function') {
-      const messagesArea = panel.querySelector(`#chat-messages-${sender.toLowerCase()}`);
-      if (messagesArea) {
-        loadConversation(sender, messagesArea, false);
-      }
+    const senderLower = sender.toLowerCase();
+    
+    // Clear existing timeout for this sender
+    const existingTimeout = conversationUpdateTimeouts.get(senderLower);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
     }
+    
+    // Debounce updates (wait 300ms to batch rapid message arrivals)
+    const timeoutId = setTimeout(async () => {
+      conversationUpdateTimeouts.delete(senderLower);
+      
+      const panel = openChatPanels.get(senderLower);
+      if (panel && typeof loadConversation === 'function') {
+        const messagesArea = panel.querySelector(`#chat-messages-${senderLower}`);
+        if (messagesArea) {
+          await loadConversation(sender, messagesArea, false);
+        }
+      }
+      
+      // Check for tabs in all-chat panel (new style)
+      if (allChatTabs.has(senderLower)) {
+        const allChatPanel = openChatPanels.get('all-chat');
+        if (allChatPanel && activeAllChatTab === senderLower) {
+          // This sender's tab is currently active, refresh the conversation
+          const messagesArea = allChatPanel.querySelector('#chat-messages-all-chat');
+          if (messagesArea && typeof loadConversation === 'function') {
+            await loadConversation(sender, messagesArea, false);
+          }
+        }
+      }
+    }, 300);
+    
+    conversationUpdateTimeouts.set(senderLower, timeoutId);
   });
 }
 
@@ -3952,30 +5035,53 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
     const messages = await checkForMessages();
     await processNewMessages(messages);
     
-    // Check for All Chat messages and update if panel is open
+    // Check for All Chat and Guild Chat messages if panel is open and tab is active (debounced)
     const allChatPanel = openChatPanels.get('all-chat');
     if (allChatPanel && typeof loadAllChatConversation === 'function') {
-      const messagesArea = allChatPanel.querySelector('#chat-messages-all-chat');
-      if (messagesArea) {
-        // Check for new messages
-        try {
-          const allChatMessages = await getAllChatMessages();
-          const latestTimestamp = allChatMessages.length > 0 ? allChatMessages[allChatMessages.length - 1]?.timestamp : null;
-          const storedTimestamp = allChatPanel._lastTimestamp;
-          
-          if (storedTimestamp === null || latestTimestamp === null) {
-            allChatPanel._lastTimestamp = latestTimestamp;
-          } else if (latestTimestamp > storedTimestamp || allChatMessages.length !== (allChatPanel._lastMessageCount || 0)) {
-            allChatPanel._lastTimestamp = latestTimestamp;
-            allChatPanel._lastMessageCount = allChatMessages.length;
-            await loadAllChatConversation(messagesArea);
-          }
-        } catch (error) {
-          if (error.message && !error.message.includes('401')) {
-            console.warn('[VIP List] Error checking All Chat messages:', error);
+      // Clear existing timeout
+      if (allChatUpdateTimeout) {
+        clearTimeout(allChatUpdateTimeout);
+      }
+      
+      // Debounce All Chat updates (wait 300ms to batch rapid updates)
+      allChatUpdateTimeout = setTimeout(async () => {
+        allChatUpdateTimeout = null;
+        const messagesArea = allChatPanel.querySelector('#chat-messages-all-chat');
+        if (!messagesArea) return;
+        
+        // Only check if All Chat tab is active (avoid unnecessary API calls)
+        if (activeAllChatTab === 'all-chat') {
+          try {
+            const allChatMessages = await getAllChatMessages();
+            const latestTimestamp = allChatMessages.length > 0 ? allChatMessages[allChatMessages.length - 1]?.timestamp : null;
+            const storedTimestamp = allChatPanel._lastTimestamp;
+            
+            if (storedTimestamp === null || latestTimestamp === null) {
+              allChatPanel._lastTimestamp = latestTimestamp;
+            } else if (latestTimestamp > storedTimestamp || allChatMessages.length !== (allChatPanel._lastMessageCount || 0)) {
+              allChatPanel._lastTimestamp = latestTimestamp;
+              allChatPanel._lastMessageCount = allChatMessages.length;
+              await loadAllChatConversation(messagesArea);
+            }
+          } catch (error) {
+            if (error.message && !error.message.includes('401')) {
+              console.warn('[VIP List] Error checking All Chat messages:', error);
+            }
           }
         }
-      }
+        
+        // Check for new guild chat messages if guild tab is active
+        if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
+          try {
+            const guildId = activeAllChatTab.replace('guild-', '');
+            await loadGuildChatConversation(messagesArea, guildId, false);
+          } catch (error) {
+            if (error.message && !error.message.includes('401')) {
+              console.warn('[VIP List] Error checking Guild Chat messages:', error);
+            }
+          }
+        }
+      }, 300);
     }
     
     // Check for conversation deletions and refresh open panels
@@ -4020,10 +5126,25 @@ function cleanupMessageChecking() {
     clearInterval(messageCheckInterval);
     messageCheckInterval = null;
   }
+  
+  // Clear all conversation update timeouts
+  for (const timeoutId of conversationUpdateTimeouts.values()) {
+    clearTimeout(timeoutId);
+  }
+  conversationUpdateTimeouts.clear();
+  
+  // Clear All Chat update timeout
+  if (allChatUpdateTimeout) {
+    clearTimeout(allChatUpdateTimeout);
+    allChatUpdateTimeout = null;
+  }
 }
 
 // Get all messages between current player and another player
-async function getConversationMessages(otherPlayer, forceRefresh = false) {
+// Get conversation messages with pagination support
+// limit: maximum number of messages to fetch (default: null = all for compatibility)
+// endBefore: message ID or timestamp to fetch messages before (for pagination)
+async function getConversationMessages(otherPlayer, forceRefresh = false, limit = null, endBefore = null) {
   if (!getMessagingApiUrl() || !MESSAGING_CONFIG.enabled) {
     return [];
   }
@@ -4037,157 +5158,191 @@ async function getConversationMessages(otherPlayer, forceRefresh = false) {
     const currentPlayerLower = currentPlayer.toLowerCase();
     const otherPlayerLower = otherPlayer.toLowerCase();
     
-    // Check cache first
+    // Check cache first (only for full fetch without pagination)
     const cacheKey = otherPlayerLower;
     let now = Date.now();
-    if (!forceRefresh && conversationCache.has(cacheKey)) {
+    if (!forceRefresh && limit === null && endBefore === null && conversationCache.has(cacheKey)) {
       const cached = conversationCache.get(cacheKey);
       if (now < cached.expiresAt) {
         return cached.messages;
       }
     }
     
-    // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
-    const hashedOtherPlayer = await hashUsername(otherPlayer);
-    const hashedCurrentPlayer = await hashUsername(currentPlayer);
+    // Hash usernames for Firebase paths (cached, so fast)
+    const [hashedOtherPlayer, hashedCurrentPlayer] = await Promise.all([
+      hashUsername(otherPlayer),
+      hashUsername(currentPlayer)
+    ]);
     
-    // Fetch messages sent TO the other player (stored under their hashed name)
-    let sentResponse = await fetch(`${getMessagingApiUrl()}/${hashedOtherPlayer}.json`);
-    let sentData = {};
+    // Build query URLs - always use orderBy to ensure chronological order
+    let sentUrl = `${getMessagingApiUrl()}/${hashedOtherPlayer}.json?orderBy="$key"`;
+    let receivedUrl = `${getMessagingApiUrl()}/${hashedCurrentPlayer}.json?orderBy="$key"`;
     
-    if (!sentResponse.ok && sentResponse.status === 404) {
-      // Try non-hashed path for backward compatibility
-      sentResponse = await fetch(`${getMessagingApiUrl()}/${otherPlayerLower}.json`);
+    if (limit !== null) {
+      // For pagination, use limitToLast to get most recent messages
+      sentUrl += `&limitToLast=${limit}`;
+      receivedUrl += `&limitToLast=${limit}`;
+      
+      // If endBefore is provided, use endAt to get messages before that key
+      if (endBefore !== null) {
+        sentUrl += `&endAt="${endBefore}"`;
+        receivedUrl += `&endAt="${endBefore}"`;
+      }
     }
     
-    if (sentResponse.ok) {
+    // Fetch both message sets in parallel for faster loading
+    const [sentResponse, receivedResponse] = await Promise.all([
+      fetch(sentUrl).catch(() => ({ ok: false, status: 404 })),
+      fetch(receivedUrl).catch(() => ({ ok: false, status: 404 }))
+    ]);
+    
+    let sentData = {};
+    if (!sentResponse.ok && sentResponse.status === 404) {
+      // Try non-hashed path for backward compatibility
+      const fallbackResponse = await fetch(`${getMessagingApiUrl()}/${otherPlayerLower}.json`).catch(() => ({ ok: false }));
+      if (fallbackResponse.ok) {
+        sentData = await fallbackResponse.json();
+      }
+    } else if (sentResponse.ok) {
       sentData = await sentResponse.json();
     } else if (sentResponse.status === 401) {
       // Silent fail - warning already shown by checkForMessages
       sentData = {};
     }
     
-    // Fetch messages received FROM the other player (stored under current player's hashed name)
-    let receivedResponse = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
     let receivedData = {};
-    
     if (!receivedResponse.ok && receivedResponse.status === 404) {
       // Try non-hashed path for backward compatibility
-      receivedResponse = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`);
-    }
-    
-    if (receivedResponse.ok) {
+      const fallbackResponse = await fetch(`${getMessagingApiUrl()}/${currentPlayerLower}.json`).catch(() => ({ ok: false }));
+      if (fallbackResponse.ok) {
+        receivedData = await fallbackResponse.json();
+      }
+    } else if (receivedResponse.ok) {
       receivedData = await receivedResponse.json();
     } else if (receivedResponse.status === 401) {
       // Silent fail - warning already shown by checkForMessages
       receivedData = {};
     }
     
-    // Combine all messages
-    const allMessages = [];
+    // Collect all potential messages first (fast filtering using hashes)
+    const sentMessagePromises = [];
+    const receivedMessagePromises = [];
     
-    // Add sent messages and decrypt
+    // Collect sent messages
     if (sentData && typeof sentData === 'object') {
       for (const [id, msg] of Object.entries(sentData)) {
         if (!msg) continue;
         
-        // Check if message is from current player using fromHash (for encrypted) or from field (for plain text)
+        // Fast filter using hash (avoids decryption for filtering)
         let isFromCurrentPlayer = false;
         if (msg.usernamesEncrypted && msg.fromHash) {
-          // Use hash comparison for encrypted usernames
           isFromCurrentPlayer = msg.fromHash === hashedCurrentPlayer;
         } else if (msg.from) {
-          // Plain text comparison (backward compatibility)
-          try {
-            // Try to decrypt and compare
-            const decryptedFrom = await decryptUsername(msg.from, currentPlayer, otherPlayer);
-            isFromCurrentPlayer = decryptedFrom && decryptedFrom.toLowerCase() === currentPlayerLower;
-          } catch (error) {
-            // If decryption fails, try direct comparison
-            isFromCurrentPlayer = msg.from.toLowerCase() === currentPlayerLower;
-          }
+          // Fallback: try direct comparison first (fast)
+          isFromCurrentPlayer = msg.from.toLowerCase() === currentPlayerLower;
         }
         
         if (isFromCurrentPlayer) {
-          let decryptedMsg = { id, ...msg, isFromMe: true };
-          // Decrypt message text if encrypted
-          if (msg.encrypted && msg.text) {
-            try {
-              const decryptedText = await decryptMessage(msg.text, currentPlayer, otherPlayer);
-              decryptedMsg.text = decryptedText;
-            } catch (error) {
-              console.warn('[VIP List] Failed to decrypt sent message:', error);
-            }
-          }
-          // Decrypt username if encrypted
-          if (msg.usernamesEncrypted && msg.from) {
-            try {
-              decryptedMsg.from = await decryptUsername(msg.from, currentPlayer, otherPlayer);
-            } catch (error) {
-              decryptedMsg.from = currentPlayer;
-            }
-          }
-          allMessages.push(decryptedMsg);
+          // Queue decryption task (will decrypt in parallel)
+          sentMessagePromises.push(
+            (async () => {
+              let decryptedMsg = { id, ...msg, isFromMe: true };
+              
+              // Decrypt text and username in parallel
+              const decryptTasks = [];
+              if (msg.encrypted && msg.text) {
+                decryptTasks.push(
+                  decryptMessage(msg.text, currentPlayer, otherPlayer)
+                    .then(text => { decryptedMsg.text = text; })
+                    .catch(() => {}) // Keep encrypted text on error
+                );
+              }
+              if (msg.usernamesEncrypted && msg.from) {
+                decryptTasks.push(
+                  decryptUsername(msg.from, currentPlayer, otherPlayer)
+                    .then(from => { decryptedMsg.from = from; })
+                    .catch(() => { decryptedMsg.from = currentPlayer; })
+                );
+              }
+              
+              await Promise.all(decryptTasks);
+              return decryptedMsg;
+            })()
+          );
         }
       }
     }
     
-    // Add received messages and decrypt
+    // Collect received messages
     if (receivedData && typeof receivedData === 'object') {
       for (const [id, msg] of Object.entries(receivedData)) {
         if (!msg) continue;
         
-        // Check if message is from other player using fromHash (for encrypted) or from field (for plain text)
+        // Fast filter using hash (avoids decryption for filtering)
         let isFromOtherPlayer = false;
         if (msg.usernamesEncrypted && msg.fromHash) {
-          // Use hash comparison for encrypted usernames
           isFromOtherPlayer = msg.fromHash === hashedOtherPlayer;
         } else if (msg.from) {
-          // Plain text comparison (backward compatibility)
-          try {
-            // Try to decrypt and compare
-            const decryptedFrom = await decryptUsername(msg.from, otherPlayer, currentPlayer);
-            isFromOtherPlayer = decryptedFrom && decryptedFrom.toLowerCase() === otherPlayerLower;
-          } catch (error) {
-            // If decryption fails, try direct comparison
-            isFromOtherPlayer = msg.from.toLowerCase() === otherPlayerLower;
-          }
+          // Fallback: try direct comparison first (fast)
+          isFromOtherPlayer = msg.from.toLowerCase() === otherPlayerLower;
         }
         
         if (isFromOtherPlayer) {
-          let decryptedMsg = { id, ...msg, isFromMe: false };
-          // Decrypt message text if encrypted
-          if (msg.encrypted && msg.text) {
-            try {
-              const decryptedText = await decryptMessage(msg.text, otherPlayer, currentPlayer);
-              decryptedMsg.text = decryptedText;
-            } catch (error) {
-              console.warn('[VIP List] Failed to decrypt received message:', error);
-            }
-          }
-          // Decrypt username if encrypted
-          if (msg.usernamesEncrypted && msg.from) {
-            try {
-              decryptedMsg.from = await decryptUsername(msg.from, otherPlayer, currentPlayer);
-            } catch (error) {
-              decryptedMsg.from = otherPlayer;
-            }
-          }
-          allMessages.push(decryptedMsg);
+          // Queue decryption task (will decrypt in parallel)
+          receivedMessagePromises.push(
+            (async () => {
+              let decryptedMsg = { id, ...msg, isFromMe: false };
+              
+              // Decrypt text and username in parallel
+              const decryptTasks = [];
+              if (msg.encrypted && msg.text) {
+                decryptTasks.push(
+                  decryptMessage(msg.text, otherPlayer, currentPlayer)
+                    .then(text => { decryptedMsg.text = text; })
+                    .catch(() => {}) // Keep encrypted text on error
+                );
+              }
+              if (msg.usernamesEncrypted && msg.from) {
+                decryptTasks.push(
+                  decryptUsername(msg.from, otherPlayer, currentPlayer)
+                    .then(from => { decryptedMsg.from = from; })
+                    .catch(() => { decryptedMsg.from = otherPlayer; })
+                );
+              }
+              
+              await Promise.all(decryptTasks);
+              return decryptedMsg;
+            })()
+          );
         }
       }
     }
     
+    // Decrypt all messages in parallel (much faster than sequential)
+    const [sentMessages, receivedMessages] = await Promise.all([
+      Promise.all(sentMessagePromises),
+      Promise.all(receivedMessagePromises)
+    ]);
+    
+    let allMessages = [...sentMessages, ...receivedMessages];
+    
     // Sort by timestamp
     allMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     
-    // Cache the messages
-    now = Date.now();
-    conversationCache.set(cacheKey, {
-      messages: allMessages,
-      timestamp: now,
-      expiresAt: now + CACHE_TTL
-    });
+    // If limit is set, take only the most recent 'limit' messages
+    if (limit !== null && allMessages.length > limit) {
+      allMessages = allMessages.slice(-limit);
+    }
+    
+    // Cache the messages (only for full fetch without pagination)
+    if (limit === null && endBefore === null) {
+      now = Date.now();
+      conversationCache.set(cacheKey, {
+        messages: allMessages,
+        timestamp: now,
+        expiresAt: now + CACHE_TTL
+      });
+    }
     
     return allMessages;
   } catch (error) {
@@ -4196,26 +5351,153 @@ async function getConversationMessages(otherPlayer, forceRefresh = false) {
   }
 }
 
+// Load older conversation messages when scrolling to top (pagination)
+async function loadOlderConversationMessages(container, playerName) {
+  const playerKey = playerName.toLowerCase();
+  await loadOlderMessages(container, getConversationMessages, {
+    loadingFlag: '_isLoadingOlderConversation',
+    oldestIdKey: `_oldestLoadedMessageId_${playerKey}`,
+    fetchArgs: (oldestMessageId) => [playerName, false, MESSAGES_PER_PAGE * 2, oldestMessageId],
+    playerName: playerName // Pass playerName for runs-only filter
+  });
+}
+
+// Setup scroll detection for private conversation
+function setupConversationScrollDetection(panel, messagesArea, scrollElement, playerName) {
+  const playerKey = playerName.toLowerCase();
+  setupScrollDetection(panel, messagesArea, scrollElement, {
+    handlerKey: `_scrollHandler_conversation_${playerKey}`,
+    oldestIdKey: `_oldestLoadedMessageId_${playerKey}`,
+    loadingFlag: '_isLoadingOlderConversation',
+    loadFunction: loadOlderConversationMessages,
+    loadArgs: [messagesArea, playerName]
+  });
+}
+
 // Load and display conversation (module-level function)
 async function loadConversation(player, container, forceScrollToBottom = false, forceRefresh = false) {
-  let messages = await getConversationMessages(player, forceRefresh);
-  
   // Get previous message count from container's data attribute or panel
   const panel = container.closest('[id^="vip-chat-panel-"]');
   
-  // Apply runs-only filter if active (per-player filter state)
+  // Check if we're loading initial messages or appending new ones
+  const existingMessages = container.querySelectorAll('[data-message-id]');
+  const isInitialLoad = existingMessages.length === 0 || forceRefresh;
+  
+  let messages;
+  if (isInitialLoad) {
+    // Load only the most recent 20 messages initially
+    messages = await getConversationMessages(player, forceRefresh, MESSAGES_PER_PAGE);
+    
+    // Track oldest loaded message for pagination
+    const playerKey = player.toLowerCase();
+    if (messages.length > 0) {
+      panel[`_oldestLoadedMessageId_${playerKey}`] = messages[0].id;
+    } else {
+      panel[`_oldestLoadedMessageId_${playerKey}`] = null;
+    }
+    
+    // Setup scroll detection for loading older messages
+    let scrollElement = container;
+    if (panel._scrollContainer && panel._scrollContainer.scrollView) {
+      scrollElement = panel._scrollContainer.scrollView;
+    } else {
+      const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
+      const scrollView = contentWrapper?.querySelector('.scroll-view');
+      if (scrollView) scrollElement = scrollView;
+    }
+    setupConversationScrollDetection(panel, container, scrollElement, player);
+  } else {
+    // For updates, fetch all messages first
+    // Show "Fetching runs..." indicator if runs-only filter is active and we're refreshing
+    const filterKey = panel ? `runsOnlyFilter_${player.toLowerCase()}` : null;
+    const isRunsOnlyActive = panel && panel.getAttribute(`data-${filterKey}`) === 'true';
+    if (isRunsOnlyActive && forceRefresh) {
+      showFetchingRunsIndicator(container);
+    }
+    
+    let filteredMessages;
+    try {
+      const allMessages = await getConversationMessages(player, forceRefresh);
+      
+      // Apply runs-only filter to all messages first (so we can properly track filtered count)
+      filteredMessages = allMessages;
+      if (isRunsOnlyActive) {
+        const originalCount = filteredMessages.length;
+        filteredMessages = filteredMessages.filter(msg => {
+          const text = msg.text || '';
+          return text.includes('$replay(');
+        });
+        console.log(`[VIP List] Runs-only filter applied to all messages: ${originalCount} -> ${filteredMessages.length} messages`);
+      }
+      
+      // Ensure filtered messages are sorted chronologically (oldest to newest)
+      if (filteredMessages && filteredMessages.length > 0) {
+        filteredMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      }
+    } finally {
+      // Hide indicator after fetching and filtering is complete
+      if (isRunsOnlyActive && forceRefresh) {
+        hideFetchingRunsIndicator(container);
+      }
+    }
+    
+    // Check if any new messages have timestamps earlier than the last displayed message
+    // If so, we need to do a full rebuild to maintain correct chronological order
+    if (filteredMessages && filteredMessages.length > 0 && existingMessages.length > 0) {
+      const lastDisplayedMessage = Array.from(container.querySelectorAll('[data-message-id]')).pop();
+      if (lastDisplayedMessage) {
+        const lastMessageId = lastDisplayedMessage.getAttribute('data-message-id');
+        const lastMessage = filteredMessages.find(msg => msg.id === lastMessageId);
+        if (lastMessage && lastMessage.timestamp) {
+          // Get messages that would be "new" (after previousMessageCount)
+          const previousMessageCount = panel?._previousMessageCount || 0;
+          const newMessages = filteredMessages.slice(previousMessageCount);
+          // Check if any new message has an earlier timestamp
+          const hasOlderMessages = newMessages.some(msg => msg.timestamp && msg.timestamp < lastMessage.timestamp);
+          if (hasOlderMessages) {
+            // Force full rebuild by treating as initial load
+            messages = filteredMessages;
+            // This will be handled by needsFullRebuild check below
+          } else {
+            // Use all filtered messages (not just new ones) so we can properly slice for appending
+            messages = filteredMessages;
+          }
+        } else {
+          messages = filteredMessages;
+        }
+      } else {
+        messages = filteredMessages;
+      }
+    } else {
+      // Use all filtered messages (not just new ones) so we can properly slice for appending
+      messages = filteredMessages || [];
+    }
+  }
+  
+  // Get filter state (already applied above for updates, but need it for initial load)
   const filterKey = panel ? `runsOnlyFilter_${player.toLowerCase()}` : null;
   const isRunsOnlyActive = panel && panel.getAttribute(`data-${filterKey}`) === 'true';
   const previousFilterState = panel?._lastRunsOnlyFilter || false;
   const filterChanged = isRunsOnlyActive !== previousFilterState;
   
-  if (isRunsOnlyActive) {
-    const originalCount = messages.length;
-    messages = messages.filter(msg => {
-      const text = msg.text || '';
-      return text.includes('$replay(');
-    });
-    console.log(`[VIP List] Runs-only filter applied: ${originalCount} -> ${messages.length} messages`);
+  // Apply runs-only filter for initial load
+  if (isInitialLoad && isRunsOnlyActive) {
+    showFetchingRunsIndicator(container);
+    try {
+      const originalCount = messages.length;
+      messages = messages.filter(msg => {
+        const text = msg.text || '';
+        return text.includes('$replay(');
+      });
+      console.log(`[VIP List] Runs-only filter applied to initial load: ${originalCount} -> ${messages.length} messages`);
+    } finally {
+      hideFetchingRunsIndicator(container);
+    }
+  }
+  
+  // Ensure messages are always sorted chronologically (oldest to newest)
+  if (messages && messages.length > 0) {
+    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   }
   
   const previousMessageCount = panel?._previousMessageCount || 0;
@@ -4225,12 +5507,10 @@ async function loadConversation(player, container, forceScrollToBottom = false, 
   const shouldScrollToBottom = forceScrollToBottom || hasNewMessages;
   
   // Track displayed message IDs to prevent duplicates
-  const existingMessages = container.querySelectorAll('[data-message-id]');
   const displayedMessageIds = getDisplayedMessageIds(container);
   
   // Determine if we need a full rebuild
   // Rebuild if: filter changed, message count decreased (deletion), or no existing messages
-  // Note: forceScrollToBottom only affects scrolling, not rebuilding
   const needsFullRebuild = shouldRebuildChat(messages, previousMessageCount, existingMessages, filterChanged);
   
   // Preserve warning message, privilege message, blocked message, and delete confirmation if they exist
@@ -4277,7 +5557,36 @@ async function loadConversation(player, container, forceScrollToBottom = false, 
   }
   
   // Get last date key for separator logic
-  const lastDateKey = getLastDateKeyFromMessages(messages, previousMessageCount, needsFullRebuild);
+  // When appending new messages, get the date key from the last displayed message in DOM
+  let lastDateKey = null;
+  if (needsFullRebuild) {
+    lastDateKey = getLastDateKeyFromMessages(messages, previousMessageCount, needsFullRebuild);
+  } else {
+    // Get last date key from the last message element in the DOM
+    const lastMessageElement = Array.from(container.querySelectorAll('[data-message-id]')).pop();
+    if (lastMessageElement) {
+      // Look backwards from the last message to find the date separator that applies to it
+      let prevElement = lastMessageElement.previousElementSibling;
+      while (prevElement) {
+        const dateText = prevElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+        if (dateText) {
+          lastDateKey = getDateKeyFromElement(prevElement);
+          break;
+        }
+        prevElement = prevElement.previousElementSibling;
+      }
+      // If no date separator found before the last message, check if there's one at the very beginning
+      if (!lastDateKey) {
+        const firstElement = container.firstElementChild;
+        if (firstElement) {
+          const firstDateText = firstElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+          if (firstDateText) {
+            lastDateKey = getDateKeyFromElement(firstElement);
+          }
+        }
+      }
+    }
+  }
   
   // Only process new messages if not rebuilding
   const messagesToProcess = needsFullRebuild ? messages : messages.slice(previousMessageCount);
@@ -4285,15 +5594,15 @@ async function loadConversation(player, container, forceScrollToBottom = false, 
   // Message ID generator function
   const getMessageId = (msg, allMessages, index) => msg.id || `msg-${allMessages.indexOf(msg)}`;
   
-  // Process messages and create elements with date separators
-  const elementsToAppend = await processMessagesWithSeparators(
+  // Process messages using unified helper (handles date separators only on full rebuild)
+  const elementsToAppend = await processMessagesForChat(
     messages,
     messagesToProcess,
     needsFullRebuild,
     displayedMessageIds,
     container,
     getMessageId,
-    lastDateKey
+    needsFullRebuild ? lastDateKey : null
   );
   
   // Append elements using DocumentFragment (reduces flicker)
@@ -4404,15 +5713,10 @@ function showDeleteConfirmation(panel, otherPlayer) {
     if (success) {
       // Remove confirmation dialog
       confirmation.remove();
-      // Refresh the chat panel to show empty state
-      await loadConversation(otherPlayer, messagesArea);
-      // Update message count tracking
-      const panel = messagesArea.closest('[id^="vip-chat-panel-"]');
-      if (panel) {
-        panel._lastMessageCount = 0;
-        const conversationKey = otherPlayer.toLowerCase();
-        conversationLastTimestamps.delete(conversationKey);
-      }
+      // Clear messages area completely
+      messagesArea.innerHTML = '';
+      // Refresh the chat panel to show empty state (force refresh to ensure clean state)
+      await loadConversation(otherPlayer, messagesArea, false, true);
     } else {
       // Re-enable buttons if deletion failed
       confirmation.style.opacity = '1';
@@ -4446,16 +5750,19 @@ async function deleteConversation(otherPlayer) {
     
     const currentPlayerLower = currentPlayer.toLowerCase();
     const otherPlayerLower = otherPlayer.toLowerCase();
+    const conversationKey = otherPlayerLower;
     
     // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
     const hashedOtherPlayer = await hashUsername(otherPlayer);
     const hashedCurrentPlayer = await hashUsername(currentPlayer);
     
     // Get all messages in the conversation
-    const conversationMessages = await getConversationMessages(otherPlayer);
+    const conversationMessages = await getConversationMessages(otherPlayer, true); // Force refresh to get all messages
     
     if (conversationMessages.length === 0) {
       console.log('[VIP List] No messages to delete');
+      // Still clear cache and state even if no messages
+      clearConversationCacheAndState(otherPlayer);
       return true;
     }
     
@@ -4512,6 +5819,9 @@ async function deleteConversation(otherPlayer) {
     // Wait for all deletions to complete
     await Promise.all(deletePromises);
     
+    // Clear cache and state after successful Firebase deletion
+    clearConversationCacheAndState(otherPlayer);
+    
     console.log('[VIP List] Conversation deleted successfully');
     
     return true;
@@ -4522,6 +5832,39 @@ async function deleteConversation(otherPlayer) {
   }
 }
 
+// Helper function to clear all conversation-related cache and state
+function clearConversationCacheAndState(otherPlayer) {
+  const conversationKey = otherPlayer.toLowerCase();
+  
+  // Clear conversation cache
+  conversationCache.delete(conversationKey);
+  
+  // Clear conversation last timestamp
+  conversationLastTimestamps.delete(conversationKey);
+  
+  // Clear panel state for this conversation
+  // Try to find panel by checking all chat panels (conversations are tabs in all-chat panel)
+  const allChatPanel = document.querySelector('[id^="vip-chat-panel-all-chat"]');
+  const privateChatPanel = document.querySelector(`[id^="vip-chat-panel-${conversationKey}"]`);
+  const panel = allChatPanel || privateChatPanel;
+  
+  if (panel) {
+    // Clear pagination state
+    panel[`_oldestLoadedMessageId_${conversationKey}`] = null;
+    panel[`_previousMessageCount_${conversationKey}`] = 0;
+    panel[`_previousMessageCount`] = 0; // Also clear generic one if exists
+    panel[`_lastMessageCount_${conversationKey}`] = 0;
+    panel[`_lastMessageCount`] = 0; // Also clear generic one if exists
+    
+    // Clear scroll handler if exists
+    const handlerKey = `_scrollHandler_conversation_${conversationKey}`;
+    if (panel[handlerKey]) {
+      panel[handlerKey] = null;
+    }
+  }
+  
+  console.log(`[VIP List] Cleared cache and state for conversation with ${otherPlayer}`);
+}
 
 // Open chat panel (now opens as tab in all-chat panel)
 async function openChatPanel(toPlayer) {
@@ -4585,8 +5928,18 @@ async function createAllChatPlayerNameButton(username, isFromCurrentPlayer, cont
   const guildAbbreviation = await getPlayerGuildAbbreviation(username);
   nameButton.textContent = username;
   
-  // Add guild abbreviation as separate span (not underlined) if available
-  if (guildAbbreviation) {
+  // Check if we're in a guild chat tab and if this player is in the same guild
+  let shouldShowGuildAbbreviation = true;
+  if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
+    const currentGuildId = activeAllChatTab.replace('guild-', '');
+    const playerGuildId = await getPlayerGuildId(username);
+    if (playerGuildId === currentGuildId) {
+      shouldShowGuildAbbreviation = false;
+    }
+  }
+  
+  // Add guild abbreviation as separate span (not underlined) if available and should show
+  if (guildAbbreviation && shouldShowGuildAbbreviation) {
     const guildSpan = document.createElement('span');
     guildSpan.textContent = `[${guildAbbreviation}] `;
     guildSpan.style.cssText = `
@@ -4720,7 +6073,7 @@ async function getPlayerGuildAbbreviation(playerName) {
   try {
     // Get player's guild from Firebase
     const hashedPlayer = await hashUsername(playerName);
-    const firebaseUrl = 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app';
+    const firebaseUrl = MESSAGING_CONFIG.firebaseUrl;
     const response = await fetch(`${firebaseUrl}/guilds/players/${hashedPlayer}.json`);
     
     if (response.ok) {
@@ -4731,8 +6084,8 @@ async function getPlayerGuildAbbreviation(playerName) {
         if (guildResponse.ok) {
           const guild = await guildResponse.json();
           if (guild && guild.abbreviation) {
-            // Cache it
-            playerGuildCache.set(playerNameLower, { abbreviation: guild.abbreviation, timestamp: Date.now() });
+            // Cache it with both abbreviation and guildId
+            playerGuildCache.set(playerNameLower, { abbreviation: guild.abbreviation, guildId: playerGuild.guildId, timestamp: Date.now() });
             return guild.abbreviation;
           }
         }
@@ -4740,7 +6093,7 @@ async function getPlayerGuildAbbreviation(playerName) {
     }
     
     // Cache null result to avoid repeated failed requests
-    playerGuildCache.set(playerNameLower, { abbreviation: null, timestamp: Date.now() });
+    playerGuildCache.set(playerNameLower, { abbreviation: null, guildId: null, timestamp: Date.now() });
     return null;
   } catch (error) {
     console.error('[VIP List] Error getting player guild abbreviation:', error);
@@ -4748,140 +6101,44 @@ async function getPlayerGuildAbbreviation(playerName) {
   }
 }
 
-// Setup scroll detection for loading older messages when scrolling to top
-function setupAllChatScrollDetection(panel, messagesArea, scrollElement) {
-  if (!panel || !scrollElement || panel._scrollHandler) {
-    return; // Already setup or invalid
+// Get player guild ID (checks cache and Firebase)
+async function getPlayerGuildId(playerName) {
+  if (!playerName) return null;
+  
+  const playerNameLower = playerName.toLowerCase();
+  
+  // Check cache first (cache valid for 1 hour)
+  const cached = playerGuildCache.get(playerNameLower);
+  if (cached && Date.now() - cached.timestamp < GUILD_CACHE_TTL) {
+    return cached.guildId || null;
   }
   
-  let scrollTimeout = null;
+  // If not in cache, fetch it (this will also populate the cache via getPlayerGuildAbbreviation)
+  await getPlayerGuildAbbreviation(playerName);
   
-  const scrollHandler = async () => {
-    // Throttle scroll events
-    if (scrollTimeout) {
-      clearTimeout(scrollTimeout);
-    }
-    
-    scrollTimeout = setTimeout(() => {
-      // Check if user is near the top (within 100px)
-      const scrollTop = scrollElement.scrollTop;
-      const scrollThreshold = 100;
-      
-      if (scrollTop <= scrollThreshold && panel._oldestLoadedMessageId && !panel._isLoadingOlderAllChat) {
-        // User scrolled to top - load older messages
-        loadOlderAllChatMessages(messagesArea);
-      }
-    }, 100); // Throttle to every 100ms
-  };
-  
-  scrollElement.addEventListener('scroll', scrollHandler, { passive: true });
-  panel._scrollHandler = scrollHandler;
+  // Check cache again after fetching
+  const cachedAfterFetch = playerGuildCache.get(playerNameLower);
+  return cachedAfterFetch ? (cachedAfterFetch.guildId || null) : null;
+}
+
+// Setup scroll detection for all-chat
+function setupAllChatScrollDetection(panel, messagesArea, scrollElement) {
+  setupScrollDetection(panel, messagesArea, scrollElement, {
+    handlerKey: '_scrollHandler',
+    oldestIdKey: '_oldestLoadedMessageId',
+    loadingFlag: '_isLoadingOlderAllChat',
+    loadFunction: loadOlderAllChatMessages,
+    loadArgs: [messagesArea]
+  });
 }
 
 // Load older messages when scrolling to top (pagination)
 async function loadOlderAllChatMessages(container) {
-  const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
-  if (!panel || panel._isLoadingOlderAllChat) {
-    return;
-  }
-  
-  // Get the oldest loaded message ID
-  const oldestMessageId = panel._oldestLoadedMessageId;
-  if (!oldestMessageId) {
-    return; // No more messages to load
-  }
-  
-  panel._isLoadingOlderAllChat = true;
-  
-  try {
-    // Get scroll element and current scroll position
-    let scrollElement = container;
-    if (panel._scrollContainer && panel._scrollContainer.scrollView) {
-      scrollElement = panel._scrollContainer.scrollView;
-    } else {
-      const contentWrapper = panel.querySelector('#all-chat-content-wrapper');
-      const scrollView = contentWrapper?.querySelector('.scroll-view');
-      if (scrollView) scrollElement = scrollView;
-    }
-    
-    const scrollHeightBefore = scrollElement.scrollHeight;
-    
-    // Fetch older messages
-    // Use endAt to get messages up to (and including) the oldest message ID
-    // Then filter out messages >= oldestMessageId to get only older ones
-    const olderMessages = await getAllChatMessages(false, MESSAGES_PER_PAGE * 2, oldestMessageId);
-    
-    if (olderMessages.length === 0) {
-      panel._oldestLoadedMessageId = null; // No more messages
-      return;
-    }
-    
-    // Get displayed message IDs to prevent duplicates
-    const displayedMessageIds = getDisplayedMessageIds(container);
-    
-    // Filter to get only messages older than the oldest we have
-    // Compare IDs numerically (they're timestamps)
-    const oldestIdNum = parseInt(oldestMessageId) || 0;
-    const newMessages = olderMessages.filter(msg => {
-      const msgId = msg.id || null;
-      if (!msgId || displayedMessageIds.has(msgId)) {
-        return false;
-      }
-      // Only include messages with ID less than oldest (older messages)
-      const msgIdNum = parseInt(msgId) || 0;
-      return msgIdNum < oldestIdNum;
-    });
-    
-    if (newMessages.length === 0) {
-      panel._oldestLoadedMessageId = null;
-      return;
-    }
-    
-    // Sort new messages (should already be sorted, but ensure)
-    newMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    
-    // Get first message element for date separator logic
-    const firstExistingMessage = container.querySelector('[data-message-id]');
-    const lastDateKey = firstExistingMessage ? 
-      getDateKeyFromElement(firstExistingMessage) : null;
-    
-    // Process messages and create elements
-    const elementsToPrepend = [];
-    let currentDateKey = lastDateKey;
-    
-    for (const msg of newMessages) {
-      const msgDateKey = getDateKey(msg.timestamp);
-      
-      // Add date separator if date changed
-      if (currentDateKey !== msgDateKey) {
-        elementsToPrepend.push(createDateSeparator(msg.timestamp));
-        currentDateKey = msgDateKey;
-      }
-      
-      // Create message element
-      const messageElement = await createChatMessageElement(msg, container, msg.id || `msg-${msg.timestamp}`);
-      elementsToPrepend.push(messageElement);
-    }
-    
-    // Insert elements at the beginning of container (preserve scroll position)
-    const firstChild = container.firstChild;
-    elementsToPrepend.reverse().forEach(element => {
-      container.insertBefore(element, firstChild);
-    });
-    
-    // Update oldest loaded message ID
-    panel._oldestLoadedMessageId = newMessages[0].id;
-    
-    // Preserve scroll position
-    const scrollHeightAfter = scrollElement.scrollHeight;
-    const scrollDiff = scrollHeightAfter - scrollHeightBefore;
-    scrollElement.scrollTop += scrollDiff;
-    
-  } catch (error) {
-    console.error('[VIP List] Error loading older All Chat messages:', error);
-  } finally {
-    panel._isLoadingOlderAllChat = false;
-  }
+  await loadOlderMessages(container, getAllChatMessages, {
+    loadingFlag: '_isLoadingOlderAllChat',
+    oldestIdKey: '_oldestLoadedMessageId',
+    fetchArgs: (oldestMessageId) => [false, MESSAGES_PER_PAGE * 2, oldestMessageId]
+  });
 }
 
 // Get date key from a message element
@@ -4890,10 +6147,13 @@ function getDateKeyFromElement(element) {
   const dateText = element.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
   if (dateText) {
     // Extract date from separator - format is "Today", "Yesterday", or date string
+    // Use the same translation function to match the text
+    const todayText = t('mods.vipList.dateToday');
+    const yesterdayText = t('mods.vipList.dateYesterday');
     const today = new Date();
-    if (dateText === 'Today') {
+    if (dateText === todayText || dateText.toUpperCase() === 'TODAY') {
       return getDateKey(today.getTime());
-    } else if (dateText === 'Yesterday') {
+    } else if (dateText === yesterdayText || dateText.toUpperCase() === 'YESTERDAY') {
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
       return getDateKey(yesterday.getTime());
@@ -4922,7 +6182,7 @@ function getDateKeyFromElement(element) {
 }
 
 // Load and display All Chat conversation
-async function loadAllChatConversation(container, forceScrollToBottom = false, forceRefresh = false) {
+async function loadAllChatConversation(container, forceScrollToBottom = false, forceRefresh = false, checkCancelled = null) {
   const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
   
   // Prevent concurrent loading (memory leak prevention)
@@ -4933,14 +6193,29 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
   panel._isLoadingAllChat = true;
   
   try {
+    // Check if cancelled before starting
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
     // Check if we're loading initial messages or appending new ones
     const existingMessages = container.querySelectorAll('[data-message-id]');
     const isInitialLoad = existingMessages.length === 0 || forceRefresh;
     
     let messages;
+    let forceRebuildForDateChange = false;
     if (isInitialLoad) {
       // Load only the most recent 20 messages initially
       messages = await getAllChatMessages(forceRefresh, MESSAGES_PER_PAGE);
+      
+      // Check if cancelled after loading messages
+      if (checkCancelled && checkCancelled()) {
+        return;
+      }
+      
+      // Verify active tab is still 'all-chat' before displaying
+      if (activeAllChatTab !== 'all-chat') {
+        return;
+      }
       
       // Track oldest loaded message for pagination
       if (messages.length > 0) {
@@ -4950,14 +6225,94 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       }
     } else {
       // For updates, fetch all new messages (will append to existing)
-      messages = await getAllChatMessages(forceRefresh);
+      const allMessages = await getAllChatMessages(forceRefresh);
+      
+      // Check if cancelled after loading messages
+      if (checkCancelled && checkCancelled()) {
+        return;
+      }
+      
+      // Verify active tab is still 'all-chat' before displaying
+      if (activeAllChatTab !== 'all-chat') {
+        return;
+      }
       
       // Filter to only new messages (after the latest we have)
       const allDisplayedIds = Array.from(container.querySelectorAll('[data-message-id]')).map(el => el.getAttribute('data-message-id'));
       if (allDisplayedIds.length > 0) {
         // Filter out messages we already have displayed
-        messages = messages.filter(msg => !allDisplayedIds.includes(msg.id));
+        messages = allMessages.filter(msg => !allDisplayedIds.includes(msg.id));
+      } else {
+        messages = allMessages;
       }
+      
+      // Check if we need a full rebuild due to date changes or chronological order issues
+      // Only rebuild if there are actual date changes or older messages that need to be inserted
+      // Don't rebuild just because there are newer messages - those can be appended
+      if (existingMessages.length > 0 && allMessages.length > 0) {
+        // Get date keys directly from displayed messages in THIS container only
+        const displayedDateKeys = new Set();
+        const displayedMsgElements = Array.from(container.querySelectorAll('[data-message-id]'));
+        
+        // Extract date keys from displayed messages by finding their timestamps in allMessages
+        displayedMsgElements.forEach(msgEl => {
+          const msgId = msgEl.getAttribute('data-message-id');
+          if (msgId) {
+            const displayedMsg = allMessages.find(msg => msg.id === msgId);
+            if (displayedMsg && displayedMsg.timestamp) {
+              displayedDateKeys.add(getDateKey(displayedMsg.timestamp));
+            }
+          }
+        });
+        
+        // Check ALL messages (not just new ones) for date changes
+        // This catches cases where older messages from different dates are in allMessages
+        const allMessageDateKeys = new Set();
+        allMessages.forEach(msg => {
+          if (msg.timestamp) {
+            allMessageDateKeys.add(getDateKey(msg.timestamp));
+          }
+        });
+        
+        // Check if allMessages contains date keys that aren't in displayed messages
+        // This means we have messages from different dates that need to be inserted
+        const hasDateChange = Array.from(allMessageDateKeys).some(dateKey => !displayedDateKeys.has(dateKey));
+        
+        // Check if any message in allMessages has an earlier timestamp than the first displayed message
+        // This means we have older messages that need to be inserted at the top
+        const firstDisplayedMessage = displayedMsgElements.length > 0 ? displayedMsgElements[0] : null;
+        let hasOlderMessages = false;
+        
+        if (firstDisplayedMessage) {
+          const firstMsgId = firstDisplayedMessage.getAttribute('data-message-id');
+          const firstMsg = firstMsgId ? allMessages.find(msg => msg.id === firstMsgId) : null;
+          
+          if (firstMsg && firstMsg.timestamp) {
+            // Check if any message in allMessages is older than the first displayed message
+            // Only count messages that aren't already displayed
+            hasOlderMessages = allMessages.some(msg => 
+              !allDisplayedIds.includes(msg.id) && 
+              msg.timestamp && 
+              msg.timestamp < firstMsg.timestamp
+            );
+          }
+        }
+        
+        // Only rebuild if:
+        // 1. Date changed (messages from different dates need proper date dividers)
+        // 2. Older messages detected (need to insert at the top, can't just append)
+        // Don't rebuild just because there are newer messages - those can be appended normally
+        if (hasDateChange || hasOlderMessages) {
+          // Use all messages and ensure they're sorted chronologically
+          messages = [...allMessages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+          forceRebuildForDateChange = true;
+        }
+      }
+    }
+    
+    // Ensure messages are always sorted chronologically (safety check)
+    if (messages && messages.length > 0) {
+      messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     }
     
     // Get previous message count from container's data attribute or panel
@@ -4971,9 +6326,27 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     // Track displayed message IDs to prevent duplicates
     const displayedMessageIds = getDisplayedMessageIds(container);
     
-    // Only rebuild if: message count decreased (deletion), no existing messages, or force refresh
+    // Check if we need a full rebuild due to chronological order issues
+    // (This happens when new messages have earlier timestamps than displayed messages)
+    // If messages contains all messages (not just new ones), we detected older messages and need full rebuild
+    const allDisplayedIdsForRebuild = Array.from(container.querySelectorAll('[data-message-id]')).map(el => el.getAttribute('data-message-id'));
+    const needsChronologicalRebuild = !isInitialLoad && allDisplayedIdsForRebuild.length > 0 && 
+      messages.length > allDisplayedIdsForRebuild.length && 
+      messages.some(msg => allDisplayedIdsForRebuild.includes(msg.id));
+    
+    // Only rebuild if: message count decreased (deletion), no existing messages, force refresh, chronological order issue, or date change detected
     // Don't rebuild just because we want to scroll - that causes flicker
-    const needsFullRebuild = isInitialLoad || shouldRebuildChat(messages, previousMessageCount, existingMessages);
+    const needsFullRebuild = isInitialLoad || forceRebuildForDateChange || needsChronologicalRebuild || shouldRebuildChat(messages, previousMessageCount, existingMessages);
+    
+    // Check if cancelled before modifying DOM
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    
+    // Verify active tab is still 'all-chat' before displaying
+    if (activeAllChatTab !== 'all-chat') {
+      return;
+    }
     
     if (needsFullRebuild) {
       container.innerHTML = '';
@@ -4997,71 +6370,66 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       return;
     }
     
-    // Batch fetch levels for new players only (optimize by only fetching for new messages)
-    const currentPlayer = getCurrentPlayerName();
-    const uniquePlayersMap = new Map(); // Map of lowercase -> original username
-    const messagesToCheck = needsFullRebuild ? messages : messages.slice(previousMessageCount);
-    messagesToCheck.forEach(msg => {
-      if (msg.from && msg.from.toLowerCase() !== currentPlayer?.toLowerCase()) {
-        const playerNameLower = msg.from.toLowerCase();
-        if (!uniquePlayersMap.has(playerNameLower)) {
-          uniquePlayersMap.set(playerNameLower, msg.from);
+    // Get last date key for separator logic (only needed for full rebuild)
+    // When appending new messages, get the date key from the last displayed message in DOM
+    let lastDateKey = null;
+    if (needsFullRebuild) {
+      lastDateKey = getLastDateKeyFromMessages(messages, previousMessageCount, needsFullRebuild);
+    } else {
+      // Get last date key from the last message element in the DOM
+      // Find the last message element and look backwards to find the date separator that applies to it
+      const lastMessageElement = Array.from(container.querySelectorAll('[data-message-id]')).pop();
+      if (lastMessageElement) {
+        // Look backwards from the last message to find the date separator that applies to it
+        let prevElement = lastMessageElement.previousElementSibling;
+        while (prevElement) {
+          const dateText = prevElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+          if (dateText) {
+            // Found the date separator that applies to the last message
+            lastDateKey = getDateKeyFromElement(prevElement);
+            break;
+          }
+          prevElement = prevElement.previousElementSibling;
         }
-      }
-    });
-    
-    // Fetch levels for players not in cache or VIP list (only for new messages)
-    const levelFetchPromises = Array.from(uniquePlayersMap.entries()).map(async ([playerNameLower, originalUsername]) => {
-      // Skip if already cached
-      const cached = playerLevelCache.get(playerNameLower);
-      if (cached && Date.now() - cached.timestamp < 3600000) {
-        return;
-      }
-      
-      // Skip if in VIP list
-      const vipList = getVIPList();
-      const vipInfo = vipList.find(vip => vip.name.toLowerCase() === playerNameLower);
-      if (vipInfo && vipInfo.level != null) {
-        playerLevelCache.set(playerNameLower, { level: vipInfo.level, timestamp: Date.now() });
-        return;
-      }
-      
-      // Fetch level
-      try {
-        const profileData = await fetchPlayerData(originalUsername);
-        if (profileData) {
-          const playerInfo = extractPlayerInfoFromProfile(profileData, originalUsername);
-          if (playerInfo.level != null) {
-            playerLevelCache.set(playerNameLower, { level: playerInfo.level, timestamp: Date.now() });
+        // If no date separator found before the last message, check if there's one at the very beginning
+        // This means all messages are from the same date (the first separator's date)
+        if (!lastDateKey) {
+          const firstElement = container.firstElementChild;
+          if (firstElement) {
+            const firstDateText = firstElement.querySelector('div[style*="text-transform: uppercase"]')?.textContent;
+            if (firstDateText) {
+              lastDateKey = getDateKeyFromElement(firstElement);
+            }
           }
         }
-      } catch (error) {
-        // Silently fail - will try again later
       }
-    });
-    
-    // Wait for level fetches (but don't block rendering if it takes too long)
-    await Promise.allSettled(levelFetchPromises);
-    
-    // Get last date key for separator logic
-    const lastDateKey = getLastDateKeyFromMessages(messages, previousMessageCount, needsFullRebuild);
+    }
     
     // Only process new messages if not rebuilding
-    const messagesToProcess = needsFullRebuild ? messages : messages.slice(previousMessageCount);
+    // When not rebuilding, messages are already filtered to only new ones, so use them directly
+    const messagesToProcess = needsFullRebuild ? messages : messages;
     
     // Message ID generator function (All Chat messages always have IDs)
     const getMessageId = (msg) => msg.id || null;
     
-    // Process messages and create elements with date separators
-    const elementsToAppend = await processMessagesWithSeparators(
+    // Process messages using unified helper (handles date separators only on full rebuild)
+    const elementsToAppend = await processMessagesForChat(
       messages,
       messagesToProcess,
       needsFullRebuild,
       displayedMessageIds,
       container,
       getMessageId,
-      lastDateKey
+      needsFullRebuild ? lastDateKey : null
     );
+  
+    // Final check: verify active tab is still 'all-chat' before appending messages
+    if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    if (activeAllChatTab !== 'all-chat') {
+      return;
+    }
   
     // Append elements using DocumentFragment (reduces flicker)
     appendElementsToContainer(container, elementsToAppend);
@@ -5111,30 +6479,10 @@ async function createAllChatTab(playerName, displayName, unreadCount = 0, isActi
   tabLabel.textContent = displayName;
   
   // Set initial status color (only for player tabs, not "All Chat")
-  // Note: Status color is applied to the label, but tab text color is controlled by game classes
-  if (playerName !== 'all-chat') {
-    try {
-      const profileData = await fetchPlayerData(playerName);
-      if (profileData) {
-        const isCurrentPlayer = getCurrentPlayerName() && (profileData.name || playerName).toLowerCase() === getCurrentPlayerName().toLowerCase();
-        const status = calculatePlayerStatus(profileData, isCurrentPlayer);
-        const statusColor = getStatusColor(status);
-        // Apply status color, but respect active state (whiteBrightest when active)
-        if (!isActive) {
-          tabLabel.style.color = statusColor;
-        }
-      } else {
-        // Default to offline if player not found
-        if (!isActive) {
-          tabLabel.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
-        }
-      }
-    } catch (error) {
-      // Default to offline on error
-      if (!isActive) {
-        tabLabel.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
-      }
-    }
+  // Note: We'll fetch player data after the tab is added to the DOM
+  // For now, set default offline color
+  if (playerName !== 'all-chat' && !playerName.startsWith('guild-') && !isActive) {
+    tabLabel.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
   }
   
   tab.appendChild(tabLabel);
@@ -5251,25 +6599,8 @@ async function updateAllChatActionsColumn(playerName) {
   // Delete conversation button
   const deleteBtn = document.createElement('button');
   deleteBtn.textContent = `🗑 ${t('mods.vipList.deleteHistory')}`;
-  deleteBtn.style.cssText = `
-    padding: 8px 12px;
-    background: rgba(255, 107, 107, 0.2);
-    border: 2px solid ${CSS_CONSTANTS.COLORS.ERROR};
-    border-radius: 4px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    transition: background 0.2s;
-  `;
-  deleteBtn.addEventListener('mouseenter', () => {
-    deleteBtn.style.background = 'rgba(255, 107, 107, 0.3)';
-  });
-  deleteBtn.addEventListener('mouseleave', () => {
-    deleteBtn.style.background = 'rgba(255, 107, 107, 0.2)';
-  });
+  deleteBtn.style.cssText = createActionButtonStyle();
+  setupActionButtonHandlers(deleteBtn, CSS_CONSTANTS.COLORS.ERROR);
   deleteBtn.addEventListener('click', async () => {
     const messagesArea = panel.querySelector('#chat-messages-all-chat');
     if (messagesArea) {
@@ -5280,25 +6611,9 @@ async function updateAllChatActionsColumn(playerName) {
   // Block/Unblock button
   const blockBtn = document.createElement('button');
   blockBtn.textContent = isBlocked ? `🔓 ${t('mods.vipList.unblockPlayer')}` : `🚫 ${t('mods.vipList.blockPlayer')}`;
-  blockBtn.style.cssText = `
-    padding: 8px 12px;
-    background: ${isBlocked ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 107, 107, 0.2)'};
-    border: 2px solid ${isBlocked ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.ERROR};
-    border-radius: 4px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    transition: background 0.2s;
-  `;
-  blockBtn.addEventListener('mouseenter', () => {
-    blockBtn.style.background = isBlocked ? 'rgba(76, 175, 80, 0.3)' : 'rgba(255, 107, 107, 0.3)';
-  });
-  blockBtn.addEventListener('mouseleave', () => {
-    blockBtn.style.background = isBlocked ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 107, 107, 0.2)';
-  });
+  blockBtn.style.cssText = createActionButtonStyle();
+  const blockBtnHoverColor = isBlocked ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.ERROR;
+  setupActionButtonHandlers(blockBtn, blockBtnHoverColor);
   blockBtn.addEventListener('click', async () => {
     // Check current blocked status instead of using captured variable
     const currentlyBlocked = await isPlayerBlocked(playerName);
@@ -5307,14 +6622,12 @@ async function updateAllChatActionsColumn(playerName) {
       const success = await unblockPlayer(playerName);
       if (success) {
         blockBtn.textContent = `🚫 ${t('mods.vipList.blockPlayer')}`;
-        blockBtn.style.background = 'rgba(255, 107, 107, 0.2)';
-        blockBtn.style.borderColor = CSS_CONSTANTS.COLORS.ERROR;
         // Update hover styles
         blockBtn.onmouseenter = () => {
-          blockBtn.style.background = 'rgba(255, 107, 107, 0.3)';
+          blockBtn.style.color = CSS_CONSTANTS.COLORS.ERROR;
         };
         blockBtn.onmouseleave = () => {
-          blockBtn.style.background = 'rgba(255, 107, 107, 0.2)';
+          blockBtn.style.color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
         };
         // Reload conversation and update UI (only if this player's tab is still active)
         const messagesArea = panel.querySelector('#chat-messages-all-chat');
@@ -5343,14 +6656,12 @@ async function updateAllChatActionsColumn(playerName) {
       const success = await blockPlayer(playerName);
       if (success) {
         blockBtn.textContent = `🔓 ${t('mods.vipList.unblockPlayer')}`;
-        blockBtn.style.background = 'rgba(76, 175, 80, 0.2)';
-        blockBtn.style.borderColor = CSS_CONSTANTS.COLORS.SUCCESS;
         // Update hover styles
         blockBtn.onmouseenter = () => {
-          blockBtn.style.background = 'rgba(76, 175, 80, 0.3)';
+          blockBtn.style.color = CSS_CONSTANTS.COLORS.SUCCESS;
         };
         blockBtn.onmouseleave = () => {
-          blockBtn.style.background = 'rgba(76, 175, 80, 0.2)';
+          blockBtn.style.color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
         };
         // Reload conversation and update UI (only if this player's tab is still active)
         const messagesArea = panel.querySelector('#chat-messages-all-chat');
@@ -5381,27 +6692,10 @@ async function updateAllChatActionsColumn(playerName) {
   // Add/Remove VIP button
   const vipBtn = document.createElement('button');
   vipBtn.textContent = isInVIPList ? `⭐ ${t('mods.vipList.inVIPList')}` : `☆ ${t('mods.vipList.addToVIP')}`;
-  vipBtn.style.cssText = `
-    padding: 8px 12px;
-    background: ${isInVIPList ? 'rgba(76, 175, 80, 0.2)' : 'rgba(100, 181, 246, 0.2)'};
-    border: 2px solid ${isInVIPList ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.LINK};
-    border-radius: 4px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    cursor: ${isInVIPList ? 'default' : 'pointer'};
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    transition: background 0.2s;
-    opacity: ${isInVIPList ? '0.6' : '1'};
-  `;
+  const vipBtnColor = isInVIPList ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
+  vipBtn.style.cssText = createActionButtonStyle(vipBtnColor) + `cursor: ${isInVIPList ? 'default' : 'pointer'}; opacity: ${isInVIPList ? '0.6' : '1'};`;
   if (!isInVIPList) {
-    vipBtn.addEventListener('mouseenter', () => {
-      vipBtn.style.background = 'rgba(100, 181, 246, 0.3)';
-    });
-    vipBtn.addEventListener('mouseleave', () => {
-      vipBtn.style.background = 'rgba(100, 181, 246, 0.2)';
-    });
+    setupActionButtonHandlers(vipBtn, CSS_CONSTANTS.COLORS.LINK);
     vipBtn.addEventListener('click', async () => {
       vipBtn.disabled = true;
       vipBtn.style.opacity = '0.6';
@@ -5413,9 +6707,9 @@ async function updateAllChatActionsColumn(playerName) {
           addToVIPList(playerName, playerInfo);
           await refreshVIPListDisplay();
           vipBtn.textContent = `⭐ ${t('mods.vipList.inVIPList')}`;
-          vipBtn.style.background = 'rgba(76, 175, 80, 0.2)';
-          vipBtn.style.borderColor = CSS_CONSTANTS.COLORS.SUCCESS;
+          vipBtn.style.color = CSS_CONSTANTS.COLORS.SUCCESS;
           vipBtn.style.cursor = 'default';
+          vipBtn.style.opacity = '0.6';
         }
       } catch (error) {
         console.error('[VIP List] Error adding player to VIP list:', error);
@@ -5435,39 +6729,30 @@ async function updateAllChatActionsColumn(playerName) {
   // Update button visual state function
   const updateButtonState = (isActive) => {
     if (isActive) {
-      runsOnlyBtn.style.background = 'rgba(100, 181, 246, 0.4)';
-      runsOnlyBtn.style.borderColor = 'rgb(100, 181, 246)';
-      runsOnlyBtn.style.borderWidth = '2px';
-      runsOnlyBtn.style.boxShadow = '0 0 8px rgba(100, 181, 246, 0.5)';
+      runsOnlyBtn.style.color = CSS_CONSTANTS.COLORS.LINK;
+      runsOnlyBtn.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME_PRESSED;
     } else {
-      runsOnlyBtn.style.background = 'rgba(100, 181, 246, 0.2)';
-      runsOnlyBtn.style.borderColor = CSS_CONSTANTS.COLORS.LINK;
-      runsOnlyBtn.style.borderWidth = '2px';
-      runsOnlyBtn.style.boxShadow = 'none';
+      runsOnlyBtn.style.color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
+      runsOnlyBtn.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME;
     }
   };
   
-  runsOnlyBtn.style.cssText = `
-    padding: 8px 12px;
-    border: 2px solid ${CSS_CONSTANTS.COLORS.LINK};
-    border-radius: 4px;
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    white-space: nowrap;
-    transition: all 0.2s;
-  `;
+  runsOnlyBtn.style.cssText = createActionButtonStyle();
   updateButtonState(isRunsOnlyActive);
   
   runsOnlyBtn.addEventListener('mouseenter', () => {
     const currentState = panel.getAttribute(dataAttrName) === 'true';
     if (!currentState) {
-      runsOnlyBtn.style.background = 'rgba(100, 181, 246, 0.3)';
+      runsOnlyBtn.style.color = CSS_CONSTANTS.COLORS.LINK;
     }
   });
   runsOnlyBtn.addEventListener('mouseleave', () => {
+    updateButtonState(panel.getAttribute(dataAttrName) === 'true');
+  });
+  runsOnlyBtn.addEventListener('mousedown', () => {
+    runsOnlyBtn.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME_PRESSED;
+  });
+  runsOnlyBtn.addEventListener('mouseup', () => {
     updateButtonState(panel.getAttribute(dataAttrName) === 'true');
   });
   runsOnlyBtn.addEventListener('click', async (e) => {
@@ -5485,7 +6770,16 @@ async function updateAllChatActionsColumn(playerName) {
       ? panel.querySelector('#chat-messages-all-chat')
       : panel.querySelector(`#chat-messages-${playerName.toLowerCase()}`);
     if (messagesArea && playerName !== 'all-chat') {
-      await loadConversation(playerName, messagesArea, false, true); // forceRefresh = true to fetch all messages
+      // Show "Fetching runs..." indicator when filtering is enabled
+      if (newState) {
+        showFetchingRunsIndicator(messagesArea);
+      }
+      try {
+        await loadConversation(playerName, messagesArea, false, true); // forceRefresh = true to fetch all messages
+      } finally {
+        // Always hide indicator when done
+        hideFetchingRunsIndicator(messagesArea);
+      }
     }
   });
   
@@ -5563,8 +6857,10 @@ function showDeleteConfirmationForAllChat(panel, otherPlayer, messagesArea) {
     const success = await deleteConversation(otherPlayer);
     if (success) {
       confirmation.remove();
-      // Reload conversation (will be empty)
-      await loadConversation(otherPlayer, messagesArea, true);
+      // Clear messages area completely
+      messagesArea.innerHTML = '';
+      // Reload conversation (will be empty, force refresh to ensure clean state)
+      await loadConversation(otherPlayer, messagesArea, false, true);
     } else {
       confirmBtn.disabled = false;
       cancelBtn.disabled = false;
@@ -5619,6 +6915,114 @@ function scrollChatToBottom(panel) {
   });
 }
 
+// Show loading indicator in messages area
+function showChatLoadingIndicator(container) {
+  // Remove existing loading indicator if any
+  const existing = container.querySelector('.chat-loading-indicator');
+  if (existing) {
+    existing.remove();
+  }
+  
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'chat-loading-indicator';
+  loadingDiv.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    gap: 12px;
+  `;
+  
+  // Create spinning loader
+  const spinner = document.createElement('div');
+  spinner.style.cssText = `
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  `;
+  
+  // Add keyframes animation if not already added
+  // Inject styles (consolidated)
+  injectVIPListStyles();
+  
+  const text = document.createElement('span');
+  text.textContent = 'Loading messages...';
+  
+  loadingDiv.appendChild(spinner);
+  loadingDiv.appendChild(text);
+  container.appendChild(loadingDiv);
+  
+  return loadingDiv;
+}
+
+// Hide loading indicator
+function hideChatLoadingIndicator(container) {
+  const loading = container.querySelector('.chat-loading-indicator');
+  if (loading) {
+    loading.remove();
+  }
+}
+
+// Show "Fetching runs..." loading indicator
+function showFetchingRunsIndicator(container) {
+  // Remove existing indicator if any
+  const existing = container.querySelector('.fetching-runs-indicator');
+  if (existing) {
+    return existing;
+  }
+  
+  const loadingDiv = document.createElement('div');
+  loadingDiv.className = 'fetching-runs-indicator';
+  loadingDiv.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    gap: 12px;
+  `;
+  
+  // Create spinning loader
+  const spinner = document.createElement('div');
+  spinner.style.cssText = `
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  `;
+  
+  // Add keyframes animation if not already added
+  // Inject styles (consolidated)
+  injectVIPListStyles();
+  
+  const text = document.createElement('span');
+  text.textContent = 'Fetching runs...';
+  
+  loadingDiv.appendChild(spinner);
+  loadingDiv.appendChild(text);
+  container.appendChild(loadingDiv);
+  
+  return loadingDiv;
+}
+
+// Hide "Fetching runs..." indicator
+function hideFetchingRunsIndicator(container) {
+  const loading = container.querySelector('.fetching-runs-indicator');
+  if (loading) {
+    loading.remove();
+  }
+}
+
 // Switch active tab in all-chat panel
 async function switchAllChatTab(playerName) {
   const panel = document.getElementById('vip-chat-panel-all-chat');
@@ -5627,182 +7031,284 @@ async function switchAllChatTab(playerName) {
   const messagesArea = panel.querySelector('#chat-messages-all-chat');
   if (!messagesArea) return;
   
-  // Update active tab
-  activeAllChatTab = playerName;
-  
-  // Update tab styles to match game's native tab styling
-  allChatTabs.forEach((tab, name) => {
-    const isActive = name === playerName;
-    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-    tab.setAttribute('data-state', isActive ? 'active' : 'inactive');
-    tab.setAttribute('tabindex', isActive ? '0' : '-1');
-    
-    // Update classes to match active/inactive state
-    if (isActive) {
-      tab.classList.remove('console-frame-inactive', 'surface-dark', 'text-whiteRegular');
-      tab.classList.add('console-frame-active', 'surface-regular', 'text-whiteBrightest');
-      
-      // Clear status color when active (let game classes control it)
-      const tabLabel = tab.querySelector('.tab-player-name');
-      if (tabLabel) {
-        tabLabel.style.color = '';
-      }
-    } else {
-      tab.classList.remove('console-frame-active', 'surface-regular', 'text-whiteBrightest');
-      tab.classList.add('console-frame-inactive', 'surface-dark', 'text-whiteRegular');
-      
-      // Restore status color when inactive (if it's a player tab)
-      if (name !== 'all-chat') {
-        updateAllChatTabStatus(name);
-      }
-    }
-  });
-  
-  // Don't reset runs-only filter when switching tabs - preserve per-player filter state
-  // The filter state is stored per player and will be applied when loading the conversation
-  
-  // Update actions column
-  await updateAllChatActionsColumn(playerName);
-  
-  // Clear messages area and reset loading state when switching tabs
-  // This ensures old content from the previous tab doesn't remain visible
-  messagesArea.innerHTML = '';
-  if (panel) {
+  // If a tab switch is already in progress, reset all state first
+  if (currentTabSwitchPromise) {
+    // Cancel previous tab switch by resetting all state
     panel._isLoadingAllChat = false;
+    panel._isLoadingOlderAllChat = false;
     panel._previousMessageCount = 0;
+    panel._lastTimestamp = null;
+    panel._lastMessageCount = null;
+    panel._lastRunsOnlyFilter = false;
+    
+    // Hide any loading indicator
+    hideChatLoadingIndicator(messagesArea);
+    
+    // Clear any pending operations
+    currentTabSwitchPromise = null;
   }
   
-  // Load appropriate conversation
-  // Note: When switching tabs, we force a fresh fetch to ensure up-to-date data
-  // The load functions will only rebuild DOM if necessary (e.g., if messages changed)
-  if (playerName === 'all-chat') {
-    await loadAllChatConversation(messagesArea, false, true); // forceRefresh = true
-    scrollChatToBottom(panel);
-  } else if (playerName.startsWith('guild-')) {
-    // Guild chat tab
-    const guildId = playerName.replace('guild-', '');
-    await loadGuildChatConversation(messagesArea, guildId, false);
-    scrollChatToBottom(panel);
-  } else {
-    // Load conversation FIRST so user sees messages immediately
-    await loadConversation(playerName, messagesArea, false, true); // forceRefresh = true
-    scrollChatToBottom(panel);
+  // Track this tab switch
+  const switchPromise = (async () => {
+    // Update active tab
+    activeAllChatTab = playerName;
     
-    // Clear unread badge on tab immediately (optimistic update)
-    updateAllChatTabUnread(playerName, 0);
-    updateVIPListChatIcon(playerName, 0);
-    
-    // Run all other operations in parallel (non-blocking for UI)
-    const currentPlayer = getCurrentPlayerName();
-    
-    // Start all async operations in parallel
-    const [
-      recipientHasChatEnabled,
-      hasPrivilege,
-      incomingRequests
-    ] = await Promise.all([
-      checkRecipientChatEnabled(playerName),
-      hasChatPrivilege(currentPlayer, playerName),
-      checkForChatRequests()
-    ]);
-    
-    const hasIncomingRequest = incomingRequests.some(req => req.from && req.from.toLowerCase() === playerName.toLowerCase());
-    
-    // Check for outgoing request (only if needed)
-    let hasOutgoingRequest = false;
-    if (!hasPrivilege && !hasIncomingRequest) {
-      try {
-        const hashedPlayerName = await hashUsername(playerName);
-        let recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedPlayerName}.json`);
-        if (!recipientRequestsResponse.ok && recipientRequestsResponse.status === 404) {
-          recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${playerName.toLowerCase()}.json`);
+    // Update tab styles to match game's native tab styling
+    allChatTabs.forEach((tab, name) => {
+      const isActive = name === playerName;
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tab.setAttribute('data-state', isActive ? 'active' : 'inactive');
+      tab.setAttribute('tabindex', isActive ? '0' : '-1');
+      
+      // Update classes to match active/inactive state
+      if (isActive) {
+        tab.classList.remove('console-frame-inactive', 'surface-dark', 'text-whiteRegular');
+        tab.classList.add('console-frame-active', 'surface-regular', 'text-whiteBrightest');
+        
+        // Clear status color when active (let game classes control it)
+        const tabLabel = tab.querySelector('.tab-player-name');
+        if (tabLabel) {
+          tabLabel.style.color = '';
         }
-        if (recipientRequestsResponse.ok) {
-          const recipientRequests = await recipientRequestsResponse.json();
-          if (recipientRequests && typeof recipientRequests === 'object') {
-            const currentPlayerHash = await hashUsername(currentPlayer);
-            hasOutgoingRequest = await Promise.all(
-              Object.values(recipientRequests).map(async (req) => {
-                if (!req || req.status !== 'pending') return false;
-                if (req.usernamesEncrypted && req.from && req.fromHash) {
-                  if (req.fromHash === currentPlayerHash) {
-                    try {
-                      const decryptedFrom = await decryptUsername(req.from, currentPlayer, playerName);
-                      return decryptedFrom && decryptedFrom.toLowerCase() === currentPlayer.toLowerCase();
-                    } catch (error) {
-                      return true;
+      } else {
+        tab.classList.remove('console-frame-active', 'surface-regular', 'text-whiteBrightest');
+        tab.classList.add('console-frame-inactive', 'surface-dark', 'text-whiteRegular');
+        
+        // Restore status color when inactive (if it's a player tab)
+        if (name !== 'all-chat') {
+          updateAllChatTabStatus(name);
+        }
+      }
+    });
+    
+    // Don't reset runs-only filter when switching tabs - preserve per-player filter state
+    // The filter state is stored per player and will be applied when loading the conversation
+    
+    // Update actions column
+    await updateAllChatActionsColumn(playerName);
+    
+    // Clear messages area and reset ALL loading/preservation state when switching tabs
+    // This ensures old content from the previous tab doesn't remain visible
+    messagesArea.innerHTML = '';
+    if (panel) {
+      // Reset all loading and preservation flags
+      panel._isLoadingAllChat = false;
+      panel._isLoadingOlderAllChat = false;
+      panel._previousMessageCount = 0;
+      panel._lastTimestamp = null;
+      panel._lastMessageCount = null;
+      panel._lastRunsOnlyFilter = false;
+      panel._oldestLoadedMessageId = null;
+    }
+    
+    // Show loading indicator
+    showChatLoadingIndicator(messagesArea);
+    
+    try {
+      // Check if this switch was cancelled (user clicked another tab)
+      const checkCancelled = () => currentTabSwitchPromise !== switchPromise;
+      
+      // Load appropriate conversation
+      // Use cache if available (5 seconds is fresh enough for switching tabs)
+      // Only force refresh on initial load or manual refresh
+      // Always scroll to bottom when switching tabs
+      if (playerName === 'all-chat') {
+        await loadAllChatConversation(messagesArea, true, false, checkCancelled); // Force scroll to bottom, use cache, pass cancellation check
+        if (checkCancelled()) return; // Abort if cancelled
+        // Verify active tab still matches loaded messages
+        if (activeAllChatTab !== playerName) {
+          messagesArea.innerHTML = '';
+          return;
+        }
+        // Scroll is handled inside loadAllChatConversation when forceScrollToBottom = true
+      } else if (playerName.startsWith('guild-')) {
+        // Guild chat tab
+        const guildId = playerName.replace('guild-', '');
+        await loadGuildChatConversation(messagesArea, guildId, true, checkCancelled); // Force scroll to bottom, pass cancellation check
+        if (checkCancelled()) return; // Abort if cancelled
+        // Verify active tab still matches loaded messages
+        if (activeAllChatTab !== playerName) {
+          messagesArea.innerHTML = '';
+          return;
+        }
+        // Scroll is handled inside loadGuildChatConversation when forceScrollToBottom = true
+      } else {
+        // Load conversation FIRST so user sees messages immediately
+        // Use cache when switching tabs for faster loading (5s cache is fresh)
+        // Always scroll to bottom when switching tabs
+        await loadConversation(playerName, messagesArea, true, false); // Force scroll to bottom, use cache
+        if (checkCancelled()) return; // Abort if cancelled
+        // Verify active tab still matches loaded messages
+        if (activeAllChatTab !== playerName) {
+          messagesArea.innerHTML = '';
+          return;
+        }
+        // Scroll is handled inside loadConversation when forceScrollToBottom = true
+        
+        // Clear unread badge on tab immediately (optimistic update)
+        updateAllChatTabUnread(playerName, 0);
+        updateVIPListChatIcon(playerName, 0);
+        
+        // Check if cancelled before continuing
+        if (checkCancelled()) return;
+        
+        // Run all other operations in parallel (non-blocking for UI)
+        const currentPlayer = getCurrentPlayerName();
+        
+        // Start all async operations in parallel
+        const [
+          recipientHasChatEnabled,
+          hasPrivilege,
+          incomingRequests
+        ] = await Promise.all([
+          checkRecipientChatEnabled(playerName),
+          hasChatPrivilege(currentPlayer, playerName),
+          checkForChatRequests()
+        ]);
+        
+        // Check if cancelled after async operations
+        if (checkCancelled()) return;
+        
+        const hasIncomingRequest = incomingRequests.some(req => req.from && req.from.toLowerCase() === playerName.toLowerCase());
+        
+        // Check for outgoing request (only if needed)
+        let hasOutgoingRequest = false;
+        if (!hasPrivilege && !hasIncomingRequest) {
+          try {
+            const hashedPlayerName = await hashUsername(playerName);
+            let recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${hashedPlayerName}.json`);
+            if (!recipientRequestsResponse.ok && recipientRequestsResponse.status === 404) {
+              recipientRequestsResponse = await fetch(`${getChatRequestsApiUrl()}/${playerName.toLowerCase()}.json`);
+            }
+            if (recipientRequestsResponse.ok) {
+              const recipientRequests = await recipientRequestsResponse.json();
+              if (recipientRequests && typeof recipientRequests === 'object') {
+                const currentPlayerHash = await hashUsername(currentPlayer);
+                hasOutgoingRequest = await Promise.all(
+                  Object.values(recipientRequests).map(async (req) => {
+                    if (!req || req.status !== 'pending') return false;
+                    if (req.usernamesEncrypted && req.from && req.fromHash) {
+                      if (req.fromHash === currentPlayerHash) {
+                        try {
+                          const decryptedFrom = await decryptUsername(req.from, currentPlayer, playerName);
+                          return decryptedFrom && decryptedFrom.toLowerCase() === currentPlayer.toLowerCase();
+                        } catch (error) {
+                          return true;
+                        }
+                      }
+                      return false;
+                    } else {
+                      return req.from && req.from.toLowerCase() === currentPlayer.toLowerCase();
                     }
-                  }
-                  return false;
-                } else {
-                  return req.from && req.from.toLowerCase() === currentPlayer.toLowerCase();
-                }
-              })
-            ).then(results => results.some(result => result === true));
+                  })
+                ).then(results => results.some(result => result === true));
+              }
+            }
+          } catch (error) {
+            // Ignore errors
           }
         }
-      } catch (error) {
-        // Ignore errors
+        
+        // Create a temporary panel-like object for updateChatPanelUI
+        const tempPanel = {
+          querySelector: (selector) => {
+            if (selector === 'button.primary') {
+              return panel.querySelector('button.primary');
+            }
+            if (selector === '.vip-chat-input' || selector === 'textarea') {
+              return panel.querySelector('textarea');
+            }
+            if (selector === `#chat-messages-${playerName.toLowerCase()}`) {
+              return messagesArea;
+            }
+            return null;
+          }
+        };
+        
+        await updateChatPanelUI(tempPanel, playerName, recipientHasChatEnabled, hasPrivilege, hasIncomingRequest, hasOutgoingRequest);
+        
+        // Check if cancelled before marking as read
+        if (checkCancelled()) return;
+        
+        // Mark messages as read in the background (non-blocking, don't wait for it)
+        markAllMessagesAsReadFromPlayer(playerName).catch(error => {
+          console.warn('[VIP List] Error marking messages as read:', error);
+        });
+        
+        // Update input placeholder and state
+        const textarea = panel.querySelector('textarea');
+        const sendButton = panel.querySelector('button.primary');
+        if (textarea) {
+          const recipientHasChatEnabled2 = await checkRecipientChatEnabled(playerName);
+          const hasPrivilege2 = await hasChatPrivilege(getCurrentPlayerName(), playerName);
+          const isBlocked = await isPlayerBlocked(playerName);
+          const isBlockedBy = await isBlockedByPlayer(playerName);
+          const canChat = recipientHasChatEnabled2 && hasPrivilege2 && !isBlocked && !isBlockedBy;
+          textarea.placeholder = canChat ? tReplace('mods.vipList.chatPlaceholder', { name: playerName }) : tReplace('mods.vipList.messagePlaceholder', { name: playerName });
+          textarea.disabled = !canChat;
+          if (sendButton) sendButton.disabled = !canChat;
+        }
+      }
+      
+      // Update input placeholder for all-chat and guild tabs
+      if (playerName === 'all-chat' || playerName.startsWith('guild-')) {
+        if (checkCancelled()) return; // Abort if cancelled
+        
+        const textarea = panel.querySelector('textarea');
+        const sendButton = panel.querySelector('button.primary');
+        if (textarea) {
+          if (playerName === 'all-chat') {
+            const canChat = await checkRecipientChatEnabled(getCurrentPlayerName());
+            textarea.placeholder = canChat ? t('mods.vipList.allChatPlaceholder') : t('mods.vipList.enableChatPlaceholder');
+            textarea.disabled = !canChat;
+            if (sendButton) sendButton.disabled = !canChat;
+          } else if (playerName.startsWith('guild-')) {
+            // Guild chat - always enabled
+            textarea.placeholder = 'Type a message...';
+            textarea.disabled = false;
+            if (sendButton) sendButton.disabled = false;
+          }
+        }
+      }
+    } finally {
+      // Hide loading indicator when done (whether successful or error)
+      hideChatLoadingIndicator(messagesArea);
+      
+      // Clear switch promise when done
+      if (currentTabSwitchPromise === switchPromise) {
+        currentTabSwitchPromise = null;
+      }
+      
+      // Prefetch conversations for other open tabs (background caching)
+      // This makes switching to those tabs instant
+      const otherTabs = Array.from(allChatTabs.keys()).filter(name => name !== playerName && !name.startsWith('guild-'));
+      if (otherTabs.length > 0) {
+        // Prefetch in background (don't wait)
+        Promise.all(
+          otherTabs.slice(0, 3).map(async (tabName) => {
+            try {
+              // Prefetch conversation (will be cached)
+              await getConversationMessages(tabName, false);
+            } catch (error) {
+              // Silently fail - just for prefetching
+            }
+          })
+        ).catch(() => {}); // Ignore errors in background prefetch
       }
     }
     
-    // Create a temporary panel-like object for updateChatPanelUI
-    const tempPanel = {
-      querySelector: (selector) => {
-        if (selector === 'button.primary') {
-          return panel.querySelector('button.primary');
-        }
-        if (selector === '.vip-chat-input' || selector === 'textarea') {
-          return panel.querySelector('textarea');
-        }
-        if (selector === `#chat-messages-${playerName.toLowerCase()}`) {
-          return messagesArea;
-        }
-        return null;
-      }
-    };
-    
-    await updateChatPanelUI(tempPanel, playerName, recipientHasChatEnabled, hasPrivilege, hasIncomingRequest, hasOutgoingRequest);
-    
-    // Mark messages as read in the background (non-blocking, don't wait for it)
-    markAllMessagesAsReadFromPlayer(playerName).catch(error => {
-      console.warn('[VIP List] Error marking messages as read:', error);
-    });
-  }
-  
-  // Update input placeholder and state
-  const textarea = panel.querySelector('textarea');
-  const sendButton = panel.querySelector('button.primary');
-  if (textarea) {
-    if (playerName === 'all-chat') {
-      const canChat = await checkRecipientChatEnabled(getCurrentPlayerName());
-      textarea.placeholder = canChat ? t('mods.vipList.allChatPlaceholder') : t('mods.vipList.enableChatPlaceholder');
-      textarea.disabled = !canChat;
-      if (sendButton) sendButton.disabled = !canChat;
-    } else {
-      const recipientHasChatEnabled = await checkRecipientChatEnabled(playerName);
-      const hasPrivilege = await hasChatPrivilege(getCurrentPlayerName(), playerName);
-      const isBlocked = await isPlayerBlocked(playerName);
-      const isBlockedBy = await isBlockedByPlayer(playerName);
-      if (playerName && playerName.startsWith('guild-')) {
-        // Guild chat - always enabled
-        textarea.placeholder = 'Type a message...';
-        textarea.disabled = false;
-        if (sendButton) sendButton.disabled = false;
-      } else {
-        const canChat = recipientHasChatEnabled && hasPrivilege && !isBlocked && !isBlockedBy;
-        textarea.placeholder = canChat ? tReplace('mods.vipList.chatPlaceholder', { name: playerName }) : tReplace('mods.vipList.messagePlaceholder', { name: playerName });
-        textarea.disabled = !canChat;
-        if (sendButton) sendButton.disabled = !canChat;
-      }
+    // Save panel settings when active tab changes
+    const chatPanel = document.getElementById('vip-chat-panel-all-chat');
+    if (chatPanel && chatPanel.style.display !== 'none') {
+      saveChatPanelSettings(true, false);
     }
-  }
+  })();
   
-  // Save panel settings when active tab changes
-  const chatPanel = document.getElementById('vip-chat-panel-all-chat');
-  if (chatPanel && chatPanel.style.display !== 'none') {
-    saveChatPanelSettings(true, false);
-  }
+  // Store the promise so we can check if it's still the current switch
+  currentTabSwitchPromise = switchPromise;
+  
+  // Wait for this switch to complete (but allow it to be cancelled if user clicks another tab)
+  await switchPromise;
 }
 
 // Add a tab to all-chat panel
@@ -5825,10 +7331,57 @@ async function addAllChatTab(playerName, displayName, unreadCount = 0) {
     return;
   }
   
-  // Create and add tab
+  // Create tab
   const tab = await createAllChatTab(playerName, displayName, unreadCount, false);
-  tabsContainer.appendChild(tab);
+  
+  // Determine insertion position based on tab type
+  if (playerName === 'all-chat') {
+    // All Chat goes first
+    tabsContainer.insertBefore(tab, tabsContainer.firstChild);
+  } else if (playerName.startsWith('guild-')) {
+    // Guild chat goes after All Chat
+    const allChatTab = tabsContainer.querySelector('[data-player-name="all-chat"]');
+    if (allChatTab && allChatTab.nextSibling) {
+      tabsContainer.insertBefore(tab, allChatTab.nextSibling);
+    } else if (allChatTab) {
+      tabsContainer.appendChild(tab);
+    } else {
+      // No All Chat tab, just append
+      tabsContainer.appendChild(tab);
+    }
+  } else {
+    // Player tabs go after All Chat and guild chat
+    const allChatTab = tabsContainer.querySelector('[data-player-name="all-chat"]');
+    const guildTab = Array.from(tabsContainer.children).find(child => {
+      const name = child.getAttribute('data-player-name');
+      return name && name.startsWith('guild-');
+    });
+    
+    // Insert after guild tab if exists, otherwise after All Chat, otherwise append
+    if (guildTab && guildTab.nextSibling) {
+      tabsContainer.insertBefore(tab, guildTab.nextSibling);
+    } else if (guildTab) {
+      tabsContainer.appendChild(tab);
+    } else if (allChatTab && allChatTab.nextSibling) {
+      tabsContainer.insertBefore(tab, allChatTab.nextSibling);
+    } else if (allChatTab) {
+      tabsContainer.appendChild(tab);
+    } else {
+      tabsContainer.appendChild(tab);
+    }
+  }
+  
+  // Verify tab was actually added to the DOM before adding to Map
+  if (!document.contains(tab)) {
+    // Tab wasn't added, don't track it
+    return;
+  }
+  
   allChatTabs.set(playerName, tab);
+  
+  // Don't fetch player data immediately - it will be batched and rate-limited
+  // Status updates will be handled by updateAllChatTabsStatus() which is called
+  // after all tabs are added (e.g., in openAllChatPanel)
   
   // Save panel settings when tabs change
   if (panel && panel.style.display !== 'none') {
@@ -5836,10 +7389,35 @@ async function addAllChatTab(playerName, displayName, unreadCount = 0) {
   }
 }
 
+// Clean up tabs that no longer exist in the DOM
+function cleanupOrphanedChatTabs() {
+  const orphanedTabs = [];
+  
+  for (const [playerName, tab] of allChatTabs.entries()) {
+    // Skip if tab is still in the DOM
+    if (document.contains(tab)) continue;
+    
+    // Tab is orphaned - mark for removal
+    orphanedTabs.push(playerName);
+  }
+  
+  // Remove orphaned tabs from Map
+  for (const playerName of orphanedTabs) {
+    allChatTabs.delete(playerName);
+    
+    // If this was the active tab, clear it
+    if (activeAllChatTab === playerName) {
+      activeAllChatTab = null;
+    }
+  }
+  
+  return orphanedTabs.length;
+}
+
 // Remove a tab from all-chat panel
 function removeAllChatTab(playerName) {
   if (playerName === 'all-chat') return; // Can't remove "All Chat" tab
-  if (playerName && playerName.startsWith('guild-')) return; // Can't remove guild chat tab
+  if (playerName && playerName.startsWith('guild-')) return; // Can't remove guild chat tab (use removeGuildChatTab instead)
   
   const tab = allChatTabs.get(playerName);
   if (!tab) return;
@@ -5894,6 +7472,60 @@ function removeAllChatTab(playerName) {
   }
 }
 
+// Remove guild chat tab (called when player leaves or is kicked from guild)
+function removeGuildChatTab(guildId) {
+  const tabName = `guild-${guildId}`;
+  const tab = allChatTabs.get(tabName);
+  if (!tab) return;
+  
+  tab.remove();
+  allChatTabs.delete(tabName);
+  
+  // Save panel settings when tabs change
+  const chatPanel = document.getElementById('vip-chat-panel-all-chat');
+  if (chatPanel && chatPanel.style.display !== 'none') {
+    saveChatPanelSettings(true, false);
+  }
+  
+  // If this was the active tab, switch to another tab
+  if (activeAllChatTab === tabName) {
+    // Try to switch to All Chat if it exists, otherwise first available tab
+    if (allChatTabs.has('all-chat')) {
+      switchAllChatTab('all-chat');
+    } else if (allChatTabs.size > 0) {
+      // Switch to first available tab
+      const firstTab = allChatTabs.keys().next().value;
+      if (firstTab) {
+        switchAllChatTab(firstTab);
+      } else {
+        // No tabs left, clear the messages area
+        activeAllChatTab = null;
+        if (chatPanel) {
+          const messagesArea = chatPanel.querySelector('#chat-messages-all-chat');
+          if (messagesArea) {
+            messagesArea.innerHTML = '';
+          }
+        }
+      }
+    } else {
+      // No tabs left, clear the messages area
+      activeAllChatTab = null;
+      if (chatPanel) {
+        const messagesArea = chatPanel.querySelector('#chat-messages-all-chat');
+        if (messagesArea) {
+          messagesArea.innerHTML = '';
+        }
+      }
+    }
+  }
+}
+
+// Expose functions globally for other mods (e.g., Guilds mod)
+if (typeof window !== 'undefined') {
+  window.removeGuildChatTab = removeGuildChatTab;
+  window.syncGuildChatTab = syncGuildChatTab;
+}
+
 // Update status color for a tab
 async function updateAllChatTabStatus(playerName) {
   if (playerName === 'all-chat') return;
@@ -5901,6 +7533,12 @@ async function updateAllChatTabStatus(playerName) {
   
   const tab = allChatTabs.get(playerName);
   if (!tab) return;
+  
+  // Verify tab is still in the DOM
+  if (!document.contains(tab)) {
+    allChatTabs.delete(playerName);
+    return;
+  }
   
   const tabLabel = tab.querySelector('.tab-player-name');
   if (!tabLabel) return;
@@ -5910,7 +7548,7 @@ async function updateAllChatTabStatus(playerName) {
   
   try {
     const profileData = await fetchPlayerData(playerName);
-    if (profileData) {
+    if (profileData && profileData.name) {
       const isCurrentPlayer = getCurrentPlayerName() && (profileData.name || playerName).toLowerCase() === getCurrentPlayerName().toLowerCase();
       const status = calculatePlayerStatus(profileData, isCurrentPlayer);
       const statusColor = getStatusColor(status);
@@ -5921,15 +7559,20 @@ async function updateAllChatTabStatus(playerName) {
         tabLabel.style.color = ''; // Let game classes control color when active
       }
     } else {
-      // Default to offline if player not found
-      if (!isActive) {
-        tabLabel.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
-      } else {
-        tabLabel.style.color = '';
-      }
+      // Player doesn't exist (no profile data or no name) - silently remove the tab
+      removeAllChatTab(playerName);
+      return;
     }
   } catch (error) {
-    // Default to offline on error
+    // Check if error is 404 (player doesn't exist)
+    if (error.message && error.message.includes('HTTP 404')) {
+      // Player doesn't exist - silently remove the tab
+      removeAllChatTab(playerName);
+      return;
+    }
+    
+    // For rate limiting (429) or other errors, keep the tab but show offline
+    // Don't remove tabs for rate limiting - player might exist, just can't fetch now
     if (!isActive) {
       tabLabel.style.color = CSS_CONSTANTS.COLORS.OFFLINE;
     } else {
@@ -5938,13 +7581,38 @@ async function updateAllChatTabStatus(playerName) {
   }
 }
 
-// Update status colors for all open tabs
+// Update status colors for all open tabs with rate limiting
 async function updateAllChatTabsStatus() {
-  const updatePromises = Array.from(allChatTabs.keys())
-    .filter(name => name !== 'all-chat')
-    .map(playerName => updateAllChatTabStatus(playerName));
+  // Clean up orphaned tabs first
+  cleanupOrphanedChatTabs();
   
-  await Promise.all(updatePromises);
+  // Filter out tabs that no longer exist in the DOM
+  const validPlayerNames = Array.from(allChatTabs.keys())
+    .filter(name => {
+      if (name === 'all-chat' || name.startsWith('guild-')) return false;
+      const tab = allChatTabs.get(name);
+      if (!tab || !document.contains(tab)) {
+        allChatTabs.delete(name);
+        return false;
+      }
+      return true;
+    });
+  
+  if (validPlayerNames.length === 0) return;
+  
+  // Process in batches with delays to avoid rate limiting
+  const BATCH_SIZE = 5;
+  const BATCH_DELAY = 500; // 500ms between batches
+  
+  for (let i = 0; i < validPlayerNames.length; i += BATCH_SIZE) {
+    const batch = validPlayerNames.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(playerName => updateAllChatTabStatus(playerName)));
+    
+    // Add delay between batches (except for the last batch)
+    if (i + BATCH_SIZE < validPlayerNames.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+    }
+  }
 }
 
 // Update chat icon indicator in VIP list
@@ -6024,6 +7692,10 @@ async function openAllChatPanel() {
   const existingPanel = document.getElementById(chatPanelId);
   if (existingPanel) {
     console.log('[VIP List] All Chat panel already exists, focusing...');
+    
+    // Clean up any orphaned tabs before proceeding
+    cleanupOrphanedChatTabs();
+    
     existingPanel.style.zIndex = '10000';
     existingPanel.style.display = 'flex';
     
@@ -6089,13 +7761,14 @@ async function openAllChatPanel() {
         
         // Add guild chat tab if player is in a guild
         await addGuildChatTab();
+        
+        // Batch update all tab statuses with rate limiting
+        await updateAllChatTabsStatus();
       } catch (error) {
         console.error('[VIP List] Error auto-opening tabs:', error);
       }
     })();
     
-    // Note: Tab restoration happens in autoReopenChatPanel after this function returns
-    // This allows the caller to restore tabs after the panel is ready
     return;
   }
   
@@ -6128,7 +7801,7 @@ async function openAllChatPanel() {
     max-height: ${CHAT_PANEL_DIMENSIONS.MAX_HEIGHT}px;
     background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
     border: 6px solid transparent;
-    border-image: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+    border-image: ${CSS_CONSTANTS.BORDER_3_FRAME};
     border-radius: 6px;
     z-index: 10000;
     display: flex;
@@ -6179,18 +7852,8 @@ async function openAllChatPanel() {
     activeTab = 'all-chat';
   }
   
-  // Create guild chat tab if player is in a guild (permanent tab like All Chat)
-  const playerGuild = getPlayerGuild();
-  if (playerGuild && playerGuild.abbreviation) {
-    const guildId = playerGuild.id;
-    const tabName = `guild-${guildId}`;
-    const displayName = playerGuild.abbreviation;
-    if (!allChatTabs.has(tabName)) {
-      const guildChatTab = await createAllChatTab(tabName, displayName, 0, false);
-      tabsContainer.appendChild(guildChatTab);
-      allChatTabs.set(tabName, guildChatTab);
-    }
-  }
+  // Sync guild chat tab (will add if player is in a guild, hide if not)
+  await syncGuildChatTab();
   
   // Close button (right side)
   const closeBtn = createStyledIconButton('✕', true);
@@ -6361,11 +8024,11 @@ async function openAllChatPanel() {
     opacity: 0;
     pointer-events: none;
     box-sizing: border-box;
-    font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+    font-family: ${CSS_CONSTANTS.FONT_FAMILY};
     font-weight: 700;
   `;
   toggleBtn.addEventListener('mouseenter', () => {
-    toggleBtn.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill';
+    toggleBtn.style.borderImage = CSS_CONSTANTS.BORDER_1_FRAME_PRESSED;
     toggleBtn.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
     toggleBtn.style.filter = 'brightness(1.2)';
   });
@@ -6425,7 +8088,8 @@ async function openAllChatPanel() {
   });
   observer.observe(actionsColumn, { attributes: true, attributeFilter: ['style'] });
   
-  // Store update function on panel for later use
+  // Store observer and update function on panel for cleanup (memory leak prevention)
+  panel._toggleButtonObserver = observer;
   panel._updateToggleButtonVisibility = updateToggleButtonVisibility;
   
   // Append messages area (either scroll container element or plain div)
@@ -6531,10 +8195,45 @@ async function openAllChatPanel() {
     try {
       let success = false;
       if (activeAllChatTab === 'all-chat') {
+        const currentPlayer = getCurrentPlayerName();
+        const messageId = Date.now().toString();
+        const timestamp = Date.now();
+        
+        // Create optimistic message object
+        const optimisticMessage = {
+          id: messageId,
+          from: currentPlayer,
+          text: text.trim(),
+          timestamp: timestamp,
+          read: false
+        };
+        
+        // Optimistically add message to DOM immediately
+        const panel = messagesArea.closest('[id^="vip-chat-panel-all-chat"]');
+        await addMessageToAllChatOptimistically(optimisticMessage, messagesArea, panel);
+        
+        // Send message to server
         success = await sendAllChatMessage(text);
-        if (success) {
+        
+        // Only reload if send failed (to remove optimistic message)
+        if (!success) {
+          // Remove optimistic message on failure
+          const optimisticMsgEl = messagesArea.querySelector(`[data-message-id="${messageId}"]`);
+          if (optimisticMsgEl) {
+            optimisticMsgEl.remove();
+            // Remove date separator if it was added and is now empty
+            const prevSeparator = optimisticMsgEl.previousElementSibling;
+            if (prevSeparator && prevSeparator.querySelector('div[style*="text-transform: uppercase"]')) {
+              const nextMsg = optimisticMsgEl.nextElementSibling;
+              if (!nextMsg || !nextMsg.hasAttribute('data-message-id')) {
+                prevSeparator.remove();
+              }
+            }
+          }
+          // Reload to sync state
           await loadAllChatConversation(messagesArea, true);
         }
+        // If success, message is already displayed optimistically, no reload needed
       } else if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
         // Guild chat
         const guildId = activeAllChatTab.replace('guild-', '');
@@ -6543,10 +8242,39 @@ async function openAllChatPanel() {
           await loadGuildChatConversation(messagesArea, guildId, true);
         }
       } else {
+        // Private message - use optimistic update
+        const currentPlayer = getCurrentPlayerName();
+        const messageId = Date.now().toString();
+        const timestamp = Date.now();
+        
+        // Create optimistic message object
+        const optimisticMessage = {
+          id: messageId,
+          from: currentPlayer,
+          text: text.trim(),
+          timestamp: timestamp,
+          read: false,
+          isFromMe: true
+        };
+        
+        // Optimistically add message to DOM immediately
+        const panel = messagesArea.closest('[id^="vip-chat-panel-"]');
+        await addMessageToConversationOptimistically(optimisticMessage, messagesArea, panel);
+        
+        // Send message to server
         success = await sendMessage(activeAllChatTab, text);
-        if (success) {
+        
+        // Only reload if send failed (to remove optimistic message)
+        if (!success) {
+          // Remove optimistic message on failure
+          const optimisticMsgEl = messagesArea.querySelector(`[data-message-id="${messageId}"]`);
+          if (optimisticMsgEl) {
+            optimisticMsgEl.remove();
+          }
+          // Reload to sync state
           await loadConversation(activeAllChatTab, messagesArea, true);
         }
+        // If success, message is already displayed optimistically, no reload needed
       }
       
       if (!success) {
@@ -6645,40 +8373,6 @@ async function openAllChatPanel() {
     panel._previousMessageCount = 0;
   }
   
-  // Check for new messages periodically (if All Chat API is available)
-  if (getAllChatApiUrl()) {
-    panel._checkInterval = setInterval(async () => {
-      try {
-        // Check for new All Chat messages
-        const messages = await getAllChatMessages();
-        const latestTimestamp = messages.length > 0 ? messages[messages.length - 1]?.timestamp : null;
-        const storedTimestamp = panel._lastTimestamp;
-        
-        if (storedTimestamp === null || latestTimestamp === null) {
-          // First check - initialize timestamp
-          panel._lastTimestamp = latestTimestamp;
-        } else if (latestTimestamp > storedTimestamp || messages.length !== (panel._lastMessageCount || 0)) {
-          // New messages detected - refresh UI (only if All Chat tab is active)
-          if (activeAllChatTab === 'all-chat') {
-            panel._lastTimestamp = latestTimestamp;
-            panel._lastMessageCount = messages.length;
-            await loadAllChatConversation(messagesArea);
-          }
-        }
-        
-        // Check for new guild chat messages
-        if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
-          const guildId = activeAllChatTab.replace('guild-', '');
-          await loadGuildChatConversation(messagesArea, guildId, false);
-        }
-      } catch (error) {
-        if (error.message && !error.message.includes('401')) {
-          console.warn('[VIP List] Error checking All Chat changes:', error);
-        }
-      }
-    }, 5000); // Check every 5 seconds
-  }
-  
   // Add to document
   document.body.appendChild(panel);
   openChatPanels.set('all-chat', panel);
@@ -6763,6 +8457,15 @@ async function minimizeAllChatPanel() {
       panel._checkInterval = null;
     }
     
+    // Remove scroll handlers (memory leak prevention)
+    removeScrollDetection(panel, { handlerKey: '_scrollHandler' });
+    
+    // Remove MutationObserver (memory leak prevention)
+    if (panel._toggleButtonObserver) {
+      panel._toggleButtonObserver.disconnect();
+      panel._toggleButtonObserver = null;
+    }
+    
     // Remove event listeners
     const headerContainer = panel.querySelector('#all-chat-tabs-container');
     removePanelDragHandlers(panel, headerContainer);
@@ -6825,6 +8528,9 @@ async function minimizeChatPanel(playerName) {
     
     // Stop frequent checking for this player
     stopPendingRequestCheck(playerName);
+    
+    // Remove scroll handlers (memory leak prevention)
+    removeScrollDetection(panel, { handlerKey: `_scrollHandler_conversation_${conversationKey}` });
     
     // Remove event listeners (stored directly on panel object)
     const headerContainer = panel.querySelector('div:first-child');
@@ -7447,25 +9153,7 @@ function getStatusColor(statusText) {
 
 // Add search input styles if not already added
 function addSearchInputStyles() {
-  if (!document.getElementById('vip-search-input-styles')) {
-    const style = document.createElement('style');
-    style.id = 'vip-search-input-styles';
-    style.textContent = `
-      .vip-search-input.error::placeholder {
-        color: ${CSS_CONSTANTS.COLORS.ERROR} !important;
-        font-style: italic;
-      }
-      .vip-search-input.success::placeholder {
-        color: ${CSS_CONSTANTS.COLORS.SUCCESS} !important;
-        font-style: italic;
-      }
-      .vip-search-input.duplicate::placeholder {
-        color: ${CSS_CONSTANTS.COLORS.DUPLICATE} !important;
-        font-style: italic;
-      }
-    `;
-    document.head.appendChild(style);
-  }
+  injectVIPListStyles(); // Uses consolidated stylesheet
 }
 
 // Show placeholder message with class styling
@@ -7683,13 +9371,7 @@ async function initializeVIPListInterface() {
 }
 
 function getVIPList() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS.DATA);
-    return stored ? JSON.parse(stored) : [];
-  } catch (error) {
-    console.error('[VIP List] Error loading VIP list:', error);
-    return [];
-  }
+  return storage.get(STORAGE_KEYS.DATA, []);
 }
 
 // Secondary sort by name helper
@@ -7747,13 +9429,9 @@ function sortVIPList(vipList, sortColumn = null, sortDirection = null) {
 }
 
 function saveVIPList(vipList) {
-  try {
-    // Sort before saving using current sort state
-    const sortedList = sortVIPList(vipList);
-    localStorage.setItem(STORAGE_KEYS.DATA, JSON.stringify(sortedList));
-  } catch (error) {
-    console.error('[VIP List] Error saving VIP list:', error);
-  }
+  // Sort before saving using current sort state
+  const sortedList = sortVIPList(vipList);
+  storage.set(STORAGE_KEYS.DATA, sortedList);
 }
 
 function addToVIPList(playerName, playerInfo) {
@@ -7780,30 +9458,155 @@ function removeFromVIPList(playerName) {
   return filteredList;
 }
 
+// Rate limiting and caching for player data fetches
+const PlayerDataFetcher = {
+  cache: new Map(),
+  pendingRequests: new Map(),
+  
+  rateLimit: {
+    lastRequestTime: 0,
+    requestCount: 0,
+    windowStart: 0,
+    maxRequests: 25, // Conservative limit (30 per 10s, but leave buffer)
+    windowMs: 10000  // 10 seconds
+  },
+  
+  TTL: 2 * 60 * 1000, // 2 minutes cache
+  
+  getCached(playerName) {
+    const key = playerName.toLowerCase();
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+    
+    const now = Date.now();
+    if (cached.data && cached.data.error) {
+      const errorTTL = cached.data.error === 'rate_limited' ? 30000 : 60000;
+      if (now - cached.timestamp < errorTTL) {
+        return cached.data;
+      }
+      this.cache.delete(key);
+      return null;
+    }
+    
+    if (now - cached.timestamp > this.TTL) {
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return cached.data;
+  },
+  
+  setCached(playerName, data) {
+    const key = playerName.toLowerCase();
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  },
+  
+  async waitForRateLimit() {
+    const now = Date.now();
+    
+    // Reset window if it's been more than windowMs since last request
+    if (now - this.rateLimit.windowStart > this.rateLimit.windowMs) {
+      this.rateLimit.requestCount = 0;
+      this.rateLimit.windowStart = now;
+    }
+    
+    // If we've hit the limit, wait until the window resets
+    if (this.rateLimit.requestCount >= this.rateLimit.maxRequests) {
+      const waitTime = this.rateLimit.windowMs - (now - this.rateLimit.windowStart);
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        this.rateLimit.requestCount = 0;
+        this.rateLimit.windowStart = Date.now();
+      }
+    }
+    
+    this.rateLimit.requestCount++;
+    this.rateLimit.lastRequestTime = Date.now();
+  },
+  
+  async fetch(playerName) {
+    const key = playerName.toLowerCase();
+    
+    // Check cache first
+    const cached = this.getCached(key);
+    if (cached !== null) {
+      if (cached.error) {
+        throw new Error(cached.error);
+      }
+      return cached;
+    }
+    
+    // Check if there's already a pending request for this player
+    if (this.pendingRequests.has(key)) {
+      return await this.pendingRequests.get(key);
+    }
+    
+    // Create promise for this request
+    const fetchPromise = (async () => {
+      try {
+        await this.waitForRateLimit();
+        
+        const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+        
+        const response = await fetch(apiUrl, {
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.status === 429) {
+          this.setCached(key, { error: 'rate_limited', timestamp: Date.now() });
+          throw new Error('Failed to fetch player data (HTTP 429)');
+        }
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch player data (HTTP ${response.status})`);
+        }
+        
+        const data = await response.json();
+        
+        let profileData = null;
+        if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
+          profileData = data[0].result.data.json;
+          // Check if the result contains an error (player doesn't exist)
+          if (data[0]?.result?.error || !profileData || (typeof profileData === 'object' && !profileData.name)) {
+            throw new Error('Failed to fetch player data (HTTP 404)');
+          }
+        } else {
+          profileData = data;
+          // Check if data is null or doesn't have a name (player doesn't exist)
+          if (!profileData || (typeof profileData === 'object' && !profileData.name)) {
+            throw new Error('Failed to fetch player data (HTTP 404)');
+          }
+        }
+        
+        this.setCached(key, profileData);
+        return profileData;
+      } catch (error) {
+        if (!error.message.includes('rate_limited')) {
+          this.setCached(key, { error: 'request_failed', timestamp: Date.now() });
+        }
+        throw error;
+      } finally {
+        this.pendingRequests.delete(key);
+      }
+    })();
+    
+    this.pendingRequests.set(key, fetchPromise);
+    return await fetchPromise;
+  }
+};
+
 async function fetchPlayerData(playerName) {
   try {
-    const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
-    
-    const response = await fetch(apiUrl, {
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch player data (HTTP ${response.status})`);
-    }
-    
-    const data = await response.json();
-    
-    // Extract profile data from the response
-    let profileData = null;
-    if (Array.isArray(data) && data[0]?.result?.data?.json !== undefined) {
-      profileData = data[0].result.data.json;
-    } else {
-      profileData = data;
-    }
-    
-    return profileData;
+    return await PlayerDataFetcher.fetch(playerName);
   } catch (error) {
+    // Don't log 404 errors as errors - they're expected when a player doesn't exist
+    if (error.message && error.message.includes('HTTP 404')) {
+      throw error; // Re-throw without logging
+    }
+    // Only log unexpected errors
     console.error('[VIP List] Error fetching player data:', error);
     throw error;
   }
@@ -7817,30 +9620,43 @@ async function refreshAllVIPPlayerData() {
   
   const currentPlayerName = getCurrentPlayerName();
   
-  // Fetch data for all players in parallel
-  const refreshPromises = vipList.map(async (vip) => {
-    try {
-      const profileData = await fetchPlayerData(vip.name || vip.profile);
-      
-      if (profileData === null) {
-        // Player no longer exists, keep old data
-        console.warn(`[VIP List] Player "${vip.name}" not found, keeping old data`);
+  // Process in batches with delays to avoid rate limiting
+  const BATCH_SIZE = 5;
+  const BATCH_DELAY = 500; // 500ms between batches
+  const updatedList = [];
+  
+  for (let i = 0; i < vipList.length; i += BATCH_SIZE) {
+    const batch = vipList.slice(i, i + BATCH_SIZE);
+    
+    const batchPromises = batch.map(async (vip) => {
+      try {
+        const profileData = await fetchPlayerData(vip.name || vip.profile);
+        
+        if (profileData === null) {
+          console.warn(`[VIP List] Player "${vip.name}" not found, keeping old data`);
+          return vip;
+        }
+        
+        const isCurrentPlayer = currentPlayerName && (profileData.name || vip.name).toLowerCase() === currentPlayerName;
+        const playerInfo = extractPlayerInfoFromProfile(profileData, vip.name || vip.profile);
+        playerInfo.profile = vip.profile || (profileData.name || vip.name).toLowerCase();
+        
+        return playerInfo;
+      } catch (error) {
+        console.error(`[VIP List] Error refreshing data for "${vip.name}":`, error);
         return vip;
       }
-      
-      const isCurrentPlayer = currentPlayerName && (profileData.name || vip.name).toLowerCase() === currentPlayerName;
-      const playerInfo = extractPlayerInfoFromProfile(profileData, vip.name || vip.profile);
-      playerInfo.profile = vip.profile || (profileData.name || vip.name).toLowerCase();
-      
-      return playerInfo;
-    } catch (error) {
-      console.error(`[VIP List] Error refreshing data for "${vip.name}":`, error);
-      // Return old data if fetch fails
-      return vip;
+    });
+    
+    const batchResults = await Promise.all(batchPromises);
+    updatedList.push(...batchResults);
+    
+    // Add delay between batches (except for the last batch)
+    if (i + BATCH_SIZE < vipList.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
     }
-  });
+  }
   
-  const updatedList = await Promise.all(refreshPromises);
   // Sort and save the updated list
   saveVIPList(updatedList);
   
@@ -8492,23 +10308,19 @@ function savePanelSettings(panel, isOpen = true, closedManually = false) {
       closedManually: closedManually
     };
     
-    localStorage.setItem(STORAGE_KEYS.PANEL_SETTINGS, JSON.stringify(settings));
-    console.log('[VIP List] Panel settings saved:', settings);
+    if (storage.set(STORAGE_KEYS.PANEL_SETTINGS, settings)) {
+      console.log('[VIP List] Panel settings saved:', settings);
+    }
   } catch (error) {
     console.error('[VIP List] Error saving panel settings:', error);
   }
 }
 
 function loadPanelSettings() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEYS.PANEL_SETTINGS);
-    if (saved) {
-      const settings = JSON.parse(saved);
-      console.log('[VIP List] Panel settings loaded:', settings);
-      return settings;
-    }
-  } catch (error) {
-    console.error('[VIP List] Error loading panel settings:', error);
+  const saved = storage.get(STORAGE_KEYS.PANEL_SETTINGS);
+  if (saved) {
+    console.log('[VIP List] Panel settings loaded:', saved);
+    return saved;
   }
   
   // Return default settings
@@ -8744,7 +10556,7 @@ async function openVIPListPanel() {
       max-height: ${PANEL_DIMENSIONS.MAX_HEIGHT}px;
       background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
       border: 6px solid transparent;
-      border-image: url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill;
+      border-image: ${CSS_CONSTANTS.BORDER_3_FRAME};
       border-radius: 6px;
       z-index: 9999;
       display: flex;
@@ -9360,6 +11172,26 @@ exports = {
       // 8. Clean up all open chat panels
       for (const [playerName, panel] of openChatPanels.entries()) {
         if (panel && panel.nodeType === 1) {
+          // Remove scroll handlers (memory leak prevention)
+          const playerKey = playerName.toLowerCase();
+          if (playerName === 'all-chat') {
+            removeScrollDetection(panel, { handlerKey: '_scrollHandler' });
+            // Remove All Chat MutationObserver
+            if (panel._toggleButtonObserver) {
+              panel._toggleButtonObserver.disconnect();
+              panel._toggleButtonObserver = null;
+            }
+          } else {
+            // Remove conversation scroll handlers
+            removeScrollDetection(panel, { handlerKey: `_scrollHandler_conversation_${playerKey}` });
+          }
+          // Remove guild chat scroll handlers if any
+          for (const key of Object.keys(panel)) {
+            if (key.startsWith('_scrollHandler_guild-')) {
+              removeScrollDetection(panel, { handlerKey: key });
+            }
+          }
+          
           // Remove event listeners (memory leak prevention)
           if (panel._dragHandler) {
             document.removeEventListener('mousemove', panel._dragHandler);
@@ -9442,8 +11274,6 @@ exports = {
       });
       
       // Clear processed menus set (WeakSet doesn't have clear, so we just reset the reference)
-      // Note: WeakSet entries are automatically garbage collected when elements are removed
-      
       console.log('[VIP List] Cleaned up successfully');
       return true;
     } catch (error) {
