@@ -132,7 +132,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 24 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -309,6 +309,14 @@ Local run data tracking and storage system:
 - Replay data management and storage
 - Integration with other mods for comprehensive tracking
 - Hidden mod that works behind the scenes
+
+#### Stamina Optimizer
+Automatically manages stamina levels by starting/stopping gameplay (by [btlucas](https://bestiaryarena.com/profile/btlucas)):
+- Configurable max/min stamina thresholds for automatic gameplay control
+- Supports autoplay or boosted-maps farming actions when stamina reaches maximum
+- Coordinates with Raid Hunter, Better Tasker, and Better Boosted Maps to prevent conflicts
+- Monitors Bestiary Automator refills to avoid interfering with stamina refills
+- Automatic gameplay pause when stamina drops below minimum threshold
 
 #### VIP List
 Player management system for tracking favorite players:

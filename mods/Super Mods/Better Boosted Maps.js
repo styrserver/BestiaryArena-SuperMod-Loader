@@ -2133,12 +2133,33 @@ function checkAutomationEnabled(stage) {
 }
 
 // Start farming boosted map
-async function startBoostedMapFarming() {
+async function startBoostedMapFarming(force = false) {
     try {
-        const farmCheck = shouldFarmBoostedMap();
-        if (!farmCheck.shouldFarm) {
-            console.log('[Better Boosted Maps] Not farming:', farmCheck.reason);
-            return;
+        let farmCheck;
+        if (force) {
+            // When forced (e.g., by Stamina Optimizer), bypass enabled checks
+            // but still get the boosted map data
+            const boostedData = getBoostedMapData();
+            if (!boostedData) {
+                console.log('[Better Boosted Maps] No boosted map data available');
+                return;
+            }
+            const roomName = getRoomName(boostedData.roomId);
+            const equipmentName = getEquipmentName(boostedData.equipId);
+            farmCheck = {
+                shouldFarm: true,
+                roomId: boostedData.roomId,
+                roomName: roomName,
+                equipmentName: equipmentName,
+                equipStat: boostedData.equipStat
+            };
+            console.log('[Better Boosted Maps] Forced farming (bypassing enabled checks)');
+        } else {
+            farmCheck = shouldFarmBoostedMap();
+            if (!farmCheck.shouldFarm) {
+                console.log('[Better Boosted Maps] Not farming:', farmCheck.reason);
+                return;
+            }
         }
         
         // Check if automation is still enabled before starting
@@ -2543,9 +2564,23 @@ function validateSettingsAfterNavigation() {
 }
 
 // Check and start boosted map farming if conditions are met
-function checkAndStartBoostedMapFarming() {
+function checkAndStartBoostedMapFarming(force = false) {
     // Don't start if already farming
     if (modState.farming.isActive) {
+        return;
+    }
+    
+    if (force) {
+        // When forced, bypass all checks and start immediately
+        console.log('[Better Boosted Maps] Forced start - bypassing conditions check');
+        const settings = loadSettings();
+        const startDelay = (settings.startDelay || 3) * 1000;
+        
+        setTimeout(() => {
+            if (!modState.farming.isActive) {
+                startBoostedMapFarming(true);
+            }
+        }, startDelay);
         return;
     }
     
@@ -2561,7 +2596,7 @@ function checkAndStartBoostedMapFarming() {
         setTimeout(() => {
             // Double-check conditions before starting
             if (canRunBoostedMaps() && !modState.farming.isActive) {
-                startBoostedMapFarming();
+                startBoostedMapFarming(false);
             }
         }, startDelay);
     }
@@ -2659,8 +2694,14 @@ function updateExposedState() {
 // Initial state exposure
 exposeBoostedMapsState();
 
+// Expose checkAndStartBoostedMapFarming on window for other mods to access
+if (typeof window !== 'undefined') {
+    window.checkAndStartBoostedMapFarming = checkAndStartBoostedMapFarming;
+}
+
 context.exports = {
     toggle: toggleBoostedMaps,
+    checkAndStartBoostedMapFarming: checkAndStartBoostedMapFarming,
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
         cleanupCoordination();
@@ -2694,6 +2735,11 @@ context.exports = {
         // Clean up exposed state
         if (window.betterBoostedMapsState) {
             delete window.betterBoostedMapsState;
+        }
+        
+        // Clean up exposed function
+        if (window.checkAndStartBoostedMapFarming) {
+            delete window.checkAndStartBoostedMapFarming;
         }
         
         console.log('[Better Boosted Maps] Cleanup completed');

@@ -148,6 +148,7 @@ async function scanAndRegisterLocalMods() {
     { name: 'Raid_Hunter.js', enabled: true },
     { name: 'Rank Pointer.js', enabled: true },
     { name: 'RunTracker.js', enabled: true },
+    { name: 'Stamina Optimizer.js', enabled: true },
     { name: 'VIP List.js', enabled: true }
   ];
   // Build mod objects
@@ -290,6 +291,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'Raid_Hunter.js',
     'Rank Pointer.js',
     'RunTracker.js',
+    'Stamina Optimizer.js',
     'VIP List.js'
   ];
 

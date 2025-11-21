@@ -639,7 +639,32 @@
       "playerDemotedToMember": "{player} demoted {member} to Member",
       "playerKickedFromGuild": "{player} kicked {member} from the guild",
       "playerChangedJoinType": "{player} changed the guild join type to {type}",
-      "playerUpdatedDescription": "{player} updated the guild description"
+      "playerUpdatedDescription": "{player} updated the guild description",
+      "playerCancelledInvite": "{player} cancelled the invite for {playerName}"
+    },
+    "staminaOptimizer": {
+      "buttonText": "Stamina Optimizer",
+      "buttonTooltip": "Stamina Optimizer Settings",
+      "settingsTitle": "Stamina Optimizer Settings",
+      "enableAutomation": "Enable Automation",
+      "enableAutomationDescription": "Automatically start/stop gameplay based on stamina levels",
+      "maxStaminaLabel": "Max Stamina",
+      "maxStaminaDescription": "Stamina level at which to start the action",
+      "minStaminaLabel": "Min Stamina",
+      "minStaminaDescription": "Stamina level at which to stop gameplay",
+      "actionLabel": "Action",
+      "actionDescription": "Action to execute when stamina reaches maximum",
+      "actionAutoplay": "Autoplay",
+      "actionBoostedMaps": "Boosted Maps",
+      "settingsAutoSave": "✓ Settings auto-save when changed",
+      "validationMaxMin": "Max stamina must be greater than min stamina",
+      "validationMaxRange": "Max stamina must be between 1 and 1000",
+      "validationMinRange": "Min stamina must be between 1 and 1000",
+      "closeButton": "Close",
+      "enabled": "Enabled",
+      "settings": "Settings",
+      "start": "Start",
+      "autoSetup": "Auto-setup"
     }
   }
 }

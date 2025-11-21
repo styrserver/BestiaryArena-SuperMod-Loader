@@ -630,6 +630,7 @@ function renderLocalMods(mods) {
     'Raid_Hunter.js',
     'Rank Pointer.js',
     'RunTracker.js',
+    'Stamina Optimizer.js',
     'VIP List.js'
   ];
 

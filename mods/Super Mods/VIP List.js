@@ -5555,6 +5555,17 @@ async function getConversationMessages(otherPlayer, forceRefresh = false, limit 
     
     let allMessages = [...sentMessages, ...receivedMessages];
     
+    // Filter out system messages (should only appear in guild chat)
+    allMessages = allMessages.filter(msg => {
+      if (msg.from && msg.from.toLowerCase() === 'system') {
+        return false;
+      }
+      if (msg.isSystem === true) {
+        return false;
+      }
+      return true;
+    });
+    
     // Sort by timestamp
     allMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     
@@ -8503,7 +8514,6 @@ async function openAllChatPanel() {
         // Send message to server
         success = await sendMessage(activeAllChatTab, text);
         
-        // Only reload if send failed (to remove optimistic message)
         if (!success) {
           // Remove optimistic message on failure
           const optimisticMsgEl = messagesArea.querySelector(`[data-message-id="${messageId}"]`);
@@ -8512,8 +8522,11 @@ async function openAllChatPanel() {
           }
           // Reload to sync state
           await loadConversation(activeAllChatTab, messagesArea, true);
+        } else {
+          // Reload conversation after successful send to ensure message is synced from Firebase
+          // This ensures the message persists after page refresh
+          await loadConversation(activeAllChatTab, messagesArea, true, true);
         }
-        // If success, message is already displayed optimistically, no reload needed
       }
       
       if (!success) {

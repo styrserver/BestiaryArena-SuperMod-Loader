@@ -640,7 +640,32 @@
       "playerDemotedToMember": "{player} rebaixou {member} a Membro",
       "playerKickedFromGuild": "{player} expulsou {member} da guilda",
       "playerChangedJoinType": "{player} alterou o tipo de entrada da guilda para {type}",
-      "playerUpdatedDescription": "{player} atualizou a descrição da guilda"
+      "playerUpdatedDescription": "{player} atualizou a descrição da guilda",
+      "playerCancelledInvite": "{player} cancelou o convite para {playerName}"
+    },
+    "staminaOptimizer": {
+      "buttonText": "Otimizador de Stamina",
+      "buttonTooltip": "Configurações do Otimizador de Stamina",
+      "settingsTitle": "Configurações do Otimizador de Stamina",
+      "enableAutomation": "Habilitar Automação",
+      "enableAutomationDescription": "Iniciar/parar gameplay automaticamente com base nos níveis de stamina",
+      "maxStaminaLabel": "Stamina Máxima",
+      "maxStaminaDescription": "Nível de stamina no qual iniciar a ação",
+      "minStaminaLabel": "Stamina Mínima",
+      "minStaminaDescription": "Nível de stamina no qual parar o gameplay",
+      "actionLabel": "Ação",
+      "actionDescription": "Ação a executar quando a stamina atingir o máximo",
+      "actionAutoplay": "Autoplay",
+      "actionBoostedMaps": "Mapas Impulsionados",
+      "settingsAutoSave": "✓ Configurações são salvas automaticamente quando alteradas",
+      "validationMaxMin": "Stamina máxima deve ser maior que a mínima",
+      "validationMaxRange": "Stamina máxima deve estar entre 1 e 1000",
+      "validationMinRange": "Stamina mínima deve estar entre 1 e 1000",
+      "closeButton": "Fechar",
+      "enabled": "Habilitado",
+      "settings": "Configurações",
+      "start": "Iniciar",
+      "autoSetup": "Autoconfigurar"
     }
   }
 }
