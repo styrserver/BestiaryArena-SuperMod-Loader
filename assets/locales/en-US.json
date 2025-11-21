@@ -545,6 +545,8 @@
       "failedToCreate": "Failed to create guild",
       "cannotCreateGuild": "Cannot Create Guild",
       "alreadyInGuild": "You are already a member of a guild. Leave your current guild before creating a new one.",
+      "alreadyInAnotherGuild": "You are already a member of another guild. Leave your current guild before joining a new one.",
+      "guildNotFound": "Guild not found",
       "browserTitle": "Guilds",
       "searchPlaceholder": "Search guilds...",
       "createGuildButton": "Create Guild",

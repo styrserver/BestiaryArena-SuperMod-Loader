@@ -610,23 +610,136 @@ function validateCurrentPlayer() {
   return currentPlayer;
 }
 
+// Check if player is in a guild (checks both Firebase and localStorage)
+// Returns { isInGuild: boolean, guildId: string|null, guildData: object|null }
+async function checkPlayerGuildMembership(expectedGuildId = null) {
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      return { isInGuild: false, guildId: null, guildData: null };
+    }
+
+    const hashedPlayer = await hashUsername(currentPlayer);
+    const playerGuildResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+    
+    if (playerGuildResponse.ok) {
+      const playerGuildCheck = await playerGuildResponse.json();
+      if (playerGuildCheck && playerGuildCheck.guildId) {
+        if (expectedGuildId === null || playerGuildCheck.guildId === expectedGuildId) {
+          return { 
+            isInGuild: true, 
+            guildId: playerGuildCheck.guildId, 
+            guildData: playerGuildCheck 
+          };
+        }
+      }
+    }
+
+    // Also check localStorage as fallback
+    const localGuild = getPlayerGuild();
+    if (localGuild && localGuild.id) {
+      if (expectedGuildId === null || localGuild.id === expectedGuildId) {
+        return { 
+          isInGuild: true, 
+          guildId: localGuild.id, 
+          guildData: localGuild 
+        };
+      }
+    }
+
+    return { isInGuild: false, guildId: null, guildData: null };
+  } catch (error) {
+    console.error('[Guilds] Error checking player guild membership:', error);
+    return { isInGuild: false, guildId: null, guildData: null };
+  }
+}
+
+// Find member in members array by username (case-insensitive)
+function findMemberByUsername(members, username) {
+  if (!members || !Array.isArray(members) || !username) {
+    return null;
+  }
+  return members.find(m => m.username && m.username.toLowerCase() === username.toLowerCase());
+}
+
+// Check if current player is the guild leader
+function isGuildLeader(guild, currentPlayer) {
+  if (!guild || !currentPlayer || !guild.leader) {
+    return false;
+  }
+  return guild.leader.toLowerCase() === currentPlayer.toLowerCase();
+}
+
+// Create ESC key handler factory for modals/dialogs
+function createEscKeyHandler(onClose) {
+  return function handleEsc(e) {
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      onClose();
+    }
+  };
+}
+
+// Setup ESC key handler with automatic cleanup when dialog closes
+function setupEscKeyHandler(dialog, onClose) {
+  const handleEsc = createEscKeyHandler(onClose);
+  document.addEventListener('keydown', handleEsc);
+  
+  // Clean up when dialog is removed
+  const observer = new MutationObserver(() => {
+    if (!document.contains(dialog)) {
+      document.removeEventListener('keydown', handleEsc);
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  
+  return handleEsc;
+}
+
+// Validate guild exists and throw error if not
+function validateGuildExists(guild, guildId = null) {
+  if (!guild) {
+    throw new Error(t('mods.guilds.guildNotFound'));
+  }
+  return guild;
+}
+
+// Validate member exists in members array
+function validateMemberExists(member, username = null) {
+  if (!member) {
+    throw new Error('Member not found');
+  }
+  return member;
+}
+
 // Update player's guild reference in Firebase
 async function updatePlayerGuildReference(hashedPlayer, guildId, guildName) {
   const url = `${getPlayerGuildApiUrl()}/${hashedPlayer}.json`;
-  if (guildId) {
-    const response = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ guildId, guildName })
-    });
-    if (!response.ok) {
-      console.warn('[Guilds] Failed to update player guild reference');
+  try {
+    if (guildId) {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId, guildName })
+      });
+      if (!response.ok) {
+        console.error('[Guilds] Failed to update player guild reference:', response.status, response.statusText);
+        return false;
+      }
+      console.log('[Guilds] Successfully updated player guild reference:', { hashedPlayer, guildId, guildName });
+      return true;
+    } else {
+      const response = await fetch(url, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) {
+        console.error('[Guilds] Failed to remove player guild reference:', response.status, response.statusText);
+        return false;
+      }
+      console.log('[Guilds] Successfully removed player guild reference:', hashedPlayer);
+      return true;
     }
-  } else {
-    const response = await fetch(url, { method: 'DELETE' });
-    if (!response.ok && response.status !== 404) {
-      console.warn('[Guilds] Failed to remove player guild reference');
-    }
+  } catch (error) {
+    console.error('[Guilds] Error updating player guild reference:', error);
+    return false;
   }
 }
 
@@ -939,20 +1052,12 @@ async function createGuild(guildName, description = '', abbreviation = '', joinT
     const currentPlayer = validateCurrentPlayer();
 
     // Check if player is already in a guild
-    const hashedPlayer = await hashUsername(currentPlayer);
-    const playerGuildCheckResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
-    if (playerGuildCheckResponse.ok) {
-      const playerGuildCheck = await playerGuildCheckResponse.json();
-      if (playerGuildCheck && playerGuildCheck.guildId) {
-        throw new Error('You are already a member of a guild. Leave your current guild before creating a new one.');
-      }
-    }
-
-    // Also check localStorage as fallback
-    const localGuild = getPlayerGuild();
-    if (localGuild && localGuild.id) {
+    const membershipCheck = await checkPlayerGuildMembership();
+    if (membershipCheck.isInGuild) {
       throw new Error('You are already a member of a guild. Leave your current guild before creating a new one.');
     }
+
+    const hashedPlayer = await hashUsername(currentPlayer);
 
     if (!guildName || guildName.trim().length === 0) {
       throw new Error('Guild name is required');
@@ -1087,9 +1192,17 @@ async function joinGuild(guildId) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
+    // Check if player is already in a guild
+    const membershipCheck = await checkPlayerGuildMembership(guildId);
+    if (membershipCheck.isInGuild && membershipCheck.guildId !== guildId) {
+      throw new Error(t('mods.guilds.alreadyInAnotherGuild'));
+    }
+
+    const hashedPlayer = await hashUsername(currentPlayer);
+
     const guild = await getGuild(guildId);
     if (!guild) {
-      throw new Error('Guild not found');
+      throw new Error(t('mods.guilds.guildNotFound'));
     }
 
     // Check if guild is invite-only
@@ -1103,7 +1216,6 @@ async function joinGuild(guildId) {
       throw new Error('Guild is full');
     }
 
-    const hashedPlayer = await hashUsername(currentPlayer);
     const existingMember = members.find(m => m.usernameHashed === hashedPlayer);
     if (existingMember) {
       throw new Error('You are already a member of this guild');
@@ -1132,6 +1244,21 @@ async function joinGuild(guildId) {
     // Update player's guild reference
     await updatePlayerGuildReference(hashedPlayer, guildId, guild.name);
 
+    // Clean up all other pending invites (player can only be in one guild)
+    const allInvites = await getPlayerInvites();
+    for (const invite of allInvites) {
+      if (invite.guildId !== guildId) {
+        // Remove invite from player's invites
+        await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${invite.guildId}.json`, {
+          method: 'DELETE'
+        });
+        // Also remove from guild's invites tracking
+        await fetch(`${getGuildInvitesApiUrl(invite.guildId)}/${hashedPlayer}.json`, {
+          method: 'DELETE'
+        });
+      }
+    }
+
     savePlayerGuild(guild);
 
     // Sync guild chat tab if VIP List mod is loaded
@@ -1155,10 +1282,10 @@ async function leaveGuild(guildId) {
 
     const guild = await getGuild(guildId);
     if (!guild) {
-      throw new Error('Guild not found');
+      throw new Error(t('mods.guilds.guildNotFound'));
     }
 
-    if (guild.leader.toLowerCase() === currentPlayer.toLowerCase()) {
+    if (isGuildLeader(guild, currentPlayer)) {
       throw new Error('Guild leader cannot leave. Transfer leadership or delete the guild.');
     }
 
@@ -1199,12 +1326,9 @@ async function updateGuildJoinType(guildId, newJoinType) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
-    const guild = await getGuild(guildId);
-    if (!guild) {
-      throw new Error('Guild not found');
-    }
+    const guild = validateGuildExists(await getGuild(guildId));
 
-    if (guild.leader.toLowerCase() !== currentPlayer.toLowerCase()) {
+    if (!isGuildLeader(guild, currentPlayer)) {
       throw new Error('Only the guild leader can update the join type');
     }
 
@@ -1245,12 +1369,9 @@ async function updateGuildDescription(guildId, newDescription) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
-    const guild = await getGuild(guildId);
-    if (!guild) {
-      throw new Error('Guild not found');
-    }
+    const guild = validateGuildExists(await getGuild(guildId));
 
-    if (guild.leader.toLowerCase() !== currentPlayer.toLowerCase()) {
+    if (!isGuildLeader(guild, currentPlayer)) {
       throw new Error('Only the guild leader can update the description');
     }
 
@@ -1290,21 +1411,14 @@ async function transferLeadership(guildId, newLeaderUsername) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
-    const guild = await getGuild(guildId);
-    if (!guild) {
-      throw new Error('Guild not found');
-    }
+    const guild = validateGuildExists(await getGuild(guildId));
 
-    if (guild.leader.toLowerCase() !== currentPlayer.toLowerCase()) {
+    if (!isGuildLeader(guild, currentPlayer)) {
       throw new Error('Only the current leader can transfer leadership');
     }
 
     const members = await getGuildMembers(guildId);
-    const newLeader = members.find(m => m.username.toLowerCase() === newLeaderUsername.toLowerCase());
-    
-    if (!newLeader) {
-      throw new Error('Member not found');
-    }
+    const newLeader = validateMemberExists(findMemberByUsername(members, newLeaderUsername));
 
     if (newLeader.username.toLowerCase() === currentPlayer.toLowerCase()) {
       throw new Error('You are already the leader');
@@ -1358,18 +1472,11 @@ async function promoteMember(guildId, memberUsername) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
-    const guild = await getGuild(guildId);
-    if (!guild) {
-      throw new Error('Guild not found');
-    }
+    const guild = validateGuildExists(await getGuild(guildId));
 
     const members = await getGuildMembers(guildId);
-    const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
-    const targetMember = members.find(m => m.username.toLowerCase() === memberUsername.toLowerCase());
-
-    if (!currentMember || !targetMember) {
-      throw new Error('Member not found');
-    }
+    const currentMember = validateMemberExists(findMemberByUsername(members, currentPlayer));
+    const targetMember = validateMemberExists(findMemberByUsername(members, memberUsername));
 
     if (!canPerformAction(currentMember.role, targetMember.role, 'promote')) {
       throw new Error('You do not have permission to promote this member');
@@ -1401,18 +1508,11 @@ async function demoteMember(guildId, memberUsername) {
   try {
     const currentPlayer = validateCurrentPlayer();
 
-    const guild = await getGuild(guildId);
-    if (!guild) {
-      throw new Error('Guild not found');
-    }
+    const guild = validateGuildExists(await getGuild(guildId));
 
     const members = await getGuildMembers(guildId);
-    const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
-    const targetMember = members.find(m => m.username.toLowerCase() === memberUsername.toLowerCase());
-
-    if (!currentMember || !targetMember) {
-      throw new Error('Member not found');
-    }
+    const currentMember = validateMemberExists(findMemberByUsername(members, currentPlayer));
+    const targetMember = validateMemberExists(findMemberByUsername(members, memberUsername));
 
     if (!canPerformAction(currentMember.role, targetMember.role, 'demote')) {
       throw new Error('You do not have permission to demote this member');
@@ -1445,12 +1545,12 @@ async function kickMember(guildId, memberUsername) {
 
     const guild = await getGuild(guildId);
     if (!guild) {
-      throw new Error('Guild not found');
+      throw new Error(t('mods.guilds.guildNotFound'));
     }
 
     const members = await getGuildMembers(guildId);
-    const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
-    const targetMember = members.find(m => m.username.toLowerCase() === memberUsername.toLowerCase());
+    const currentMember = findMemberByUsername(members, currentPlayer);
+    const targetMember = findMemberByUsername(members, memberUsername);
 
     if (!currentMember) {
       throw new Error('You are not a member of this guild');
@@ -1512,10 +1612,10 @@ async function deleteGuild(guildId) {
 
     const guild = await getGuild(guildId);
     if (!guild) {
-      throw new Error('Guild not found');
+      throw new Error(t('mods.guilds.guildNotFound'));
     }
 
-    if (guild.leader.toLowerCase() !== currentPlayer.toLowerCase()) {
+    if (!isGuildLeader(guild, currentPlayer)) {
       throw new Error('Only the guild leader can delete the guild');
     }
 
@@ -1573,11 +1673,11 @@ async function invitePlayer(guildId, playerName) {
 
     const guild = await getGuild(guildId);
     if (!guild) {
-      throw new Error('Guild not found');
+      throw new Error(t('mods.guilds.guildNotFound'));
     }
 
     const members = await getGuildMembers(guildId);
-    const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
+    const currentMember = findMemberByUsername(members, currentPlayer);
 
     if (!currentMember) {
       throw new Error('You are not a member of this guild');
@@ -1909,7 +2009,7 @@ async function sendGuildMessage(guildId, text) {
     }
 
     const members = await getGuildMembers(guildId);
-    const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
+    const currentMember = findMemberByUsername(members, currentPlayer);
     if (!currentMember) {
       throw new Error('You are not a member of this guild');
     }
@@ -2406,24 +2506,10 @@ async function showCreateGuildDialog() {
 
   // Check if player is already in a guild
   try {
-    const currentPlayer = getCurrentPlayerName();
-    if (currentPlayer) {
-      const hashedPlayer = await hashUsername(currentPlayer);
-      const playerGuildResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
-      if (playerGuildResponse.ok) {
-        const playerGuild = await playerGuildResponse.json();
-        if (playerGuild && playerGuild.guildId) {
-          showWarningModal(t('mods.guilds.cannotCreateGuild'), t('mods.guilds.alreadyInGuild'));
-          return;
-        }
-      }
-
-      // Also check localStorage as fallback
-      const localGuild = getPlayerGuild();
-      if (localGuild && localGuild.id) {
-        showWarningModal(t('mods.guilds.cannotCreateGuild'), t('mods.guilds.alreadyInGuild'));
-        return;
-      }
+    const membershipCheck = await checkPlayerGuildMembership();
+    if (membershipCheck.isInGuild) {
+      showWarningModal(t('mods.guilds.cannotCreateGuild'), t('mods.guilds.alreadyInGuild'));
+      return;
     }
   } catch (error) {
     console.error('[Guilds] Error checking player guild status:', error);
@@ -2700,13 +2786,9 @@ async function showInvitesDialog() {
     }],
     onAfterCreate: (dialog) => {
       // Add ESC key support to close modal
-      const handleEsc = (e) => {
-        if (e.key === 'Escape' || e.keyCode === 27) {
-          dialog.remove();
-          document.removeEventListener('keydown', handleEsc);
-        }
-      };
-      document.addEventListener('keydown', handleEsc);
+      setupEscKeyHandler(dialog, () => {
+        dialog.remove();
+      });
     }
   });
 }
@@ -2925,13 +3007,50 @@ async function showGuildBrowser() {
       `;
       leaderCell.textContent = guild.leader;
       
-      const isPlayerGuild = playerGuild && playerGuild.id === guild.id;
+      // Check if this is the player's guild (from localStorage)
+      let isPlayerGuild = playerGuild && playerGuild.id === guild.id;
       
-      // Check if player is already a member
+      // Also verify from Firebase if localStorage doesn't match
+      // Check if player is actually a member (to handle localStorage sync issues)
       let isAlreadyMember = false;
-      if (hashedPlayer && !isPlayerGuild) {
+      let playerRole = null;
+      if (hashedPlayer) {
         const members = await getGuildMembers(guild.id);
-        isAlreadyMember = members.some(m => m.usernameHashed === hashedPlayer);
+        const member = members.find(m => m.usernameHashed === hashedPlayer);
+        if (member) {
+          isAlreadyMember = true;
+          playerRole = member.role;
+          // If player is a member but localStorage doesn't match, fix it
+          if (!isPlayerGuild) {
+            // Check Firebase to verify if this is actually their guild
+            try {
+              const playerGuildResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+              if (playerGuildResponse.ok) {
+                const playerGuildData = await playerGuildResponse.json();
+                if (playerGuildData && playerGuildData.guildId === guild.id) {
+                  // Firebase confirms this is their guild - update localStorage
+                  isPlayerGuild = true;
+                  savePlayerGuild(guild);
+                  // Sync guild chat tab if VIP List mod is loaded
+                  if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+                    window.syncGuildChatTab();
+                  }
+                }
+              }
+            } catch (error) {
+              // If Firebase check fails, still treat as their guild if they're a member
+              // (especially if leader)
+              if (playerRole === GUILD_ROLES.LEADER || isGuildLeader(guild, currentPlayer)) {
+                isPlayerGuild = true;
+                savePlayerGuild(guild);
+                // Sync guild chat tab if VIP List mod is loaded
+                if (typeof window !== 'undefined' && typeof window.syncGuildChatTab === 'function') {
+                  window.syncGuildChatTab();
+                }
+              }
+            }
+          }
+        }
       }
 
       const actionCell = document.createElement('div');
@@ -2964,6 +3083,15 @@ async function showGuildBrowser() {
         actionBtn.textContent = t('mods.guilds.full');
         actionBtn.style.cssText = 'background: rgba(128, 128, 128, 0.3); border-color: rgba(128, 128, 128, 0.5); opacity: 0.6;';
         actionBtn.disabled = true;
+      } else if (playerGuild && playerGuild.id && playerGuild.id !== guild.id) {
+        actionBtn.textContent = t('mods.guilds.view');
+        actionBtn.style.cssText = 'background: rgba(100, 181, 246, 0.3); border-color: rgba(100, 181, 246, 0.5);';
+        actionBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const dialog = getOpenDialog();
+          if (dialog) dialog.remove();
+          await openGuildPanel(guild.id);
+        });
       } else {
         const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
         if (joinType === GUILD_JOIN_TYPES.INVITE_ONLY) {
@@ -3304,23 +3432,33 @@ async function showMemberManagementModal(guild, currentMember, targetMember) {
       applyModalStyles(dialog, 350, null);
       
       // Add ESC key support to close modal
-      const handleEsc = (e) => {
-        if (e.key === 'Escape' || e.keyCode === 27) {
-          dialog.remove();
-          document.removeEventListener('keydown', handleEsc);
-        }
-      };
-      document.addEventListener('keydown', handleEsc);
+      setupEscKeyHandler(dialog, () => {
+        dialog.remove();
+      });
     }
   }, 100);
 }
 
-async function openGuildPanel() {
+async function openGuildPanel(viewGuildId = null) {
   if (!ensureModalApi()) return;
 
-  // First, verify actual guild state from Firebase
-  let verifiedGuild = null;
-  const currentPlayer = getCurrentPlayerName();
+  let guild, members, currentPlayer, currentMember;
+
+  // If viewGuildId is provided, we're viewing as a non-member - skip membership checks
+  if (viewGuildId) {
+    guild = await getGuild(viewGuildId);
+    if (!guild) {
+      showWarningModal(t('mods.guilds.error'), t('mods.guilds.guildNotFound'));
+      return;
+    }
+    members = await getGuildMembers(guild.id);
+    currentPlayer = getCurrentPlayerName();
+    currentMember = currentPlayer ? findMemberByUsername(members, currentPlayer) : null;
+    // Show guild in view mode (will hide admin controls if currentMember is null)
+  } else {
+    // First, verify actual guild state from Firebase
+    let verifiedGuild = null;
+    currentPlayer = getCurrentPlayerName();
   try {
     if (currentPlayer) {
       const hashedPlayer = await hashUsername(currentPlayer);
@@ -3366,41 +3504,41 @@ async function openGuildPanel() {
         }
       }
     }
-  } catch (error) {
-    console.error('[Guilds] Error verifying guild state from Firebase:', error);
-    // Fall back to localStorage check if Firebase check fails
-    verifiedGuild = getPlayerGuild();
-  }
+    } catch (error) {
+      console.error('[Guilds] Error verifying guild state from Firebase:', error);
+      // Fall back to localStorage check if Firebase check fails
+      verifiedGuild = getPlayerGuild();
+    }
 
-  // Use verified guild (from Firebase) or fall back to localStorage
-  const playerGuild = verifiedGuild || getPlayerGuild();
-  if (!playerGuild) {
-    const invites = await getPlayerInvites();
-    if (invites.length > 0) {
-      showInvitesDialog();
+    // Use verified guild (from Firebase) or fall back to localStorage
+    const playerGuild = verifiedGuild || getPlayerGuild();
+    if (!playerGuild) {
+      const invites = await getPlayerInvites();
+      if (invites.length > 0) {
+        showInvitesDialog();
+        return;
+      }
+      showGuildBrowser();
       return;
     }
-    showGuildBrowser();
-    return;
-  }
 
-  const guild = await getGuild(playerGuild.id);
-  if (!guild) {
-    clearPlayerGuild();
-    showGuildBrowser();
-    return;
+    guild = await getGuild(playerGuild.id);
+    if (!guild) {
+      clearPlayerGuild();
+      showGuildBrowser();
+      return;
+    }
+    members = await getGuildMembers(guild.id);
+    currentMember = currentPlayer ? members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase()) : null;
   }
-
-  const members = await getGuildMembers(guild.id);
-  if (!currentPlayer) {
-    console.warn('[Guilds] No current player - redirecting to browser');
-    showGuildBrowser();
-    return;
-  }
-  const currentMember = members.find(m => m.username.toLowerCase() === currentPlayer.toLowerCase());
   
-  // Final verification - if user is not actually a member, redirect to browser
-  if (!currentMember) {
+  // Final verification - if user is not actually a member, redirect to browser (unless viewing)
+  if (!currentMember && !viewGuildId) {
+    if (!currentPlayer) {
+      console.warn('[Guilds] No current player - redirecting to browser');
+      showGuildBrowser();
+      return;
+    }
     console.warn('[Guilds] Player has guild in localStorage but is not a member - redirecting to browser');
     await updatePlayerGuildReference(await hashUsername(currentPlayer), null, null);
     clearPlayerGuild();
@@ -3458,17 +3596,57 @@ async function openGuildPanel() {
     padding: 3px;
   `;
 
-  members.forEach(member => {
+  // Calculate points for all members first, then sort
+  const membersWithPoints = await Promise.all(members.map(async (member) => {
+    const pointsData = await calculateMemberPoints(member.username);
+    return {
+      ...member,
+      _points: pointsData.total
+    };
+  }));
+
+  // Sort members by role (Leader > Officer > Member), then by points (descending), then by name
+  const rolePriority = {
+    [GUILD_ROLES.LEADER]: 0,
+    [GUILD_ROLES.OFFICER]: 1,
+    [GUILD_ROLES.MEMBER]: 2
+  };
+  
+  const sortedMembers = membersWithPoints.sort((a, b) => {
+    // First sort by role
+    const roleDiff = (rolePriority[a.role] ?? 99) - (rolePriority[b.role] ?? 99);
+    if (roleDiff !== 0) {
+      return roleDiff;
+    }
+    // Then sort by points (descending - higher points first)
+    const pointsDiff = (b._points || 0) - (a._points || 0);
+    if (pointsDiff !== 0) {
+      return pointsDiff;
+    }
+    // Finally sort by name (case-insensitive)
+    return (a.username || '').toLowerCase().localeCompare((b.username || '').toLowerCase());
+  });
+
+  sortedMembers.forEach(member => {
     const memberItem = document.createElement('div');
     memberItem.style.cssText = `
       display: flex;
-      flex-direction: row;
-      align-items: center;
+      flex-direction: column;
       padding: 10px 8px;
       margin-bottom: 6px;
       background: rgba(255, 255, 255, 0.05);
       width: 100%;
       border-radius: 2px;
+      gap: 8px;
+    `;
+
+    // Top row: member info and points
+    const topRow = document.createElement('div');
+    topRow.style.cssText = `
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      width: 100%;
     `;
 
     const memberInfo = document.createElement('div');
@@ -3514,7 +3692,7 @@ async function openGuildPanel() {
     
     memberInfo.appendChild(memberName);
     memberInfo.appendChild(memberRole);
-    memberItem.appendChild(memberInfo);
+    topRow.appendChild(memberInfo);
 
     // Add points display with tooltip
     const pointsContainer = document.createElement('div');
@@ -3528,7 +3706,8 @@ async function openGuildPanel() {
     `;
 
     const pointsDisplay = document.createElement('div');
-    pointsDisplay.textContent = '...';
+    const memberPoints = member._points !== undefined ? member._points : 0;
+    pointsDisplay.textContent = formatNumber(memberPoints);
     pointsDisplay.style.cssText = `
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
       font-size: 12px;
@@ -3559,9 +3738,12 @@ async function openGuildPanel() {
     `;
     document.body.appendChild(tooltip);
 
-    // Calculate and display points
+    // Recalculate for tooltip (to get detailed breakdown)
     calculateMemberPoints(member.username).then(pointsData => {
-      pointsDisplay.textContent = formatNumber(pointsData.total);
+      // Update display if points changed (shouldn't happen, but just in case)
+      if (pointsData.total !== memberPoints) {
+        pointsDisplay.textContent = formatNumber(pointsData.total);
+      }
       
       // Build tooltip content with game-native styling
       const tooltipContent = document.createElement('div');
@@ -3691,11 +3873,12 @@ async function openGuildPanel() {
     });
 
     pointsContainer.appendChild(pointsDisplay);
-    memberItem.appendChild(pointsContainer);
+    topRow.appendChild(pointsContainer);
+    memberItem.appendChild(topRow);
 
     if (currentMember && member.username.toLowerCase() !== currentPlayer.toLowerCase()) {
       const buttonContainer = document.createElement('div');
-      buttonContainer.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+      buttonContainer.style.cssText = 'display: flex; gap: 4px; align-items: center; margin-top: 4px;';
 
       const isLeader = currentMember.role === GUILD_ROLES.LEADER;
       const canPromote = isLeader && member.role === GUILD_ROLES.MEMBER;
@@ -4724,31 +4907,208 @@ function startAccountMenuObserver() {
 // Initialization
 // =======================
 
+// Helper function to sync guild chat tab with retry
+function syncGuildChatTabWithRetry(retries = 3, delay = 1000) {
+  if (typeof window === 'undefined' || typeof window.syncGuildChatTab !== 'function') {
+    if (retries > 0) {
+      setTimeout(() => syncGuildChatTabWithRetry(retries - 1, delay), delay);
+    } else {
+      console.warn('[Guilds] syncGuildChatTab not available after retries');
+    }
+    return;
+  }
+  
+  try {
+    window.syncGuildChatTab();
+  } catch (error) {
+    console.error('[Guilds] Error syncing guild chat tab:', error);
+  }
+}
+
 async function initializeGuilds() {
   console.log('[Guilds] initialized');
   
-  // Sync player's guild from Firebase
+  // Sync player's guild from Firebase and verify membership
   try {
     const currentPlayer = getCurrentPlayerName();
-    if (currentPlayer) {
-      const hashedPlayer = await hashUsername(currentPlayer);
-      const response = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
-      if (response.ok) {
-        const playerGuild = await response.json();
-        if (playerGuild && playerGuild.guildId) {
-          const guild = await getGuild(playerGuild.guildId);
-          if (guild) {
-            savePlayerGuild(guild);
-          }
+    if (!currentPlayer) {
+      console.warn('[Guilds] Player name not available during initialization, will retry...');
+      // Retry after a delay if player name isn't available yet
+      setTimeout(async () => {
+        const retryPlayer = getCurrentPlayerName();
+        if (retryPlayer) {
+          await syncGuildFromFirebase(retryPlayer);
         }
-      }
+      }, 2000);
+      startAccountMenuObserver();
+      return;
     }
+    
+    await syncGuildFromFirebase(currentPlayer);
   } catch (error) {
     console.error('[Guilds] Error initializing:', error);
   }
 
   // Start menu observer
   startAccountMenuObserver();
+}
+
+async function syncGuildFromFirebase(currentPlayer) {
+  try {
+    console.log('[Guilds] Starting sync for player:', currentPlayer);
+    const hashedPlayer = await hashUsername(currentPlayer);
+    console.log('[Guilds] Hashed player:', hashedPlayer);
+    
+    // First, check if player is in members list of any guild (source of truth)
+    console.log('[Guilds] Checking all guilds for membership...');
+    const allGuildsResponse = await fetch(`${getGuildsApiUrl()}.json`);
+    let foundGuild = null;
+    let foundGuildId = null;
+    
+    if (allGuildsResponse.ok) {
+      const allGuilds = await allGuildsResponse.json();
+      if (allGuilds) {
+        for (const [guildId, guild] of Object.entries(allGuilds)) {
+          const members = await getGuildMembers(guildId);
+          const isMember = members.some(m => m.usernameHashed === hashedPlayer);
+          if (isMember) {
+            foundGuild = { ...guild, id: guildId };
+            foundGuildId = guildId;
+            console.log('[Guilds] Found player in guild members:', guild.name, '(ID:', guildId + ')');
+            break;
+          }
+        }
+      }
+    }
+    
+    // Check player reference in Firebase
+    const playerRefResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+    const hasPlayerRef = playerRefResponse.ok;
+    let playerRefData = null;
+    if (hasPlayerRef) {
+      playerRefData = await playerRefResponse.json();
+      console.log('[Guilds] Player reference exists:', playerRefData);
+    } else {
+      console.log('[Guilds] No player reference found (status:', playerRefResponse.status + ')');
+    }
+    
+    // Sync logic: members list is source of truth
+    if (foundGuild) {
+      // Player is a member - ensure player reference matches
+      if (!hasPlayerRef || !playerRefData || playerRefData.guildId !== foundGuildId) {
+        console.log('[Guilds] Fixing player reference - creating/updating to match membership');
+        const updateResult = await updatePlayerGuildReference(hashedPlayer, foundGuildId, foundGuild.name);
+        
+        if (updateResult) {
+          // Verify it was created
+          const verifyResponse = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}.json`);
+          if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            console.log('[Guilds] Verified player reference created:', verifyData);
+          } else {
+            console.error('[Guilds] Failed to verify player reference creation - status:', verifyResponse.status);
+          }
+        } else {
+          console.error('[Guilds] Failed to update player reference');
+        }
+      } else {
+        console.log('[Guilds] Player reference already matches membership');
+      }
+      
+      // Save to localStorage and sync chat
+      savePlayerGuild(foundGuild);
+      console.log('[Guilds] Saved guild to localStorage:', foundGuild.name);
+      syncGuildChatTabWithRetry();
+      return;
+    } else {
+      // Player is not a member of any guild
+      if (hasPlayerRef && playerRefData) {
+        console.warn('[Guilds] Player reference exists but player is not a member - cleaning up');
+        await updatePlayerGuildReference(hashedPlayer, null, null);
+      }
+      
+      // Clear localStorage if it says otherwise
+      const localGuild = getPlayerGuild();
+      if (localGuild) {
+        console.warn('[Guilds] Clearing localStorage - player is not in any guild');
+        clearPlayerGuild();
+      }
+      syncGuildChatTabWithRetry();
+    }
+  } catch (error) {
+    console.error('[Guilds] Error syncing guild from Firebase:', error);
+    console.error('[Guilds] Error stack:', error.stack);
+  }
+}
+
+// Comprehensive sync function to ensure all members and players are in sync
+async function syncAllMembersAndPlayers() {
+  try {
+    console.log('[Guilds] Starting comprehensive sync of all members and players...');
+    
+    // Get all guilds
+    const allGuildsResponse = await fetch(`${getGuildsApiUrl()}.json`);
+    if (!allGuildsResponse.ok) {
+      console.error('[Guilds] Failed to fetch all guilds:', allGuildsResponse.status);
+      return;
+    }
+    
+    const allGuilds = await allGuildsResponse.json();
+    if (!allGuilds) {
+      console.log('[Guilds] No guilds found');
+      return;
+    }
+    
+    const membersToPlayers = new Map(); // Track which members need player references
+    
+    // Check all members in all guilds
+    for (const [guildId, guild] of Object.entries(allGuilds)) {
+      const members = await getGuildMembers(guildId);
+      for (const member of members) {
+        if (member.usernameHashed) {
+          membersToPlayers.set(member.usernameHashed, {
+            guildId: guildId,
+            guildName: guild.name,
+            username: member.username
+          });
+        }
+      }
+    }
+    
+    console.log('[Guilds] Found', membersToPlayers.size, 'members across all guilds');
+    
+    // Get all player references
+    const allPlayersResponse = await fetch(`${getPlayerGuildApiUrl()}.json`);
+    const allPlayers = allPlayersResponse.ok ? await allPlayersResponse.json() : {};
+    
+    // Fix missing player references
+    let fixedCount = 0;
+    for (const [hashedPlayer, memberInfo] of membersToPlayers.entries()) {
+      const playerRef = allPlayers[hashedPlayer];
+      if (!playerRef || playerRef.guildId !== memberInfo.guildId) {
+        console.log('[Guilds] Fixing missing/incorrect player reference for:', memberInfo.username, '(hash:', hashedPlayer + ')');
+        await updatePlayerGuildReference(hashedPlayer, memberInfo.guildId, memberInfo.guildName);
+        fixedCount++;
+      }
+    }
+    
+    // Remove orphaned player references (players that are not members)
+    let removedCount = 0;
+    for (const [hashedPlayer, playerRef] of Object.entries(allPlayers || {})) {
+      if (playerRef && playerRef.guildId) {
+        const memberInfo = membersToPlayers.get(hashedPlayer);
+        if (!memberInfo || memberInfo.guildId !== playerRef.guildId) {
+          console.log('[Guilds] Removing orphaned player reference for hash:', hashedPlayer);
+          await updatePlayerGuildReference(hashedPlayer, null, null);
+          removedCount++;
+        }
+      }
+    }
+    
+    console.log('[Guilds] Sync complete - Fixed:', fixedCount, 'Removed:', removedCount);
+  } catch (error) {
+    console.error('[Guilds] Error in comprehensive sync:', error);
+  }
 }
 
 // =======================
@@ -4764,6 +5124,19 @@ exports = {
       console.error('[Guilds] Initialization error:', error);
       return false;
     }
+  },
+  
+  syncGuildFromFirebase: async function() {
+    const currentPlayer = getCurrentPlayerName();
+    if (currentPlayer) {
+      await syncGuildFromFirebase(currentPlayer);
+    } else {
+      console.warn('[Guilds] Cannot sync: player name not available');
+    }
+  },
+  
+  syncAllMembersAndPlayers: async function() {
+    await syncAllMembersAndPlayers();
   },
   
   cleanup: function() {
@@ -4782,6 +5155,22 @@ exports = {
     }
   }
 };
+
+// Expose sync functions globally for manual use
+if (typeof window !== 'undefined') {
+  window.syncGuildFromFirebase = async function() {
+    const currentPlayer = getCurrentPlayerName();
+    if (currentPlayer) {
+      await syncGuildFromFirebase(currentPlayer);
+    } else {
+      console.warn('[Guilds] Cannot sync: player name not available');
+    }
+  };
+  
+  window.syncAllMembersAndPlayers = async function() {
+    await syncAllMembersAndPlayers();
+  };
+}
 
 // Auto-initialize if running in mod context
 if (typeof context !== 'undefined' && context.api) {

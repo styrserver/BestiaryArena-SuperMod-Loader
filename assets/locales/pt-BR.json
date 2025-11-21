@@ -546,6 +546,8 @@
       "failedToCreate": "Falha ao criar guilda",
       "cannotCreateGuild": "Não é possível criar guilda",
       "alreadyInGuild": "Você já é membro de uma guilda. Deixe sua guilda atual antes de criar uma nova.",
+      "alreadyInAnotherGuild": "Você já é membro de outra guilda. Deixe sua guilda atual antes de entrar em uma nova.",
+      "guildNotFound": "Guilda não encontrada",
       "browserTitle": "Guildas",
       "searchPlaceholder": "Buscar guildas...",
       "createGuildButton": "Criar Guilda",

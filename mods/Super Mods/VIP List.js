@@ -474,6 +474,40 @@ const tReplace = (key, replacements) => {
 // =======================
 
 // Get current player's name from game state
+// Validate if a username looks valid (not encrypted/corrupted)
+function isValidUsername(username) {
+  if (!username || typeof username !== 'string') {
+    return false;
+  }
+  
+  // Username should be reasonable length (encrypted data is usually 40+ characters)
+  if (username.length > 50) {
+    return false;
+  }
+  
+  // Check if it looks like base64-encoded encrypted data
+  // Encrypted data typically contains base64-specific characters (/, +) or padding (=)
+  const hasBase64Chars = username.includes('/') || username.includes('+') || username.includes('=');
+  const base64Pattern = /^[A-Za-z0-9+/]+=*$/;
+  
+  // If it's 40+ characters and contains base64-specific characters, likely encrypted
+  if (username.length >= 40 && hasBase64Chars && base64Pattern.test(username)) {
+    return false; // Likely encrypted
+  }
+  
+  // If it's 30+ characters with base64 pattern and padding, likely encrypted
+  if (username.length >= 30 && username.includes('=') && base64Pattern.test(username)) {
+    return false; // Likely encrypted
+  }
+  
+  // Username should contain at least one alphanumeric character
+  if (!/[a-zA-Z0-9]/.test(username)) {
+    return false;
+  }
+  
+  return true;
+}
+
 function getCurrentPlayerName() {
   try {
     const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
@@ -631,17 +665,46 @@ function saveChatPanelSettings(isOpen = true, closedManually = false) {
   }
   
   // Get list of open tabs (excluding 'all-chat' as it's always created)
-  const openTabs = Array.from(allChatTabs.keys()).filter(name => name !== 'all-chat');
+  // Filter out any invalid tab names (shouldn't happen, but safety check)
+  const openTabs = Array.from(allChatTabs.keys())
+    .filter(name => name !== 'all-chat')
+    .filter(name => isValidTabName(name));
+  
+  // Validate activeTab before saving
+  const activeTab = activeAllChatTab || 'all-chat';
+  const validActiveTab = isValidTabName(activeTab) ? activeTab : 'all-chat';
   
   const settings = {
     isOpen: isOpen,
     closedManually: closedManually,
     openTabs: openTabs,
-    activeTab: activeAllChatTab || 'all-chat'
+    activeTab: validActiveTab
   };
   if (storage.set(STORAGE_KEYS.CHAT_PANEL_SETTINGS, settings)) {
     console.log('[VIP List] Chat panel settings saved:', settings);
   }
+}
+
+// Validate if a tab name is valid (not encrypted/invalid)
+function isValidTabName(tabName) {
+  if (!tabName || typeof tabName !== 'string') {
+    return false;
+  }
+  
+  // Special tab names are always valid
+  if (tabName === 'all-chat') {
+    return true;
+  }
+  
+  // Guild chat tabs are valid if they have the correct format
+  if (tabName.startsWith('guild-')) {
+    const guildId = tabName.replace('guild-', '');
+    // Guild ID should be a valid string (not encrypted)
+    return guildId.length > 0 && guildId.length < 100;
+  }
+  
+  // Regular player tabs must pass username validation
+  return isValidUsername(tabName);
 }
 
 // Load chat panel settings from localStorage
@@ -649,7 +712,36 @@ function loadChatPanelSettings() {
   const saved = storage.get(STORAGE_KEYS.CHAT_PANEL_SETTINGS);
   if (saved) {
     console.log('[VIP List] Chat panel settings loaded:', saved);
-    return saved;
+    
+    // Clean up invalid tab names (encrypted values that couldn't be decrypted)
+    let cleaned = false;
+    const cleanedSettings = { ...saved };
+    
+    // Clean up activeTab if invalid
+    if (saved.activeTab && !isValidTabName(saved.activeTab)) {
+      console.warn('[VIP List] Removing invalid activeTab (likely encrypted):', saved.activeTab);
+      cleanedSettings.activeTab = 'all-chat';
+      cleaned = true;
+    }
+    
+    // Clean up openTabs array if it exists
+    if (Array.isArray(saved.openTabs)) {
+      const validTabs = saved.openTabs.filter(tab => isValidTabName(tab));
+      if (validTabs.length !== saved.openTabs.length) {
+        const invalidTabs = saved.openTabs.filter(tab => !isValidTabName(tab));
+        console.warn('[VIP List] Removing invalid openTabs (likely encrypted):', invalidTabs);
+        cleanedSettings.openTabs = validTabs;
+        cleaned = true;
+      }
+    }
+    
+    // Save cleaned settings back to localStorage if any were cleaned
+    if (cleaned) {
+      storage.set(STORAGE_KEYS.CHAT_PANEL_SETTINGS, cleanedSettings);
+      console.log('[VIP List] Chat panel settings cleaned and saved:', cleanedSettings);
+    }
+    
+    return cleanedSettings;
   }
   
   // Return default settings
@@ -693,8 +785,15 @@ async function autoReopenChatPanel() {
       }
       
       // Load saved settings to get active tab preference
+      // loadChatPanelSettings() now automatically cleans up invalid tab names
       const savedSettings = loadChatPanelSettings();
       const activeTabToRestore = savedSettings.activeTab || 'all-chat';
+      
+      // Double-check that activeTab is valid (should already be cleaned, but safety check)
+      const validActiveTab = isValidTabName(activeTabToRestore) && 
+                            (activeTabToRestore === 'all-chat' || allChatTabs.has(activeTabToRestore))
+                            ? activeTabToRestore 
+                            : 'all-chat';
       
       // Temporarily disable saving during panel creation
       window._vipListChatAutoReopening = true;
@@ -718,8 +817,8 @@ async function autoReopenChatPanel() {
       // No stale tabs are restored from localStorage
       
       // Switch to saved active tab if it still exists
-      if (activeTabToRestore === 'all-chat' || allChatTabs.has(activeTabToRestore)) {
-        await switchAllChatTab(activeTabToRestore);
+      if (validActiveTab === 'all-chat' || allChatTabs.has(validActiveTab)) {
+        await switchAllChatTab(validActiveTab);
       } else {
         // Default to all-chat
         await switchAllChatTab('all-chat');
@@ -2910,10 +3009,66 @@ async function checkForChatRequests() {
                     }
                   }
                 }
+                
+                // If decryption failed and username is still invalid, delete the corrupted request
+                if (!isValidUsername(decryptedReq.from)) {
+                  console.warn('[VIP List] Deleting corrupted chat request with invalid username:', id);
+                  try {
+                    // Try hashed path first, then fallback to non-hashed
+                    let deleteUrl = `${getChatRequestsApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                    let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    if (!deleteResponse.ok && deleteResponse.status === 404) {
+                      deleteUrl = `${getChatRequestsApiUrl()}/${currentPlayer.toLowerCase()}/${id}.json`;
+                      deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    }
+                    if (deleteResponse.ok) {
+                      console.log('[VIP List] Deleted corrupted chat request:', id);
+                    }
+                  } catch (deleteError) {
+                    console.error('[VIP List] Failed to delete corrupted chat request:', deleteError);
+                  }
+                  return null; // Don't include this request
+                }
               } catch (error) {
                 console.warn('[VIP List] Failed to decrypt request usernames:', error);
-                // Keep encrypted values if decryption fails
+                // If username is invalid, delete the corrupted request
+                if (!isValidUsername(req.from)) {
+                  console.warn('[VIP List] Deleting corrupted chat request with invalid username:', id);
+                  try {
+                    let deleteUrl = `${getChatRequestsApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                    let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    if (!deleteResponse.ok && deleteResponse.status === 404) {
+                      deleteUrl = `${getChatRequestsApiUrl()}/${currentPlayer.toLowerCase()}/${id}.json`;
+                      deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    }
+                    if (deleteResponse.ok) {
+                      console.log('[VIP List] Deleted corrupted chat request:', id);
+                    }
+                  } catch (deleteError) {
+                    console.error('[VIP List] Failed to delete corrupted chat request:', deleteError);
+                  }
+                  return null; // Don't include this request
+                }
               }
+            }
+            
+            // Final check: if username is invalid (even if not marked as encrypted), delete corrupted request
+            if (decryptedReq.from && !isValidUsername(decryptedReq.from)) {
+              console.warn('[VIP List] Deleting chat request with invalid username (not marked as encrypted):', id);
+              try {
+                let deleteUrl = `${getChatRequestsApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                if (!deleteResponse.ok && deleteResponse.status === 404) {
+                  deleteUrl = `${getChatRequestsApiUrl()}/${currentPlayer.toLowerCase()}/${id}.json`;
+                  deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                }
+                if (deleteResponse.ok) {
+                  console.log('[VIP List] Deleted corrupted chat request:', id);
+                }
+              } catch (deleteError) {
+                console.error('[VIP List] Failed to delete corrupted chat request:', deleteError);
+              }
+              return null; // Don't include this request
             }
             
             return decryptedReq;
@@ -3343,9 +3498,46 @@ async function checkForMessages() {
                 
                 decryptedMsg.from = decryptedFrom;
                 decryptedMsg.to = decryptedTo;
+                
+                // If decryption failed and username is still invalid, delete the corrupted message
+                if (!isValidUsername(decryptedFrom)) {
+                  console.warn('[VIP List] Deleting corrupted message with invalid username:', id);
+                  try {
+                    // Try hashed path first, then fallback to non-hashed
+                    let deleteUrl = `${getMessagingApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                    let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    if (!deleteResponse.ok && deleteResponse.status === 404) {
+                      deleteUrl = `${getMessagingApiUrl()}/${currentPlayerLower}/${id}.json`;
+                      deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    }
+                    if (deleteResponse.ok) {
+                      console.log('[VIP List] Deleted corrupted message:', id);
+                    }
+                  } catch (deleteError) {
+                    console.error('[VIP List] Failed to delete corrupted message:', deleteError);
+                  }
+                  return null; // Don't include this message
+                }
               } catch (error) {
                 console.warn('[VIP List] Failed to decrypt usernames:', error);
-                // Keep encrypted values if decryption fails
+                // If username is invalid, delete the corrupted message
+                if (!isValidUsername(msg.from)) {
+                  console.warn('[VIP List] Deleting corrupted message with invalid username:', id);
+                  try {
+                    let deleteUrl = `${getMessagingApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                    let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    if (!deleteResponse.ok && deleteResponse.status === 404) {
+                      deleteUrl = `${getMessagingApiUrl()}/${currentPlayerLower}/${id}.json`;
+                      deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                    }
+                    if (deleteResponse.ok) {
+                      console.log('[VIP List] Deleted corrupted message:', id);
+                    }
+                  } catch (deleteError) {
+                    console.error('[VIP List] Failed to delete corrupted message:', deleteError);
+                  }
+                  return null; // Don't include this message
+                }
               }
             }
             
@@ -3372,6 +3564,25 @@ async function checkForMessages() {
             } else {
               // Default to unread if read status is missing
               decryptedMsg.read = false;
+            }
+            
+            // Final check: if username is invalid (even if not marked as encrypted), delete corrupted message
+            if (decryptedMsg.from && !isValidUsername(decryptedMsg.from)) {
+              console.warn('[VIP List] Deleting message with invalid username (not marked as encrypted):', id);
+              try {
+                let deleteUrl = `${getMessagingApiUrl()}/${hashedCurrentPlayer}/${id}.json`;
+                let deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                if (!deleteResponse.ok && deleteResponse.status === 404) {
+                  deleteUrl = `${getMessagingApiUrl()}/${currentPlayerLower}/${id}.json`;
+                  deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+                }
+                if (deleteResponse.ok) {
+                  console.log('[VIP List] Deleted corrupted message:', id);
+                }
+              } catch (deleteError) {
+                console.error('[VIP List] Failed to delete corrupted message:', deleteError);
+              }
+              return null; // Don't include this message
             }
             
             return decryptedMsg;
@@ -4824,15 +5035,17 @@ async function autoOpenTabsFromFirebase(updateTabStatus = true) {
     // Get all unread messages (always check Firebase for unread messages)
     const unreadMessages = await checkForMessages();
     
-    // Group unread messages by sender
+    // Group unread messages by sender, filtering out invalid usernames
     const unreadBySender = new Map();
     unreadMessages.forEach(msg => {
-      if (msg && msg.from && !msg.read) {
+      if (msg && msg.from && !msg.read && isValidUsername(msg.from)) {
         const sender = msg.from;
         if (!unreadBySender.has(sender)) {
           unreadBySender.set(sender, []);
         }
         unreadBySender.get(sender).push(msg);
+      } else if (msg && msg.from && !isValidUsername(msg.from)) {
+        console.warn('[VIP List] Skipping message with invalid/encrypted username:', msg.from);
       }
     });
     
@@ -4847,10 +5060,12 @@ async function autoOpenTabsFromFirebase(updateTabStatus = true) {
     // Get all message requests (always open tabs for requests)
     const requests = await checkForChatRequests();
     
-    // Open tabs for each requester
+    // Open tabs for each requester, filtering out invalid usernames
     for (const req of requests) {
-      if (req && req.from && !allChatTabs.has(req.from)) {
+      if (req && req.from && isValidUsername(req.from) && !allChatTabs.has(req.from)) {
         await addAllChatTab(req.from, req.from, 0);
+      } else if (req && req.from && !isValidUsername(req.from)) {
+        console.warn('[VIP List] Skipping chat request with invalid/encrypted username:', req.from);
       }
     }
     
@@ -4876,6 +5091,12 @@ async function processChatRequests(requests) {
   // Process each incoming request
   for (const req of requests) {
     if (req.from) {
+      // Skip if username is invalid/encrypted
+      if (!isValidUsername(req.from)) {
+        console.warn('[VIP List] Skipping chat request with invalid/encrypted username:', req.from);
+        continue;
+      }
+      
       const fromPlayer = req.from;
       const fromPlayerLower = fromPlayer.toLowerCase();
       
@@ -7063,6 +7284,28 @@ async function switchAllChatTab(playerName) {
   
   const messagesArea = panel.querySelector('#chat-messages-all-chat');
   if (!messagesArea) return;
+  
+  // Validate tab name (prevent switching to encrypted/invalid tab names)
+  if (!isValidTabName(playerName)) {
+    console.warn('[VIP List] Attempted to switch to invalid tab name (likely encrypted):', playerName);
+    // Fallback to 'all-chat' if it exists, otherwise do nothing
+    if (allChatTabs.has('all-chat')) {
+      playerName = 'all-chat';
+    } else {
+      return;
+    }
+  }
+  
+  // Ensure tab exists before switching
+  if (!allChatTabs.has(playerName)) {
+    console.warn('[VIP List] Attempted to switch to non-existent tab:', playerName);
+    // Fallback to 'all-chat' if it exists, otherwise do nothing
+    if (allChatTabs.has('all-chat')) {
+      playerName = 'all-chat';
+    } else {
+      return;
+    }
+  }
   
   // If a tab switch is already in progress, reset all state first
   if (currentTabSwitchPromise) {
