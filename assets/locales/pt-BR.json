@@ -615,6 +615,7 @@
       "roleLeader": "Líder",
       "roleOfficer": "Oficial",
       "roleMember": "Membro",
+      "dropdownEquipment": "Equipamento",
       "kickConfirm": "Expulsar {name} da guilda?",
       "inviteSent": "Convite enviado para {name}",
       "transferLeadershipConfirm": "Transferir liderança para {name}? Você se tornará um membro regular.",
@@ -641,7 +642,27 @@
       "playerKickedFromGuild": "{player} expulsou {member} da guilda",
       "playerChangedJoinType": "{player} alterou o tipo de entrada da guilda para {type}",
       "playerUpdatedDescription": "{player} atualizou a descrição da guilda",
-      "playerCancelledInvite": "{player} cancelou o convite para {playerName}"
+      "playerCancelledInvite": "{player} cancelou o convite para {playerName}",
+      "equipment": {
+        "modalTitle": "Equipamento",
+        "arsenalTitle": "Arsenal",
+        "characterEquipmentTitle": "Equipamento do Personagem",
+        "totalStatsTitle": "Estatísticas Totais",
+        "searchPlaceholder": "Buscar equipamento...",
+        "filterAll": "Todos",
+        "noEquipmentFound": "Nenhum equipamento encontrado.",
+        "noEquipmentFoundMatching": "Nenhum equipamento encontrado correspondendo a \"{searchValue}\"",
+        "totalGuildPoints": "Pontos Totais da Guilda",
+        "tooltipEquipped": "Equipado",
+        "tooltipGuildPoints": "Pontos da Guilda",
+        "tooltipStat": "Atributo",
+        "tooltipTier": "Tier",
+        "tooltipSlot": "Slot",
+        "tooltipEmptySlot": "Slot vazio",
+        "tooltipInstruction": "Clique para selecionar • Clique com botão direito para desequipar",
+        "menuItem": "Equipamento",
+        "equipmentPoints": "Pontos de Equipamento"
+      }
     },
     "staminaOptimizer": {
       "buttonText": "Otimizador de Stamina",

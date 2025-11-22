@@ -641,6 +641,7 @@ function renderLocalMods(mods) {
     'Welcome.js',
     'equipment-database.js',
     'maps-database.js',
+    'playereq-database.js',
     'Mod Settings.js',
     'RunTracker.js',
     'Outfiter.js'

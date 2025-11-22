@@ -614,6 +614,7 @@
       "roleLeader": "Leader",
       "roleOfficer": "Officer",
       "roleMember": "Member",
+      "dropdownEquipment": "Equipment",
       "kickConfirm": "Kick {name} from the guild?",
       "inviteSent": "Invite sent to {name}",
       "transferLeadershipConfirm": "Transfer leadership to {name}? You will become a regular member.",
@@ -640,7 +641,27 @@
       "playerKickedFromGuild": "{player} kicked {member} from the guild",
       "playerChangedJoinType": "{player} changed the guild join type to {type}",
       "playerUpdatedDescription": "{player} updated the guild description",
-      "playerCancelledInvite": "{player} cancelled the invite for {playerName}"
+      "playerCancelledInvite": "{player} cancelled the invite for {playerName}",
+      "equipment": {
+        "modalTitle": "Equipment",
+        "arsenalTitle": "Arsenal",
+        "characterEquipmentTitle": "Character Equipment",
+        "totalStatsTitle": "Total stats",
+        "searchPlaceholder": "Search equipment...",
+        "filterAll": "All",
+        "noEquipmentFound": "No equipment found.",
+        "noEquipmentFoundMatching": "No equipment found matching \"{searchValue}\"",
+        "totalGuildPoints": "Total Guild Points",
+        "tooltipEquipped": "Equipped",
+        "tooltipGuildPoints": "Guild Points",
+        "tooltipStat": "Stat",
+        "tooltipTier": "Tier",
+        "tooltipSlot": "Slot",
+        "tooltipEmptySlot": "Empty slot",
+        "tooltipInstruction": "Click to select • Right-click to unequip",
+        "menuItem": "Equipment",
+        "equipmentPoints": "Equipment Points"
+      }
     },
     "staminaOptimizer": {
       "buttonText": "Stamina Optimizer",

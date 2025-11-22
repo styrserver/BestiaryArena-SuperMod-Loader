@@ -27,7 +27,7 @@ const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
 const DEFAULT_MAX_STAMINA = 350;
 const DEFAULT_MIN_STAMINA = 100;
-const DEFAULT_ACTION = 'autoplay';
+const DEFAULT_ACTION = 'boosted-maps';
 
 const AUTOMATION_ENABLED = true;
 const AUTOMATION_DISABLED = false;
@@ -606,9 +606,6 @@ function executeAction() {
     console.log(`[Stamina Optimizer] Executing action: ${action}`);
     
     switch (action) {
-        case 'autoplay':
-            startAutoplay();
-            break;
         case 'boosted-maps':
             startBoostedMapFarming();
             break;
@@ -1188,7 +1185,6 @@ function createSettingsContent() {
         t('mods.staminaOptimizer.actionDescription'),
         settings.action || DEFAULT_ACTION,
         [
-            { value: 'autoplay', label: t('mods.staminaOptimizer.actionAutoplay') },
             { value: 'boosted-maps', label: t('mods.staminaOptimizer.actionBoostedMaps') }
         ]
     );

@@ -302,6 +302,7 @@ function setEditorContent(title, content, editable, onSave, downloadName) {
     'creature-database.js',
     'equipment-database.js',
     'maps-database.js',
+    'playereq-database.js',
     'Mod Settings.js',
     'RunTracker.js',
     'Outfiter.js'

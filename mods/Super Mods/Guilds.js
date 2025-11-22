@@ -71,6 +71,18 @@ const PANEL_DIMENSIONS = {
 
 const PANEL_ID = 'guilds-panel';
 
+// Timeout constants (matching VIP List)
+const TIMEOUTS = {
+  IMMEDIATE: 0,
+  SHORT: 10,
+  MEDIUM: 50,
+  NORMAL: 100,
+  LONG: 200,
+  LONGER: 300,
+  INITIAL_CHECK: 500,
+  PLACEHOLDER_RESET: 3000
+};
+
 // =======================
 // Translation Helpers
 // =======================
@@ -449,6 +461,42 @@ function calculateTimeSumPenalty(timeSum) {
   return Math.floor(timeSum / POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR);
 }
 
+// Get equipment points for a specific player
+async function getPlayerEquipmentPoints(username) {
+  try {
+    if (!username) return 0;
+    
+    const normalizedName = username.toLowerCase();
+    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
+    
+    const response = await fetch(path);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return 0; // No equipment stored yet
+      }
+      return 0;
+    }
+    
+    const equippedItems = await response.json();
+    if (!equippedItems || typeof equippedItems !== 'object') {
+      return 0;
+    }
+    
+    // Calculate total guild points from equipped items (sum of tiers)
+    let totalPoints = 0;
+    for (const [slotType, item] of Object.entries(equippedItems)) {
+      if (item && item.tier) {
+        totalPoints += item.tier;
+      }
+    }
+    
+    return totalPoints;
+  } catch (error) {
+    console.warn(`[Guilds] Error fetching equipment points for ${username}:`, error);
+    return 0;
+  }
+}
+
 // Calculate individual member points and get detailed breakdown
 async function calculateMemberPoints(username) {
   try {
@@ -459,6 +507,7 @@ async function calculateMemberPoints(username) {
         levelPoints: 0,
         rankPoints: 0,
         timeSumPenalty: 0,
+        equipmentPoints: 0,
         level: 0,
         exp: 0,
         rankPointsValue: 0,
@@ -480,17 +529,21 @@ async function calculateMemberPoints(username) {
     const timeSum = profile.ticks || 0;
     const timeSumPenalty = calculateTimeSumPenalty(timeSum);
     
+    // Get equipment points
+    const equipmentPoints = await getPlayerEquipmentPoints(username);
+    
     // Check if member holds a world record (individual check, but bonus is guild-wide)
     const hasWorldRecord = await checkMemberWorldRecord(username);
     
     // Individual member points (without world record bonus, as that's guild-wide)
-    const total = levelPoints + rankPoints - timeSumPenalty;
+    const total = levelPoints + rankPoints - timeSumPenalty + equipmentPoints;
     
     return {
       total: Math.max(0, Math.floor(total)),
       levelPoints,
       rankPoints,
       timeSumPenalty,
+      equipmentPoints,
       level,
       exp,
       rankPointsValue,
@@ -504,6 +557,7 @@ async function calculateMemberPoints(username) {
       levelPoints: 0,
       rankPoints: 0,
       timeSumPenalty: 0,
+      equipmentPoints: 0,
       level: 0,
       exp: 0,
       rankPointsValue: 0,
@@ -532,12 +586,18 @@ async function calculateGuildPoints(guildId) {
     let totalLevels = 0;
     let totalRankPoints = 0;
     let totalTimeSum = 0;
+    let totalEquipmentPoints = 0;
     
     // Fetch profile data for all members (with rate limiting consideration)
     const profilePromises = members.map(member => fetchPlayerProfile(member.username));
     const profiles = await Promise.all(profilePromises);
     
-    for (const profile of profiles) {
+    // Fetch equipment points for all members
+    const equipmentPromises = members.map(member => getPlayerEquipmentPoints(member.username));
+    const equipmentPointsArray = await Promise.all(equipmentPromises);
+    
+    for (let i = 0; i < profiles.length; i++) {
+      const profile = profiles[i];
       if (!profile) continue;
       
       // Calculate level from exp
@@ -552,6 +612,9 @@ async function calculateGuildPoints(guildId) {
       // Get time sum (ticks)
       const timeSum = profile.ticks || 0;
       totalTimeSum += timeSum;
+      
+      // Add equipment points
+      totalEquipmentPoints += equipmentPointsArray[i] || 0;
     }
     
     // Calculate points using helper functions
@@ -564,7 +627,7 @@ async function calculateGuildPoints(guildId) {
     const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
     const worldRecordBonus = hasWorldRecord ? POINTS_CONFIG.WORLD_RECORD_BONUS : 0;
     
-    const totalPoints = levelPoints + rankPoints - timeSumPenalty + worldRecordBonus;
+    const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + worldRecordBonus;
     
     // Ensure points are never negative - minimum is 0
     const points = Math.max(0, Math.floor(totalPoints));
@@ -599,6 +662,19 @@ async function handleFirebaseResponse(response, errorContext, defaultReturn = nu
     throw new Error(`Failed to ${errorContext}: ${response.status}`);
   }
   return await response.json();
+}
+
+// Common Firebase request helper
+async function firebaseRequest(endpoint, method, data = null, errorContext, defaultReturn = null) {
+  const options = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (data !== null) {
+    options.body = JSON.stringify(data);
+  }
+  const response = await fetch(`${endpoint}.json`, options);
+  return await handleFirebaseResponse(response, errorContext, defaultReturn);
 }
 
 // Validate current player and get player name
@@ -681,7 +757,23 @@ function createEscKeyHandler(onClose) {
 
 // Setup ESC key handler with automatic cleanup when dialog closes
 function setupEscKeyHandler(dialog, onClose) {
-  const handleEsc = createEscKeyHandler(onClose);
+  let isHandling = false;
+  const handleEsc = function(e) {
+    // Ignore if already handling (prevents double-triggering)
+    if (isHandling) return;
+    // Only handle real user key presses, not programmatic events
+    if (e.isTrusted && (e.key === 'Escape' || e.keyCode === 27)) {
+      // Check if dialog still exists
+      if (!document.contains(dialog)) {
+        document.removeEventListener('keydown', handleEsc);
+        return;
+      }
+      isHandling = true;
+      onClose();
+      // Reset after a short delay
+      setTimeout(() => { isHandling = false; }, 100);
+    }
+  };
   document.addEventListener('keydown', handleEsc);
   
   // Clean up when dialog is removed
@@ -710,6 +802,30 @@ function validateMemberExists(member, username = null) {
     throw new Error('Member not found');
   }
   return member;
+}
+
+// Common validation helper for guild operations
+async function validateGuildOperation(guildId, requireLeader = false, requirePermission = null) {
+  const currentPlayer = validateCurrentPlayer();
+  const guild = validateGuildExists(await getGuild(guildId));
+  
+  if (requireLeader && !isGuildLeader(guild, currentPlayer)) {
+    throw new Error('Only the guild leader can perform this action');
+  }
+  
+  if (requirePermission) {
+    const members = await getGuildMembers(guildId);
+    const currentMember = findMemberByUsername(members, currentPlayer);
+    if (!currentMember) {
+      throw new Error('You are not a member of this guild');
+    }
+    if (!hasPermission(currentMember.role, requirePermission)) {
+      throw new Error(`You do not have permission to ${requirePermission}`);
+    }
+    return { currentPlayer, guild, members, currentMember };
+  }
+  
+  return { currentPlayer, guild };
 }
 
 // Update player's guild reference in Firebase
@@ -746,11 +862,7 @@ async function updatePlayerGuildReference(hashedPlayer, guildId, guildName) {
 // Update guild member count
 async function updateGuildMemberCount(guildId) {
   const members = await getGuildMembers(guildId);
-  await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ memberCount: members.length })
-  });
+  await firebaseRequest(`${getGuildsApiUrl()}/${guildId}`, 'PATCH', { memberCount: members.length }, 'update member count');
 }
 
 // Button style constants
@@ -1095,15 +1207,7 @@ async function createGuild(guildName, description = '', abbreviation = '', joinT
     };
 
     // Create guild in Firebase
-    const guildResponse = await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(guildData)
-    });
-
-    if (!guildResponse.ok) {
-      throw new Error(`Failed to create guild: ${guildResponse.status}`);
-    }
+    await firebaseRequest(`${getGuildsApiUrl()}/${guildId}`, 'PUT', guildData, 'create guild');
 
     // Add leader as member
     const memberData = {
@@ -1228,15 +1332,7 @@ async function joinGuild(guildId) {
       joinedAt: Date.now()
     };
 
-    const response = await fetch(`${getGuildMembersApiUrl(guildId)}/${hashedPlayer}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(memberData)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to join guild: ${response.status}`);
-    }
+    await firebaseRequest(`${getGuildMembersApiUrl(guildId)}/${hashedPlayer}`, 'PUT', memberData, 'join guild');
 
     // Update member count
     await updateGuildMemberCount(guildId);
@@ -1324,27 +1420,13 @@ async function leaveGuild(guildId) {
 // Update guild join type
 async function updateGuildJoinType(guildId, newJoinType) {
   try {
-    const currentPlayer = validateCurrentPlayer();
-
-    const guild = validateGuildExists(await getGuild(guildId));
-
-    if (!isGuildLeader(guild, currentPlayer)) {
-      throw new Error('Only the guild leader can update the join type');
-    }
+    const { currentPlayer, guild } = await validateGuildOperation(guildId, true);
 
     if (newJoinType !== GUILD_JOIN_TYPES.OPEN && newJoinType !== GUILD_JOIN_TYPES.INVITE_ONLY) {
       throw new Error('Invalid join type');
     }
 
-    const response = await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ joinType: newJoinType })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to update join type: ${response.status}`);
-    }
+    await firebaseRequest(`${getGuildsApiUrl()}/${guildId}`, 'PATCH', { joinType: newJoinType }, 'update join type');
 
     // Update local storage
     const playerGuild = getPlayerGuild();
@@ -1367,27 +1449,13 @@ async function updateGuildJoinType(guildId, newJoinType) {
 // Update guild description
 async function updateGuildDescription(guildId, newDescription) {
   try {
-    const currentPlayer = validateCurrentPlayer();
-
-    const guild = validateGuildExists(await getGuild(guildId));
-
-    if (!isGuildLeader(guild, currentPlayer)) {
-      throw new Error('Only the guild leader can update the description');
-    }
+    const { currentPlayer, guild } = await validateGuildOperation(guildId, true);
 
     if (newDescription.length > GUILD_CONFIG.maxGuildDescriptionLength) {
       throw new Error(`Description must be ${GUILD_CONFIG.maxGuildDescriptionLength} characters or less`);
     }
 
-    const response = await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: newDescription.trim() })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to update description: ${response.status}`);
-    }
+    await firebaseRequest(`${getGuildsApiUrl()}/${guildId}`, 'PATCH', { description: newDescription.trim() }, 'update description');
 
     // Update local storage
     const playerGuild = getPlayerGuild();
@@ -1409,15 +1477,7 @@ async function updateGuildDescription(guildId, newDescription) {
 // Transfer leadership to another member
 async function transferLeadership(guildId, newLeaderUsername) {
   try {
-    const currentPlayer = validateCurrentPlayer();
-
-    const guild = validateGuildExists(await getGuild(guildId));
-
-    if (!isGuildLeader(guild, currentPlayer)) {
-      throw new Error('Only the current leader can transfer leadership');
-    }
-
-    const members = await getGuildMembers(guildId);
+    const { currentPlayer, guild, members } = await validateGuildOperation(guildId, true);
     const newLeader = validateMemberExists(findMemberByUsername(members, newLeaderUsername));
 
     if (newLeader.username.toLowerCase() === currentPlayer.toLowerCase()) {
@@ -1428,27 +1488,14 @@ async function transferLeadership(guildId, newLeaderUsername) {
     const currentLeaderHashed = await hashUsername(currentPlayer);
 
     // Update guild leader
-    await fetch(`${getGuildsApiUrl()}/${guildId}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        leader: newLeaderUsername,
-        leaderHashed: newLeaderHashed
-      })
-    });
+    await firebaseRequest(`${getGuildsApiUrl()}/${guildId}`, 'PATCH', { 
+      leader: newLeaderUsername,
+      leaderHashed: newLeaderHashed
+    }, 'transfer leadership');
 
     // Update member roles
-    await fetch(`${getGuildMembersApiUrl(guildId)}/${currentLeaderHashed}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: GUILD_ROLES.MEMBER })
-    });
-
-    await fetch(`${getGuildMembersApiUrl(guildId)}/${newLeaderHashed}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: GUILD_ROLES.LEADER })
-    });
+    await firebaseRequest(`${getGuildMembersApiUrl(guildId)}/${currentLeaderHashed}`, 'PATCH', { role: GUILD_ROLES.MEMBER }, 'update member role');
+    await firebaseRequest(`${getGuildMembersApiUrl(guildId)}/${newLeaderHashed}`, 'PATCH', { role: GUILD_ROLES.LEADER }, 'update member role');
 
     // Update local storage if current player is still in guild
     const playerGuild = getPlayerGuild();
@@ -1470,12 +1517,7 @@ async function transferLeadership(guildId, newLeaderUsername) {
 // Promote member to officer
 async function promoteMember(guildId, memberUsername) {
   try {
-    const currentPlayer = validateCurrentPlayer();
-
-    const guild = validateGuildExists(await getGuild(guildId));
-
-    const members = await getGuildMembers(guildId);
-    const currentMember = validateMemberExists(findMemberByUsername(members, currentPlayer));
+    const { currentPlayer, members, currentMember } = await validateGuildOperation(guildId, false, 'promote');
     const targetMember = validateMemberExists(findMemberByUsername(members, memberUsername));
 
     if (!canPerformAction(currentMember.role, targetMember.role, 'promote')) {
@@ -1487,11 +1529,7 @@ async function promoteMember(guildId, memberUsername) {
     }
 
     const hashedMember = await hashUsername(memberUsername);
-    await fetch(`${getGuildMembersApiUrl(guildId)}/${hashedMember}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: GUILD_ROLES.OFFICER })
-    });
+    await firebaseRequest(`${getGuildMembersApiUrl(guildId)}/${hashedMember}`, 'PATCH', { role: GUILD_ROLES.OFFICER }, 'promote member');
 
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} promoted ${memberUsername} to Officer`);
@@ -1506,12 +1544,7 @@ async function promoteMember(guildId, memberUsername) {
 // Demote officer to member
 async function demoteMember(guildId, memberUsername) {
   try {
-    const currentPlayer = validateCurrentPlayer();
-
-    const guild = validateGuildExists(await getGuild(guildId));
-
-    const members = await getGuildMembers(guildId);
-    const currentMember = validateMemberExists(findMemberByUsername(members, currentPlayer));
+    const { currentPlayer, members, currentMember } = await validateGuildOperation(guildId, false, 'demote');
     const targetMember = validateMemberExists(findMemberByUsername(members, memberUsername));
 
     if (!canPerformAction(currentMember.role, targetMember.role, 'demote')) {
@@ -1523,11 +1556,7 @@ async function demoteMember(guildId, memberUsername) {
     }
 
     const hashedMember = await hashUsername(memberUsername);
-    await fetch(`${getGuildMembersApiUrl(guildId)}/${hashedMember}.json`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: GUILD_ROLES.MEMBER })
-    });
+    await firebaseRequest(`${getGuildMembersApiUrl(guildId)}/${hashedMember}`, 'PATCH', { role: GUILD_ROLES.MEMBER }, 'demote member');
 
     // Post system message
     await sendGuildSystemMessage(guildId, `${currentPlayer} demoted ${memberUsername} to Member`);
@@ -1722,15 +1751,7 @@ async function invitePlayer(guildId, playerName) {
       invitedAt: Date.now()
     };
 
-    const response = await fetch(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(inviteData)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to send invite: ${response.status}`);
-    }
+    await firebaseRequest(`${getPlayerGuildApiUrl()}/${hashedPlayer}/invites/${guildId}`, 'PUT', inviteData, 'send invite');
 
     // Also store invite in guild's invites path for tracking (check for duplicates here too)
     const guildInviteCheck = await fetch(`${getGuildInvitesApiUrl(guildId)}/${hashedPlayer}.json`);
@@ -2025,15 +2046,7 @@ async function sendGuildMessage(guildId, text) {
     };
 
     const messageId = Date.now().toString();
-    const response = await fetch(`${getGuildChatApiUrl(guildId)}/${messageId}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(messageData)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to send message: ${response.status}`);
-    }
+    await firebaseRequest(`${getGuildChatApiUrl(guildId)}/${messageId}`, 'PUT', messageData, 'send message');
 
     return true;
   } catch (error) {
@@ -2182,29 +2195,12 @@ function shouldDropdownOpenUpward(dropdown, button, container) {
 
 // Position dropdown above or below button
 function positionDropdown(dropdown, button, openUpward, container) {
-  // Check if button's parent has position: relative
-  const relativeParent = button.closest('div[style*="position: relative"]') || 
-                         (button.parentElement && getComputedStyle(button.parentElement).position === 'relative' ? button.parentElement : null);
+  // Always use fixed positioning when dropdown is in document.body (ensures it appears above all elements)
+  // Use absolute positioning only if dropdown is still in its original container (modal context)
+  const isInBody = dropdown.parentElement === document.body;
   
-  if (relativeParent) {
-    // Use absolute positioning relative to the positioned parent
-    dropdown.style.position = 'absolute';
-    if (openUpward) {
-      dropdown.style.top = 'auto';
-      dropdown.style.bottom = '100%';
-      dropdown.style.marginTop = '0';
-      dropdown.style.marginBottom = '4px';
-    } else {
-      dropdown.style.top = '100%';
-      dropdown.style.bottom = 'auto';
-      dropdown.style.marginTop = '4px';
-      dropdown.style.marginBottom = '0';
-    }
-    dropdown.style.left = '0';
-    dropdown.style.right = 'auto';
-    dropdown.style.transform = 'none';
-  } else {
-    // Fallback to fixed positioning
+  if (isInBody) {
+    // Use fixed positioning relative to viewport (ensures dropdown appears above all elements)
     const buttonRect = button.getBoundingClientRect();
     
     if (openUpward) {
@@ -2221,6 +2217,30 @@ function positionDropdown(dropdown, button, openUpward, container) {
     dropdown.style.marginTop = '0';
     dropdown.style.marginBottom = '0';
     dropdown.style.transform = 'none';
+  } else {
+    // Use absolute positioning relative to button's positioned parent (for modals)
+    const relativeParent = button.closest('div[style*="position: relative"]') || 
+                           (button.parentElement && getComputedStyle(button.parentElement).position === 'relative' ? button.parentElement : null);
+    
+    if (relativeParent && relativeParent.style.position !== 'relative') {
+      relativeParent.style.position = 'relative';
+    }
+    
+    dropdown.style.position = 'absolute';
+    if (openUpward) {
+      dropdown.style.top = 'auto';
+      dropdown.style.bottom = '100%';
+      dropdown.style.marginTop = '0';
+      dropdown.style.marginBottom = '4px';
+    } else {
+      dropdown.style.top = '100%';
+      dropdown.style.bottom = 'auto';
+      dropdown.style.marginTop = '4px';
+      dropdown.style.marginBottom = '0';
+    }
+    dropdown.style.left = '0';
+    dropdown.style.right = 'auto';
+    dropdown.style.transform = 'none';
   }
 }
 
@@ -2234,6 +2254,12 @@ function resetDropdownStyles(dropdown) {
   dropdown.style.marginBottom = '';
   dropdown.style.transform = '';
   dropdown.style.position = '';
+  
+  // Move dropdown back to original parent if it was moved to document.body
+  if (dropdown._originalParent && dropdown.parentElement === document.body) {
+    dropdown._originalParent.appendChild(dropdown);
+    dropdown._originalParent = null;
+  }
 }
 
 // Close all dropdowns except the specified one
@@ -2251,8 +2277,8 @@ function createDropdownElement() {
   dropdown.className = 'guild-dropdown-menu';
   dropdown.style.cssText = `
     display: none;
-    position: absolute;
-    top: 100%;
+    position: fixed;
+    top: 0;
     left: 0;
     transform: none;
     background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
@@ -2260,7 +2286,8 @@ function createDropdownElement() {
     border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
     min-width: 120px;
     z-index: 10001;
-    margin-top: 4px;
+    margin-top: 0;
+    margin-bottom: 0;
     padding: 4px;
     pointer-events: auto;
   `;
@@ -2272,7 +2299,8 @@ function createDropdownItem(text, onClick, dropdown, options = {}) {
   const {
     color = CSS_CONSTANTS.COLORS.TEXT_PRIMARY,
     fontSize = '',
-    selected = false
+    selected = false,
+    dataAttributes = {}
   } = options;
   
   const menuItem = document.createElement('div');
@@ -2286,14 +2314,40 @@ function createDropdownItem(text, onClick, dropdown, options = {}) {
     ${selected ? 'background: rgba(100, 181, 246, 0.2);' : ''}
   `;
   
+  // Apply data attributes
+  Object.entries(dataAttributes).forEach(([key, value]) => {
+    menuItem.setAttribute(key, value);
+  });
+  
   addHoverEffect(menuItem);
   menuItem.addEventListener('click', (e) => {
     e.stopPropagation();
     onClick();
-    dropdown.style.display = 'none';
+    resetDropdownStyles(dropdown); // Properly close and reset dropdown
   });
   
   return menuItem;
+}
+
+// Global click handler for closing dropdowns
+let guildDropdownClickHandler = null;
+
+// Setup global click handler to close dropdowns when clicking outside
+function setupGuildDropdownClickHandler() {
+  if (guildDropdownClickHandler) return;
+  
+  guildDropdownClickHandler = (e) => {
+    // Close all dropdowns if click is outside any dropdown menu
+    const clickedDropdown = e.target.closest('.guild-dropdown-menu');
+    
+    if (!clickedDropdown) {
+      document.querySelectorAll('.guild-dropdown-menu').forEach(menu => {
+        resetDropdownStyles(menu);
+      });
+    }
+  };
+  
+  document.addEventListener('click', guildDropdownClickHandler);
 }
 
 // Toggle dropdown visibility with positioning
@@ -2302,12 +2356,27 @@ function toggleDropdown(dropdown, button, container) {
   closeAllDropdownsExcept(dropdown);
   
   if (!isVisible) {
+    setupGuildDropdownClickHandler(); // Ensure handler is set up
+    
+    // Move dropdown to document.body to ensure it appears above all elements
+    const originalParent = dropdown.parentElement;
+    if (dropdown.parentElement !== document.body) {
+      document.body.appendChild(dropdown);
+      dropdown._originalParent = originalParent;
+    }
+    
     const openUpward = shouldDropdownOpenUpward(dropdown, button, container);
     dropdown.style.display = 'block';
     void dropdown.offsetHeight;
     positionDropdown(dropdown, button, openUpward, container);
   } else {
     resetDropdownStyles(dropdown);
+    
+    // Move dropdown back to original parent if it was moved
+    if (dropdown._originalParent && dropdown.parentElement === document.body) {
+      dropdown._originalParent.appendChild(dropdown);
+      dropdown._originalParent = null;
+    }
   }
 }
 
@@ -2334,6 +2403,438 @@ function getOpenDialog() {
 function closeDialog() {
   const dialog = getOpenDialog();
   if (dialog) dialog.remove();
+}
+
+// Open Cyclopedia modal for a specific player (Leaderboards view - same as VIP List)
+function openCyclopediaForPlayer(playerName) {
+  // Close guild panel if open
+  const guildPanel = document.querySelector('.guild-panel');
+  if (guildPanel) {
+    const closeBtn = guildPanel.querySelector('.panel-close-button');
+    if (closeBtn) closeBtn.click();
+  }
+  
+  // Check if Cyclopedia is already open and close it first
+  const isCyclopediaOpen = () => {
+    if (typeof window !== 'undefined' && window.activeCyclopediaModal) return true;
+    if (typeof window !== 'undefined' && window.cyclopediaModalInProgress) return true;
+    if (typeof window !== 'undefined' && window.cyclopediaState && window.cyclopediaState.modalOpen) return true;
+    const openModal = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (openModal && openModal.textContent && openModal.textContent.includes('Cyclopedia')) return true;
+    return false;
+  };
+  
+  const wasCyclopediaOpen = isCyclopediaOpen();
+  
+  if (wasCyclopediaOpen) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    
+    if (typeof window !== 'undefined') {
+      if (window.activeCyclopediaModal) window.activeCyclopediaModal = null;
+      if (window.cyclopediaModalInProgress !== undefined) window.cyclopediaModalInProgress = false;
+      if (window.cyclopediaState) window.cyclopediaState.modalOpen = false;
+    }
+  }
+  
+  // Helper to set cyclopedia state
+  const setCyclopediaState = (username) => {
+    if (typeof cyclopediaState !== 'undefined') {
+      cyclopediaState.searchedUsername = username;
+    } else if (typeof window !== 'undefined' && window.cyclopediaState) {
+      window.cyclopediaState.searchedUsername = username;
+    }
+  };
+  
+  // Wait a bit for modal to close, then open Cyclopedia (longer wait if we closed one)
+  const waitTime = wasCyclopediaOpen ? TIMEOUTS.NORMAL : TIMEOUTS.SHORT;
+  const timeout1 = setTimeout(() => {
+    try {
+      // Set searched player name in cyclopediaState before opening
+      setCyclopediaState(playerName);
+      
+      // Set selected category to Leaderboards
+      if (typeof window !== 'undefined') {
+        window.selectedCharacterItem = 'Leaderboards';
+      }
+      
+      // Open Cyclopedia modal
+      if (typeof window !== 'undefined' && window.Cyclopedia && typeof window.Cyclopedia.show === 'function') {
+        window.Cyclopedia.show({});
+      } else if (typeof openCyclopediaModal === 'function') {
+        openCyclopediaModal({});
+      } else {
+        console.warn('[Guilds] Could not find openCyclopediaModal function');
+        return;
+      }
+      
+      // After opening, navigate to Characters tab and Leaderboards
+      const timeout2 = setTimeout(() => {
+        setCyclopediaState(playerName);
+        
+        // Find Characters tab button
+        const tabButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
+          const text = btn.textContent?.trim() || '';
+          return text === 'Characters';
+        });
+        
+        // Click Characters tab
+        if (tabButtons.length > 0) {
+          const charactersTab = tabButtons.find((btn) => {
+            const parent = btn.closest('[role="tablist"], .flex, nav');
+            return parent !== null;
+          }) || tabButtons[0];
+          
+          charactersTab.click();
+        }
+        
+        // Wait for Characters tab to load, then click Leaderboards and trigger search
+        const timeout3 = setTimeout(() => {
+          setCyclopediaState(playerName);
+          
+          // Set selected category to Leaderboards
+          if (typeof window !== 'undefined') {
+            window.selectedCharacterItem = 'Leaderboards';
+          }
+          
+          // Find and set search input value (before clicking Leaderboards if input exists)
+          const searchInputBefore = document.querySelector('input[type="text"]');
+          if (searchInputBefore) {
+            searchInputBefore.value = playerName;
+            searchInputBefore.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          
+          // Find and click Leaderboards button
+          const leaderboardsButton = Array.from(document.querySelectorAll('div')).find(div => {
+            const text = div.textContent?.trim() || '';
+            return text === 'Leaderboards';
+          });
+          
+          if (leaderboardsButton) {
+            leaderboardsButton.click();
+          }
+          
+          // Wait for Leaderboards to load, then find search input and trigger search
+          const timeout4 = setTimeout(() => {
+            // Try to find the leaderboard search input using multiple strategies
+            let searchInput = null;
+            
+            // Strategy 1: Look for visible input with placeholder containing "search"
+            const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
+            searchInput = allInputs.find(input => {
+              const placeholder = (input.placeholder || '').toLowerCase();
+              const style = window.getComputedStyle(input);
+              return !input.disabled && 
+                     input.offsetParent !== null &&
+                     style.display !== 'none' &&
+                     style.visibility !== 'hidden';
+            });
+            
+            // Strategy 2: Look for input near a Search button
+            if (!searchInput) {
+              const searchButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
+                const text = btn.textContent?.trim().toLowerCase() || '';
+                return text === 'search' && !btn.disabled && btn.offsetParent !== null;
+              });
+              
+              if (searchButtons.length > 0) {
+                const searchButton = searchButtons[0];
+                const buttonParent = searchButton.closest('div');
+                if (buttonParent) {
+                  searchInput = buttonParent.querySelector('input[type="text"]');
+                }
+              }
+            }
+            
+            // If found, set the value and trigger search
+            if (searchInput) {
+              searchInput.value = playerName;
+              searchInput.focus();
+              
+              // Trigger input event
+              searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+              
+              // Also try Enter key to trigger search
+              searchInput.dispatchEvent(new KeyboardEvent('keydown', { 
+                bubbles: true, 
+                cancelable: true, 
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13
+              }));
+              
+              // Look for and click Search button if it exists
+              const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
+                const text = btn.textContent?.trim() || '';
+                return text.toLowerCase() === 'search' && !btn.disabled && btn.offsetParent !== null;
+              });
+              
+              if (searchButton) {
+                setTimeout(() => {
+                  searchButton.click();
+                }, 100);
+              }
+            }
+          }, TIMEOUTS.NORMAL);
+        }, TIMEOUTS.LONGER);
+      }, TIMEOUTS.LONG);
+    } catch (error) {
+      console.error('[Guilds] Error opening Cyclopedia:', error);
+    }
+  }, waitTime);
+}
+
+// Get player equipment from Firebase
+async function getPlayerEquipmentFromFirebase(playerName) {
+  try {
+    if (!playerName) return {};
+    
+    const normalizedName = playerName.toLowerCase();
+    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
+    
+    const response = await fetch(path);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return {}; // No equipment stored yet
+      }
+      return {};
+    }
+    
+    const data = await response.json();
+    return data || {};
+  } catch (error) {
+    console.error('[Guilds] Error fetching player equipment from Firebase:', error);
+    return {};
+  }
+}
+
+// Helper function to populate equipment grid with player equipment
+async function populatePlayerEquipmentGrid(container, equippedItems) {
+  EQUIPMENT_SLOTS.forEach(([slotType, x, y, name]) => {
+    const slot = container.querySelector(`[data-slot-type="${slotType}"]`);
+    if (!slot) return;
+    
+    // Clear slot completely (including any async-loaded default images)
+    while (slot.firstChild) {
+      const child = slot.firstChild;
+      if (child.parentNode === slot) {
+        slot.removeChild(child);
+      } else {
+        break; // Child is no longer a child of slot, stop
+      }
+    }
+    
+    // Try to find item by slotType, or by normalized slot type
+    let item = equippedItems[slotType];
+    if (!item) {
+      // Try normalized slot types (weapon -> weapon-right, shield -> weapon-left)
+      const normalizedSlot = normalizeSlotTypeFromDb(slotType);
+      if (normalizedSlot !== slotType) {
+        item = equippedItems[normalizedSlot];
+      }
+      // Also try reverse normalization (weapon-right -> weapon, weapon-left -> shield)
+      if (!item && slotType === 'weapon-right') {
+        item = equippedItems['weapon'];
+      } else if (!item && slotType === 'weapon-left') {
+        item = equippedItems['shield'];
+      }
+    }
+    
+    if (item && item.gameId) {
+      // Show equipped item
+      try {
+        const equipData = globalThis.state?.utils?.getEquipment(item.gameId);
+        if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
+          const spriteId = equipData.metadata.spriteId;
+          const itemPortrait = api.ui.components.createItemPortrait({
+            itemId: spriteId,
+            stat: item.stat,
+            tier: item.tier
+          });
+          slot.appendChild(itemPortrait);
+        } else {
+          loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        }
+      } catch (e) {
+        console.warn(`[Guilds] Error displaying equipped item:`, e);
+        loadDefaultSlotImageIntoSlot(slot, slotType, name);
+      }
+    } else {
+      // No equipment - show empty slot image
+      loadDefaultSlotImageIntoSlot(slot, slotType, name);
+    }
+  });
+}
+
+// Show equipment modal for a player
+async function showPlayerEquipmentModal(playerName) {
+  try {
+    // Close guild panel if open
+    const guildPanel = document.querySelector('.guild-panel');
+    if (guildPanel) {
+      const closeBtn = guildPanel.querySelector('.panel-close-button');
+      if (closeBtn) closeBtn.click();
+    }
+    
+    // Fetch equipment from Firebase
+    const equippedItems = await getPlayerEquipmentFromFirebase(playerName);
+    
+    // Calculate total stats
+    let totalStats = { ad: 0, ap: 0, hp: 0 };
+    let totalGuildPoints = 0;
+    
+    for (const [slotType, item] of Object.entries(equippedItems)) {
+      if (item && item.tier && item.stat) {
+        totalGuildPoints += item.tier;
+        const statType = item.stat.toLowerCase();
+        if (totalStats.hasOwnProperty(statType)) {
+          totalStats[statType] += item.tier;
+        }
+      }
+    }
+    
+    // Create modal content similar to col2 layout
+    const contentDiv = document.createElement('div');
+    contentDiv.style.cssText = `
+      width: 190px;
+      min-width: 190px;
+      max-width: 190px;
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    `;
+    
+    // Row 1: Equipment section (50% height - fixed)
+    const equipmentBox = createEquipmentBox({
+      title: t('mods.guilds.equipment.characterEquipmentTitle') || 'Character Equipment',
+      content: (() => {
+        const container = document.createElement('div');
+        container.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: 100%;
+          height: 100%;
+        `;
+        
+        const equipmentGrid = createEquipmentGrid(true); // Skip auto-loading
+        container.appendChild(equipmentGrid);
+        
+        // Populate grid with player equipment (async)
+        populatePlayerEquipmentGrid(equipmentGrid, equippedItems);
+        
+        return container;
+      })()
+    });
+    equipmentBox.style.flex = '0 0 200px';
+    equipmentBox.style.height = '200px';
+    equipmentBox.style.minHeight = '200px';
+    equipmentBox.style.maxHeight = '200px';
+    contentDiv.appendChild(equipmentBox);
+    
+    // Row 2: Total stats section (50% height - fixed)
+    const detailsContainer = document.createElement('div');
+    detailsContainer.setAttribute('data-details-container', 'true');
+    detailsContainer.style.cssText = `
+      width: 100%;
+      height: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    `;
+    
+    const statsDiv = document.createElement('div');
+    statsDiv.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      height: 100%;
+    `;
+    
+    // Total Guild Points
+    const totalDiv = document.createElement('div');
+    totalDiv.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    `;
+    
+    const totalLabel = document.createElement('div');
+    totalLabel.textContent = t('mods.guilds.equipment.totalGuildPoints') || 'Total Guild Points';
+    totalLabel.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 10px;
+      opacity: 0.7;
+    `;
+    
+    const totalValue = document.createElement('div');
+    totalValue.textContent = totalGuildPoints.toString();
+    totalValue.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 18px;
+      font-weight: 600;
+    `;
+    
+    totalDiv.appendChild(totalLabel);
+    totalDiv.appendChild(totalValue);
+    statsDiv.appendChild(totalDiv);
+    
+    detailsContainer.appendChild(statsDiv);
+    
+    const bottomBox = createEquipmentBox({
+      title: t('mods.guilds.equipment.totalStatsTitle') || 'Total stats',
+      content: detailsContainer
+    });
+    bottomBox.style.flex = '0 0 200px';
+    bottomBox.style.height = '200px';
+    bottomBox.style.minHeight = '200px';
+    bottomBox.style.maxHeight = '200px';
+    contentDiv.appendChild(bottomBox);
+    
+    // Create modal
+    if (!ensureModalApi()) {
+      console.error('[Guilds] Modal API not available');
+      return;
+    }
+    
+    const modal = api.ui.components.createModal({
+      title: `${playerName}'s Equipment`,
+      width: 220,
+      height: 480,
+      content: contentDiv,
+      buttons: [{
+        text: t('mods.guilds.close') || 'Close',
+        primary: true,
+        onClick: () => {
+          const dialog = getOpenDialog();
+          if (dialog) dialog.remove();
+        }
+      }]
+    });
+    
+    setTimeout(() => {
+      const dialog = getOpenDialog();
+      if (dialog) {
+        applyModalStyles(dialog, 220, 480);
+        setupEscKeyHandler(dialog, () => {
+          dialog.remove();
+        });
+      }
+    }, 100);
+    
+  } catch (error) {
+    console.error('[Guilds] Error showing equipment modal:', error);
+    showWarningModal(t('mods.guilds.error') || 'Error', 'Failed to load equipment data.');
+  }
 }
 
 // Check if modal API is available
@@ -3632,12 +4133,12 @@ async function openGuildPanel(viewGuildId = null) {
     memberItem.style.cssText = `
       display: flex;
       flex-direction: column;
-      padding: 10px 8px;
-      margin-bottom: 6px;
+      padding: 6px 6px;
+      margin-bottom: 3px;
       background: rgba(255, 255, 255, 0.05);
       width: 100%;
       border-radius: 2px;
-      gap: 8px;
+      gap: 4px;
     `;
 
     // Top row: member info and points
@@ -3654,21 +4155,109 @@ async function openGuildPanel(viewGuildId = null) {
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+      position: relative;
     `;
     
-    const memberName = document.createElement('span');
-    memberName.textContent = member.username;
-    if (member.username.toLowerCase() === currentPlayer.toLowerCase()) {
-      memberName.textContent += ' ' + t('mods.guilds.youSuffix');
-    }
-    memberName.style.cssText = `
-      color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.4;
+    // Create wrapper for name button and dropdown
+    const nameWrapper = document.createElement('div');
+    nameWrapper.style.cssText = `
+      position: relative;
+      display: inline-block;
+      width: fit-content;
+      z-index: 1;
     `;
+    
+    // Create clickable name button
+    const memberName = document.createElement('button');
+    const nameText = member.username;
+    const isCurrentPlayer = member.username.toLowerCase() === currentPlayer.toLowerCase();
+    const displayText = isCurrentPlayer
+      ? nameText + ' ' + t('mods.guilds.youSuffix')
+      : nameText;
+    memberName.textContent = displayText;
+    
+    // Disable button for current player
+    if (isCurrentPlayer) {
+      memberName.disabled = true;
+      memberName.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+        background: transparent;
+        border: none;
+        padding: 0;
+        cursor: default;
+        text-decoration: none;
+        font-family: inherit;
+        opacity: 0.8;
+      `;
+    } else {
+      memberName.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.2;
+        background: transparent;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        text-decoration: underline;
+        text-decoration-color: rgba(230, 215, 176, 0.6);
+        text-underline-offset: 2px;
+        font-family: inherit;
+      `;
+      
+      // Add hover effect only for non-current players
+      memberName.addEventListener('mouseenter', () => {
+        memberName.style.textDecorationColor = CSS_CONSTANTS.COLORS.TEXT_PRIMARY;
+      });
+      memberName.addEventListener('mouseleave', () => {
+        memberName.style.textDecorationColor = 'rgba(230, 215, 176, 0.6)';
+      });
+      
+      // Create dropdown menu only for non-current players
+      const dropdown = createDropdownElement();
+      
+      // Get profile URL (use lowercase username)
+      const profileUrl = member.username.toLowerCase();
+      
+      // Add Profile dropdown item
+      dropdown.appendChild(createDropdownItem(t('mods.vipList.dropdownProfile') || 'Profile', () => {
+        window.open(`/profile/${profileUrl}`, '_blank');
+      }, dropdown, { fontSize: '13px' }));
+      
+      // Add Cyclopedia dropdown item (with data attribute to prevent Cyclopedia mod from hiding it)
+      const cyclopediaMenuItem = createDropdownItem(t('mods.vipList.dropdownCyclopedia') || 'Cyclopedia', () => {
+        openCyclopediaForPlayer(member.username);
+      }, dropdown, {
+        fontSize: '13px',
+        dataAttributes: {
+          'data-cyclopedia-exclude': 'true'
+        }
+      });
+      cyclopediaMenuItem.style.display = '';
+      dropdown.appendChild(cyclopediaMenuItem);
+      
+      // Add Equipment dropdown item
+      dropdown.appendChild(createDropdownItem(t('mods.guilds.dropdownEquipment') || 'Equipment', () => {
+        showPlayerEquipmentModal(member.username);
+      }, dropdown, { fontSize: '13px' }));
+      
+      // Add click handler to toggle dropdown
+      memberName.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const container = findDropdownContainer(memberItem);
+        toggleDropdown(dropdown, memberName, container || membersList);
+      });
+      
+      nameWrapper.appendChild(dropdown);
+    }
+    
+    nameWrapper.appendChild(memberName);
     
     const memberRole = document.createElement('span');
     const roleKey = `mods.guilds.role${member.role.charAt(0).toUpperCase() + member.role.slice(1)}`;
@@ -3683,14 +4272,14 @@ async function openGuildPanel(viewGuildId = null) {
     }
     
     memberRole.style.cssText = `
-      font-size: 11px;
+      font-size: 10px;
       opacity: 0.9;
       color: ${roleColor};
-      line-height: 1.3;
+      line-height: 1.2;
       font-weight: 500;
     `;
     
-    memberInfo.appendChild(memberName);
+    memberInfo.appendChild(nameWrapper);
     memberInfo.appendChild(memberRole);
     topRow.appendChild(memberInfo);
 
@@ -3701,7 +4290,7 @@ async function openGuildPanel(viewGuildId = null) {
       flex-direction: column;
       align-items: flex-end;
       gap: 2px;
-      margin-left: 8px;
+      margin-left: 6px;
       position: relative;
     `;
 
@@ -3710,7 +4299,7 @@ async function openGuildPanel(viewGuildId = null) {
     pointsDisplay.textContent = formatNumber(memberPoints);
     pointsDisplay.style.cssText = `
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       cursor: help;
       min-width: 40px;
@@ -3787,6 +4376,10 @@ async function openGuildPanel(viewGuildId = null) {
       addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
       addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
       addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      if (pointsData.equipmentPoints > 0) {
+        addDetail(t('mods.guilds.equipment.equipmentPoints') || 'Equipment Points', `+${pointsData.equipmentPoints}`, '#81c784');
+        addDetail(`  (Sum of equipped item tiers)`, ``, 'rgba(255, 255, 255, 0.6)');
+      }
       addDetail('Time Penalty', `-${pointsData.timeSumPenalty}`, CSS_CONSTANTS.COLORS.ERROR);
       addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
       
@@ -3878,7 +4471,7 @@ async function openGuildPanel(viewGuildId = null) {
 
     if (currentMember && member.username.toLowerCase() !== currentPlayer.toLowerCase()) {
       const buttonContainer = document.createElement('div');
-      buttonContainer.style.cssText = 'display: flex; gap: 4px; align-items: center; margin-top: 4px;';
+      buttonContainer.style.cssText = 'display: flex; gap: 4px; align-items: center; margin-top: 2px;';
 
       const isLeader = currentMember.role === GUILD_ROLES.LEADER;
       const canPromote = isLeader && member.role === GUILD_ROLES.MEMBER;
@@ -4864,6 +5457,1824 @@ function injectGuildMenuItem(menuElement) {
     // Insert right after VIP List
     vipListItem.parentNode.insertBefore(guildsMenuItem, vipListItem.nextSibling);
   }
+
+  // Inject Equipment menu item after Guilds
+  injectEquipmentMenuItem(guildsMenuItem);
+}
+
+// =======================
+// Equipment Section
+// =======================
+
+const EQUIPMENT_CONFIG = {
+  MODAL_WIDTH: 490,
+  MODAL_HEIGHT: 490,
+  SLOT_SIZE: 32,
+  SLOT_GAP: 4,
+  // Base path for local equipment images (relative to extension root)
+  IMAGE_BASE_PATH: '/assets/equipment/'
+};
+
+// Cache for extension base URL to avoid repeated lookups
+let cachedExtensionBaseUrl = null;
+
+// Store window message handler for cleanup
+let windowMessageHandler = null;
+
+// Listen for extension base URL from injector
+if (typeof window !== 'undefined') {
+  windowMessageHandler = function(event) {
+    if (event.source !== window) return;
+    if (!event.data || event.data.from !== 'BESTIARY_EXTENSION') return;
+    
+    // Get extension base URL from postMessage
+    if (event.data.extensionBaseUrl) {
+      cachedExtensionBaseUrl = event.data.extensionBaseUrl;
+      console.log('[Equipment] Received extension base URL:', cachedExtensionBaseUrl);
+    }
+    
+    // Also check window.BESTIARY_EXTENSION_BASE_URL (set by client.js)
+    if (window.BESTIARY_EXTENSION_BASE_URL && !cachedExtensionBaseUrl) {
+      cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+    }
+  };
+  
+  window.addEventListener('message', windowMessageHandler);
+  
+  // Check if it's already set
+  if (window.BESTIARY_EXTENSION_BASE_URL) {
+    cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+  }
+}
+
+// Equipment slot definitions: [slotType, x, y, name]
+const EQUIPMENT_SLOTS = [
+  ['amulet', 1, 19, 'Amulet'],
+  ['weapon-right', 1, 55, 'Right Hand'],
+  ['ring', 1, 91, 'Ring'],
+  ['helmet', 37, 1, 'Helmet'],
+  ['armor', 37, 37, 'Armor'],
+  ['legs', 37, 73, 'Legs'],
+  ['boots', 37, 109, 'Boots'],
+  ['bag', 73, 19, 'Backpack'],
+  ['weapon-left', 73, 55, 'Shield'],
+  ['ammo', 73, 91, 'Ammunition']
+];
+
+// Helper functions for slot type normalization
+function normalizeSlotTypeForDb(slotType) {
+  if (slotType === 'weapon-right') return 'weapon';
+  if (slotType === 'weapon-left') return 'shield';
+  return slotType;
+}
+
+function normalizeSlotTypeFromDb(dbSlotType) {
+  if (dbSlotType === 'weapon') return 'weapon-right';
+  if (dbSlotType === 'shield') return 'weapon-left';
+  return dbSlotType;
+}
+
+// Helper function to calculate tooltip position
+function calculateTooltipPosition(elementRect, tooltipRect) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  let left = elementRect.right + 10;
+  let top = elementRect.top;
+  
+  // Adjust if tooltip would go off screen
+  if (left + tooltipRect.width > viewportWidth) {
+    left = elementRect.left - tooltipRect.width - 10;
+  }
+  if (top + tooltipRect.height > viewportHeight) {
+    top = viewportHeight - tooltipRect.height - 10;
+  }
+  if (left < 0) {
+    left = 10;
+  }
+  if (top < 0) {
+    top = 10;
+  }
+  
+  return { left, top };
+}
+
+// Tooltip manager for equipment modal - ensures only one tooltip is visible at a time
+let currentEquipmentTooltip = null;
+
+function hideCurrentEquipmentTooltip() {
+  if (currentEquipmentTooltip && currentEquipmentTooltip.style.display !== 'none') {
+    currentEquipmentTooltip.style.display = 'none';
+  }
+  currentEquipmentTooltip = null;
+}
+
+function showEquipmentTooltip(tooltip) {
+  hideCurrentEquipmentTooltip();
+  currentEquipmentTooltip = tooltip;
+  if (tooltip) {
+    tooltip.style.display = 'block';
+  }
+}
+
+// Helper function to create a tooltip element
+function createTooltipElement() {
+  const tooltip = document.createElement('div');
+  tooltip.setAttribute('data-equipment-tooltip', 'true');
+  tooltip.style.cssText = `
+    position: fixed;
+    padding: 8px 10px;
+    background: url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat;
+    border-width: 4px;
+    border-style: solid;
+    border-color: transparent;
+    border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 11px;
+    white-space: nowrap;
+    z-index: 10002;
+    display: none;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
+    font-family: 'Trebuchet MS', 'Arial Black', Arial, sans-serif;
+  `;
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+// Helper function to add a detail row to tooltip content
+function addTooltipDetail(container, label, value, color = CSS_CONSTANTS.COLORS.TEXT_WHITE) {
+  const detail = document.createElement('div');
+  detail.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    color: ${color};
+    font-size: 11px;
+    line-height: 1.4;
+  `;
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  labelSpan.style.opacity = '0.9';
+  const valueSpan = document.createElement('span');
+  valueSpan.textContent = value;
+  valueSpan.style.fontWeight = '600';
+  valueSpan.style.color = color;
+  detail.appendChild(labelSpan);
+  detail.appendChild(valueSpan);
+  container.appendChild(detail);
+}
+
+// Equipment item data - maps slot types to image info
+// Using local files for better performance and reliability
+const EQUIPMENT_ITEMS = {
+  'amulet': {
+    local: 'NoAmulet.webp',
+    name: 'No Amulet'
+  },
+  'weapon-right': {
+    local: 'NoWeaponRight.webp',
+    name: 'No Weapon'
+  },
+  'ring': {
+    local: 'NoRing.webp',
+    name: 'No Ring'
+  },
+  'helmet': {
+    local: 'NoHelmet.webp',
+    name: 'No Helmet'
+  },
+  'armor': {
+    local: 'NoArmor.webp',
+    name: 'No Armor'
+  },
+  'legs': {
+    local: 'NoLegs.webp',
+    name: 'No Legs'
+  },
+  'boots': {
+    local: 'NoBoots.webp',
+    name: 'No Boots'
+  },
+  'bag': {
+    local: 'NoBag.gif',
+    name: 'No Backpack'
+  },
+  'weapon-left': {
+    local: 'NoWeaponLeft.webp',
+    name: 'No Shield'
+  },
+  'ammo': {
+    local: 'NoAmmo.gif',
+    name: 'No Ammunition'
+  }
+};
+
+function getEquipmentImageUrl(slotType) {
+  const item = EQUIPMENT_ITEMS[slotType];
+  if (!item || !item.local) return '';
+  
+  const imagePath = EQUIPMENT_CONFIG.IMAGE_BASE_PATH + item.local;
+  
+  // Use cached base URL if available
+  if (cachedExtensionBaseUrl) {
+    // Ensure no double slashes - remove leading slash from imagePath if baseUrl ends with slash
+    const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+    const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+    return base + path;
+  }
+  
+  // Try multiple methods to get extension runtime URL (similar to local_mods.js)
+  // Method 1: Try browser API in order: browserAPI, chrome, browser
+  // IMPORTANT: Check runtime.id first to ensure extension context is valid
+  try {
+    const api = window.browserAPI || window.chrome || window.browser;
+    if (api && api.runtime) {
+      // Check if runtime.id exists and is valid (not "invalid")
+      if (api.runtime.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
+        const url = api.runtime.getURL(imagePath);
+        // Validate URL - make sure it's not "invalid"
+        if (url && url.includes('://') && !url.includes('://invalid')) {
+          // Cache the base URL for future use
+          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+          if (baseUrlMatch) {
+            cachedExtensionBaseUrl = baseUrlMatch[0];
+          }
+          return url;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Equipment] Error getting URL from browser API:', e);
+  }
+  
+  // Method 2: Try global browserAPI (if available in mod context)
+  try {
+    if (typeof browserAPI !== 'undefined' && browserAPI?.runtime) {
+      if (browserAPI.runtime.id && browserAPI.runtime.id !== 'invalid' && browserAPI.runtime.getURL) {
+        const url = browserAPI.runtime.getURL(imagePath);
+        if (url && url.includes('://') && !url.includes('://invalid')) {
+          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+          if (baseUrlMatch) {
+            cachedExtensionBaseUrl = baseUrlMatch[0];
+          }
+          return url;
+        }
+      }
+    }
+  } catch (e) {}
+  
+  // Method 3: Try to get from extension base URL if available (from postMessage or window)
+  if (typeof window !== 'undefined') {
+    if (window.BESTIARY_EXTENSION_BASE_URL && !cachedExtensionBaseUrl) {
+      cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+    }
+    if (cachedExtensionBaseUrl) {
+      // Ensure no double slashes - remove leading slash from imagePath if baseUrl ends with slash
+      const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+      const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+      return base + path;
+    }
+  }
+  
+  // Method 4: Try to detect extension URL from script sources (similar to client.js)
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    // Check all script elements
+    const scriptElements = document.querySelectorAll('script[src]');
+    for (const script of scriptElements) {
+      const src = script.src || '';
+      // Look for extension scripts (chrome-extension:// or moz-extension://)
+      const extensionMatch = src.match(/^(chrome-extension|moz-extension):\/\/([^/]+)\//);
+      if (extensionMatch && extensionMatch[2] && extensionMatch[2] !== 'invalid' && extensionMatch[2].length > 10) {
+        const protocol = extensionMatch[1];
+        const extensionId = extensionMatch[2];
+        cachedExtensionBaseUrl = `${protocol}://${extensionId}/`;
+        // Remove leading slash from imagePath to avoid double slashes
+        const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+        return cachedExtensionBaseUrl + path;
+      }
+    }
+    
+    // Also check script elements that might be in the head or body
+    const allScripts = document.getElementsByTagName('script');
+    for (const script of allScripts) {
+      const src = script.src || script.getAttribute('src') || '';
+      if (src) {
+        const extensionMatch = src.match(/^(chrome-extension|moz-extension):\/\/([^/]+)\//);
+        if (extensionMatch && extensionMatch[2] && extensionMatch[2] !== 'invalid' && extensionMatch[2].length > 10) {
+          const protocol = extensionMatch[1];
+          const extensionId = extensionMatch[2];
+          cachedExtensionBaseUrl = `${protocol}://${extensionId}/`;
+          // Remove leading slash from imagePath to avoid double slashes
+          const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+          return cachedExtensionBaseUrl + path;
+        }
+      }
+    }
+  }
+  
+  // Last resort: return path and let the browser try (will likely fail but better than nothing)
+  console.warn('[Equipment] Could not determine extension runtime URL, using relative path:', imagePath);
+  return imagePath;
+}
+
+function createEquipmentSlot(slotType, x, y, name) {
+  const slot = document.createElement('div');
+  slot.className = 'equipment-slot';
+  slot.setAttribute('data-slot-type', slotType);
+  slot.setAttribute('data-slot-name', name);
+  slot.style.cssText = `
+    position: absolute;
+    left: ${x}px;
+    top: ${y}px;
+    width: ${EQUIPMENT_CONFIG.SLOT_SIZE}px;
+    height: ${EQUIPMENT_CONFIG.SLOT_SIZE}px;
+    cursor: pointer;
+    border: none;
+    background: rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  `;
+  
+  // Store original styles for reset
+  slot._originalBorder = 'none';
+  slot._originalBackground = 'rgba(0, 0, 0, 0.3)';
+  
+  // Create tooltip for slot
+  const tooltip = createTooltipElement();
+  
+  // Build tooltip content (will be updated when hovering)
+  const tooltipContent = document.createElement('div');
+  tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+  tooltip.appendChild(tooltipContent);
+  
+  const updateSlotTooltip = async () => {
+    tooltipContent.innerHTML = '';
+    
+    const title = document.createElement('div');
+    title.textContent = name;
+    title.style.cssText = `
+      font-weight: 600;
+      font-size: 12px;
+      margin-bottom: 2px;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+      padding-bottom: 6px;
+      color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+    `;
+    tooltipContent.appendChild(title);
+    
+    // Get equipped item if any
+    const equippedItem = await getEquippedItem(slotType);
+    
+    if (equippedItem) {
+      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipEquipped') || 'Equipped', equippedItem.name, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipGuildPoints') || 'Guild Points', `+${equippedItem.tier}`, CSS_CONSTANTS.COLORS.SUCCESS);
+      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equippedItem.stat.toUpperCase(), '#64b5f6');
+      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipTier') || 'Tier', `T${equippedItem.tier}`, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+    } else {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.textContent = t('mods.guilds.equipment.tooltipEmptySlot') || 'Empty slot';
+      emptyMsg.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+        font-size: 11px;
+        opacity: 0.7;
+        font-style: italic;
+      `;
+      tooltipContent.appendChild(emptyMsg);
+    }
+    
+    const instruction = document.createElement('div');
+    instruction.textContent = t('mods.guilds.equipment.tooltipInstruction') || 'Click to select • Right-click to unequip';
+    instruction.style.cssText = `
+      margin-top: 4px;
+      padding-top: 6px;
+      border-top: 2px solid rgba(255, 255, 255, 0.2);
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 10px;
+      opacity: 0.6;
+    `;
+    tooltipContent.appendChild(instruction);
+  };
+  
+  // Show/hide tooltip on hover
+  let tooltipTimeout;
+  const showTooltip = () => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    tooltipTimeout = setTimeout(async () => {
+      await updateSlotTooltip();
+      showEquipmentTooltip(tooltip);
+      updateTooltipPosition();
+    }, 300);
+  };
+  
+  const hideTooltip = () => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    if (currentEquipmentTooltip === tooltip) {
+      hideCurrentEquipmentTooltip();
+    } else {
+      tooltip.style.display = 'none';
+    }
+  };
+  
+  const updateTooltipPosition = () => {
+    const rect = slot.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const position = calculateTooltipPosition(rect, tooltipRect);
+    tooltip.style.left = `${position.left}px`;
+    tooltip.style.top = `${position.top}px`;
+  };
+  
+  // Hover effects
+  slot.addEventListener('mouseenter', () => {
+    // Don't override selection highlight on hover
+    if (!slot.classList.contains('slot-selected')) {
+      slot.style.background = 'rgba(255, 255, 255, 0.1)';
+    }
+    showTooltip();
+  });
+  
+  slot.addEventListener('mouseleave', () => {
+    // Restore selection highlight if selected (monochrome grey), otherwise restore original
+    if (slot.classList.contains('slot-selected')) {
+      slot.style.filter = 'grayscale(100%) brightness(0.7)';
+    } else {
+      slot.style.filter = '';
+    }
+    hideTooltip();
+  });
+  
+  slot.addEventListener('mousemove', updateTooltipPosition);
+  
+  // Click handler
+  slot.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleEquipmentSlotClick(slotType, name, slot);
+  });
+  
+  // Right-click handler to unequip
+  slot.addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const equippedItem = await getEquippedItem(slotType);
+    if (equippedItem) {
+      await unequipItemFromSlot(slotType);
+    }
+  });
+  
+  // Load equipped item or default image (async)
+  (async () => {
+    const equippedItem = await getEquippedItem(slotType);
+    if (equippedItem) {
+      // Show equipped item
+      try {
+        const equipData = globalThis.state?.utils?.getEquipment(equippedItem.gameId);
+        if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
+          const spriteId = equipData.metadata.spriteId;
+          const itemPortrait = api.ui.components.createItemPortrait({
+            itemId: spriteId,
+            stat: equippedItem.stat,
+            tier: equippedItem.tier
+          });
+          
+          slot.appendChild(itemPortrait);
+          // No title attribute - we use custom tooltip instead
+        } else {
+          // Fallback: show default image
+          loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        }
+      } catch (e) {
+        console.warn(`[Equipment] Error loading equipped item:`, e);
+        loadDefaultSlotImageIntoSlot(slot, slotType, name);
+      }
+    } else {
+      // Show default slot image
+      loadDefaultSlotImageIntoSlot(slot, slotType, name);
+    }
+  })();
+  
+  return slot;
+}
+
+// Helper function to load default slot image
+function loadDefaultSlotImageIntoSlot(slot, slotType, name) {
+  const img = document.createElement('img');
+  img.alt = name;
+  img.style.cssText = `
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    object-fit: contain;
+  `;
+  
+  // Function to load image with retry
+  const loadImage = (retryCount = 0) => {
+    let imageUrl = getEquipmentImageUrl(slotType);
+    
+    // If we don't have a valid URL and haven't retried, wait a bit and try again
+    if ((!imageUrl || imageUrl.includes('://invalid') || (!imageUrl.includes('://') && retryCount < 3))) {
+      if (retryCount < 3) {
+        setTimeout(() => {
+          loadImage(retryCount + 1);
+        }, 200);
+        return;
+      }
+    }
+    
+    if (imageUrl && !imageUrl.includes('://invalid')) {
+      img.src = imageUrl;
+    } else {
+      console.warn(`[Equipment] Could not get valid URL for ${slotType} after retries`);
+      img.style.opacity = '0.3';
+    }
+  };
+  
+  // Start loading
+  loadImage();
+  
+  // Handle image load errors gracefully
+  img.onerror = () => {
+    console.warn(`[Equipment] Failed to load image for ${slotType}, URL:`, img.src);
+    // Show placeholder or empty slot
+    img.style.opacity = '0.3';
+  };
+  
+  slot.appendChild(img);
+}
+
+// Function to clear all slot highlights
+function clearSlotHighlights() {
+  const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+  if (modal) {
+    const slots = modal.querySelectorAll('.equipment-slot');
+    slots.forEach(slot => {
+      slot.classList.remove('slot-selected');
+      slot.style.filter = '';
+    });
+  }
+}
+
+// Function to highlight a specific slot
+function highlightSlot(slotElement) {
+  if (!slotElement) return;
+  
+  // Clear all highlights first
+  clearSlotHighlights();
+  
+  // Highlight the selected slot (monochrome grey filter)
+  slotElement.classList.add('slot-selected');
+  slotElement.style.filter = 'grayscale(100%) brightness(0.7)';
+}
+
+function handleEquipmentSlotClick(slotType, slotName, slotElement) {
+  const item = EQUIPMENT_ITEMS[slotType];
+  const itemName = item?.name || slotName;
+  
+  console.log(`[Equipment] Clicked ${slotName} (${slotType}): ${itemName}`);
+  
+  // Find the modal and check if this slot is already selected
+  const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+  if (modal) {
+    const currentSelectedSlot = modal.getAttribute('data-selected-slot');
+    
+    // If clicking the same slot, unselect it
+    if (currentSelectedSlot === slotType) {
+      modal.removeAttribute('data-selected-slot');
+      clearSlotHighlights();
+      // Buttons remain enabled - they can auto-equip to correct slot
+      
+      // Clear filter and show all equipment
+      const arsenalContent = modal.querySelector('[data-arsenal-content="true"]');
+      if (arsenalContent && typeof arsenalContent.filterBySlot === 'function') {
+        arsenalContent.filterBySlot('all');
+      }
+      
+      console.log(`[Equipment] Unselected ${slotName}`);
+      return;
+    }
+    
+    // Store selected slot on modal for easy access
+    modal.setAttribute('data-selected-slot', slotType);
+    
+    // Highlight the clicked slot
+    if (slotElement) {
+      highlightSlot(slotElement);
+    } else {
+      // Fallback: find slot by data attribute
+      const slot = modal.querySelector(`[data-slot-type="${slotType}"]`);
+      if (slot) {
+        highlightSlot(slot);
+      }
+    }
+    
+    // Enable equipment buttons
+    enableEquipmentButtons(modal, true);
+    
+    // Find the arsenal content div and filter by slot
+    const arsenalContent = modal.querySelector('[data-arsenal-content="true"]');
+    if (arsenalContent && typeof arsenalContent.filterBySlot === 'function') {
+      arsenalContent.filterBySlot(slotType);
+      console.log(`[Equipment] Filtered arsenal to show ${slotType} equipment`);
+    } else {
+      // Fallback: try to find by searching for the search input
+      const searchInput = modal.querySelector('input[placeholder*="Search equipment"]');
+      if (searchInput) {
+        const arsenalDiv = searchInput.closest('div[style*="padding: 10px"]');
+        if (arsenalDiv && typeof arsenalDiv.filterBySlot === 'function') {
+          arsenalDiv.filterBySlot(slotType);
+          console.log(`[Equipment] Filtered arsenal to show ${slotType} equipment`);
+        }
+      }
+    }
+  }
+}
+
+// Function to enable/disable equipment buttons based on slot selection
+// Note: Buttons are now always enabled, but this function is kept for potential future use
+function enableEquipmentButtons(modal, enabled) {
+  if (!modal) return;
+  
+  const equipmentButtons = modal.querySelectorAll('button[data-equipment-id]');
+  equipmentButtons.forEach(btn => {
+    // Always enable buttons - they will auto-equip to correct slot
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.style.pointerEvents = 'auto';
+    btn.classList.remove('equipment-disabled');
+  });
+}
+
+// Custom equipment storage using localStorage
+// Firebase path helper for player equipment
+function getPlayerEquipmentPath(playerName) {
+  if (!playerName) return null;
+  // Normalize player name (lowercase for consistency)
+  const normalizedName = playerName.toLowerCase();
+  return `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
+}
+
+// Get all equipped items from Firebase
+async function getEquippedItems() {
+  try {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) {
+      console.warn('[Equipment] No player name available');
+      return {};
+    }
+    
+    const path = getPlayerEquipmentPath(playerName);
+    if (!path) return {};
+    
+    const response = await fetch(path);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return {}; // No equipment stored yet
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return data || {};
+  } catch (error) {
+    console.error('[Equipment] Error loading equipped items from Firebase:', error);
+    return {};
+  }
+}
+
+// Save equipped items to Firebase
+async function saveEquippedItems(equippedItems) {
+  try {
+    const playerName = getCurrentPlayerName();
+    if (!playerName) {
+      console.warn('[Equipment] No player name available');
+      return false;
+    }
+    
+    const path = getPlayerEquipmentPath(playerName);
+    if (!path) return false;
+    
+    const response = await fetch(path, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(equippedItems)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[Equipment] Error saving equipped items to Firebase:', error);
+    return false;
+  }
+}
+
+// Get equipped item for a specific slot
+async function getEquippedItem(slotType) {
+  const equippedItems = await getEquippedItems();
+  return equippedItems[slotType] || null;
+}
+
+// Equip an item to a slot
+async function equipItemToSlot(equipment, slotType) {
+  try {
+    const equippedItems = await getEquippedItems();
+    
+    // Store equipment data
+    equippedItems[slotType] = {
+      id: equipment.id,
+      gameId: equipment.gameId,
+      name: equipment.name,
+      tier: equipment.tier,
+      stat: equipment.stat,
+      slotType: slotType,
+      equippedAt: Date.now()
+    };
+    
+    const saved = await saveEquippedItems(equippedItems);
+    if (!saved) {
+      console.warn('[Equipment] Failed to save equipment to Firebase');
+      return false;
+    }
+    
+    console.log(`[Equipment] Equipped ${equipment.name} to ${slotType} slot`);
+    
+    // Small delay to ensure Firebase save is complete
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // Update the slot display
+    await updateSlotDisplay(slotType);
+    
+    // Update stats display
+    await updateEquipmentStats();
+    
+    // Clear selection after equipping (buttons remain enabled for auto-equip)
+    const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (modal) {
+      modal.removeAttribute('data-selected-slot');
+      clearSlotHighlights();
+      // Buttons remain enabled - they can auto-equip to correct slot
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[Equipment] Error equipping item:', error);
+    return false;
+  }
+}
+
+// Unequip an item from a slot
+async function unequipItemFromSlot(slotType) {
+  try {
+    const equippedItems = await getEquippedItems();
+    if (equippedItems[slotType]) {
+      delete equippedItems[slotType];
+      const saved = await saveEquippedItems(equippedItems);
+      if (!saved) {
+        console.warn('[Equipment] Failed to save equipment to Firebase');
+        return false;
+      }
+      
+      console.log(`[Equipment] Unequipped item from ${slotType} slot`);
+      
+      // Small delay to ensure Firebase save is complete
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Update the slot display
+      await updateSlotDisplay(slotType);
+      
+      // Update stats display
+      await updateEquipmentStats();
+      
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('[Equipment] Error unequipping item:', error);
+    return false;
+  }
+}
+
+// Calculate total stats from equipped items (using playereq-database.js as source of truth)
+async function calculateEquipmentStats() {
+  try {
+    const equippedItems = await getEquippedItems();
+    let totalGuildPoints = 0;
+    const stats = {
+      totalGuildPoints: 0,
+      itemsCount: 0,
+      itemsByTier: {},
+      itemsBySlot: {},
+      // Stat totals (using database as source of truth)
+      totalStats: {
+        ad: 0,
+        ap: 0,
+        hp: 0,
+        armor: 0,
+        magicResist: 0
+      },
+      statsByType: {
+        ad: [],
+        ap: [],
+        hp: [],
+        armor: [],
+        magicResist: []
+      }
+    };
+    
+    // Get database for verification
+    const playerEqDb = window.playerEquipmentDatabase;
+    
+    for (const [slotType, item] of Object.entries(equippedItems)) {
+      if (item && item.tier) {
+        totalGuildPoints += item.tier;
+        stats.itemsCount++;
+        
+        // Count by tier
+        stats.itemsByTier[item.tier] = (stats.itemsByTier[item.tier] || 0) + 1;
+        
+        // Store item by slot
+        stats.itemsBySlot[slotType] = item;
+        
+        // Calculate stat totals (each tier point = 1 stat point)
+        // Use item.stat from equipped data, verify with database if available
+        const statType = item.stat || 'unknown';
+        if (statType !== 'unknown' && stats.totalStats.hasOwnProperty(statType)) {
+          stats.totalStats[statType] += item.tier;
+          stats.statsByType[statType].push({
+            name: item.name,
+            tier: item.tier,
+            slotType: slotType
+          });
+        }
+        
+        // Verify slot type matches database if available
+        if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT) {
+          const normalizedSlot = normalizeSlotTypeForDb(slotType);
+          const slotEquipment = playerEqDb.EQUIPMENT_BY_SLOT[normalizedSlot] || [];
+          const itemInSlot = slotEquipment.includes(item.name);
+          
+          if (!itemInSlot) {
+            console.warn(`[Equipment] Item ${item.name} may not belong to slot ${slotType} according to database`);
+          }
+        }
+      }
+    }
+    
+    stats.totalGuildPoints = totalGuildPoints;
+    return stats;
+  } catch (error) {
+    console.error('[Equipment] Error calculating stats:', error);
+    return {
+      totalGuildPoints: 0,
+      itemsCount: 0,
+      itemsByTier: {},
+      itemsBySlot: {},
+      totalStats: {
+        ad: 0,
+        ap: 0,
+        hp: 0,
+        armor: 0,
+        magicResist: 0
+      },
+      statsByType: {
+        ad: [],
+        ap: [],
+        hp: [],
+        armor: [],
+        magicResist: []
+      }
+    };
+  }
+}
+
+// Update the equipment stats display
+async function updateEquipmentStats(container) {
+  if (!container) {
+    const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (modal) {
+      container = modal.querySelector('[data-details-container="true"]');
+    }
+  }
+  
+  if (!container) return;
+  
+  const stats = await calculateEquipmentStats();
+  
+  // Clear container
+  container.innerHTML = '';
+  
+  // Create stats display
+  const statsDiv = document.createElement('div');
+  statsDiv.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    height: 100%;
+  `;
+  
+  // Total Guild Points
+  const totalDiv = document.createElement('div');
+  totalDiv.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+  `;
+  
+  const totalLabel = document.createElement('div');
+  totalLabel.textContent = t('mods.guilds.equipment.totalGuildPoints') || 'Total Guild Points';
+  totalLabel.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 10px;
+    opacity: 0.7;
+  `;
+  
+  const totalValue = document.createElement('div');
+  totalValue.textContent = stats.totalGuildPoints.toString();
+  totalValue.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 18px;
+    font-weight: 600;
+  `;
+  
+  totalDiv.appendChild(totalLabel);
+  totalDiv.appendChild(totalValue);
+  statsDiv.appendChild(totalDiv);
+  
+  container.appendChild(statsDiv);
+}
+
+// Update the visual display of a slot
+async function updateSlotDisplay(slotType) {
+  const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+  if (!modal) {
+    console.warn('[Equipment] Modal not found for slot update');
+    return;
+  }
+  
+  const slot = modal.querySelector(`[data-slot-type="${slotType}"]`);
+  if (!slot) {
+    console.warn(`[Equipment] Slot ${slotType} not found in modal`);
+    return;
+  }
+  
+  const equippedItem = await getEquippedItem(slotType);
+  const slotName = slot.getAttribute('data-slot-name') || slotType;
+  
+  // Remove all children but preserve the slot element and its event listeners
+  while (slot.firstChild) {
+    const child = slot.firstChild;
+    if (child.parentNode === slot) {
+      slot.removeChild(child);
+    } else {
+      break; // Child is no longer a child of slot, stop
+    }
+  }
+  
+  if (equippedItem) {
+    // Show equipped item
+    try {
+      const equipData = globalThis.state?.utils?.getEquipment(equippedItem.gameId);
+      if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
+        const spriteId = equipData.metadata.spriteId;
+        const itemPortrait = api.ui.components.createItemPortrait({
+          itemId: spriteId,
+          stat: equippedItem.stat,
+          tier: equippedItem.tier
+        });
+        
+        // Add portrait to slot
+        slot.appendChild(itemPortrait);
+        
+        // No title attribute - we use custom tooltip instead
+      } else {
+        // Fallback: show default image
+        loadDefaultSlotImage(slot, slotType);
+      }
+    } catch (e) {
+      console.warn(`[Equipment] Error displaying equipped item:`, e);
+      // Fallback to default slot image
+      loadDefaultSlotImage(slot, slotType);
+    }
+  } else {
+    // Show default slot image
+    loadDefaultSlotImage(slot, slotType);
+  }
+  
+  console.log(`[Equipment] Updated slot display for ${slotType}`, equippedItem ? `(equipped: ${equippedItem.name})` : '(empty)');
+}
+
+// Load default slot image (used by updateSlotDisplay)
+function loadDefaultSlotImage(slot, slotType) {
+  const name = EQUIPMENT_ITEMS[slotType]?.name || slotType;
+  loadDefaultSlotImageIntoSlot(slot, slotType, name);
+}
+
+function createEquipmentGrid(skipAutoLoad = false) {
+  const container = document.createElement('div');
+  container.className = 'equipment-grid-container';
+  container.style.cssText = `
+    position: relative;
+    width: 110px;
+    height: 145px;
+    margin: 0 auto;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 4px;
+  `;
+  
+  EQUIPMENT_SLOTS.forEach(([slotType, x, y, name]) => {
+    const slot = skipAutoLoad ? createEquipmentSlotSimple(slotType, x, y, name) : createEquipmentSlot(slotType, x, y, name);
+    container.appendChild(slot);
+  });
+  
+  return container;
+}
+
+// Create a simple equipment slot without async auto-loading (for player equipment display)
+function createEquipmentSlotSimple(slotType, x, y, name) {
+  const slot = document.createElement('div');
+  slot.className = 'equipment-slot';
+  slot.setAttribute('data-slot-type', slotType);
+  slot.setAttribute('data-slot-name', name);
+  slot.style.cssText = `
+    position: absolute;
+    left: ${x}px;
+    top: ${y}px;
+    width: ${EQUIPMENT_CONFIG.SLOT_SIZE}px;
+    height: ${EQUIPMENT_CONFIG.SLOT_SIZE}px;
+    cursor: default;
+    border: none;
+    background: rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  `;
+  
+  return slot;
+}
+
+// =======================
+// Arsenal Functions
+// =======================
+
+function getUserOwnedEquipment() {
+  try {
+    const playerSnapshot = globalThis.state?.player?.getSnapshot();
+    if (!playerSnapshot) {
+      console.warn('[Equipment] ⚠️ Player snapshot not available');
+      return [];
+    }
+    
+    const playerContext = playerSnapshot.context;
+    if (!playerContext) {
+      console.warn('[Equipment] ⚠️ Player context not available');
+      return [];
+    }
+    
+    const userEquips = playerContext.equips || [];
+    
+    if (!userEquips || userEquips.length === 0) {
+      console.log('[Equipment] 📦 No equipment found in player state');
+      return [];
+    }
+    
+    const individualEquipment = userEquips
+      .filter(equip => equip && equip.gameId)
+      .map((equip, index) => {
+        try {
+          const equipData = globalThis.state?.utils?.getEquipment(equip.gameId);
+          const equipmentName = equipData?.metadata?.name || `Equipment ID ${equip.gameId}`;
+          
+          return {
+            id: equip.id || `equip_${index}`,
+            gameId: equip.gameId,
+            name: equipmentName,
+            tier: equip.tier || 1,
+            stat: equip.stat || 'unknown',
+            count: 1
+          };
+        } catch (e) {
+          console.warn(`[Equipment] ⚠️ Error processing equipment ${equip.gameId}:`, e);
+          return null;
+        }
+      })
+      .filter(Boolean);
+    
+    const sortedEquipment = individualEquipment.sort((a, b) => {
+      if (a.tier !== b.tier) return b.tier - a.tier;
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return a.stat.localeCompare(b.stat);
+    });
+    
+    return sortedEquipment;
+  } catch (error) {
+    console.error('[Equipment] 💥 Error getting user owned equipment:', error);
+    return [];
+  }
+}
+
+function applyTierFilter(equipment, tierFilter) {
+  if (!tierFilter || tierFilter === 'all') {
+    return equipment;
+  }
+  const tierNum = parseInt(tierFilter.substring(1));
+  return equipment.filter(equip => equip.tier === tierNum);
+}
+
+function applyFilters(equipment, searchTerm, tierFilter) {
+  let filtered = equipment;
+  
+  filtered = applyTierFilter(filtered, tierFilter);
+  
+  if (searchTerm) {
+    filtered = filtered.filter(equip => 
+      equip.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }
+  
+  return filtered;
+}
+
+function updateFilterButtonText(filterBtn, tierFilter) {
+  if (filterBtn && tierFilter) {
+    const filterValues = ['all', 't1', 't2', 't3', 't4', 't5'];
+    const filterLabels = [t('mods.guilds.equipment.filterAll') || 'All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+    const filterIndex = filterValues.findIndex(value => value === tierFilter.toLowerCase());
+    if (filterIndex >= 0) {
+      filterBtn.textContent = filterLabels[filterIndex];
+    }
+  }
+}
+
+function createEquipmentSearchBar() {
+  try {
+    const searchContainer = document.createElement('div');
+    searchContainer.style.cssText = 'display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 3px; margin: 0; width: 100%; box-sizing: border-box;';
+  
+    const searchInput = document.createElement('input');
+    searchInput.placeholder = t('mods.guilds.equipment.searchPlaceholder') || 'Search equipment...';
+    searchInput.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 6px; border-radius: 2px; font-size: 12px; flex: 1; font-family: inherit; outline: none; box-sizing: border-box;';
+    
+    searchInput.addEventListener('focus', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+    });
+    
+    searchInput.addEventListener('blur', () => {
+      searchInput.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    const filterBtn = document.createElement('button');
+    filterBtn.textContent = t('mods.guilds.equipment.filterAll') || 'All';
+    filterBtn.style.cssText = 'background: rgba(255, 255, 255, 0.1); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); padding: 3px 8px; border-radius: 2px; font-size: 12px; cursor: pointer; font-family: inherit; outline: none; white-space: nowrap; min-width: 50px;';
+    
+    filterBtn.addEventListener('mouseenter', () => {
+      filterBtn.style.background = 'rgba(255, 255, 255, 0.2)';
+      filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+    });
+    
+    filterBtn.addEventListener('mouseleave', () => {
+      filterBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+      filterBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    searchContainer.appendChild(searchInput);
+    searchContainer.appendChild(filterBtn);
+    
+    return { searchContainer, searchInput, filterBtn };
+  } catch (error) {
+    console.error('[Equipment] Error creating search bar:', error);
+    return { searchContainer: document.createElement('div'), searchInput: document.createElement('input'), filterBtn: document.createElement('button') };
+  }
+}
+
+function createEquipmentButton(equipment, onSelect) {
+  const btn = document.createElement('button');
+  btn.setAttribute('data-equipment', equipment.name);
+  btn.setAttribute('data-equipment-id', equipment.id);
+  btn.setAttribute('data-tier', equipment.tier);
+  btn.setAttribute('data-stat', equipment.stat);
+  
+  btn.style.width = '34px';
+  btn.style.height = '34px';
+  btn.style.minWidth = '34px';
+  btn.style.minHeight = '34px';
+  btn.style.maxWidth = '34px';
+  btn.style.maxHeight = '34px';
+  btn.style.display = 'flex';
+  btn.style.alignItems = 'center';
+  btn.style.justifyContent = 'center';
+  btn.style.padding = '0';
+  btn.style.margin = '0';
+  btn.style.border = 'none';
+  btn.style.background = 'none';
+  btn.style.cursor = 'pointer';
+  btn.style.opacity = '1';
+  btn.style.pointerEvents = 'auto';
+  
+  let spriteId = '';
+  let equipName = equipment.name;
+  try {
+    const equipData = globalThis.state?.utils?.getEquipment(equipment.gameId);
+    if (equipData && equipData.metadata) {
+      spriteId = equipData.metadata.spriteId;
+      equipName = equipData.metadata.name;
+    }
+  } catch (e) {
+    console.warn(`[Equipment] Error getting equipment data for ${equipment.name}:`, e);
+  }
+  
+  if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function') {
+    try {
+      const itemPortrait = api.ui.components.createItemPortrait({
+        itemId: spriteId,
+        stat: equipment.stat,
+        tier: equipment.tier,
+        onClick: () => {
+          const targetSlot = getTargetSlotForEquipment();
+          if (!targetSlot) {
+            console.warn('[Equipment] Could not determine target slot for', equipName);
+            return;
+          }
+          
+          // Equip the item to the target slot (will replace if already equipped)
+          equipItemToSlot(equipment, targetSlot).then(success => {
+            if (success && onSelect) onSelect(equipment);
+          });
+        }
+      });
+      
+      btn.innerHTML = '';
+      btn.appendChild(itemPortrait);
+    } catch (e) {
+      btn.textContent = equipName.charAt(0).toUpperCase();
+    }
+  } else {
+    btn.textContent = equipName.charAt(0).toUpperCase();
+  }
+  
+  // No title attribute - we use custom tooltip instead
+  
+  // Create tooltip for equipment
+  const tooltip = createTooltipElement();
+  
+  // Get slot type from database
+  const playerEqDb = window.playerEquipmentDatabase;
+  let equipmentSlot = 'Unknown';
+  let targetSlotType = null; // Store the actual slot type for equipping
+  if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT) {
+    for (const [slotType, items] of Object.entries(playerEqDb.EQUIPMENT_BY_SLOT)) {
+      if (items.includes(equipName)) {
+        targetSlotType = slotType; // Store the database slot type
+        // Format slot name nicely for display
+        if (slotType === 'weapon') {
+          equipmentSlot = 'Weapon (Right Hand)';
+        } else if (slotType === 'shield') {
+          equipmentSlot = 'Shield';
+        } else {
+          equipmentSlot = slotType.charAt(0).toUpperCase() + slotType.slice(1);
+        }
+        break;
+      }
+    }
+  }
+  
+  // Function to get the correct slot for this equipment
+  const getTargetSlotForEquipment = () => {
+    // If a slot is manually selected, use that
+    const modal = document.querySelector('div[role="dialog"][data-state="open"]');
+    if (modal) {
+      const selectedSlot = modal.getAttribute('data-selected-slot');
+      if (selectedSlot) {
+        return selectedSlot;
+      }
+    }
+    
+    // Otherwise, use the slot from database
+    if (!targetSlotType) {
+      return null;
+    }
+    
+    // Map database slot types to actual equipment slot types
+    return normalizeSlotTypeFromDb(targetSlotType);
+  };
+  
+  // Build tooltip content
+  const tooltipContent = document.createElement('div');
+  tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+  
+  const title = document.createElement('div');
+  title.textContent = equipName;
+  title.style.cssText = `
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 2px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    padding-bottom: 6px;
+    color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+  `;
+  tooltipContent.appendChild(title);
+  
+  addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipSlot') || 'Slot', equipmentSlot, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+  addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipGuildPoints') || 'Guild Points', `+${equipment.tier}`, CSS_CONSTANTS.COLORS.SUCCESS);
+  addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equipment.stat.toUpperCase(), '#64b5f6');
+  addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipTier') || 'Tier', `T${equipment.tier}`, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+  
+  tooltip.appendChild(tooltipContent);
+  
+  // Show/hide tooltip on hover
+  let tooltipTimeout;
+  const showTooltip = (e) => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    tooltipTimeout = setTimeout(() => {
+      showEquipmentTooltip(tooltip);
+      updateTooltipPosition(e);
+    }, 300);
+  };
+  
+  const hideTooltip = () => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    if (currentEquipmentTooltip === tooltip) {
+      hideCurrentEquipmentTooltip();
+    } else {
+      tooltip.style.display = 'none';
+    }
+  };
+  
+  const updateTooltipPosition = (e) => {
+    const rect = btn.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const position = calculateTooltipPosition(rect, tooltipRect);
+    tooltip.style.left = `${position.left}px`;
+    tooltip.style.top = `${position.top}px`;
+  };
+  
+  btn.addEventListener('mouseenter', showTooltip);
+  btn.addEventListener('mouseleave', hideTooltip);
+  btn.addEventListener('mousemove', updateTooltipPosition);
+  
+  // Add click handler for fallback case (when itemPortrait is not used)
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    const targetSlot = getTargetSlotForEquipment();
+    if (!targetSlot) {
+      console.warn('[Equipment] Could not determine target slot for', equipName);
+      return;
+    }
+    
+    // Equip the item to the target slot (will replace if already equipped)
+    equipItemToSlot(equipment, targetSlot).then(success => {
+      if (success && onSelect) onSelect(equipment);
+    });
+  });
+  
+  return btn;
+}
+
+function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
+  scrollArea.innerHTML = '';
+  
+  if (!equipmentItems.length) {
+    scrollArea.innerHTML = `<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;max-width:100%;word-wrap:break-word;overflow-wrap:break-word;">${t('mods.guilds.equipment.noEquipmentFound') || 'No equipment found.'}</div>`;
+    return;
+  }
+  
+  const sortedEquipment = [...equipmentItems].sort((a, b) => {
+    if (a.tier !== b.tier) return b.tier - a.tier;
+    if (a.name !== b.name) return a.name.localeCompare(b.name);
+    return a.stat.localeCompare(b.stat);
+  });
+  
+  for (const equipment of sortedEquipment) {
+    const btn = createEquipmentButton(equipment, onSelect);
+    scrollArea.appendChild(btn);
+  }
+}
+
+function applyEquipmentSearch(scrollArea, searchValue, equipmentItems, onSelect) {
+  try {
+    if (!scrollArea || !(scrollArea instanceof HTMLElement)) {
+      return;
+    }
+    
+    const searchTerm = searchValue.toLowerCase().trim();
+    
+    if (searchTerm && searchTerm.length > 0) {
+      const matchingEquipment = equipmentItems.filter(equipment => 
+        equipment.name.toLowerCase().includes(searchTerm)
+      );
+      
+      if (matchingEquipment.length > 0) {
+        matchingEquipment.sort((a, b) => {
+          if (a.tier !== b.tier) return b.tier - a.tier;
+          if (a.name !== b.name) return a.name.localeCompare(b.name);
+          return a.stat.localeCompare(b.stat);
+        });
+      }
+      
+      requestAnimationFrame(() => {
+        scrollArea.innerHTML = '';
+        
+        if (matchingEquipment.length === 0) {
+          const noResultsMsg = document.createElement('div');
+          noResultsMsg.style.cssText = 'color: #bbb; text-align: center; padding: 16px; grid-column: span 6; max-width: 100%; word-wrap: break-word; overflow-wrap: break-word;';
+          noResultsMsg.textContent = (t('mods.guilds.equipment.noEquipmentFoundMatching') || 'No equipment found matching "{searchValue}"').replace('{searchValue}', searchValue);
+          scrollArea.appendChild(noResultsMsg);
+        } else {
+          matchingEquipment.forEach(equipment => {
+            const btn = createEquipmentButton(equipment, onSelect);
+            scrollArea.appendChild(btn);
+          });
+        }
+      });
+    } else {
+      renderEquipmentList(scrollArea, equipmentItems, onSelect);
+    }
+  } catch (error) {
+    console.error('[Equipment] Error applying search:', error);
+  }
+}
+
+// Function to filter equipment by slot type
+function filterEquipmentBySlot(equipment, slotType) {
+  if (!slotType || slotType === 'all' || slotType === 'unknown') {
+    return equipment;
+  }
+  
+  // Normalize slot type (weapon-right -> weapon, weapon-left -> shield)
+  const normalizedSlot = normalizeSlotTypeForDb(slotType.toLowerCase());
+  
+  // Get equipment database for slot filtering (source of truth)
+  const playerEqDb = window.playerEquipmentDatabase;
+  if (!playerEqDb || !playerEqDb.EQUIPMENT_BY_SLOT) {
+    console.warn('[Equipment] Player equipment database not available, cannot filter by slot');
+    return []; // Return empty array if database not available
+  }
+  
+  // Use database to filter
+  const slotEquipment = playerEqDb.EQUIPMENT_BY_SLOT[normalizedSlot] || [];
+  const slotEquipmentSet = new Set(slotEquipment.map(name => name.toLowerCase()));
+  
+  return equipment.filter(eq => slotEquipmentSet.has(eq.name.toLowerCase()));
+}
+
+function getArsenalContent() {
+  try {
+    const div = document.createElement('div');
+    div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 0; height: 100%; width: 100%; box-sizing: border-box;';
+    
+    const availableEquipment = getUserOwnedEquipment();
+    
+    const { searchContainer, searchInput, filterBtn } = createEquipmentSearchBar();
+    div.appendChild(searchContainer);
+    
+    const scrollArea = document.createElement('div');
+    scrollArea.style.cssText = 'flex: 1 1 0; height: calc(100% - 40px); min-height: 0; width: 100%; max-width: 100%; overflow-y: auto; display: grid; grid-template-columns: repeat(6, 34px); grid-auto-rows: 34px; gap: 0; padding: 5px; background: rgba(40,40,40,0.96); box-sizing: border-box; justify-content: center;';
+    
+    let currentFilter = 'all';
+    let currentSlotFilter = 'all';
+    let filteredEquipment = availableEquipment;
+    let currentSearchTerm = '';
+    
+    const filterValues = ['all', 't1', 't2', 't3', 't4', 't5'];
+    const filterLabels = [t('mods.guilds.equipment.filterAll') || 'All', 'T1', 'T2', 'T3', 'T4', 'T5'];
+    let currentFilterIndex = 0;
+    
+    // Function to refresh the equipment list with current filters
+    const refreshEquipmentList = () => {
+      const freshEquipment = getUserOwnedEquipment();
+      let filtered = freshEquipment;
+      
+      // Apply slot filter
+      if (currentSlotFilter && currentSlotFilter !== 'all') {
+        filtered = filterEquipmentBySlot(filtered, currentSlotFilter);
+      }
+      
+      // Apply tier filter
+      filtered = applyTierFilter(filtered, currentFilter);
+      
+      // Apply search filter
+      if (currentSearchTerm && currentSearchTerm.trim()) {
+        filtered = filtered.filter(eq => 
+          eq.name.toLowerCase().includes(currentSearchTerm.toLowerCase())
+        );
+      }
+      
+      scrollArea.innerHTML = '';
+      renderEquipmentList(scrollArea, filtered, (equipment) => {
+        console.log('[Equipment] Selected equipment:', equipment);
+      });
+      
+      // Ensure buttons are enabled (they auto-equip to correct slot)
+      const modal = scrollArea.closest('div[role="dialog"]');
+      if (modal) {
+        enableEquipmentButtons(modal, true);
+      }
+    };
+    
+    renderEquipmentList(scrollArea, filteredEquipment, (equipment) => {
+      console.log('[Equipment] Selected equipment:', equipment);
+    });
+    
+    // Ensure buttons are enabled (they auto-equip to correct slot)
+    const modal = scrollArea.closest('div[role="dialog"]');
+    if (modal) {
+      enableEquipmentButtons(modal, true);
+    }
+    
+    let searchTimeout;
+    const debouncedSearch = (value) => {
+      if (searchTimeout) clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        currentSearchTerm = value;
+        refreshEquipmentList();
+      }, 150);
+    };
+    
+    searchInput.addEventListener('input', (e) => {
+      debouncedSearch(e.target.value);
+    });
+    
+    filterBtn.addEventListener('click', () => {
+      currentFilterIndex = (currentFilterIndex + 1) % filterValues.length;
+      currentFilter = filterValues[currentFilterIndex];
+      updateFilterButtonText(filterBtn, currentFilter);
+      refreshEquipmentList();
+    });
+    
+    div.appendChild(scrollArea);
+    
+    // Store filter function on the div so it can be called from outside
+    div.filterBySlot = (slotType) => {
+      currentSlotFilter = slotType || 'all';
+      refreshEquipmentList();
+    };
+    
+    return div;
+  } catch (error) {
+    console.error('[Equipment] Error creating arsenal content:', error);
+    return document.createElement('div');
+  }
+}
+
+function createEquipmentBox({title, content}) {
+  const box = document.createElement('div');
+  box.style.flex = '1 1 0';
+  box.style.display = 'flex';
+  box.style.flexDirection = 'column';
+  box.style.margin = '0';
+  box.style.padding = '0';
+  box.style.minHeight = '0';
+  box.style.height = '100%';
+  box.style.background = `url('${CSS_CONSTANTS.BACKGROUND_URL}') repeat`;
+  box.style.border = '4px solid transparent';
+  box.style.borderImage = CSS_CONSTANTS.BORDER_4_FRAME;
+  box.style.borderRadius = '6px';
+  box.style.overflow = 'hidden';
+  
+  const titleEl = document.createElement('h2');
+  titleEl.className = 'widget-top widget-top-text';
+  titleEl.style.margin = '0';
+  titleEl.style.padding = '2px 8px';
+  titleEl.style.textAlign = 'center';
+  titleEl.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
+  titleEl.style.fontSize = '14px';
+  titleEl.style.fontWeight = '600';
+  
+  const p = document.createElement('p');
+  p.textContent = title;
+  p.style.margin = '0';
+  p.style.padding = '0';
+  p.style.textAlign = 'center';
+  p.style.color = CSS_CONSTANTS.COLORS.TEXT_WHITE;
+  titleEl.appendChild(p);
+  box.appendChild(titleEl);
+  
+  const contentWrapper = document.createElement('div');
+  contentWrapper.className = 'column-content-wrapper';
+  contentWrapper.style.flex = '1 1 0';
+  contentWrapper.style.height = '100%';
+  contentWrapper.style.minHeight = '0';
+  contentWrapper.style.overflowY = 'auto';
+  contentWrapper.style.display = 'flex';
+  contentWrapper.style.flexDirection = 'column';
+  contentWrapper.style.padding = '0';
+  
+  if (typeof content === 'string') {
+    contentWrapper.style.alignItems = 'center';
+    contentWrapper.style.justifyContent = 'center';
+    contentWrapper.style.padding = '8px';
+    contentWrapper.innerHTML = content;
+  } else if (content instanceof HTMLElement) {
+    contentWrapper.style.alignItems = 'stretch';
+    contentWrapper.style.justifyContent = 'flex-start';
+    content.style.width = '100%';
+    content.style.height = '100%';
+    contentWrapper.appendChild(content);
+  }
+  box.appendChild(contentWrapper);
+  return box;
+}
+
+function createEquipmentModalColumn(width) {
+  const column = document.createElement('div');
+  column.style.width = width;
+  column.style.minWidth = width;
+  column.style.maxWidth = width;
+  column.style.height = '100%';
+  column.style.flex = `0 0 ${width}`;
+  column.style.display = 'flex';
+  column.style.flexDirection = 'column';
+  column.style.gap = '8px';
+  return column;
+}
+
+function showEquipmentModal() {
+  if (!ensureModalApi()) return;
+  
+  // Clear any existing tooltip when modal opens
+  hideCurrentEquipmentTooltip();
+
+  const contentDiv = document.createElement('div');
+  contentDiv.style.cssText = `
+    width: 100%;
+    height: 100%;
+    min-width: 490px;
+    max-width: 490px;
+    min-height: 400px;
+    max-height: 400px;
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    flex: 1 1 0;
+  `;
+
+  // Column 1: Arsenal
+  const col1 = createEquipmentModalColumn('250px');
+  const arsenalContent = getArsenalContent();
+  arsenalContent.setAttribute('data-arsenal-content', 'true');
+  const arsenalBox = createEquipmentBox({
+    title: t('mods.guilds.equipment.arsenalTitle') || 'Arsenal',
+    content: arsenalContent
+  });
+  col1.appendChild(arsenalBox);
+
+  // Column 2: Equipment Grid (split into 2 rows)
+  const col2 = createEquipmentModalColumn('200px');
+  
+  // Row 1: Equipment section (50% height)
+  const equipmentBox = createEquipmentBox({
+    title: t('mods.guilds.equipment.characterEquipmentTitle') || 'Character Equipment',
+    content: (() => {
+      const container = document.createElement('div');
+      container.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        height: 100%;
+      `;
+      
+      const equipmentGrid = createEquipmentGrid();
+      container.appendChild(equipmentGrid);
+      
+      return container;
+    })()
+  });
+  equipmentBox.style.flex = '0 0 50%';
+  equipmentBox.style.minHeight = '0';
+  col2.appendChild(equipmentBox);
+  
+  // Row 2: Details section (50% height)
+  const detailsContainer = document.createElement('div');
+  detailsContainer.setAttribute('data-details-container', 'true');
+  detailsContainer.style.cssText = `
+    width: 100%;
+    height: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    overflow-y: auto;
+  `;
+  
+  const bottomBox = createEquipmentBox({
+    title: t('mods.guilds.equipment.totalStatsTitle') || 'Total stats',
+    content: detailsContainer
+  });
+  bottomBox.style.flex = '0 0 191px';
+  bottomBox.style.height = '191px';
+  bottomBox.style.minHeight = '191px';
+  col2.appendChild(bottomBox);
+  
+  // Initial stats display
+  updateEquipmentStats(detailsContainer);
+
+  contentDiv.appendChild(col1);
+  contentDiv.appendChild(col2);
+
+  const modal = createStyledModal({
+    title: t('mods.guilds.equipment.modalTitle') || 'Equipment',
+    width: EQUIPMENT_CONFIG.MODAL_WIDTH,
+    height: EQUIPMENT_CONFIG.MODAL_HEIGHT,
+    content: contentDiv,
+    buttons: [{
+      text: t('mods.guilds.close') || 'Close',
+      primary: true,
+      onClick: () => {
+        hideCurrentEquipmentTooltip();
+      }
+    }],
+    onAfterCreate: (dialog) => {
+      setupEscKeyHandler(dialog, () => {
+        hideCurrentEquipmentTooltip();
+        dialog.remove();
+      });
+      
+      // Clean up tooltips when modal is removed
+      const originalRemove = dialog.remove.bind(dialog);
+      dialog.remove = function() {
+        hideCurrentEquipmentTooltip();
+        originalRemove();
+      };
+      
+      // Apply modal dimensions
+      setTimeout(() => {
+        if (!dialog) return;
+        
+        const dimensions = {
+          width: '490px',
+          height: '490px'
+        };
+        
+        Object.entries(dimensions).forEach(([prop, value]) => {
+          dialog.style[prop] = value;
+          dialog.style[`min${prop.charAt(0).toUpperCase() + prop.slice(1)}`] = value;
+          dialog.style[`max${prop.charAt(0).toUpperCase() + prop.slice(1)}`] = value;
+        });
+        
+        dialog.classList.remove('max-w-[300px]');
+        
+        const contentWrapper = dialog.querySelector(':scope > div:not(:first-child)') || dialog.querySelector(':scope > div');
+        if (contentWrapper) {
+          Object.assign(contentWrapper.style, {
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            flex: '1 1 0'
+          });
+        }
+      }, 0);
+    }
+  });
+}
+
+function injectEquipmentMenuItem(guildsMenuItem) {
+  const equipmentMenuItem = document.createElement('div');
+  equipmentMenuItem.className = 'dropdown-menu-item relative flex cursor-default select-none items-center gap-2 outline-none text-whiteRegular equipment-menu-item';
+  equipmentMenuItem.setAttribute('role', 'menuitem');
+  equipmentMenuItem.setAttribute('tabindex', '-1');
+  equipmentMenuItem.setAttribute('data-orientation', 'vertical');
+  equipmentMenuItem.setAttribute('data-radix-collection-item', '');
+
+  // Add icon (using shield/sword icon for equipment)
+  equipmentMenuItem.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+    </svg>
+    <span class="relative">${t('mods.guilds.equipment.menuItem') || 'Equipment'}</span>
+  `;
+
+  // Add click handler
+  equipmentMenuItem.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    // Close the menu first, then open modal after a short delay
+    // This prevents the ESC key from closing the modal
+    const closeMenuEvent = new KeyboardEvent('keydown', { 
+      key: 'Escape', 
+      code: 'Escape', 
+      keyCode: 27, 
+      bubbles: true 
+    });
+    document.dispatchEvent(closeMenuEvent);
+    
+    // Wait for menu to close, then open modal
+    setTimeout(() => {
+      showEquipmentModal();
+    }, 150);
+  });
+
+  // Insert right after Guilds menu item
+  guildsMenuItem.parentNode.insertBefore(equipmentMenuItem, guildsMenuItem.nextSibling);
 }
 
 // =======================
@@ -4871,6 +7282,7 @@ function injectGuildMenuItem(menuElement) {
 // =======================
 
 let accountMenuObserver = null;
+let cacheCleanupInterval = null;
 let firebase401WarningShown = false;
 
 function startAccountMenuObserver() {
@@ -4927,6 +7339,19 @@ function syncGuildChatTabWithRetry(retries = 3, delay = 1000) {
 
 async function initializeGuilds() {
   console.log('[Guilds] initialized');
+  
+  // Start periodic cache cleanup (every 5 minutes)
+  if (!cacheCleanupInterval) {
+    cacheCleanupInterval = setInterval(() => {
+      try {
+        playerExistsCache.cleanup();
+        playerProfileCache.cleanup();
+        guildPointsCache.cleanup();
+      } catch (error) {
+        console.error('[Guilds] Error during cache cleanup:', error);
+      }
+    }, 5 * 60 * 1000); // Every 5 minutes
+  }
   
   // Sync player's guild from Firebase and verify membership
   try {
@@ -5145,6 +7570,33 @@ exports = {
       if (accountMenuObserver) {
         accountMenuObserver.disconnect();
         accountMenuObserver = null;
+      }
+      
+      // Remove guild dropdown click handler
+      if (guildDropdownClickHandler) {
+        document.removeEventListener('click', guildDropdownClickHandler);
+        guildDropdownClickHandler = null;
+      }
+      
+      // Remove window message listener
+      if (windowMessageHandler && typeof window !== 'undefined') {
+        window.removeEventListener('message', windowMessageHandler);
+        windowMessageHandler = null;
+      }
+      
+      // Clear cache cleanup interval
+      if (cacheCleanupInterval) {
+        clearInterval(cacheCleanupInterval);
+        cacheCleanupInterval = null;
+      }
+      
+      // Clear all caches
+      try {
+        playerExistsCache.clear();
+        playerProfileCache.clear();
+        guildPointsCache.clear();
+      } catch (error) {
+        console.error('[Guilds] Error clearing caches:', error);
       }
       
       console.log('[Guilds] Cleaned up successfully');

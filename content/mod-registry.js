@@ -27,7 +27,8 @@ export const DATABASE_MODS = [
   'inventory-database.js',
   'creature-database.js',
   'equipment-database.js',
-  'maps-database.js'
+  'maps-database.js',
+  'playereq-database.js'
 ];
 
 // Official mods - included with the extension
@@ -80,6 +81,7 @@ export const DEFAULT_ENABLED_MODS = [
   'database/creature-database.js',
   'database/equipment-database.js',
   'database/maps-database.js',
+  'database/playereq-database.js',
   'Official Mods/Bestiary_Automator.js',
   'Official Mods/Board Analyzer.js',
   'Official Mods/Custom_Display.js',
@@ -105,6 +107,7 @@ export const HIDDEN_MODS = [
   'creature-database.js',
   'equipment-database.js',
   'maps-database.js',
+  'playereq-database.js',
   'Mod Settings.js',
   'RunTracker.js',
   'Outfiter.js'
