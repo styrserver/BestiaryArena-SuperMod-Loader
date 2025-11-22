@@ -6177,6 +6177,71 @@ async function getEquippedItem(slotType) {
   return equippedItems[slotType] || null;
 }
 
+// Remove unknown equipment slots from Firebase
+async function removeUnknownEquipment(playerName = null) {
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    const targetPlayer = playerName || currentPlayer;
+    
+    if (!targetPlayer) {
+      console.warn('[Equipment] No player name available');
+      return { removed: 0, errors: ['No player name available'] };
+    }
+    
+    // Get equipment for the target player
+    const equippedItems = playerName 
+      ? await getPlayerEquipmentFromFirebase(playerName)
+      : await getEquippedItems();
+      
+    if (!equippedItems || Object.keys(equippedItems).length === 0) {
+      return { removed: 0, errors: [] };
+    }
+    
+    // Only allow saving if it's for the current player (security)
+    const canSave = !playerName || targetPlayer.toLowerCase() === currentPlayer?.toLowerCase();
+    if (playerName && !canSave) {
+      console.warn('[Equipment] Can only save equipment for current player');
+      return { removed: 0, errors: ['Can only save equipment for current player'] };
+    }
+    
+    const cleanedItems = { ...equippedItems };
+    let removedCount = 0;
+    const errors = [];
+    
+    // Check each equipment slot
+    for (const [slotType, item] of Object.entries(equippedItems)) {
+      // Check if slot key is "unknown" or item's slotType property is "unknown"
+      // Unknown equipment cannot be equipped, so it should be deleted
+      if ((slotType === 'unknown' || (item && item.slotType === 'unknown')) && item) {
+        // Delete unknown equipment (cannot be equipped)
+        delete cleanedItems[slotType];
+        removedCount++;
+        console.log(`[Equipment] Removed "${item.name}" (unknown slot cannot be equipped)`);
+      }
+    }
+    
+    // Save cleaned equipment if changes were made and we can save
+    if (removedCount > 0 && canSave) {
+      const saved = await saveEquippedItems(cleanedItems);
+      if (!saved) {
+        errors.push('Failed to save cleaned equipment to Firebase');
+        return { removed: 0, errors };
+      }
+    } else if (removedCount > 0) {
+      // Changes detected but can't save (read-only mode)
+      return { 
+        removed: removedCount, 
+        errors: ['Read-only mode: changes detected but not saved'] 
+      };
+    }
+    
+    return { removed: removedCount, errors };
+  } catch (error) {
+    console.error('[Equipment] Error removing unknown equipment:', error);
+    return { removed: 0, errors: [error.message] };
+  }
+}
+
 // Equip an item to a slot
 async function equipItemToSlot(equipment, slotType) {
   try {
@@ -7363,6 +7428,8 @@ async function initializeGuilds() {
         const retryPlayer = getCurrentPlayerName();
         if (retryPlayer) {
           await syncGuildFromFirebase(retryPlayer);
+          // Clean up unknown equipment on retry
+          await removeUnknownEquipment();
         }
       }, 2000);
       startAccountMenuObserver();
@@ -7370,6 +7437,16 @@ async function initializeGuilds() {
     }
     
     await syncGuildFromFirebase(currentPlayer);
+    
+    // Clean up unknown equipment slots on initialization (unknown cannot be equipped)
+    try {
+      const result = await removeUnknownEquipment();
+      if (result.removed > 0) {
+        console.log(`[Guilds] Removed ${result.removed} unknown equipment slot(s) from Firebase`);
+      }
+    } catch (error) {
+      console.error('[Guilds] Error cleaning up unknown equipment:', error);
+    }
   } catch (error) {
     console.error('[Guilds] Error initializing:', error);
   }
