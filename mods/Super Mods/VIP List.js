@@ -4422,7 +4422,12 @@ function copyToClipboard(text) {
     console.error('[VIP List] Failed to copy text:', err);
   }
   
-  document.body.removeChild(textarea);
+  // Safely remove textarea if it's still a child of body
+  if (textarea.parentNode === document.body) {
+    document.body.removeChild(textarea);
+  } else if (textarea.parentNode) {
+    textarea.parentNode.removeChild(textarea);
+  }
   return success;
 }
 
@@ -6817,16 +6822,16 @@ async function updateAllChatActionsColumn(playerName) {
   // Clear existing content (but preserve toggle button)
   const children = Array.from(actionsColumn.children);
   children.forEach(child => {
-    if (child !== toggleBtn) {
+    if (child !== toggleBtn && child.parentNode === actionsColumn) {
       actionsColumn.removeChild(child);
     }
   });
   
   // Re-add toggle button at the end if it existed
-  if (toggleBtn && actionsColumn.contains(toggleBtn)) {
+  if (toggleBtn && actionsColumn.contains(toggleBtn) && toggleBtn.parentNode === actionsColumn) {
     actionsColumn.removeChild(toggleBtn);
     actionsColumn.appendChild(toggleBtn);
-  } else if (toggleBtn) {
+  } else if (toggleBtn && !actionsColumn.contains(toggleBtn)) {
     actionsColumn.appendChild(toggleBtn);
   }
   
