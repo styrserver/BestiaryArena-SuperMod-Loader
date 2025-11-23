@@ -27,6 +27,12 @@ function getEquipmentSlotType(equipment) {
     return equipment.metadata.slot.toLowerCase();
   }
   
+  // Explicit gameId mappings for specific equipment
+  const gameId = equipment?.gameId;
+  if (gameId === 10327 || gameId === 21445) {
+    return 'bag';
+  }
+  
   // If not, try to determine from equipment name patterns
   const name = equipment?.metadata?.name?.toLowerCase() || '';
   
