@@ -509,6 +509,8 @@ function injectHuntAnalyzerStyles() {
             width: 100%;
             margin-bottom: 2px;
             cursor: move;
+            min-width: 0;
+            gap: 4px;
         }
         
         .ha-room-title {
@@ -517,6 +519,11 @@ function injectHuntAnalyzerStyles() {
             color: var(--ha-text-accent);
             font-weight: bold;
             text-shadow: 0 0 5px var(--ha-text-shadow);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
         }
         
         .ha-header-controls {
@@ -4206,6 +4213,43 @@ function createUnifiedGridContainer() {
 // 5.0. Event Handler Functions
 // =======================
 
+// Helper function to update minimize button state
+function updateMinimizeButtonState(minimizeBtn, isMinimized) {
+    if (!minimizeBtn) return;
+    if (isMinimized) {
+        minimizeBtn.textContent = '+';
+        minimizeBtn.title = 'Restore Analyzer';
+    } else {
+        minimizeBtn.textContent = '–';
+        minimizeBtn.title = 'Minimize Analyzer';
+    }
+}
+
+// Helper function to update style button state
+function updateStyleButtonState(styleButton, mode) {
+    if (!styleButton) return;
+    if (mode === LAYOUT_MODES.VERTICAL) {
+        styleButton.textContent = 'Horizontal';
+        styleButton.title = 'Switch to horizontal layout';
+    } else if (mode === LAYOUT_MODES.HORIZONTAL) {
+        styleButton.textContent = 'Vertical';
+        styleButton.title = 'Switch to vertical layout';
+    }
+}
+
+// Helper function to apply layout dimensions to panel
+function applyLayoutDimensions(panel, mode) {
+    const layout = LAYOUT_DIMENSIONS[mode];
+    if (!layout) return;
+    
+    panel.style.width = layout.width + 'px';
+    panel.style.height = layout.height + 'px';
+    panel.style.minWidth = layout.minWidth + 'px';
+    panel.style.maxWidth = layout.maxWidth + 'px';
+    panel.style.minHeight = layout.minHeight + 'px';
+    panel.style.maxHeight = layout.maxHeight + 'px';
+}
+
 // Handles the style button click for layout switching
 function handleStyleButtonClick(panel, styleButton, minimizeBtn) {
     // Only toggle between vertical and horizontal
@@ -4213,66 +4257,55 @@ function handleStyleButtonClick(panel, styleButton, minimizeBtn) {
         // If minimized, restore to last non-minimized mode, then toggle
         panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
     }
+    // Toggle between vertical and horizontal
     if (panelState.mode === LAYOUT_MODES.VERTICAL) {
         panelState.mode = LAYOUT_MODES.HORIZONTAL;
-        styleButton.textContent = 'Vertical';
-        styleButton.title = 'Switch to vertical layout';
     } else {
         panelState.mode = LAYOUT_MODES.VERTICAL;
-        styleButton.textContent = 'Horizontal';
-        styleButton.title = 'Switch to horizontal layout';
     }
     // Always update _lastMode for minimize restore
     panelState._lastMode = panelState.mode;
-    // Always reset to default layout size for the new mode
-    const layout = LAYOUT_DIMENSIONS[panelState.mode];
-    panel.style.width = layout.width + 'px';
-    panel.style.height = layout.height + 'px';
-    panel.style.minWidth = layout.minWidth + 'px';
-    panel.style.maxWidth = layout.maxWidth + 'px';
-    panel.style.minHeight = layout.minHeight + 'px';
-    panel.style.maxHeight = layout.maxHeight + 'px';
+    // Apply layout dimensions for the new mode
+    applyLayoutDimensions(panel, panelState.mode);
     updatePanelLayout(panel);
     updatePanelPosition();
-    // Update minimize button state if coming from minimized
-    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
-        minimizeBtn.textContent = '–';
-        minimizeBtn.title = 'Minimize Analyzer';
-    }
+    // Update button states
+    updateMinimizeButtonState(minimizeBtn, false);
+    updateStyleButtonState(styleButton, panelState.mode);
     // Save panel settings after layout change
     savePanelSettings(panel);
 }
 
 // Handles the minimize button click
 function handleMinimizeButtonClick(panel, styleButton, minimizeBtn) {
-    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+    const wasMinimized = panelState.mode === LAYOUT_MODES.MINIMIZED;
+    
+    if (!wasMinimized) {
+        // Minimize: store current mode and switch to minimized
         panelState._lastMode = panelState.mode;
         panelState.mode = LAYOUT_MODES.MINIMIZED;
-        minimizeBtn.textContent = '+';
-        minimizeBtn.title = 'Restore Analyzer';
     } else {
+        // Restore: switch back to last mode
         panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
-        minimizeBtn.textContent = '–';
-        minimizeBtn.title = 'Minimize Analyzer';
     }
-    // Always reset to default layout size for the new mode
-    const layout = LAYOUT_DIMENSIONS[panelState.mode];
-    panel.style.width = layout.width + 'px';
-    panel.style.height = layout.height + 'px';
-    panel.style.minWidth = layout.minWidth + 'px';
-    panel.style.maxWidth = layout.maxWidth + 'px';
-    panel.style.minHeight = layout.minHeight + 'px';
-    panel.style.maxHeight = layout.maxHeight + 'px';
+    
+    // Apply layout dimensions for the new mode
+    applyLayoutDimensions(panel, panelState.mode);
     updatePanelLayout(panel);
     updatePanelPosition();
-    // Update style button state if coming from minimized
-    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-        styleButton.textContent = 'Horizontal';
-        styleButton.title = 'Switch to horizontal layout';
-    } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-        styleButton.textContent = 'Vertical';
-        styleButton.title = 'Switch to vertical layout';
+    
+    // Update button states
+    updateMinimizeButtonState(minimizeBtn, !wasMinimized);
+    if (!wasMinimized) {
+        // Only update style button when restoring (it's hidden when minimized)
+        updateStyleButtonState(styleButton, panelState.mode);
     }
+    
+    // Re-render loot and creature drops when restoring from minimized
+    if (wasMinimized) {
+        renderAllSessions();
+    }
+    
     // Save panel settings after minimize/restore
     savePanelSettings(panel);
 }
@@ -5774,6 +5807,14 @@ function createAutoplayAnalyzerPanel() {
         // Apply layout mode to panel (preserveSize=true to keep saved width/height)
         applyLayoutMode(panel, panelState.mode, mapFilterContainer, lootContainer, creatureDropContainer, buttonContainer, true);
         
+        // Update panel layout to ensure everything is properly set up
+        updatePanelLayout(panel);
+        
+        // If restoring from minimized, render the sessions
+        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+            renderAllSessions();
+        }
+        
         // Re-apply saved size after layout mode to ensure it takes precedence
         const savedSettings = loadPanelSettings();
         if (savedSettings) {
@@ -5796,19 +5837,9 @@ function createAutoplayAnalyzerPanel() {
         }
         
         // Update button states based on saved layout mode
-        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-            styleButton.textContent = 'Horizontal';
-            styleButton.title = 'Switch to horizontal layout';
-            minimizeBtn.textContent = '—';
-            minimizeBtn.title = 'Minimize Analyzer';
-        } else if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
-            styleButton.textContent = 'Vertical';
-            styleButton.title = 'Switch to vertical layout';
-            minimizeBtn.textContent = '—';
-            minimizeBtn.title = 'Minimize Analyzer';
-        } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
-            minimizeBtn.textContent = '+';
-            minimizeBtn.title = 'Restore Analyzer';
+        updateMinimizeButtonState(minimizeBtn, panelState.mode === LAYOUT_MODES.MINIMIZED);
+        if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+            updateStyleButtonState(styleButton, panelState.mode);
         }
     }
 
@@ -6262,23 +6293,54 @@ function updatePanelLayout(panel) {
         buttonContainer.style.flex = "0 0 auto";
         buttonContainer.style.flexDirection = 'row';
     }
-    // Set flex based on layout mode
-    if (panelState.mode === LAYOUT_MODES.VERTICAL) {
-        // In vertical mode, give map filter minimal space and make loot/creatures bigger
-        if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
-        if (lootContainer) lootContainer.style.flex = "1 1 0";
-        if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+    // Set display and flex based on layout mode
+    if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
+        // Hide containers when minimized
+        if (mapFilterContainer) mapFilterContainer.style.display = 'none';
+        if (lootContainer) lootContainer.style.display = 'none';
+        if (creatureDropContainer) creatureDropContainer.style.display = 'none';
+        if (buttonContainer) buttonContainer.style.display = 'flex';
     } else {
-        // In horizontal mode, all sections get their normal sizing
-        if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
-        if (lootContainer) lootContainer.style.flex = "1 1 0";
-        if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+        // Show containers when not minimized
+        if (mapFilterContainer) {
+            mapFilterContainer.style.display = 'flex';
+            mapFilterContainer.style.flexDirection = 'column';
+        }
+        if (lootContainer) {
+            lootContainer.style.display = 'flex';
+            lootContainer.style.flexDirection = 'column';
+        }
+        if (creatureDropContainer) {
+            creatureDropContainer.style.display = 'flex';
+            creatureDropContainer.style.flexDirection = 'column';
+        }
+        if (buttonContainer) buttonContainer.style.display = 'flex';
+        
+        // Set flex based on layout mode
+        if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+            // In vertical mode, give map filter minimal space and make loot/creatures bigger
+            if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
+            if (lootContainer) lootContainer.style.flex = "1 1 0";
+            if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+        } else {
+            // In horizontal mode, all sections get their normal sizing
+            if (mapFilterContainer) mapFilterContainer.style.flex = "0 0 auto";
+            if (lootContainer) lootContainer.style.flex = "1 1 0";
+            if (creatureDropContainer) creatureDropContainer.style.flex = "1 1 0";
+        }
     }
 
     // Use currentLayoutMode for layout
     if (panelState.mode === LAYOUT_MODES.HORIZONTAL) {
         panel.style.flexDirection = 'row';
-        // Ensure leftColumn contains header, live, buttons in order
+        // Ensure leftColumn exists and contains header, live, buttons in order
+        if (!leftColumn) {
+            // Create leftColumn if it doesn't exist
+            const newLeftColumn = document.createElement('div');
+            newLeftColumn.className = 'ha-left-column';
+            panel._leftColumn = newLeftColumn;
+            panel.insertBefore(newLeftColumn, panel.firstChild);
+        }
         if (leftColumn) {
             if (leftColumn.children[0] !== topHeaderContainer) leftColumn.insertBefore(topHeaderContainer, leftColumn.firstChild);
             if (leftColumn.children[1] !== liveDisplaySection) leftColumn.insertBefore(liveDisplaySection, leftColumn.children[1] || null);
@@ -6286,7 +6348,32 @@ function updatePanelLayout(panel) {
         }
         // Ensure panel order: leftColumn, mapFilter, loot, creatures
         [leftColumn, mapFilterContainer, lootContainer, creatureDropContainer].forEach((el, idx) => {
-            if (el && panel.children[idx] !== el) panel.insertBefore(el, panel.children[idx] || null);
+            if (el && !panel.contains(el)) {
+                // Add element if it's not in the panel
+                panel.appendChild(el);
+            } else if (el && panel.children[idx] !== el) {
+                panel.insertBefore(el, panel.children[idx] || null);
+            }
+        });
+    } else if (panelState.mode === LAYOUT_MODES.VERTICAL) {
+        panel.style.flexDirection = 'column';
+        // Remove leftColumn if present (vertical mode doesn't use it)
+        if (leftColumn && panel.contains(leftColumn)) {
+            // Move children back to panel before removing leftColumn
+            while (leftColumn.firstChild) {
+                panel.insertBefore(leftColumn.firstChild, leftColumn);
+            }
+            panel.removeChild(leftColumn);
+        }
+        // Ensure all containers are in the panel and in correct order
+        const elements = [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer];
+        elements.forEach((el, idx) => {
+            if (el && !panel.contains(el)) {
+                // Add element if it's not in the panel (restoring from minimized)
+                panel.appendChild(el);
+            } else if (el && panel.children[idx] !== el) {
+                panel.insertBefore(el, panel.children[idx] || null);
+            }
         });
     } else if (panelState.mode === LAYOUT_MODES.MINIMIZED) {
         panel.style.flexDirection = 'column';
@@ -6309,23 +6396,15 @@ function updatePanelLayout(panel) {
             liveDisplaySection.style.flex = '1 1 auto';
             liveDisplaySection.style.height = 'auto';
             liveDisplaySection.style.maxHeight = 'none';
+            liveDisplaySection.style.minHeight = '0';
+            liveDisplaySection.style.overflow = 'hidden';
         }
         if (buttonContainer) {
             buttonContainer.style.width = '100%';
             buttonContainer.style.height = 'auto';
+            buttonContainer.style.flex = '0 0 auto';
+            buttonContainer.style.flexShrink = '0';
         }
-    } else {
-        // Vertical
-        panel.style.flexDirection = 'column';
-        // Remove leftColumn if present
-        if (leftColumn && panel.contains(leftColumn)) panel.removeChild(leftColumn);
-        // Always remove all six elements from the panel, then append in correct order
-        [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
-            if (el && el.parentNode === panel) panel.removeChild(el);
-        });
-        [topHeaderContainer, liveDisplaySection, buttonContainer, mapFilterContainer, lootContainer, creatureDropContainer].forEach(el => {
-            if (el) panel.appendChild(el);
-        });
     }
 }
 
@@ -6835,27 +6914,29 @@ function applyPanelSettings(panel, settings) {
             const lootContainer = panel.querySelector('.loot-container');
             const creatureDropContainer = panel.querySelector('.creature-drop-container');
             const minimizeBtn = document.getElementById("mod-minimize-button");
+            const styleButton = document.getElementById("mod-style-button");
             const buttonContainer = panel.querySelector('.button-container');
             if (lootContainer && creatureDropContainer && minimizeBtn) {
                 if (settings.isMinimized) {
-                    lootContainer.style.display = 'none';
-                    creatureDropContainer.style.display = 'none';
-                    panel.style.height = 'fit-content';
-                    panel.style.maxHeight = '200px';
-                    minimizeBtn.textContent = '+';
-                    minimizeBtn.title = 'Maximize Analyzer';
+                    // Store the last mode before minimizing
+                    if (panelState.mode !== LAYOUT_MODES.MINIMIZED) {
+                        panelState._lastMode = panelState.mode || LAYOUT_MODES.VERTICAL;
+                    }
+                    panelState.mode = LAYOUT_MODES.MINIMIZED;
+                    updateMinimizeButtonState(minimizeBtn, true);
                 } else {
-                    lootContainer.style.display = 'flex';
-                    lootContainer.style.flexDirection = 'column';
-                    creatureDropContainer.style.display = 'flex';
-                    creatureDropContainer.style.flexDirection = 'column';
-                    panel.style.height = '90vh';
-                    panel.style.maxHeight = '750px';
-                    minimizeBtn.textContent = '—';
-                    minimizeBtn.title = 'Minimize Analyzer';
+                    // Restore from minimized
+                    panelState.mode = panelState._lastMode || LAYOUT_MODES.VERTICAL;
+                    updateMinimizeButtonState(minimizeBtn, false);
+                    updateStyleButtonState(styleButton, panelState.mode);
+                    // Re-render loot and creature drops when restoring from minimized
+                    renderAllSessions();
                 }
             }
         }
+        
+        // Note: updatePanelLayout will be called after panel structure is built
+        // This ensures all elements exist before layout is applied
         
         console.log('[Hunt Analyzer] Panel settings applied:', settings);
     } catch (error) {

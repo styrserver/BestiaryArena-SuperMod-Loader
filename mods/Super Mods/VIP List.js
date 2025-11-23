@@ -8839,21 +8839,23 @@ async function openMessageDialog(toPlayer) {
 // =======================
 
 // Open Cyclopedia modal for a specific player
-function openCyclopediaForPlayer(playerName) {
-  // Close VIP List modal
-  if (vipListModalInstance) {
-    document.dispatchEvent(new KeyboardEvent('keydown', { 
-      key: 'Escape', 
-      code: 'Escape', 
-      keyCode: 27, 
-      bubbles: true 
-    }));
-    vipListModalInstance = null;
-  }
-  
-  // Close VIP List panel
-  if (vipListPanelInstance) {
-    handlePanelCloseButtonClick(vipListPanelInstance);
+function openCyclopediaForPlayer(playerName, closeVIPList = false) {
+  // Close VIP List modal only if explicitly requested (e.g., when called from VIP list items)
+  if (closeVIPList) {
+    if (vipListModalInstance) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { 
+        key: 'Escape', 
+        code: 'Escape', 
+        keyCode: 27, 
+        bubbles: true 
+      }));
+      vipListModalInstance = null;
+    }
+    
+    // Close VIP List panel
+    if (vipListPanelInstance) {
+      handlePanelCloseButtonClick(vipListPanelInstance);
+    }
   }
   
   // Check if Cyclopedia is already open and close it first
@@ -8974,13 +8976,6 @@ function openCyclopediaForPlayer(playerName) {
             window.selectedCharacterItem = 'Leaderboards';
           }
           
-          // Find and set search input value
-          const searchInput = document.querySelector('input[type="text"]');
-          if (searchInput) {
-            searchInput.value = playerName;
-            searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          
           // Find and click Leaderboards button
           const leaderboardsButton = Array.from(document.querySelectorAll('div')).find(div => {
             const text = div.textContent?.trim() || '';
@@ -8991,16 +8986,98 @@ function openCyclopediaForPlayer(playerName) {
             leaderboardsButton.click();
           }
           
-          // Wait a bit, then trigger the search
+          // Wait for Leaderboards to load, then find search input and trigger search
           const timeout4 = setTimeout(() => {
             pendingTimeouts.delete(timeout4);
-            const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
-              const text = btn.textContent?.trim() || '';
-              return text === 'Search';
+            // Try to find the leaderboard search input using multiple strategies
+            let searchInput = null;
+            
+            // Strategy 1: Look for input with placeholder "Compare with..." inside "Player search" widget
+            const playerSearchHeaders = Array.from(document.querySelectorAll('h2, .widget-top-text')).filter(el => {
+              const text = el.textContent?.trim() || '';
+              return text.toLowerCase() === 'player search';
             });
             
-            if (searchButton) {
-              searchButton.click();
+            if (playerSearchHeaders.length > 0) {
+              // Find the closest parent container that contains both the header and the input
+              const playerSearchContainer = playerSearchHeaders[0].closest('div[style*="flex-direction: column"]');
+              if (playerSearchContainer) {
+                const inputWithPlaceholder = playerSearchContainer.querySelector('input[placeholder*="Compare with"]');
+                if (inputWithPlaceholder) {
+                  searchInput = inputWithPlaceholder;
+                }
+              }
+            }
+            
+            // Strategy 2: Look for visible input with placeholder "Compare with..."
+            if (!searchInput) {
+              const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
+              searchInput = allInputs.find(input => {
+                const placeholder = (input.placeholder || '').toLowerCase();
+                const style = window.getComputedStyle(input);
+                return placeholder.includes('compare with') &&
+                       !input.disabled && 
+                       input.offsetParent !== null &&
+                       style.display !== 'none' &&
+                       style.visibility !== 'hidden';
+              });
+            }
+            
+            // Strategy 3: Look for input near a Search button (fallback)
+            if (!searchInput) {
+              const searchButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
+                const text = btn.textContent?.trim().toLowerCase() || '';
+                return text === 'search' && !btn.disabled && btn.offsetParent !== null;
+              });
+              
+              if (searchButtons.length > 0) {
+                // Find the Search button that's in the same container as "Player search" header
+                const playerSearchButton = searchButtons.find(btn => {
+                  const container = btn.closest('div[style*="flex-direction: column"]');
+                  if (container) {
+                    const header = container.querySelector('h2, .widget-top-text');
+                    return header && header.textContent?.trim().toLowerCase() === 'player search';
+                  }
+                  return false;
+                });
+                
+                if (playerSearchButton) {
+                  const buttonParent = playerSearchButton.closest('div');
+                  if (buttonParent) {
+                    searchInput = buttonParent.querySelector('input[type="text"]');
+                  }
+                }
+              }
+            }
+            
+            // If found, set the value and trigger search
+            if (searchInput) {
+              searchInput.value = playerName;
+              searchInput.focus();
+              
+              // Trigger input event
+              searchInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+              
+              // Also try Enter key to trigger search
+              searchInput.dispatchEvent(new KeyboardEvent('keydown', { 
+                bubbles: true, 
+                cancelable: true, 
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13
+              }));
+              
+              // Look for and click Search button if it exists
+              const searchButton = Array.from(document.querySelectorAll('button')).find(btn => {
+                const text = btn.textContent?.trim() || '';
+                return text.toLowerCase() === 'search' && !btn.disabled && btn.offsetParent !== null;
+              });
+              
+              if (searchButton) {
+                setTimeout(() => {
+                  searchButton.click();
+                }, 100);
+              }
             }
           }, TIMEOUTS.NORMAL);
           trackTimeout(timeout4);
@@ -10329,7 +10406,7 @@ async function createVIPListItem(vip, forPanel = false) {
   
   // Create Cyclopedia item with data attribute to prevent Cyclopedia mod from hiding it
   const cyclopediaMenuItem = createDropdownItem(t('mods.vipList.dropdownCyclopedia'), () => {
-    openCyclopediaForPlayer(vip.name);
+    openCyclopediaForPlayer(vip.name); // Don't close VIP list when opening cyclopedia
   }, dropdown, {
     fontSize: dropdownFontSizeOption,
     dataAttributes: {

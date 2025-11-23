@@ -2497,13 +2497,6 @@ function openCyclopediaForPlayer(playerName) {
             window.selectedCharacterItem = 'Leaderboards';
           }
           
-          // Find and set search input value (before clicking Leaderboards if input exists)
-          const searchInputBefore = document.querySelector('input[type="text"]');
-          if (searchInputBefore) {
-            searchInputBefore.value = playerName;
-            searchInputBefore.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          
           // Find and click Leaderboards button
           const leaderboardsButton = Array.from(document.querySelectorAll('div')).find(div => {
             const text = div.textContent?.trim() || '';
@@ -2519,18 +2512,38 @@ function openCyclopediaForPlayer(playerName) {
             // Try to find the leaderboard search input using multiple strategies
             let searchInput = null;
             
-            // Strategy 1: Look for visible input with placeholder containing "search"
-            const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
-            searchInput = allInputs.find(input => {
-              const placeholder = (input.placeholder || '').toLowerCase();
-              const style = window.getComputedStyle(input);
-              return !input.disabled && 
-                     input.offsetParent !== null &&
-                     style.display !== 'none' &&
-                     style.visibility !== 'hidden';
+            // Strategy 1: Look for input with placeholder "Compare with..." inside "Player search" widget
+            const playerSearchHeaders = Array.from(document.querySelectorAll('h2, .widget-top-text')).filter(el => {
+              const text = el.textContent?.trim() || '';
+              return text.toLowerCase() === 'player search';
             });
             
-            // Strategy 2: Look for input near a Search button
+            if (playerSearchHeaders.length > 0) {
+              // Find the closest parent container that contains both the header and the input
+              const playerSearchContainer = playerSearchHeaders[0].closest('div[style*="flex-direction: column"]');
+              if (playerSearchContainer) {
+                const inputWithPlaceholder = playerSearchContainer.querySelector('input[placeholder*="Compare with"]');
+                if (inputWithPlaceholder) {
+                  searchInput = inputWithPlaceholder;
+                }
+              }
+            }
+            
+            // Strategy 2: Look for visible input with placeholder "Compare with..."
+            if (!searchInput) {
+              const allInputs = Array.from(document.querySelectorAll('input[type="text"]'));
+              searchInput = allInputs.find(input => {
+                const placeholder = (input.placeholder || '').toLowerCase();
+                const style = window.getComputedStyle(input);
+                return placeholder.includes('compare with') &&
+                       !input.disabled && 
+                       input.offsetParent !== null &&
+                       style.display !== 'none' &&
+                       style.visibility !== 'hidden';
+              });
+            }
+            
+            // Strategy 3: Look for input near a Search button (fallback)
             if (!searchInput) {
               const searchButtons = Array.from(document.querySelectorAll('button')).filter(btn => {
                 const text = btn.textContent?.trim().toLowerCase() || '';
@@ -2538,10 +2551,21 @@ function openCyclopediaForPlayer(playerName) {
               });
               
               if (searchButtons.length > 0) {
-                const searchButton = searchButtons[0];
-                const buttonParent = searchButton.closest('div');
-                if (buttonParent) {
-                  searchInput = buttonParent.querySelector('input[type="text"]');
+                // Find the Search button that's in the same container as "Player search" header
+                const playerSearchButton = searchButtons.find(btn => {
+                  const container = btn.closest('div[style*="flex-direction: column"]');
+                  if (container) {
+                    const header = container.querySelector('h2, .widget-top-text');
+                    return header && header.textContent?.trim().toLowerCase() === 'player search';
+                  }
+                  return false;
+                });
+                
+                if (playerSearchButton) {
+                  const buttonParent = playerSearchButton.closest('div');
+                  if (buttonParent) {
+                    searchInput = buttonParent.querySelector('input[type="text"]');
+                  }
                 }
               }
             }
@@ -2640,30 +2664,173 @@ async function populatePlayerEquipmentGrid(container, equippedItems) {
       }
     }
     
+    // Store item data on slot for tooltip access
+    slot._equippedItem = item;
+    
     if (item && item.gameId) {
       // Show equipped item
       try {
         const equipData = globalThis.state?.utils?.getEquipment(item.gameId);
-        if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
-          const spriteId = equipData.metadata.spriteId;
+        let spriteId = null;
+        let isInventoryItem = false;
+        
+        if (equipData && equipData.metadata) {
+          spriteId = equipData.metadata.spriteId;
+        } else {
+          // For inventory items, use gameId directly as spriteId
+          spriteId = item.gameId;
+          isInventoryItem = true;
+        }
+        
+        if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function' && !isInventoryItem) {
+          // Use createItemPortrait for regular equipment
           const itemPortrait = api.ui.components.createItemPortrait({
             itemId: spriteId,
             stat: item.stat,
             tier: item.tier
           });
           slot.appendChild(itemPortrait);
+        } else if (spriteId) {
+          // For inventory items, create viewport structure manually
+          const viewportStructure = createViewportStructureForSlot(spriteId);
+          slot.appendChild(viewportStructure);
         } else {
           loadDefaultSlotImageIntoSlot(slot, slotType, name);
         }
       } catch (e) {
-        console.warn(`[Guilds] Error displaying equipped item:`, e);
-        loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        // For inventory items that can't be accessed via getEquipment, try using gameId directly
+        try {
+          const spriteId = item.gameId;
+          const viewportStructure = createViewportStructureForSlot(spriteId);
+          slot.appendChild(viewportStructure);
+        } catch (e2) {
+          console.warn(`[Guilds] Error displaying equipped item:`, e2);
+          loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        }
       }
     } else {
       // No equipment - show empty slot image
       loadDefaultSlotImageIntoSlot(slot, slotType, name);
     }
+    
+    // Add tooltip functionality for viewing other players' equipment
+    addPlayerEquipmentTooltip(slot, slotType, name);
   });
+}
+
+// Helper function to add tooltip to equipment slot when viewing other players' equipment
+function addPlayerEquipmentTooltip(slot, slotType, name) {
+  // Remove existing tooltip if any
+  if (slot._tooltip) {
+    const existingTooltip = slot._tooltip;
+    slot.removeEventListener('mouseenter', slot._showTooltip);
+    slot.removeEventListener('mouseleave', slot._hideTooltip);
+    slot.removeEventListener('mousemove', slot._updateTooltipPosition);
+    if (existingTooltip.parentNode) {
+      existingTooltip.parentNode.removeChild(existingTooltip);
+    }
+  }
+  
+  // Create tooltip for slot
+  const tooltip = createTooltipElement();
+  slot._tooltip = tooltip;
+  
+  // Build tooltip content (will be updated when hovering)
+  const tooltipContent = document.createElement('div');
+  tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+  tooltip.appendChild(tooltipContent);
+  
+  const updateSlotTooltip = () => {
+    tooltipContent.innerHTML = '';
+    
+    const title = document.createElement('div');
+    title.textContent = name;
+    title.style.cssText = `
+      font-weight: 600;
+      font-size: 12px;
+      margin-bottom: 2px;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+      padding-bottom: 6px;
+      color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+    `;
+    tooltipContent.appendChild(title);
+    
+    // Get equipped item from slot data
+    const item = slot._equippedItem;
+    
+    if (item && item.gameId) {
+      // Get item name
+      let itemName = item.name || `Item ${item.gameId}`;
+      try {
+        const equipData = globalThis.state?.utils?.getEquipment(item.gameId);
+        if (equipData && equipData.metadata && equipData.metadata.name) {
+          itemName = equipData.metadata.name;
+        }
+      } catch (e) {
+        // Use stored name or fallback
+      }
+      
+      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipEquipped') || 'Equipped', itemName, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+      if (item.tier) {
+        addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipGuildPoints') || 'Guild Points', `+${item.tier}`, CSS_CONSTANTS.COLORS.SUCCESS);
+      }
+      // Backpacks have no stat
+      if (!isSpecialBackpack(item.gameId) && item.stat) {
+        addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', item.stat.toUpperCase(), '#64b5f6');
+      }
+      if (item.tier) {
+        addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipTier') || 'Tier', `T${item.tier}`, CSS_CONSTANTS.COLORS.TEXT_WHITE);
+      }
+    } else {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.textContent = t('mods.guilds.equipment.tooltipEmptySlot') || 'Empty slot';
+      emptyMsg.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+        font-size: 11px;
+        opacity: 0.7;
+        font-style: italic;
+      `;
+      tooltipContent.appendChild(emptyMsg);
+    }
+  };
+  
+  // Show/hide tooltip on hover
+  let tooltipTimeout;
+  const showTooltip = () => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    tooltipTimeout = setTimeout(() => {
+      updateSlotTooltip();
+      showEquipmentTooltip(tooltip);
+      updateTooltipPosition();
+    }, 300);
+  };
+  
+  const hideTooltip = () => {
+    if (tooltipTimeout) clearTimeout(tooltipTimeout);
+    if (currentEquipmentTooltip === tooltip) {
+      hideCurrentEquipmentTooltip();
+    } else {
+      tooltip.style.display = 'none';
+    }
+  };
+  
+  const updateTooltipPosition = () => {
+    const rect = slot.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const position = calculateTooltipPosition(rect, tooltipRect);
+    tooltip.style.left = `${position.left}px`;
+    tooltip.style.top = `${position.top}px`;
+  };
+  
+  // Store handlers for cleanup
+  slot._showTooltip = showTooltip;
+  slot._hideTooltip = hideTooltip;
+  slot._updateTooltipPosition = updateTooltipPosition;
+  
+  // Hover effects
+  slot.addEventListener('mouseenter', showTooltip);
+  slot.addEventListener('mouseleave', hideTooltip);
+  slot.addEventListener('mousemove', updateTooltipPosition);
 }
 
 // Show equipment modal for a player
@@ -5521,6 +5688,53 @@ const EQUIPMENT_SLOTS = [
   ['ammo', 73, 91, 'Ammunition']
 ];
 
+// Special backpack IDs (inventory items that don't have stats)
+const SPECIAL_BACKPACK_IDS = [10327, 21445];
+const BACKPACK_NAMES = {
+  10327: 'Bestiary backpack',
+  21445: 'Runes backpack'
+};
+
+// Helper functions for special backpacks
+function isSpecialBackpack(gameId) {
+  return SPECIAL_BACKPACK_IDS.includes(gameId);
+}
+
+function getBackpackName(gameId) {
+  return BACKPACK_NAMES[gameId] || `Item ${gameId}`;
+}
+
+function getBackpackCountFromInventory(backpackId, inventory) {
+  if (!inventory) return 1;
+  
+  const idString = String(backpackId);
+  
+  // Check if inventory has this ID as a key directly
+  if (inventory[idString] !== undefined) {
+    return typeof inventory[idString] === 'number' ? inventory[idString] : 1;
+  }
+  
+  // Check if any key contains the ID
+  for (const [key, value] of Object.entries(inventory)) {
+    if (key === idString || key.includes(idString)) {
+      return typeof value === 'number' ? value : 1;
+    }
+  }
+  
+  return 1;
+}
+
+function createBackpackEquipmentItem(backpackId, itemData, count) {
+  return {
+    id: `backpack_${backpackId}`,
+    gameId: backpackId,
+    name: itemData?.metadata?.name || getBackpackName(backpackId),
+    tier: itemData?.tier || 1,
+    count: count
+    // Note: Backpacks have no stat field
+  };
+}
+
 // Helper functions for slot type normalization
 function normalizeSlotTypeForDb(slotType) {
   if (slotType === 'weapon-right') return 'weapon';
@@ -5828,7 +6042,10 @@ function createEquipmentSlot(slotType, x, y, name) {
     if (equippedItem) {
       addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipEquipped') || 'Equipped', equippedItem.name, CSS_CONSTANTS.COLORS.TEXT_WHITE);
       addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipGuildPoints') || 'Guild Points', `+${equippedItem.tier}`, CSS_CONSTANTS.COLORS.SUCCESS);
-      addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equippedItem.stat.toUpperCase(), '#64b5f6');
+      // Backpacks have no stat
+      if (!isSpecialBackpack(equippedItem.gameId) && equippedItem.stat) {
+        addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equippedItem.stat.toUpperCase(), '#64b5f6');
+      }
       addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipTier') || 'Tier', `T${equippedItem.tier}`, CSS_CONSTANTS.COLORS.TEXT_WHITE);
     } else {
       const emptyMsg = document.createElement('div');
@@ -5928,8 +6145,19 @@ function createEquipmentSlot(slotType, x, y, name) {
       // Show equipped item
       try {
         const equipData = globalThis.state?.utils?.getEquipment(equippedItem.gameId);
-        if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
-          const spriteId = equipData.metadata.spriteId;
+        let spriteId = null;
+        let isInventoryItem = false;
+        
+        if (equipData && equipData.metadata) {
+          spriteId = equipData.metadata.spriteId;
+        } else {
+          // For inventory items, use gameId directly as spriteId
+          spriteId = equippedItem.gameId;
+          isInventoryItem = true;
+        }
+        
+        if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function' && !isInventoryItem) {
+          // Use createItemPortrait for regular equipment
           const itemPortrait = api.ui.components.createItemPortrait({
             itemId: spriteId,
             stat: equippedItem.stat,
@@ -5938,13 +6166,24 @@ function createEquipmentSlot(slotType, x, y, name) {
           
           slot.appendChild(itemPortrait);
           // No title attribute - we use custom tooltip instead
+        } else if (spriteId) {
+          // For inventory items, create viewport structure manually
+          const viewportStructure = createViewportStructureForSlot(spriteId);
+          slot.appendChild(viewportStructure);
         } else {
           // Fallback: show default image
           loadDefaultSlotImageIntoSlot(slot, slotType, name);
         }
       } catch (e) {
-        console.warn(`[Equipment] Error loading equipped item:`, e);
-        loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        // For inventory items that can't be accessed via getEquipment, try using gameId directly
+        try {
+          const spriteId = equippedItem.gameId;
+          const viewportStructure = createViewportStructureForSlot(spriteId);
+          slot.appendChild(viewportStructure);
+        } catch (e2) {
+          console.warn(`[Equipment] Error loading equipped item:`, e2);
+          loadDefaultSlotImageIntoSlot(slot, slotType, name);
+        }
       }
     } else {
       // Show default slot image
@@ -6248,15 +6487,22 @@ async function equipItemToSlot(equipment, slotType) {
     const equippedItems = await getEquippedItems();
     
     // Store equipment data
-    equippedItems[slotType] = {
+    // Backpacks don't have stat
+    const equippedItemData = {
       id: equipment.id,
       gameId: equipment.gameId,
       name: equipment.name,
       tier: equipment.tier,
-      stat: equipment.stat,
       slotType: slotType,
       equippedAt: Date.now()
     };
+    
+    // Only include stat if it exists (backpacks don't have stat)
+    if (equipment.stat) {
+      equippedItemData.stat = equipment.stat;
+    }
+    
+    equippedItems[slotType] = equippedItemData;
     
     const saved = await saveEquippedItems(equippedItems);
     if (!saved) {
@@ -6477,6 +6723,40 @@ async function updateEquipmentStats(container) {
 }
 
 // Update the visual display of a slot
+// Helper function to create viewport structure for inventory items (like Cyclopedia)
+function createViewportStructureForSlot(itemId) {
+  const containerSlot = document.createElement('div');
+  containerSlot.className = 'container-slot surface-darker';
+  containerSlot.setAttribute('data-hoverable', 'true');
+  containerSlot.setAttribute('data-highlighted', 'false');
+  containerSlot.setAttribute('data-disabled', 'false');
+  
+  const rarityDiv = document.createElement('div');
+  rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+  
+  const spriteContainer = document.createElement('div');
+  spriteContainer.className = 'sprite item relative';
+  spriteContainer.classList.add(`id-${itemId}`);
+  spriteContainer.classList.add('translate-y-px');
+  
+  const viewport = document.createElement('div');
+  viewport.className = 'viewport';
+  
+  const img = document.createElement('img');
+  img.alt = String(itemId);
+  img.setAttribute('data-cropped', 'false');
+  img.className = 'spritesheet';
+  img.style.setProperty('--cropX', '0');
+  img.style.setProperty('--cropY', '0');
+  
+  viewport.appendChild(img);
+  spriteContainer.appendChild(viewport);
+  rarityDiv.appendChild(spriteContainer);
+  containerSlot.appendChild(rarityDiv);
+  
+  return containerSlot;
+}
+
 async function updateSlotDisplay(slotType) {
   const modal = document.querySelector('div[role="dialog"][data-state="open"]');
   if (!modal) {
@@ -6507,8 +6787,19 @@ async function updateSlotDisplay(slotType) {
     // Show equipped item
     try {
       const equipData = globalThis.state?.utils?.getEquipment(equippedItem.gameId);
-      if (equipData && equipData.metadata && typeof api?.ui?.components?.createItemPortrait === 'function') {
-        const spriteId = equipData.metadata.spriteId;
+      let spriteId = null;
+      let isInventoryItem = false;
+      
+      if (equipData && equipData.metadata) {
+        spriteId = equipData.metadata.spriteId;
+      } else {
+        // For inventory items, use gameId directly as spriteId
+        spriteId = equippedItem.gameId;
+        isInventoryItem = true;
+      }
+      
+      if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function' && !isInventoryItem) {
+        // Use createItemPortrait for regular equipment
         const itemPortrait = api.ui.components.createItemPortrait({
           itemId: spriteId,
           stat: equippedItem.stat,
@@ -6517,16 +6808,25 @@ async function updateSlotDisplay(slotType) {
         
         // Add portrait to slot
         slot.appendChild(itemPortrait);
-        
-        // No title attribute - we use custom tooltip instead
+      } else if (spriteId) {
+        // For inventory items, create viewport structure manually
+        const viewportStructure = createViewportStructureForSlot(spriteId);
+        slot.appendChild(viewportStructure);
       } else {
         // Fallback: show default image
         loadDefaultSlotImage(slot, slotType);
       }
     } catch (e) {
-      console.warn(`[Equipment] Error displaying equipped item:`, e);
-      // Fallback to default slot image
-      loadDefaultSlotImage(slot, slotType);
+      // For inventory items that can't be accessed via getEquipment, try using gameId directly
+      try {
+        const spriteId = equippedItem.gameId;
+        const viewportStructure = createViewportStructureForSlot(spriteId);
+        slot.appendChild(viewportStructure);
+      } catch (e2) {
+        console.warn(`[Equipment] Error displaying equipped item:`, e2);
+        // Fallback to default slot image
+        loadDefaultSlotImage(slot, slotType);
+      }
     }
   } else {
     // Show default slot image
@@ -6605,11 +6905,6 @@ function getUserOwnedEquipment() {
     
     const userEquips = playerContext.equips || [];
     
-    if (!userEquips || userEquips.length === 0) {
-      console.log('[Equipment] 📦 No equipment found in player state');
-      return [];
-    }
-    
     const individualEquipment = userEquips
       .filter(equip => equip && equip.gameId)
       .map((equip, index) => {
@@ -6632,10 +6927,36 @@ function getUserOwnedEquipment() {
       })
       .filter(Boolean);
     
+    // Always include specific backpack IDs (inventory items) - these are always available
+    const inventory = playerContext.inventory || {};
+    
+    for (const backpackId of SPECIAL_BACKPACK_IDS) {
+      // Check if already in list
+      const alreadyExists = individualEquipment.some(eq => eq.gameId === backpackId);
+      if (alreadyExists) continue;
+      
+      // Try to get item data for this ID (might work even for inventory items)
+      let itemData = null;
+      try {
+        itemData = globalThis.state?.utils?.getEquipment(backpackId);
+      } catch (e) {
+        // getEquipment might fail for inventory items, that's okay
+      }
+      
+      // Get count from inventory
+      const count = getBackpackCountFromInventory(backpackId, inventory);
+      
+      // Create and add backpack equipment item
+      individualEquipment.push(createBackpackEquipmentItem(backpackId, itemData, count));
+    }
+    
     const sortedEquipment = individualEquipment.sort((a, b) => {
       if (a.tier !== b.tier) return b.tier - a.tier;
       if (a.name !== b.name) return a.name.localeCompare(b.name);
-      return a.stat.localeCompare(b.stat);
+      // Handle items without stat (like backpacks)
+      const statA = a.stat || '';
+      const statB = b.stat || '';
+      return statA.localeCompare(statB);
     });
     
     return sortedEquipment;
@@ -6724,7 +7045,10 @@ function createEquipmentButton(equipment, onSelect) {
   btn.setAttribute('data-equipment', equipment.name);
   btn.setAttribute('data-equipment-id', equipment.id);
   btn.setAttribute('data-tier', equipment.tier);
-  btn.setAttribute('data-stat', equipment.stat);
+  // Backpacks don't have stat
+  if (equipment.stat) {
+    btn.setAttribute('data-stat', equipment.stat);
+  }
   
   btn.style.width = '34px';
   btn.style.height = '34px';
@@ -6745,51 +7069,25 @@ function createEquipmentButton(equipment, onSelect) {
   
   let spriteId = '';
   let equipName = equipment.name;
+  let isInventoryItem = false;
+  
   try {
     const equipData = globalThis.state?.utils?.getEquipment(equipment.gameId);
     if (equipData && equipData.metadata) {
       spriteId = equipData.metadata.spriteId;
       equipName = equipData.metadata.name;
+    } else {
+      // For inventory items, use gameId directly as spriteId
+      spriteId = equipment.gameId;
+      isInventoryItem = true;
     }
   } catch (e) {
-    console.warn(`[Equipment] Error getting equipment data for ${equipment.name}:`, e);
+    // For inventory items that can't be accessed via getEquipment, use gameId as spriteId
+    spriteId = equipment.gameId;
+    isInventoryItem = true;
   }
   
-  if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function') {
-    try {
-      const itemPortrait = api.ui.components.createItemPortrait({
-        itemId: spriteId,
-        stat: equipment.stat,
-        tier: equipment.tier,
-        onClick: () => {
-          const targetSlot = getTargetSlotForEquipment();
-          if (!targetSlot) {
-            console.warn('[Equipment] Could not determine target slot for', equipName);
-            return;
-          }
-          
-          // Equip the item to the target slot (will replace if already equipped)
-          equipItemToSlot(equipment, targetSlot).then(success => {
-            if (success && onSelect) onSelect(equipment);
-          });
-        }
-      });
-      
-      btn.innerHTML = '';
-      btn.appendChild(itemPortrait);
-    } catch (e) {
-      btn.textContent = equipName.charAt(0).toUpperCase();
-    }
-  } else {
-    btn.textContent = equipName.charAt(0).toUpperCase();
-  }
-  
-  // No title attribute - we use custom tooltip instead
-  
-  // Create tooltip for equipment
-  const tooltip = createTooltipElement();
-  
-  // Get slot type from database
+  // Get slot type from database first (needed for getTargetSlotForEquipment)
   const playerEqDb = window.playerEquipmentDatabase;
   let equipmentSlot = 'Unknown';
   let targetSlotType = null; // Store the actual slot type for equipping
@@ -6808,6 +7106,12 @@ function createEquipmentButton(equipment, onSelect) {
         break;
       }
     }
+  }
+  
+  // For special backpack IDs, set target slot to 'bag'
+  if (isSpecialBackpack(equipment.gameId)) {
+    targetSlotType = 'bag';
+    equipmentSlot = 'Backpack';
   }
   
   // Function to get the correct slot for this equipment
@@ -6830,6 +7134,80 @@ function createEquipmentButton(equipment, onSelect) {
     return normalizeSlotTypeFromDb(targetSlotType);
   };
   
+  // Function to create viewport structure manually (like Cyclopedia)
+  const createViewportStructure = (itemId) => {
+    const containerSlot = document.createElement('div');
+    containerSlot.className = 'container-slot surface-darker';
+    containerSlot.setAttribute('data-hoverable', 'true');
+    containerSlot.setAttribute('data-highlighted', 'false');
+    containerSlot.setAttribute('data-disabled', 'false');
+    
+    const rarityDiv = document.createElement('div');
+    rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+    
+    const spriteContainer = document.createElement('div');
+    spriteContainer.className = 'sprite item relative';
+    spriteContainer.classList.add(`id-${itemId}`);
+    spriteContainer.classList.add('translate-y-px');
+    
+    const viewport = document.createElement('div');
+    viewport.className = 'viewport';
+    
+    const img = document.createElement('img');
+    img.alt = String(itemId);
+    img.setAttribute('data-cropped', 'false');
+    img.className = 'spritesheet';
+    img.style.setProperty('--cropX', '0');
+    img.style.setProperty('--cropY', '0');
+    
+    viewport.appendChild(img);
+    spriteContainer.appendChild(viewport);
+    rarityDiv.appendChild(spriteContainer);
+    containerSlot.appendChild(rarityDiv);
+    
+    return containerSlot;
+  };
+  
+  if (spriteId && typeof api?.ui?.components?.createItemPortrait === 'function' && !isInventoryItem) {
+    try {
+      const itemPortrait = api.ui.components.createItemPortrait({
+        itemId: spriteId,
+        stat: equipment.stat,
+        tier: equipment.tier,
+        onClick: () => {
+          const targetSlot = getTargetSlotForEquipment();
+          if (!targetSlot) {
+            console.warn('[Equipment] Could not determine target slot for', equipName);
+            return;
+          }
+          
+          // Equip the item to the target slot (will replace if already equipped)
+          equipItemToSlot(equipment, targetSlot).then(success => {
+            if (success && onSelect) onSelect(equipment);
+          });
+        }
+      });
+      
+      btn.innerHTML = '';
+      btn.appendChild(itemPortrait);
+    } catch (e) {
+      // Fallback to manual viewport structure
+      btn.innerHTML = '';
+      btn.appendChild(createViewportStructure(spriteId));
+    }
+  } else if (spriteId) {
+    // For inventory items or when createItemPortrait is not available, create viewport manually
+    btn.innerHTML = '';
+    btn.appendChild(createViewportStructure(spriteId));
+  } else {
+    btn.textContent = equipName.charAt(0).toUpperCase();
+  }
+  
+  // No title attribute - we use custom tooltip instead
+  
+  // Create tooltip for equipment
+  const tooltip = createTooltipElement();
+  
   // Build tooltip content
   const tooltipContent = document.createElement('div');
   tooltipContent.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
@@ -6848,7 +7226,10 @@ function createEquipmentButton(equipment, onSelect) {
   
   addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipSlot') || 'Slot', equipmentSlot, CSS_CONSTANTS.COLORS.TEXT_WHITE);
   addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipGuildPoints') || 'Guild Points', `+${equipment.tier}`, CSS_CONSTANTS.COLORS.SUCCESS);
-  addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equipment.stat.toUpperCase(), '#64b5f6');
+  // Backpacks have no stat
+  if (!isSpecialBackpack(equipment.gameId) && equipment.stat) {
+    addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipStat') || 'Stat', equipment.stat.toUpperCase(), '#64b5f6');
+  }
   addTooltipDetail(tooltipContent, t('mods.guilds.equipment.tooltipTier') || 'Tier', `T${equipment.tier}`, CSS_CONSTANTS.COLORS.TEXT_WHITE);
   
   tooltip.appendChild(tooltipContent);
@@ -6976,6 +7357,9 @@ function filterEquipmentBySlot(equipment, slotType) {
   // Normalize slot type (weapon-right -> weapon, weapon-left -> shield)
   const normalizedSlot = normalizeSlotTypeForDb(slotType.toLowerCase());
   
+  // Special backpack IDs that should always be included when filtering for bags
+  const isBagFilter = normalizedSlot === 'bag';
+  
   // Get equipment database for slot filtering (source of truth)
   const playerEqDb = window.playerEquipmentDatabase;
   if (!playerEqDb || !playerEqDb.EQUIPMENT_BY_SLOT) {
@@ -6987,7 +7371,14 @@ function filterEquipmentBySlot(equipment, slotType) {
   const slotEquipment = playerEqDb.EQUIPMENT_BY_SLOT[normalizedSlot] || [];
   const slotEquipmentSet = new Set(slotEquipment.map(name => name.toLowerCase()));
   
-  return equipment.filter(eq => slotEquipmentSet.has(eq.name.toLowerCase()));
+  return equipment.filter(eq => {
+    // Always allow special backpack IDs when filtering for bags
+    if (isBagFilter && isSpecialBackpack(eq.gameId)) {
+      return true;
+    }
+    // Otherwise use database filter
+    return slotEquipmentSet.has(eq.name.toLowerCase());
+  });
 }
 
 function getArsenalContent() {
