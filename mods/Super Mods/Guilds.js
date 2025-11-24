@@ -2851,11 +2851,14 @@ async function showPlayerEquipmentModal(playerName) {
     let totalGuildPoints = 0;
     
     for (const [slotType, item] of Object.entries(equippedItems)) {
-      if (item && item.tier && item.stat) {
+      if (item && item.tier) {
         totalGuildPoints += item.tier;
-        const statType = item.stat.toLowerCase();
-        if (totalStats.hasOwnProperty(statType)) {
-          totalStats[statType] += item.tier;
+        // Calculate stats separately (only if item has stat property)
+        if (item.stat) {
+          const statType = item.stat.toLowerCase();
+          if (totalStats.hasOwnProperty(statType)) {
+            totalStats[statType] += item.tier;
+          }
         }
       }
     }

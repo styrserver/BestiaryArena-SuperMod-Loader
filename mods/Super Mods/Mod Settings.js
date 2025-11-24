@@ -32,7 +32,8 @@ const defaultConfig = {
   enableMismatchRefresh: false,
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
-  vipListMessageFilter: 'all' // 'all' or 'friends' - who can send messages
+  vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
+  betterHighscoresBackgroundOpacity: 1.0 // Opacity for Better Highscores background (0.0 to 1.0)
 };
 
 // Storage key for this mod
@@ -1909,6 +1910,11 @@ function showSettingsModal() {
               <option value="Prismatic">Prismatic</option>
             </select>
           </div>
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="color: #ccc; min-width: 200px;">Better Highscores Background Opacity</span>
+            <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
+            <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
+          </div>
         `;
         rightColumn.appendChild(uiContent);
       } else if (categoryId === 'creatures') {
@@ -2209,6 +2215,32 @@ function showSettingsModal() {
       const inventoryBorderStyleSelector = content.querySelector('#inventory-border-style-selector');
       if (inventoryBorderStyleSelector) {
         createSettingsDropdownHandler('inventoryBorderStyle')(inventoryBorderStyleSelector);
+      }
+      
+      const betterHighscoresOpacitySlider = content.querySelector('#better-highscores-opacity-slider');
+      const betterHighscoresOpacityValue = content.querySelector('#better-highscores-opacity-value');
+      if (betterHighscoresOpacitySlider && betterHighscoresOpacityValue) {
+        // Set initial value from config (convert from 0-1 to 0-100)
+        const initialValue = Math.round((config.betterHighscoresBackgroundOpacity || 1.0) * 100);
+        betterHighscoresOpacitySlider.value = initialValue;
+        betterHighscoresOpacityValue.textContent = `${initialValue}%`;
+        
+        betterHighscoresOpacitySlider.addEventListener('input', () => {
+          const opacityValue = parseInt(betterHighscoresOpacitySlider.value) / 100;
+          config.betterHighscoresBackgroundOpacity = opacityValue;
+          saveConfig();
+          betterHighscoresOpacityValue.textContent = `${betterHighscoresOpacitySlider.value}%`;
+          
+          // Update Better Highscores mod if available
+          if (window.BetterHighscores && typeof window.BetterHighscores.updateOpacity === 'function') {
+            window.BetterHighscores.updateOpacity(opacityValue);
+          } else if (window.BetterHighscores && window.BetterHighscores.updateLeaderboards) {
+            // Fallback: trigger a full update to apply new opacity
+            window.BetterHighscores.updateLeaderboards();
+          }
+          
+          console.log('[Mod Settings] Better Highscores background opacity updated:', opacityValue);
+        });
       }
       
       const vipListInterfaceSelector = content.querySelector('#vip-list-interface-selector');

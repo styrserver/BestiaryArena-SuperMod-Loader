@@ -976,16 +976,6 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Indicate async response
   }
 
-  if (message.action === 'openDashboard') {
-    const dashboardUrl = browserAPI.runtime.getURL('dashboard/dashboard.html');
-    if (browserAPI.tabs && typeof browserAPI.tabs.create === 'function') {
-      browserAPI.tabs.create({ url: dashboardUrl });
-    }
-    // Send response to prevent "message port closed" error
-    sendResponse({ success: true });
-    return true; // Indicate async response
-  }
-
   if (message.action === 'getVersion') {
     try {
       const manifest = browserAPI.runtime.getManifest();

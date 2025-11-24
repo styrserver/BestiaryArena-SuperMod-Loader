@@ -65,24 +65,7 @@ export const SUPER_MODS = [
 ];
 ```
 
-**2. `dashboard/dashboard.js`** - Update the static list (appears in **2 places**):
-```javascript
-// Location 1: In scanAndRegisterLocalMods() function
-const modFiles = [
-  // ... other mods ...
-  { name: 'Your New Mod.js', enabled: true },  // ← Add here
-];
-
-// Location 2: In superModNames array
-const superModNames = [
-  'Autoseller.js',
-  'Mod Settings.js',
-  'Your New Mod.js',  // ← And here
-  // ...
-];
-```
-
-**3. `popup/popup.js`** - Update the static list:
+**2. `popup/popup.js`** - Update the static list:
 ```javascript
 const superModNames = [
   'Autoseller.js',
@@ -92,17 +75,17 @@ const superModNames = [
 ];
 ```
 
-**Why 3 places?**
+**Why 2 places?**
 - `mod-registry.js` is used by content scripts and background (supports ES6 modules)
-- Dashboard and popup cannot load ES6 modules due to browser security restrictions
-- They use static lists for UI display
+- Popup cannot load ES6 modules due to browser security restrictions
+- It uses static lists for UI display
 
 **Important Browser Limitations:**
 - **Firefox**: Background scripts can use dynamic `import()` to load `mod-registry.js`
 - **Chrome**: Service workers cannot use dynamic imports (HTML spec restriction)
 - **Chrome Fallback**: Background script uses hardcoded lists that must be kept in sync with `mod-registry.js`
 
-**Tip:** Search for "kept in sync with mod-registry.js" in `dashboard.js` and `popup.js` to find the exact locations quickly.
+**Tip:** Search for "kept in sync with mod-registry.js" in `popup.js` to find the exact location quickly.
 
 ### Debug System
 

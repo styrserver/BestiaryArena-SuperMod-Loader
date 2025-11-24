@@ -9,6 +9,21 @@
   const defaultConfig = { enabled: true };
   const config = Object.assign({}, defaultConfig, context?.config);
   
+  // Get Better Highscores opacity from Mod Settings config
+  function getBackgroundOpacity() {
+    try {
+      // Try to get from Mod Settings config
+      if (window.betterUIConfig && window.betterUIConfig.betterHighscoresBackgroundOpacity !== undefined) {
+        return window.betterUIConfig.betterHighscoresBackgroundOpacity;
+      }
+      // Fallback to default
+      return 1.0;
+    } catch (error) {
+      console.warn('[Better Highscores] Error getting background opacity:', error);
+      return 1.0;
+    }
+  }
+  
   const DELAYS = {
     RESTORE: 100,
     UPDATE: 200,
@@ -707,12 +722,56 @@
 
   // Function to create leaderboard display
   function createLeaderboardDisplay(tickData, rankData, mapName) {
-    const container = document.createElement('div');
-    container.className = 'better-highscores-container';
+    // Get opacity from config
+    const opacity = getBackgroundOpacity();
     
-    // Apply container styles
-    Object.assign(container.style, UI_CONFIG.CONTAINER_STYLE);
-    Object.assign(container.style, UI_CONFIG.CONTAINER_POSITION);
+    // Create wrapper container for positioning
+    const wrapper = document.createElement('div');
+    wrapper.className = 'better-highscores-container';
+    Object.assign(wrapper.style, UI_CONFIG.CONTAINER_POSITION);
+    // Ensure wrapper has highest z-index to always be on top
+    wrapper.style.zIndex = UI_CONFIG.CONTAINER_STYLE.zIndex || '999999';
+    
+    // Create background div with opacity
+    const backgroundDiv = document.createElement('div');
+    Object.assign(backgroundDiv.style, {
+      position: 'absolute',
+      top: '0',
+      left: '0',
+      right: '0',
+      bottom: '0',
+      background: 'url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png")',
+      backgroundSize: 'auto',
+      backgroundRepeat: 'repeat',
+      opacity: opacity,
+      borderRadius: '4px',
+      zIndex: '0',
+      pointerEvents: 'none'
+    });
+    wrapper.appendChild(backgroundDiv);
+    
+    // Create content container
+    const container = document.createElement('div');
+    Object.assign(container.style, {
+      position: 'relative',
+      border: '4px solid transparent',
+      borderImage: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 4 stretch',
+      borderRadius: '4px',
+      padding: '4px',
+      color: 'white',
+      fontFamily: "'Courier New', monospace",
+      fontSize: '11px',
+      zIndex: '1',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '20px',
+      background: 'transparent'
+    });
+    
+    // Store references for opacity updates
+    wrapper._backgroundDiv = backgroundDiv;
+    wrapper._contentDiv = container;
     
     // Get user data once
     const userScores = getUserBestScores();
@@ -763,7 +822,10 @@
     container.appendChild(tickSection);
     container.appendChild(rankSection);
     
-    return container;
+    // Append content container to wrapper
+    wrapper.appendChild(container);
+    
+    return wrapper;
   }
 
   // Function to update leaderboards
@@ -1089,12 +1151,24 @@
     exports.modVersion = context.modVersion;
   }
   
+  // Function to update opacity of existing container
+  function updateOpacity(opacity) {
+    if (leaderboardContainer && leaderboardContainer._backgroundDiv) {
+      leaderboardContainer._backgroundDiv.style.opacity = opacity;
+    } else if (leaderboardContainer) {
+      // Container exists but doesn't have the new structure, recreate it
+      console.log('[Better Highscores] Container structure outdated, updating leaderboards');
+      updateLeaderboards();
+    }
+  }
+  
   if (typeof window !== 'undefined') {
     window.BetterHighscores = window.BetterHighscores || {};
     window.BetterHighscores.cleanup = cleanup;
     window.BetterHighscores.updateLeaderboards = updateLeaderboards;
     window.BetterHighscores.restoreContainer = restoreContainer;
     window.BetterHighscores.preserveContainer = preserveContainer;
+    window.BetterHighscores.updateOpacity = updateOpacity;
     window.BetterHighscores.debug = {
       getCurrentMapCode: getCurrentMapCode,
       getMapName: getMapName,
