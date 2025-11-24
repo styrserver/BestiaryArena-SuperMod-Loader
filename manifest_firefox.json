@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "BestiaryArena SuperMod Loader",
-  "version": "2.9.13",
+  "version": "3.0.0",
   "description": "SuperMod loader for Bestiary Arena - Advanced mod management system with enhanced features and custom mods.",
   "icons": {
     "16": "assets/icons/icon-16.png",
@@ -52,21 +52,6 @@
       "js": ["content/utility_injector.js"],
       "run_at": "document_idle",
       "all_frames": true
-    },
-    {
-      "matches": [
-        "*://*.bestiaryarena.com/*", 
-        "*://bestiaryarena.com/*"
-      ],
-      "exclude_matches": [
-        "*://bestiaryarena.com/profile/*",
-        "*://bestiaryarena.com/recolor*",
-        "*://bestiaryarena.com/assets*",
-        "*://bestiaryarena.com/_next/*"
-      ],
-      "js": ["content/dashboard_bridge.js"],
-      "run_at": "document_idle",
-      "all_frames": true
     }
   ],
   "permissions": [
@@ -106,9 +91,6 @@
     "database/maps-database.js",
     "database/Welcome.js"
   ],
-  "options_ui": {
-    "page": "dashboard/dashboard.html"
-  },
   "browser_specific_settings": {
     "gecko": {
       "id": "bestiaryarena-supermodloader@private.local",
