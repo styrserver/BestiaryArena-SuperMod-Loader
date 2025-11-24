@@ -47,7 +47,25 @@ To access the Mod Loader interface, click the extension icon in your browser too
 
 ### Extension Popup Interface
 
-The extension provides a user-friendly popup interface for managing your mods. The popup interface allows you to enable/disable mods and access configuration options quickly.
+The extension provides a modern, store-like popup interface for managing your mods with the following features:
+
+- **Store-like Grid Layout**: Browse mods in an organized grid view with visual mod cards
+- **Search Functionality**: Quickly find mods by name using the search bar
+- **Category Filtering**: Filter mods by category (All, Original Mods, SuperMods, Custom Mods) with enabled/total counts
+- **Mod Cards**: Each mod displays with:
+  - Mod name and category badge (color-coded by type)
+  - Description of mod functionality
+  - Enable/disable toggle switch
+  - Delete button for custom mods
+- **Patch Notes System**: Automatically displays patch notes for new versions, with manual viewing option
+- **Storage Usage Display**: Monitor extension storage usage in real-time
+- **Extras Section**: Collapsible section containing:
+  - **Debug Mode**: Toggle console logging for all mods
+  - **Outfiter**: Locally unlock all outfits in the outfit selector
+  - **Welcome Page**: Enable/disable the welcome page on next load
+  - **Patch Notes**: View latest changes and updates
+- **Add Script Section**: Collapsible section for importing mods from GitHub Gists (supports both hash and full URL)
+- **External Links**: Quick access to find more user-generated mods on the wiki
 
 ### Loading Mods
 

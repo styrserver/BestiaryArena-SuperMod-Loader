@@ -28,25 +28,24 @@ const WELCOME_STORAGE_KEY = 'welcome-enabled';
 let WELCOME_ENABLED = true;
 
 // Patch Notes System
+// NOTE: Keep patch notes simple and concise. Consolidate similar changes into single entries.
+// Only show patch notes for the current version in the popup.
 const PATCH_NOTES_STORAGE_KEY = 'last-viewed-version';
-const PATCH_NOTES = [
-  {
-    version: '3.0.0',
-    changes: [
-      { type: 'added', text: 'Redesigned popup interface with store-like grid layout' },
-      { type: 'added', text: 'Added search and filter functionality for mods' },
-      { type: 'added', text: 'Added mod descriptions and category badges' },
-      { type: 'added', text: 'Added patch notes tracking system' },
-      { type: 'added', text: 'Added opacity slider in Mod Settings interface for Better Highscores background' },
-      { type: 'added', text: 'Better Highscores now supports configurable background opacity (0-100%)' },
-      { type: 'changed', text: 'Changed "User" category to "Custom"' },
-      { type: 'changed', text: 'Moved "Enable Welcome Page" button to Extras section' },
-      { type: 'removed', text: 'Removed dashboard' },
-      { type: 'fixed', text: 'Ensured Better Highscores container maintains highest z-index for visibility' }
-    ]
+let PATCH_NOTES = [];
+
+// Load patch notes from JSON file
+async function loadPatchNotes() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('docs/patch-notes.json'));
+    if (response.ok) {
+      PATCH_NOTES = await response.json();
+      return PATCH_NOTES;
+    }
+  } catch (error) {
+    originalConsoleLog('Error loading patch notes:', error);
   }
-  // Add more versions here as updates are released
-];
+  return [];
+}
 
 // Keep original console.log for popup use
 const originalConsoleLog = console.log;
@@ -65,7 +64,9 @@ async function updateDebugMode(enabled) {
     debugToggle.checked = enabled;
   }
   if (debugStatus) {
-    debugStatus.textContent = enabled ? 'ON' : 'OFF';
+    const onText = await getTranslation('popup.on', 'ON');
+    const offText = await getTranslation('popup.off', 'OFF');
+    debugStatus.textContent = enabled ? onText : offText;
   }
   
   // Send message to content script to update debug flag
@@ -131,7 +132,9 @@ async function updateOutfiterMode(enabled) {
     outfiterToggle.checked = enabled;
   }
   if (outfiterStatus) {
-    outfiterStatus.textContent = enabled ? 'ON' : 'OFF';
+    const onText = await getTranslation('popup.on', 'ON');
+    const offText = await getTranslation('popup.off', 'OFF');
+    outfiterStatus.textContent = enabled ? onText : offText;
   }
   
   // Send message to content script to update outfiter flag
@@ -265,7 +268,9 @@ async function loadDebugMode() {
       debugToggle.checked = DEBUG_MODE;
     }
     if (debugStatus) {
-      debugStatus.textContent = DEBUG_MODE ? 'ON' : 'OFF';
+      const onText = await getTranslation('popup.on', 'ON');
+      const offText = await getTranslation('popup.off', 'OFF');
+      debugStatus.textContent = DEBUG_MODE ? onText : offText;
     }
     
     // Always show debug mode loading
@@ -288,7 +293,9 @@ async function loadOutfiterMode() {
       outfiterToggle.checked = OUTFITER_ENABLED;
     }
     if (outfiterStatus) {
-      outfiterStatus.textContent = OUTFITER_ENABLED ? 'ON' : 'OFF';
+      const onText = await getTranslation('popup.on', 'ON');
+      const offText = await getTranslation('popup.off', 'OFF');
+      outfiterStatus.textContent = OUTFITER_ENABLED ? onText : offText;
     }
     
     // Always show outfiter mode loading
@@ -318,6 +325,117 @@ const i18n = window.i18n;
 const localModsContainer = document.getElementById('local-mods-container');
 
 const MANUAL_MODS_KEY = 'manualMods';
+
+// Translation cache
+let translations = null;
+
+// Load and apply translations
+async function loadAndApplyTranslations() {
+  try {
+    translations = await window.LocalizationUtils.loadTranslations();
+    await applyTranslations();
+  } catch (error) {
+    originalConsoleLog('Error loading translations:', error);
+  }
+}
+
+// Apply translations to DOM elements
+async function applyTranslations() {
+  if (!translations) {
+    translations = await window.LocalizationUtils.loadTranslations();
+  }
+  
+  const t = async (path) => {
+    return await window.LocalizationUtils.getLocalizedTextWithFallback('', path);
+  };
+  
+  // Helper to get translation
+  const getT = async (path, fallback) => {
+    const translation = await window.LocalizationUtils.getTranslation(path);
+    return translation || fallback;
+  };
+  
+  // Apply translations
+  const applyT = async (selector, path, attribute = 'textContent') => {
+    const element = document.querySelector(selector);
+    if (element) {
+      const translation = await getT(path, element[attribute]);
+      element[attribute] = translation;
+    }
+  };
+  
+  // Apply all translations
+  await applyT('#mod-search', 'popup.searchPlaceholder', 'placeholder');
+  await applyT('.category-filter[data-category="all"]', 'popup.categoryAll');
+  await applyT('.category-filter[data-category="official"]', 'popup.categoryOfficial');
+  await applyT('.category-filter[data-category="super"]', 'popup.categorySuper');
+  await applyT('.category-filter[data-category="custom"]', 'popup.categoryCustom');
+  await applyT('#empty-state p', 'popup.noModsFound');
+  await applyT('.collapsible-header span:first-child', 'popup.addScript');
+  await applyT('label[for="hash-input"]', 'popup.gistHashLabel');
+  await applyT('#hash-input', 'popup.gistHashPlaceholder', 'placeholder');
+  await applyT('.form-hint', 'popup.gistHashHelp');
+  await applyT('label[for="name-input"]', 'popup.scriptNameLabel');
+  await applyT('#name-input', 'popup.scriptNamePlaceholder', 'placeholder');
+  await applyT('#hash-form button[type="submit"]', 'popup.addButton');
+  await applyT('.external-link a', 'popup.findMoreMods');
+  // Apply extras translation - find the second collapsible section
+  const collapsibleSections = document.querySelectorAll('.collapsible-section');
+  if (collapsibleSections.length > 1) {
+    const extrasHeader = collapsibleSections[1].querySelector('.collapsible-header span:first-child');
+    if (extrasHeader) {
+      const extrasText = await getT('popup.extras', 'Extras');
+      extrasHeader.textContent = extrasText;
+    }
+  }
+  await applyT('label[for="debug-toggle"]', 'popup.debugMode');
+  await applyT('#debug-status', 'popup.off');
+  await applyT('.setting-item:has(#debug-toggle) .setting-description', 'popup.debugModeDescription');
+  await applyT('#storage-usage', 'popup.storageCalculating');
+  await applyT('label[for="outfiter-toggle"]', 'popup.outfiter');
+  await applyT('#outfiter-status', 'popup.off');
+  await applyT('.setting-item:has(#outfiter-toggle) .setting-description', 'popup.outfiterDescription');
+  await applyT('.setting-item:has(#enable-welcome-btn) .setting-header label', 'popup.welcomePage');
+  await applyT('#enable-welcome-btn', 'popup.enableWelcomePage');
+  await applyT('.setting-item:has(#enable-welcome-btn) .setting-description', 'popup.welcomePageDescription');
+  await applyT('.setting-item:has(#show-patch-notes-btn) .setting-header label', 'popup.patchNotes');
+  await applyT('#show-patch-notes-btn', 'popup.viewPatchNotes');
+  await applyT('.setting-item:has(#show-patch-notes-btn) .setting-description', 'popup.patchNotesDescription');
+  await applyT('.patch-notes-title', 'popup.patchNotesTitle');
+  await applyT('.patch-notes-close', 'popup.closePatchNotes', 'aria-label');
+  
+  // Update version display
+  const versionElement = document.getElementById('version-display');
+  if (versionElement && versionElement.textContent.includes('loading')) {
+    const versionText = await getT('popup.versionLoading', 'Version loading...');
+    versionElement.textContent = versionText;
+  }
+  
+  // Update ON/OFF statuses (will be updated dynamically, but set initial)
+  const debugStatus = document.getElementById('debug-status');
+  const outfiterStatus = document.getElementById('outfiter-status');
+  if (debugStatus) {
+    const onText = await getT('popup.on', 'ON');
+    const offText = await getT('popup.off', 'OFF');
+    if (debugStatus.textContent === 'ON') debugStatus.textContent = onText;
+    if (debugStatus.textContent === 'OFF') debugStatus.textContent = offText;
+  }
+  if (outfiterStatus) {
+    const onText = await getT('popup.on', 'ON');
+    const offText = await getT('popup.off', 'OFF');
+    if (outfiterStatus.textContent === 'ON') outfiterStatus.textContent = onText;
+    if (outfiterStatus.textContent === 'OFF') outfiterStatus.textContent = offText;
+  }
+}
+
+// Helper function to get translation (for use in other functions)
+async function getTranslation(path, fallback = '') {
+  if (!translations) {
+    translations = await window.LocalizationUtils.loadTranslations();
+  }
+  const translation = await window.LocalizationUtils.getTranslation(path);
+  return translation || fallback;
+}
 
 async function getManualMods() {
   return new Promise(resolve => {
@@ -413,7 +531,8 @@ async function updateStorageUsage() {
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
     
-    storageElement.textContent = `Storage: ${formatBytes(totalBytes)}`;
+    const storageText = await getTranslation('popup.storage', 'Storage:');
+    storageElement.textContent = `${storageText} ${formatBytes(totalBytes)}`;
     
     // Add color indicator if storage is getting high
     if (totalBytes > 4 * 1024 * 1024) { // > 4MB
@@ -427,26 +546,35 @@ async function updateStorageUsage() {
     console.error('Failed to calculate storage usage:', error);
     const storageElement = document.getElementById('storage-usage');
     if (storageElement) {
-      storageElement.textContent = 'Storage: unavailable';
+      const storageText = await getTranslation('popup.storage', 'Storage:');
+      storageElement.textContent = `${storageText} unavailable`;
     }
   }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Load translations first
+  await loadAndApplyTranslations();
+  
+  // Load patch notes
+  await loadPatchNotes();
+  
   // === VERSION DISPLAY ===
   async function updateVersionDisplay() {
     try {
       const manifest = await window.browserAPI.runtime.getManifest();
       const versionElement = document.getElementById('version-display');
       if (versionElement) {
-        versionElement.textContent = `Version ${manifest.version}`;
+        const versionText = await getTranslation('popup.version', 'Version');
+        versionElement.textContent = `${versionText} ${manifest.version}`;
       }
       return manifest.version;
     } catch (error) {
       console.error('Failed to load manifest version:', error);
       const versionElement = document.getElementById('version-display');
       if (versionElement) {
-        versionElement.textContent = 'Version unknown';
+        const versionText = await getTranslation('popup.version', 'Version');
+        versionElement.textContent = `${versionText} unknown`;
       }
       return null;
     }
@@ -495,16 +623,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return 0;
   }
 
-  function renderPatchNotes(currentVersion) {
+  async function renderPatchNotes(currentVersion) {
     const patchNotesContainer = document.getElementById('patch-notes');
     const patchNotesContent = document.getElementById('patch-notes-content');
     
     if (!patchNotesContainer || !patchNotesContent) return;
 
-    // Get patch notes for current version and newer
+    // Ensure patch notes are loaded
+    if (PATCH_NOTES.length === 0) {
+      await loadPatchNotes();
+    }
+
+    // Get patch notes for current version only
     const relevantNotes = PATCH_NOTES.filter(note => 
-      compareVersions(note.version, currentVersion) <= 0
-    ).sort((a, b) => compareVersions(b.version, a.version)); // Sort newest first
+      note.version === currentVersion
+    );
 
     if (relevantNotes.length === 0) {
       patchNotesContainer.style.display = 'none';
@@ -516,9 +649,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Define type order for sorting
     const typeOrder = { 'added': 0, 'changed': 1, 'removed': 2, 'fixed': 3 };
     
-    relevantNotes.forEach(note => {
+    for (const note of relevantNotes) {
       html += `<div class="patch-note-version">`;
-      html += `<div class="patch-note-version-title">Version ${note.version}</div>`;
+      const versionText = await getTranslation('popup.version', 'Version');
+      html += `<div class="patch-note-version-title">${versionText} ${note.version}</div>`;
       html += `<ul class="patch-note-list">`;
       // Sort changes by type
       const sortedChanges = [...note.changes].sort((a, b) => {
@@ -530,7 +664,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         html += `<li class="${change.type}">${change.text}</li>`;
       });
       html += `</ul></div>`;
-    });
+    }
 
     patchNotesContent.innerHTML = html;
   }
@@ -546,14 +680,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       // 1. No last viewed version (first time)
       // 2. Current version is newer than last viewed
       if (!lastViewedVersion || compareVersions(currentVersion, lastViewedVersion) > 0) {
-        renderPatchNotes(currentVersion);
+        await renderPatchNotes(currentVersion);
         const patchNotesContainer = document.getElementById('patch-notes');
         if (patchNotesContainer) {
           patchNotesContainer.style.display = 'block';
         }
       } else {
         // Still render but don't show (user can manually open if needed)
-        renderPatchNotes(currentVersion);
+        await renderPatchNotes(currentVersion);
       }
     } catch (error) {
       originalConsoleLog('Error checking patch notes:', error);
@@ -666,7 +800,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const gistHash = extractGistHash(hashInputValue);
       
       if (!gistHash) {
-        alert('Please enter a valid GitHub Gist hash or Gist URL.');
+        const errorMsg = await getTranslation('form.hashPlaceholder', 'Please enter a valid GitHub Gist hash or Gist URL.');
+        alert(errorMsg);
         return;
       }
       
@@ -683,7 +818,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       if (!scriptContent) {
-        alert('Failed to fetch script content. Check the Gist hash/URL and your internet connection.');
+        const errorMsg = await getTranslation('messages.errorLoadingScripts', 'Failed to fetch script content. Check the Gist hash/URL and your internet connection.');
+        alert(errorMsg);
         return;
       }
       
@@ -699,7 +835,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         await updateStorageUsage();
       } catch (e) {
         originalConsoleLog('Failed to save script:', e);
-        alert('Failed to save script.');
+        const errorMsg = await getTranslation('popup.messages.failedToSaveScript', 'Failed to save script.');
+        alert(errorMsg);
       }
     });
   }
@@ -808,7 +945,7 @@ async function loadLocalMods() {
     const response = await window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' });
     const mods = response && response.success ? response.mods : [];
 
-    renderLocalMods(mods);
+    await renderLocalMods(mods);
   } catch (error) {
     showError('Error loading local mods: ' + error.message);
   }
@@ -913,21 +1050,33 @@ function getModDisplayName(mod) {
   return modFileName.replace('.js', '').replace(/_/g, ' ');
 }
 
-function getModDescription(mod) {
+async function getModDescription(mod) {
   const displayName = getModDisplayName(mod);
-  return modDescriptions[displayName] || `Enhance your Bestiary Arena experience with ${displayName}.`;
+  // Try to get translation first
+  const translationKey = `popup.modDescriptions.${displayName}`;
+  const translatedDescription = await getTranslation(translationKey);
+  if (translatedDescription) {
+    return translatedDescription;
+  }
+  // Fallback to hardcoded English descriptions
+  if (modDescriptions[displayName]) {
+    return modDescriptions[displayName];
+  }
+  // Final fallback with translation
+  const defaultDesc = await getTranslation('popup.modDescriptions.defaultDescription', `Enhance your Bestiary Arena experience with ${displayName}.`);
+  return defaultDesc.replace('{name}', displayName);
 }
 
-function getCategoryDisplayName(category) {
+async function getCategoryDisplayName(category) {
   const categoryNames = {
-    'official': 'Original Mods',
-    'super': 'SuperMods',
-    'custom': 'Custom Mods'
+    'official': await getTranslation('popup.categoryOfficial', 'Original Mods'),
+    'super': await getTranslation('popup.categorySuper', 'SuperMods'),
+    'custom': await getTranslation('popup.categoryCustom', 'Custom Mods')
   };
   return categoryNames[category] || category;
 }
 
-function createModCard(mod) {
+async function createModCard(mod) {
   const modCard = document.createElement('div');
   modCard.className = 'mod-card';
   if (mod.enabled) {
@@ -938,7 +1087,7 @@ function createModCard(mod) {
 
   const category = getModCategory(mod);
   const displayName = getModDisplayName(mod);
-  const description = getModDescription(mod);
+  const description = await getModDescription(mod);
 
   // Header with title and category badge
   const header = document.createElement('div');
@@ -950,7 +1099,7 @@ function createModCard(mod) {
 
   const categoryBadge = document.createElement('span');
   categoryBadge.className = `mod-card-category ${category}`;
-  categoryBadge.textContent = getCategoryDisplayName(category);
+  categoryBadge.textContent = await getCategoryDisplayName(category);
 
   header.appendChild(title);
   header.appendChild(categoryBadge);
@@ -969,7 +1118,9 @@ function createModCard(mod) {
 
   const toggleLabel = document.createElement('span');
   toggleLabel.className = 'mod-card-toggle-label';
-  toggleLabel.textContent = mod.enabled ? 'ON' : 'OFF';
+  const onText = await getTranslation('popup.on', 'ON');
+  const offText = await getTranslation('popup.off', 'OFF');
+  toggleLabel.textContent = mod.enabled ? onText : offText;
 
   const toggleSwitch = document.createElement('label');
   toggleSwitch.className = 'toggle-switch';
@@ -979,7 +1130,9 @@ function createModCard(mod) {
   toggleInput.checked = mod.enabled;
   toggleInput.addEventListener('change', async () => {
     await toggleLocalMod(mod.name, toggleInput.checked);
-    toggleLabel.textContent = toggleInput.checked ? 'ON' : 'OFF';
+    const onText = await getTranslation('popup.on', 'ON');
+    const offText = await getTranslation('popup.off', 'OFF');
+    toggleLabel.textContent = toggleInput.checked ? onText : offText;
     if (toggleInput.checked) {
       modCard.classList.add('enabled');
     } else {
@@ -987,7 +1140,7 @@ function createModCard(mod) {
     }
     // Update mod enabled state for counts
     mod.enabled = toggleInput.checked;
-    updateCategoryCounts(allMods);
+    await updateCategoryCounts(allMods);
   });
 
   const slider = document.createElement('span');
@@ -1005,12 +1158,14 @@ function createModCard(mod) {
     const deleteButton = document.createElement('button');
     deleteButton.className = 'mod-card-delete';
     deleteButton.innerHTML = '×';
-    deleteButton.setAttribute('aria-label', 'Delete mod');
-    deleteButton.setAttribute('title', 'Delete mod');
+    const deleteText = await getTranslation('popup.deleteMod', 'Delete mod');
+    deleteButton.setAttribute('aria-label', deleteText);
+    deleteButton.setAttribute('title', deleteText);
     deleteButton.addEventListener('click', async (e) => {
       e.stopPropagation();
       const modName = mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', '');
-      if (confirm(`Are you sure you want to delete "${modName}"?`)) {
+      const confirmMsg = await getTranslation('popup.messages.deleteConfirm', `Are you sure you want to delete "${modName}"?`);
+      if (confirm(confirmMsg.replace('{name}', modName))) {
         await deleteManualMod(mod.originalName || mod.displayName || mod.name.split('/').pop().replace('.js', ''));
       }
     });
@@ -1024,7 +1179,7 @@ function createModCard(mod) {
   return modCard;
 }
 
-function updateCategoryCounts(mods) {
+async function updateCategoryCounts(mods) {
   if (!mods || mods.length === 0) return;
 
   // Filter out hidden mods
@@ -1059,28 +1214,31 @@ function updateCategoryCounts(mods) {
 
   if (officialFilter) {
     if (counts.official.total > 0) {
-      officialFilter.textContent = `Original Mods (${counts.official.enabled}/${counts.official.total})`;
+      const categoryText = await getTranslation('popup.categoryOfficial', 'Original Mods');
+      officialFilter.textContent = `${categoryText} (${counts.official.enabled}/${counts.official.total})`;
     } else {
-      officialFilter.textContent = 'Original Mods';
+      officialFilter.textContent = await getTranslation('popup.categoryOfficial', 'Original Mods');
     }
   }
   if (superFilter) {
     if (counts.super.total > 0) {
-      superFilter.textContent = `SuperMods (${counts.super.enabled}/${counts.super.total})`;
+      const categoryText = await getTranslation('popup.categorySuper', 'SuperMods');
+      superFilter.textContent = `${categoryText} (${counts.super.enabled}/${counts.super.total})`;
     } else {
-      superFilter.textContent = 'SuperMods';
+      superFilter.textContent = await getTranslation('popup.categorySuper', 'SuperMods');
     }
   }
   if (customFilter) {
     if (counts.custom.total > 0) {
-      customFilter.textContent = `Custom Mods (${counts.custom.enabled}/${counts.custom.total})`;
+      const categoryText = await getTranslation('popup.categoryCustom', 'Custom Mods');
+      customFilter.textContent = `${categoryText} (${counts.custom.enabled}/${counts.custom.total})`;
     } else {
-      customFilter.textContent = 'Custom Mods';
+      customFilter.textContent = await getTranslation('popup.categoryCustom', 'Custom Mods');
     }
   }
 }
 
-function renderLocalMods(mods) {
+async function renderLocalMods(mods) {
   const modsGrid = document.getElementById('mods-grid');
   const emptyState = document.getElementById('empty-state');
 
@@ -1090,7 +1248,7 @@ function renderLocalMods(mods) {
 
   if (!mods || mods.length === 0) {
     emptyState.style.display = 'block';
-    updateCategoryCounts([]);
+    await updateCategoryCounts([]);
     return;
   }
 
@@ -1106,13 +1264,13 @@ function renderLocalMods(mods) {
   allMods = visibleMods;
 
   // Update category counts
-  updateCategoryCounts(visibleMods);
+  await updateCategoryCounts(visibleMods);
 
   // Render all mods
-  visibleMods.forEach(mod => {
-    const modCard = createModCard(mod);
+  for (const mod of visibleMods) {
+    const modCard = await createModCard(mod);
     modsGrid.appendChild(modCard);
-  });
+  }
 
   emptyState.style.display = visibleMods.length === 0 ? 'block' : 'none';
   
@@ -1229,7 +1387,8 @@ window.browserAPI.storage.onChanged.addListener((changes, area) => {
 });
 
 document.getElementById('reload-mods-btn')?.addEventListener('click', async () => {
-  if (!confirm('Are you sure you want to reset local mods? This will remove all official and super mods from storage and reload from disk. User-generated mods will not be affected.')) return;
+  const confirmMsg = await getTranslation('popup.messages.resetLocalModsConfirm', 'Are you sure you want to reset local mods? This will remove all official and super mods from storage and reload from disk. User-generated mods will not be affected.');
+  if (!confirm(confirmMsg)) return;
   try {
     if (window.browser && window.browser.storage && window.browser.storage.local) {
       await window.browser.storage.local.remove(['localMods', 'activeScripts']);
@@ -1243,16 +1402,19 @@ document.getElementById('reload-mods-btn')?.addEventListener('click', async () =
     await new Promise(res => setTimeout(res, 50));
     await loadLocalMods();
     await updateStorageUsage();
-    alert('Local mods reset!');
+    const successMsg = await getTranslation('popup.messages.localModsReset', 'Local mods reset!');
+    alert(successMsg);
   } catch (e) {
-    alert('Failed to reset local mods.');
+    const errorMsg = await getTranslation('popup.messages.failedToResetLocalMods', 'Failed to reset local mods.');
+    alert(errorMsg);
   }
 });
 
 
 
 document.getElementById('reset-all-btn')?.addEventListener('click', async () => {
-  if (!confirm('Are you sure you want to reset the entire mod loader? This will remove ALL settings, mods, and data.')) return;
+  const confirmMsg = await getTranslation('popup.messages.resetAllConfirm', 'Are you sure you want to reset the entire mod loader? This will remove ALL settings, mods, and data.');
+  if (!confirm(confirmMsg)) return;
   try {
     if (window.browser && window.browser.storage && window.browser.storage.local) {
       await new Promise(res => window.browser.storage.local.clear(res));
@@ -1265,10 +1427,12 @@ document.getElementById('reset-all-btn')?.addEventListener('click', async () => 
     }
     await loadLocalMods();
     await updateStorageUsage();
-    alert('All mod loader data reset!');
+    const successMsg = await getTranslation('popup.messages.allDataReset', 'All mod loader data reset!');
+    alert(successMsg);
     window.location.reload();
   } catch (e) {
-    alert('Failed to reset all data.');
+    const errorMsg = await getTranslation('popup.messages.failedToResetAll', 'Failed to reset all data.');
+    alert(errorMsg);
   }
 });
 
