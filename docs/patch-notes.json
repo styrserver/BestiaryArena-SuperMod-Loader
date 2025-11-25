@@ -4,6 +4,14 @@
   },
   "notes": [
   {
+    "version": "3.0.3",
+    "changes": [
+      { "type": "added", "mod": "Cyclopedia", "text": "Added Dungeon Ascension upgrade to inventory database and upgrade keys" },
+      { "type": "changed", "mod": "Cyclopedia", "text": "Improved inventory display: added store prices to item tooltips and upgradeable status indicator" },
+      { "type": "fixed", "mod": "Autoseller", "text": "Fixed autoplant potentially selling creatures instead of devouring them by preventing autosell from running when autoplant is enabled" }
+    ]
+  },
+  {
     "version": "3.0.2",
     "changes": [
       { "type": "removed", "mod": "Autoscroller", "text": "Removed Gummy Raider and Yeti from available and selected creatures lists" },

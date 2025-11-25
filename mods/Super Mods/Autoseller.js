@@ -2231,6 +2231,12 @@
         try {
             const settings = getSettings();
             
+            // Prevent autosell from running when autoplant is enabled (they conflict)
+            if (type === 'sell' && settings.autoplantChecked) {
+                console.log('[Autoseller] Autoplant is enabled, skipping autosell processing');
+                return;
+            }
+            
             // Check if the feature is enabled before processing
             if (type === 'sell' && !settings.autosellChecked) {
                 return;
@@ -3493,8 +3499,15 @@
                         return;
                     }
                     
-                    await processEligibleMonsters(inventorySnapshot, 'squeeze');
-                    await processEligibleMonsters(inventorySnapshot, 'sell');
+                    // Autosqueeze is independent and can run with autoplant
+                    if (settings.autosqueezeChecked) {
+                        await processEligibleMonsters(inventorySnapshot, 'squeeze');
+                    }
+                    
+                    // Only process sell if autosell is enabled AND autoplant is NOT enabled (they conflict)
+                    if (settings.autosellChecked && !settings.autoplantChecked) {
+                        await processEligibleMonsters(inventorySnapshot, 'sell');
+                    }
                 }, (waitSeconds + 5) * 1000);
             });
         }

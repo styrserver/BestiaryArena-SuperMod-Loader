@@ -9,7 +9,7 @@ const inventoryTooltips = {
     text: `"Your new name shall be reviewed by King Tibianus himself. He's not a fan of offensive words, trust me."`,
     icon: '/assets/icons/player-nickname.png',
     rarity: '2',
-    obtain: 'Store'
+    obtain: 'Store (10,000 gold)'
   },
   diceManipulator1: {
     displayName: "Dice Manipulator (Common)",
@@ -44,7 +44,7 @@ const inventoryTooltips = {
     text: `Re-roll 1 gene stat.\n\n"Despite common belief, rolling a dice isn't about luck—it's about skill."`,
     icon: 'sprite://35909',
     rarity: '5',
-    obtain: 'Loot, Surprise Cube, Store, Level-up Reward'
+    obtain: 'Loot, Surprise Cube, Store (10,000 gold), Level-up Reward'
   },
   equipChest: {
     displayName: "Exaltation Chest (Honed)",
@@ -58,7 +58,7 @@ const inventoryTooltips = {
     text: 'Contains a random hunter outfit.',
     icon: '/assets/icons/hunteroutfitbag.png',
     rarity: '3',
-    obtain: 'Store, Level-up Reward, Reward Shop (3 hunting marks)'
+    obtain: 'Store (100 Beast Coins), Level-up Reward, Reward Shop (3 hunting marks)'
   },
   insightStone1: {
     displayName: "Stone of Insight (Glimpse)",
@@ -100,14 +100,14 @@ const inventoryTooltips = {
     text: `Your creature's nickname will also be visible for other players.\n\n"This paperwork will be processed by a dead bureaucrat at the Pits of Despair. They are not in a hurry, since they have all the time in the world."`,
     icon: '/assets/icons/nickname-change.png',
     rarity: '2',
-    obtain: 'Store'
+    obtain: 'Store (4,000 gold)'
   },
   outfitBag1: {
     displayName: "Outfit Bag",
     text: 'Contains a random outfit.',
     icon: 'sprite://653',
     rarity: '2',
-    obtain: 'Store, Level-up Reward, Reward Shop (3 hunting marks)'
+    obtain: 'Store (125 Beast Coins for 1x OR 250 Beast Coins for 3x), Level-up Reward, Reward Shop (3 hunting marks)'
   },
   stamina1: {
     displayName: "Stamina Potion (Mini)",
@@ -142,7 +142,7 @@ const inventoryTooltips = {
     text: 'Restores your stamina to full.\n\n"Force flows from fluid,\nfueling for further fights"',
     icon: '/assets/icons/stamina5.png',
     rarity: '5',
-    obtain: 'Surprise Cube, Daily Seashell, Store, Level-up Reward'
+    obtain: 'Surprise Cube, Daily Seashell, Store (15 Beast Coins), Level-up Reward'
   },
   summonScroll1: {
     displayName: "Summon Scroll (Crude)",
@@ -177,7 +177,7 @@ const inventoryTooltips = {
     text: 'Summon a creature with at least 80% genes.\n\nYou see a spell scroll. It reads: "utevo res".',
     icon: '/assets/icons/summonscroll5.png',
     rarity: '5',
-    obtain: 'Loot, Surprise Cube, Daily Seashell, Store, Level-up Reward'
+    obtain: 'Loot, Surprise Cube, Daily Seashell, Store (20 Beast Coins), Level-up Reward'
   },
   summonScroll6: {
     displayName: "Summon Scroll (Chromatic)",
@@ -350,84 +350,91 @@ const inventoryTooltips = {
     text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!\n\nUpgrades to Dragon Plant.',
     icon: 'sprite://28689',
     rarity: '3',
-    obtain: 'Store'
+    obtain: 'Store (100,000 gold)'
   },
   daycare: {
     displayName: "Daycare",
     text: 'Leave your creatures training at the daycare.\n\nDuring this time, your creatures will slowly earn xp.',
     icon: '/assets/icons/daycare.png',
     rarity: '3',
-    obtain: 'Store'
+    obtain: 'Store (1,500 gold)'
   },
   dragonPlant: {
     displayName: "Dragon Plant",
     text: 'This useful pet plant can automatically swallow any freshly dropped monsters and digest them into gold!',
     icon: 'sprite://37022',
     rarity: '4',
-    obtain: 'Store'
+    obtain: 'Store (100,000 gold, upgradeable 5x times)'
   },
   forge: {
     displayName: "The Sweaty Cyclop's Forge",
     text: 'Bring me two of the same thing.\n\nMe smelt, me smash, until make better thing.',
     icon: '/assets/misc/forge-mini.png',
     rarity: '5',
-    obtain: 'Store'
+    obtain: 'Store (50,000 gold)'
   },
   hygenie: {
     displayName: "Hy'genie",
     text: `Need to fuse all your items at once? Your wish is my command.`,
     icon: 'sprite://42363',
     rarity: '5',
-    obtain: 'Store'
+    obtain: 'Store (15,000 gold)'
   },
   monsterCauldron: {
     displayName: "Monster Cauldron",
     text: 'All sold creatures go to the cauldron. You may bring a creature back, if is not yet dissolved.',
     icon: 'sprite://43672',
     rarity: '3',
-    obtain: 'Store'
+    obtain: 'Store (15,000 gold)'
   },
   mountainFortress: {
     displayName: "The Mountain Fortress",
     text: 'Upgrade a creature tier to increase its maximum level.\n\n"Nobody knows exactly what happens to those creatures..."',
     icon: '/assets/icons/mountainfortress.png',
     rarity: '4',
-    obtain: 'Store'
+    obtain: 'Store (1,500 gold)'
   },
   monsterRaids: {
     displayName: "Monster Raids",
     text: 'Stay alert! At any moment, a new random monster raid may begin! Raids can drop exclusive equipments and monsters.',
     icon: 'https://bestiaryarena.com/assets/icons/raid-store.png',
     rarity: '5',
-    obtain: 'Store'
+    obtain: 'Store (20,000 gold)'
   },
   monsterSqueezer: {
     displayName: "Monster Squeezer",
     text: 'Ingredients should have at most Lv. 10 and have at least 80% genes.\n\nThis is required if you want to produce 99.1% pure dust.\n\nSqueezing is easy peasy. Unsqueezing is not feasibly',
     icon: '/assets/misc/monster-squeezer-portrait-mini.png',
     rarity: '4',
-    obtain: 'Store'
+    obtain: 'Store (30,000 gold)'
   },
   dailyBoostedMap: {
     displayName: "Daily Boosted Map",
     text: 'Unlocks the daily boosted map feature.\n\n"Experience enhanced rewards and challenges on specially boosted maps each day."',
     icon: '/assets/icons/boosted-map.png',
     rarity: '4',
-    obtain: 'Store'
+    obtain: 'Store (10,000 gold)'
   },
   premium: {
     displayName: "Premium",
     text: 'Premium subscription that unlocks exclusive features and benefits.\n\n"Access to premium content, enhanced rewards, and exclusive features."',
     icon: '/assets/icons/premium.png',
     rarity: '5',
-    obtain: 'Store'
+    obtain: 'Store (300 Beast Coins)'
   },
   yasirTradingContract: {
     displayName: "Yasir's Trading Contract",
     text: 'Unlocks trading features with Yasir.\n\n"Establish trade agreements and access exclusive trading opportunities."',
     icon: '/assets/icons/yasir-contract.png',
     rarity: '4',
-    obtain: 'Store'
+    obtain: 'Store (25,000 gold)'
+  },
+  dungeonAscension: {
+    displayName: "Dungeon Ascension",
+    text: 'Ascend your way through increasingly more difficult enemies. The higher you climb, the better the loot. How high can you go?',
+    icon: '/assets/icons/dungeon-ascension.png',
+    rarity: '5',
+    obtain: 'Store (200,000 gold)'
   }
 };
 
@@ -436,7 +443,7 @@ const INVENTORY_CATEGORIES = {
   'Consumables': ['Change Nickname', 'Dice Manipulators', 'Exaltation Chests', 'Nickname Creature', 'Outfit Bags', 'Stamina Potions', 'Stones of Insight', 'Summon Scrolls', 'Surprise Cubes'],
   'Currency': ['Beast Coins', 'Dust', 'Gold', 'Hunting Marks'],
   'Runes': ['Avarice Rune', 'Hitpoints Rune', 'Attack Damage Rune', 'Ability Power Rune', 'Armor Rune', 'Magic Resist Rune', 'Blank Rune', 'Recycle Rune', 'Kaleidoscopic Rune', 'Conversion Rune (hp)', 'Conversion Rune (ad)', 'Conversion Rune (ap)'],
-  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
+  'Upgrades': ['Baby Dragon Plant', 'Daily Boosted Map', 'Daycare', 'Dungeon Ascension', 'Dragon Plant', 'Hy\'genie', 'Monster Cauldron', 'Monster Raids', 'Monster Squeezer', 'Mountain Fortress', 'Premium', 'The Sweaty Cyclop\'s Forge', 'Yasir\'s Trading Contract']
 };
 
 const INVENTORY_VARIANTS = {
@@ -451,7 +458,7 @@ const INVENTORY_VARIANTS = {
   'Avarice Rune': ['runeAvarice'], 'Hitpoints Rune': ['runeHp'], 'Attack Damage Rune': ['runeAd'], 'Ability Power Rune': ['runeAp'], 'Armor Rune': ['runeAr'], 'Magic Resist Rune': ['runeMr'],
   'Blank Rune': ['runeBlank'], 'Recycle Rune': ['runeRecycle'],
   'Kaleidoscopic Rune': ['runeKaleidoscopic'], 'Conversion Rune (hp)': ['runeConversionHp'], 'Conversion Rune (ad)': ['runeConversionAd'], 'Conversion Rune (ap)': ['runeConversionAp'],
-  'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
+  'Baby Dragon Plant': ['babyDragonPlant'], 'Daily Boosted Map': ['dailyBoostedMap'], 'Daycare': ['daycare'], 'Dungeon Ascension': ['dungeonAscension'], 'Dragon Plant': ['dragonPlant'], 'Hy\'genie': ['hygenie'],
   'Monster Cauldron': ['monsterCauldron'], 'Monster Raids': ['monsterRaids'], 'Monster Squeezer': ['monsterSqueezer'], 'Mountain Fortress': ['mountainFortress'],
   'Premium': ['premium'], 'The Sweaty Cyclop\'s Forge': ['forge'], 'Yasir\'s Trading Contract': ['yasirTradingContract']
 };
@@ -467,11 +474,16 @@ const INVENTORY_STATIC_ITEMS = {
   'nicknamePlayer': { name: 'Player Nickname', rarity: '2' }, 'equipChest': { name: 'Exaltation Chest', rarity: '5' },
   'hunterOutfitBag': { name: 'Hunter Outfit Bag', rarity: '3' }, 'outfitBag1': { name: 'Outfit Bag', rarity: '2' },
   'babyDragonPlant': { name: 'Baby Dragon Plant', rarity: '3' }, 'dailyBoostedMap': { name: 'Daily Boosted Map', rarity: '4' }, 'daycare': { name: 'Daycare', rarity: '3' },
-  'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
+  'dungeonAscension': { name: 'Dungeon Ascension', rarity: '5' }, 'dragonPlant': { name: 'Dragon Plant', rarity: '4' }, 'hygenie': { name: 'Hy\'genie', rarity: '5' }, 'monsterCauldron': { name: 'Monster Cauldron', rarity: '4' },
   'monsterRaids': { name: 'Monster Raids', rarity: '4' }, 'monsterSqueezer': { name: 'Monster Squeezer', rarity: '3' }, 'mountainFortress': { name: 'Mountain Fortress', rarity: '4' },
   'premium': { name: 'Premium', rarity: '5' }, 'forge': { name: 'The Sweaty Cyclop\'s Forge', rarity: '5' },
   'yasirTradingContract': { name: 'Yasir\'s Trading Contract', rarity: '4' }
 };
+
+// Items that can be upgraded multiple times
+const INVENTORY_UPGRADEABLE_ITEMS = [
+  'dragonPlant'
+];
 
 // Rarity configuration for items and equipment
 const RARITY_CONFIG = {
@@ -485,6 +497,7 @@ const inventoryDatabase = {
   categories: INVENTORY_CATEGORIES,
   variants: INVENTORY_VARIANTS,
   staticItems: INVENTORY_STATIC_ITEMS,
+  upgradeableItems: INVENTORY_UPGRADEABLE_ITEMS,
   rarityText: RARITY_CONFIG.text,
   rarityColors: RARITY_CONFIG.colors
 };

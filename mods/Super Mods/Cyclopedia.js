@@ -143,7 +143,7 @@ const ALL_EQUIPMENT = window.equipmentDatabase?.ALL_EQUIPMENT || [];
 const GAME_KEYS = {
   NO_RARITY: ['nicknameChange', 'nicknameMonster', 'hunterOutfitBag', 'outfitBag1'],
   CURRENCY: ['gold', 'dust', 'beastCoins', 'huntingMarks'],
-  UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
+  UPGRADE: ['babyDragonPlant', 'dailyBoostedMap', 'daycare', 'dungeonAscension', 'dragonPlant', 'hygenie', 'monsterCauldron', 'monsterRaids', 'monsterSqueezer', 'mountainFortress', 'premium', 'forge', 'yasirTradingContract']
 };
 
 const EXP_TABLE = [
@@ -7557,10 +7557,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             const raritySpan = isNoRarity ? '' : `<span style="color: ${rarityColors[realRarity] || '#666'}; font-size: 11px;">${getRarityDisplayText(realRarity)}</span>`;
 
             const upgradeKeys = GAME_DATA.UPGRADE_KEYS;
+            const upgradeableItems = (inventoryDatabase && inventoryDatabase.upgradeableItems) || [];
+            const isUpgradeable = upgradeableItems.includes(itemKey);
             const formattedCount = currencyKeys.includes(itemKey)
               ? `<span style=\"color: #ffe066; font-weight: bold; cursor: help;\" title=\"${count.toLocaleString()}\">${FormatUtils.currency(count)}</span>`
               : upgradeKeys.includes(itemKey)
-              ? `<span style=\"color: #888; font-style: italic;\">One-time purchase</span>`
+              ? `<span style=\"color: #888; font-style: italic;\">${isUpgradeable ? 'Upgradeable' : 'One-time purchase'}</span>`
               : `<span style=\"color: #ffe066; font-weight: bold;\">${count}</span>`;
 
             return `
@@ -7651,10 +7653,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
 
           const currencyKeys = GAME_DATA.CURRENCY_KEYS;
           const upgradeKeys = GAME_DATA.UPGRADE_KEYS;
+          const upgradeableItems = (inventoryDatabase && inventoryDatabase.upgradeableItems) || [];
+          const isUpgradeable = upgradeableItems.includes(itemKey);
           const formattedCount = currencyKeys.includes(itemKey)
             ? FormatUtils.currency(count)
             : upgradeKeys.includes(itemKey)
-            ? 'One-time purchase'
+            ? (isUpgradeable ? 'Upgradeable' : 'One-time purchase')
             : count;
 
           return `
