@@ -873,6 +873,15 @@ const BUTTON_STYLES = {
   DISABLED: 'background: rgba(128, 128, 128, 0.3); border-color: rgba(128, 128, 128, 0.5); opacity: 0.6;'
 };
 
+// Font helper functions
+function getFontFamily() {
+  return CSS_CONSTANTS.FONT_FAMILY_SYSTEM;
+}
+
+function getFontSize(size = 'BASE') {
+  return CSS_CONSTANTS.FONT_SIZES[size] || CSS_CONSTANTS.FONT_SIZES.BASE;
+}
+
 // Create styled input or textarea element
 function createStyledInput({ type = 'text', placeholder = '', maxLength, className = 'pixel-font-14', style = {} }) {
   const input = type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
@@ -890,7 +899,8 @@ function createStyledInput({ type = 'text', placeholder = '', maxLength, classNa
     border-color: transparent;
     border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
     color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    font-size: ${type === 'textarea' ? '12px' : '14px'};
+    font-size: ${type === 'textarea' ? getFontSize('BASE') : getFontSize('LG')};
+    font-family: ${getFontFamily()};
     ${type === 'textarea' ? 'resize: none; flex: 1; min-height: 80px;' : 'max-height: 21px; height: 21px; line-height: normal;'}
     box-sizing: border-box;
   `;
@@ -915,7 +925,8 @@ function createStyledSelect({ className = 'pixel-font-14', style = {} } = {}) {
     border-color: transparent;
     border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
     color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    font-size: 14px;
+    font-size: ${getFontSize('LG')};
+    font-family: ${getFontFamily()};
     min-height: 35px;
     height: auto;
     line-height: 1.4;
@@ -973,7 +984,7 @@ function createFormField(labelText, inputElement) {
   
   const label = document.createElement('label');
   label.textContent = labelText;
-  label.style.cssText = `display: block; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 14px; margin-bottom: 4px;`;
+  label.style.cssText = `display: block; color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: ${getFontSize('LG')}; font-family: ${getFontFamily()}; margin-bottom: 4px;`;
   
   container.appendChild(label);
   container.appendChild(inputElement);
@@ -2121,14 +2132,38 @@ const CSS_CONSTANTS = {
   BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
   BORDER_4_FRAME: 'url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch',
   BORDER_1_FRAME: 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill',
+  BORDER_1_FRAME_PRESSED: 'url("https://bestiaryarena.com/_next/static/media/1-frame-pressed.e3fabbc5.png") 4 fill',
+  BORDER_3_FRAME: 'url("https://bestiaryarena.com/_next/static/media/3-frame.87c349c1.png") 6 fill',
+  FONT_FAMILY: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+  FONT_FAMILY_SYSTEM: 'system-ui, -apple-system, sans-serif',
   COLORS: {
     TEXT_PRIMARY: 'rgb(230, 215, 176)',
     TEXT_WHITE: 'rgb(255, 255, 255)',
+    ONLINE: 'rgb(76, 175, 80)',
+    OFFLINE: 'rgb(255, 107, 107)',
+    LINK: 'rgb(100, 181, 246)',
     ERROR: '#ff6b6b',
     SUCCESS: '#4caf50',
     ROLE_LEADER: '#ffd700', // Gold for leader
     ROLE_OFFICER: '#64b5f6', // Blue for officer
-    ROLE_MEMBER: '#a5d6a7' // Green for member
+    ROLE_MEMBER: '#a5d6a7', // Green for member
+    WHITE_50: 'rgba(255, 255, 255, 0.5)',
+    WHITE_60: 'rgba(255, 255, 255, 0.6)',
+    WHITE_70: 'rgba(255, 255, 255, 0.7)',
+    WHITE_05: 'rgba(255, 255, 255, 0.05)',
+    WHITE_10: 'rgba(255, 255, 255, 0.1)',
+    WHITE_20: 'rgba(255, 255, 255, 0.2)',
+    BLACK_20: 'rgba(0, 0, 0, 0.2)',
+    BLACK_30: 'rgba(0, 0, 0, 0.3)',
+    LINK_15: 'rgba(100, 181, 246, 0.15)'
+  },
+  FONT_SIZES: {
+    XS: '10px',
+    SM: '11px',
+    BASE: '12px',
+    MD: '13px',
+    LG: '14px',
+    XL: '16px'
   }
 };
 
@@ -3137,8 +3172,8 @@ function createGuildBox({headerRow, content}) {
   titleEl.style.flexDirection = 'row';
   titleEl.style.alignItems = 'center';
   titleEl.style.width = '100%';
-  titleEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-  titleEl.style.fontSize = '14px';
+  titleEl.style.fontFamily = getFontFamily();
+  titleEl.style.fontSize = getFontSize('LG');
   titleEl.style.fontWeight = '600';
   titleEl.style.letterSpacing = '0.3px';
   
@@ -3594,6 +3629,7 @@ async function showGuildBrowser() {
         margin-bottom: 4px;
         background: ${bgColor};
         width: 100%;
+        font-family: ${getFontFamily()};
       `;
 
       const guildNameCell = document.createElement('div');
@@ -3602,11 +3638,14 @@ async function showGuildBrowser() {
         text-align: center;
         position: relative;
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+        font-family: ${getFontFamily()};
       `;
       const guildName = document.createElement('div');
       guildName.style.cssText = `
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
         font-weight: 600;
+        font-size: ${getFontSize('BASE')};
+        font-family: ${getFontFamily()};
       `;
       const nameText = document.createTextNode(guild.name);
       guildName.appendChild(nameText);
@@ -3616,8 +3655,9 @@ async function showGuildBrowser() {
         abbrevSpan.style.cssText = `
           color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
           opacity: 0.7;
-          font-size: 12px;
+          font-size: ${getFontSize('BASE')};
           font-weight: normal;
+          font-family: ${getFontFamily()};
         `;
         guildName.appendChild(abbrevSpan);
       }
@@ -3628,9 +3668,10 @@ async function showGuildBrowser() {
         inviteOnlyBadge.style.cssText = `
           color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
           opacity: 0.6;
-          font-size: 11px;
+          font-size: ${getFontSize('SM')};
           font-weight: normal;
           font-style: italic;
+          font-family: ${getFontFamily()};
         `;
         guildName.appendChild(inviteOnlyBadge);
       }
@@ -3642,6 +3683,8 @@ async function showGuildBrowser() {
         text-align: center;
         position: relative;
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
+        font-size: ${getFontSize('BASE')};
+        font-family: ${getFontFamily()};
       `;
       memberCountCell.textContent = `${guild.memberCount || 0}/${GUILD_CONFIG.maxMembers}`;
 
@@ -3651,8 +3694,9 @@ async function showGuildBrowser() {
         text-align: center;
         position: relative;
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-        font-size: 12px;
+        font-size: ${getFontSize('BASE')};
         font-weight: 600;
+        font-family: ${getFontFamily()};
       `;
       
       // Use cached points if available, otherwise calculate
@@ -3673,8 +3717,9 @@ async function showGuildBrowser() {
         text-align: center;
         position: relative;
         color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
-        font-size: 12px;
+        font-size: ${getFontSize('BASE')};
         opacity: 0.8;
+        font-family: ${getFontFamily()};
       `;
       leaderCell.textContent = guild.leader;
       
@@ -3809,12 +3854,12 @@ async function showGuildBrowser() {
     background: rgba(255, 255, 255, 0.1);
     border-bottom: 2px solid rgba(255, 255, 255, 0.2);
     font-weight: 600;
-    font-family: system-ui, -apple-system, sans-serif;
-    font-size: 13px;
+    font-family: ${getFontFamily()};
+    font-size: ${getFontSize('MD')};
     letter-spacing: 0.2px;
     width: 100%;
   `;
-
+  
   // Store sort indicators for updating
   const sortIndicators = new Map();
 
@@ -3826,8 +3871,8 @@ async function showGuildBrowser() {
       text-align: center;
       white-space: nowrap;
       position: relative;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 13px;
+      font-family: ${getFontFamily()};
+      font-size: ${getFontSize('MD')};
       font-weight: 600;
       letter-spacing: 0.2px;
       ${sortable ? 'cursor: pointer; user-select: none;' : ''}
@@ -3934,7 +3979,8 @@ async function showGuildBrowser() {
       border-color: transparent;
       border-image: ${CSS_CONSTANTS.BORDER_1_FRAME};
       color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-      font-size: 14px;
+      font-size: ${getFontSize('XS')};
+      font-family: ${getFontFamily()};
       text-align: left;
       box-sizing: border-box;
       max-height: 21px;
@@ -4309,6 +4355,7 @@ async function openGuildPanel(viewGuildId = null) {
       width: 100%;
       border-radius: 2px;
       gap: 4px;
+      font-family: ${getFontFamily()};
     `;
 
     // Top row: member info and points
@@ -4328,6 +4375,7 @@ async function openGuildPanel(viewGuildId = null) {
       gap: 2px;
       color: ${CSS_CONSTANTS.COLORS.TEXT_PRIMARY};
       position: relative;
+      font-family: ${getFontFamily()};
     `;
     
     // Create wrapper for name button and dropdown
@@ -4442,11 +4490,12 @@ async function openGuildPanel(viewGuildId = null) {
     }
     
     memberRole.style.cssText = `
-      font-size: 10px;
+      font-size: ${getFontSize('XS')};
       opacity: 0.9;
       color: ${roleColor};
       line-height: 1.2;
       font-weight: 500;
+      font-family: ${getFontFamily()};
     `;
     
     memberInfo.appendChild(nameWrapper);
@@ -4474,6 +4523,7 @@ async function openGuildPanel(viewGuildId = null) {
       cursor: help;
       min-width: 40px;
       text-align: right;
+      font-family: ${getFontFamily()};
     `;
 
     // Create tooltip with game-native styling
@@ -4919,24 +4969,104 @@ async function openGuildPanel(viewGuildId = null) {
 
   const isLeader = currentMember && currentMember.role === GUILD_ROLES.LEADER;
 
+  // Guild Points (visible to all members) - at top
+  const pointsSection = document.createElement('div');
+  pointsSection.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    padding: 8px;
+    gap: 6px;
+  `;
+  
+  const pointsLabel = document.createElement('label');
+  pointsLabel.textContent = t('mods.guilds.guildPoints');
+  pointsLabel.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  `;
+  
+  const pointsValueContainer = document.createElement('div');
+  pointsValueContainer.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 165, 0, 0.1));
+    border: 2px solid rgba(255, 215, 0, 0.3);
+    border-radius: 3px;
+    justify-content: center;
+  `;
+  
+  const pointsIcon = document.createElement('span');
+  pointsIcon.textContent = '⭐';
+  pointsIcon.style.cssText = 'font-size: 14px;';
+  
+  const currentPoints = document.createElement('div');
+  currentPoints.textContent = '...';
+  currentPoints.style.cssText = `
+    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 6px rgba(255, 215, 0, 0.5);
+  `;
+  
+  // Calculate and display points
+  calculateGuildPoints(guild.id).then(points => {
+    currentPoints.textContent = formatNumber(points);
+  }).catch(() => {
+    currentPoints.textContent = '0';
+  });
+  
+  pointsValueContainer.appendChild(pointsIcon);
+  pointsValueContainer.appendChild(currentPoints);
+  
+  pointsSection.appendChild(pointsLabel);
+  pointsSection.appendChild(pointsValueContainer);
+  adminContainer.appendChild(pointsSection);
+
   // Change Description (Leader only)
   if (isLeader) {
     const descSection = document.createElement('div');
-    descSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+    descSection.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 8px;
+      gap: 6px;
+    `;
     
     const descLabel = document.createElement('label');
     descLabel.textContent = t('mods.guilds.description');
-    descLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
+    descLabel.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    `;
     
     const currentDesc = document.createElement('div');
     currentDesc.textContent = guild.description || t('mods.guilds.noDescription');
     currentDesc.style.cssText = `
       color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
       font-size: 12px;
-      opacity: 0.8;
-      padding: 4px;
-      min-height: 20px;
+      opacity: 0.9;
+      padding: 6px;
+      min-height: 30px;
       word-wrap: break-word;
+      line-height: 1.4;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
     `;
     
     const descBtn = createButton(t('mods.guilds.editDescription'), async () => {
@@ -5059,24 +5189,53 @@ async function openGuildPanel(viewGuildId = null) {
 
     // Join Type setting (Leader only)
     const joinTypeSection = document.createElement('div');
-    joinTypeSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
+    joinTypeSection.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 8px;
+      gap: 6px;
+    `;
     
     const joinTypeLabel = document.createElement('label');
     joinTypeLabel.textContent = t('mods.guilds.joinTypeLabel');
-    joinTypeLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
+    joinTypeLabel.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    `;
     
     const currentJoinType = document.createElement('div');
     const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
-    currentJoinType.textContent = joinType === GUILD_JOIN_TYPES.OPEN 
+    const joinTypeText = joinType === GUILD_JOIN_TYPES.OPEN 
       ? t('mods.guilds.joinTypeOpen') 
       : t('mods.guilds.joinTypeInviteOnly');
+    
+    const joinTypeBadge = document.createElement('span');
+    joinTypeBadge.textContent = joinType === GUILD_JOIN_TYPES.OPEN ? '🌐' : '🔒';
+    joinTypeBadge.style.cssText = 'font-size: 12px; margin-right: 5px;';
+    
+    const joinTypeTextSpan = document.createElement('span');
+    joinTypeTextSpan.textContent = joinTypeText;
+    
     currentJoinType.style.cssText = `
       color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
       font-size: 12px;
-      opacity: 0.8;
-      padding: 4px;
-      min-height: 20px;
+      font-weight: 500;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
     `;
+    
+    currentJoinType.appendChild(joinTypeBadge);
+    currentJoinType.appendChild(joinTypeTextSpan);
     
     const joinTypeBtn = createButton(t('mods.guilds.changeJoinType'), async () => {
       let selectedJoinType = joinType;
@@ -5277,36 +5436,6 @@ async function openGuildPanel(viewGuildId = null) {
     joinTypeSection.appendChild(joinTypeBtn);
     adminContainer.appendChild(joinTypeSection);
   }
-
-  // Guild Points (visible to all members)
-  const pointsSection = document.createElement('div');
-  pointsSection.style.cssText = 'display: flex; flex-direction: column; gap: 4px; margin-top: 8px;';
-  
-  const pointsLabel = document.createElement('label');
-  pointsLabel.textContent = t('mods.guilds.guildPoints');
-  pointsLabel.style.cssText = `color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE}; font-size: 12px;`;
-  
-  const currentPoints = document.createElement('div');
-  currentPoints.textContent = '...';
-  currentPoints.style.cssText = `
-    color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-    font-size: 12px;
-    opacity: 0.8;
-    padding: 4px;
-    min-height: 20px;
-    font-weight: 600;
-  `;
-  
-  // Calculate and display points
-  calculateGuildPoints(guild.id).then(points => {
-    currentPoints.textContent = formatNumber(points);
-  }).catch(() => {
-    currentPoints.textContent = '0';
-  });
-  
-  pointsSection.appendChild(pointsLabel);
-  pointsSection.appendChild(currentPoints);
-  adminContainer.appendChild(pointsSection);
 
   // Delete Guild (Leader only, when they are the only member)
   if (isLeader && members.length === 1) {

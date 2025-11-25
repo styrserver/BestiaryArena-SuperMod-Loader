@@ -38,7 +38,9 @@ async function loadPatchNotes() {
   try {
     const response = await fetch(chrome.runtime.getURL('docs/patch-notes.json'));
     if (response.ok) {
-      PATCH_NOTES = await response.json();
+      const data = await response.json();
+      // Handle both old array format and new object format with metadata
+      PATCH_NOTES = Array.isArray(data) ? data : (data.notes || []);
       return PATCH_NOTES;
     }
   } catch (error) {
@@ -654,14 +656,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       const versionText = await getTranslation('popup.version', 'Version');
       html += `<div class="patch-note-version-title">${versionText} ${note.version}</div>`;
       html += `<ul class="patch-note-list">`;
-      // Sort changes by type
+      // Sort changes by: 1. Type, 2. mod, 3. text
       const sortedChanges = [...note.changes].sort((a, b) => {
+        // 1. Sort by type
         const orderA = typeOrder[a.type] !== undefined ? typeOrder[a.type] : 999;
         const orderB = typeOrder[b.type] !== undefined ? typeOrder[b.type] : 999;
-        return orderA - orderB;
+        if (orderA !== orderB) return orderA - orderB;
+        
+        // 2. Sort by mod (if both have mod field)
+        const modA = (a.mod || '').toLowerCase();
+        const modB = (b.mod || '').toLowerCase();
+        if (modA !== modB) return modA.localeCompare(modB);
+        
+        // 3. Sort by text
+        return (a.text || '').localeCompare(b.text || '');
       });
       sortedChanges.forEach(change => {
-        html += `<li class="${change.type}">${change.text}</li>`;
+        const modBadge = change.mod ? `<span class="patch-note-mod">${change.mod}</span>` : '';
+        html += `<li class="${change.type}">${modBadge}${change.text}</li>`;
       });
       html += `</ul></div>`;
     }

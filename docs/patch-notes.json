@@ -1,24 +1,37 @@
-[
+{
+  "_meta": {
+    "_comment": "Sort patch notes by: 1. Type, 2. mod, 3. text. Keep patch notes simple and concise."
+  },
+  "notes": [
+  {
+    "version": "3.0.2",
+    "changes": [
+      { "type": "removed", "mod": "Autoscroller", "text": "Removed Gummy Raider and Yeti from available and selected creatures lists" },
+      { "type": "changed", "mod": "Guilds", "text": "Improved Guilds mod styling: refactored font system to use centralized constants, standardized to system-ui font for consistency, and unified font sizes across all elements" },
+      { "type": "changed", "mod": "Guilds", "text": "Redesigned guild administration panel with professional card-based layout, moved Guild Points to top, and made everything more compact" }
+    ]
+  },
   {
     "version": "3.0.1",
     "changes": [
-      { "type": "added", "text": "Full translation support for popup interface (uses browser language, all buttons, messages, and mod descriptions translated)" },
-      { "type": "removed", "text": "Removed unused modsLoader.js file" }
+      { "type": "added", "mod": "Core", "text": "Full translation support for popup interface (uses browser language, all buttons, messages, and mod descriptions translated)" },
+      { "type": "removed", "mod": "Core", "text": "Removed unused modsLoader.js file" }
     ]
   },
   {
     "version": "3.0.0",
     "changes": [
-      { "type": "added", "text": "Redesigned popup interface with store-like grid layout" },
-      { "type": "added", "text": "Added search and filter functionality for mods" },
-      { "type": "added", "text": "Added mod descriptions and category badges" },
-      { "type": "added", "text": "Added patch notes tracking system" },
-      { "type": "added", "text": "Better Highscores now supports configurable background opacity (0-100%)" },
-      { "type": "changed", "text": "Changed \"User\" category to \"Custom\"" },
-      { "type": "changed", "text": "Moved \"Enable Welcome Page\" button to Extras section" },
-      { "type": "removed", "text": "Removed dashboard" },
-      { "type": "fixed", "text": "Ensured Better Highscores container maintains highest z-index for visibility" }
+      { "type": "added", "mod": "Core", "text": "Redesigned popup interface with store-like grid layout" },
+      { "type": "added", "mod": "Core", "text": "Added search and filter functionality for mods" },
+      { "type": "added", "mod": "Core", "text": "Added mod descriptions and category badges" },
+      { "type": "added", "mod": "Core", "text": "Added patch notes tracking system" },
+      { "type": "added", "mod": "Better Highscores", "text": "Better Highscores now supports configurable background opacity (0-100%)" },
+      { "type": "changed", "mod": "Core", "text": "Changed \"User\" category to \"Custom\"" },
+      { "type": "changed", "mod": "Core", "text": "Moved \"Enable Welcome Page\" button to Extras section" },
+      { "type": "removed", "mod": "Core", "text": "Removed dashboard" },
+      { "type": "fixed", "mod": "Better Highscores", "text": "Ensured Better Highscores container maintains highest z-index for visibility" }
     ]
   }
-]
+  ]
+}
 

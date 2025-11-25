@@ -1244,7 +1244,12 @@
         const state = JSON.parse(saved);
         
         if (state.selectedScrollTier) selectedScrollTier = state.selectedScrollTier;
-        if (state.selectedCreatures) selectedCreatures = [...state.selectedCreatures];
+        if (state.selectedCreatures) {
+          selectedCreatures = [...state.selectedCreatures].filter(c => {
+            const lower = c.toLowerCase();
+            return lower !== 'gummy raider' && lower !== 'yeti';
+          });
+        }
         if (state.stopConditions) stopConditions = { ...stopConditions, ...state.stopConditions };
         if (state.userDefinedSpeed) userDefinedSpeed = state.userDefinedSpeed;
         if (state.autosellNonSelected !== undefined) autosellNonSelected = state.autosellNonSelected;
@@ -2294,8 +2299,12 @@
       // When reopening the modal, respect already selected creatures:
       // 1) Deduplicate any prior selections
       // 2) Exclude selected creatures from the available list
+      // 3) Exclude Gummy Raider and Yeti
       selectedCreatures = Array.from(new Set(selectedCreatures));
-      availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
+      availableCreatures = availableCreatures.filter(c => {
+        const lower = c.toLowerCase();
+        return !selectedCreatures.includes(c) && lower !== 'gummy raider' && lower !== 'yeti';
+      });
       
       // Only reset autoscroll state, not the configuration
       autoscrollStats = {
