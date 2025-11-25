@@ -171,6 +171,8 @@
       "shinyColor": "Cor:",
       "persistAutomatorAutoRefill": "⚠️ Manter Reabastecimento de Stamina",
       "persistAutomatorAutoRefillWarning": "Quando ativado, a configuração de Reabastecimento Automático de Stamina do Bestiary Automator persistirá após atualizar a página. Use com cuidado.",
+      "useApiForStaminaRefill": "Usar API para Reabastecimento de Stamina",
+      "useApiForStaminaRefillWarning": "Usa chamadas de API diretas em vez de cliques DOM para reabastecimentos mais rápidos e confiáveis. Usa poções de menor nível primeiro. Aviso: Há risco de ser limitado por taxa de requisições.",
       "disableAutoReload": "⚠️ Desativar Recarregamento Automático",
       "disableAutoReloadWarning": "Impede recarregamentos automáticos de página do Raid Hunter e Better Tasker.",
       "alwaysOpenHuntAnalyzer": "⚠️ Auto-abrir Hunt Analyzer",

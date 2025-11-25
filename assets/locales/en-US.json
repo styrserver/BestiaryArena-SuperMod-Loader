@@ -171,6 +171,8 @@
       "shinyColor": "Color:",
       "persistAutomatorAutoRefill": "⚠️ Persist Autorefill Stamina",
       "persistAutomatorAutoRefillWarning": "When enabled, Bestiary Automator's Autorefill Stamina setting will persist across page refreshes. Use with caution.",
+      "useApiForStaminaRefill": "Use API for Stamina Refill",
+      "useApiForStaminaRefillWarning": "Uses direct API calls instead of DOM clicks for faster, more reliable refills. Uses lowest tier potions first. Warning: There is a risk of getting rate limited.",
       "disableAutoReload": "⚠️ Disable Auto-Reload",
       "disableAutoReloadWarning": "Prevents automatic page reloads from Raid Hunter and Better Tasker.",
       "alwaysOpenHuntAnalyzer": "⚠️ Auto-open Hunt Analyzer",

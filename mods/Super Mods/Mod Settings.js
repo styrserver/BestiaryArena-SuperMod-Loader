@@ -1993,6 +1993,12 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="automator-api-stamina-refill-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.useApiForStaminaRefillWarning')}">⚠️ ${t('mods.betterUI.useApiForStaminaRefill')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="disable-auto-reload-toggle" style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableAutoReloadWarning')}">${t('mods.betterUI.disableAutoReload')}</span>
             </label>
@@ -2370,6 +2376,41 @@ function showSettingsModal() {
           console.log('[Mod Settings] Updated Bestiary Automator runtime config');
         }
       });
+      }
+      
+      const automatorApiStaminaRefillCheckbox = content.querySelector('#automator-api-stamina-refill-toggle');
+      if (automatorApiStaminaRefillCheckbox) {
+        // Set initial state from Bestiary Automator's config
+        try {
+          const automatorConfig = localStorage.getItem('bestiary-automator-config');
+          const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
+          automatorApiStaminaRefillCheckbox.checked = parsedConfig.useApiForStaminaRefill || false;
+        } catch (error) {
+          console.error('[Mod Settings] Error reading Bestiary Automator config:', error);
+        }
+        
+        automatorApiStaminaRefillCheckbox.addEventListener('change', () => {
+          const newValue = automatorApiStaminaRefillCheckbox.checked;
+          
+          // Write directly to Bestiary Automator's localStorage
+          try {
+            const automatorConfig = localStorage.getItem('bestiary-automator-config');
+            const config = automatorConfig ? JSON.parse(automatorConfig) : {};
+            config.useApiForStaminaRefill = newValue;
+            localStorage.setItem('bestiary-automator-config', JSON.stringify(config));
+            console.log('[Mod Settings] Updated Bestiary Automator localStorage useApiForStaminaRefill:', newValue);
+          } catch (error) {
+            console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
+          }
+          
+          // Also update runtime if Bestiary Automator is loaded
+          if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
+            window.bestiaryAutomator.updateConfig({
+              useApiForStaminaRefill: newValue
+            });
+            console.log('[Mod Settings] Updated Bestiary Automator runtime config');
+          }
+        });
       }
       
       const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');

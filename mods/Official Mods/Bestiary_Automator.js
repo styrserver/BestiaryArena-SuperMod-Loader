@@ -13,7 +13,8 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
-  persistAutoRefillOnRefresh: false
+  persistAutoRefillOnRefresh: false,
+  useApiForStaminaRefill: false
 };
 
 // Storage key for localStorage
@@ -297,6 +298,92 @@ function showNotification(message, type = 'info', duration = 3000) {
   });
 }
 
+// Show stamina restoration toast (matches Raid_Hunter.js toast pattern)
+const showStaminaRestoredToast = (pointsRestored) => {
+  try {
+    // Get or create the main toast container (same pattern as Raid_Hunter.js)
+    let mainContainer = document.getElementById('bestiary-automator-toast-container');
+    if (!mainContainer) {
+      mainContainer = document.createElement('div');
+      mainContainer.id = 'bestiary-automator-toast-container';
+      mainContainer.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        inset: 16px 16px 64px;
+        pointer-events: none;
+      `;
+      document.body.appendChild(mainContainer);
+    }
+    
+    // Count existing toasts to calculate stacking position
+    const existingToasts = mainContainer.querySelectorAll('.toast-item');
+    const stackOffset = existingToasts.length * 46;
+    
+    // Create the flex container for this specific toast
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'toast-item';
+    flexContainer.style.cssText = `
+      left: 0px;
+      right: 0px;
+      display: flex;
+      position: absolute;
+      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+      transform: translateY(-${stackOffset}px);
+      bottom: 0px;
+      justify-content: flex-end;
+    `;
+    
+    // Create toast button
+    const toast = document.createElement('button');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    
+    // Create widget structure
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    
+    // Create text content
+    const textLeft = document.createElement('div');
+    textLeft.className = 'text-left';
+    
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'Restored ';
+    
+    const staminaSpan = document.createElement('span');
+    staminaSpan.className = 'text-stamina';
+    staminaSpan.textContent = `+${pointsRestored} stamina points`;
+    
+    paragraph.appendChild(staminaSpan);
+    textLeft.appendChild(paragraph);
+    widgetBottom.appendChild(textLeft);
+    
+    // Assemble toast
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    mainContainer.appendChild(flexContainer);
+    
+    // Auto-remove after duration
+    setTimeout(() => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        
+        // Update positions of remaining toasts
+        const toasts = mainContainer.querySelectorAll('.toast-item');
+        toasts.forEach((toast, index) => {
+          const offset = index * 46;
+          toast.style.transform = `translateY(-${offset}px)`;
+        });
+      }
+    }, 4000);
+    
+  } catch (error) {
+    console.error('[Bestiary Automator] Error showing stamina restored toast:', error);
+  }
+};
+
 // Automation Tasks
 
 // Stamina refill tracking (simplified)
@@ -361,6 +448,119 @@ const isGameReadyForStaminaRefill = () => {
     console.error('[Bestiary Automator] Error checking game readiness:', error);
     return false;
   }
+};
+
+// Get current stamina from DOM (used by API-based refill system)
+const getCurrentStaminaFromState = () => {
+  try {
+    const elStamina = document.querySelector('[title="Stamina"]');
+    if (!elStamina) return null;
+    
+    const staminaElement = elStamina.querySelector('span span');
+    if (!staminaElement) return null;
+    
+    const stamina = Number(staminaElement.textContent);
+    return isNaN(stamina) ? null : stamina;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error getting current stamina:', error);
+    return null;
+  }
+};
+
+// Helper functions for mod coordination
+const setRefillingFlag = () => {
+  try {
+    window.__modCoordination = window.__modCoordination || {};
+    window.__modCoordination.automatorRefilling = true;
+    console.log('[Bestiary Automator] Set automatorRefilling flag - other mods should pause');
+  } catch (_) {}
+};
+
+const clearRefillingFlag = () => {
+  try {
+    if (window.__modCoordination) {
+      window.__modCoordination.automatorRefilling = false;
+      console.log('[Bestiary Automator] Cleared automatorRefilling flag - other mods can resume');
+    }
+  } catch (_) {}
+};
+
+// Helper to check if Game State API is available
+const isGameStateAPIAvailable = () => {
+  return !!(globalThis.state && globalThis.state.player);
+};
+
+// Helper to get player inventory from Game State API
+const getPlayerInventory = () => {
+  if (!isGameStateAPIAvailable()) {
+    return null;
+  }
+  const playerContext = globalThis.state.player.getSnapshot().context;
+  return playerContext.inventory || {};
+};
+
+// Helper to find lowest tier potion available in inventory
+const findLowestTierPotion = (inventory) => {
+  if (!inventory) return null;
+  
+  for (let tier = 1; tier <= 4; tier++) {
+    const potionKey = `stamina${tier}`;
+    if (inventory[potionKey] && inventory[potionKey] > 0) {
+      return tier;
+    }
+  }
+  return null;
+};
+
+// Helper to extract API response data
+const extractAPIResponseData = (result) => {
+  if (result && result[0] && result[0].result && result[0].result.data && result[0].result.data.json) {
+    return result[0].result.data.json;
+  }
+  return null;
+};
+
+// Helper to update inventory state from inventoryDiff
+const updateInventoryFromDiff = (inventoryDiff) => {
+  if (!inventoryDiff || !isGameStateAPIAvailable()) {
+    return;
+  }
+  
+  globalThis.state.player.send({
+    type: 'setState',
+    fn: (prev) => {
+      const newState = { ...prev };
+      newState.inventory = { ...prev.inventory };
+      
+      for (let tier = 1; tier <= 4; tier++) {
+        const potionKey = `stamina${tier}`;
+        if (inventoryDiff[potionKey] !== undefined) {
+          const diff = inventoryDiff[potionKey];
+          if (newState.inventory[potionKey] !== undefined) {
+            newState.inventory[potionKey] = Math.max(0, newState.inventory[potionKey] + diff);
+            newState[potionKey] = newState.inventory[potionKey];
+          }
+        }
+      }
+      
+      return newState;
+    }
+  });
+};
+
+// Helper to update staminaWillBeFullAt timestamp
+const updateStaminaWillBeFullAt = (timestamp) => {
+  if (!timestamp || !isGameStateAPIAvailable()) {
+    return;
+  }
+  
+  globalThis.state.player.send({
+    type: 'setState',
+    fn: (prev) => ({
+      ...prev,
+      staminaWillBeFullAt: timestamp
+    })
+  });
 };
 
 // Simple stamina refill method for background tabs (original approach)
@@ -455,10 +655,190 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   await sleep(300);
 };
 
-// Refill stamina if needed - chooses method based on tab visibility
+// Rate limiting for potion usage: max 1 potion every 3 seconds
+let lastPotionUsageTime = 0;
+const POTION_RATE_LIMIT_MS = 3000; // 3 seconds
+
+const waitForPotionRateLimit = async () => {
+  const now = Date.now();
+  const timeSinceLastPotion = now - lastPotionUsageTime;
+  
+  if (timeSinceLastPotion < POTION_RATE_LIMIT_MS) {
+    const waitTime = POTION_RATE_LIMIT_MS - timeSinceLastPotion;
+    console.log(`[Bestiary Automator] Rate limit: waiting ${Math.ceil(waitTime / 1000)}s before next potion...`);
+    await sleep(waitTime);
+  }
+  
+  lastPotionUsageTime = Date.now();
+};
+
+// API-based stamina refill method
+const refillStaminaViaAPI = async () => {
+  // Check game readiness before starting
+  if (!isGameReadyForStaminaRefill()) {
+    console.log('[Bestiary Automator] Game not ready for API-based stamina refill');
+    return false;
+  }
+  
+  setRefillingFlag();
+  
+  try {
+    // Get current stamina
+    let currentStamina = getCurrentStaminaFromState();
+    if (currentStamina === null) {
+      console.log('[Bestiary Automator] Could not get current stamina, aborting API refill');
+      clearRefillingFlag();
+      return false;
+    }
+    
+    // Check if we already have enough stamina
+    if (currentStamina >= config.minimumStaminaWithoutRefill) {
+      console.log(`[Bestiary Automator] Stamina already sufficient: ${currentStamina} >= ${config.minimumStaminaWithoutRefill}`);
+      clearRefillingFlag();
+      return true;
+    }
+    
+    console.log(`[Bestiary Automator] Starting API-based stamina refill: current=${currentStamina}, target=${config.minimumStaminaWithoutRefill}`);
+    
+    if (!isGameStateAPIAvailable()) {
+      console.log('[Bestiary Automator] Game State API not available for API refill');
+      clearRefillingFlag();
+      return false;
+    }
+    
+    // Refill loop: use lowest tier potions first until target is reached
+    while (currentStamina < config.minimumStaminaWithoutRefill) {
+      // Refresh inventory from Game State API before each potion check
+      const inventory = getPlayerInventory();
+      if (!inventory) {
+        console.log('[Bestiary Automator] Game State API not available for inventory check');
+        break;
+      }
+      
+      // Find lowest tier potion available
+      const potionTier = findLowestTierPotion(inventory);
+      if (!potionTier) {
+        console.log('[Bestiary Automator] No stamina potions available');
+        break;
+      }
+      
+      const potionKey = `stamina${potionTier}`;
+      console.log(`[Bestiary Automator] Using tier ${potionTier} potion (current stamina: ${currentStamina}, available: ${inventory[potionKey]})`);
+      
+      // Wait for rate limit before using potion
+      await waitForPotionRateLimit();
+      
+      // Make API call
+      try {
+        const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.staminaPotion?batch=1', {
+          method: 'POST',
+          headers: {
+            'accept': '*/*',
+            'content-type': 'application/json',
+            'Referer': 'https://bestiaryarena.com/game',
+            'X-Game-Version': '1'
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            '0': {
+              json: {
+                rarity: potionTier,
+                amount: 1
+              }
+            }
+          })
+        });
+        
+        if (!response.ok) {
+          const status = response.status;
+          let errorMessage = '';
+          try {
+            const errorBody = await response.text();
+            errorMessage = errorBody ? ` - ${errorBody.substring(0, 200)}` : '';
+          } catch (_) {}
+          console.log(`[Bestiary Automator] API call failed with status ${status}${errorMessage}`);
+          
+          // Handle 400/403/404 errors (no potions or invalid request)
+          if (status === 400 || status === 403 || status === 404) {
+            removeStaminaPotionFromInventory(potionTier);
+            break;
+          }
+          
+          // For other errors, break and return failure
+          break;
+        }
+        
+        const result = await response.json();
+        const data = extractAPIResponseData(result);
+        
+        if (data) {
+          // Update inventory state from API response
+          if (data.inventoryDiff) {
+            updateInventoryFromDiff(data.inventoryDiff);
+          }
+          
+          // Update staminaWillBeFullAt timestamp
+          if (data.nextStaminaWillBeFullAt) {
+            updateStaminaWillBeFullAt(data.nextStaminaWillBeFullAt);
+          }
+          
+          const pointsRestored = data.pointsRestored || 0;
+          console.log(`[Bestiary Automator] Potion used successfully, restored ${pointsRestored} points`);
+          
+          // Show toast notification
+          if (pointsRestored > 0) {
+            try {
+              showStaminaRestoredToast(pointsRestored);
+            } catch (error) {
+              console.error('[Bestiary Automator] Error calling showStaminaRestoredToast:', error);
+            }
+          }
+        }
+        
+        // Wait a bit before checking stamina again
+        await sleep(300);
+        
+        // Re-check current stamina
+        currentStamina = getCurrentStaminaFromState();
+        if (currentStamina === null) {
+          console.log('[Bestiary Automator] Could not get updated stamina, stopping refill');
+          break;
+        }
+        
+      } catch (error) {
+        console.error('[Bestiary Automator] Error in API call:', error);
+        break;
+      }
+    }
+    
+    const finalStamina = getCurrentStaminaFromState();
+    if (finalStamina !== null && finalStamina >= config.minimumStaminaWithoutRefill) {
+      console.log(`[Bestiary Automator] API refill completed successfully: ${finalStamina} >= ${config.minimumStaminaWithoutRefill}`);
+    } else {
+      console.log(`[Bestiary Automator] API refill completed: final stamina = ${finalStamina}`);
+    }
+    
+    clearRefillingFlag();
+    return true;
+    
+  } catch (error) {
+    console.error('[Bestiary Automator] Error in API-based stamina refill:', error);
+    clearRefillingFlag();
+    return false;
+  }
+};
+
+// Refill stamina if needed - chooses method based on config
 const refillStaminaIfNeeded = async () => {
   if (!config.autoRefillStamina) return;
   
+  // Use API method if enabled, otherwise use DOM method
+  if (config.useApiForStaminaRefill) {
+    await refillStaminaViaAPI();
+    return;
+  }
+  
+  // Existing DOM-based method (unchanged)
   try {
     const elStamina = document.querySelector('[title="Stamina"]');
     if (!elStamina) return;
@@ -471,32 +851,22 @@ const refillStaminaIfNeeded = async () => {
     
     console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
     
-    // Signal to other mods that we're refilling stamina (for coordination)
-    try {
-      window.__modCoordination = window.__modCoordination || {};
-      window.__modCoordination.automatorRefilling = true;
-      console.log('[Bestiary Automator] Set automatorRefilling flag - other mods should pause');
-    } catch (_) {}
+    setRefillingFlag();
     
-    // Choose method based on tab visibility
-    if (document.hidden) {
-      await refillStaminaSimple(elStamina);
-    } else {
-      await refillStaminaWithRetry(elStamina, staminaElement);
+    try {
+      // Choose method based on tab visibility
+      if (document.hidden) {
+        await refillStaminaSimple(elStamina);
+      } else {
+        await refillStaminaWithRetry(elStamina, staminaElement);
+      }
+    } finally {
+      clearRefillingFlag();
     }
-    
-    // Clear the flag after refilling is complete
-    try {
-      window.__modCoordination.automatorRefilling = false;
-      console.log('[Bestiary Automator] Cleared automatorRefilling flag - other mods can resume');
-    } catch (_) {}
     
   } catch (error) {
     console.error('[Bestiary Automator] Error refilling stamina:', error);
-    // Always clear the flag even on error
-    try {
-      window.__modCoordination.automatorRefilling = false;
-    } catch (_) {}
+    clearRefillingFlag();
   }
 };
 
@@ -2875,8 +3245,11 @@ function updateSettingsModalUI() {
     
     if (refillCheckbox) {
       const oldValue = refillCheckbox.checked;
-      refillCheckbox.checked = config.autoRefillStamina; // Show current state (can be true when set by Raid Hunter)
-      console.log('[Bestiary Automator] Updated autorefill stamina checkbox from', oldValue, 'to', config.autoRefillStamina);
+      const newValue = config.autoRefillStamina;
+      if (oldValue !== newValue) {
+        refillCheckbox.checked = newValue;
+        console.log('[Bestiary Automator] Updated autorefill stamina checkbox from', oldValue, 'to', newValue);
+      }
       
       // Add event listener to update config when checkbox changes (if not already added) - button styling only updates on save
       if (!refillCheckbox.hasAttribute('data-listener-added')) {
@@ -2906,12 +3279,12 @@ context.exports = {
   toggleAutomation,
   updateConfig: (newConfig) => {
     console.log('[Bestiary Automator] updateConfig called with:', newConfig);
-    console.log('[Bestiary Automator] Current config before update:', config);
+    console.log('[Bestiary Automator] Current config before update:', JSON.parse(JSON.stringify(config)));
     
     const oldEnabled = config.enabled;
     Object.assign(config, newConfig);
     
-    console.log('[Bestiary Automator] Config after update:', config);
+    console.log('[Bestiary Automator] Config after update:', JSON.parse(JSON.stringify(config)));
     
     // Only start or stop automation if the enabled state actually changed
     if (newConfig.hasOwnProperty('enabled') && newConfig.enabled !== oldEnabled) {

@@ -4,6 +4,14 @@
   },
   "notes": [
   {
+    "version": "3.0.4",
+    "changes": [
+      { "type": "added", "mod": "Bestiary Automator", "text": "Added API-based stamina refill method: works when tab is in background, rate limited to 1 potion per 3s, uses lowest tier potions first, shows toast notifications, and checks inventory before each use" },
+      { "type": "added", "mod": "Mod Settings", "text": "Added \"Use API for Stamina Refill\" toggle in Advanced section with warning about background usage and rate limiting risk" },
+      { "type": "changed", "mod": "Bestiary Automator", "text": "Refactored autorefill code with helper functions for better maintainability" }
+    ]
+  },
+  {
     "version": "3.0.3",
     "changes": [
       { "type": "added", "mod": "Cyclopedia", "text": "Added Dungeon Ascension upgrade to inventory database and upgrade keys" },
