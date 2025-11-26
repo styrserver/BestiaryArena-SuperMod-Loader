@@ -122,6 +122,23 @@ const MESSAGING_CONFIG = {
   maxMessageLength: 1000
 };
 
+// Sanitize username for Firebase key (Firebase keys cannot start with . or $)
+const sanitizeFirebaseKey = (username) => {
+  if (!username) return '';
+  let sanitized = username.toLowerCase();
+  // Replace leading dot with _dot_
+  if (sanitized.startsWith('.')) {
+    sanitized = '_dot_' + sanitized.substring(1);
+  }
+  // Replace leading $ with _dollar_
+  if (sanitized.startsWith('$')) {
+    sanitized = '_dollar_' + sanitized.substring(1);
+  }
+  // Replace other invalid characters for Firebase keys
+  sanitized = sanitized.replace(/[\/\[\]#]/g, '_');
+  return sanitized;
+};
+
 const getApiUrl = (endpoint) => {
   return MESSAGING_CONFIG.enabled 
     ? `${MESSAGING_CONFIG.firebaseUrl}/${endpoint}`
@@ -3096,8 +3113,8 @@ async function isPlayerBlocked(playerName) {
       return false;
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const playerNameLower = playerName.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const playerNameLower = sanitizeFirebaseKey(playerName);
     
     // Check if current player has blocked this player
     const response = await fetch(`${getBlockedPlayersApiUrl()}/${currentPlayerLower}/${playerNameLower}.json`);
@@ -3131,8 +3148,8 @@ async function isBlockedByPlayer(playerName) {
       return false;
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const playerNameLower = playerName.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const playerNameLower = sanitizeFirebaseKey(playerName);
     
     // Check if the other player has blocked current player
     const response = await fetch(`${getBlockedPlayersApiUrl()}/${playerNameLower}/${currentPlayerLower}.json`);
@@ -3167,8 +3184,8 @@ async function blockPlayer(playerName) {
       throw new Error('Could not get current player name');
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const playerNameLower = playerName.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const playerNameLower = sanitizeFirebaseKey(playerName);
     
     // Add to blocked list
     const blockData = {
@@ -3206,8 +3223,8 @@ async function unblockPlayer(playerName) {
       throw new Error('Could not get current player name');
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const playerNameLower = playerName.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const playerNameLower = sanitizeFirebaseKey(playerName);
     
     // Remove from blocked list
     const response = await fetch(`${getBlockedPlayersApiUrl()}/${currentPlayerLower}/${playerNameLower}.json`, {
@@ -3399,7 +3416,7 @@ async function checkForMessages() {
     
     // Hash username for Firebase path (try both hashed and non-hashed for backward compatibility)
     const hashedCurrentPlayer = await hashUsername(currentPlayer);
-    const currentPlayerLower = currentPlayer.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
     
     // Try hashed path first (new format), fallback to non-hashed (backward compatibility)
     let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
@@ -3797,7 +3814,7 @@ async function markMessageAsRead(messageId, fromPlayer = null) {
     
     // Hash username for Firebase path (use hashed path, same as messages)
     const hashedCurrentPlayer = await hashUsername(currentPlayer);
-    const currentPlayerLower = currentPlayer.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
     
     // If fromPlayer not provided, fetch the message to get sender
     let senderName = fromPlayer;
@@ -3882,7 +3899,7 @@ async function markAllMessagesAsReadFromPlayer(playerName) {
     
     // Hash username for Firebase path (use hashed path, same as messages)
     const hashedCurrentPlayer = await hashUsername(currentPlayer);
-    const currentPlayerLower = currentPlayer.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
     
     // Get all messages for current player (try hashed path first, fallback to non-hashed)
     let response = await fetch(`${getMessagingApiUrl()}/${hashedCurrentPlayer}.json`);
@@ -4587,8 +4604,8 @@ function extractUsernamesFromSystemMessage(text) {
     protectedText = protectedText.substring(0, q.start) + spaces + protectedText.substring(q.end);
   }
   
-  // Find all potential usernames
-  const usernamePattern = /\b([a-zA-Z0-9_\-]{1,30})\b/g;
+  // Find all potential usernames (including dots)
+  const usernamePattern = /(?<![a-zA-Z0-9_.\-])([a-zA-Z0-9_\-.]{1,30})(?![a-zA-Z0-9_.\-])/g;
   const usernameMatches = [];
   let match;
   
@@ -4801,8 +4818,9 @@ async function embedSystemMessageUsernames(text, container) {
   // Find all username positions in translated text
   const usernamePositions = [];
   for (const username of sortedUsernames) {
-    // Use word boundaries to match whole usernames only
-    const regex = new RegExp(`\\b${username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+    // Use negative lookbehind/lookahead to match whole usernames only (handles dots)
+    const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?<![a-zA-Z0-9_.\\-])${escapedUsername}(?![a-zA-Z0-9_.\\-])`, 'g');
     let match;
     while ((match = regex.exec(translatedText)) !== null) {
       usernamePositions.push({
@@ -5389,11 +5407,11 @@ async function getConversationMessages(otherPlayer, forceRefresh = false, limit 
       return [];
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const otherPlayerLower = otherPlayer.toLowerCase();
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const otherPlayerLower = sanitizeFirebaseKey(otherPlayer);
     
     // Check cache first (only for full fetch without pagination)
-    const cacheKey = otherPlayerLower;
+    const cacheKey = otherPlayer.toLowerCase(); // Use unsanitized for cache key consistency
     let now = Date.now();
     if (!forceRefresh && limit === null && endBefore === null && conversationCache.has(cacheKey)) {
       const cached = conversationCache.get(cacheKey);
@@ -5993,9 +6011,9 @@ async function deleteConversation(otherPlayer) {
       throw new Error('Could not get current player name');
     }
     
-    const currentPlayerLower = currentPlayer.toLowerCase();
-    const otherPlayerLower = otherPlayer.toLowerCase();
-    const conversationKey = otherPlayerLower;
+    const currentPlayerLower = sanitizeFirebaseKey(currentPlayer);
+    const otherPlayerLower = sanitizeFirebaseKey(otherPlayer);
+    const conversationKey = otherPlayer.toLowerCase(); // Use unsanitized for cache key consistency
     
     // Hash usernames for Firebase paths (try hashed first, fallback to lowercase for backward compatibility)
     const hashedOtherPlayer = await hashUsername(otherPlayer);

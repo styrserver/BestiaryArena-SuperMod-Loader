@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.0.5",
+    "changes": [
+      { "type": "fixed", "mod": "VIP List", "text": "Fixed 400 Bad Request errors when usernames start with . or $ by sanitizing Firebase keys" },
+      { "type": "fixed", "mod": "Guilds", "text": "Fixed 400 Bad Request errors when usernames start with . or $ in player equipment paths" }
+    ]
+  },
+  {
     "version": "3.0.4",
     "changes": [
       { "type": "added", "mod": "Bestiary Automator", "text": "Added API-based stamina refill method: works when tab is in background, rate limited to 1 potion per 3s, uses lowest tier potions first, shows toast notifications, and checks inventory before each use" },

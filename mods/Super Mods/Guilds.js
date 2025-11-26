@@ -122,6 +122,23 @@ const getPlayerGuildApiUrl = () => getApiUrl('players');
 // Utility Functions
 // =======================
 
+// Sanitize username for Firebase key (Firebase keys cannot start with . or $)
+const sanitizeFirebaseKey = (username) => {
+  if (!username) return '';
+  let sanitized = username.toLowerCase();
+  // Replace leading dot with _dot_
+  if (sanitized.startsWith('.')) {
+    sanitized = '_dot_' + sanitized.substring(1);
+  }
+  // Replace leading $ with _dollar_
+  if (sanitized.startsWith('$')) {
+    sanitized = '_dollar_' + sanitized.substring(1);
+  }
+  // Replace other invalid characters for Firebase keys
+  sanitized = sanitized.replace(/[\/\[\]#]/g, '_');
+  return sanitized;
+};
+
 function getCurrentPlayerName() {
   try {
     const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
@@ -243,6 +260,11 @@ function createTTLCache(defaultTTL = 10 * 60 * 1000) {
 // Cache for player existence checks (10 minutes TTL)
 const playerExistsCache = createTTLCache(10 * 60 * 1000);
 
+// Shared helper for Bestiary Arena profile API URL
+function buildProfileApiUrl(playerName) {
+  return `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+}
+
 // Check if a player exists by fetching their profile data (with caching)
 async function playerExists(playerName) {
   if (!playerName || typeof playerName !== 'string') {
@@ -256,7 +278,7 @@ async function playerExists(playerName) {
   }
   
   try {
-    const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+    const apiUrl = buildProfileApiUrl(playerName);
     
     const response = await fetch(apiUrl, {
       headers: { 'Accept': 'application/json' }
@@ -327,7 +349,7 @@ async function fetchPlayerProfile(playerName) {
   }
   
   try {
-    const apiUrl = `https://bestiaryarena.com/api/trpc/serverSide.profilePageData?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%22${encodeURIComponent(playerName)}%22%7D%7D`;
+    const apiUrl = buildProfileApiUrl(playerName);
     
     const response = await fetch(apiUrl, {
       headers: { 'Accept': 'application/json' }
@@ -466,7 +488,7 @@ async function getPlayerEquipmentPoints(username) {
   try {
     if (!username) return 0;
     
-    const normalizedName = username.toLowerCase();
+    const normalizedName = sanitizeFirebaseKey(username);
     const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
     
     const response = await fetch(path);
@@ -2648,7 +2670,7 @@ async function getPlayerEquipmentFromFirebase(playerName) {
   try {
     if (!playerName) return {};
     
-    const normalizedName = playerName.toLowerCase();
+    const normalizedName = sanitizeFirebaseKey(playerName);
     const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
     
     const response = await fetch(path);
@@ -6478,8 +6500,8 @@ function enableEquipmentButtons(modal, enabled) {
 // Firebase path helper for player equipment
 function getPlayerEquipmentPath(playerName) {
   if (!playerName) return null;
-  // Normalize player name (lowercase for consistency)
-  const normalizedName = playerName.toLowerCase();
+  // Normalize and sanitize player name for Firebase
+  const normalizedName = sanitizeFirebaseKey(playerName);
   return `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
 }
 
