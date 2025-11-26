@@ -4,6 +4,15 @@
   },
   "notes": [
   {
+    "version": "3.0.6",
+    "changes": [
+      { "type": "added", "mod": "Cyclopedia", "text": "Added Speed stat to creature stats display" },
+      { "type": "added", "mod": "Cyclopedia", "text": "Added hardcoded stats for unobtainable creatures to display correct map stats in Cyclopedia (display-only, does not affect game state)" },
+      { "type": "fixed", "mod": "creature-database.js", "text": "Removed hardcodedStats that was causing NaN movement speed bug and weird stats when navigating to maps" },
+      { "type": "removed", "mod": "Mod Settings", "text": "Removed \"Refresh on Mismatch\" feature from Advanced settings" }
+    ]
+  },
+  {
     "version": "3.0.5",
     "changes": [
       { "type": "fixed", "mod": "VIP List", "text": "Fixed 400 Bad Request errors when usernames start with . or $ by sanitizing Firebase keys" },

@@ -110,8 +110,23 @@ const MONSTER_STATS_CONFIG = [
     { key: 'ad', label: 'Attack Damage', icon: '/assets/icons/attackdamage.png', max: 80, barColor: 'rgb(255, 128, 96)' },
     { key: 'ap', label: 'Ability Power', icon: '/assets/icons/abilitypower.png', max: 60, barColor: 'rgb(128, 128, 255)' },
     { key: 'armor', label: 'Armor', icon: '/assets/icons/armor.png', max: 60, barColor: 'rgb(224, 224, 128)' },
-    { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' }
+    { key: 'magicResist', label: 'Magic Resist', icon: '/assets/icons/magicresist.png', max: 60, barColor: 'rgb(192, 128, 255)' },
+    { key: 'speed', label: 'Speed', icon: '/assets/icons/speed.png', max: 200, barColor: 'rgb(255, 200, 100)' }
 ];
+
+// Hardcoded monster stats for unobtainable creatures that have different stats on maps
+const HARDCODED_MONSTER_STATS = {
+  'old giant spider': { baseStats: { hp: 1140, ad: 108, ap: 30, armor: 30, magicResist: 30 }, level: 300 },
+  'willi wasp': { baseStats: { hp: 924, ad: 0, ap: 0, armor: 26, magicResist: 45 }, level: 100 },
+  'black knight': { baseStats: { hp: 4800, ad: 66, ap: 0, armor: 975, magicResist: 975 }, level: 300 },
+  'dharalion': { baseStats: { hp: 2200, ad: 33, ap: 25, armor: 60, magicResist: 66 }, level: 200 },
+  'dead tree': { baseStats: { hp: 7000, ad: 0, ap: 0, armor: 700, magicResist: 700 }, level: 100 },
+  'earth crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
+  'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
+  'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
+  'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
+  'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 }
+};
 
 // Get creature data from centralized database
 const HIDE_FROM_CYCLOPEDIA = ['Tentugly', 'Dwarf Henchman'];
@@ -126,7 +141,6 @@ console.log('[Cyclopedia] Creature database integration:', {
   hasDatabase: !!window.creatureDatabase,
   allCreaturesFromDB: window.creatureDatabase?.ALL_CREATURES?.length || 0,
   unobtainableFromDB: window.creatureDatabase?.UNOBTAINABLE_CREATURES?.length || 0,
-  monsterStatsFromDB: Object.keys(window.creatureDatabase?.HARDCODED_MONSTER_STATS || {}).length,
   usingFallback: !window.creatureDatabase
 });
 
@@ -157,8 +171,6 @@ const EXP_TABLE = [
   [47, 7058000], [48, 8225000], [49, 9598500], [50, 11214750]
 ];
 
-// Get hardcoded monster stats from centralized database
-const HARDCODED_MONSTER_STATS = window.creatureDatabase?.HARDCODED_MONSTER_STATS || {};
 
 const MAP_INTERACTION_CONFIG = {
   cursor: 'pointer',
@@ -171,6 +183,95 @@ const MAP_INTERACTION_CONFIG = {
   padding: '2px 6px',
   borderRadius: '4px',
   boxSizing: 'border-box'
+};
+
+// Centralized Navigation Handler
+const NavigationHandler = {
+  // Navigate to a map by display name
+  navigateToMapByName(mapName) {
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    if (!roomNames) return false;
+    
+    for (const [roomId, displayName] of Object.entries(roomNames)) {
+      if (displayName === mapName) {
+        return this.navigateToMapByRoomId(roomId);
+      }
+    }
+    return false;
+  },
+
+  // Navigate to a map by room ID/code
+  navigateToMapByRoomId(roomId) {
+    if (!globalThis.state?.board) return false;
+    
+    globalThis.state.board.send({
+      type: 'selectRoomById',
+      roomId: roomId
+    });
+    
+    // Try to close modal if present
+    const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
+      btn => btn.textContent.trim() === 'Close'
+    );
+    if (closeBtn) {
+      closeBtn.click();
+    }
+    return true;
+  },
+
+  // Navigate to a player profile
+  navigateToProfile(playerName) {
+    const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent(playerName)}`;
+    window.open(profileUrl, '_blank');
+  },
+
+  // Attach map navigation handler with hover effects to an element
+  attachMapNavigation(element, mapName, config = {}) {
+    const cfg = { ...MAP_INTERACTION_CONFIG, ...config };
+    
+    element.style.cursor = cfg.cursor;
+    element.style.textDecoration = cfg.textDecoration;
+    element.title = cfg.tooltip;
+    element.style.padding = cfg.padding;
+    element.style.borderRadius = cfg.borderRadius;
+    element.style.boxSizing = cfg.boxSizing;
+    
+    element.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.navigateToMapByName(mapName);
+    });
+    
+    element.addEventListener('mouseenter', () => {
+      element.style.background = cfg.hoverBackground;
+      element.style.color = cfg.hoverTextColor;
+    });
+    
+    element.addEventListener('mouseleave', () => {
+      element.style.background = cfg.defaultBackground;
+      element.style.color = cfg.defaultTextColor;
+    });
+  },
+
+  // Attach profile navigation handler to an element
+  attachProfileNavigation(element, playerName, hoverStyles = {}) {
+    element.style.cursor = 'pointer';
+    element.style.textDecoration = 'underline';
+    element.style.color = COLOR_CONSTANTS.PRIMARY;
+    
+    element.addEventListener('click', () => {
+      this.navigateToProfile(playerName);
+    });
+    
+    if (Object.keys(hoverStyles).length > 0) {
+      const defaultColor = element.style.color;
+      element.addEventListener('mouseenter', () => {
+        Object.assign(element.style, hoverStyles);
+      });
+      element.addEventListener('mouseleave', () => {
+        element.style.color = defaultColor;
+      });
+    }
+  }
 };
 
 const REGION_NAME_MAP = {
@@ -192,7 +293,6 @@ const GAME_DATA = {
   UPGRADE_KEYS: GAME_KEYS.UPGRADE,
   RARITY_COLORS: inventoryDatabase.rarityColors || {},
   EXP_TABLE,
-  HARDCODED_MONSTER_STATS,
   REGION_NAME_MAP
 };
 
@@ -1681,14 +1781,6 @@ const buildCyclopediaMonsterNameMap = MemoizationUtils.memoize(function() {
     } catch (error) { continue; }
   }
   cyclopediaState.monsterNameMapBuilt = true;
-  
-  Object.entries(GAME_DATA.HARDCODED_MONSTER_STATS).forEach(([monsterName, stats]) => {
-    const entry = cyclopediaState.monsterNameMap.get(monsterName);
-    if (entry?.monster?.metadata) {
-      if (stats.baseStats) entry.monster.metadata.baseStats = stats.baseStats;
-      if (stats.level) entry.monster.metadata.level = stats.level;
-    }
-  });
   
   return cyclopediaState.monsterNameMap;
 });
@@ -3313,30 +3405,9 @@ function openCyclopediaModal(options) {
         return cache;
       }
 
-      // Helper function to navigate to a map by name
+      // Helper function to navigate to a map by name (uses centralized NavigationHandler)
       function navigateToMap(mapName) {
-        // Find the room ID by matching display names (same as Bestiary tab)
-        const roomNames = globalThis.state?.utils?.ROOM_NAME;
-        if (roomNames) {
-          for (const [roomId, displayName] of Object.entries(roomNames)) {
-            if (displayName === mapName) {
-              // Use roomId directly like Bestiary tab does
-              globalThis.state.board.send({
-                type: 'selectRoomById',
-                roomId: roomId
-              });
-              // Try to close the modal if present
-              const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
-                btn => btn.textContent.trim() === 'Close'
-              );
-              if (closeBtn) {
-                closeBtn.click();
-              }
-              return true;
-            }
-          }
-        }
-        return false;
+        return NavigationHandler.navigateToMapByName(mapName);
       }
 
       // Function to get creature usage data for equipment (optimized with cache)
@@ -3593,21 +3664,8 @@ function openCyclopediaModal(options) {
                   `;
                   mapNameSpan.textContent = usage.mapName;
                   
-                  // Add click handler for map navigation
-                  mapNameDiv.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    navigateToMap(usage.mapName);
-                  });
-                  
-                  // Add hover effect like Bestiary Tab
-                  mapNameDiv.addEventListener('mouseenter', () => {
-                    mapNameDiv.style.background = MAP_INTERACTION_CONFIG.hoverBackground;
-                    mapNameDiv.style.color = MAP_INTERACTION_CONFIG.hoverTextColor;
-                  });
-                  mapNameDiv.addEventListener('mouseleave', () => {
-                    mapNameDiv.style.background = MAP_INTERACTION_CONFIG.defaultBackground;
-                    mapNameDiv.style.color = MAP_INTERACTION_CONFIG.defaultTextColor;
-                  });
+                  // Attach map navigation handler
+                  NavigationHandler.attachMapNavigation(mapNameDiv, usage.mapName);
                   
                   mapNameDiv.appendChild(mapNameSpan);
                   usageDiv.appendChild(mapNameDiv);
@@ -4597,18 +4655,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               `;
               
               if (cellIndex === 1) {
-                cell.style.cursor = 'pointer';
-                cell.style.textDecoration = 'underline';
-                cell.style.color = COLOR_CONSTANTS.PRIMARY;
-                cell.addEventListener('click', () => {
-                  window.open(`https://bestiaryarena.com/profile/${ranking.name}`, '_blank');
-                });
-                cell.addEventListener('mouseenter', () => {
-                  cell.style.color = '#fff';
-                });
-                cell.addEventListener('mouseleave', () => {
-                  cell.style.color = COLOR_CONSTANTS.PRIMARY;
-                });
+                NavigationHandler.attachProfileNavigation(cell, ranking.name, { color: '#fff' });
               }
               
               cell.textContent = text;
@@ -6130,8 +6177,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             // Add click handler
             profileButton.addEventListener('click', () => {
-              const profileUrl = `https://bestiaryarena.com/profile/${encodeURIComponent(playerName)}`;
-              window.open(profileUrl, '_blank');
+              NavigationHandler.navigateToProfile(playerName);
             });
             
             // Add pressed state
@@ -9739,17 +9785,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       title.addEventListener('click', (e) => {
         e.stopPropagation();
-        globalThis.state.board.send({
-          type: 'selectRoomById',
-          roomId: selectedMap
-        });
-        // Try to close the modal if present
-        const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
-          btn => btn.textContent.trim() === 'Close'
-        );
-        if (closeBtn) {
-          closeBtn.click();
-        }
+        NavigationHandler.navigateToMapByRoomId(selectedMap);
       });
       mapInfoDiv.appendChild(title);
       
@@ -10418,7 +10454,7 @@ function renderMonsterStats(monsterData) {
       textAlign: 'left',
       margin: '2px',
       width: '160px',
-      height: '150px',
+      height: '160px',
       alignSelf: 'center',
       padding: '4px',
       display: 'flex',
@@ -10469,8 +10505,8 @@ function renderMonsterStats(monsterData) {
           icon.src = stat.icon;
           icon.alt = stat.label;
           Object.assign(icon.style, {
-            width: '16px',
-            height: '16px',
+            width: '12px',
+            height: '12px',
             marginRight: '2px'
           });
           
@@ -10822,7 +10858,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   col1TopArea.style.flexDirection = 'row';
   col1TopArea.style.alignItems = 'flex-start';
   col1TopArea.style.justifyContent = 'flex-start';
-  col1TopArea.style.height = '35%';
+  col1TopArea.style.height = '40%';
   col1TopArea.style.marginLeft = '0';
   col1TopArea.style.paddingLeft = '0';
   col1TopArea.style.marginBottom = '5px';
@@ -10909,7 +10945,37 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   statsDiv.style.alignSelf = 'unset';
   if (monsterId) {
     queueMonsterDataLoad(monsterId, (monsterData) => {
-      const actualStatsDiv = renderMonsterStats(monsterData);
+      // Create a safe copy for display without cloning non-cloneable objects
+      let displayMonsterData = monsterData;
+      
+      // Check if this creature has hardcoded stats (for unobtainable creatures with different map stats)
+      const creatureNameLower = monsterData?.metadata?.name?.toLowerCase();
+      if (creatureNameLower && HARDCODED_MONSTER_STATS[creatureNameLower] && monsterData?.metadata?.baseStats) {
+        // Clone only the baseStats object using spread to avoid mutating internal game state
+        const clonedBaseStats = { ...monsterData.metadata.baseStats };
+        
+        // Preserve speed from original data since hardcoded stats don't include it
+        const originalSpeed = clonedBaseStats?.speed;
+        
+        // Replace baseStats with hardcoded values
+        Object.assign(clonedBaseStats, HARDCODED_MONSTER_STATS[creatureNameLower].baseStats);
+        
+        // Restore speed from original data
+        if (originalSpeed !== undefined) {
+          clonedBaseStats.speed = originalSpeed;
+        }
+        
+        // Create a new object with cloned baseStats without cloning the entire monsterData
+        displayMonsterData = {
+          ...monsterData,
+          metadata: {
+            ...monsterData.metadata,
+            baseStats: clonedBaseStats
+          }
+        };
+      }
+      
+      const actualStatsDiv = renderMonsterStats(displayMonsterData);
       statsDiv.innerHTML = '';
       statsDiv.appendChild(actualStatsDiv);
     });
@@ -11280,16 +11346,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
             roomDiv.addEventListener('click', () => {
               const roomCode = globalThis.state.utils.ROOMS[foundLoc.roomId]?.id;
               if (roomCode) {
-                globalThis.state.board.send({
-                  type: 'selectRoomById',
-                  roomId: roomCode
-                });
-                const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
-                  btn => btn.textContent.trim() === 'Close'
-                );
-                if (closeBtn) {
-                  closeBtn.click();
-                }
+                NavigationHandler.navigateToMapByRoomId(roomCode);
               }
             });
           }
@@ -12203,16 +12260,7 @@ function renderBoostedBox(boosted, utils, formatTime, msUntilNextEpochDay) {
     boostedRoomP.title = 'Go to this map';
     boostedRoomP.addEventListener('click', (e) => {
       e.stopPropagation();
-      globalThis.state.board.send({
-        type: 'selectRoomById',
-        roomId: boosted.roomId
-      });
-      const closeBtn = Array.from(DOMCache.getAll('button.pixel-font-14')).find(
-        btn => btn.textContent.trim() === 'Close'
-      );
-      if (closeBtn) {
-        closeBtn.click();
-      }
+      NavigationHandler.navigateToMapByRoomId(boosted.roomId);
     });
   }
 
