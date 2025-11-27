@@ -540,7 +540,7 @@ const parseMaxStaminaFromDOM = () => {
   }
 };
 
-// Get current stamina from DOM (used by API-based refill system)
+// Get current stamina from DOM (used by Game State-based refill system)
 const getCurrentStaminaFromState = () => {
   try {
     console.log('[Bestiary Automator] Checking current stamina from DOM...');
@@ -598,7 +598,7 @@ const getPlayerInventory = () => {
   return playerContext.inventory || {};
 };
 
-// Helper to get current stamina from Game State API (for API-based refill method)
+// Helper to get current stamina from Game State API (for Game State-based refill method)
 const getCurrentStaminaFromGameStateAPI = () => {
   try {
     if (!isGameStateAPIAvailable()) {
@@ -871,7 +871,7 @@ const waitForPotionRateLimit = async () => {
   lastPotionUsageTime = Date.now();
 };
 
-// API-based stamina refill method
+// Game State-based stamina refill method
 const refillStaminaViaAPI = async () => {
   // Check game readiness before starting
   if (!isGameReadyForStaminaRefill()) {
@@ -1114,7 +1114,7 @@ let lastSeashellReadyAt = null;
 // Track if Faster Autoplay is currently running
 let fasterAutoplayRunning = false;
 
-// Track current stamina for API-based refill (updated from API responses)
+// Track current stamina for Game State-based refill (updated from API responses)
 let trackedStamina = null;
 
 // Store max stamina (parsed from DOM at init)
@@ -2887,6 +2887,198 @@ const toggleAutomation = () => {
   api.service.updateScriptConfig(context.hash, { enabled: config.enabled });
 };
 
+// Helper function to check if any potions are selected
+const hasAnyPotionSelected = () => {
+  return config.potionEnabled.mini || 
+         config.potionEnabled.strong || 
+         config.potionEnabled.great || 
+         config.potionEnabled.ultimate || 
+         config.potionEnabled.supreme;
+};
+
+// Helper function to update warning visibility
+const updatePotionWarning = () => {
+  const refillCheckbox = document.getElementById('auto-refill-checkbox');
+  const warningElement = document.getElementById('potion-warning-message');
+  if (!warningElement) return;
+  
+  // Check current state of checkboxes
+  const autoRefillEnabled = refillCheckbox ? refillCheckbox.checked : config.autoRefillStamina;
+  const hasPotionSelected = 
+    (document.getElementById('mini-potion-checkbox')?.checked) ||
+    (document.getElementById('strong-potion-checkbox')?.checked) ||
+    (document.getElementById('great-potion-checkbox')?.checked) ||
+    (document.getElementById('ultimate-potion-checkbox')?.checked) ||
+    (document.getElementById('supreme-potion-checkbox')?.checked);
+  
+  warningElement.style.display = (autoRefillEnabled && !hasPotionSelected) ? 'block' : 'none';
+};
+
+// Helper function to set nested property value
+const setNestedProperty = (obj, propertyPath, value) => {
+  if (propertyPath.includes('.')) {
+    const parts = propertyPath.split('.');
+    let target = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!target[parts[i]]) {
+        target[parts[i]] = {};
+      }
+      target = target[parts[i]];
+    }
+    target[parts[parts.length - 1]] = value;
+  } else {
+    obj[propertyPath] = value;
+  }
+};
+
+// Helper function to get nested property value
+const getNestedProperty = (obj, propertyPath) => {
+  if (propertyPath.includes('.')) {
+    return propertyPath.split('.').reduce((current, key) => current?.[key], obj);
+  }
+  return obj[propertyPath];
+};
+
+// Auto-save function that saves only the changed setting
+const autoSaveConfig = (propertyPath, value) => {
+  try {
+    // Update the config property
+    setNestedProperty(config, propertyPath, value);
+    
+    // Handle special cases that need additional logic
+    if (propertyPath === 'fasterAutoplay' || propertyPath === 'fasterAutoplayMs') {
+      // Reset autoplay delay based on Faster Autoplay setting
+      try {
+        if (config.fasterAutoplay) {
+          // Set autoplay delay to configured value
+          globalThis.state.clientConfig.trigger.setState({
+            fn: (prev) => ({
+              ...prev,
+              autoplayDelayMs: config.fasterAutoplayMs
+            }),
+          });
+          
+          console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to ${config.fasterAutoplayMs}ms`);
+        } else {
+          // Reset autoplay delay to default 3 seconds
+          globalThis.state.clientConfig.trigger.setState({
+            fn: (prev) => ({
+              ...prev,
+              autoplayDelayMs: 3000
+            }),
+          });
+          console.log('[Bestiary Automator] Faster Autoplay disabled - reset autoplay delay to 3000ms');
+        }
+      } catch (error) {
+        console.warn('[Bestiary Automator] Could not update autoplay delay:', error);
+      }
+    }
+    
+    // Load existing config from localStorage and merge with the change
+    let savedConfig = {};
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
+        savedConfig = JSON.parse(savedData);
+      }
+    } catch (error) {
+      console.warn('[Bestiary Automator] Error loading existing config:', error);
+    }
+    
+    // Merge with current config to ensure all properties are present
+    savedConfig = Object.assign({}, defaultConfig, savedConfig, config);
+    
+    // Update only the changed property in the saved config
+    setNestedProperty(savedConfig, propertyPath, value);
+    
+    // Save to localStorage
+    saveConfigToStorage(savedConfig);
+    
+    console.log(`[Bestiary Automator] Auto-saved ${propertyPath}:`, value);
+    
+    // Only start automation if it's not already running (prevents redundant initialization)
+    if (!automationInterval) {
+      startAutomation();
+    }
+    
+    // Update game state subscription based on autoplay setting
+    if (propertyPath === 'autoPlayAfterDefeat') {
+      if (config.autoPlayAfterDefeat) {
+        subscribeToGameState();
+      } else {
+        unsubscribeFromGameState();
+      }
+    }
+    
+    // Only update button styling if configuration actually changed
+    updateAutomatorButton();
+    
+    // Update potion warning visibility if relevant property changed
+    if (propertyPath === 'autoRefillStamina' || propertyPath.startsWith('potionEnabled.')) {
+      updatePotionWarning();
+    }
+  } catch (error) {
+    console.error('[Bestiary Automator] Error in auto-save:', error);
+  }
+};
+
+// Helper function to setup checkbox with auto-save
+const setupCheckboxAutoSave = (checkbox, propertyPath, onChange = null) => {
+  if (!checkbox) return;
+  checkbox.checked = config[propertyPath];
+  checkbox.addEventListener('change', () => {
+    if (onChange) onChange();
+    autoSaveConfig(propertyPath, checkbox.checked);
+  });
+};
+
+// Helper function to setup number input with auto-save and validation
+const setupNumberInputAutoSave = (input, propertyPath, min, max) => {
+  if (!input) return;
+  input.value = getNestedProperty(config, propertyPath);
+  
+  const validateAndSave = () => {
+    const value = parseInt(input.value, 10);
+    if (!isNaN(value) && value >= min && value <= max) {
+      autoSaveConfig(propertyPath, value);
+    }
+  };
+  
+  input.addEventListener('change', validateAndSave);
+  input.addEventListener('blur', validateAndSave);
+};
+
+// Helper function to setup potion checkbox with auto-save
+const setupPotionCheckboxAutoSave = (checkbox, potionType) => {
+  if (!checkbox) return;
+  checkbox.checked = config.potionEnabled[potionType];
+  checkbox.addEventListener('change', () => {
+    // Update associated threshold input disabled state
+    const thresholdInput = document.getElementById(`${potionType}-threshold-input`);
+    if (thresholdInput) {
+      thresholdInput.disabled = !checkbox.checked;
+    }
+    updatePotionWarning();
+    autoSaveConfig(`potionEnabled.${potionType}`, checkbox.checked);
+  });
+};
+
+// Helper function to setup potion threshold input with auto-save
+const setupPotionThresholdAutoSave = (input, potionType) => {
+  if (!input) return;
+  input.value = config.potionQuantityThresholds[potionType];
+  
+  const validateAndSave = () => {
+    const value = parseInt(input.value, 10);
+    if (!isNaN(value) && value >= 0 && value <= 1000) {
+      autoSaveConfig(`potionQuantityThresholds.${potionType}`, value);
+    }
+  };
+  
+  input.addEventListener('change', validateAndSave);
+  input.addEventListener('blur', validateAndSave);
+};
+
 // Create the configuration panel
 const createConfigPanel = () => {
   const content = document.createElement('div');
@@ -2955,7 +3147,17 @@ const createConfigPanel = () => {
   mainItemsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
   mainItemsContainer.appendChild(refillContainer);
   mainItemsContainer.appendChild(staminaContainer);
+  
+  // Warning if autorefillstamina is enabled but no potions are selected
+  const warningMsg = document.createElement('div');
+  warningMsg.id = 'potion-warning-message';
+  warningMsg.textContent = t('mods.automator.noPotionWarning');
+  warningMsg.style.cssText = 'color: #e74c3c; margin-top: 8px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px; font-size: 0.9em;';
+  warningMsg.style.display = (config.autoRefillStamina && !hasAnyPotionSelected()) ? 'block' : 'none';
+  mainItemsContainer.appendChild(warningMsg);
+  
   mainItemsContainer.appendChild(rewardsContainer);
+  
   mainItemsContainer.appendChild(dayCareContainer);
   mainItemsContainer.appendChild(autoPlayContainer);
   mainItemsContainer.appendChild(fasterAutoplayContainer);
@@ -2967,6 +3169,19 @@ const createConfigPanel = () => {
   // Faster autoplay delay input
   const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, 0, 3000);
   
+  // Separator and credit footer for advanced section
+  const creditSeparator = document.createElement('div');
+  creditSeparator.style.cssText = 'margin-top: 8px; border-top: 1px solid #444; opacity: 0.6;';
+  const credit = document.createElement('div');
+  credit.style.cssText = 'margin-top: 2px; font-size: 11px; font-style: italic; color: #aaa; text-align: right;';
+  const linkHtml = '<a href="https://bestiaryarena.com/profile/whoman2" target="_blank" rel="noopener noreferrer" style="color:#61AFEF; text-decoration: underline;">whoman2</a>';
+  credit.innerHTML = `Made with the help of ${linkHtml}`;
+  
+  // Auto-save indicator at the top
+  const autoSaveFooter = document.createElement('div');
+  autoSaveFooter.style.cssText = 'font-size: 11px; font-style: italic; color: rgb(74, 222, 128); text-align: left;';
+  autoSaveFooter.textContent = t('mods.automator.settingsAutoSave');
+  
   // Create collapsible advanced section with potion thresholds and faster autoplay delay
   const advancedSection = createCollapsibleSection('advanced-section', t('mods.automator.advanced'), [
     potionHeaderRow,
@@ -2976,58 +3191,35 @@ const createConfigPanel = () => {
     ultimateThresholdContainer,
     supremeThresholdContainer,
     separator,
-    fasterAutoplayDelayContainer
+    fasterAutoplayDelayContainer,
+    creditSeparator,
+    credit
   ], mainItemsContainer);
   
   // Add all elements to content
+  content.appendChild(autoSaveFooter);
   content.appendChild(mainItemsContainer);
   content.appendChild(advancedSection);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
-    const refillCheckbox = document.getElementById('auto-refill-checkbox');
-    const rewardsCheckbox = document.getElementById('auto-rewards-checkbox');
-    const dayCareCheckbox = document.getElementById('auto-daycare-checkbox');
-    const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
-    const fasterAutoplayCheckbox = document.getElementById('faster-autoplay-checkbox');
-    const staminaInput = document.getElementById('min-stamina-input');
-    const supremeThresholdInput = document.getElementById('supreme-threshold-input');
-    const ultimateThresholdInput = document.getElementById('ultimate-threshold-input');
-    const greatThresholdInput = document.getElementById('great-threshold-input');
-    const strongThresholdInput = document.getElementById('strong-threshold-input');
-    const miniThresholdInput = document.getElementById('mini-threshold-input');
-    const supremePotionCheckbox = document.getElementById('supreme-potion-checkbox');
-    const ultimatePotionCheckbox = document.getElementById('ultimate-potion-checkbox');
-    const greatPotionCheckbox = document.getElementById('great-potion-checkbox');
-    const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
-    const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
+    // Setup checkboxes with auto-save
+    setupCheckboxAutoSave(document.getElementById('auto-refill-checkbox'), 'autoRefillStamina', updatePotionWarning);
+    setupCheckboxAutoSave(document.getElementById('auto-rewards-checkbox'), 'autoCollectRewards');
+    setupCheckboxAutoSave(document.getElementById('auto-daycare-checkbox'), 'autoDayCare');
+    setupCheckboxAutoSave(document.getElementById('auto-play-defeat-checkbox'), 'autoPlayAfterDefeat');
+    setupCheckboxAutoSave(document.getElementById('faster-autoplay-checkbox'), 'fasterAutoplay');
     
-    if (refillCheckbox) {
-      refillCheckbox.checked = config.autoRefillStamina; // Show current state
-      // Add event listener to update config when checkbox changes (button styling only updates on save)
-      refillCheckbox.addEventListener('change', () => {
-        config.autoRefillStamina = refillCheckbox.checked;
-        console.log('[Bestiary Automator] Checkbox manually changed to:', refillCheckbox.checked);
-      });
-    }
-    if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
-    if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
-    if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
-    if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
-    if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
-    if (supremeThresholdInput) supremeThresholdInput.value = config.potionQuantityThresholds.supreme;
-    if (ultimateThresholdInput) ultimateThresholdInput.value = config.potionQuantityThresholds.ultimate;
-    if (greatThresholdInput) greatThresholdInput.value = config.potionQuantityThresholds.great;
-    if (strongThresholdInput) strongThresholdInput.value = config.potionQuantityThresholds.strong;
-    if (miniThresholdInput) miniThresholdInput.value = config.potionQuantityThresholds.mini;
-    if (supremePotionCheckbox) supremePotionCheckbox.checked = config.potionEnabled.supreme;
-    if (ultimatePotionCheckbox) ultimatePotionCheckbox.checked = config.potionEnabled.ultimate;
-    if (greatPotionCheckbox) greatPotionCheckbox.checked = config.potionEnabled.great;
-    if (strongPotionCheckbox) strongPotionCheckbox.checked = config.potionEnabled.strong;
-    if (miniPotionCheckbox) miniPotionCheckbox.checked = config.potionEnabled.mini;
+    // Setup number inputs with auto-save
+    setupNumberInputAutoSave(document.getElementById('min-stamina-input'), 'minimumStaminaWithoutRefill', 1, 360);
+    setupNumberInputAutoSave(document.getElementById('faster-autoplay-input'), 'fasterAutoplayMs', 0, 3000);
     
-    const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
-    if (fasterAutoplayInput) fasterAutoplayInput.value = config.fasterAutoplayMs;
+    // Setup potion checkboxes and threshold inputs with auto-save
+    const potionTypes = ['supreme', 'ultimate', 'great', 'strong', 'mini'];
+    potionTypes.forEach(potionType => {
+      setupPotionCheckboxAutoSave(document.getElementById(`${potionType}-potion-checkbox`), potionType);
+      setupPotionThresholdAutoSave(document.getElementById(`${potionType}-threshold-input`), potionType);
+    });
   }, 100);
   
   // Create the config panel
@@ -3043,169 +3235,6 @@ const createConfigPanel = () => {
     },
     buttons: [
       {
-        text: t('mods.automator.saveButton'),
-        primary: true,
-        onClick: () => {
-          // Update configuration from form values
-          const refillCheckbox = document.getElementById('auto-refill-checkbox');
-          config.autoRefillStamina = refillCheckbox ? refillCheckbox.checked : false;
-          
-          // Validate stamina input
-          const staminaInput = document.getElementById('min-stamina-input');
-          const staminaValue = parseInt(staminaInput.value, 10);
-          if (isNaN(staminaValue) || staminaValue < 1 || staminaValue > 360) {
-            showNotification('Minimum stamina must be between 1 and 360', 'error');
-            staminaInput.focus();
-            return;
-          }
-          config.minimumStaminaWithoutRefill = staminaValue;
-          
-          config.autoCollectRewards = document.getElementById('auto-rewards-checkbox').checked;
-          config.autoDayCare = document.getElementById('auto-daycare-checkbox').checked;
-          config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
-          config.fasterAutoplay = document.getElementById('faster-autoplay-checkbox').checked;
-          
-          // Validate potion threshold inputs
-          const supremeThresholdInput = document.getElementById('supreme-threshold-input');
-          const ultimateThresholdInput = document.getElementById('ultimate-threshold-input');
-          const greatThresholdInput = document.getElementById('great-threshold-input');
-          const strongThresholdInput = document.getElementById('strong-threshold-input');
-          const miniThresholdInput = document.getElementById('mini-threshold-input');
-
-          const supremeValue = parseInt(supremeThresholdInput.value, 10);
-          const ultimateValue = parseInt(ultimateThresholdInput.value, 10);
-          const greatValue = parseInt(greatThresholdInput.value, 10);
-          const strongValue = parseInt(strongThresholdInput.value, 10);
-          const miniValue = parseInt(miniThresholdInput.value, 10);
-
-          // Validate all potion thresholds
-          if (isNaN(supremeValue) || supremeValue < 0 || supremeValue > 1000) {
-            showNotification('Supreme potion threshold must be between 0 and 1000', 'error');
-            supremeThresholdInput.focus();
-            return;
-          }
-          if (isNaN(ultimateValue) || ultimateValue < 0 || ultimateValue > 1000) {
-            showNotification('Ultimate potion threshold must be between 0 and 1000', 'error');
-            ultimateThresholdInput.focus();
-            return;
-          }
-          if (isNaN(greatValue) || greatValue < 0 || greatValue > 1000) {
-            showNotification('Great potion threshold must be between 0 and 1000', 'error');
-            greatThresholdInput.focus();
-            return;
-          }
-          if (isNaN(strongValue) || strongValue < 0 || strongValue > 1000) {
-            showNotification('Strong potion threshold must be between 0 and 1000', 'error');
-            strongThresholdInput.focus();
-            return;
-          }
-          if (isNaN(miniValue) || miniValue < 0 || miniValue > 1000) {
-            showNotification('Mini potion threshold must be between 0 and 1000', 'error');
-            miniThresholdInput.focus();
-            return;
-          }
-
-          config.potionQuantityThresholds = {
-            supreme: supremeValue,
-            ultimate: ultimateValue,
-            great: greatValue,
-            strong: strongValue,
-            mini: miniValue
-          };
-          
-          // Get potion enabled checkbox states
-          const supremePotionCheckbox = document.getElementById('supreme-potion-checkbox');
-          const ultimatePotionCheckbox = document.getElementById('ultimate-potion-checkbox');
-          const greatPotionCheckbox = document.getElementById('great-potion-checkbox');
-          const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
-          const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
-          
-          config.potionEnabled = {
-            supreme: supremePotionCheckbox ? supremePotionCheckbox.checked : true,
-            ultimate: ultimatePotionCheckbox ? ultimatePotionCheckbox.checked : true,
-            great: greatPotionCheckbox ? greatPotionCheckbox.checked : true,
-            strong: strongPotionCheckbox ? strongPotionCheckbox.checked : true,
-            mini: miniPotionCheckbox ? miniPotionCheckbox.checked : true
-          };
-          
-          // Validate faster autoplay delay input
-          const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
-          const fasterAutoplayValue = parseInt(fasterAutoplayInput.value, 10);
-          if (isNaN(fasterAutoplayValue) || fasterAutoplayValue < 0 || fasterAutoplayValue > 3000) {
-            showNotification('Autoplay delay must be between 0 and 3000', 'error');
-            fasterAutoplayInput.focus();
-            return;
-          }
-          config.fasterAutoplayMs = fasterAutoplayValue;
-          
-          // Reset autoplay delay based on Faster Autoplay setting
-          try {
-            if (config.fasterAutoplay) {
-              // Set autoplay delay to configured value
-              globalThis.state.clientConfig.trigger.setState({
-                fn: (prev) => ({
-                  ...prev,
-                  autoplayDelayMs: config.fasterAutoplayMs
-                }),
-              });
-              
-              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to ${config.fasterAutoplayMs}ms`);
-            } else {
-              // Reset autoplay delay to default 3 seconds
-              globalThis.state.clientConfig.trigger.setState({
-                fn: (prev) => ({
-                  ...prev,
-                  autoplayDelayMs: 3000
-                }),
-              });
-              console.log('[Bestiary Automator] Faster Autoplay disabled - reset autoplay delay to 3000ms');
-            }
-          } catch (error) {
-            console.warn('[Bestiary Automator] Could not update autoplay delay:', error);
-          }
-          
-          // Save configuration
-          const configToSave = {
-            enabled: config.enabled,
-            autoRefillStamina: config.autoRefillStamina,
-            minimumStaminaWithoutRefill: config.minimumStaminaWithoutRefill,
-            autoCollectRewards: config.autoCollectRewards,
-            autoDayCare: config.autoDayCare,
-            autoPlayAfterDefeat: config.autoPlayAfterDefeat,
-            fasterAutoplay: config.fasterAutoplay,
-            fasterAutoplayMs: config.fasterAutoplayMs,
-            persistAutoRefillOnRefresh: config.persistAutoRefillOnRefresh,
-            potionQuantityThresholds: config.potionQuantityThresholds,
-            potionEnabled: config.potionEnabled
-          };
-          
-          console.log('[Bestiary Automator] Attempting to save config:', configToSave);
-          
-          // Save to localStorage
-          saveConfigToStorage(configToSave);
-          
-          // Skip API save to prevent reload/reinitialization issues
-          console.log('[Bestiary Automator] Skipping API save to prevent reload issues');
-          
-          // Only start automation if it's not already running (prevents redundant initialization)
-          if (!automationInterval) {
-            startAutomation();
-          }
-          
-          // Update game state subscription based on autoplay setting
-          if (config.autoPlayAfterDefeat) {
-            subscribeToGameState();
-          } else {
-            unsubscribeFromGameState();
-          }
-          
-          // Only update button styling if configuration actually changed
-          updateAutomatorButton();
-          
-          showNotification(t('mods.automator.settingsSaved'), 'success');
-        }
-      },
-      {
         text: t('mods.automator.closeButton'),
         primary: false
       }
@@ -3216,7 +3245,7 @@ const createConfigPanel = () => {
   function createCollapsibleSection(id, title, children, mainItemsContainer = null) {
     const container = document.createElement('div');
     container.id = id;
-    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;';
+    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px;';
     
     // Create the toggle button
     const toggleButton = document.createElement('button');
@@ -3396,6 +3425,9 @@ const createConfigPanel = () => {
     input.disabled = !checked;
     checkbox.addEventListener('change', () => {
       input.disabled = !checkbox.checked;
+      updatePotionWarning();
+      // Note: auto-save is handled by event listeners added in setTimeout block
+      // to avoid duplicate saves
     });
     
     // Add input validation
@@ -3410,7 +3442,7 @@ const createConfigPanel = () => {
       }
     });
     
-    // Add validation to reset to min/max values when exceeding limits
+    // Add validation to reset to min/max values when exceeding limits and auto-save
     input.addEventListener('blur', () => {
       const numValue = parseInt(input.value, 10);
       if (!isNaN(numValue)) {
@@ -3422,6 +3454,31 @@ const createConfigPanel = () => {
           input.value = min;
           input.style.borderColor = '#444';
           input.title = '';
+        }
+      }
+      // Determine which property this is based on inputId
+      const finalValue = parseInt(input.value, 10);
+      if (!isNaN(finalValue) && finalValue >= min && finalValue <= max) {
+        if (inputId.includes('threshold-input')) {
+          const potionType = inputId.replace('-threshold-input', '');
+          autoSaveConfig(`potionQuantityThresholds.${potionType}`, finalValue);
+        } else if (inputId === 'faster-autoplay-input') {
+          autoSaveConfig('fasterAutoplayMs', finalValue);
+        } else if (inputId === 'min-stamina-input') {
+          autoSaveConfig('minimumStaminaWithoutRefill', finalValue);
+        }
+      }
+    });
+    input.addEventListener('change', () => {
+      const numValue = parseInt(input.value, 10);
+      if (!isNaN(numValue) && numValue >= min && numValue <= max) {
+        if (inputId.includes('threshold-input')) {
+          const potionType = inputId.replace('-threshold-input', '');
+          autoSaveConfig(`potionQuantityThresholds.${potionType}`, numValue);
+        } else if (inputId === 'faster-autoplay-input') {
+          autoSaveConfig('fasterAutoplayMs', numValue);
+        } else if (inputId === 'min-stamina-input') {
+          autoSaveConfig('minimumStaminaWithoutRefill', numValue);
         }
       }
     });
@@ -3605,7 +3662,7 @@ function init() {
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
-  // Parse max stamina from DOM (for API-based refill calculation)
+  // Parse max stamina from DOM (for Game State-based refill calculation)
   // Try immediately and with a delay in case DOM isn't ready
   maxStamina = parseMaxStaminaFromDOM();
   if (!maxStamina) {
@@ -3767,23 +3824,40 @@ function updateSettingsModalUI() {
         console.log('[Bestiary Automator] Updated autorefill stamina checkbox from', oldValue, 'to', newValue);
       }
       
-      // Add event listener to update config when checkbox changes (if not already added) - button styling only updates on save
+      // Add event listener to auto-save when checkbox changes (if not already added)
       if (!refillCheckbox.hasAttribute('data-listener-added')) {
-        refillCheckbox.addEventListener('change', () => {
-          config.autoRefillStamina = refillCheckbox.checked;
-          console.log('[Bestiary Automator] Checkbox manually changed to:', refillCheckbox.checked);
-        });
+        setupCheckboxAutoSave(refillCheckbox, 'autoRefillStamina', updatePotionWarning);
         refillCheckbox.setAttribute('data-listener-added', 'true');
       }
     } else {
       console.log('[Bestiary Automator] Autorefill stamina checkbox not found!');
     }
     
-    if (rewardsCheckbox) rewardsCheckbox.checked = config.autoCollectRewards;
-    if (dayCareCheckbox) dayCareCheckbox.checked = config.autoDayCare;
-    if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
-    if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
-    if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
+    if (rewardsCheckbox && !rewardsCheckbox.hasAttribute('data-listener-added')) {
+      rewardsCheckbox.checked = config.autoCollectRewards;
+      setupCheckboxAutoSave(rewardsCheckbox, 'autoCollectRewards');
+      rewardsCheckbox.setAttribute('data-listener-added', 'true');
+    }
+    if (dayCareCheckbox && !dayCareCheckbox.hasAttribute('data-listener-added')) {
+      dayCareCheckbox.checked = config.autoDayCare;
+      setupCheckboxAutoSave(dayCareCheckbox, 'autoDayCare');
+      dayCareCheckbox.setAttribute('data-listener-added', 'true');
+    }
+    if (autoPlayCheckbox && !autoPlayCheckbox.hasAttribute('data-listener-added')) {
+      autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
+      setupCheckboxAutoSave(autoPlayCheckbox, 'autoPlayAfterDefeat');
+      autoPlayCheckbox.setAttribute('data-listener-added', 'true');
+    }
+    if (fasterAutoplayCheckbox && !fasterAutoplayCheckbox.hasAttribute('data-listener-added')) {
+      fasterAutoplayCheckbox.checked = config.fasterAutoplay;
+      setupCheckboxAutoSave(fasterAutoplayCheckbox, 'fasterAutoplay');
+      fasterAutoplayCheckbox.setAttribute('data-listener-added', 'true');
+    }
+    if (staminaInput && !staminaInput.hasAttribute('data-listener-added')) {
+      staminaInput.value = config.minimumStaminaWithoutRefill;
+      setupNumberInputAutoSave(staminaInput, 'minimumStaminaWithoutRefill', 1, 360);
+      staminaInput.setAttribute('data-listener-added', 'true');
+    }
 
     // Update potion threshold inputs
     const supremeThresholdInput = document.getElementById('supreme-threshold-input');
@@ -3805,31 +3879,39 @@ function updateSettingsModalUI() {
     const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
     const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
 
-    if (supremePotionCheckbox) {
-      supremePotionCheckbox.checked = config.potionEnabled.supreme;
-      // Update input disabled state
-      if (supremeThresholdInput) supremeThresholdInput.disabled = !supremePotionCheckbox.checked;
-    }
-    if (ultimatePotionCheckbox) {
-      ultimatePotionCheckbox.checked = config.potionEnabled.ultimate;
-      if (ultimateThresholdInput) ultimateThresholdInput.disabled = !ultimatePotionCheckbox.checked;
-    }
-    if (greatPotionCheckbox) {
-      greatPotionCheckbox.checked = config.potionEnabled.great;
-      if (greatThresholdInput) greatThresholdInput.disabled = !greatPotionCheckbox.checked;
-    }
-    if (strongPotionCheckbox) {
-      strongPotionCheckbox.checked = config.potionEnabled.strong;
-      if (strongThresholdInput) strongThresholdInput.disabled = !strongPotionCheckbox.checked;
-    }
-    if (miniPotionCheckbox) {
-      miniPotionCheckbox.checked = config.potionEnabled.mini;
-      if (miniThresholdInput) miniThresholdInput.disabled = !miniPotionCheckbox.checked;
-    }
+    // Update potion checkboxes and their associated threshold inputs
+    const potionTypes = ['supreme', 'ultimate', 'great', 'strong', 'mini'];
+    potionTypes.forEach(potionType => {
+      const checkbox = document.getElementById(`${potionType}-potion-checkbox`);
+      const thresholdInput = document.getElementById(`${potionType}-threshold-input`);
+      
+      if (checkbox) {
+        checkbox.checked = config.potionEnabled[potionType];
+        // Update input disabled state
+        if (thresholdInput) thresholdInput.disabled = !checkbox.checked;
+        if (!checkbox.hasAttribute('data-listener-added')) {
+          setupPotionCheckboxAutoSave(checkbox, potionType);
+          checkbox.setAttribute('data-listener-added', 'true');
+        }
+      }
+      
+      if (thresholdInput && !thresholdInput.hasAttribute('data-listener-added')) {
+        thresholdInput.value = config.potionQuantityThresholds[potionType];
+        setupPotionThresholdAutoSave(thresholdInput, potionType);
+        thresholdInput.setAttribute('data-listener-added', 'true');
+      }
+    });
     
     // Update faster autoplay delay input
     const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
-    if (fasterAutoplayInput) fasterAutoplayInput.value = config.fasterAutoplayMs;
+    if (fasterAutoplayInput && !fasterAutoplayInput.hasAttribute('data-listener-added')) {
+      fasterAutoplayInput.value = config.fasterAutoplayMs;
+      setupNumberInputAutoSave(fasterAutoplayInput, 'fasterAutoplayMs', 0, 3000);
+      fasterAutoplayInput.setAttribute('data-listener-added', 'true');
+    }
+    
+    // Update potion warning visibility after updating UI
+    updatePotionWarning();
     
   } catch (error) {
     console.error('[Bestiary Automator] Error updating settings modal UI:', error);

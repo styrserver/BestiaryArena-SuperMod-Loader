@@ -4,10 +4,17 @@
   },
   "notes": [
   {
+    "version": "3.0.8",
+    "changes": [
+      { "type": "changed", "mod": "Core", "text": "General improvements, terminology updates, and translation updates" },
+      { "type": "changed", "mod": "Bestiary Automator", "text": "Switched to auto-save for all settings" }
+    ]
+  },
+  {
     "version": "3.0.7",
     "changes": [
       { "type": "changed", "mod": "Bestiary Automator", "text": "Added collapsible Advanced section in settings with potion quantity thresholds and faster autoplay delay configuration" },
-      { "type": "changed", "mod": "Bestiary Automator", "text": "Use API for Stamina Refill was improved to use game state and calculations for stamina" }
+      { "type": "changed", "mod": "Bestiary Automator", "text": "Use Game State for Stamina Refill was improved to use game state and calculations for stamina" }
     ]
   },
   {
@@ -29,8 +36,8 @@
   {
     "version": "3.0.4",
     "changes": [
-      { "type": "added", "mod": "Bestiary Automator", "text": "Added API-based stamina refill method: works when tab is in background, rate limited to 1 potion per 3s, uses lowest tier potions first, shows toast notifications, and checks inventory before each use" },
-      { "type": "added", "mod": "Mod Settings", "text": "Added \"Use API for Stamina Refill\" toggle in Advanced section with warning about background usage and rate limiting risk" },
+      { "type": "added", "mod": "Bestiary Automator", "text": "Added Game State-based stamina refill method: works when tab is in background, rate limited to 1 potion per 3s, uses lowest tier potions first, shows toast notifications, and checks inventory before each use" },
+      { "type": "added", "mod": "Mod Settings", "text": "Added \"Use Game State for Stamina Refill\" toggle in Advanced section with warning about background usage and rate limiting risk" },
       { "type": "changed", "mod": "Bestiary Automator", "text": "Refactored autorefill code with helper functions for better maintainability" }
     ]
   },

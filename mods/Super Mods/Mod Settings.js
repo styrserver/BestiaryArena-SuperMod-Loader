@@ -1968,6 +1968,18 @@ function showSettingsModal() {
         `;
         rightColumn.appendChild(creaturesContent);
       } else if (categoryId === 'advanced') {
+        // Read Bestiary Automator config values BEFORE creating HTML to ensure correct initial state
+        let useApiForStaminaRefill = false;
+        let persistAutoRefill = false;
+        try {
+          const automatorConfig = localStorage.getItem('bestiary-automator-config');
+          const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
+          useApiForStaminaRefill = parsedConfig.useApiForStaminaRefill || false;
+          persistAutoRefill = parsedConfig.persistAutoRefillOnRefresh || false;
+        } catch (error) {
+          console.error('[Mod Settings] Error reading Bestiary Automator config for HTML:', error);
+        }
+        
         const advancedContent = document.createElement('div');
         advancedContent.innerHTML = `
           <div style="margin-bottom: 15px;">
@@ -1986,13 +1998,13 @@ function showSettingsModal() {
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="persist-automator-autorefill-toggle" style="transform: scale(1.2);">
+              <input type="checkbox" id="persist-automator-autorefill-toggle" ${persistAutoRefill ? 'checked' : ''} style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.persistAutomatorAutoRefillWarning')}">${t('mods.betterUI.persistAutomatorAutoRefill')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="automator-api-stamina-refill-toggle" style="transform: scale(1.2);">
+              <input type="checkbox" id="automator-api-stamina-refill-toggle" ${useApiForStaminaRefill ? 'checked' : ''} style="transform: scale(1.2);">
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.useApiForStaminaRefillWarning')}">⚠️ ${t('mods.betterUI.useApiForStaminaRefill')}</span>
             </label>
           </div>
