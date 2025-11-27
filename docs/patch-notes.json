@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.0.7",
+    "changes": [
+      { "type": "changed", "mod": "Bestiary Automator", "text": "Added collapsible Advanced section in settings with potion quantity thresholds and faster autoplay delay configuration" },
+      { "type": "changed", "mod": "Bestiary Automator", "text": "Use API for Stamina Refill was improved to use game state and calculations for stamina" }
+    ]
+  },
+  {
     "version": "3.0.6",
     "changes": [
       { "type": "added", "mod": "Cyclopedia", "text": "Added Speed stat to creature stats display" },

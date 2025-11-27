@@ -13,8 +13,23 @@ const defaultConfig = {
   autoDayCare: false,
   autoPlayAfterDefeat: false,
   fasterAutoplay: false,
+  fasterAutoplayMs: 100,
   persistAutoRefillOnRefresh: false,
-  useApiForStaminaRefill: false
+  useApiForStaminaRefill: false,
+  potionQuantityThresholds: {
+    mini: 0,
+    strong: 0,
+    great: 0,
+    ultimate: 0,
+    supreme: 0
+  },
+  potionEnabled: {
+    mini: true,
+    strong: true,
+    great: true,
+    ultimate: true,
+    supreme: true
+  }
 };
 
 // Storage key for localStorage
@@ -44,6 +59,18 @@ const loadConfig = () => {
   return fallbackConfig;
 };
 
+// Save config to localStorage (consolidated helper)
+const saveConfigToStorage = (configToSave) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
+    console.log('[Bestiary Automator] Config saved to localStorage successfully');
+    return true;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error saving config to localStorage:', error);
+    return false;
+  }
+};
+
 config = loadConfig();
 
 // Force autoRefillStamina to false on every page load for safety (unless user enabled persistence)
@@ -69,6 +96,21 @@ const SUPER_AUTOPLAY_TIMING = {
   BUTTON_CLICK_DELAY: 150,   // Delay after button clicks (reduced for faster response)
   DEFEAT_PROCESSING_DELAY: 300, // Delay before processing defeat toast
   STATE_RESET_DELAY: 1000    // Delay before resetting state
+};
+
+// Common timing constants
+const TIMING = {
+  TOAST_AUTO_REMOVE: 4000,      // Auto-remove toast after 4 seconds
+  TOAST_STACK_OFFSET: 46,        // Offset between stacked toasts
+  QUEST_LOG_CLOSE_ATTEMPTS: 3,   // Number of ESC key presses to close quest log
+  QUEST_LOG_CLOSE_DELAY: 50,     // Delay between ESC key presses
+  STAMINA_REFILL_DELAY: 500,     // Delay for stamina refill operations
+  MODAL_CLOSE_DELAY: 500,        // Delay after closing modals
+  REWARDS_COLLECT_DELAY: 500,    // Delay for rewards collection
+  DAYCARE_LEVELUP_DELAY: 1000,   // Delay after daycare level up
+  DAYCARE_EJECTION_DELAY: 1000,  // Delay after daycare ejection
+  SCROLL_LOCK_CHECK_DELAY: 150,  // Delay after ESC key for scroll lock check
+  ESC_KEY_REPEAT_DELAY: 200      // Delay between repeated ESC key presses
 };
 
 // Only track states that prevent conflicts
@@ -107,6 +149,24 @@ const canTransitionTo = (newState) => {
 
 // Helper functions for automation
 
+// Check if Board Analyzer is running (repeated check pattern)
+const isBoardAnalyzerRunning = () => {
+  return !!(window.__modCoordination && window.__modCoordination.boardAnalyzerRunning);
+};
+
+// Simulate ESC key press (repeated pattern)
+const simulateEscKey = () => {
+  const escEvent = new KeyboardEvent('keydown', {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    which: 27,
+    bubbles: true,
+    cancelable: true
+  });
+  document.dispatchEvent(escEvent);
+};
+
 // Find button with specific text (considering language differences)
 const findButtonWithText = (textKey) => {
   const text = t(textKey);
@@ -143,7 +203,7 @@ const clickButtonWithText = (textKey) => {
 // Check and handle scroll lock
 const handleScrollLock = async () => {
   // Don't handle scroll lock if Board Analyzer is running
-  if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+  if (isBoardAnalyzerRunning()) {
     console.log('[Bestiary Automator] Board Analyzer is running, skipping scroll lock handling');
     return false;
   }
@@ -156,19 +216,10 @@ const handleScrollLock = async () => {
       console.log(`[Bestiary Automator] Scroll lock detected (${scrollLockValue}), simulating ESC key`);
       
       // Simulate ESC key press
-      const escEvent = new KeyboardEvent('keydown', {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-        cancelable: true
-      });
-      
-      document.dispatchEvent(escEvent);
+      simulateEscKey();
       
       // Wait briefly and verify the scroll lock was actually resolved
-      await sleep(150);
+      await sleep(TIMING.SCROLL_LOCK_CHECK_DELAY);
       const newScrollLockValue = body.getAttribute('data-scroll-locked');
       const wasResolved = !newScrollLockValue || parseInt(newScrollLockValue) <= 0;
       
@@ -191,7 +242,7 @@ const handleScrollLock = async () => {
 // Click all Close buttons
 const clickAllCloseButtons = () => {
   // Don't close modals if Board Analyzer is running
-  if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+  if (isBoardAnalyzerRunning()) {
     console.log('[Bestiary Automator] Board Analyzer is running, skipping modal close operations');
     return false;
   }
@@ -317,7 +368,7 @@ const showStaminaRestoredToast = (pointsRestored) => {
     
     // Count existing toasts to calculate stacking position
     const existingToasts = mainContainer.querySelectorAll('.toast-item');
-    const stackOffset = existingToasts.length * 46;
+    const stackOffset = existingToasts.length * TIMING.TOAST_STACK_OFFSET;
     
     // Create the flex container for this specific toast
     const flexContainer = document.createElement('div');
@@ -373,11 +424,11 @@ const showStaminaRestoredToast = (pointsRestored) => {
         // Update positions of remaining toasts
         const toasts = mainContainer.querySelectorAll('.toast-item');
         toasts.forEach((toast, index) => {
-          const offset = index * 46;
+          const offset = index * TIMING.TOAST_STACK_OFFSET;
           toast.style.transform = `translateY(-${offset}px)`;
         });
       }
-    }, 4000);
+    }, TIMING.TOAST_AUTO_REMOVE);
     
   } catch (error) {
     console.error('[Bestiary Automator] Error showing stamina restored toast:', error);
@@ -414,7 +465,7 @@ const isAutoplayMode = () => {
 const isGameActive = () => {
   try {
     // Check if Board Analyzer is running - if so, pause automation
-    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+    if (isBoardAnalyzerRunning()) {
       console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
       return false;
     }
@@ -436,31 +487,79 @@ const isGameActive = () => {
 const isGameReadyForStaminaRefill = () => {
   try {
     // Check if Board Analyzer is running - if so, pause automation
-    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
+    if (isBoardAnalyzerRunning()) {
       console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
       return false;
     }
     
     // Simple check: just verify stamina element exists
-    const elStamina = document.querySelector('[title="Stamina"]');
-    return !!elStamina;
+    return !!getStaminaElement();
   } catch (error) {
     console.error('[Bestiary Automator] Error checking game readiness:', error);
     return false;
   }
 };
 
+// Get stamina element from DOM (repeated query pattern)
+const getStaminaElement = () => {
+  return document.querySelector('[title="Stamina"]');
+};
+
+// Get stamina value element from DOM
+const getStaminaValueElement = () => {
+  const elStamina = getStaminaElement();
+  return elStamina ? elStamina.querySelector('span span') : null;
+};
+
+// Parse max stamina from DOM (e.g., "3/360" -> 360)
+const parseMaxStaminaFromDOM = () => {
+  try {
+    const elStamina = getStaminaElement();
+    if (!elStamina) {
+      console.log('[Bestiary Automator] Stamina element not found in DOM for max stamina parsing');
+      return null;
+    }
+    
+    // Look for pattern like "3/360" in the stamina element
+    const staminaText = elStamina.textContent || '';
+    const match = staminaText.match(/\/(\d+)/);
+    
+    if (match && match[1]) {
+      const maxStam = Number(match[1]);
+      if (!isNaN(maxStam) && maxStam > 0) {
+        console.log(`[Bestiary Automator] Parsed max stamina from DOM: ${maxStam}`);
+        return maxStam;
+      }
+    }
+    
+    console.log('[Bestiary Automator] Could not parse max stamina from DOM');
+    return null;
+  } catch (error) {
+    console.error('[Bestiary Automator] Error parsing max stamina from DOM:', error);
+    return null;
+  }
+};
+
 // Get current stamina from DOM (used by API-based refill system)
 const getCurrentStaminaFromState = () => {
   try {
-    const elStamina = document.querySelector('[title="Stamina"]');
-    if (!elStamina) return null;
+    console.log('[Bestiary Automator] Checking current stamina from DOM...');
+    const staminaElement = getStaminaValueElement();
+    if (!staminaElement) {
+      console.log('[Bestiary Automator] Stamina value element not found');
+      return null;
+    }
     
-    const staminaElement = elStamina.querySelector('span span');
-    if (!staminaElement) return null;
+    const staminaText = staminaElement.textContent;
+    const stamina = Number(staminaText);
     
-    const stamina = Number(staminaElement.textContent);
-    return isNaN(stamina) ? null : stamina;
+    if (isNaN(stamina)) {
+      console.log(`[Bestiary Automator] Invalid stamina value: "${staminaText}" (not a number)`);
+      return null;
+    }
+    
+    console.log(`[Bestiary Automator] Current stamina retrieved: ${stamina} (from DOM text: "${staminaText}")`);
+    return stamina;
   } catch (error) {
     console.error('[Bestiary Automator] Error getting current stamina:', error);
     return null;
@@ -499,16 +598,145 @@ const getPlayerInventory = () => {
   return playerContext.inventory || {};
 };
 
-// Helper to find lowest tier potion available in inventory
+// Helper to get current stamina from Game State API (for API-based refill method)
+const getCurrentStaminaFromGameStateAPI = () => {
+  try {
+    if (!isGameStateAPIAvailable()) {
+      console.log('[Bestiary Automator] Game State API not available for stamina check');
+      return null;
+    }
+    
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    
+    // Check if stamina is directly in playerContext
+    if (playerContext.stamina !== undefined && playerContext.stamina !== null) {
+      const staminaValue = Number(playerContext.stamina);
+      if (!isNaN(staminaValue)) {
+        console.log(`[Bestiary Automator] Current stamina retrieved from Game State API: ${staminaValue}`);
+        return staminaValue;
+      }
+    }
+    
+    // Try alternative property names
+    if (playerContext.currentStamina !== undefined && playerContext.currentStamina !== null) {
+      const staminaValue = Number(playerContext.currentStamina);
+      if (!isNaN(staminaValue)) {
+        console.log(`[Bestiary Automator] Found currentStamina in Game State API: ${staminaValue}`);
+        return staminaValue;
+      }
+    }
+    
+    // Check if there's a utils function to calculate stamina
+    if (globalThis.state.utils && typeof globalThis.state.utils.getCurrentStamina === 'function') {
+      try {
+        const stamina = globalThis.state.utils.getCurrentStamina();
+        if (stamina !== null && stamina !== undefined) {
+          console.log(`[Bestiary Automator] Current stamina from utils.getCurrentStamina: ${stamina}`);
+          return Number(stamina);
+        }
+      } catch (e) {
+        // Utils function doesn't exist or failed, continue to fallback
+      }
+    }
+    
+    // Calculate current stamina from staminaWillBeFullAt timestamp
+    // Stamina regenerates at 1 per minute (60 seconds)
+    if (playerContext.staminaWillBeFullAt && maxStamina !== null) {
+      const currentTime = Date.now();
+      const staminaWillBeFullAt = playerContext.staminaWillBeFullAt;
+      const timeUntilFull = staminaWillBeFullAt - currentTime;
+      
+      console.log('[Bestiary Automator] === Stamina Calculation Debug ===');
+      console.log(`[Bestiary Automator] Max stamina: ${maxStamina}`);
+      console.log(`[Bestiary Automator] Current time: ${currentTime} (${new Date(currentTime).toLocaleString()})`);
+      console.log(`[Bestiary Automator] Stamina will be full at: ${staminaWillBeFullAt} (${new Date(staminaWillBeFullAt).toLocaleString()})`);
+      console.log(`[Bestiary Automator] Time until full: ${timeUntilFull}ms (${(timeUntilFull / 1000).toFixed(1)}s)`);
+      
+      // If already full or past the timestamp, stamina is at max
+      if (timeUntilFull <= 0) {
+        console.log(`[Bestiary Automator] ✅ Stamina is FULL (calculated from timestamp): ${maxStamina}`);
+        console.log('[Bestiary Automator] === End Calculation ===');
+        return maxStamina;
+      }
+      
+      // Calculate missing stamina: time until full (in minutes) = stamina missing
+      // 1 stamina per minute = 60,000ms per stamina
+      const timeUntilFullMinutes = timeUntilFull / 60000;
+      const staminaMissing = Math.ceil(timeUntilFullMinutes);
+      const currentStamina = Math.max(0, maxStamina - staminaMissing);
+      
+      console.log(`[Bestiary Automator] Time until full: ${timeUntilFullMinutes.toFixed(2)} minutes`);
+      console.log(`[Bestiary Automator] Stamina missing (rounded up): ${staminaMissing}`);
+      console.log(`[Bestiary Automator] Calculation: ${maxStamina} - ${staminaMissing} = ${currentStamina}`);
+      console.log(`[Bestiary Automator] ✅ Calculated current stamina: ${currentStamina} / ${maxStamina}`);
+      console.log('[Bestiary Automator] === End Calculation ===');
+      return currentStamina;
+    }
+    
+    // Fallback to DOM if calculation not possible (works in foreground tabs, but not background)
+    console.log('[Bestiary Automator] Cannot calculate stamina from timestamp (missing maxStamina or staminaWillBeFullAt), falling back to DOM');
+    return getCurrentStaminaFromState();
+    
+  } catch (error) {
+    console.error('[Bestiary Automator] Error getting current stamina from Game State API:', error);
+    // Fallback to DOM on error
+    return getCurrentStaminaFromState();
+  }
+};
+
+// Helper to map tier number to potion name
+const getPotionNameFromTier = (tier) => {
+  const tierMap = {
+    1: 'mini',
+    2: 'strong',
+    3: 'great',
+    4: 'ultimate',
+    5: 'supreme'
+  };
+  return tierMap[tier] || null;
+};
+
+// Helper to find lowest tier potion available in inventory that is enabled and meets threshold
 const findLowestTierPotion = (inventory) => {
   if (!inventory) return null;
   
-  for (let tier = 1; tier <= 4; tier++) {
+  // Check tiers 1-5 (Mini, Strong, Great, Ultimate, Supreme)
+  for (let tier = 1; tier <= 5; tier++) {
     const potionKey = `stamina${tier}`;
-    if (inventory[potionKey] && inventory[potionKey] > 0) {
-      return tier;
+    const potionCount = inventory[potionKey] || 0;
+    
+    // Check if potion exists and has quantity > 0
+    if (potionCount <= 0) {
+      continue;
     }
+    
+    // Get potion name from tier
+    const potionName = getPotionNameFromTier(tier);
+    if (!potionName) {
+      continue;
+    }
+    
+    // Check if this potion type is enabled
+    if (!config.potionEnabled || !config.potionEnabled[potionName]) {
+      console.log(`[Bestiary Automator] Tier ${tier} (${potionName}) potion is disabled, skipping`);
+      continue;
+    }
+    
+    // Check if quantity meets threshold
+    const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+      ? config.potionQuantityThresholds[potionName]
+      : 0;
+    
+    if (potionCount <= threshold) {
+      console.log(`[Bestiary Automator] Tier ${tier} (${potionName}) potion quantity (${potionCount}) does not exceed threshold (${threshold}), skipping`);
+      continue;
+    }
+    
+    // This potion is available, enabled, and meets threshold
+    console.log(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (threshold: ${threshold})`);
+    return tier;
   }
+  
   return null;
 };
 
@@ -565,61 +793,50 @@ const updateStaminaWillBeFullAt = (timestamp) => {
 
 // Simple stamina refill method for background tabs (original approach)
 const refillStaminaSimple = async (elStamina) => {
-  console.log('[Bestiary Automator] Using simple refill method (background tab)');
-  
   elStamina.click();
-  await sleep(500);
+  await sleep(TIMING.STAMINA_REFILL_DELAY);
   clickButtonWithText('mods.automator.usePotion');
-  await sleep(500);
+  await sleep(TIMING.STAMINA_REFILL_DELAY);
   clickButtonWithText('common.close');
-  await sleep(500);
+  await sleep(TIMING.STAMINA_REFILL_DELAY);
 };
 
 // Robust stamina refill method for foreground tabs (with retry logic)
 const refillStaminaWithRetry = async (elStamina, staminaElement) => {
-  console.log('[Bestiary Automator] Using retry refill method (foreground tab)');
-  
   const initialStamina = Number(staminaElement.textContent);
   
   elStamina.click();
-  await sleep(500);
+  await sleep(TIMING.STAMINA_REFILL_DELAY);
   clickButtonWithText('mods.automator.usePotion');
-  await sleep(500);
+  await sleep(TIMING.STAMINA_REFILL_DELAY);
   
-  // Retry logic for foreground tabs
-  let retryCount = 0;
-  const maxRetries = 5;
-  
-  while (retryCount < maxRetries) {
-    const newStaminaElement = document.querySelector('[title="Stamina"] span span');
-    if (newStaminaElement) {
+      // Retry logic for foreground tabs
+      let retryCount = 0;
+      const maxRetries = 5;
+      
+      while (retryCount < maxRetries) {
+        const newStaminaElement = getStaminaValueElement();
+        if (newStaminaElement) {
       const newStamina = Number(newStaminaElement.textContent);
       if (newStamina >= config.minimumStaminaWithoutRefill) {
-        console.log(`[Bestiary Automator] Stamina refilled successfully: ${newStamina}`);
         break;
       }
       
       retryCount++;
-      console.log(`[Bestiary Automator] Stamina still low after refill: ${newStamina}, retry ${retryCount}/${maxRetries}`);
       
       clickButtonWithText('mods.automator.usePotion');
-      await sleep(500);
+      await sleep(TIMING.STAMINA_REFILL_DELAY);
     } else {
-      console.log(`[Bestiary Automator] Could not find stamina element for retry ${retryCount + 1}`);
       break;
     }
   }
   
   if (retryCount >= maxRetries) {
-    console.log(`[Bestiary Automator] Max retries (${maxRetries}) reached for stamina refill`);
-    
     // Check if stamina didn't increase at all - likely means no potions
-    const finalStaminaElement = document.querySelector('[title="Stamina"] span span');
+    const finalStaminaElement = getStaminaValueElement();
     if (finalStaminaElement) {
       const finalStamina = Number(finalStaminaElement.textContent);
       if (finalStamina === initialStamina) {
-        console.log('[Bestiary Automator] Stamina unchanged after max retries - checking if user has potions...');
-        
         // Wait a bit for inventory to update, then check
         await sleep(1000);
         if (!hasStaminaPotions()) {
@@ -630,27 +847,9 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
   }
   
   // Use ESC key for foreground tabs (more reliable when tab is active)
-  const escEvent1 = new KeyboardEvent('keydown', {
-    key: 'Escape',
-    code: 'Escape',
-    keyCode: 27,
-    which: 27,
-    bubbles: true,
-    cancelable: true
-  });
-  document.dispatchEvent(escEvent1);
-  
-  await sleep(200);
-  
-  const escEvent2 = new KeyboardEvent('keydown', {
-    key: 'Escape',
-    code: 'Escape',
-    keyCode: 27,
-    which: 27,
-    bubbles: true,
-    cancelable: true
-  });
-  document.dispatchEvent(escEvent2);
+  simulateEscKey();
+  await sleep(TIMING.ESC_KEY_REPEAT_DELAY);
+  simulateEscKey();
   
   await sleep(300);
 };
@@ -676,59 +875,84 @@ const waitForPotionRateLimit = async () => {
 const refillStaminaViaAPI = async () => {
   // Check game readiness before starting
   if (!isGameReadyForStaminaRefill()) {
-    console.log('[Bestiary Automator] Game not ready for API-based stamina refill');
     return false;
   }
   
   setRefillingFlag();
   
   try {
-    // Get current stamina
-    let currentStamina = getCurrentStaminaFromState();
-    if (currentStamina === null) {
-      console.log('[Bestiary Automator] Could not get current stamina, aborting API refill');
+    // Get current stamina from Game State API (not DOM, for background tab support)
+    let currentStamina = getCurrentStaminaFromGameStateAPI();
+    
+    // If we got a value, update tracked stamina
+    if (currentStamina !== null) {
+      trackedStamina = currentStamina;
+    } else if (trackedStamina !== null) {
+      // Use tracked value if available (for background tabs)
+      currentStamina = trackedStamina;
+    } else {
       clearRefillingFlag();
       return false;
     }
     
     // Check if we already have enough stamina
     if (currentStamina >= config.minimumStaminaWithoutRefill) {
-      console.log(`[Bestiary Automator] Stamina already sufficient: ${currentStamina} >= ${config.minimumStaminaWithoutRefill}`);
       clearRefillingFlag();
       return true;
     }
     
-    console.log(`[Bestiary Automator] Starting API-based stamina refill: current=${currentStamina}, target=${config.minimumStaminaWithoutRefill}`);
+    // Check if any enabled potions are available before starting refill
+    if (!hasStaminaPotions()) {
+      clearRefillingFlag();
+      return false;
+    }
     
     if (!isGameStateAPIAvailable()) {
-      console.log('[Bestiary Automator] Game State API not available for API refill');
       clearRefillingFlag();
       return false;
     }
     
     // Refill loop: use lowest tier potions first until target is reached
+    let potionCount = 0;
     while (currentStamina < config.minimumStaminaWithoutRefill) {
+      potionCount++;
+      
       // Refresh inventory from Game State API before each potion check
       const inventory = getPlayerInventory();
       if (!inventory) {
-        console.log('[Bestiary Automator] Game State API not available for inventory check');
         break;
       }
       
       // Find lowest tier potion available
       const potionTier = findLowestTierPotion(inventory);
       if (!potionTier) {
-        console.log('[Bestiary Automator] No stamina potions available');
         break;
       }
       
       const potionKey = `stamina${potionTier}`;
-      console.log(`[Bestiary Automator] Using tier ${potionTier} potion (current stamina: ${currentStamina}, available: ${inventory[potionKey]})`);
+      const potionCountAvailable = inventory[potionKey] || 0;
+      
+      // Double-check potion is still available before making API call
+      if (potionCountAvailable <= 0) {
+        removeStaminaPotionFromInventory(potionTier);
+        break;
+      }
       
       // Wait for rate limit before using potion
       await waitForPotionRateLimit();
       
-      // Make API call
+      // Final inventory check right before API call to prevent unnecessary 404s
+      const finalInventory = getPlayerInventory();
+      if (finalInventory) {
+        const finalPotionKey = `stamina${potionTier}`;
+        const finalPotionCount = finalInventory[finalPotionKey] || 0;
+        if (finalPotionCount <= 0) {
+          removeStaminaPotionFromInventory(potionTier);
+          break;
+        }
+      }
+      
+      // Make API call with silent error handling for expected 404s
       try {
         const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.staminaPotion?batch=1', {
           method: 'POST',
@@ -751,20 +975,20 @@ const refillStaminaViaAPI = async () => {
         
         if (!response.ok) {
           const status = response.status;
+          
+          // Handle 400/403/404 errors (no potions or invalid request) - these are expected, handle silently
+          if (status === 400 || status === 403 || status === 404) {
+            removeStaminaPotionFromInventory(potionTier);
+            break;
+          }
+          
+          // For other errors, log and break
           let errorMessage = '';
           try {
             const errorBody = await response.text();
             errorMessage = errorBody ? ` - ${errorBody.substring(0, 200)}` : '';
           } catch (_) {}
           console.log(`[Bestiary Automator] API call failed with status ${status}${errorMessage}`);
-          
-          // Handle 400/403/404 errors (no potions or invalid request)
-          if (status === 400 || status === 403 || status === 404) {
-            removeStaminaPotionFromInventory(potionTier);
-            break;
-          }
-          
-          // For other errors, break and return failure
           break;
         }
         
@@ -783,7 +1007,11 @@ const refillStaminaViaAPI = async () => {
           }
           
           const pointsRestored = data.pointsRestored || 0;
-          console.log(`[Bestiary Automator] Potion used successfully, restored ${pointsRestored} points`);
+          
+          // Update tracked stamina from API response
+          if (pointsRestored > 0 && trackedStamina !== null) {
+            trackedStamina = trackedStamina + pointsRestored;
+          }
           
           // Show toast notification
           if (pointsRestored > 0) {
@@ -798,10 +1026,15 @@ const refillStaminaViaAPI = async () => {
         // Wait a bit before checking stamina again
         await sleep(300);
         
-        // Re-check current stamina
-        currentStamina = getCurrentStaminaFromState();
-        if (currentStamina === null) {
-          console.log('[Bestiary Automator] Could not get updated stamina, stopping refill');
+        // Re-check current stamina from Game State API (calculated from timestamp)
+        const newStamina = getCurrentStaminaFromGameStateAPI();
+        if (newStamina !== null) {
+          currentStamina = newStamina;
+          trackedStamina = newStamina; // Update tracked value with calculated value
+        } else if (trackedStamina !== null) {
+          // Use tracked value if calculation failed (fallback)
+          currentStamina = trackedStamina;
+        } else {
           break;
         }
         
@@ -809,13 +1042,6 @@ const refillStaminaViaAPI = async () => {
         console.error('[Bestiary Automator] Error in API call:', error);
         break;
       }
-    }
-    
-    const finalStamina = getCurrentStaminaFromState();
-    if (finalStamina !== null && finalStamina >= config.minimumStaminaWithoutRefill) {
-      console.log(`[Bestiary Automator] API refill completed successfully: ${finalStamina} >= ${config.minimumStaminaWithoutRefill}`);
-    } else {
-      console.log(`[Bestiary Automator] API refill completed: final stamina = ${finalStamina}`);
     }
     
     clearRefillingFlag();
@@ -830,7 +1056,9 @@ const refillStaminaViaAPI = async () => {
 
 // Refill stamina if needed - chooses method based on config
 const refillStaminaIfNeeded = async () => {
-  if (!config.autoRefillStamina) return;
+  if (!config.autoRefillStamina) {
+    return;
+  }
   
   // Use API method if enabled, otherwise use DOM method
   if (config.useApiForStaminaRefill) {
@@ -840,16 +1068,19 @@ const refillStaminaIfNeeded = async () => {
   
   // Existing DOM-based method (unchanged)
   try {
-    const elStamina = document.querySelector('[title="Stamina"]');
+    const elStamina = getStaminaElement();
     if (!elStamina) return;
     
-    const staminaElement = elStamina.querySelector('span span');
+    const staminaElement = getStaminaValueElement();
     if (!staminaElement) return;
     
     const stamina = Number(staminaElement.textContent);
     if (stamina >= config.minimumStaminaWithoutRefill) return;
     
-    console.log(`[Bestiary Automator] Refilling stamina: current=${stamina}, minimum=${config.minimumStaminaWithoutRefill}`);
+    // Check if any enabled potions are available before attempting refill
+    if (!hasStaminaPotions()) {
+      return;
+    }
     
     setRefillingFlag();
     
@@ -883,8 +1114,14 @@ let lastSeashellReadyAt = null;
 // Track if Faster Autoplay is currently running
 let fasterAutoplayRunning = false;
 
+// Track current stamina for API-based refill (updated from API responses)
+let trackedStamina = null;
 
-// Check if user has any stamina potions in inventory
+// Store max stamina (parsed from DOM at init)
+let maxStamina = null;
+
+
+// Check if user has any enabled stamina potions in inventory that meet thresholds
 const hasStaminaPotions = () => {
   try {
     if (!globalThis.state || !globalThis.state.player) {
@@ -894,10 +1131,32 @@ const hasStaminaPotions = () => {
     const playerContext = globalThis.state.player.getSnapshot().context;
     const inventory = playerContext.inventory || {};
     
-    // Check all potion tiers (1-4)
-    for (let tier = 1; tier <= 4; tier++) {
+    // Check all potion tiers (1-5: Mini, Strong, Great, Ultimate, Supreme)
+    for (let tier = 1; tier <= 5; tier++) {
       const potionKey = `stamina${tier}`;
-      if (inventory[potionKey] && inventory[potionKey] > 0) {
+      const potionCount = inventory[potionKey] || 0;
+      
+      if (potionCount <= 0) {
+        continue;
+      }
+      
+      // Get potion name from tier
+      const potionName = getPotionNameFromTier(tier);
+      if (!potionName) {
+        continue;
+      }
+      
+      // Check if this potion type is enabled
+      if (!config.potionEnabled || !config.potionEnabled[potionName]) {
+        continue;
+      }
+      
+      // Check if quantity meets threshold
+      const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+        ? config.potionQuantityThresholds[potionName]
+        : 0;
+      
+      if (potionCount > threshold) {
         return true;
       }
     }
@@ -921,7 +1180,7 @@ const disableAutoRefillDueToNoPotions = () => {
     const savedData = localStorage.getItem(STORAGE_KEY);
     const savedConfig = savedData ? JSON.parse(savedData) : {};
     savedConfig.autoRefillStamina = false;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedConfig));
+    saveConfigToStorage(savedConfig);
   } catch (error) {
     console.error('[Bestiary Automator] Error saving to localStorage:', error);
   }
@@ -990,51 +1249,86 @@ const setupStaminaPotionErrorHandler = () => {
       
       // Check if this is a stamina potion request
       if (url && url.includes('inventory.staminaPotion') && options && options.method === 'POST') {
-        return originalFetch.apply(this, args).then(async response => {
-          // Check for client/server errors (400, 401, 403, 404)
-          if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
-            console.log(`[Bestiary Automator] ${response.status} error detected for stamina potion API`);
-            
-            // Try to extract potion tier from request body
-            let potionTier = 1; // Default to tier 1
-            try {
-              if (options.body) {
-                const requestBody = JSON.parse(options.body);
-                console.log('[Bestiary Automator] Request body for tier detection:', requestBody);
-                
-                // Try different possible structures for tier
-                if (requestBody['0'] && requestBody['0'].json) {
-                  const jsonData = requestBody['0'].json;
-                  if (jsonData.rarity) {
-                    // Game uses 'rarity' field to indicate potion tier
-                    potionTier = jsonData.rarity;
-                  } else if (jsonData.tier) {
-                    potionTier = jsonData.tier;
-                  } else if (jsonData.potionTier) {
-                    potionTier = jsonData.potionTier;
-                  } else if (jsonData.type && jsonData.type.includes('stamina')) {
-                    // Try to extract tier from type field like "stamina2"
-                    const tierMatch = jsonData.type.match(/stamina(\d+)/);
-                    if (tierMatch) {
-                      potionTier = parseInt(tierMatch[1]);
-                    }
-                  }
-                }
-                
-                console.log(`[Bestiary Automator] Detected potion tier: ${potionTier}`);
+        // Try to extract potion tier from request body
+        let potionTier = 1;
+        try {
+          if (options.body) {
+            const requestBody = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+            if (requestBody['0'] && requestBody['0'].json) {
+              const jsonData = requestBody['0'].json;
+              if (jsonData.rarity) {
+                potionTier = jsonData.rarity;
+              } else if (jsonData.tier) {
+                potionTier = jsonData.tier;
+              } else if (jsonData.potionTier) {
+                potionTier = jsonData.potionTier;
               }
-            } catch (parseError) {
-              console.warn('[Bestiary Automator] Could not parse request body for potion tier, using default tier 1:', parseError);
             }
-            
-            // Remove the potion from local inventory immediately
+          }
+        } catch (_) {
+          // Use default tier if parsing fails
+        }
+        
+        // Check inventory before making the call to prevent unnecessary 404s
+        const inventory = getPlayerInventory();
+        if (inventory) {
+          const potionKey = `stamina${potionTier}`;
+          const potionCount = inventory[potionKey] || 0;
+          if (potionCount <= 0) {
+            // Potion not available - remove from inventory and prevent the API call
+            // This prevents the browser from logging a 404 error
             removeStaminaPotionFromInventory(potionTier);
+            // Return a response that won't trigger browser console errors
+            // The calling code checks response.ok and then data, so this is safe
+            return Promise.resolve(new Response(JSON.stringify([{
+              result: {
+                data: {
+                  json: null
+                }
+              }
+            }]), {
+              status: 200,
+              statusText: 'OK',
+              headers: { 'Content-Type': 'application/json' }
+            }));
+          }
+        }
+        
+        return originalFetch.apply(this, args).then(async response => {
+          // Check for client/server errors (400, 401, 403, 404) - these are expected when potions aren't available
+          if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
+            // Remove the potion from local inventory immediately (expected behavior for 404s)
+            removeStaminaPotionFromInventory(potionTier);
+            // Return a successful mock response to prevent browser console errors
+            return new Response(JSON.stringify([{
+              result: {
+                data: {
+                  json: null
+                }
+              }
+            }]), {
+              status: 200,
+              statusText: 'OK',
+              headers: { 'Content-Type': 'application/json' }
+            });
           }
           
           return response;
         }).catch(error => {
-          console.error('[Bestiary Automator] Error in fetch interceptor:', error);
-          throw error;
+          // Silently handle network errors
+          removeStaminaPotionFromInventory(potionTier);
+          // Return a successful mock response to prevent browser console errors
+          return new Response(JSON.stringify([{
+            result: {
+              data: {
+                json: null
+              }
+            }
+          }]), {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'Content-Type': 'application/json' }
+          });
         });
       }
       
@@ -1073,13 +1367,10 @@ const takeRewardsIfAvailable = async () => {
       return;
     }
     
-    console.log(`[Bestiary Automator] Taking rewards at level ${currentLevel}`);
-    
     // Signal to other mods that we're collecting rewards (for coordination)
     try {
       window.__modCoordination = window.__modCoordination || {};
       window.__modCoordination.automatorCollectingRewards = true;
-      console.log('[Bestiary Automator] Set automatorCollectingRewards flag - other mods should pause');
     } catch (_) {}
     
     // Open rewards menu
@@ -1092,11 +1383,11 @@ const takeRewardsIfAvailable = async () => {
         };
       },
     });
-    await sleep(500);
+    await sleep(TIMING.REWARDS_COLLECT_DELAY);
     clickButtonWithText('mods.automator.collect');
-    await sleep(500);
+    await sleep(TIMING.REWARDS_COLLECT_DELAY);
     clickAllCloseButtons();
-    await sleep(500);
+    await sleep(TIMING.REWARDS_COLLECT_DELAY);
     
     // Check for seashell collection (but only if no timer is set)
     if (!seashellTimer) {
@@ -1112,7 +1403,6 @@ const takeRewardsIfAvailable = async () => {
     // Clear the flag after collecting is complete
     try {
       window.__modCoordination.automatorCollectingRewards = false;
-      console.log('[Bestiary Automator] Cleared automatorCollectingRewards flag - other mods can resume');
     } catch (_) {}
     
   } catch (error) {
@@ -1258,7 +1548,7 @@ const openQuestLogForSeashell = async () => {
     
     if (questButton) {
       questButton.click();
-      await sleep(500); // Wait for quest log to open
+      await sleep(TIMING.MODAL_CLOSE_DELAY); // Wait for quest log to open
       
       // Verify quest log opened by looking for the container or seashell section
       const questLogContainer = document.querySelector('.widget-bottom .grid.h-\\[260px\\].items-start.gap-1');
@@ -1365,7 +1655,7 @@ const clickSeashellOpenButton = async () => {
         
         openButton.click();
         console.log('[Bestiary Automator] ✅ Seashell Open button clicked!');
-        await sleep(500);
+        await sleep(TIMING.MODAL_CLOSE_DELAY);
         console.log('[Bestiary Automator] ✅ Seashell Open button click completed');
         return true;
       } else {
@@ -1411,17 +1701,9 @@ const closeQuestLog = async () => {
     console.log('[Bestiary Automator] Closing quest log...');
     
     // Press ESC key to close quest log
-    for (let i = 0; i < 3; i++) {
-      const escEvent = new KeyboardEvent('keydown', {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-        cancelable: true
-      });
-      document.dispatchEvent(escEvent);
-      await sleep(50);
+    for (let i = 0; i < TIMING.QUEST_LOG_CLOSE_ATTEMPTS; i++) {
+      simulateEscKey();
+      await sleep(TIMING.QUEST_LOG_CLOSE_DELAY);
     }
     
     console.log('[Bestiary Automator] Quest log closed');
@@ -1436,14 +1718,13 @@ const handleDayCare = async () => {
   if (!config.autoDayCare) return;
   
   // Check if Board Analyzer is running - if so, skip daycare detection
-  if (window.__modCoordination?.boardAnalyzerRunning) return;
+  if (isBoardAnalyzerRunning()) return;
   
   try {
     // Signal to other mods that we're handling daycare (for coordination)
     try {
       window.__modCoordination = window.__modCoordination || {};
       window.__modCoordination.automatorHandlingDaycare = true;
-      console.log('[Bestiary Automator] Set automatorHandlingDaycare flag - other mods should pause');
     } catch (_) {}
     
     // Single query with early exit - if no blip elements, skip processing
@@ -1456,8 +1737,6 @@ const handleDayCare = async () => {
       return;
     }
     
-    console.log('[Bestiary Automator] Found', blipElements.length, 'daycare creatures with data-blip="true"');
-    
     // Check for daycare button with visual indicator
     const dayCareButton = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
     let hasDayCareButtonIndicator = false;
@@ -1465,31 +1744,11 @@ const handleDayCare = async () => {
     if (dayCareButton) {
       if (dayCareButton.classList.contains('focus-style-visible') && dayCareButton.classList.contains('active:opacity-70')) {
         hasDayCareButtonIndicator = true;
-        console.log('[Bestiary Automator] Daycare button has visual indicator');
       }
-    } else {
-      console.log('[Bestiary Automator] No daycare button found');
     }
     
     // Look for creatures that are actually in daycare slots (have both creature and daycare images)
     const creatureAtDaycare = document.querySelector('div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="daycare"]), div[data-blip="true"]:has(img[alt="creature"]):has(img[alt="Daycare"])');
-    
-    if (creatureAtDaycare) {
-      console.log('[Bestiary Automator] Found creature at daycare with blip');
-      
-      // Check if this specific creature is ready (not max level)
-      const isRedBlip = creatureAtDaycare.querySelector('.text-invalid');
-      const isGreenBlip = creatureAtDaycare.querySelector('.text-expBar');
-      const maxLevelText = creatureAtDaycare.querySelector('span[data-state="closed"]');
-      
-      if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
-        console.log('[Bestiary Automator] Creature is at max level, not ready');
-      } else if (isGreenBlip) {
-        console.log('[Bestiary Automator] Creature is ready for level up!');
-      }
-    } else {
-      console.log('[Bestiary Automator] No creature at daycare with blip found');
-    }
     
     // Check if there are any elements that contain both a blip AND a daycare image
     let foundBlipWithDaycare = false;
@@ -1514,10 +1773,8 @@ const handleDayCare = async () => {
         
         // Only consider it ready if it has a green blip (not red) and no "Max" text
         if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
-          console.log(`[Bestiary Automator] Creature ${i + 1} is ready for level up!`);
           foundReadyCreature = true;
         } else if (isRedBlip || maxLevelText?.textContent?.includes('Max')) {
-          console.log(`[Bestiary Automator] Creature ${i + 1} is at max level, needs ejection`);
           foundMaxedCreature = true;
         }
       }
@@ -1568,28 +1825,24 @@ const handleDayCare = async () => {
     console.log('[Bestiary Automator] Handling day care');
     
     clickButtonWithText('mods.automator.inventory');
-    await sleep(500);
+    await sleep(TIMING.MODAL_CLOSE_DELAY);
     
     // Double-check after opening inventory
     const dayCareButtonAfter = document.querySelector('button:has(img[alt="daycare"]), button:has(img[alt="Daycare"])');
     if (!dayCareButtonAfter) return;
     
     dayCareButtonAfter.click();
-    await sleep(500);
+    await sleep(TIMING.MODAL_CLOSE_DELAY);
     
     // Handle all creatures that can level up in one session
     let levelUpCount = 0;
     const maxLevelUps = 4; // Maximum 4 creatures can be in daycare
     
     while (levelUpCount < maxLevelUps) {
-      console.log(`[Bestiary Automator] === Level up attempt ${levelUpCount + 1} ===`);
-      
       // Check if there are any creatures ready to level up
       const readyCreatures = document.querySelectorAll('[data-blip="true"]');
       let foundReadyCreature = false;
       let readyCreatureCount = 0;
-      
-      console.log(`[Bestiary Automator] Checking ${readyCreatures.length} blip elements for ready creatures...`);
       
       for (let i = 0; i < readyCreatures.length; i++) {
         const creature = readyCreatures[i];
@@ -1600,66 +1853,41 @@ const handleDayCare = async () => {
           const isGreenBlip = creature.querySelector('.text-expBar');
           const maxLevelText = creature.querySelector('span[data-state="closed"]');
           
-          console.log(`[Bestiary Automator] Creature ${i + 1} in daycare modal:`);
-          console.log(`[Bestiary Automator] - Red blip:`, !!isRedBlip);
-          console.log(`[Bestiary Automator] - Green blip:`, !!isGreenBlip);
-          console.log(`[Bestiary Automator] - Max text:`, maxLevelText?.textContent);
-          
           if (isGreenBlip && !isRedBlip && !maxLevelText?.textContent?.includes('Max')) {
-            console.log(`[Bestiary Automator] Creature ${i + 1} is ready for level up!`);
             foundReadyCreature = true;
             readyCreatureCount++;
-          } else {
-            console.log(`[Bestiary Automator] Creature ${i + 1} is not ready`);
           }
         }
       }
       
-      console.log(`[Bestiary Automator] Found ${readyCreatureCount} creatures ready for level up`);
-      
       if (!foundReadyCreature) {
-        console.log('[Bestiary Automator] No more creatures ready for level up, stopping');
         break;
       }
       
       // Click level up
-      console.log('[Bestiary Automator] Attempting to click level up button...');
       const levelUpClicked = clickButtonWithText('mods.automator.levelUp');
       
       if (!levelUpClicked) {
-        console.log('[Bestiary Automator] Level up button not found, stopping');
         break;
       }
       
       levelUpCount++;
-      console.log(`[Bestiary Automator] Successfully clicked level up for creature ${levelUpCount}`);
       
       // Wait for the level up to process
-      console.log('[Bestiary Automator] Waiting 1 second for level up to process...');
-      await sleep(1000);
-      
-      console.log(`[Bestiary Automator] Level up ${levelUpCount} completed`);
+      await sleep(TIMING.DAYCARE_LEVELUP_DELAY);
     }
-    
-    console.log(`[Bestiary Automator] Completed ${levelUpCount} level ups`);
     
     // Handle ejection of maxed creatures
     if (foundMaxedCreature) {
-      console.log('[Bestiary Automator] Starting maxed creature ejection process');
-      
       let ejectionCount = 0;
       const maxEjections = 4; // Maximum 4 creatures can be in daycare
       
       while (ejectionCount < maxEjections) {
-        console.log(`[Bestiary Automator] === Ejection attempt ${ejectionCount + 1} ===`);
-        
         // Check if there are any maxed creatures that need ejection
         // Look for daycare slot containers that contain maxed creatures
         const daycareSlots = document.querySelectorAll('div.relative.flex.items-center.gap-2');
         let foundMaxedCreatureInModal = false;
         let maxedCreatureWithdrawButton = null;
-        
-        console.log(`[Bestiary Automator] Checking ${daycareSlots.length} daycare slots for maxed creatures...`);
         
         for (let i = 0; i < daycareSlots.length; i++) {
           const slot = daycareSlots[i];
@@ -1667,12 +1895,7 @@ const handleDayCare = async () => {
           const maxLevelText = slot.querySelector('span[data-state="closed"]');
           const withdrawButton = slot.querySelector('button[title="Withdraw"]');
           
-          console.log(`[Bestiary Automator] Daycare slot ${i + 1}:`);
-          console.log(`[Bestiary Automator] - Max text:`, maxLevelText?.textContent);
-          console.log(`[Bestiary Automator] - Withdraw button:`, !!withdrawButton);
-          
           if (maxLevelText?.textContent?.includes('Max') && withdrawButton) {
-            console.log(`[Bestiary Automator] Daycare slot ${i + 1} has maxed creature, ejecting!`);
             foundMaxedCreatureInModal = true;
             maxedCreatureWithdrawButton = withdrawButton;
             break; // Found one to eject, break and process it
@@ -1680,30 +1903,22 @@ const handleDayCare = async () => {
         }
         
         if (!foundMaxedCreatureInModal || !maxedCreatureWithdrawButton) {
-          console.log('[Bestiary Automator] No more maxed creatures to eject, stopping');
           break;
         }
         
         // Click the withdraw button for the specific maxed creature
-        console.log('[Bestiary Automator] Clicking withdraw button for maxed creature...');
         maxedCreatureWithdrawButton.click();
         
         ejectionCount++;
-        console.log(`[Bestiary Automator] Successfully ejected creature ${ejectionCount}`);
         
         // Wait for the ejection to process
-        console.log('[Bestiary Automator] Waiting 1 second for ejection to process...');
-        await sleep(1000);
-        
-        console.log(`[Bestiary Automator] Ejection ${ejectionCount} completed`);
+        await sleep(TIMING.DAYCARE_EJECTION_DELAY);
       }
-      
-      console.log(`[Bestiary Automator] Completed ${ejectionCount} ejections`);
     }
     
     // Close the modal after handling all creatures
     clickAllCloseButtons();
-    await sleep(500);
+    await sleep(TIMING.MODAL_CLOSE_DELAY);
     
     // Check for scroll lock after daycare operations
     await handleScrollLock();
@@ -1711,7 +1926,6 @@ const handleDayCare = async () => {
     // Clear the flag after daycare is complete
     try {
       window.__modCoordination.automatorHandlingDaycare = false;
-      console.log('[Bestiary Automator] Cleared automatorHandlingDaycare flag - other mods can resume');
     } catch (_) {}
     
   } catch (error) {
@@ -1756,10 +1970,8 @@ const updateRequiredStamina = () => {
         };
         
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            ...JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'),
-            ...configToSave
-          }));
+          const existingConfig = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+          saveConfigToStorage({ ...existingConfig, ...configToSave });
         } catch (error) {
           console.error('[Bestiary Automator] Error saving to localStorage:', error);
         }
@@ -1875,7 +2087,6 @@ const subscribeToGameState = () => {
             if (node.nodeType === Node.ELEMENT_NODE) {
               // Check if the added element is a defeat toast
               if (isDefeatToast(node)) {
-                console.log('[Bestiary Automator] Defeat toast detected via MutationObserver!');
                 // Process immediately without debouncing
                 processDefeatToast();
                 return; // Exit early since we found a defeat toast
@@ -1883,7 +2094,6 @@ const subscribeToGameState = () => {
               
               // Check for battle ongoing toasts (network issues)
               if (isBattleOngoingToast(node)) {
-                console.log('[Bestiary Automator] Battle ongoing toast detected via MutationObserver!');
                 // Process immediately without debouncing
                 const toastText = getToastText(node);
                 processBattleOngoingToast(toastText);
@@ -1892,7 +2102,6 @@ const subscribeToGameState = () => {
               
               // Check for "Something went wrong" toasts
               if (isSomethingWrongToast(node)) {
-                console.log('[Bestiary Automator] Something went wrong toast detected via MutationObserver!');
                 // Process immediately without debouncing
                 processSomethingWrongToast();
                 return; // Exit early since we found a something wrong toast
@@ -1906,7 +2115,6 @@ const subscribeToGameState = () => {
                 const portugueseDefeat = toastText.includes('Autoplay parou porque suas criaturas foram derrotadas');
                 
                 if (englishDefeat || portugueseDefeat) {
-                  console.log('[Bestiary Automator] Defeat toast found in child elements via MutationObserver!');
                   processDefeatToast();
                   return;
                 }
@@ -1915,7 +2123,6 @@ const subscribeToGameState = () => {
               // Check child elements for battle ongoing toasts
               const battleToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
               if (battleToast && battleToast.textContent.includes('Battle still ongoing') && battleToast.textContent.includes('ms diff')) {
-                console.log('[Bestiary Automator] Battle ongoing toast found in child elements via MutationObserver!');
                 const toastText = getToastText(battleToast);
                 processBattleOngoingToast(toastText);
                 return;
@@ -1924,7 +2131,6 @@ const subscribeToGameState = () => {
               // Check child elements for "Something went wrong" toasts
               const somethingWrongToast = node.querySelector && node.querySelector('div.widget-bottom.pixel-font-16.flex.items-center.gap-2.px-2.py-1.text-whiteHighlight');
               if (somethingWrongToast && somethingWrongToast.textContent.includes('Something went wrong')) {
-                console.log('[Bestiary Automator] Something went wrong toast found in child elements via MutationObserver!');
                 processSomethingWrongToast();
                 return;
               }
@@ -2644,8 +2850,7 @@ const stopAutomation = () => {
 const runAutomationTasks = async () => {
   try {
     // Check if Board Analyzer is running - if so, skip all automation tasks
-    if (window.__modCoordination && window.__modCoordination.boardAnalyzerRunning) {
-      console.log('[Bestiary Automator] Board Analyzer is running, skipping all automation tasks');
+    if (isBoardAnalyzerRunning()) {
       return;
     }
     
@@ -2705,20 +2910,78 @@ const createConfigPanel = () => {
   const autoPlayContainer = createCheckboxContainer('auto-play-defeat-checkbox', t('mods.automator.autoPlayAfterDefeat'), config.autoPlayAfterDefeat);
   
   // Faster autoplay checkbox with warning
-  const fasterAutoplayWarningText = config.currentLocale === 'pt' 
-    ? '⚠️ Remove o tempo de espera de 3 segundos entre ações de autoplay. Pode causar comportamento inesperado ou conflitos com outros mods.'
-    : '⚠️ Removes the 3-second delay between autoplay actions. May cause unexpected behavior or conflicts with other mods.';
+  const fasterAutoplayWarningText = t('mods.automator.fasterAutoplayWarning');
   
   const fasterAutoplayContainer = createCheckboxContainerWithWarning('faster-autoplay-checkbox', t('mods.automator.fasterAutoplay'), config.fasterAutoplay, fasterAutoplayWarningText);
   
+  // Potion quantity thresholds section
+  const miniThresholdContainer = createCheckboxWithNumberInput('mini-potion-checkbox', 'mini-threshold-input', t('mods.automator.miniPotion'), config.potionEnabled.mini, config.potionQuantityThresholds.mini, 0, 1000);
+  const strongThresholdContainer = createCheckboxWithNumberInput('strong-potion-checkbox', 'strong-threshold-input', t('mods.automator.strongPotion'), config.potionEnabled.strong, config.potionQuantityThresholds.strong, 0, 1000);
+  const greatThresholdContainer = createCheckboxWithNumberInput('great-potion-checkbox', 'great-threshold-input', t('mods.automator.greatPotion'), config.potionEnabled.great, config.potionQuantityThresholds.great, 0, 1000);
+  const ultimateThresholdContainer = createCheckboxWithNumberInput('ultimate-potion-checkbox', 'ultimate-threshold-input', t('mods.automator.ultimatePotion'), config.potionEnabled.ultimate, config.potionQuantityThresholds.ultimate, 0, 1000);
+  const supremeThresholdContainer = createCheckboxWithNumberInput('supreme-potion-checkbox', 'supreme-threshold-input', t('mods.automator.supremePotion'), config.potionEnabled.supreme, config.potionQuantityThresholds.supreme, 0, 1000);
+  
+  // Create header row for potion thresholds
+  const potionHeaderRow = document.createElement('div');
+  potionHeaderRow.style.cssText = 'display: flex; align-items: center; margin: 5px 0px; font-weight: bold;';
+  
+  // Add spacer to account for checkbox width (16px) + margin-right (10px) = 26px
+  const checkboxSpacer = document.createElement('span');
+  checkboxSpacer.style.cssText = 'width: 26px; margin-right: 0px;';
+  
+  const potionHeaderLabel = document.createElement('span');
+  potionHeaderLabel.textContent = t('mods.automator.potion');
+  potionHeaderLabel.style.cssText = 'margin-right: 10px; min-width: 120px; display: inline-block; text-align: center;';
+  
+  const thresholdHeaderLabel = document.createElement('span');
+  thresholdHeaderLabel.textContent = t('mods.automator.threshold');
+  thresholdHeaderLabel.style.cssText = 'width: 80px; display: inline-block; text-align: center;';
+  
+  // Create info icon with tooltip for threshold
+  const thresholdInfoIcon = document.createElement('img');
+  thresholdInfoIcon.src = 'https://bestiaryarena.com/assets/icons/info.png';
+  thresholdInfoIcon.alt = 'info';
+  thresholdInfoIcon.style.cssText = 'width: 11px; height: 11px; margin-left: 4px; cursor: help; opacity: 0.7;';
+  thresholdInfoIcon.title = t('mods.automator.thresholdTooltip');
+  
+  potionHeaderRow.appendChild(checkboxSpacer);
+  potionHeaderRow.appendChild(potionHeaderLabel);
+  potionHeaderRow.appendChild(thresholdHeaderLabel);
+  potionHeaderRow.appendChild(thresholdInfoIcon);
+  
+  // Create container for items above Advanced section
+  const mainItemsContainer = document.createElement('div');
+  mainItemsContainer.id = 'main-items-container';
+  mainItemsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 15px;';
+  mainItemsContainer.appendChild(refillContainer);
+  mainItemsContainer.appendChild(staminaContainer);
+  mainItemsContainer.appendChild(rewardsContainer);
+  mainItemsContainer.appendChild(dayCareContainer);
+  mainItemsContainer.appendChild(autoPlayContainer);
+  mainItemsContainer.appendChild(fasterAutoplayContainer);
+  
+  // Create separator between potion thresholds and faster autoplay delay
+  const separator = document.createElement('div');
+  separator.style.cssText = 'height: 1px; background-color: #555; margin: 15px 0px; width: 100%;';
+  
+  // Faster autoplay delay input
+  const fasterAutoplayDelayContainer = createNumberInputContainer('faster-autoplay-input', t('mods.automator.autoplayDelay'), config.fasterAutoplayMs, 0, 3000);
+  
+  // Create collapsible advanced section with potion thresholds and faster autoplay delay
+  const advancedSection = createCollapsibleSection('advanced-section', t('mods.automator.advanced'), [
+    potionHeaderRow,
+    miniThresholdContainer,
+    strongThresholdContainer,
+    greatThresholdContainer,
+    ultimateThresholdContainer,
+    supremeThresholdContainer,
+    separator,
+    fasterAutoplayDelayContainer
+  ], mainItemsContainer);
   
   // Add all elements to content
-  content.appendChild(refillContainer);
-  content.appendChild(staminaContainer);
-  content.appendChild(rewardsContainer);
-  content.appendChild(dayCareContainer);
-  content.appendChild(autoPlayContainer);
-  content.appendChild(fasterAutoplayContainer);
+  content.appendChild(mainItemsContainer);
+  content.appendChild(advancedSection);
   
   // Update checkboxes with current config values after creation
   setTimeout(() => {
@@ -2728,6 +2991,16 @@ const createConfigPanel = () => {
     const autoPlayCheckbox = document.getElementById('auto-play-defeat-checkbox');
     const fasterAutoplayCheckbox = document.getElementById('faster-autoplay-checkbox');
     const staminaInput = document.getElementById('min-stamina-input');
+    const supremeThresholdInput = document.getElementById('supreme-threshold-input');
+    const ultimateThresholdInput = document.getElementById('ultimate-threshold-input');
+    const greatThresholdInput = document.getElementById('great-threshold-input');
+    const strongThresholdInput = document.getElementById('strong-threshold-input');
+    const miniThresholdInput = document.getElementById('mini-threshold-input');
+    const supremePotionCheckbox = document.getElementById('supreme-potion-checkbox');
+    const ultimatePotionCheckbox = document.getElementById('ultimate-potion-checkbox');
+    const greatPotionCheckbox = document.getElementById('great-potion-checkbox');
+    const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
+    const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
     
     if (refillCheckbox) {
       refillCheckbox.checked = config.autoRefillStamina; // Show current state
@@ -2742,6 +3015,19 @@ const createConfigPanel = () => {
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
+    if (supremeThresholdInput) supremeThresholdInput.value = config.potionQuantityThresholds.supreme;
+    if (ultimateThresholdInput) ultimateThresholdInput.value = config.potionQuantityThresholds.ultimate;
+    if (greatThresholdInput) greatThresholdInput.value = config.potionQuantityThresholds.great;
+    if (strongThresholdInput) strongThresholdInput.value = config.potionQuantityThresholds.strong;
+    if (miniThresholdInput) miniThresholdInput.value = config.potionQuantityThresholds.mini;
+    if (supremePotionCheckbox) supremePotionCheckbox.checked = config.potionEnabled.supreme;
+    if (ultimatePotionCheckbox) ultimatePotionCheckbox.checked = config.potionEnabled.ultimate;
+    if (greatPotionCheckbox) greatPotionCheckbox.checked = config.potionEnabled.great;
+    if (strongPotionCheckbox) strongPotionCheckbox.checked = config.potionEnabled.strong;
+    if (miniPotionCheckbox) miniPotionCheckbox.checked = config.potionEnabled.mini;
+    
+    const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
+    if (fasterAutoplayInput) fasterAutoplayInput.value = config.fasterAutoplayMs;
   }, 100);
   
   // Create the config panel
@@ -2779,18 +3065,91 @@ const createConfigPanel = () => {
           config.autoPlayAfterDefeat = document.getElementById('auto-play-defeat-checkbox').checked;
           config.fasterAutoplay = document.getElementById('faster-autoplay-checkbox').checked;
           
+          // Validate potion threshold inputs
+          const supremeThresholdInput = document.getElementById('supreme-threshold-input');
+          const ultimateThresholdInput = document.getElementById('ultimate-threshold-input');
+          const greatThresholdInput = document.getElementById('great-threshold-input');
+          const strongThresholdInput = document.getElementById('strong-threshold-input');
+          const miniThresholdInput = document.getElementById('mini-threshold-input');
+
+          const supremeValue = parseInt(supremeThresholdInput.value, 10);
+          const ultimateValue = parseInt(ultimateThresholdInput.value, 10);
+          const greatValue = parseInt(greatThresholdInput.value, 10);
+          const strongValue = parseInt(strongThresholdInput.value, 10);
+          const miniValue = parseInt(miniThresholdInput.value, 10);
+
+          // Validate all potion thresholds
+          if (isNaN(supremeValue) || supremeValue < 0 || supremeValue > 1000) {
+            showNotification('Supreme potion threshold must be between 0 and 1000', 'error');
+            supremeThresholdInput.focus();
+            return;
+          }
+          if (isNaN(ultimateValue) || ultimateValue < 0 || ultimateValue > 1000) {
+            showNotification('Ultimate potion threshold must be between 0 and 1000', 'error');
+            ultimateThresholdInput.focus();
+            return;
+          }
+          if (isNaN(greatValue) || greatValue < 0 || greatValue > 1000) {
+            showNotification('Great potion threshold must be between 0 and 1000', 'error');
+            greatThresholdInput.focus();
+            return;
+          }
+          if (isNaN(strongValue) || strongValue < 0 || strongValue > 1000) {
+            showNotification('Strong potion threshold must be between 0 and 1000', 'error');
+            strongThresholdInput.focus();
+            return;
+          }
+          if (isNaN(miniValue) || miniValue < 0 || miniValue > 1000) {
+            showNotification('Mini potion threshold must be between 0 and 1000', 'error');
+            miniThresholdInput.focus();
+            return;
+          }
+
+          config.potionQuantityThresholds = {
+            supreme: supremeValue,
+            ultimate: ultimateValue,
+            great: greatValue,
+            strong: strongValue,
+            mini: miniValue
+          };
+          
+          // Get potion enabled checkbox states
+          const supremePotionCheckbox = document.getElementById('supreme-potion-checkbox');
+          const ultimatePotionCheckbox = document.getElementById('ultimate-potion-checkbox');
+          const greatPotionCheckbox = document.getElementById('great-potion-checkbox');
+          const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
+          const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
+          
+          config.potionEnabled = {
+            supreme: supremePotionCheckbox ? supremePotionCheckbox.checked : true,
+            ultimate: ultimatePotionCheckbox ? ultimatePotionCheckbox.checked : true,
+            great: greatPotionCheckbox ? greatPotionCheckbox.checked : true,
+            strong: strongPotionCheckbox ? strongPotionCheckbox.checked : true,
+            mini: miniPotionCheckbox ? miniPotionCheckbox.checked : true
+          };
+          
+          // Validate faster autoplay delay input
+          const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
+          const fasterAutoplayValue = parseInt(fasterAutoplayInput.value, 10);
+          if (isNaN(fasterAutoplayValue) || fasterAutoplayValue < 0 || fasterAutoplayValue > 3000) {
+            showNotification('Autoplay delay must be between 0 and 3000', 'error');
+            fasterAutoplayInput.focus();
+            return;
+          }
+          config.fasterAutoplayMs = fasterAutoplayValue;
+          
           // Reset autoplay delay based on Faster Autoplay setting
           try {
             if (config.fasterAutoplay) {
-              // Set autoplay delay to 0 for instant execution
+              // Set autoplay delay to configured value
               globalThis.state.clientConfig.trigger.setState({
                 fn: (prev) => ({
                   ...prev,
-                  autoplayDelayMs: 0
+                  autoplayDelayMs: config.fasterAutoplayMs
                 }),
               });
               
-              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to 0ms`);
+              console.log(`[Bestiary Automator] Faster Autoplay enabled - set autoplay delay to ${config.fasterAutoplayMs}ms`);
             } else {
               // Reset autoplay delay to default 3 seconds
               globalThis.state.clientConfig.trigger.setState({
@@ -2814,18 +3173,16 @@ const createConfigPanel = () => {
             autoDayCare: config.autoDayCare,
             autoPlayAfterDefeat: config.autoPlayAfterDefeat,
             fasterAutoplay: config.fasterAutoplay,
-            persistAutoRefillOnRefresh: config.persistAutoRefillOnRefresh
+            fasterAutoplayMs: config.fasterAutoplayMs,
+            persistAutoRefillOnRefresh: config.persistAutoRefillOnRefresh,
+            potionQuantityThresholds: config.potionQuantityThresholds,
+            potionEnabled: config.potionEnabled
           };
           
           console.log('[Bestiary Automator] Attempting to save config:', configToSave);
           
           // Save to localStorage
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
-            console.log('[Bestiary Automator] Config saved to localStorage successfully');
-          } catch (error) {
-            console.error('[Bestiary Automator] Error saving config to localStorage:', error);
-          }
+          saveConfigToStorage(configToSave);
           
           // Skip API save to prevent reload/reinitialization issues
           console.log('[Bestiary Automator] Skipping API save to prevent reload issues');
@@ -2855,10 +3212,91 @@ const createConfigPanel = () => {
     ]
   });
   
+  // Helper to create a collapsible section
+  function createCollapsibleSection(id, title, children, mainItemsContainer = null) {
+    const container = document.createElement('div');
+    container.id = id;
+    container.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin-top: 10px;';
+    
+    // Create the toggle button
+    const toggleButton = document.createElement('button');
+    toggleButton.type = 'button';
+    toggleButton.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 8px 12px;
+      background-color: #333;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    `;
+    toggleButton.onmouseover = () => toggleButton.style.backgroundColor = '#444';
+    toggleButton.onmouseout = () => toggleButton.style.backgroundColor = '#333';
+    
+    // Create title text
+    const titleText = document.createElement('span');
+    titleText.textContent = title;
+    
+    // Create arrow icon
+    const arrow = document.createElement('span');
+    arrow.textContent = '▼';
+    arrow.style.cssText = 'transition: transform 0.2s; font-size: 12px;';
+    
+    toggleButton.appendChild(titleText);
+    toggleButton.appendChild(arrow);
+    
+    // Create the collapsible content container
+    const contentContainer = document.createElement('div');
+    contentContainer.id = `${id}-content`;
+    contentContainer.style.cssText = `
+      display: none;
+      flex-direction: column;
+      gap: 0px;
+      margin-top: 5px;
+    `;
+    
+    // Add children to content container
+    children.forEach(child => {
+      contentContainer.appendChild(child);
+    });
+    
+    // Toggle functionality
+    let isExpanded = false;
+    toggleButton.addEventListener('click', () => {
+      isExpanded = !isExpanded;
+      if (isExpanded) {
+        contentContainer.style.display = 'flex';
+        arrow.style.transform = 'rotate(180deg)';
+        // Hide main items container when Advanced is expanded
+        if (mainItemsContainer) {
+          mainItemsContainer.style.display = 'none';
+        }
+      } else {
+        contentContainer.style.display = 'none';
+        arrow.style.transform = 'rotate(0deg)';
+        // Show main items container when Advanced is collapsed
+        if (mainItemsContainer) {
+          mainItemsContainer.style.display = 'flex';
+        }
+      }
+    });
+    
+    container.appendChild(toggleButton);
+    container.appendChild(contentContainer);
+    
+    return container;
+  }
+  
   // Helper to create a checkbox container
   function createCheckboxContainer(id, label, checked) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -2869,6 +3307,7 @@ const createConfigPanel = () => {
     const labelElement = document.createElement('label');
     labelElement.htmlFor = id;
     labelElement.textContent = label;
+    labelElement.style.cssText = 'flex: 1 1 0%;';
     
     container.appendChild(checkbox);
     container.appendChild(labelElement);
@@ -2929,10 +3368,75 @@ const createConfigPanel = () => {
     return container;
   }
   
+  // Helper to create a checkbox with number input container
+  function createCheckboxWithNumberInput(checkboxId, inputId, label, checked, value, min, max) {
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
+    
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = checkboxId;
+    checkbox.checked = checked;
+    checkbox.style.cssText = 'width: 16px; height: 16px; margin-right: 10px;';
+    
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = checkboxId;
+    labelElement.textContent = label;
+    labelElement.style.cssText = 'margin-right: 10px; min-width: 120px;';
+    
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = inputId;
+    input.min = min;
+    input.max = max;
+    input.value = Math.max(min, Math.min(max, value));
+    input.style.cssText = 'width: 80px; padding: 5px; background-color: #222; color: #fff; border: 1px solid #444;';
+    
+    // Disable input when checkbox is unchecked
+    input.disabled = !checked;
+    checkbox.addEventListener('change', () => {
+      input.disabled = !checkbox.checked;
+    });
+    
+    // Add input validation
+    input.addEventListener('input', () => {
+      const numValue = parseInt(input.value, 10);
+      if (isNaN(numValue) || numValue < min || numValue > max) {
+        input.style.borderColor = '#ff4444';
+        input.title = `Value must be between ${min} and ${max}`;
+      } else {
+        input.style.borderColor = '#444';
+        input.title = '';
+      }
+    });
+    
+    // Add validation to reset to min/max values when exceeding limits
+    input.addEventListener('blur', () => {
+      const numValue = parseInt(input.value, 10);
+      if (!isNaN(numValue)) {
+        if (numValue > max) {
+          input.value = max;
+          input.style.borderColor = '#444';
+          input.title = '';
+        } else if (numValue < min) {
+          input.value = min;
+          input.style.borderColor = '#444';
+          input.title = '';
+        }
+      }
+    });
+    
+    container.appendChild(checkbox);
+    container.appendChild(labelElement);
+    container.appendChild(input);
+    
+    return container;
+  }
+  
   // Helper to create a checkbox container with info icon and tooltip
   function createCheckboxContainerWithInfo(id, label, checked, infoText) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -2950,7 +3454,7 @@ const createConfigPanel = () => {
     const labelElement = document.createElement('label');
     labelElement.htmlFor = id;
     labelElement.textContent = label;
-    labelElement.style.cssText = 'flex: 1;';
+    labelElement.style.cssText = 'flex: 1 1 0%;';
     
     container.appendChild(checkbox);
     container.appendChild(infoIcon);
@@ -2962,7 +3466,7 @@ const createConfigPanel = () => {
   // Helper to create a checkbox container with warning symbol and tooltip
   function createCheckboxContainerWithWarning(id, label, checked, warningText) {
     const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0;';
+    container.style.cssText = 'display: flex; align-items: center; margin: 5px 0px;';
     
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -2979,7 +3483,7 @@ const createConfigPanel = () => {
     const labelElement = document.createElement('label');
     labelElement.htmlFor = id;
     labelElement.textContent = label;
-    labelElement.style.cssText = 'flex: 1; color: #ff4444; font-weight: bold;';
+    labelElement.style.cssText = 'flex: 1 1 0%; color: #ff4444; font-weight: bold;';
     
     container.appendChild(checkbox);
     container.appendChild(warningSymbol);
@@ -3101,6 +3605,18 @@ function init() {
   fasterAutoplayExecutedThisSession = false;
   fasterAutoplayRunning = false;
   
+  // Parse max stamina from DOM (for API-based refill calculation)
+  // Try immediately and with a delay in case DOM isn't ready
+  maxStamina = parseMaxStaminaFromDOM();
+  if (!maxStamina) {
+    setTimeout(() => {
+      maxStamina = parseMaxStaminaFromDOM();
+      if (maxStamina) {
+        console.log(`[Bestiary Automator] Max stamina parsed on delayed attempt: ${maxStamina}`);
+      }
+    }, 1000);
+  }
+  
   // Set up stamina potion error handler
   setupStaminaPotionErrorHandler();
   
@@ -3156,7 +3672,7 @@ function updateAutomatorButton() {
     autoPlayAfterDefeat: config.autoPlayAfterDefeat,
     fasterAutoplay: config.fasterAutoplay,
     fasterAutoplayRunning: fasterAutoplayRunning,
-    boardAnalyzerRunning: window.__modCoordination && window.__modCoordination.boardAnalyzerRunning
+    boardAnalyzerRunning: isBoardAnalyzerRunning()
   };
   
   // Only update button styling if state has changed
@@ -3268,6 +3784,52 @@ function updateSettingsModalUI() {
     if (autoPlayCheckbox) autoPlayCheckbox.checked = config.autoPlayAfterDefeat;
     if (fasterAutoplayCheckbox) fasterAutoplayCheckbox.checked = config.fasterAutoplay;
     if (staminaInput) staminaInput.value = config.minimumStaminaWithoutRefill;
+
+    // Update potion threshold inputs
+    const supremeThresholdInput = document.getElementById('supreme-threshold-input');
+    const ultimateThresholdInput = document.getElementById('ultimate-threshold-input');
+    const greatThresholdInput = document.getElementById('great-threshold-input');
+    const strongThresholdInput = document.getElementById('strong-threshold-input');
+    const miniThresholdInput = document.getElementById('mini-threshold-input');
+
+    if (supremeThresholdInput) supremeThresholdInput.value = config.potionQuantityThresholds.supreme;
+    if (ultimateThresholdInput) ultimateThresholdInput.value = config.potionQuantityThresholds.ultimate;
+    if (greatThresholdInput) greatThresholdInput.value = config.potionQuantityThresholds.great;
+    if (strongThresholdInput) strongThresholdInput.value = config.potionQuantityThresholds.strong;
+    if (miniThresholdInput) miniThresholdInput.value = config.potionQuantityThresholds.mini;
+
+    // Update potion enabled checkboxes
+    const supremePotionCheckbox = document.getElementById('supreme-potion-checkbox');
+    const ultimatePotionCheckbox = document.getElementById('ultimate-potion-checkbox');
+    const greatPotionCheckbox = document.getElementById('great-potion-checkbox');
+    const strongPotionCheckbox = document.getElementById('strong-potion-checkbox');
+    const miniPotionCheckbox = document.getElementById('mini-potion-checkbox');
+
+    if (supremePotionCheckbox) {
+      supremePotionCheckbox.checked = config.potionEnabled.supreme;
+      // Update input disabled state
+      if (supremeThresholdInput) supremeThresholdInput.disabled = !supremePotionCheckbox.checked;
+    }
+    if (ultimatePotionCheckbox) {
+      ultimatePotionCheckbox.checked = config.potionEnabled.ultimate;
+      if (ultimateThresholdInput) ultimateThresholdInput.disabled = !ultimatePotionCheckbox.checked;
+    }
+    if (greatPotionCheckbox) {
+      greatPotionCheckbox.checked = config.potionEnabled.great;
+      if (greatThresholdInput) greatThresholdInput.disabled = !greatPotionCheckbox.checked;
+    }
+    if (strongPotionCheckbox) {
+      strongPotionCheckbox.checked = config.potionEnabled.strong;
+      if (strongThresholdInput) strongThresholdInput.disabled = !strongPotionCheckbox.checked;
+    }
+    if (miniPotionCheckbox) {
+      miniPotionCheckbox.checked = config.potionEnabled.mini;
+      if (miniThresholdInput) miniThresholdInput.disabled = !miniPotionCheckbox.checked;
+    }
+    
+    // Update faster autoplay delay input
+    const fasterAutoplayInput = document.getElementById('faster-autoplay-input');
+    if (fasterAutoplayInput) fasterAutoplayInput.value = config.fasterAutoplayMs;
     
   } catch (error) {
     console.error('[Bestiary Automator] Error updating settings modal UI:', error);
@@ -3342,7 +3904,97 @@ context.exports = {
   collectRewards: takeRewardsIfAvailable,
   // Seashell timer management
   clearSeashellTimer: clearSeashellTimer,
-  setupSeashellTimer: setupSeashellTimer
+  setupSeashellTimer: setupSeashellTimer,
+  // Debug function to check Game State API structure
+  debugStamina: function() {
+    console.log('=== [Bestiary Automator] Game State API Debug ===');
+    console.log('Function called successfully');
+    
+    try {
+      console.log('Step 1: Checking globalThis.state...');
+      if (!globalThis.state) {
+        console.error('❌ globalThis.state is not available');
+        console.log('=== End Debug (early exit) ===');
+        return;
+      }
+      console.log('✅ globalThis.state is available');
+      console.log('Step 2: Checking globalThis.state.player...');
+      
+      if (!globalThis.state.player) {
+        console.error('❌ globalThis.state.player is not available');
+        console.log('Available state keys:', Object.keys(globalThis.state));
+        console.log('=== End Debug (early exit) ===');
+        return;
+      }
+      console.log('✅ globalThis.state.player is available');
+      console.log('Step 3: Getting player snapshot...');
+      
+      const snapshot = globalThis.state.player.getSnapshot();
+      console.log('✅ Snapshot obtained');
+      console.log('Snapshot keys:', Object.keys(snapshot));
+      
+      console.log('Step 4: Getting player context...');
+      const playerContext = snapshot.context;
+      console.log('✅ Player context obtained');
+      console.log('📋 All keys in playerContext:', Object.keys(playerContext));
+      
+      // Use a safer JSON stringify with error handling
+      try {
+        console.log('📦 Full playerContext object:', JSON.stringify(playerContext, null, 2));
+      } catch (e) {
+        console.log('📦 Full playerContext object (circular reference, showing keys only):', playerContext);
+      }
+      
+      // Check for stamina in various possible locations
+      console.log('\n🔍 Checking for stamina in different locations:');
+      console.log('  - playerContext.stamina:', playerContext.stamina);
+      console.log('  - playerContext.currentStamina:', playerContext.currentStamina);
+      console.log('  - playerContext.staminaPoints:', playerContext.staminaPoints);
+      console.log('  - playerContext.staminaCurrent:', playerContext.staminaCurrent);
+      
+      // Check if stamina might be in a nested object
+      if (playerContext.stats) {
+        console.log('  - playerContext.stats:', playerContext.stats);
+        console.log('  - playerContext.stats.stamina:', playerContext.stats.stamina);
+      }
+      if (playerContext.resources) {
+        console.log('  - playerContext.resources:', playerContext.resources);
+        console.log('  - playerContext.resources.stamina:', playerContext.resources.stamina);
+      }
+      
+      // Check snapshot value
+      console.log('\n📸 Snapshot structure:');
+      console.log('  - snapshot keys:', Object.keys(snapshot));
+      if (snapshot.value) {
+        console.log('  - snapshot.value keys:', Object.keys(snapshot.value));
+        try {
+          console.log('  - snapshot.value:', JSON.stringify(snapshot.value, null, 2));
+        } catch (e) {
+          console.log('  - snapshot.value (circular reference):', snapshot.value);
+        }
+      }
+      
+      // Try to get stamina using the same method as DOM
+      console.log('\n🌐 Checking DOM for stamina:');
+      const elStamina = getStaminaElement();
+      if (elStamina) {
+        const staminaElement = getStaminaValueElement();
+        if (staminaElement) {
+          console.log('  - DOM stamina value:', staminaElement.textContent);
+        } else {
+          console.log('  - Stamina element found but span span not found');
+        }
+      } else {
+        console.log('  - Stamina element not found in DOM');
+      }
+      
+      console.log('\n=== End Debug ===');
+    } catch (error) {
+      console.error('❌ Error during debug:', error);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+  }
 };
 
 // Also expose globally for other mods to access
