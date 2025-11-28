@@ -4,6 +4,12 @@
   },
   "notes": [
   {
+    "version": "3.0.9",
+    "changes": [
+      { "type": "fixed", "mod": "Bestiary Automator", "text": "Various bug fixes" }
+    ]
+  },
+  {
     "version": "3.0.8",
     "changes": [
       { "type": "changed", "mod": "Core", "text": "General improvements, terminology updates, and translation updates" },

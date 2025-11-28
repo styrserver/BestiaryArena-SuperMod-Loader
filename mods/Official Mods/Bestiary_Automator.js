@@ -3092,7 +3092,7 @@ const createConfigPanel = () => {
   
   // Auto collect rewards checkbox with info icon
   const rewardsContainer = createCheckboxContainerWithInfo('auto-rewards-checkbox', t('mods.automator.autoCollectRewards'), config.autoCollectRewards, 
-    'Automatically collects level up rewards and Daily Seashell when ready');
+    t('mods.automator.autoCollectRewardsTooltip'));
   
   // Auto day care checkbox
   const dayCareContainer = createCheckboxContainer('auto-daycare-checkbox', t('mods.automator.autoDayCare'), config.autoDayCare);
@@ -3175,7 +3175,7 @@ const createConfigPanel = () => {
   const credit = document.createElement('div');
   credit.style.cssText = 'margin-top: 2px; font-size: 11px; font-style: italic; color: #aaa; text-align: right;';
   const linkHtml = '<a href="https://bestiaryarena.com/profile/whoman2" target="_blank" rel="noopener noreferrer" style="color:#61AFEF; text-decoration: underline;">whoman2</a>';
-  credit.innerHTML = `Made with the help of ${linkHtml}`;
+  credit.innerHTML = t('mods.automator.madeWithHelp').replace('{link}', linkHtml);
   
   // Auto-save indicator at the top
   const autoSaveFooter = document.createElement('div');
