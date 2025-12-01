@@ -1359,6 +1359,37 @@ function formatLocalRunTime(ticks) {
   return `${ticks.toString()} ticks`;
 }
 
+// Helper function to normalize user's floor data with fallback
+// If both floor and floorTicks are missing, defaults to floor 0 and uses room's ticks
+function normalizeUserFloorData(room) {
+  let floor = room?.floor;
+  let floorTicks = room?.floorTicks;
+  
+  if ((floor === undefined || floor === null) && (floorTicks === undefined || floorTicks === null)) {
+    floor = 0;
+    floorTicks = room?.ticks || 0;
+  }
+  
+  return { floor, floorTicks };
+}
+
+// Helper function to normalize best/highscore floor data with fallback
+// If both floor and floorTicks are missing, defaults to floor 0 and uses speedrun ticks
+function normalizeBestFloorData(roomCode, roomsHighscores, best) {
+  const bestFloorData = roomsHighscores?.floor?.[roomCode];
+  let floor = bestFloorData?.floor;
+  let floorTicks = bestFloorData?.floorTicks || bestFloorData?.ticks;
+  let playerName = bestFloorData?.userName || 'Unknown';
+  
+  if ((floor === undefined || floor === null) && (floorTicks === undefined || floorTicks === null)) {
+    floor = 0;
+    floorTicks = best?.[roomCode]?.ticks || 0;
+    playerName = best?.[roomCode]?.userName || 'Unknown';
+  }
+  
+  return { floor, floorTicks, playerName };
+}
+
 // Optimized data fetching system for Maps Tab
 const MapsDataFetcher = {
   // Cache for different data types with individual TTLs
@@ -4441,7 +4472,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             { type: 'text', content: 'Player', key: 'name', sortable: true },
             { type: 'text', content: 'Level', key: 'level', sortable: true },
             { type: 'icon', src: '/assets/icons/match-count.png', alt: 'Total runs', key: 'successfulRuns', sortable: true },
-            { type: 'icon', src: '/assets/icons/grade.png', alt: 'Rank points', key: 'rankPoints', sortable: true },
+            { type: 'icon', src: '/assets/icons/star-tier.png', alt: 'Rank points', key: 'rankPoints', sortable: true },
             { type: 'icon', src: '/assets/icons/speed.png', alt: 'Time sum', key: 'timeSum', sortable: true },
             { type: 'icon', src: '/assets/icons/shell-count.png', alt: 'Daily seashell', key: 'dailySeashell', sortable: true },
             { type: 'icon', src: '/assets/icons/task-count.png', alt: 'Hunting tasks', key: 'huntingTasks', sortable: true },
@@ -5037,6 +5068,23 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               dataRow.appendChild(yourData);
               dataRow.appendChild(topData);
               roomEntry.appendChild(dataRow);
+
+            } else if (category === 'Floors') {
+              const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+              const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
+
+              const dataRow = document.createElement('div');
+              dataRow.style.cssText = `display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #ccc;`;
+
+              const yourData = document.createElement('div');
+              yourData.innerHTML = `<div style="color: #8f8; font-weight: bold;">You:</div><div>Floor ${yourFloor !== undefined && yourFloor !== null ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>`;
+
+              const bestData = document.createElement('div');
+              bestData.innerHTML = `<div style="color: #ff8; font-weight: bold;">Best:</div><div>Floor ${bestFloor !== undefined && bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div><div style="font-size: 10px; color: #888;">by ${bestFloorPlayer}</div>`;
+
+              dataRow.appendChild(yourData);
+              dataRow.appendChild(bestData);
+              roomEntry.appendChild(dataRow);
             }
 
             contentContainer.appendChild(roomEntry);
@@ -5567,7 +5615,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           yourRankData.innerHTML = `
             <span style="color: #8f8; font-weight: bold;">You:</span>
-            <span>${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/icons/star-tier.png" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa;">(${yourRankTicks})</i>` : ' (null)'}</span>
           `;
 
           const topRankData = document.createElement('div');
@@ -5582,14 +5630,70 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           topRankData.innerHTML = `
             <span style="color: #ff8; font-weight: bold;">Top:</span>
-            <span>${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/icons/star-tier.png" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${topRank}${topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)'}</span>
           `;
 
           rankRow.appendChild(yourRankData);
           rankRow.appendChild(topRankData);
 
+          // Floor row
+          const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+          const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
+
+          const isFloorTop = yourFloor !== null && bestFloor !== null && yourFloor === bestFloor &&
+            (yourFloorTicks === bestFloorTicks ||
+             ((yourFloorTicks === undefined || yourFloorTicks === null) && (bestFloorTicks === undefined || bestFloorTicks === null)));
+
+          const floorRow = document.createElement('div');
+          floorRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            min-width: 0;
+            max-width: 100%;
+            gap: 6px;
+            padding: 4px;
+            background: ${isFloorTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #9C27B0;
+          `;
+
+          const yourFloorData = document.createElement('div');
+          yourFloorData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isFloorTop ? 'bold' : 'normal'};
+          `;
+          yourFloorData.innerHTML = `
+            <span style="color: #8f8; font-weight: bold;">You:</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${yourFloor !== null && yourFloor >= 0 ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks})</i>` : ''}</span>
+          `;
+
+          const topFloorData = document.createElement('div');
+          topFloorData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isFloorTop ? 'bold' : 'normal'};
+          `;
+          topFloorData.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks})</i>` : ''}</span>
+          `;
+
+          floorRow.appendChild(yourFloorData);
+          floorRow.appendChild(topFloorData);
+
           dataColumn.appendChild(speedrunRow);
           dataColumn.appendChild(rankRow);
+          dataColumn.appendChild(floorRow);
 
           roomEntry.appendChild(mapColumn);
           roomEntry.appendChild(dataColumn);
@@ -5752,6 +5856,44 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             dataRow.appendChild(searchedData);
             dataRow.appendChild(yourData);
             dataRow.appendChild(topData);
+            roomEntry.appendChild(dataRow);
+
+          } else if (category === 'Floors') {
+            const { floor: searchedFloor, floorTicks: searchedFloorTicks } = normalizeUserFloorData(searchedRoom);
+            const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+            const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(roomCode, roomsHighscores, best);
+
+            const dataRow = document.createElement('div');
+            dataRow.style.cssText = `
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              font-size: 12px;
+              color: #ccc;
+            `;
+
+            const searchedData = document.createElement('div');
+            searchedData.innerHTML = `
+              <div style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</div>
+              <div>Floor ${searchedFloor !== undefined && searchedFloor !== null ? searchedFloor : '-'}${searchedFloorTicks !== undefined && searchedFloorTicks !== null ? ` <i style="color: #aaa;">(${searchedFloorTicks} ticks)</i>` : ''}</div>
+            `;
+
+            const yourData = document.createElement('div');
+            yourData.innerHTML = `
+              <div style="color: #8f8; font-weight: bold;">You:</div>
+              <div>Floor ${yourFloor !== undefined && yourFloor !== null ? yourFloor : '-'}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+            `;
+
+            const bestData = document.createElement('div');
+            bestData.innerHTML = `
+              <div style="color: #ff8; font-weight: bold;">Best:</div>
+              <div>Floor ${bestFloor !== undefined && bestFloor !== null ? bestFloor : '-'}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
+              <div style="font-size: 10px; color: #888;">by ${truncatePlayerName(bestFloorPlayer)}</div>
+            `;
+
+            dataRow.appendChild(searchedData);
+            dataRow.appendChild(yourData);
+            dataRow.appendChild(bestData);
             roomEntry.appendChild(dataRow);
           }
 
@@ -5994,7 +6136,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           searchedRankData.innerHTML = `
             <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
-            <span>${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/icons/star-tier.png" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedRank !== null && searchedRank >= 0 ? searchedRank + (searchedRankTicks !== undefined && searchedRankTicks !== null ? ` <i style="color: #aaa;">(${searchedRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
           const topRankData = document.createElement('div');
@@ -6009,14 +6151,71 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           `;
           topRankData.innerHTML = `
             <span style="color: #ff8; font-weight: bold;">Top:</span>
-            <span>${topRank !== null ? topRank + (topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)') : '-'}</span>
+            <span style="white-space: nowrap;"><img src="https://bestiaryarena.com/assets/icons/star-tier.png" alt="Rank" style="width: 9px; height: 10px; vertical-align: middle; margin-right: 2px; display: inline-block;">${topRank !== null ? topRank + (topRankTicks !== undefined && topRankTicks !== null ? ` <i style="color: #aaa;">(${topRankTicks})</i>` : ' (null)') : '-'}</span>
           `;
 
           rankRow.appendChild(searchedRankData);
           rankRow.appendChild(topRankData);
 
+          // Floor row
+          const { floor: searchedFloor, floorTicks: searchedFloorTicks } = normalizeUserFloorData(searchedRoom);
+          const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+          const { floor: bestFloor, floorTicks: bestFloorTicks } = normalizeBestFloorData(roomCode, roomsHighscores, best);
+
+          const isFloorTop = searchedFloor !== null && bestFloor !== null && searchedFloor === bestFloor &&
+            (searchedFloorTicks === bestFloorTicks ||
+             ((searchedFloorTicks === undefined || searchedFloorTicks === null) && (bestFloorTicks === undefined || bestFloorTicks === null)));
+
+          const floorRow = document.createElement('div');
+          floorRow.style.cssText = `
+            display: grid;
+            grid-template-columns: 120px 120px;
+            align-items: center;
+            min-width: 0;
+            max-width: 100%;
+            gap: 6px;
+            padding: 4px;
+            background: ${isFloorTop ? 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")' : 'rgba(255, 255, 255, 0.03)'};
+            border-radius: 3px;
+            border-left: 3px solid #9C27B0;
+          `;
+
+          const searchedFloorData = document.createElement('div');
+          searchedFloorData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isFloorTop ? 'bold' : 'normal'};
+          `;
+          searchedFloorData.innerHTML = `
+            <span style="color: ${COLOR_CONSTANTS.PRIMARY}; font-weight: bold;">${truncatePlayerName(playerName)}:</span>
+            <span style="white-space: nowrap;">${searchedFloor !== null && searchedFloor >= 0 ? `<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${searchedFloor}${searchedFloorTicks !== undefined && searchedFloorTicks !== null ? ` <i style="color: #aaa;">(${searchedFloorTicks})</i>` : ''}` : '-'}</span>
+          `;
+
+          const topFloorData = document.createElement('div');
+          topFloorData.style.cssText = `
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #ccc;
+            width: 120px;
+            font-weight: ${isFloorTop ? 'bold' : 'normal'};
+          `;
+          topFloorData.innerHTML = `
+            <span style="color: #ff8; font-weight: bold;">Top:</span>
+            <span style="white-space: nowrap;">${bestFloor !== null ? `<img src="https://bestiaryarena.com/assets/UI/floor-15.png" alt="Floor" style="width: 14px; height: 7px; vertical-align: middle; margin-right: 2px; display: inline-block;">${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks})</i>` : ''}` : '-'}</span>
+          `;
+
+          floorRow.appendChild(searchedFloorData);
+          floorRow.appendChild(topFloorData);
+
           dataColumn.appendChild(speedrunRow);
           dataColumn.appendChild(rankRow);
+          dataColumn.appendChild(floorRow);
 
           roomEntry.appendChild(mapColumn);
           roomEntry.appendChild(dataColumn);
@@ -7952,6 +8151,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       return d;
     }
 
+    // Helper function to get local runs for a map from RunTracker
+    async function getLocalRunsForMap(mapKey, category) {
+      try {
+        if (window.RunTrackerAPI && window.RunTrackerAPI.getRuns) {
+          const runs = window.RunTrackerAPI.getRuns(mapKey, category);
+          return Array.isArray(runs) ? runs : [];
+        }
+        return [];
+      } catch (error) {
+        console.error('[Cyclopedia] Error getting local runs:', error);
+        return [];
+      }
+    }
+
     // Helper function to create statistics section
     function createStatisticsSection(selectedMap) {
       const statsContainer = document.createElement('div');
@@ -7974,12 +8187,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Column 1: Speedrun
       const speedrunCol = document.createElement('div');
       speedrunCol.style.flex = '1 1 0';
-      speedrunCol.style.maxWidth = '245px';
+      speedrunCol.style.maxWidth = '160px';
       speedrunCol.style.display = 'flex';
       speedrunCol.style.flexDirection = 'column';
       speedrunCol.style.padding = '10px';
       speedrunCol.style.borderRight = '3px solid transparent';
       speedrunCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      speedrunCol.style.borderLeft = 'none';
       
       const speedrunTitle = document.createElement('h3');
       speedrunTitle.style.margin = '0 0 10px 0';
@@ -8023,10 +8237,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Column 2: Rank Points
       const rankPointsCol = document.createElement('div');
       rankPointsCol.style.flex = '1 1 0';
-      rankPointsCol.style.maxWidth = '245px';
+      rankPointsCol.style.maxWidth = '160px';
       rankPointsCol.style.display = 'flex';
       rankPointsCol.style.flexDirection = 'column';
       rankPointsCol.style.padding = '10px';
+      rankPointsCol.style.borderRight = '3px solid transparent';
       rankPointsCol.style.borderLeft = '3px solid transparent';
       rankPointsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
       
@@ -8069,9 +8284,60 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       rankPointsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
       rankPointsCol.appendChild(rankPointsContent);
       
+      // Column 3: Floors
+      const floorsCol = document.createElement('div');
+      floorsCol.style.flex = '1 1 0';
+      floorsCol.style.maxWidth = '160px';
+      floorsCol.style.display = 'flex';
+      floorsCol.style.flexDirection = 'column';
+      floorsCol.style.padding = '10px';
+      floorsCol.style.borderLeft = '3px solid transparent';
+      floorsCol.style.borderRight = 'none';
+      floorsCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const floorsTitle = document.createElement('h3');
+      floorsTitle.style.margin = '0 0 10px 0';
+      floorsTitle.style.fontSize = '16px';
+      floorsTitle.style.fontWeight = 'bold';
+      floorsTitle.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      floorsTitle.style.textAlign = 'center';
+      floorsTitle.style.color = COLOR_CONSTANTS.TEXT;
+      floorsTitle.style.display = 'flex';
+      floorsTitle.style.alignItems = 'center';
+      floorsTitle.style.justifyContent = 'center';
+      floorsTitle.style.gap = '6px';
+      
+      const floorsIcon = document.createElement('img');
+      floorsIcon.src = 'https://bestiaryarena.com/assets/icons/floors.png';
+      floorsIcon.alt = 'Floors';
+      floorsIcon.style.width = '16px';
+      floorsIcon.style.height = '16px';
+      
+      const floorsText = document.createElement('span');
+      floorsText.textContent = 'Floors';
+      
+      floorsTitle.appendChild(floorsIcon);
+      floorsTitle.appendChild(floorsText);
+      floorsCol.appendChild(floorsTitle);
+      
+      const floorsContent = document.createElement('div');
+      floorsContent.style.flex = '1';
+      floorsContent.style.display = 'flex';
+      floorsContent.style.flexDirection = 'column';
+      floorsContent.style.justifyContent = 'center';
+      floorsContent.style.alignItems = 'center';
+      floorsContent.style.color = '#888';
+      floorsContent.style.fontSize = '14px';
+      floorsContent.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      floorsContent.style.textAlign = 'center';
+      floorsContent.style.padding = '6px';
+      floorsContent.innerHTML = '<div style="margin-bottom: 10px;">Loading...</div>';
+      floorsCol.appendChild(floorsContent);
+      
       // Add columns to row1
       row1.appendChild(speedrunCol);
       row1.appendChild(rankPointsCol);
+      row1.appendChild(floorsCol);
       
       // Row 2: Top 5 tables (max 180px height)
       const row2 = document.createElement('div');
@@ -8084,7 +8350,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const speedrunTableCol = document.createElement('div');
       speedrunTableCol.setAttribute('data-table-type', 'speedrun');
       speedrunTableCol.style.flex = '1 1 0';
-      speedrunTableCol.style.maxWidth = '245px';
+      speedrunTableCol.style.maxWidth = '160px';
       speedrunTableCol.style.display = 'flex';
       speedrunTableCol.style.flexDirection = 'column';
       speedrunTableCol.style.padding = '10px';
@@ -8110,7 +8376,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Table header
       const speedrunHeader = DOMUtils.createStyledElement('div', {
         display: 'grid',
-        gridTemplateColumns: '30px 1fr 30px 30px',
+        gridTemplateColumns: '1fr 20px 20px',
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
         borderBottom: '1px solid #444',
         fontWeight: 'bold',
@@ -8118,10 +8384,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
         color: COLOR_CONSTANTS.TEXT
       });
-      
-      // Medal column header (empty)
-      const medalHeader = DOMUtils.createTableCell('', { padding: '6px 2px' });
-      speedrunHeader.appendChild(medalHeader);
       
       const timeHeader = DOMUtils.createTableCell('Time', { padding: '6px 4px' });
       speedrunHeader.appendChild(timeHeader);
@@ -8186,37 +8448,17 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             for (let i = 1; i <= 5; i++) {
               const row = document.createElement('div');
               row.style.display = 'grid';
-              row.style.gridTemplateColumns = '30px 1fr 30px 30px';
+              row.style.gridTemplateColumns = '1fr 20px 20px';
               row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
               row.style.fontSize = '10px';
               row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
               row.style.color = '#666';
               
-              // Medal cell
-              const medalCell = document.createElement('div');
-              medalCell.style.padding = '4px 2px';
-              medalCell.style.borderRight = '1px solid #333';
-              medalCell.style.textAlign = 'center';
-              medalCell.style.fontSize = '12px';
-              
-              // Set medal icon based on position (1-5)
-              const rankPosition = i;
-              if (rankPosition === 1) {
-                medalCell.innerHTML = '🥇';
-              } else if (rankPosition === 2) {
-                medalCell.innerHTML = '🥈';
-              } else if (rankPosition === 3) {
-                medalCell.innerHTML = '🥉';
-              } else {
-                medalCell.innerHTML = '🏅';
-              }
-              row.appendChild(medalCell);
-              
               const timeCell = document.createElement('div');
               timeCell.style.padding = '4px 2px';
               timeCell.style.borderRight = '1px solid #333';
               timeCell.style.textAlign = 'center';
-              timeCell.textContent = 'No runs';
+              timeCell.textContent = '-';
               row.appendChild(timeCell);
               
               const copyCell = document.createElement('div');
@@ -8241,7 +8483,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           for (let i = 0; i < 5; i++) {
             const row = document.createElement('div');
             row.style.display = 'grid';
-            row.style.gridTemplateColumns = '30px 1fr 30px 30px';
+            row.style.gridTemplateColumns = '1fr 20px 20px';
             row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
             row.style.fontSize = '10px';
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
@@ -8253,31 +8495,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               // No run for this slot - show "No runs" without buttons
               row.style.color = '#666';
               
-              // Medal cell
-              const medalCell = document.createElement('div');
-              medalCell.style.padding = '4px 2px';
-              medalCell.style.borderRight = '1px solid #333';
-              medalCell.style.textAlign = 'center';
-              medalCell.style.fontSize = '12px';
-              
-              // Set medal icon based on position (1-5)
-              const rankPosition = i + 1;
-              if (rankPosition === 1) {
-                medalCell.innerHTML = '🥇';
-              } else if (rankPosition === 2) {
-                medalCell.innerHTML = '🥈';
-              } else if (rankPosition === 3) {
-                medalCell.innerHTML = '🥉';
-              } else {
-                medalCell.innerHTML = '🏅';
-              }
-              row.appendChild(medalCell);
-              
               const timeCell = document.createElement('div');
               timeCell.style.padding = '4px 2px';
               timeCell.style.borderRight = '1px solid #333';
               timeCell.style.textAlign = 'center';
-              timeCell.textContent = 'No runs';
+              timeCell.textContent = '-';
               row.appendChild(timeCell);
               
               const copyCell = document.createElement('div');
@@ -8299,26 +8521,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             
             // Has run data - show with buttons
             row.style.color = '#ccc';
-            
-            // Medal cell
-            const medalCell = document.createElement('div');
-            medalCell.style.padding = '4px 2px';
-            medalCell.style.borderRight = '1px solid #333';
-            medalCell.style.textAlign = 'center';
-            medalCell.style.fontSize = '12px';
-            
-            // Set medal icon based on position (1-5)
-            const rankPosition = i + 1;
-            if (rankPosition === 1) {
-              medalCell.innerHTML = '🥇'; // Gold medal
-            } else if (rankPosition === 2) {
-              medalCell.innerHTML = '🥈'; // Silver medal
-            } else if (rankPosition === 3) {
-              medalCell.innerHTML = '🥉'; // Bronze medal
-            } else {
-              medalCell.innerHTML = '🏅'; // Generic medal for 4th and 5th
-            }
-            row.appendChild(medalCell);
             
             const timeCell = document.createElement('div');
             timeCell.style.padding = '4px 2px';
@@ -8658,15 +8860,487 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       speedrunTableCol.appendChild(speedrunTable);
       
-      // Right column: Top 5 Ranks
+      // Right column: Top 5 Floors
+      const floorsTableCol = document.createElement('div');
+      floorsTableCol.setAttribute('data-table-type', 'floors');
+      floorsTableCol.style.flex = '1 1 0';
+      floorsTableCol.style.maxWidth = '160px';
+      floorsTableCol.style.display = 'flex';
+      floorsTableCol.style.flexDirection = 'column';
+      floorsTableCol.style.padding = '10px';
+      floorsTableCol.style.borderLeft = '3px solid transparent';
+      floorsTableCol.style.borderRight = 'none';
+      floorsTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
+      
+      const floorsTableTitle = document.createElement('div');
+      floorsTableTitle.style.fontSize = '16px';
+      floorsTableTitle.style.fontWeight = 'bold';
+      floorsTableTitle.style.color = COLOR_CONSTANTS.TEXT;
+      floorsTableTitle.style.marginBottom = '10px';
+      floorsTableTitle.style.textAlign = 'center';
+      floorsTableTitle.textContent = 'Top 5 Floors';
+      floorsTableCol.appendChild(floorsTableTitle);
+      
+      const floorsTable = DOMUtils.createStyledElement('div', {
+        border: '1px solid #444',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        backgroundColor: 'rgba(255, 255, 255, 0.02)'
+      });
+      
+      // Table header
+      const floorsHeader = DOMUtils.createStyledElement('div', {
+        display: 'grid',
+        gridTemplateColumns: '1fr 50px 20px 20px',
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderBottom: '1px solid #444',
+        fontWeight: 'bold',
+        fontSize: '11px',
+        fontFamily: "'Trebuchet MS', 'Arial Black', Arial, sans-serif",
+        color: COLOR_CONSTANTS.TEXT
+      });
+      
+      const floorsFloorHeader = DOMUtils.createTableCell('Floor', { padding: '6px 4px' });
+      floorsHeader.appendChild(floorsFloorHeader);
+      
+      const floorsTimeHeader = DOMUtils.createTableCell('Time', { padding: '6px 4px' });
+      floorsHeader.appendChild(floorsTimeHeader);
+      
+      const floorsCopyHeader = DOMUtils.createTableCell('', { padding: '4px 2px' });
+      floorsHeader.appendChild(floorsCopyHeader);
+      
+      const floorsDeleteHeader = DOMUtils.createTableCell('', { padding: '4px 2px', borderRight: 'none' });
+      floorsHeader.appendChild(floorsDeleteHeader);
+      
+      floorsTable.appendChild(floorsHeader);
+      
+      // Function to populate floors table with local data
+      async function populateFloorsTable() {
+        try {
+          console.log(`[Cyclopedia] Populating floors table for map: ${selectedMap}`);
+          // Resolve the map name to ensure consistency with RunTracker
+          const resolvedMapName = resolveMapName(selectedMap);
+          const mapKey = `map_${resolvedMapName.toLowerCase().replace(/\s+/g, '_')}`;
+          console.log(`[Cyclopedia] Resolved map name: "${selectedMap}" -> "${resolvedMapName}"`);
+          console.log(`[Cyclopedia] Generated mapKey: ${mapKey}`);
+          let localRuns = await getLocalRunsForMap(mapKey, 'floor');
+          console.log(`[Cyclopedia] Retrieved ${localRuns ? localRuns.length : 0} floor records:`, localRuns);
+          
+          // Ensure currentYourRooms is populated for warning icon comparisons
+          if (!currentYourRooms) {
+            const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+            currentYourRooms = playerState?.rooms || {};
+            console.log(`[Cyclopedia] Populated currentYourRooms from player state:`, currentYourRooms);
+          }
+          
+          // Sort floor data: 1. Floor (descending), 2. FloorTicks (ascending), 3. Date (newest first)
+          if (localRuns && localRuns.length > 0) {
+            localRuns.sort((a, b) => {
+              // First priority: Floor (higher is better)
+              if (a.floor !== b.floor) {
+                return (b.floor || 0) - (a.floor || 0);
+              }
+              // Second priority: FloorTicks (lower is better)
+              if (a.floorTicks !== b.floorTicks) {
+                return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
+              }
+              // Third priority: Date (newer is better)
+              const dateA = a.date || a.timestamp || 0;
+              const dateB = b.date || b.timestamp || 0;
+              return dateB - dateA;
+            });
+            console.log(`[Cyclopedia] Sorted floor records:`, localRuns);
+          }
+          
+          if (!localRuns || localRuns.length === 0) {
+            // Show empty state
+            for (let i = 1; i <= 5; i++) {
+              const row = document.createElement('div');
+              row.style.display = 'grid';
+              row.style.gridTemplateColumns = '1fr 50px 20px 20px';
+              row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
+              row.style.fontSize = '10px';
+              row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+              row.style.color = '#666';
+              
+              const floorCell = document.createElement('div');
+              floorCell.style.padding = '4px 2px';
+              floorCell.style.borderRight = '1px solid #333';
+              floorCell.style.textAlign = 'center';
+              floorCell.textContent = '-';
+              row.appendChild(floorCell);
+              
+              const ticksCell = document.createElement('div');
+              ticksCell.style.padding = '4px 2px';
+              ticksCell.style.borderRight = '1px solid #333';
+              ticksCell.style.textAlign = 'center';
+              ticksCell.textContent = '-';
+              row.appendChild(ticksCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              floorsTable.appendChild(row);
+            }
+            return;
+          }
+          
+          // Populate with actual data
+          for (let i = 0; i < 5; i++) {
+            const row = document.createElement('div');
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr 50px 20px 20px';
+            row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
+            row.style.fontSize = '10px';
+            row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+            
+            const run = localRuns[i];
+            console.log(`[Cyclopedia] Processing floor run ${i + 1}:`, run);
+            
+            if (!run) {
+              // No run for this slot - show "No runs" without buttons
+              row.style.color = '#666';
+              
+              const floorCell = document.createElement('div');
+              floorCell.style.padding = '4px 2px';
+              floorCell.style.borderRight = '1px solid #333';
+              floorCell.style.textAlign = 'center';
+              floorCell.textContent = '-';
+              row.appendChild(floorCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = '-';
+              row.appendChild(timeCell);
+              
+              const copyCell = document.createElement('div');
+              copyCell.style.padding = '2px 1px';
+              copyCell.style.borderRight = '1px solid #333';
+              copyCell.style.textAlign = 'center';
+              copyCell.innerHTML = '';
+              row.appendChild(copyCell);
+              
+              const deleteCell = document.createElement('div');
+              deleteCell.style.padding = '2px 1px';
+              deleteCell.style.textAlign = 'center';
+              deleteCell.innerHTML = '';
+              row.appendChild(deleteCell);
+              
+              floorsTable.appendChild(row);
+              continue;
+            }
+            
+            // Has run data - show with buttons
+            row.style.color = '#ccc';
+            
+            const floorCell = document.createElement('div');
+            floorCell.style.padding = '4px 2px';
+            floorCell.style.borderRight = '1px solid #333';
+            floorCell.style.textAlign = 'center';
+            floorCell.style.display = 'flex';
+            floorCell.style.alignItems = 'center';
+            floorCell.style.justifyContent = 'center';
+            floorCell.style.gap = '4px';
+            if (run.floor !== undefined && run.floor !== null) {
+              floorCell.textContent = run.floor;
+              console.log(`[Cyclopedia] Floor run ${i + 1} floor: ${run.floor}`);
+            } else {
+              floorCell.textContent = 'N/A';
+              console.log(`[Cyclopedia] Floor run ${i + 1} has no floor property`);
+            }
+            row.appendChild(floorCell);
+            
+            const timeCell = document.createElement('div');
+            timeCell.style.padding = '4px 2px';
+            timeCell.style.borderRight = '1px solid #333';
+            timeCell.style.textAlign = 'center';
+            timeCell.style.display = 'flex';
+            timeCell.style.alignItems = 'center';
+            timeCell.style.justifyContent = 'center';
+            if (run.time !== undefined && run.time !== null) {
+              const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
+              timeCell.textContent = timeValue;
+              console.log(`[Cyclopedia] Floor run ${i + 1} time: ${run.time} -> ${timeValue}`);
+            } else {
+              timeCell.textContent = '-';
+              console.log(`[Cyclopedia] Floor run ${i + 1} has no time property`);
+            }
+            row.appendChild(timeCell);
+            
+            const copyCell = document.createElement('div');
+            copyCell.style.padding = '2px 1px';
+            copyCell.style.borderRight = '1px solid #333';
+            copyCell.style.textAlign = 'center';
+            copyCell.style.cursor = 'pointer';
+            copyCell.style.color = '#4CAF50';
+            copyCell.style.fontSize = '14px';
+            copyCell.innerHTML = '🔗';
+            copyCell.title = 'Copy $replay command';
+            if (run.seed) {
+              // Add click animation styles
+              copyCell.style.transition = 'all 0.1s ease';
+              copyCell.style.userSelect = 'none';
+              
+              copyCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                
+                // Click animation
+                copyCell.style.transform = 'scale(0.9)';
+                copyCell.style.opacity = '0.7';
+                setTimeout(() => {
+                  copyCell.style.transform = 'scale(1)';
+                  copyCell.style.opacity = '1';
+                }, 100);
+                
+                console.log(`[Cyclopedia] Copy button clicked for floor run:`, run);
+                
+                // Generate replay command with board configuration if available
+                let replayData = {};
+                
+                // Get proper region and map names
+                let regionName = 'Unknown Region';
+                let mapName = resolveMapName(selectedMap); // Use resolved map name
+                
+                // First, try to use the region name that RunTracker already resolved and saved
+                if (run.regionName) {
+                  regionName = run.regionName;
+                  console.log('[Cyclopedia] Using saved region name from RunTracker:', regionName);
+                } else {
+                  // Try to determine region from the map name/ID using game state utils
+                  try {
+                    const mapId = selectedMap;
+                    let foundRegion = null;
+                    
+                    // Search through all regions to find which one contains this map
+                    if (globalThis.state?.utils?.REGIONS) {
+                      for (const region of globalThis.state.utils.REGIONS) {
+                        if (region.rooms && region.rooms.some(room => room.id === mapId)) {
+                          foundRegion = region;
+                          break;
+                        }
+                      }
+                    }
+                    
+                    if (foundRegion) {
+                      regionName = GAME_DATA.REGION_NAME_MAP[foundRegion.id] || foundRegion.id;
+                      console.log('[Cyclopedia] Found region for map using game state utils:', regionName);
+                    } else {
+                      // Fallback: try to get region from current game state
+                      const boardSnapshot = globalThis.state?.board?.getSnapshot();
+                      if (boardSnapshot?.context?.selectedMap?.selectedRegion?.name) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.name;
+                        console.log('[Cyclopedia] Using region name from current game state (fallback):', regionName);
+                      } else if (boardSnapshot?.context?.selectedMap?.selectedRegion?.id) {
+                        regionName = boardSnapshot.context.selectedMap.selectedRegion.id;
+                        // Capitalize region name
+                        regionName = GAME_DATA.REGION_NAME_MAP[regionName.toLowerCase()] || regionName.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+                        console.log('[Cyclopedia] Using region ID from current game state (fallback):', regionName);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('[Cyclopedia] Error getting region from game state:', e);
+                  }
+                }
+                
+                replayData.region = regionName;
+                replayData.map = mapName;
+                
+                // Check if we have stored board setup data
+                if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
+                  console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
+                  console.log('[Cyclopedia] Run setup data:', run.setup);
+                  console.log('[Cyclopedia] Run setup pieces:', run.setup.pieces);
+                  
+                  // Convert stored pieces to board format
+                  const board = run.setup.pieces.map(piece => {
+                    const boardPiece = {
+                      tile: piece.tile,
+                      monster: {
+                        name: piece.monsterName || piece.monsterId || 'unknown monster',
+                        level: piece.level || 1,
+                        hp: piece.monsterStats?.hp || 20,
+                        ad: piece.monsterStats?.ad || 20,
+                        ap: piece.monsterStats?.ap || 20,
+                        armor: piece.monsterStats?.armor || 20,
+                        magicResist: piece.monsterStats?.magicResist || 20
+                      }
+                    };
+                    
+                    // Add equipment if available
+                    if (piece.equipmentName || piece.equipId) {
+                      boardPiece.equipment = {
+                        name: piece.equipmentName || piece.equipId || 'unknown equipment',
+                        stat: piece.equipmentStat || 'ap',
+                        tier: piece.equipmentTier || 5
+                      };
+                    }
+                    
+                    return boardPiece;
+                  });
+                  
+                  replayData.board = board;
+                  console.log('[Cyclopedia] Generated board configuration:', board);
+                  console.log('[Cyclopedia] Final replay data:', replayData);
+                } else {
+                  console.log('[Cyclopedia] No stored board setup found, using basic replay command');
+                }
+                
+                // Add seed at the end
+                replayData.seed = run.seed;
+                
+                const replayCommand = `$replay(${JSON.stringify(replayData)})`;
+                console.log(`[Cyclopedia] Generated floor replay command: ${replayCommand}`);
+                navigator.clipboard.writeText(replayCommand).then(() => {
+                  console.log('[Cyclopedia] Successfully copied floor replay command to clipboard:', replayCommand);
+                  // Update status bar with success message
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Successfully copied run!';
+                    row3.statusBar.style.color = '#4CAF50';
+                    // Reset status bar after 3 seconds
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                }).catch(err => {
+                  console.error('[Cyclopedia] Error copying floor replay command:', err);
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Error copying run.';
+                    row3.statusBar.style.color = '#ff6b6b';
+                    setTimeout(() => {
+                      row3.statusBar.textContent = 'Select to copy or delete run.';
+                      row3.statusBar.style.color = '#ccc';
+                    }, 3000);
+                  }
+                });
+              });
+            }
+            row.appendChild(copyCell);
+            
+            const deleteCell = document.createElement('div');
+            deleteCell.style.padding = '2px 1px';
+            deleteCell.style.textAlign = 'center';
+            deleteCell.style.cursor = 'pointer';
+            deleteCell.style.color = '#f44336';
+            deleteCell.style.fontSize = '14px';
+            deleteCell.innerHTML = '🗑️';
+            deleteCell.title = 'Delete this run';
+            deleteCell.setAttribute('data-map-key', mapKey);
+            deleteCell.setAttribute('data-category', 'floor');
+            deleteCell.setAttribute('data-index', i);
+            if (run.seed) {
+              deleteCell.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Check if already in confirmation mode
+                if (deleteCell.getAttribute('data-confirming') === 'true') {
+                  // Confirm deletion
+                  console.log(`[Cyclopedia] Confirming deletion of floor run at index ${i} for ${mapKey}`);
+                  
+                  // Call RunTracker API to delete the run
+                  if (window.RunTrackerAPI && window.RunTrackerAPI.deleteRun) {
+                    window.RunTrackerAPI.deleteRun(mapKey, 'floor', i).then(success => {
+                      if (success) {
+                        console.log(`[Cyclopedia] Successfully deleted floor run at index ${i} for ${mapKey}`);
+                        // Refresh the table
+                        populateFloorsTable();
+                        // Update status bar
+                        if (row3 && row3.statusBar) {
+                          row3.statusBar.textContent = 'Run deleted successfully!';
+                          row3.statusBar.style.color = '#4CAF50';
+                          setTimeout(() => {
+                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                            row3.statusBar.style.color = '#ccc';
+                          }, 3000);
+                        }
+                      } else {
+                        console.error(`[Cyclopedia] Failed to delete floor run at index ${i} for ${mapKey}`);
+                        if (row3 && row3.statusBar) {
+                          row3.statusBar.textContent = 'Error deleting run.';
+                          row3.statusBar.style.color = '#ff6b6b';
+                          setTimeout(() => {
+                            row3.statusBar.textContent = 'Select to copy or delete run.';
+                            row3.statusBar.style.color = '#ccc';
+                          }, 3000);
+                        }
+                      }
+                    });
+                  }
+                  
+                  // Reset confirmation state
+                  deleteCell.innerHTML = '🗑️';
+                  deleteCell.style.color = '#f44336';
+                  deleteCell.removeAttribute('data-confirming');
+                  deleteCell.title = 'Delete this run';
+                  
+                  // Reset status bar
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Select to copy or delete run.';
+                    row3.statusBar.style.color = '#ccc';
+                  }
+                } else {
+                  // Enter confirmation mode
+                  deleteCell.innerHTML = '❌';
+                  deleteCell.style.color = '#ff6b6b';
+                  deleteCell.setAttribute('data-confirming', 'true');
+                  deleteCell.title = 'Click again to confirm deletion';
+                  
+                  // Clear any existing timeout
+                  if (row3.statusBarTimeout) {
+                    clearTimeout(row3.statusBarTimeout);
+                    row3.statusBarTimeout = null;
+                  }
+                  
+                  // Update status bar
+                  if (row3 && row3.statusBar) {
+                    row3.statusBar.textContent = 'Are you sure you want to delete this run?';
+                    row3.statusBar.style.color = '#ff6b6b';
+                  }
+                  
+                  // Confirmation mode - no timer, user must click again to confirm or click elsewhere to cancel
+                }
+              });
+            }
+            row.appendChild(deleteCell);
+            
+            floorsTable.appendChild(row);
+          }
+        } catch (error) {
+          console.error('[Cyclopedia] Error populating floors table:', error);
+        }
+      }
+      
+      // Populate the floors table
+      populateFloorsTable();
+      
+      // Make the populate function accessible for refresh
+      floorsTableCol.populateFloorsTable = populateFloorsTable;
+      
+      floorsTableCol.appendChild(floorsTable);
+      
+      // Middle column: Top 5 Ranks
       const ranksTableCol = document.createElement('div');
       ranksTableCol.setAttribute('data-table-type', 'ranks');
       ranksTableCol.style.flex = '1 1 0';
-      ranksTableCol.style.maxWidth = '245px';
+      ranksTableCol.style.maxWidth = '160px';
       ranksTableCol.style.display = 'flex';
       ranksTableCol.style.flexDirection = 'column';
       ranksTableCol.style.padding = '10px';
       ranksTableCol.style.borderLeft = '3px solid transparent';
+      ranksTableCol.style.borderRight = '3px solid transparent';
       ranksTableCol.style.borderImage = `url("${START_PAGE_CONFIG.FRAME_IMAGE_URL}") 6 6 6 6 fill stretch`;
       
       const ranksTableTitle = document.createElement('div');
@@ -8687,7 +9361,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Table header
       const ranksHeader = document.createElement('div');
       ranksHeader.style.display = 'grid';
-      ranksHeader.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
+      ranksHeader.style.gridTemplateColumns = '1fr 50px 20px 20px';
       ranksHeader.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
       ranksHeader.style.borderBottom = '1px solid #444';
       ranksHeader.style.fontWeight = 'bold';
@@ -8695,13 +9369,12 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       ranksHeader.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
       ranksHeader.style.color = COLOR_CONSTANTS.TEXT;
       
-      // Medal column header (empty)
-      const ranksMedalHeader = document.createElement('div');
-      ranksMedalHeader.style.padding = '6px 2px';
-      ranksMedalHeader.style.borderRight = '1px solid #444';
-      ranksMedalHeader.style.textAlign = 'center';
-      ranksMedalHeader.textContent = '';
-      ranksHeader.appendChild(ranksMedalHeader);
+      const ranksRankHeader = document.createElement('div');
+      ranksRankHeader.style.padding = '6px 4px';
+      ranksRankHeader.style.borderRight = '1px solid #444';
+      ranksRankHeader.style.textAlign = 'center';
+      ranksRankHeader.textContent = 'Rank';
+      ranksHeader.appendChild(ranksRankHeader);
       
       const ranksTimeHeader = document.createElement('div');
       ranksTimeHeader.style.padding = '6px 4px';
@@ -8709,13 +9382,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       ranksTimeHeader.style.textAlign = 'center';
       ranksTimeHeader.textContent = 'Time';
       ranksHeader.appendChild(ranksTimeHeader);
-      
-      const ranksRankHeader = document.createElement('div');
-      ranksRankHeader.style.padding = '6px 4px';
-      ranksRankHeader.style.borderRight = '1px solid #444';
-      ranksRankHeader.style.textAlign = 'center';
-      ranksRankHeader.textContent = 'Rank';
-      ranksHeader.appendChild(ranksRankHeader);
       
       const ranksCopyHeader = document.createElement('div');
       ranksCopyHeader.style.padding = '4px 2px';
@@ -8790,38 +9456,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             for (let i = 1; i <= 5; i++) {
               const row = document.createElement('div');
               row.style.display = 'grid';
-              row.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
+              row.style.gridTemplateColumns = '1fr 50px 20px 20px';
               row.style.borderBottom = i < 5 ? '1px solid #333' : 'none';
               row.style.fontSize = '10px';
               row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
               row.style.color = '#666';
-              
-              // Medal cell
-              const medalCell = document.createElement('div');
-              medalCell.style.padding = '4px 2px';
-              medalCell.style.borderRight = '1px solid #333';
-              medalCell.style.textAlign = 'center';
-              medalCell.style.fontSize = '12px';
-              
-              // Set medal icon based on position (1-5)
-              const rankPosition = i;
-              if (rankPosition === 1) {
-                medalCell.innerHTML = '🥇';
-              } else if (rankPosition === 2) {
-                medalCell.innerHTML = '🥈';
-              } else if (rankPosition === 3) {
-                medalCell.innerHTML = '🥉';
-              } else {
-                medalCell.innerHTML = '🏅';
-              }
-              row.appendChild(medalCell);
-              
-              const timeCell = document.createElement('div');
-              timeCell.style.padding = '4px 2px';
-              timeCell.style.borderRight = '1px solid #333';
-              timeCell.style.textAlign = 'center';
-              timeCell.textContent = 'No runs';
-              row.appendChild(timeCell);
               
               const rankCell = document.createElement('div');
               rankCell.style.padding = '4px 2px';
@@ -8829,6 +9468,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               rankCell.style.textAlign = 'center';
               rankCell.textContent = '-';
               row.appendChild(rankCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = '-';
+              row.appendChild(timeCell);
               
               const copyCell = document.createElement('div');
               copyCell.style.padding = '2px 1px';
@@ -8852,7 +9498,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           for (let i = 0; i < 5; i++) {
             const row = document.createElement('div');
             row.style.display = 'grid';
-            row.style.gridTemplateColumns = '30px 1fr 35px 30px 30px';
+            row.style.gridTemplateColumns = '1fr 50px 20px 20px';
             row.style.borderBottom = i < 4 ? '1px solid #333' : 'none';
             row.style.fontSize = '10px';
             row.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
@@ -8864,39 +9510,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               // No run for this slot - show "No runs" without buttons
               row.style.color = '#666';
               
-              // Medal cell
-              const medalCell = document.createElement('div');
-              medalCell.style.padding = '4px 2px';
-              medalCell.style.borderRight = '1px solid #333';
-              medalCell.style.textAlign = 'center';
-              medalCell.style.fontSize = '12px';
-              
-              // Set medal icon based on position (1-5)
-              const rankPosition = i + 1;
-              if (rankPosition === 1) {
-                medalCell.innerHTML = '🥇';
-              } else if (rankPosition === 2) {
-                medalCell.innerHTML = '🥈';
-              } else if (rankPosition === 3) {
-                medalCell.innerHTML = '🥉';
-              } else {
-                medalCell.innerHTML = '🏅';
-              }
-              row.appendChild(medalCell);
-              
-              const timeCell = document.createElement('div');
-              timeCell.style.padding = '4px 2px';
-              timeCell.style.borderRight = '1px solid #333';
-              timeCell.style.textAlign = 'center';
-              timeCell.textContent = 'No runs';
-              row.appendChild(timeCell);
-              
               const rankCell = document.createElement('div');
               rankCell.style.padding = '4px 2px';
               rankCell.style.borderRight = '1px solid #333';
               rankCell.style.textAlign = 'center';
               rankCell.textContent = '-';
               row.appendChild(rankCell);
+              
+              const timeCell = document.createElement('div');
+              timeCell.style.padding = '4px 2px';
+              timeCell.style.borderRight = '1px solid #333';
+              timeCell.style.textAlign = 'center';
+              timeCell.textContent = '-';
+              row.appendChild(timeCell);
               
               const copyCell = document.createElement('div');
               copyCell.style.padding = '2px 1px';
@@ -8918,25 +9544,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Has run data - show with buttons
             row.style.color = '#ccc';
             
-            // Medal cell
-            const medalCell = document.createElement('div');
-            medalCell.style.padding = '4px 2px';
-            medalCell.style.borderRight = '1px solid #333';
-            medalCell.style.textAlign = 'center';
-            medalCell.style.fontSize = '12px';
-            
-            // Set medal icon based on position (1-5)
-            const rankPosition = i + 1;
-            if (rankPosition === 1) {
-              medalCell.innerHTML = '🥇'; // Gold medal
-            } else if (rankPosition === 2) {
-              medalCell.innerHTML = '🥈'; // Silver medal
-            } else if (rankPosition === 3) {
-              medalCell.innerHTML = '🥉'; // Bronze medal
+            const rankCell = document.createElement('div');
+            rankCell.style.padding = '4px 2px';
+            rankCell.style.borderRight = '1px solid #333';
+            rankCell.style.textAlign = 'center';
+            rankCell.style.display = 'flex';
+            rankCell.style.alignItems = 'center';
+            rankCell.style.justifyContent = 'center';
+            rankCell.style.position = 'relative';
+            if (run.points) {
+              rankCell.textContent = run.points.toLocaleString();
+              console.log(`[Cyclopedia] Rank run ${i + 1} points: ${run.points} -> ${run.points.toLocaleString()}`);
             } else {
-              medalCell.innerHTML = '🏅'; // Generic medal for 4th and 5th
+              rankCell.textContent = 'N/A';
+              console.log(`[Cyclopedia] Rank run ${i + 1} has no points property`);
             }
-            row.appendChild(medalCell);
+            row.appendChild(rankCell);
             
             const timeCell = document.createElement('div');
             timeCell.style.padding = '4px 2px';
@@ -8972,7 +9595,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 warningIcon.style.zIndex = '1';
                 
                 // Create time text centered with left margin to avoid overlap
-                timeText.textContent = formatLocalRunTime(run.time);
+                const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
+                timeText.textContent = timeValue;
                 timeText.style.textAlign = 'center';
                 timeText.style.flex = '1';
                 timeText.style.marginLeft = '12px';
@@ -8984,7 +9608,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 row.style.color = '#ff6b6b';
                 console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank})`);
               } else {
-                timeText.textContent = formatLocalRunTime(run.time);
+                const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
+                timeText.textContent = timeValue;
                 timeCell.appendChild(timeText);
               }
             } else {
@@ -8993,23 +9618,6 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
             
             row.appendChild(timeCell);
-            
-            const rankCell = document.createElement('div');
-            rankCell.style.padding = '4px 2px';
-            rankCell.style.borderRight = '1px solid #333';
-            rankCell.style.textAlign = 'center';
-            rankCell.style.display = 'flex';
-            rankCell.style.alignItems = 'center';
-            rankCell.style.justifyContent = 'center';
-            rankCell.style.position = 'relative';
-            if (run.points) {
-              rankCell.textContent = run.points.toLocaleString();
-              console.log(`[Cyclopedia] Rank run ${i + 1} points: ${run.points} -> ${run.points.toLocaleString()}`);
-            } else {
-              rankCell.textContent = 'N/A';
-              console.log(`[Cyclopedia] Rank run ${i + 1} has no points property`);
-            }
-            row.appendChild(rankCell);
             
             const copyCell = document.createElement('div');
             copyCell.style.padding = '2px 1px';
@@ -9278,6 +9886,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Add columns to row2
       row2.appendChild(speedrunTableCol);
       row2.appendChild(ranksTableCol);
+      row2.appendChild(floorsTableCol);
       
       // Row 3: Additional content area
       const row3 = document.createElement('div');
@@ -9373,9 +9982,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             if (data.error === 'rate_limited') {
               speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
               rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+              floorsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
             } else {
               speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
               rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+              floorsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
             }
             return;
           }
@@ -9433,9 +10044,41 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             rankPointsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
           }
           rankPointsContent.innerHTML = rankPointsHtml;
+          
+          // Update floors content
+          const yourRoom = yourRooms?.[selectedMap];
+          const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+          const { floor: bestFloor, floorTicks: bestFloorTicks, playerName: bestFloorPlayer } = normalizeBestFloorData(selectedMap, roomsHighscores, best);
+          
+          let floorsHtml = '';
+          // Check if we have world record data (best floor or fallback to ticks)
+          if (bestFloorTicks > 0) {
+            floorsHtml = `
+              <div style="margin-bottom: 4px; color: #ff8; font-weight: bold; font-size: 12px;">World Record</div>
+              <div style="margin-bottom: 2px; font-size: 12px; color: #fff;">Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa;">(${bestFloorTicks} ticks)</i>` : ''}</div>
+              <div style="margin-bottom: 6px; font-size: 10px; color: #888;">by ${bestFloorPlayer}</div>
+            `;
+            // Add "Your Best" if user has floor data
+            if (yourFloor !== undefined && yourFloor !== null) {
+              floorsHtml += `
+                <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+                <div style="font-size: 12px; color: #ccc;">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+              `;
+            }
+          } else if (yourFloor !== undefined && yourFloor !== null) {
+            // Only show "Your Best" if no world record but user has data
+            floorsHtml = `
+              <div style="margin-bottom: 4px; color: #8f8; font-weight: bold; font-size: 12px;">Your Best</div>
+              <div style="font-size: 12px; color: #ccc;">Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa;">(${yourFloorTicks} ticks)</i>` : ''}</div>
+            `;
+          } else {
+            floorsHtml = '<div style="color: #666; font-size: 12px;">No records yet</div>';
+          }
+          floorsContent.innerHTML = floorsHtml;
         } else {
           speedrunContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
           rankPointsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
+          floorsContent.innerHTML = '<div style="color: #666;">Unable to load data</div>';
         }
       }).catch(error => {
         console.error('[Cyclopedia] Error loading maps leaderboard data:', error);
@@ -9444,9 +10087,11 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         if (error.message.includes('Rate limited')) {
           speedrunContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
           rankPointsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
+          floorsContent.innerHTML = '<div style="color: #ff6b6b; font-size: 12px;">Rate limited. Please wait.</div>';
         } else {
           speedrunContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
           rankPointsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
+          floorsContent.innerHTML = '<div style="color: #888; font-size: 12px;">Data temporarily unavailable</div>';
         }
       });
       
@@ -11742,6 +12387,7 @@ const CYCLOPEDIA_TRANSLATION = {
   bagOutfits: { label: 'Bag Outfits', value: d => d.ownedOutfits },
   rankPoints: { label: 'Rank points', value: d => d.rankPoints },
   timeSum: { label: 'Time sum', value: d => d.ticks },
+  floorsSum: { label: 'Floors sum', value: d => d.floors },
   createdAt: { label: 'Created at', value: d => FormatUtils.date(d.createdAt) },
   level: { label: 'Level', value: d => (typeof d.exp === 'number' ? Math.floor(d.exp / 400) + 1 : '?') },
   xp: { label: 'XP', value: d => d.exp },
@@ -11773,7 +12419,7 @@ function renderCyclopediaPlayerInfo(profileData) {
     return profileData[key] !== undefined ? profileData[key] : '-';
   }
 
-  function addRow({ label, icon, value, highlight, colspan, title, extraIcon, tooltip, valueClass }) {
+  function addRow({ label, icon, iconConfig, value, highlight, colspan, title, extraIcon, tooltip, valueClass }) {
     const tr = document.createElement('tr');
     tr.setAttribute('data-highlight', highlight ? 'true' : 'false');
     tr.className = 'group/row odd:bg-grayBrightest even:bg-grayHighlight hover:bg-whiteDarkest hover:text-whiteBrightest data-[highlight=\'true\']:bg-whiteDarkest data-[highlight=\'true\']:text-whiteBrightest';
@@ -11789,10 +12435,10 @@ function renderCyclopediaPlayerInfo(profileData) {
       if (icon) {
         const img = document.createElement('img');
         img.alt = label;
-        img.src = icon;
-        img.className = 'pixelated mr-1 inline-block -translate-y-0.5';
-        img.width = 11;
-        img.height = 11;
+        img.src = typeof icon === 'string' ? icon : icon.src;
+        img.className = iconConfig?.className || (typeof icon === 'object' && icon.className) || 'pixelated mr-1 inline-block -translate-y-0.5';
+        img.width = iconConfig?.width || (typeof icon === 'object' && icon.width) || 11;
+        img.height = iconConfig?.height || (typeof icon === 'object' && icon.height) || 11;
         td1.appendChild(img);
       }
       td1.appendChild(document.createTextNode(label));
@@ -12011,6 +12657,14 @@ function renderCyclopediaPlayerInfo(profileData) {
     icon: '/assets/icons/speed.png',
     value: (getProfileValue('timeSum') !== undefined ? FormatUtils.number(getProfileValue('timeSum')) : '-'),
     title: profileData.ticksPosition !== undefined ? 'Position: ' + profileData.ticksPosition : undefined,
+    extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
+  });
+  addRow({
+    label: CYCLOPEDIA_TRANSLATION.floorsSum.label,
+    icon: '/assets/UI/floor-15.png',
+    iconConfig: { width: 14, height: 7, className: 'pixelated -ml-px mr-0.5 inline-block -translate-y-0.5' },
+    value: (getProfileValue('floorsSum') !== undefined ? FormatUtils.number(getProfileValue('floorsSum')) : '-'),
+    title: profileData.floorsPosition !== undefined ? 'Position: ' + profileData.floorsPosition : undefined,
     extraIcon: { alt: 'Highscore', src: '/assets/icons/highscore.png' }
   });
   statsTable.appendChild(tbody);

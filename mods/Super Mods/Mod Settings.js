@@ -1910,7 +1910,7 @@ function showSettingsModal() {
             </select>
           </div>
           <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="color: #ccc; min-width: 200px;">Better Highscores Background Opacity</span>
+            <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
             <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
             <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
           </div>

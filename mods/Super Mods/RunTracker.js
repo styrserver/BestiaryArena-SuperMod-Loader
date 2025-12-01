@@ -309,6 +309,51 @@ async function initializeStorage() {
       };
     }
     
+    // Ensure all maps have floor category
+    for (const mapKey in runStorage.runs) {
+      if (runStorage.runs[mapKey] && !runStorage.runs[mapKey].floor) {
+        runStorage.runs[mapKey].floor = [];
+      }
+    }
+    
+    // Migrate existing runs to add floor: 0 fallback if missing
+    let migratedCount = 0;
+    for (const mapKey in runStorage.runs) {
+      const mapData = runStorage.runs[mapKey];
+      if (mapData) {
+        // Check speedrun category
+        if (Array.isArray(mapData.speedrun)) {
+          mapData.speedrun.forEach(run => {
+            if (run.floor === undefined || run.floor === null) {
+              run.floor = 0;
+              migratedCount++;
+            }
+          });
+        }
+        // Check rank category
+        if (Array.isArray(mapData.rank)) {
+          mapData.rank.forEach(run => {
+            if (run.floor === undefined || run.floor === null) {
+              run.floor = 0;
+              migratedCount++;
+            }
+          });
+        }
+        // Check floor category
+        if (Array.isArray(mapData.floor)) {
+          mapData.floor.forEach(run => {
+            if (run.floor === undefined || run.floor === null) {
+              run.floor = 0;
+              migratedCount++;
+            }
+          });
+        }
+      }
+    }
+    if (migratedCount > 0) {
+      console.log(`[RunTracker] Migrated ${migratedCount} runs to add floor: 0 fallback`);
+    }
+    
     // Save the properly structured storage
     await saveStorage();
   } catch (error) {
@@ -338,9 +383,10 @@ function findExistingRun(runData) {
       return null;
     }
     
-    // Check both speedrun and rank categories for runs with identical setup
+    // Check all categories for runs with identical setup
     const speedrunRuns = runStorage.runs[runData.mapKey].speedrun || [];
     const rankRuns = runStorage.runs[runData.mapKey].rank || [];
+    const floorRuns = runStorage.runs[runData.mapKey].floor || [];
     
     // Helper function to compare setups
     const compareSetups = (run1, run2) => {
@@ -361,9 +407,10 @@ function findExistingRun(runData) {
     // Look for runs with identical setup
     const existingSpeedrun = speedrunRuns.find(run => compareSetups(run, runData));
     const existingRank = rankRuns.find(run => compareSetups(run, runData));
+    const existingFloor = floorRuns.find(run => compareSetups(run, runData));
     
-    // Return the first found match (either speedrun or rank)
-    return existingSpeedrun || existingRank || null;
+    // Return the first found match (speedrun, rank, or floor)
+    return existingSpeedrun || existingRank || existingFloor || null;
   } catch (error) {
     console.warn('[RunTracker] Error finding existing run:', error);
     return null;
@@ -532,6 +579,8 @@ function parseServerResults(serverResults) {
     
     // Extract map information from rewardScreen.roomId
     if (serverResults.rewardScreen.roomId) {
+      // Store the original map ID for boosted map checking
+      runData.mapId = serverResults.rewardScreen.roomId;
       // Resolve the map ID to the proper map name
       const resolvedMapName = resolveMapName(serverResults.rewardScreen.roomId);
       runData.mapName = resolvedMapName;
@@ -540,6 +589,10 @@ function parseServerResults(serverResults) {
     } else if (serverResults.mapName) {
       runData.mapName = serverResults.mapName;
       runData.mapKey = `map_${serverResults.mapName.toLowerCase().replace(/\s+/g, '_')}`;
+      // Try to get map ID if available
+      if (serverResults.mapId) {
+        runData.mapId = serverResults.mapId;
+      }
     } else {
       // Try to extract from other sources
       const gameState = globalThis.state?.player?.getSnapshot()?.context;
@@ -655,6 +708,26 @@ function parseServerResults(serverResults) {
       runData.points = serverResults.rankPoints;
     }
     
+    // Extract floor data from rewardScreen
+    if (serverResults.rewardScreen.floor !== undefined && serverResults.rewardScreen.floor !== null) {
+      runData.floor = serverResults.rewardScreen.floor;
+      console.log(`[RunTracker] Extracted floor from rewardScreen.floor: ${runData.floor}`);
+    } else if (serverResults.floor !== undefined && serverResults.floor !== null) {
+      runData.floor = serverResults.floor;
+      console.log(`[RunTracker] Extracted floor from serverResults.floor: ${runData.floor}`);
+    } else {
+      // Fallback: set floor to 0 if not present
+      runData.floor = 0;
+      console.log(`[RunTracker] No floor data found in server results, defaulting to 0`);
+    }
+    
+    // Extract floor ticks (time to reach floor)
+    if (serverResults.rewardScreen.floorTicks !== undefined && serverResults.rewardScreen.floorTicks !== null) {
+      runData.floorTicks = serverResults.rewardScreen.floorTicks;
+    } else if (serverResults.floorTicks !== undefined && serverResults.floorTicks !== null) {
+      runData.floorTicks = serverResults.floorTicks;
+    }
+    
     // Extract additional info
     if (serverResults.rewardScreen.victory !== undefined) {
       runData.victory = serverResults.rewardScreen.victory;
@@ -667,10 +740,13 @@ function parseServerResults(serverResults) {
     }
     
     // Validate we have required data
-    if (!runData.mapKey || (!runData.time && !runData.points)) {
+    if (!runData.mapKey || (!runData.time && !runData.points && !runData.floor)) {
       console.warn('[RunTracker] Missing required run data:', runData);
       return null;
     }
+    
+    // Log that floor attribute is present (for debugging)
+    console.log(`[RunTracker] Parsed run data - floor: ${runData.floor}, time: ${runData.time}, points: ${runData.points}, map: ${runData.mapName}`);
     
     return runData;
   } catch (error) {
@@ -799,9 +875,10 @@ async function addRun(runData) {
       const dailyContext = globalThis.state?.daily?.getSnapshot()?.context;
       
       if (dailyContext?.boostedMap?.roomId) {
-        // Check if the current map matches the boosted map (compare map IDs)
-        if (runData.setup?.mapId && dailyContext.boostedMap.roomId.toLowerCase() === runData.setup.mapId.toLowerCase()) {
-          console.log(`[RunTracker] Skipping boosted map: ${runData.mapName}`);
+        // Check if the run's map matches the boosted map (compare map IDs from server results, not board setup)
+        const runMapId = runData.mapId || runData.setup?.mapId;
+        if (runMapId && dailyContext.boostedMap.roomId.toLowerCase() === runMapId.toLowerCase()) {
+          console.log(`[RunTracker] Skipping boosted map: ${runData.mapName} (ID: ${runMapId})`);
           return false; // Don't track runs on boosted maps
         }
       }
@@ -812,8 +889,9 @@ async function addRun(runData) {
     // Fallback: Check if we can get boosted map info from other sources
     try {
       const boardContext = globalThis.state?.board?.getSnapshot()?.context;
-      if (boardContext?.selectedMap?.boosted && runData.setup?.mapId && boardContext.selectedMap.id === runData.setup.mapId) {
-        console.log(`[RunTracker] Skipping boosted map (board context): ${runData.mapName}`);
+      const runMapId = runData.mapId || runData.setup?.mapId;
+      if (boardContext?.selectedMap?.boosted && runMapId && boardContext.selectedMap.id === runMapId) {
+        console.log(`[RunTracker] Skipping boosted map (board context): ${runData.mapName} (ID: ${runMapId})`);
         return false;
       }
     } catch (fallbackError) {
@@ -825,7 +903,7 @@ async function addRun(runData) {
     if (existingRun) {
       console.log('[RunTracker] Found existing run with same setup, checking if new run is better');
       
-      // Check if the new run is better than the existing one
+      // Check if the new run is better than the existing one in any category
       let shouldUpdate = false;
       let updateReason = [];
       
@@ -848,12 +926,24 @@ async function addRun(runData) {
         }
       }
       
+      // For floor: check if new floor is higher or same floor with faster floorTicks
+      if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0 && existingRun.floor !== undefined && existingRun.floor !== null) {
+        if (runData.floor > existingRun.floor) {
+          shouldUpdate = true;
+          updateReason.push(`higher floor (${runData.floor} vs ${existingRun.floor})`);
+        } else if (runData.floor === existingRun.floor && runData.floorTicks && existingRun.floorTicks && runData.floorTicks < existingRun.floorTicks) {
+          shouldUpdate = true;
+          updateReason.push(`same floor but faster floorTicks (${runData.floorTicks} vs ${existingRun.floorTicks})`);
+        }
+      }
+      
       if (shouldUpdate) {
         console.log(`[RunTracker] Updating existing run: ${updateReason.join(', ')}`);
         // Continue with the update process
       } else {
-        console.log('[RunTracker] New run is not better than existing run, skipping');
-        return false;
+        // Don't return early - let each category check independently
+        // A run might not be better overall but could still be better in a specific category
+        console.log('[RunTracker] New run is not better than existing run in checked categories, but will check each category independently');
       }
     }
     
@@ -864,18 +954,24 @@ async function addRun(runData) {
     if (!runStorage.runs[runData.mapKey]) {
       runStorage.runs[runData.mapKey] = {
         speedrun: [],
-        rank: []
+        rank: [],
+        floor: []
       };
     }
     
     let speedrunUpdated = false;
     let rankUpdated = false;
+    let floorUpdated = false;
     
     // Skip failed runs entirely - only track victories
     // Check both victory flag and points (0 points = defeat)
+    // Note: Floor runs can still be tracked even if defeated, as they represent progress
     if (runData.victory === false || runData.points === 0) {
-      console.log(`[RunTracker] Skipping failed run for ${runData.mapName} (victory: ${runData.victory}, points: ${runData.points})`);
-      return false;
+      // Only skip if we don't have floor data (floor runs can be tracked even on defeat)
+      if (!runData.floor) {
+        console.log(`[RunTracker] Skipping failed run for ${runData.mapName} (victory: ${runData.victory}, points: ${runData.points})`);
+        return false;
+      }
     }
     
     // Check both categories independently - a run can qualify for both speedrun and rank
@@ -891,11 +987,19 @@ async function addRun(runData) {
       console.log(`[RunTracker] Skipping defeated run with 0 rank points for ${runData.mapName}`);
     }
     
+    // Check floor category independently - tracks highest floor reached
+    // Only track floor runs if floor > 0 (floor: 0 is just a fallback for missing data)
+    if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0) {
+      floorUpdated = await checkAndUpdateFloorRuns(runData);
+    } else {
+      console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} (must be > 0 to track)`);
+    }
+    
     // Update metadata only if there were changes
-    if (speedrunUpdated || rankUpdated) {
+    if (speedrunUpdated || rankUpdated || floorUpdated) {
       runStorage.lastUpdated = Date.now();
       runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
-        return total + map.speedrun.length + map.rank.length;
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
       }, 0);
       runStorage.metadata.totalMaps = Object.keys(runStorage.runs).length;
       
@@ -903,7 +1007,7 @@ async function addRun(runData) {
       StorageManager.queueSave();
     }
     
-    return speedrunUpdated || rankUpdated;
+    return speedrunUpdated || rankUpdated || floorUpdated;
   } catch (error) {
     return Utils.handleError(error, 'adding run', false);
   }
@@ -1033,6 +1137,97 @@ async function checkAndUpdateRankRuns(runData) {
   return true;
 }
 
+// Check and update floor category
+async function checkAndUpdateFloorRuns(runData) {
+  const floorRuns = runStorage.runs[runData.mapKey].floor;
+  
+  // Check if floor is higher or equal to existing runs
+  // For same floor, prefer faster floorTicks (if available)
+  const qualifyingRuns = floorRuns.filter(run => 
+    (run.floor < runData.floor) || 
+    (run.floor === runData.floor && run.floorTicks && runData.floorTicks && run.floorTicks >= runData.floorTicks) ||
+    (run.floor === runData.floor && !run.floorTicks && runData.floorTicks)
+  );
+  
+  if (qualifyingRuns.length === 0 && floorRuns.length >= MAX_RUNS_PER_MAP) {
+    // Check if this run is better than the worst run
+    const worstRun = floorRuns[floorRuns.length - 1];
+    if (runData.floor < worstRun.floor || 
+        (runData.floor === worstRun.floor && runData.floorTicks && worstRun.floorTicks && runData.floorTicks >= worstRun.floorTicks)) {
+      console.log(`[RunTracker] Skipping floor run - floor ${runData.floor} not high enough for ${runData.mapName}`);
+      return false;
+    }
+  }
+  
+  // Check for same setup (more robust comparison)
+  const sameSetupRun = floorRuns.find(run => {
+    if (!run.setup || !runData.setup) return false;
+    
+    // Compare pieces array
+    const runPieces = run.setup.pieces || [];
+    const dataPieces = runData.setup.pieces || [];
+    
+    if (runPieces.length !== dataPieces.length) return false;
+    
+    // Sort pieces by tile for consistent comparison
+    const sortedRunPieces = [...runPieces].sort((a, b) => a.tile - b.tile);
+    const sortedDataPieces = [...dataPieces].sort((a, b) => a.tile - b.tile);
+    
+    return JSON.stringify(sortedRunPieces) === JSON.stringify(sortedDataPieces);
+  });
+  
+  if (sameSetupRun) {
+    // Same setup found - update if new floor is higher, or same floor with better floorTicks
+    let shouldUpdate = false;
+    if (runData.floor > sameSetupRun.floor) {
+      shouldUpdate = true;
+    } else if (runData.floor === sameSetupRun.floor && runData.floorTicks && sameSetupRun.floorTicks) {
+      if (runData.floorTicks < sameSetupRun.floorTicks) {
+        shouldUpdate = true;
+      }
+    } else if (runData.floor === sameSetupRun.floor && runData.floorTicks && !sameSetupRun.floorTicks) {
+      shouldUpdate = true;
+    }
+    
+    if (shouldUpdate) {
+      const existingIndex = floorRuns.indexOf(sameSetupRun);
+      const updatedRun = { ...sameSetupRun, ...runData };
+      floorRuns[existingIndex] = updatedRun;
+      
+      console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
+    } else {
+      console.log(`[RunTracker] New floor run is not better than existing run for same setup`);
+      return false;
+    }
+  } else {
+    // Unique setup - add to top 5 in correct order
+    floorRuns.push(runData);
+    
+    // Sort by floor (highest first), then by floorTicks (fastest first) for tiebreakers
+    floorRuns.sort((a, b) => {
+      if (a.floor !== b.floor) {
+        return (b.floor || 0) - (a.floor || 0);
+      }
+      // Same floor - prefer faster floorTicks, or runs with floorTicks over those without
+      if (a.floorTicks && b.floorTicks) {
+        return (a.floorTicks || Infinity) - (b.floorTicks || Infinity);
+      }
+      if (a.floorTicks && !b.floorTicks) return -1;
+      if (!a.floorTicks && b.floorTicks) return 1;
+      return 0;
+    });
+    
+    // Keep only top 5
+    if (floorRuns.length > MAX_RUNS_PER_MAP) {
+      floorRuns.splice(MAX_RUNS_PER_MAP);
+    }
+    
+    console.log(`[RunTracker] Added new floor run for ${runData.mapName} with unique setup: floor ${runData.floor}${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
+  }
+  
+  return true;
+}
+
 // Add replay data to storage
 async function addReplayData(replayData) {
   try {
@@ -1123,13 +1318,18 @@ async function cleanupDefeatedRuns() {
           totalRemoved += removedCount;
         }
       }
+      
+      // Ensure floor category exists
+      if (!mapData.floor) {
+        mapData.floor = [];
+      }
     }
     
     if (totalRemoved > 0) {
       console.log(`[RunTracker] Cleaned up ${totalRemoved} total defeated runs`);
       // Update metadata
       runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
-        return total + map.speedrun.length + map.rank.length;
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
       }, 0);
       // Queue save
       StorageManager.queueSave();
@@ -1361,7 +1561,7 @@ if (!window.RunTrackerAPI) {
   getRuns: (mapKey, category = null) => {
     try {
       if (!runStorage || !runStorage.runs || !runStorage.runs[mapKey]) {
-        return category ? [] : { speedrun: [], rank: [] };
+        return category ? [] : { speedrun: [], rank: [], floor: [] };
       }
       
       if (category) {
@@ -1371,7 +1571,7 @@ if (!window.RunTrackerAPI) {
       return runStorage.runs[mapKey];
     } catch (error) {
       console.error('[RunTracker] Error getting runs:', error);
-      return category ? [] : { speedrun: [], rank: [] };
+      return category ? [] : { speedrun: [], rank: [], floor: [] };
     }
   },
   getReplays: (mapKey = null) => {
@@ -1418,8 +1618,9 @@ if (!window.RunTrackerAPI) {
           stats.maps[mapKey] = {
             speedrun: map.speedrun?.length || 0,
             rank: map.rank?.length || 0,
+            floor: map.floor?.length || 0,
             replays: runStorage.replays?.[mapKey]?.length || 0,
-            total: (map.speedrun?.length || 0) + (map.rank?.length || 0)
+            total: (map.speedrun?.length || 0) + (map.rank?.length || 0) + (map.floor?.length || 0)
           };
         });
       }
@@ -1503,7 +1704,7 @@ if (!window.RunTrackerAPI) {
       // Update metadata
       runStorage.lastUpdated = Date.now();
       runStorage.metadata.totalRuns = Object.values(runStorage.runs).reduce((total, map) => {
-        return total + map.speedrun.length + map.rank.length;
+        return total + map.speedrun.length + map.rank.length + (map.floor?.length || 0);
       }, 0);
       
       // Save immediately for deletions to ensure persistence

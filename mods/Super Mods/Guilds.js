@@ -483,6 +483,10 @@ function calculateTimeSumPenalty(timeSum) {
   return Math.floor(timeSum / POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR);
 }
 
+function calculateFloorPoints(floors) {
+  return floors || 0;
+}
+
 // Get equipment points for a specific player
 async function getPlayerEquipmentPoints(username) {
   try {
@@ -554,11 +558,15 @@ async function calculateMemberPoints(username) {
     // Get equipment points
     const equipmentPoints = await getPlayerEquipmentPoints(username);
     
+    // Get floors
+    const floors = profile.floors || 0;
+    const floorPoints = calculateFloorPoints(floors);
+    
     // Check if member holds a world record (individual check, but bonus is guild-wide)
     const hasWorldRecord = await checkMemberWorldRecord(username);
     
     // Individual member points (without world record bonus, as that's guild-wide)
-    const total = levelPoints + rankPoints - timeSumPenalty + equipmentPoints;
+    const total = levelPoints + rankPoints - timeSumPenalty + equipmentPoints + floorPoints;
     
     return {
       total: Math.max(0, Math.floor(total)),
@@ -566,10 +574,12 @@ async function calculateMemberPoints(username) {
       rankPoints,
       timeSumPenalty,
       equipmentPoints,
+      floorPoints,
       level,
       exp,
       rankPointsValue,
       timeSum,
+      floors,
       hasWorldRecord
     };
   } catch (error) {
@@ -580,10 +590,12 @@ async function calculateMemberPoints(username) {
       rankPoints: 0,
       timeSumPenalty: 0,
       equipmentPoints: 0,
+      floorPoints: 0,
       level: 0,
       exp: 0,
       rankPointsValue: 0,
       timeSum: 0,
+      floors: 0,
       hasWorldRecord: false
     };
   }
@@ -609,6 +621,7 @@ async function calculateGuildPoints(guildId) {
     let totalRankPoints = 0;
     let totalTimeSum = 0;
     let totalEquipmentPoints = 0;
+    let totalFloors = 0;
     
     // Fetch profile data for all members (with rate limiting consideration)
     const profilePromises = members.map(member => fetchPlayerProfile(member.username));
@@ -637,19 +650,24 @@ async function calculateGuildPoints(guildId) {
       
       // Add equipment points
       totalEquipmentPoints += equipmentPointsArray[i] || 0;
+      
+      // Get floors
+      const floors = profile.floors || 0;
+      totalFloors += floors;
     }
     
     // Calculate points using helper functions
     const levelPoints = calculateLevelPoints(totalLevels);
     const rankPoints = calculateRankPoints(totalRankPoints);
     const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
+    const floorPoints = calculateFloorPoints(totalFloors);
     
     // Check if any member holds a world record
     const memberUsernames = members.map(m => m.username).filter(Boolean);
     const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
     const worldRecordBonus = hasWorldRecord ? POINTS_CONFIG.WORLD_RECORD_BONUS : 0;
     
-    const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + worldRecordBonus;
+    const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
     
     // Ensure points are never negative - minimum is 0
     const points = Math.max(0, Math.floor(totalPoints));
@@ -4618,6 +4636,10 @@ async function openGuildPanel(viewGuildId = null) {
       addDetail(`  (Level ${pointsData.level})`, ``, 'rgba(255, 255, 255, 0.6)');
       addDetail('Rank Points', `+${pointsData.rankPoints}`, '#64b5f6');
       addDetail(`  (${formatNumber(pointsData.rankPointsValue)} total, every ${POINTS_CONFIG.RANK_POINTS_PER_POINT} = 1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
+      if (pointsData.floorPoints > 0) {
+        addDetail(t('mods.guilds.equipment.floorPoints') || 'Floor Points', `+${pointsData.floorPoints}`, '#ba68c8');
+        addDetail(`  (${tReplace('mods.guilds.equipment.floorPointsDescription', { floors: formatNumber(pointsData.floors) }) || `${formatNumber(pointsData.floors)} floors, 1 floor = 1 pt`})`, ``, 'rgba(255, 255, 255, 0.6)');
+      }
       if (pointsData.equipmentPoints > 0) {
         addDetail(t('mods.guilds.equipment.equipmentPoints') || 'Equipment Points', `+${pointsData.equipmentPoints}`, '#81c784');
         addDetail(`  (Sum of equipped item tiers)`, ``, 'rgba(255, 255, 255, 0.6)');

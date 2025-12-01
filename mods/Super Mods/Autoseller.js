@@ -84,6 +84,24 @@
     // Global references for cleanup
     let originalFetch = null;
     let messageListener = null;
+    
+    // Translation helper
+    const t = (key) => {
+        if (typeof api !== 'undefined' && api.i18n && api.i18n.t) {
+            return api.i18n.t(key);
+        }
+        // Fallback to key if translation API is not available
+        return key;
+    };
+    
+    // Helper for dynamic translation with placeholders
+    const tReplace = (key, replacements) => {
+        let text = t(key);
+        Object.entries(replacements).forEach(([placeholder, value]) => {
+            text = text.replace(`{${placeholder}}`, value);
+        });
+        return text;
+    };
 
     // Dragon Plant Autocollect Constants
     const DRAGON_PLANT_CONFIG = {
@@ -996,12 +1014,14 @@
     }
     
     function createWarningRow(warningText, showTooltip = false) {
-        const parts = warningText.split('ALL');
+        // Handle both "ALL" (English) and "TODAS" (Portuguese)
+        const allWord = warningText.includes('TODAS') ? 'TODAS' : 'ALL';
+        const parts = warningText.split(allWord);
         const beforeAll = parts[0];
         const afterAll = parts[1];
         
         const allSpan = createElement('span', { 
-            text: 'ALL',
+            text: allWord,
             styles: { 
                 textDecoration: 'underline',
                 color: '#4A90E2',
@@ -1010,10 +1030,11 @@
         });
         
         if (showTooltip) {
-            const isAutosell = warningText.includes('sell');
+            // Check for both English "sell" and Portuguese "venderá"
+            const isAutosell = warningText.includes('sell') || warningText.includes('venderá');
             const tooltipText = isAutosell 
-                ? 'The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare,\n- Not shiny.'
-                : 'The script will squeeze all creatures in your inventory that are:\n- Unlocked creatures,\n- Within the specified gene range,\n- Not in daycare,\n- Not shiny.';
+                ? t('mods.autoseller.tooltipSellAll')
+                : t('mods.autoseller.tooltipSqueezeAll');
             
             allSpan.title = tooltipText;
             
@@ -1127,7 +1148,7 @@
         row.style.marginBottom = '12px';
         
         const inputLabel = document.createElement('span');
-        inputLabel.textContent = opts.inputLabel + ': Between';
+        inputLabel.textContent = opts.inputLabel + ': ' + t('mods.autoseller.between');
         inputLabel.className = 'pixel-font-16';
         inputLabel.style.marginRight = '6px';
         inputLabel.style.fontWeight = 'bold';
@@ -1154,7 +1175,7 @@
         row.appendChild(inputMin);
         
         const andText = document.createElement('span');
-        andText.textContent = 'and';
+        andText.textContent = t('mods.autoseller.and');
         andText.className = 'pixel-font-16';
         andText.style.margin = '0 4px';
         andText.style.color = '#cccccc';
@@ -1197,7 +1218,7 @@
         row.style.marginBottom = '12px';
         
         const minCountLabel = document.createElement('span');
-        minCountLabel.textContent = 'Trigger when:';
+        minCountLabel.textContent = t('mods.autoseller.triggerWhen');
         minCountLabel.className = 'pixel-font-16';
         minCountLabel.style.marginRight = '6px';
         minCountLabel.style.fontWeight = 'bold';
@@ -1232,7 +1253,7 @@
         row.appendChild(minCountInput);
         
         const minCountSuffix = document.createElement('span');
-        minCountSuffix.textContent = 'creatures';
+        minCountSuffix.textContent = t('mods.autoseller.creaturesSuffix');
         minCountSuffix.className = 'pixel-font-16';
         minCountSuffix.style.color = '#cccccc';
         row.appendChild(minCountSuffix);
@@ -1318,7 +1339,7 @@
         checkboxLabel.appendChild(checkbox);
         
         const labelText = document.createElement('span');
-        labelText.textContent = 'Enable Dragon Plant';
+        labelText.textContent = t('mods.autoseller.enableDragonPlant');
         checkboxLabel.appendChild(labelText);
         
         checkboxContainer.appendChild(checkboxLabel);
@@ -1352,7 +1373,7 @@
         autocollectCheckboxLabel.appendChild(autocollectCheckbox);
         
         const autocollectLabelText = document.createElement('span');
-        autocollectLabelText.textContent = 'Autocollect Dragon Plant';
+        autocollectLabelText.textContent = t('mods.autoseller.autocollectDragonPlant');
         autocollectCheckboxLabel.appendChild(autocollectLabelText);
         
         autocollectCheckboxContainer.appendChild(autocollectCheckboxLabel);
@@ -1412,7 +1433,7 @@
 
             // Available creatures column
             const availableBox = createAutoplantCreaturesBox({
-                title: 'Creatures',
+                title: t('mods.autoseller.creatures'),
                 items: availableCreatures,
                 selectedCreature: null,
                 onSelectCreature: (creatureName) => {
@@ -1440,7 +1461,7 @@
 
             // Selected creatures column
             const selectedBox = createAutoplantCreaturesBox({
-                title: 'Ignore List',
+                title: t('mods.autoseller.ignoreList'),
                 items: selectedCreatures,
                 selectedCreature: null,
                 onSelectCreature: (creatureName) => {
@@ -1500,7 +1521,7 @@
 
         const genesLabel = document.createElement('label');
         genesLabel.className = 'pixel-font-14';
-        genesLabel.textContent = 'Keep genes';
+        genesLabel.textContent = t('mods.autoseller.keepGenes');
         genesLabel.style.fontSize = '12px';
         genesLabel.style.color = '#ffe066';
         genesLabel.style.cursor = 'pointer';
@@ -1531,7 +1552,7 @@
 
         const genesPercent = document.createElement('span');
         genesPercent.className = 'pixel-font-14';
-        genesPercent.textContent = '% and above.';
+        genesPercent.textContent = t('mods.autoseller.andAbove');
         genesPercent.style.fontSize = '12px';
         genesPercent.style.color = '#ffe066';
 
@@ -1560,7 +1581,7 @@
 
         const devourLabel = document.createElement('label');
         devourLabel.className = 'pixel-font-14';
-        devourLabel.textContent = 'Devour genes';
+        devourLabel.textContent = t('mods.autoseller.devourGenes');
         devourLabel.style.fontSize = '12px';
         devourLabel.style.color = '#ffe066';
         devourLabel.style.cursor = 'pointer';
@@ -1591,7 +1612,7 @@
 
         const devourPercent = document.createElement('span');
         devourPercent.className = 'pixel-font-14';
-        devourPercent.textContent = '% and below.';
+        devourPercent.textContent = t('mods.autoseller.andBelow');
         devourPercent.style.fontSize = '12px';
         devourPercent.style.color = '#ffe066';
 
@@ -1637,10 +1658,11 @@
             const ignoredCount = selectedCreatures.length;
             const isEnabled = window.autoplantCheckbox ? window.autoplantCheckbox.checked : false;
             
-            let statusText = `Autoplant is ${isEnabled ? 'enabled' : 'disabled'}.`;
+            const statusKey = isEnabled ? 'mods.autoseller.statusEnabled' : 'mods.autoseller.statusDisabled';
+            let statusText = tReplace(statusKey, { type: t('mods.autoseller.autoplantLabel') });
             
             if (isEnabled && ignoredCount > 0) {
-                statusText += ` Ignoring ${ignoredCount} creatures.`;
+                statusText += ' ' + tReplace('mods.autoseller.statusIgnoring', { count: ignoredCount });
             }
             
             summary.textContent = statusText;
@@ -1843,8 +1865,8 @@
         section.appendChild(descWrapper);
         
         const warningText = opts.summaryType === 'Autosell' 
-            ? 'This will sell ALL creatures from your inventory!'
-            : 'This will squeeze ALL creatures from your inventory!';
+            ? t('mods.autoseller.warningSellAll')
+            : t('mods.autoseller.warningSqueezeAll');
         const warningWrapper = createWarningRow(warningText, true);
         section.appendChild(warningWrapper);
         
@@ -1914,8 +1936,8 @@
         label.htmlFor = checkbox.id;
         inputMin.tabIndex = 2;
         inputMax.tabIndex = 3;
-        inputMin.setAttribute('aria-label', opts.label + ' Genes Min Threshold');
-        inputMax.setAttribute('aria-label', opts.label + ' Genes Max Threshold');
+        inputMin.setAttribute('aria-label', tReplace('mods.autoseller.genesMinThreshold', { label: opts.label }));
+        inputMax.setAttribute('aria-label', tReplace('mods.autoseller.genesMaxThreshold', { label: opts.label }));
         inputMin.setAttribute('autocomplete', 'off');
         inputMax.setAttribute('autocomplete', 'off');
         [checkbox, inputMin, inputMax].forEach(el => {
@@ -2018,14 +2040,23 @@
             if (typeof count === 'number') {
                 if (checkbox.checked) {
                     if (opts.summaryType === 'Autosell') {
-                        summary.textContent = `Selling creatures with genes between ${minVal} and ${maxVal} if count ≥ ${minCountVal}.`;
+                        summary.textContent = tReplace('mods.autoseller.summarySelling', { min: minVal, max: maxVal, minCount: minCountVal });
                     } else if (opts.summaryType === 'Autosqueeze') {
-                        summary.textContent = `Squeezing creatures with genes between ${minVal} and ${maxVal} if count ≥ ${minCountVal}.`;
+                        summary.textContent = tReplace('mods.autoseller.summarySqueezing', { min: minVal, max: maxVal, minCount: minCountVal });
                     } else {
-                        summary.textContent = `${count} creature${count === 1 ? '' : 's'} will be auto${opts.summaryType.toLowerCase()} if count ≥ ${minCountVal}.`;
+                        const plural = count === 1 ? '' : 's';
+                        // Portuguese pluralization: "será" (singular) vs "serão" (plural)
+                        const plural2 = count === 1 ? '' : 'ão';
+                        summary.textContent = tReplace('mods.autoseller.summaryCreatures', { 
+                            count: count, 
+                            plural: plural,
+                            plural2: plural2,
+                            type: opts.summaryType.toLowerCase(),
+                            minCount: minCountVal
+                        });
                     }
                 } else {
-                    summary.textContent = opts.summaryType + ' is disabled.';
+                    summary.textContent = tReplace('mods.autoseller.statusDisabled', { type: opts.summaryType });
                 }
                 summary.style.color = checkbox.checked ? '#4CAF50' : '#ff6b6b'; // Green when enabled, red when disabled
             }
@@ -2432,9 +2463,9 @@
         
         if (typeof api !== 'undefined' && api && api.ui && api.ui.components && api.ui.components.createModal) {
             const autosellSection = createSettingsSection({
-                label: 'Sell creatures equal or below:',
+                label: t('mods.autoseller.autosellLabel'),
                 inputLabel: 'Genes',
-                desc: 'Automatically sells creatures below the selected gene threshold.',
+                desc: t('mods.autoseller.descAutosell'),
                 tooltip: 'When enabled, creatures with genes at or below the specified percentage will be sold automatically.',
                 inputMin: 5,
                 inputMax: 79,
@@ -2449,9 +2480,9 @@
             autosellSection.setAttribute('data-autosell-section', 'true');
             
             const autosqueezeSection = createSettingsSection({
-                label: 'Squeeze creatures equal or below:',
+                label: t('mods.autoseller.autosqueezeLabel'),
                 inputLabel: 'Genes',
-                desc: 'Automatically squeezes creatures below the selected gene threshold.',
+                desc: t('mods.autoseller.descAutosqueeze'),
                 tooltip: 'When enabled, creatures with genes at or below the specified percentage will be squeezed automatically.',
                 inputMin: 80,
                 inputMax: 100,
@@ -2463,18 +2494,18 @@
             });
             
             const col1 = createBox({ 
-                title: 'Autosell', 
+                title: t('mods.autoseller.autosellLabel'), 
                 content: autosellSection, 
                 icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
                 tabs: [
                     {
-                        title: 'Autoplant',
+                        title: t('mods.autoseller.autoplantLabel'),
                         icon: 'https://bestiaryarena.com/assets/icons/plant.png',
                         content: createAutplantPlaceholder(),
                         verticalAlign: 'space-between'
                     },
                     {
-                        title: 'Autosell',
+                        title: t('mods.autoseller.autosellLabel'),
                         icon: 'https://bestiaryarena.com/assets/icons/goldpile.png',
                         content: autosellSection,
                         verticalAlign: 'center'
@@ -2488,7 +2519,7 @@
             col1.style.flex = '0 0 240px';
             
             const col2 = createBox({ 
-                title: 'Autosqueeze', 
+                title: t('mods.autoseller.autosqueezeLabel'), 
                 content: autosqueezeSection, 
                 icon: 'https://bestiaryarena.com/assets/icons/dust.png',
                 verticalAlign: 'center'
@@ -2537,13 +2568,13 @@
             columnsWrapper.id = 'autoseller-modal-columns';
             
             let modalInstance = api.ui.components.createModal({
-                title: 'Autoseller',
+                title: t('mods.autoseller.modalTitle'),
                 width: UI_CONSTANTS.MODAL_WIDTH,
                 height: UI_CONSTANTS.MODAL_HEIGHT,
                 content: columnsWrapper,
                 buttons: [
                     {
-                        text: 'Close',
+                        text: t('mods.autoseller.closeButton'),
                         primary: true,
                         className: 'diceroller-btn',
                         style: {
@@ -2635,7 +2666,7 @@
             const btn = document.createElement('button');
             btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5`;
             btn.setAttribute('data-selected', 'false');
-            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/autoplay.png" alt="Autoseller" width="11" height="11" class="pixelated"><span class="hidden sm:inline">Autoseller</span>`;
+            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/autoplay.png" alt="${t('mods.autoseller.navButton')}" width="11" height="11" class="pixelated"><span class="hidden sm:inline">${t('mods.autoseller.navButton')}</span>`;
             btn.onclick = openAutosellerModal;
             
             li.appendChild(btn);
@@ -2807,6 +2838,12 @@
         const settings = getSettings();
         const shouldShowWidget = settings.autoplantChecked || settings.autosellChecked || settings.autosqueezeChecked;
         
+        console.log('[Autoseller] createAutosellerSessionWidget called, shouldShowWidget:', shouldShowWidget, 'settings:', {
+            autoplantChecked: settings.autoplantChecked,
+            autosellChecked: settings.autosellChecked,
+            autosqueezeChecked: settings.autosqueezeChecked
+        });
+        
         const existingWidget = queryElement(`#${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET}`);
         if (!shouldShowWidget) {
             if (existingWidget && existingWidget.parentNode) {
@@ -2817,38 +2854,34 @@
             }
             return;
         }
-        if (existingWidget) return;
-        
-        // Find the autoplay session container using the same logic as manual injection
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        let autoplayContainer = null;
-        
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                autoplayContainer = widgetBottom;
-                break;
-            }
-        }
-        
-        if (!autoplayContainer) {
-            // Don't log warning - this is expected when autoplay is not active
+        if (existingWidget) {
+            console.log('[Autoseller] Widget already exists, skipping creation');
             return;
         }
+        
+        // Find the autoplay session container using the helper function
+        const autoplayContainer = findAutoplayContainer();
+        
+        if (!autoplayContainer) {
+            console.log('[Autoseller] Autoplay container not found');
+            return;
+        }
+        console.log('[Autoseller] Autoplay container found, creating widget');
+        console.log('[Autoseller] Autoplay container found, creating widget');
         const widget = document.createElement('div');
-        widget.className = '';
+        widget.className = 'mt-1.5';
         widget.id = UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET;
         
         // Create widget using the same structure that worked in manual injection
         // Determine label: if autoplant is ON -> 'Devoured', if autosell is ON -> 'Sold', 
         // if both OFF -> use last active mode
         const soldLabel = settings.autoplantChecked 
-            ? 'Devoured:' 
+            ? t('mods.autoseller.devoured') 
             : (settings.autosellChecked 
-                ? 'Sold:' 
-                : (settings.lastActiveMode === 'autoplant' ? 'Devoured:' : 'Sold:'));
+                ? t('mods.autoseller.sold') 
+                : (settings.lastActiveMode === 'autoplant' ? t('mods.autoseller.devoured') : t('mods.autoseller.sold')));
         widget.innerHTML = `
-            <div class="widget-top">Autoseller session</div>
+            <div class="widget-top widget-top-text">${t('mods.autoseller.widgetTitle')}</div>
             <div class="widget-bottom p-0">
                 <div class="stat-row">
                     <div class="stat-label">${soldLabel}</div>
@@ -2858,7 +2891,7 @@
                         <span>0</span>
                     </div>
                     <div class="separator"></div>
-                    <div class="stat-label">Squeezed:</div>
+                    <div class="stat-label">${t('mods.autoseller.squeezed')}</div>
                     <div class="stat-value" id="autoseller-session-squeezed-count">0</div>
                     <div class="stat-value" id="autoseller-session-squeezed-dust">
                         <img src="https://bestiaryarena.com/assets/icons/dust.png" alt="Dust" class="stat-icon">
@@ -2883,8 +2916,9 @@
             squeezedDust: widget.querySelector('#autoseller-session-squeezed-dust')
         };
         
-        // Add widget to the autoplay container
+        // Insert widget at the end of the container (after Enable Dragon Plant checkbox)
         autoplayContainer.appendChild(widget);
+        console.log('[Autoseller] Widget appended to end of container');
     }
 
 
@@ -2903,10 +2937,10 @@
         // Determine label: if autoplant is ON -> 'Devoured', if autosell is ON -> 'Sold',
         // if both OFF -> use last active mode
         const soldLabel = settings.autoplantChecked 
-            ? 'Devoured:' 
+            ? t('mods.autoseller.devoured') 
             : (settings.autosellChecked 
-                ? 'Sold:' 
-                : (settings.lastActiveMode === 'autoplant' ? 'Devoured:' : 'Sold:'));
+                ? t('mods.autoseller.sold') 
+                : (settings.lastActiveMode === 'autoplant' ? t('mods.autoseller.devoured') : t('mods.autoseller.sold')));
         const isShowingDevoured = soldLabel === 'Devoured:';
         
         if (statEls.soldLabel) {
@@ -3007,22 +3041,64 @@
     let dragonPlantObserverAttempts = 0;
     
     // Apply localStorage state to game checkbox
+    // Helper function to find autoplay container (widget-bottom)
+    function findAutoplayContainer() {
+        // Try to find by data-autosetup first (old method)
+        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
+        for (const session of autoplaySessions) {
+            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
+            if (widgetBottom) return widgetBottom;
+        }
+        
+        // If not found, try finding by "Autoplay session" button text
+        const autoplayButtons = Array.from(document.querySelectorAll('button.widget-top, button.widget-top-text'));
+        for (const button of autoplayButtons) {
+            const buttonText = button.textContent || '';
+            if (buttonText.includes('Autoplay session')) {
+                const parent = button.parentElement;
+                if (parent) {
+                    const widgetBottom = parent.querySelector('.widget-bottom[data-minimized="false"]');
+                    if (widgetBottom) return widgetBottom;
+                }
+            }
+        }
+        
+        // Last resort: find any widget-bottom that has a loot section and is in a container with an Autoplay session button
+        const allWidgetBottoms = document.querySelectorAll('.widget-bottom[data-minimized="false"]');
+        for (const wb of allWidgetBottoms) {
+            const hasLoot = wb.querySelector('.widget-top img[alt="loot"]');
+            if (hasLoot) {
+                let parent = wb.parentElement;
+                let foundAutoplay = false;
+                while (parent && parent !== document.body) {
+                    const buttons = parent.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        if (btn.textContent && btn.textContent.includes('Autoplay session')) {
+                            foundAutoplay = true;
+                            break;
+                        }
+                    }
+                    if (foundAutoplay) return wb;
+                    parent = parent.parentElement;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
     function applyLocalStorageToGameCheckbox() {
         const settings = getSettings();
         const savedState = settings.autoplantChecked;
         
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
-                if (gameCheckbox) {
-                    const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
-                    if (savedState !== isCurrentlyChecked) {
-                        console.log(`[${modName}] Applying localStorage (${savedState}) to game checkbox`);
-                        gameCheckbox.click();
-                    }
-                    break;
+        const widgetBottom = findAutoplayContainer();
+        if (widgetBottom) {
+            const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
+            if (gameCheckbox) {
+                const isCurrentlyChecked = gameCheckbox.getAttribute('aria-checked') === 'true';
+                if (savedState !== isCurrentlyChecked) {
+                    console.log(`[${modName}] Applying localStorage (${savedState}) to game checkbox`);
+                    gameCheckbox.click();
                 }
             }
         }
@@ -3094,13 +3170,14 @@
         const target = event.target.closest('button[role="checkbox"]');
         if (!target) return;
         
-        // Check if this is in an autoplay session
-        const autoplaySession = target.closest('div[data-autosetup]');
-        if (!autoplaySession) return;
-        
-        // Check if this is the Dragon Plant checkbox (look for the checkbox in widget bottom)
-        const widgetBottom = autoplaySession.querySelector('.widget-bottom[data-minimized="false"]');
+        // Find the autoplay container
+        const widgetBottom = findAutoplayContainer();
         if (!widgetBottom || !widgetBottom.contains(target)) return;
+        
+        // Verify this is the Dragon Plant checkbox by checking if it's in the widget bottom
+        // and has the "Enable Dragon Plant" label nearby
+        const label = widgetBottom.querySelector('label');
+        if (!label || !label.textContent.includes('Dragon Plant')) return;
         
         console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
         
@@ -3188,36 +3265,30 @@
         // Only proceed if autoplant is enabled
         if (!settings.autoplantChecked) return;
         
-        // Check if we're in an autoplay session
-        const autoplaySessions = document.querySelectorAll('div[data-autosetup]');
-        if (autoplaySessions.length === 0) return;
+        // Find the autoplay container
+        const widgetBottom = findAutoplayContainer();
+        if (!widgetBottom) return;
         
         // Find the Dragon Plant button (try Dragon Plant first, then Baby Dragon Plant)
         let dragonPlantButton = null;
-        for (const session of autoplaySessions) {
-            const widgetBottom = session.querySelector('.widget-bottom[data-minimized="false"]');
-            if (widgetBottom) {
-                const allButtons = widgetBottom.querySelectorAll('button');
-                for (const button of allButtons) {
-                    const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
-                    
-                    // First try Dragon Plant (ID 37022)
-                    let img = button.querySelector('img[alt="37022"]');
-                    if (img && isNotCheckbox) {
-                        dragonPlantButton = button;
-                        break;
-                    }
-                    
-                    // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
-                    if (!dragonPlantButton) {
-                        img = button.querySelector('img[alt="28689"]');
-                        if (img && isNotCheckbox) {
-                            dragonPlantButton = button;
-                            break;
-                        }
-                    }
+        const allButtons = widgetBottom.querySelectorAll('button');
+        for (const button of allButtons) {
+            const isNotCheckbox = button.getAttribute('role') !== 'checkbox';
+            
+            // First try Dragon Plant (ID 37022)
+            let img = button.querySelector('img[alt="37022"]');
+            if (img && isNotCheckbox) {
+                dragonPlantButton = button;
+                break;
+            }
+            
+            // If Dragon Plant not found, try Baby Dragon Plant (ID 28689)
+            if (!dragonPlantButton) {
+                img = button.querySelector('img[alt="28689"]');
+                if (img && isNotCheckbox) {
+                    dragonPlantButton = button;
+                    break;
                 }
-                if (dragonPlantButton) break;
             }
         }
         

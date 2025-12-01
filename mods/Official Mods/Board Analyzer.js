@@ -660,6 +660,9 @@ class ChartRenderer {
     }
     
     tooltipText += `, ${result.completed ? 'Completed' : 'Failed'}`;
+    if (currentFloor !== null && currentFloor !== undefined) {
+      tooltipText += `, Floor: ${currentFloor}`;
+    }
     if (result.seed) {
       tooltipText += `, Seed: ${result.seed}`;
     }
@@ -695,6 +698,7 @@ let currentSeed = null;
 let currentRegionId = null;
 let currentRoomId = null;
 let currentRoomName = null;
+let currentFloor = null;
 let boardSetup = [];
 
 // Use the utility maps from the API if available, otherwise define placeholders
@@ -796,6 +800,28 @@ const configureBoard = (config) => {
     type: 'selectRoomById',
     roomId: mapId,
   });
+  // Configure the proper floor, defaulting to `0`.
+  try {
+    if (globalThis.state.board.trigger && globalThis.state.board.trigger.setState) {
+      globalThis.state.board.trigger.setState({
+        fn: (prev) => ({
+          ...prev,
+          floor: config.floor ?? 0,
+        }),
+      });
+    } else if (globalThis.state.board.send) {
+      // Fallback to using send if trigger.setState is not available
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({
+          ...prev,
+          floor: config.floor ?? 0,
+        }),
+      });
+    }
+  } catch (error) {
+    console.warn('Could not set floor:', error);
+  }
   // Set up the pieces.
   const playerTeamConfig = config.board.map((piece, index) => {
     const monster = piece.monster;
@@ -1086,9 +1112,11 @@ const serializeBoard = () => {
   const regionName = regionIdsToNames.get(regionId);
   const mapId = selectedMap.selectedRoom.id;
   const mapName = mapIdsToNames.get(mapId);
+  const floor = boardContext.floor;
   const result = {
     region: regionName,
     map: mapName,
+    floor: floor,
     board: board,
   };
   return result;
@@ -1690,6 +1718,7 @@ function setupAnalysisEnvironment() {
   currentRegionId = null;
   currentRoomId = null;
   currentRoomName = null;
+  currentFloor = null;
   boardSetup = [];
 }
 
@@ -1746,6 +1775,12 @@ function captureMapInformation() {
                          globalThis.state.utils.ROOM_NAME[currentRoomId] || 
                          selectedMap.selectedRoom.file.name;
       console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
+    }
+    
+    // Capture floor information
+    if (typeof boardContext.floor !== 'undefined') {
+      currentFloor = boardContext.floor;
+      console.log('Captured floor:', currentFloor);
     }
   } catch (error) {
     console.error('Error capturing map information:', error);
@@ -1880,6 +1915,7 @@ function initializeAnalysisEnvironment() {
   currentRegionId = null;
   currentRoomId = null;
   currentRoomName = null;
+  currentFloor = null;
   boardSetup = [];
 }
 
@@ -1987,6 +2023,12 @@ function captureMapInformation() {
                          globalThis.state.utils.ROOM_NAME[currentRoomId] || 
                          selectedMap.selectedRoom.file.name;
       console.log('Captured room ID:', currentRoomId, 'Name:', currentRoomName);
+    }
+    
+    // Capture floor information
+    if (typeof boardContext.floor !== 'undefined') {
+      currentFloor = boardContext.floor;
+      console.log('Captured floor:', currentFloor);
     }
   } catch (error) {
     console.error('Error capturing map information:', error);
@@ -3133,8 +3175,12 @@ function showResultsModal(results) {
     document.addEventListener('keydown', escKeyListener);
     
     // Show the results modal with a callback to clean up when closed
+    let modalTitle = t('mods.boardAnalyzer.resultTitle');
+    if (currentFloor !== null && currentFloor !== undefined) {
+      modalTitle += ` (Floor ${currentFloor})`;
+    }
     const resultsModal = api.ui.components.createModal({
-      title: t('mods.boardAnalyzer.resultTitle'),
+      title: modalTitle,
       width: 400,
       content: content,
       buttons: [
