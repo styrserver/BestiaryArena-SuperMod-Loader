@@ -208,6 +208,7 @@
       "refreshOnMismatch": "⚠️ Refresh on Mismatch",
       "refreshOnMismatchTooltip": "Automatically refresh the browser when a server/simulation mismatch is detected",
       "inventoryBorderStyle": "Inventory Mod Buttons",
+      "betterHighscoresBackgroundOpacity": "Better Highscores Background Opacity",
       "vipListInterface": "VIP List interface:",
       "vipListInterfaceModal": "Modal",
       "vipListInterfacePanel": "Panel",
@@ -347,6 +348,7 @@
       "resultTitle": "Analysis Results",
       "sPlusRateLabel": "S+ Rate:",
       "completionRateLabel": "Completion Rate:",
+      "floorLabel": "Floor:",
       "bestTimeLabel": "Best Time:",
       "maxPointsLabel": "Max Rank Points:",
       "minTimeLabel": "Min Win Time:",
@@ -770,7 +772,9 @@
         "tooltipEmptySlot": "Empty slot",
         "tooltipInstruction": "Click to select • Right-click to unequip",
         "menuItem": "Equipment",
-        "equipmentPoints": "Equipment Points"
+        "equipmentPoints": "Equipment Points",
+        "floorPoints": "Floor Points",
+        "floorPointsDescription": "{floors} floors, 1 floor = 1 pt"
       }
     },
     "staminaOptimizer": {
@@ -796,6 +800,45 @@
       "settings": "Settings",
       "start": "Start",
       "autoSetup": "Auto-setup"
+    },
+    "autoseller": {
+      "modalTitle": "Autoseller",
+      "closeButton": "Close",
+      "navButton": "Autoseller",
+      "widgetTitle": "Autoseller session",
+      "sold": "Sold:",
+      "devoured": "Devoured:",
+      "squeezed": "Squeezed:",
+      "autosellLabel": "Autosell",
+      "autosqueezeLabel": "Autosqueeze",
+      "autoplantLabel": "Autoplant",
+      "enableDragonPlant": "Enable Dragon Plant",
+      "autocollectDragonPlant": "Autocollect Dragon Plant",
+      "creatures": "Creatures",
+      "ignoreList": "Ignore List",
+      "keepGenes": "Keep genes",
+      "devourGenes": "Devour genes",
+      "andAbove": "% and above.",
+      "andBelow": "% and below.",
+      "between": "Between",
+      "and": "and",
+      "percent": "%",
+      "triggerWhen": "Trigger when:",
+      "creaturesSuffix": "creatures",
+      "warningSellAll": "This will sell ALL creatures from your inventory!",
+      "warningSqueezeAll": "This will squeeze ALL creatures from your inventory!",
+      "tooltipSellAll": "The script will sell all creatures in your inventory that are:\n- Unlocked creatures,\n- Level 10 or below (52251 experience),\n- Not in daycare,\n- Not shiny.",
+      "tooltipSqueezeAll": "The script will squeeze all creatures in your inventory that are:\n- Unlocked creatures,\n- Within the specified gene range,\n- Not in daycare,\n- Not shiny.",
+      "statusDisabled": "{type} is disabled.",
+      "statusEnabled": "{type} is enabled.",
+      "statusIgnoring": "Ignoring {count} creatures.",
+      "summarySelling": "Selling creatures with genes between {min} and {max} if count ≥ {minCount}.",
+      "summarySqueezing": "Squeezing creatures with genes between {min} and {max} if count ≥ {minCount}.",
+      "summaryCreatures": "{count} creature{plural} will be auto{type} if count ≥ {minCount}.",
+      "genesMinThreshold": "{label} Genes Min Threshold",
+      "genesMaxThreshold": "{label} Genes Max Threshold",
+      "descAutosell": "Automatically sells creatures below the selected gene threshold.",
+      "descAutosqueeze": "Automatically squeezes creatures below the selected gene threshold."
     }
   }
 }

@@ -327,6 +327,29 @@
 					roomId: mapId,
 				});
 				
+				// Configure the proper floor, defaulting to `0`.
+				try {
+					if (safeAccess(globalThis, 'state.board.trigger.setState')) {
+						globalThis.state.board.trigger.setState({
+							fn: (prev) => ({
+								...prev,
+								floor: config.floor ?? 0,
+							}),
+						});
+					} else if (safeAccess(globalThis, 'state.board.send')) {
+						// Fallback to using send if trigger.setState is not available
+						globalThis.state.board.send({
+							type: 'setState',
+							fn: (prev) => ({
+								...prev,
+								floor: config.floor ?? 0,
+							}),
+						});
+					}
+				} catch (error) {
+					console.warn('Could not set floor:', error);
+				}
+				
 				// Set up the pieces.
 				const playerTeamConfig = config.board.map((piece, index) => {
 					const monster = piece.monster;
@@ -671,10 +694,12 @@
 				}
 				
 				const mapName = mapIdsToNames.get(mapId);
+				const floor = boardContext.floor;
 				
 				const result = {
 					region: regionName,
 					map: mapName,
+					floor: floor,
 					board: board,
 				};
 				return JSON.stringify(result);

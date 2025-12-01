@@ -658,6 +658,13 @@ globalThis.state.board.send({
   }),
 });
 
+// Interacting with Ascension floors
+// Getting current selected floor (ranges from 0-15)
+const currentFloor = globalThis.state.board.get().context.floor;
+
+// Setting current floor
+globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 10 }) });
+
 // Subscribe to game state changes
 const unsubscribe = globalThis.state.board.subscribe((state) => {
   console.log('Board state changed:', state);

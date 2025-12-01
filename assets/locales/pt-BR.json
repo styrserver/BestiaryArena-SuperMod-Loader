@@ -208,6 +208,7 @@
       "refreshOnMismatch": "⚠️ Atualizar em Incompatibilidade",
       "refreshOnMismatchTooltip": "Atualiza automaticamente o navegador quando uma incompatibilidade servidor/simulação é detectada",
       "inventoryBorderStyle": "Botões de Mod do Inventário",
+      "betterHighscoresBackgroundOpacity": "Opacidade do Fundo do Better Highscores",
       "vipListInterface": "Interface da Lista VIP:",
       "vipListInterfaceModal": "Modal",
       "vipListInterfacePanel": "Painel",
@@ -347,6 +348,7 @@
       "resultTitle": "Resultados da Análise",
       "sPlusRateLabel": "Taxa de S+:",
       "completionRateLabel": "Taxa de Conclusão:",
+      "floorLabel": "Andar:",
       "bestTimeLabel": "Melhor Tempo:",
       "maxPointsLabel": "Pontos Máximos:",
       "minTimeLabel": "Tempo Mínimo Vitória:",
@@ -771,7 +773,9 @@
         "tooltipEmptySlot": "Slot vazio",
         "tooltipInstruction": "Clique para selecionar • Clique com botão direito para desequipar",
         "menuItem": "Equipamento",
-        "equipmentPoints": "Pontos de Equipamento"
+        "equipmentPoints": "Pontos de Equipamento",
+        "floorPoints": "Pontos de Andar",
+        "floorPointsDescription": "{floors} andares, 1 andar = 1 pt"
       }
     },
     "staminaOptimizer": {
@@ -797,6 +801,45 @@
       "settings": "Configurações",
       "start": "Iniciar",
       "autoSetup": "Autoconfigurar"
+    },
+    "autoseller": {
+      "modalTitle": "Autoseller",
+      "closeButton": "Fechar",
+      "navButton": "Autoseller",
+      "widgetTitle": "Sessão Autoseller",
+      "sold": "Vendido:",
+      "devoured": "Devorado:",
+      "squeezed": "Espremido:",
+      "autosellLabel": "Autovenda",
+      "autosqueezeLabel": "Autoespremer",
+      "autoplantLabel": "Autoplanta",
+      "enableDragonPlant": "Ativar Planta Dragão",
+      "autocollectDragonPlant": "Autocoletar Planta Dragão",
+      "creatures": "Criaturas",
+      "ignoreList": "Ignorar",
+      "keepGenes": "Manter genes",
+      "devourGenes": "Devorar genes",
+      "andAbove": "% e acima.",
+      "andBelow": "% e abaixo.",
+      "between": "Entre",
+      "and": "e",
+      "percent": "%",
+      "triggerWhen": "Ativar quando:",
+      "creaturesSuffix": "criaturas",
+      "warningSellAll": "Isso venderá TODAS as criaturas do seu inventário!",
+      "warningSqueezeAll": "Isso espremerá TODAS as criaturas do seu inventário!",
+      "tooltipSellAll": "O script venderá todas as criaturas do seu inventário que são:\n- Criaturas desbloqueadas,\n- Nível 10 ou abaixo (52251 de experiência),\n- Não estão na creche,\n- Não são shiny.",
+      "tooltipSqueezeAll": "O script espremerá todas as criaturas do seu inventário que são:\n- Criaturas desbloqueadas,\n- Dentro do intervalo de genes especificado,\n- Não estão na creche,\n- Não são shiny.",
+      "statusDisabled": "{type} está desabilitado.",
+      "statusEnabled": "{type} está habilitado.",
+      "statusIgnoring": "Ignorando {count} criaturas.",
+      "summarySelling": "Vendendo criaturas com genes entre {min} e {max} se a contagem ≥ {minCount}.",
+      "summarySqueezing": "Espremendo criaturas com genes entre {min} e {max} se a contagem ≥ {minCount}.",
+      "summaryCreatures": "{count} criatura{plural} será{plural2} auto{type} se a contagem ≥ {minCount}.",
+      "genesMinThreshold": "Limite Mínimo de Genes {label}",
+      "genesMaxThreshold": "Limite Máximo de Genes {label}",
+      "descAutosell": "Vende automaticamente criaturas abaixo do limite de genes selecionado.",
+      "descAutosqueeze": "Espreme automaticamente criaturas abaixo do limite de genes selecionado."
     }
   }
 }

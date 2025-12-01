@@ -4,6 +4,23 @@
   },
   "notes": [
   {
+    "version": "3.1.0",
+    "changes": [
+      { "type": "added", "mod": "Board Analyzer", "text": "Added floor information to analysis results display" },
+      { "type": "changed", "mod": "Better Highscores", "text": "Updated Better Highscores for dungeon ascension" },
+      { "type": "changed", "mod": "Cyclopedia", "text": "Updated cyclopedia for dungeon ascension" },
+      { "type": "changed", "mod": "Guilds", "text": "Updated Guilds for dungeon ascension: added floors to guild points calculation" },
+      { "type": "changed", "mod": "RunTracker", "text": "Updated RunTracker for dungeon ascension" },
+      { "type": "fixed", "mod": "Autoseller", "text": "Fixed autoseller widget not appearing" }
+    ]
+  },
+  {
+    "version": "3.0.10",
+    "changes": [
+      { "type": "fixed", "mod": "Core", "text": "Various translations fixes" }
+    ]
+  },
+  {
     "version": "3.0.9",
     "changes": [
       { "type": "fixed", "mod": "Bestiary Automator", "text": "Various bug fixes" }
