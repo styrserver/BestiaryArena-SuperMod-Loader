@@ -58,7 +58,6 @@ export const SUPER_MODS = [
   'Better Setups.js',
   'Better Tasker.js',
   'Better Yasir.js',
-  'Board Advisor.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
   'Guilds.js',

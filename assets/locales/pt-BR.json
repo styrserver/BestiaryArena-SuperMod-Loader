@@ -133,7 +133,6 @@
       "Better Setups": "Gerenciamento e organização aprimorados de setups.",
       "Better Tasker": "Recursos aprimorados de automação de tarefas.",
       "Better Yasir": "Recursos aprimorados de interação com Yasir.",
-      "Board Advisor": "Fornece recomendações e conselhos de configuração de tabuleiro.",
       "Cyclopedia": "Enciclopédia abrangente de criaturas e itens.",
       "Dice Roller": "Role dados para várias mecânicas do jogo.",
       "Guilds": "Recursos de gerenciamento e interação de guildas.",
@@ -219,7 +218,9 @@
       "vipListMessageFilterFriends": "Amigos",
       "vipListChatDocumentation": "Saiba como o chat funciona",
       "staminaFullText": "Cheio",
-      "favoriteMenuLabel": "Favorito"
+      "favoriteMenuLabel": "Favorito",
+      "disableRunTracker": "⚠️ Desativar Run Tracker",
+      "disableRunTrackerWarning": "Rastreia e armazena seus dados de execução locais (speedruns, pontos de rank e progresso de andares) para cada mapa. Os dados são armazenados localmente no seu navegador e podem ser exportados/importados na aba Backup."
     },
     "automator": {
       "buttonText": "Automatizador",

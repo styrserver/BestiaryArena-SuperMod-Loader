@@ -264,7 +264,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           const databases = await window.indexedDB.databases();
           for (const dbInfo of databases) {
-            if (dbInfo.name === 'BoardAdvisorDB' || dbInfo.name.includes('bestiary')) {
+            if (dbInfo.name.includes('bestiary')) {
               const request = indexedDB.open(dbInfo.name);
               await new Promise((resolve, reject) => {
                 request.onsuccess = async (event) => {

@@ -133,7 +133,6 @@
       "Better Setups": "Improved setup management and organization.",
       "Better Tasker": "Enhanced task automation features.",
       "Better Yasir": "Improved Yasir interaction and features.",
-      "Board Advisor": "Provides board setup recommendations and advice.",
       "Cyclopedia": "Comprehensive creature and item encyclopedia.",
       "Dice Roller": "Roll dice for various game mechanics.",
       "Guilds": "Guild management and interaction features.",
@@ -219,7 +218,9 @@
       "vipListMessageFilterFriends": "Friends",
       "vipListChatDocumentation": "Learn how chat works",
       "staminaFullText": "Full",
-      "favoriteMenuLabel": "Favorite"
+      "favoriteMenuLabel": "Favorite",
+      "disableRunTracker": "⚠️ Disable Run Tracker",
+      "disableRunTrackerWarning": "Tracks and stores your local run data (speedruns, rank points, and floor progress) for each map. Data is stored locally in your browser and can be exported/imported in the Backup tab."
     },
     "automator": {
       "buttonText": "Automator",

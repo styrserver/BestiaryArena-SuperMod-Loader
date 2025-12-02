@@ -4,6 +4,17 @@
   },
   "notes": [
   {
+    "version": "3.1.1",
+    "changes": [
+      { "type": "added", "mod": "Cyclopedia", "text": "Added floors column to Rankings in characters tab after Time Sum" },
+      { "type": "added", "mod": "VIP List", "text": "Added floors column to VIP list display after Time Sum" },
+      { "type": "added", "mod": "Mod Settings", "text": "Added \"Disable Run Tracker\" checkbox in Advanced section to enable/disable run tracking" },
+      { "type": "fixed", "mod": "Better Tasker", "text": "Fixed Better Tasker interrupting ongoing raids when accepting tasks - now respects raid priorities" },
+      { "type": "changed", "mod": "Stamina Optimizer", "text": "Improved mod coordination, autoplay control management, and Bestiary Automator refill detection" },
+      { "type": "removed", "mod": "Board Advisor", "text": "Deprecated Board Advisor mod" }
+    ]
+  },
+  {
     "version": "3.1.0",
     "changes": [
       { "type": "added", "mod": "Board Analyzer", "text": "Added floor information to analysis results display" },
