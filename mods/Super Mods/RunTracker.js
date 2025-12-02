@@ -36,6 +36,20 @@ const NETWORK_DEBOUNCE_TIME = 1000; // 1 second
 // =======================
 // 2. Global State & Storage
 // =======================
+// Check if RunTracker is enabled (default: true)
+function isRunTrackerEnabled() {
+  try {
+    const modSettingsConfig = localStorage.getItem('mod-settings-config');
+    if (modSettingsConfig) {
+      const parsed = JSON.parse(modSettingsConfig);
+      return parsed.enableRunTracker !== false; // Default to true if not set
+    }
+  } catch (error) {
+    console.warn('[RunTracker] Error checking enable state:', error);
+  }
+  return true; // Default to enabled
+}
+
 // Run storage structure
 let runStorage = {
   lastUpdated: Date.now(),
@@ -59,6 +73,75 @@ let gameTimerUnsubscribe = null;
 let originalFetch = null;
 let originalConsoleLog = null;
 let retryInterval = null;
+
+// Cleanup function (defined early so it can be called from disable method)
+async function performCleanup() {
+  try {
+    console.log('[RunTracker] Cleaning up mod resources...');
+    
+    // Unsubscribe from game state listeners
+    if (boardUnsubscribe && typeof boardUnsubscribe === 'function') {
+      boardUnsubscribe();
+      boardUnsubscribe = null;
+      console.log('[RunTracker] Unsubscribed from board state');
+    }
+    
+    if (gameTimerUnsubscribe && typeof gameTimerUnsubscribe === 'function') {
+      gameTimerUnsubscribe();
+      gameTimerUnsubscribe = null;
+      console.log('[RunTracker] Unsubscribed from game timer state');
+    }
+    
+    // Clear retry interval
+    if (retryInterval) {
+      clearInterval(retryInterval);
+      retryInterval = null;
+      console.log('[RunTracker] Cleared retry interval');
+    }
+    
+    // Restore original global functions
+    if (originalFetch) {
+      console.log('[RunTracker] Restoring original fetch function');
+      window.fetch = originalFetch;
+      originalFetch = null;
+    }
+    
+    if (originalConsoleLog) {
+      console.log('[RunTracker] Restoring original console.log function');
+      console.log = originalConsoleLog;
+      originalConsoleLog = null;
+    }
+    
+    // Clear all pending debouncer timers
+    if (Utils && Utils.debouncer && Utils.debouncer.timers) {
+      Utils.debouncer.timers.forEach(timer => clearTimeout(timer));
+      Utils.debouncer.timers.clear();
+      console.log('[RunTracker] Cleared all debouncer timers');
+    }
+    
+    // Flush any pending storage operations
+    if (StorageManager) {
+      await StorageManager.flushSaves();
+      console.log('[RunTracker] Flushed pending storage operations');
+      
+      // Clear StorageManager state
+      StorageManager.pendingSaves.clear();
+      if (StorageManager.saveTimeout) {
+        clearTimeout(StorageManager.saveTimeout);
+        StorageManager.saveTimeout = null;
+      }
+    }
+    
+    // Reset initialization state for clean reinitialization
+    hasInitialized = false;
+    isInitializing = false;
+    initializationPromise = null;
+    
+    console.log('[RunTracker] Cleanup completed successfully');
+  } catch (error) {
+    console.error('[RunTracker] Error during cleanup:', error);
+  }
+}
 
 // =======================
 // 3. Utility Functions
@@ -841,6 +924,11 @@ function parseReplayData(replayMessage) {
 // Add a new run to storage
 async function addRun(runData) {
   try {
+    // Check if RunTracker is enabled
+    if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+      return false;
+    }
+    
     if (!runData || !runData.mapKey) {
       console.warn('[RunTracker] Invalid run data:', runData);
       return false;
@@ -1231,6 +1319,11 @@ async function checkAndUpdateFloorRuns(runData) {
 // Add replay data to storage
 async function addReplayData(replayData) {
   try {
+    // Check if RunTracker is enabled
+    if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+      return false;
+    }
+    
     if (!replayData || !replayData.seed || !replayData.mapKey) {
       console.warn('[RunTracker] Invalid replay data:', replayData);
       return false;
@@ -1350,6 +1443,11 @@ function setupResultsListener() {
       // Listen for game board subscription (like Hunt Analyzer)
       if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
         boardUnsubscribe = globalThis.state.board.subscribe(({ context }) => {
+          // Check if RunTracker is enabled before processing
+          if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+            return;
+          }
+          
           const serverResults = context.serverResults;
           if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') return;
           
@@ -1416,6 +1514,11 @@ function setupNetworkListener() {
     window.fetch = async function(...args) {
       const response = await originalFetch.apply(this, args);
       
+      // Check if RunTracker is enabled before processing
+      if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+        return response;
+      }
+      
       // Check if this is a server results request
       const url = args[0];
       if (typeof url === 'string' && (url.includes('gameServer?batch=1') || url.includes('game.gameServer?batch=1'))) {
@@ -1463,6 +1566,11 @@ function setupNetworkListener() {
     console.log = function(...args) {
       // Call original console.log
       originalConsoleLog.apply(console, args);
+      
+      // Check if RunTracker is enabled before processing
+      if (!window.RunTrackerAPI || !window.RunTrackerAPI._initialized) {
+        return;
+      }
       
       // Check for replay data (but avoid recursive calls from RunTracker itself)
       const message = args.join(' ');
@@ -1718,20 +1826,61 @@ if (!window.RunTrackerAPI) {
     }
   },
   
+  // Enable/Disable RunTracker
+  enable: async () => {
+    if (window.RunTrackerAPI._initialized) {
+      console.log('[RunTracker] Already enabled');
+      return true;
+    }
+    try {
+      await initializeMod();
+      window.RunTrackerAPI._initialized = true;
+      console.log('[RunTracker] Enabled successfully');
+      return true;
+    } catch (error) {
+      console.error('[RunTracker] Error enabling:', error);
+      return false;
+    }
+  },
+  
+  disable: async () => {
+    if (!window.RunTrackerAPI._initialized) {
+      console.log('[RunTracker] Already disabled');
+      return true;
+    }
+    try {
+      await performCleanup();
+      window.RunTrackerAPI._initialized = false;
+      console.log('[RunTracker] Disabled successfully');
+      return true;
+    } catch (error) {
+      console.error('[RunTracker] Error disabling:', error);
+      return false;
+    }
+  },
+  
+  isEnabled: () => {
+    return window.RunTrackerAPI._initialized === true;
+  }
 
   };
 }
 
   console.log('[RunTracker] API loaded immediately');
 
-// Start initialization
-initializeMod().then(() => {
-  // Mark as fully initialized
-  window.RunTrackerAPI._initialized = true;
-  console.log('[RunTracker] Mod fully initialized and ready');
-}).catch(error => {
-  console.error('[RunTracker] Initialization failed:', error);
-});
+// Start initialization only if enabled
+if (isRunTrackerEnabled()) {
+  initializeMod().then(() => {
+    // Mark as fully initialized
+    window.RunTrackerAPI._initialized = true;
+    console.log('[RunTracker] Mod fully initialized and ready');
+  }).catch(error => {
+    console.error('[RunTracker] Initialization failed:', error);
+  });
+} else {
+  console.log('[RunTracker] Mod disabled in settings, skipping initialization');
+  window.RunTrackerAPI._initialized = false;
+}
 
 // =======================
 // 10. Module Exports
@@ -1747,76 +1896,11 @@ exports = {
   
   // Cleanup function to prevent memory leaks
   cleanup: async () => {
-    try {
-      console.log('[RunTracker] Cleaning up mod resources...');
-      
-      // Unsubscribe from game state listeners
-      if (boardUnsubscribe && typeof boardUnsubscribe === 'function') {
-        boardUnsubscribe();
-        boardUnsubscribe = null;
-        console.log('[RunTracker] Unsubscribed from board state');
-      }
-      
-      if (gameTimerUnsubscribe && typeof gameTimerUnsubscribe === 'function') {
-        gameTimerUnsubscribe();
-        gameTimerUnsubscribe = null;
-        console.log('[RunTracker] Unsubscribed from game timer state');
-      }
-      
-      // Clear retry interval
-      if (retryInterval) {
-        clearInterval(retryInterval);
-        retryInterval = null;
-        console.log('[RunTracker] Cleared retry interval');
-      }
-      
-      // Restore original global functions (log before restoring)
-      if (originalFetch) {
-        console.log('[RunTracker] Restoring original fetch function');
-        window.fetch = originalFetch;
-        originalFetch = null;
-      }
-      
-      if (originalConsoleLog) {
-        console.log('[RunTracker] Restoring original console.log function');
-        console.log = originalConsoleLog;
-        originalConsoleLog = null;
-      }
-      
-      // Clear all pending debouncer timers
-      if (Utils && Utils.debouncer && Utils.debouncer.timers) {
-        Utils.debouncer.timers.forEach(timer => clearTimeout(timer));
-        Utils.debouncer.timers.clear();
-        console.log('[RunTracker] Cleared all debouncer timers');
-      }
-      
-      // Flush any pending storage operations (await for data integrity)
-      if (StorageManager) {
-        await StorageManager.flushSaves();
-        console.log('[RunTracker] Flushed pending storage operations');
-        
-        // Clear StorageManager state
-        StorageManager.pendingSaves.clear();
-        if (StorageManager.saveTimeout) {
-          clearTimeout(StorageManager.saveTimeout);
-          StorageManager.saveTimeout = null;
-        }
-      }
-      
-      // Reset initialization state for clean reinitialization
-      hasInitialized = false;
-      isInitializing = false;
-      initializationPromise = null;
-      
-      // Remove global API to prevent memory leaks
-      if (window.RunTrackerAPI) {
-        delete window.RunTrackerAPI;
-        console.log('[RunTracker] Removed global API');
-      }
-      
-      console.log('[RunTracker] Cleanup completed successfully');
-    } catch (error) {
-      console.error('[RunTracker] Error during cleanup:', error);
+    await performCleanup();
+    // Remove global API to prevent memory leaks (only when mod is unloaded, not when disabled)
+    if (window.RunTrackerAPI) {
+      delete window.RunTrackerAPI;
+      console.log('[RunTracker] Removed global API');
     }
   }
 };

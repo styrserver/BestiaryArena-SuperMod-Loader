@@ -812,7 +812,7 @@ async function waitForGameCompletion(analysisId) {
       console.log(`[Rank Pointer] Using gameTicks from serverResults: ${currentTick}`);
     }
     
-    // Try to get rank points from serverResults.rank (not rankPoints) - like RunTracker/Board Advisor
+    // Try to get rank points from serverResults.rank (not rankPoints) - like RunTracker
     if (typeof serverResults.rewardScreen.rank === 'number') {
       rankPoints = serverResults.rewardScreen.rank;
       console.log(`[Rank Pointer] Using rank from serverResults.rewardScreen.rank: ${rankPoints}`);

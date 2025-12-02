@@ -4189,7 +4189,7 @@ function openCyclopediaModal(options) {
           rows.forEach((row, rowIndex) => {
             const cols = row.split('|').map(s => s.trim()).filter(Boolean);
             if (cols.length < 11) {
-              console.log(`[Cyclopedia] Skipping row ${rowIndex + 1}: insufficient columns (${cols.length}), expected 11`);
+              console.log(`[Cyclopedia] Skipping row ${rowIndex + 1}: insufficient columns (${cols.length}), expected at least 11`);
               return;
             }
             
@@ -4204,12 +4204,14 @@ function openCyclopediaModal(options) {
             const successfulRuns = parseInt(cols[2], 10);
             const rankPoints = parseInt(cols[3], 10);
             const timeSum = parseInt(cols[4], 10);
-            const dailySeashell = parseInt(cols[5], 10);
-            const huntingTasks = parseInt(cols[6], 10);
-            const raids = parseInt(cols[7], 10);
-            const perfectCreatures = parseInt(cols[8], 10);
-            const bisEquipment = parseInt(cols[9], 10);
-            const bagOutfits = parseInt(cols[10], 10);
+            const hasFloors = cols.length >= 12;
+            const floors = hasFloors ? parseInt(cols[5], 10) : 0;
+            const dailySeashell = hasFloors ? parseInt(cols[6], 10) : parseInt(cols[5], 10);
+            const huntingTasks = hasFloors ? parseInt(cols[7], 10) : parseInt(cols[6], 10);
+            const raids = hasFloors ? parseInt(cols[8], 10) : parseInt(cols[7], 10);
+            const perfectCreatures = hasFloors ? parseInt(cols[9], 10) : parseInt(cols[8], 10);
+            const bisEquipment = hasFloors ? parseInt(cols[10], 10) : parseInt(cols[9], 10);
+            const bagOutfits = hasFloors ? parseInt(cols[11], 10) : parseInt(cols[10], 10);
             
             if (isNaN(level) || !username) {
               console.log(`[Cyclopedia] Skipping row ${rowIndex + 1}: invalid data (level: ${level}, username: ${username})`);
@@ -4223,6 +4225,7 @@ function openCyclopediaModal(options) {
               successfulRuns: successfulRuns,
               rankPoints: rankPoints,
               timeSum: timeSum,
+              floors: isNaN(floors) ? 0 : floors,
               dailySeashell: dailySeashell,
               huntingTasks: huntingTasks,
               raids: raids,
@@ -4430,6 +4433,8 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           let currentSortColumn = 'level';
           let currentSortDirection = 'desc';
           
+          const rankingsGridColumns = '48px 120px 53px 53px 40px 48px 40px 40px 40px 40px 40px 40px 40px';
+          
           const containerDiv = document.createElement('div');
           Object.assign(containerDiv.style, {
             display: 'flex', flexDirection: 'column', width: '100%', height: '100%',
@@ -4458,7 +4463,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const headerRow = document.createElement('div');
           headerRow.style.cssText = `
             display: grid;
-            grid-template-columns: 43px 120px 53px 48px 48px 48px 48px 48px 48px 48px 48px 48px;
+            grid-template-columns: ${rankingsGridColumns};
             gap: 1px;
             background: rgba(255, 224, 102, 0.2);
             position: sticky;
@@ -4474,6 +4479,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             { type: 'icon', src: '/assets/icons/match-count.png', alt: 'Total runs', key: 'successfulRuns', sortable: true },
             { type: 'icon', src: '/assets/icons/star-tier.png', alt: 'Rank points', key: 'rankPoints', sortable: true },
             { type: 'icon', src: '/assets/icons/speed.png', alt: 'Time sum', key: 'timeSum', sortable: true },
+            { type: 'icon', src: 'https://bestiaryarena.com/assets/UI/floor-15.png', alt: 'Floors', key: 'floors', sortable: true },
             { type: 'icon', src: '/assets/icons/shell-count.png', alt: 'Daily seashell', key: 'dailySeashell', sortable: true },
             { type: 'icon', src: '/assets/icons/task-count.png', alt: 'Hunting tasks', key: 'huntingTasks', sortable: true },
             { type: 'icon', src: 'https://bestiaryarena.com/assets/icons/raid.png', alt: 'Raids', key: 'raids', sortable: true },
@@ -4553,7 +4559,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 let primarySort = 0;
                 
-                if (sortKey === 'timeSum') {
+                if (sortKey === 'timeSum' || sortKey === 'floors') {
                   if (currentSortDirection === 'desc') {
                     primarySort = aVal - bVal;
                   } else {
@@ -4619,7 +4625,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           const dataRowsContainer = document.createElement('div');
           dataRowsContainer.style.cssText = `
             display: grid;
-            grid-template-columns: 43px 120px 53px 48px 48px 48px 48px 48px 48px 48px 48px 48px;
+            grid-template-columns: ${rankingsGridColumns};
             gap: 1px;
             min-height: fit-content;
             flex: 1;
@@ -4656,6 +4662,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               ranking.successfulRuns.toLocaleString(),
               ranking.rankPoints.toLocaleString(),
               ranking.timeSum.toLocaleString(),
+              (ranking.floors !== undefined ? ranking.floors.toLocaleString() : '0'),
               ranking.dailySeashell.toLocaleString(),
               ranking.huntingTasks.toLocaleString(),
               ranking.raids.toLocaleString(),

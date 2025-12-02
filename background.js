@@ -1011,9 +1011,9 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // NOTE: Keep these in sync with content/mod-registry.js
         console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
         const modCounts = {
-          database: 5,
+          database: 6,
           official: 11,
-          super: 24
+          super: 23
         };
         
         sendResponse({ success: true, counts: modCounts });
@@ -1022,7 +1022,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ultimate fallback
         sendResponse({ 
           success: true, 
-          counts: { database: 5, official: 11, super: 24 } 
+          counts: { database: 6, official: 11, super: 23 } 
         });
       }
     })();

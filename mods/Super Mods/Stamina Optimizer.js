@@ -47,6 +47,8 @@ const AUTOPLAY_STOP_CHECK_DELAY = 3000;
 const BOOSTED_MAPS_TRIGGER_WINDOW = 5000;
 const PAUSE_BUTTON_CLICK_DELAY = 100;
 const PAUSE_BUTTON_UPDATE_DELAY = 300;
+const MODS_LOADING_GRACE_PERIOD = 10000; // 10 seconds after allModsLoaded before allowing actions
+const MAX_WAIT_FOR_SIGNAL = 15000; // Maximum time to wait for allModsLoaded signal (15 seconds)
 
 const COLOR_ACCENT = '#ffe066';
 const COLOR_WHITE = '#fff';
@@ -120,6 +122,7 @@ let modalTimeouts = [];
 let otherTimeouts = [];
 let allModsLoaded = false;
 let hasLoggedAutoplayDetection = false;
+let gracePeriodEndTime = 0; // Timestamp when grace period ends (0 = grace period active or not started)
 
 // ============================================================================
 // 3. STAMINA MONITORING FUNCTIONS
@@ -617,6 +620,22 @@ function executeAction() {
 // Monitor stamina and execute actions based on thresholds
 function monitorStamina() {
     if (!isAutomationEnabled) {
+        return;
+    }
+    
+    // Check if we're still waiting for allModsLoaded signal or in grace period
+    if (!allModsLoaded) {
+        // Still waiting for the signal - don't execute actions yet
+        return;
+    }
+    
+    // Check if we're still in the grace period after allModsLoaded
+    const now = Date.now();
+    if (gracePeriodEndTime > 0 && now < gracePeriodEndTime) {
+        const remainingSeconds = Math.ceil((gracePeriodEndTime - now) / 1000);
+        if (remainingSeconds % 5 === 0 || remainingSeconds <= 3) {
+            console.log(`[Stamina Optimizer] Waiting for mods to finish loading (${remainingSeconds}s remaining)...`);
+        }
         return;
     }
     
@@ -1531,6 +1550,26 @@ function init() {
     }
     
     console.log('[Stamina Optimizer] Initialized - waiting for allModsLoaded signal');
+    
+    // Fallback: if allModsLoaded signal is never received, set grace period after max wait time
+    const fallbackTimeout = setTimeout(() => {
+        if (!allModsLoaded) {
+            console.warn('[Stamina Optimizer] allModsLoaded signal not received after timeout - setting grace period anyway');
+            allModsLoaded = true;
+            gracePeriodEndTime = Date.now() + MODS_LOADING_GRACE_PERIOD;
+            console.log(`[Stamina Optimizer] Grace period started (fallback) - will wait ${MODS_LOADING_GRACE_PERIOD / 1000}s before allowing actions`);
+            
+            const gracePeriodTimeout = setTimeout(() => {
+                console.log('[Stamina Optimizer] Grace period ended - now allowing actions');
+                const index = otherTimeouts.indexOf(gracePeriodTimeout);
+                if (index > -1) otherTimeouts.splice(index, 1);
+            }, MODS_LOADING_GRACE_PERIOD);
+            otherTimeouts.push(gracePeriodTimeout);
+        }
+        const index = otherTimeouts.indexOf(fallbackTimeout);
+        if (index > -1) otherTimeouts.splice(index, 1);
+    }, MAX_WAIT_FOR_SIGNAL);
+    otherTimeouts.push(fallbackTimeout);
 }
 
 // Start automation after all mods are loaded
@@ -1548,12 +1587,24 @@ let windowMessageHandler = (event) => {
         console.log('[Stamina Optimizer] Received allModsLoaded signal');
         allModsLoaded = true;
         
+        // Set grace period end time to allow other mods to initialize
+        gracePeriodEndTime = Date.now() + MODS_LOADING_GRACE_PERIOD;
+        console.log(`[Stamina Optimizer] Grace period started - will wait ${MODS_LOADING_GRACE_PERIOD / 1000}s before allowing actions`);
+        
         const timeout = setTimeout(() => {
             startAutomation();
             const index = otherTimeouts.indexOf(timeout);
             if (index > -1) otherTimeouts.splice(index, 1);
         }, 1500);
         otherTimeouts.push(timeout);
+        
+        // Log when grace period ends
+        const gracePeriodTimeout = setTimeout(() => {
+            console.log('[Stamina Optimizer] Grace period ended - now allowing actions');
+            const index = otherTimeouts.indexOf(gracePeriodTimeout);
+            if (index > -1) otherTimeouts.splice(index, 1);
+        }, MODS_LOADING_GRACE_PERIOD);
+        otherTimeouts.push(gracePeriodTimeout);
     }
 };
 window.addEventListener('message', windowMessageHandler);

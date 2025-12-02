@@ -615,6 +615,7 @@ function extractPlayerInfoFromProfile(profileData, playerName) {
   const status = calculatePlayerStatus(profileData, isCurrentPlayer);
   const rankPoints = profileData.rankPoints !== undefined ? profileData.rankPoints : 0;
   const timeSum = profileData.ticks !== undefined ? profileData.ticks : 0;
+  const floors = profileData.floors !== undefined ? profileData.floors : 0;
   
   return {
     name: profileData.name || playerName,
@@ -622,6 +623,7 @@ function extractPlayerInfoFromProfile(profileData, playerName) {
     status: status,
     rankPoints: rankPoints,
     timeSum: timeSum,
+    floors: floors,
     profile: playerName.toLowerCase(),
     lastUpdatedAt: profileData.lastUpdatedAt || null
   };
@@ -9737,6 +9739,11 @@ function sortVIPList(vipList, sortColumn = null, sortDirection = null) {
       const timeSumB = parseInt(b.timeSum) || 0;
       comparison = timeSumA - timeSumB;
       comparison = secondarySortByName(a, b, comparison);
+    } else if (column === 'floors') {
+      const floorsA = parseInt(a.floors) || 0;
+      const floorsB = parseInt(b.floors) || 0;
+      comparison = floorsA - floorsB;
+      comparison = secondarySortByName(a, b, comparison);
     }
     
     // Apply direction
@@ -10220,9 +10227,9 @@ function createVIPHeaderRow(forPanel = false) {
           currentSortState.direction = currentSortState.direction === 'asc' ? 'desc' : 'asc';
         } else {
           currentSortState.column = column;
-          // For level and rankPoints, default to desc (higher is better)
-          // For other columns, default to asc
-          currentSortState.direction = (column === 'level' || column === 'rankPoints') ? 'desc' : 'asc';
+        // For level, rankPoints, timeSum, and floors, default to desc (higher is better)
+        // For other columns, default to asc
+        currentSortState.direction = (column === 'level' || column === 'rankPoints' || column === 'timeSum' || column === 'floors') ? 'desc' : 'asc';
         }
         
         saveSortPreference();
@@ -10234,7 +10241,11 @@ function createVIPHeaderRow(forPanel = false) {
         const iconImg = document.createElement('img');
         iconImg.src = iconUrl;
         iconImg.alt = text;
-        iconImg.style.cssText = 'width: 11px; height: 11px; image-rendering: pixelated; display: block;';
+        // Special sizing for floor-15 icon (14x7)
+        const isFloorIcon = iconUrl.includes('floor-15');
+        iconImg.style.cssText = isFloorIcon 
+          ? 'width: 14px; height: 7px; image-rendering: pixelated; display: block;'
+          : 'width: 11px; height: 11px; image-rendering: pixelated; display: block;';
         cell.appendChild(iconImg);
       } else {
         const textSpan = document.createElement('span');
@@ -10274,6 +10285,7 @@ function createVIPHeaderRow(forPanel = false) {
   headerRow.appendChild(createHeaderCell(t('mods.vipList.columnStatus'), '0.9', 'status'));
   headerRow.appendChild(createHeaderCell(t('mods.vipList.columnRankPoints'), '0.9', 'rankPoints', 'https://bestiaryarena.com/assets/icons/star-tier.png'));
   headerRow.appendChild(createHeaderCell(t('mods.vipList.columnTimeSum'), '0.9', 'timeSum', 'https://bestiaryarena.com/assets/icons/speed.png'));
+  headerRow.appendChild(createHeaderCell(t('mods.vipList.columnFloors'), '0.9', 'floors', 'https://bestiaryarena.com/assets/UI/floor-15.png'));
   
   return headerRow;
 }
@@ -10482,6 +10494,10 @@ async function createVIPListItem(vip, forPanel = false) {
   // Format timeSum with locale string (e.g., 14 181)
   const timeSumCell = createCell((vip.timeSum !== undefined ? vip.timeSum.toLocaleString() : '0'), '0.9');
   item.appendChild(timeSumCell);
+  
+  // Format floors with locale string
+  const floorsCell = createCell((vip.floors !== undefined ? vip.floors.toLocaleString() : '0'), '0.9');
+  item.appendChild(floorsCell);
   
   return item;
 }

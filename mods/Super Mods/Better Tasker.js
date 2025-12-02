@@ -3714,9 +3714,13 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 setupButton.click();
                 await sleep(AUTO_SETUP_DELAY);
                 
-                // Enable autoplay mode
+                // Enable autoplay mode (checks Raid Hunter internally to avoid interrupting raids)
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                await ensureAutoplayMode();
+                const autoplayEnabled = await ensureAutoplayMode();
+                if (!autoplayEnabled) {
+                    console.log('[Better Tasker] Autoplay not enabled (Raid Hunter may be raiding) - aborting setup');
+                    return true; // Return success but skip further setup - raid takes priority
+                }
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -3832,9 +3836,13 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 setupButton.click();
                 await sleep(AUTO_SETUP_DELAY);
                 
-                // Enable autoplay mode
+                // Enable autoplay mode (checks Raid Hunter internally to avoid interrupting raids)
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                await ensureAutoplayMode();
+                const autoplayEnabled = await ensureAutoplayMode();
+                if (!autoplayEnabled) {
+                    console.log('[Better Tasker] Autoplay not enabled (Raid Hunter may be raiding) - aborting setup');
+                    return; // Exit early - raid takes priority
+                }
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -4467,6 +4475,13 @@ function ensureAutoplayMode() {
     // Check if another mod is controlling autoplay
     if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
         console.log('[Better Tasker] Cannot switch to autoplay - controlled by another mod');
+        return false;
+    }
+    
+    // CRITICAL: Always check if Raid Hunter is actively raiding before taking autoplay control
+    // This ensures raids continue uninterrupted even if Better Tasker accepts a task during a raid
+    if (isRaidHunterRaiding()) {
+        console.log('[Better Tasker] Raid Hunter is actively raiding - skipping autoplay control to avoid interrupting raid');
         return false;
     }
     

@@ -256,14 +256,6 @@ Centralized mod configuration and backup system with UI enhancements:
 - Live player count display in header with 30-second updates and setup labels visibility toggle
 - Backup/restore configuration including active mods, settings, and game data with integrated settings panel
 
-#### Board Advisor
-Advanced board analysis and recommendations system:
-- Room-based data storage and pattern analysis
-- Performance predictions and optimization suggestions
-- Learning from successful runs to improve recommendations
-- Automatic analysis when board changes
-- Configurable analysis depth and recommendation thresholds
-
 #### Cyclopedia
 A comprehensive game data viewer and player profile manager with advanced features:
 - **Monster Database**: Browse and search all monsters with detailed stats, abilities, and locations

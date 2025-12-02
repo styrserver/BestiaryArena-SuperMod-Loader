@@ -2020,6 +2020,12 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.antiIdleTooltip')}">${t('mods.betterUI.antiIdleLabel')}</span>
             </label>
           </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="run-tracker-toggle" style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableRunTrackerWarning')}">${t('mods.betterUI.disableRunTracker')}</span>
+            </label>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -2441,6 +2447,33 @@ function showSettingsModal() {
             enableAntiIdleSounds();
           } else {
             disableAntiIdleSounds();
+          }
+        });
+      }
+      
+      const runTrackerCheckbox = content.querySelector('#run-tracker-toggle');
+      if (runTrackerCheckbox) {
+        // Checkbox is reversed: checked = disabled, unchecked = enabled
+        // Default to enabled (false = not disabled) if not set
+        runTrackerCheckbox.checked = config.enableRunTracker === false;
+        
+        runTrackerCheckbox.addEventListener('change', async () => {
+          // Checked means disabled, so enableRunTracker should be false
+          config.enableRunTracker = !runTrackerCheckbox.checked;
+          saveConfig();
+          
+          if (window.RunTrackerAPI) {
+            if (runTrackerCheckbox.checked) {
+              // Checkbox is checked = disabled
+              await window.RunTrackerAPI.disable();
+              console.log('[Mod Settings] Run Tracker disabled');
+            } else {
+              // Checkbox is unchecked = enabled
+              await window.RunTrackerAPI.enable();
+              console.log('[Mod Settings] Run Tracker enabled');
+            }
+          } else {
+            console.warn('[Mod Settings] RunTracker API not available');
           }
         });
       }

@@ -3476,10 +3476,6 @@ async function runAnalysis() {
       window.__boardAnalyzerResults = null;
     }
     
-    // Store results globally for Board Advisor to access
-    window.__boardAnalyzerResults = results;
-    console.log('[Board Analyzer] Results stored globally for Board Advisor access');
-    
     // Force close all modals again
     forceCloseAllModals();
     
