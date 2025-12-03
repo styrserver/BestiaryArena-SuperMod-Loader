@@ -4559,7 +4559,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 let primarySort = 0;
                 
-                if (sortKey === 'timeSum' || sortKey === 'floors') {
+                if (sortKey === 'timeSum') {
                   if (currentSortDirection === 'desc') {
                     primarySort = aVal - bVal;
                   } else {

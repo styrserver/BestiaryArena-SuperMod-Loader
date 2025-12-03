@@ -4336,6 +4336,15 @@ function handleCloseButtonClick(panel) {
     // Clear cached DOM references
     domCache.clear();
     // Stop the live update interval
+    if (updateIntervalId) {
+        clearInterval(updateIntervalId);
+        updateIntervalId = null;
+    }
+    // Stop auto-save interval
+    if (autoSaveIntervalId) {
+        clearInterval(autoSaveIntervalId);
+        autoSaveIntervalId = null;
+    }
     // Remove resize listener
     window.removeEventListener('resize', updatePanelPosition);
     // Remove the panel

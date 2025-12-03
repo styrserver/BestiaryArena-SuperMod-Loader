@@ -760,7 +760,7 @@ const updateInventoryFromDiff = (inventoryDiff) => {
       const newState = { ...prev };
       newState.inventory = { ...prev.inventory };
       
-      for (let tier = 1; tier <= 4; tier++) {
+      for (let tier = 1; tier <= 5; tier++) {
         const potionKey = `stamina${tier}`;
         if (inventoryDiff[potionKey] !== undefined) {
           const diff = inventoryDiff[potionKey];
