@@ -4,6 +4,15 @@
   },
   "notes": [
   {
+    "version": "3.1.2",
+    "changes": [
+      { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed Supreme potions being used below threshold due to inventory not updating for tier 5 potions" },
+      { "type": "fixed", "mod": "Core", "text": "General bug fixes" },
+      { "type": "fixed", "mod": "Cyclopedia", "text": "Fixed floor sorting in rankings" },
+      { "type": "changed", "mod": "Autoseller", "text": "BIG overhaul of autoseller to also include autoduster (no more accidentally selling inventory creatures!)." }
+    ]
+  },
+  {
     "version": "3.1.1",
     "changes": [
       { "type": "added", "mod": "Cyclopedia", "text": "Added floors column to Rankings in characters tab after Time Sum" },
