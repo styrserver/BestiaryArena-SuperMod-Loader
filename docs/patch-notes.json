@@ -4,6 +4,12 @@
   },
   "notes": [
   {
+    "version": "3.1.4",
+    "changes": [
+      { "type": "fixed", "mod": "Better Tasker", "text": "Fixed translation errors: replaced getLocalizedText and UI_TEXT references with centralized translation API" }
+    ]
+  },
+  {
     "version": "3.1.3",
     "changes": [
       { "type": "added", "mod": "Autoseller", "text": "Added right-click context menu on creatures to set per-creature gene keep ranges" },
