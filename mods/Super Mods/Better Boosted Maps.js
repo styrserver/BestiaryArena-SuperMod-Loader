@@ -9,80 +9,23 @@ const MOD_ID = 'better-boosted-maps';
 const TOGGLE_BUTTON_ID = `${MOD_ID}-toggle-button`;
 const SETTINGS_BUTTON_ID = `${MOD_ID}-settings-button`;
 
-// UI Text Constants - Centralized text management for multi-language support
-const UI_TEXT = {
-    BUTTONS: {
-        ENABLED: 'Enabled',
-        SETTINGS: 'Settings',
-        CLOSE: 'Close',
-        START: 'Start',
-        AUTO_SETUP: 'Auto-setup',
-        REMOVE: 'Remove',
-        CONFIRM: 'Confirm'
-    },
-    BUTTONS_PT: {
-        ENABLED: 'Habilitado',
-        SETTINGS: 'Configurações',
-        CLOSE: 'Fechar',
-        START: 'Iniciar',
-        AUTO_SETUP: 'Autoconfigurar',
-        REMOVE: 'Remover',
-        CONFIRM: 'Confirmar'
-    },
-    LABELS: {
-        START_DELAY: 'Start Delay (seconds)',
-        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
-        FASTER_AUTOPLAY: 'Faster Autoplay',
-        ENABLE_AUTOPLANT: 'Enable Autoplant',
-        BOOSTED_MAP_SELECTION: 'Select which boosted maps to farm:',
-        EQUIPMENT_SELECTION: 'Select which equipment to use:',
-        WARNING_UNSELECTED: 'Unselected maps will be skipped'
-    },
-    LABELS_PT: {
-        START_DELAY: 'Delay de Início (segundos)',
-        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
-        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
-        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
-        BOOSTED_MAP_SELECTION: 'Selecione quais mapas boosted farmar:',
-        EQUIPMENT_SELECTION: 'Selecione qual equipamento usar:',
-        WARNING_UNSELECTED: 'Mapas não selecionados serão ignorados'
-    },
-    TITLES: {
-        BOOSTED_MAPS_SETTINGS: 'Better Boosted Maps Settings',
-        BOOSTED_MAP_SETTINGS: 'Boosted Map Settings',
-        SELECTION_SETTINGS: 'Selection Settings'
-    },
-    TITLES_PT: {
-        BOOSTED_MAPS_SETTINGS: 'Configurações do Better Boosted Maps',
-        BOOSTED_MAP_SETTINGS: 'Configurações de Mapas Boosted',
-        SELECTION_SETTINGS: 'Configurações de Seleção'
-    },
-    DESCRIPTIONS: {
-        SELECT_MAPS: 'Select Maps',
-        SELECT_EQUIPMENT: 'Select Equipment',
-        NO_MAPS_AVAILABLE: 'No maps available',
-        NO_EQUIPMENT_AVAILABLE: 'No equipment available'
-    },
-    DESCRIPTIONS_PT: {
-        SELECT_MAPS: 'Selecionar Mapas',
-        SELECT_EQUIPMENT: 'Selecionar Equipamento',
-        NO_MAPS_AVAILABLE: 'Nenhum mapa disponível',
-        NO_EQUIPMENT_AVAILABLE: 'Nenhum equipamento disponível'
+// Translation helper
+const t = (key) => {
+    if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) {
+        return context.api.i18n.t(key);
     }
+    // Fallback to key if translation API is not available
+    return key;
 };
 
-// Language detection function
-// Only checks game language, not browser language
-function isPortuguese() {
-    return document.documentElement.lang === 'pt-BR' || 
-           document.querySelector('html[lang="pt-BR"]') ||
-           window.location.href.includes('/pt/');
-}
-
-// Get localized text based on current language
-function getLocalizedText(englishText, portugueseText) {
-    return isPortuguese() ? portugueseText : englishText;
-}
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+    let text = t(key);
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+        text = text.replace(`{${placeholder}}`, value);
+    });
+    return text;
+};
 
 // Timing constants - Standardized across all mods
 const NAVIGATION_DELAY = 500;           // Reduced from 1000ms for faster response
@@ -505,7 +448,7 @@ function isBetterSetupsAvailable() {
  * @returns {Array} Array of available setup options
  */
 function getAvailableSetupOptions() {
-    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    const options = [t('mods.betterBoostedMaps.autoSetup')]; // Always include default with translation
     
     if (isBetterSetupsAvailable()) {
         try {
@@ -543,7 +486,7 @@ function hasSavedSetup(button) {
  * @returns {HTMLElement|null} The button element or null if not found
  */
 function findSetupButton(option) {
-    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
+    if (option === 'Auto-setup') {
         return findButtonByText('Auto-setup');
     }
     
@@ -1139,10 +1082,10 @@ function insertButtons() {
             const buttonContainer = document.createElement('div');
             buttonContainer.style.cssText = `display: flex; gap: 4px; margin-top: 4px;`;
             
-            const toggleButton = createStyledButton(TOGGLE_BUTTON_ID, getLocalizedText('Disabled', 'Desabilitado'), 'red', toggleBoostedMaps);
+            const toggleButton = createStyledButton(TOGGLE_BUTTON_ID, t('mods.betterBoostedMaps.enabled'), 'red', toggleBoostedMaps);
             buttonContainer.appendChild(toggleButton);
             
-            const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS), 'blue', openSettingsModal);
+            const settingsButton = createStyledButton(SETTINGS_BUTTON_ID, t('mods.betterBoostedMaps.settingsButton'), 'blue', openSettingsModal);
             buttonContainer.appendChild(settingsButton);
             
             // Find the timer element (has clock icon and time)
@@ -1213,10 +1156,10 @@ function updateToggleButton() {
     if (!toggleButton) return;
     
     if (modState.enabled) {
-        toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
+        toggleButton.textContent = t('mods.betterBoostedMaps.enabled');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     } else {
-        toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
+        toggleButton.textContent = 'Disabled'; // Not in translations yet, keeping as-is
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
     }
 }
@@ -1253,10 +1196,11 @@ function loadSettings() {
         fasterAutoplay: false,
         enableAutoplant: false,
         startDelay: DEFAULT_START_DELAY,  // Use standardized default
-        setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
+        setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
         showNotification: true,
         maps: {},
-        equipment: {}
+        equipment: {},
+        mapFloors: {}
     };
     
     const saved = localStorage.getItem('betterBoostedMapsSettings');
@@ -1273,10 +1217,11 @@ function loadSettings() {
 function saveSettings() {
     const settings = {
         maps: {},
-        equipment: {}
+        equipment: {},
+        mapFloors: {}
     };
     
-    const inputs = document.querySelectorAll('input[id^="boosted-maps-"], select[id^="boosted-maps-"]');
+    const inputs = document.querySelectorAll('input[id^="boosted-maps-"], select[id^="boosted-maps-"], select[id^="floor-"]');
     
     inputs.forEach(input => {
         if (input.type === 'checkbox') {
@@ -1293,13 +1238,45 @@ function saveSettings() {
             const id = input.id.replace('boosted-maps-', '');
             settings[id] = parseInt(input.value) || 3;
         } else if (input.tagName === 'SELECT') {
-            const id = input.id.replace('boosted-maps-', '');
-            settings[id] = input.value;
+            if (input.id.startsWith('floor-')) {
+                const mapId = input.getAttribute('data-map-id');
+                if (mapId) {
+                    const floorValue = parseInt(input.value);
+                    if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
+                        settings.mapFloors[mapId] = floorValue;
+                    }
+                }
+            } else {
+                const id = input.id.replace('boosted-maps-', '');
+                settings[id] = input.value;
+            }
         }
     });
     
     localStorage.setItem('betterBoostedMapsSettings', JSON.stringify(settings));
     console.log('[Better Boosted Maps] Settings saved');
+}
+
+// Apply saved floor settings to floor dropdowns in the modal
+function applyFloorSettings() {
+    try {
+        const settings = loadSettings();
+        
+        // Apply floor dropdown values for all maps
+        if (settings.mapFloors && typeof settings.mapFloors === 'object') {
+            document.querySelectorAll('select[id^="floor-"]').forEach(select => {
+                const mapId = select.getAttribute('data-map-id');
+                if (mapId && settings.mapFloors[mapId] !== undefined) {
+                    const floorValue = settings.mapFloors[mapId];
+                    if (floorValue >= 0 && floorValue <= 15) {
+                        select.value = floorValue.toString();
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('[Better Boosted Maps] Error applying floor settings:', error);
+    }
 }
 
 function createSettingsContent() {
@@ -1327,9 +1304,9 @@ function createSettingsContent() {
     // Left column - Automation Settings
     const leftColumn = document.createElement('div');
     leftColumn.style.cssText = `
-        width: 250px;
-        min-width: 250px;
-        max-width: 250px;
+        width: 200px;
+        min-width: 200px;
+        max-width: 200px;
         display: flex;
         flex-direction: column;
         border-right: 1px solid #444;
@@ -1384,7 +1361,7 @@ function createBoostedMapSettings(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText(UI_TEXT.TITLES.BOOSTED_MAP_SETTINGS, UI_TEXT.TITLES_PT.BOOSTED_MAP_SETTINGS);
+    title.textContent = t('mods.betterBoostedMaps.boostedMapSettings');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1407,7 +1384,7 @@ function createBoostedMapSettings(settings) {
     // Start delay setting
     const startDelayDiv = createNumberSetting(
         'boosted-maps-startDelay',
-        getLocalizedText(UI_TEXT.LABELS.START_DELAY, UI_TEXT.LABELS_PT.START_DELAY),
+        t('mods.betterBoostedMaps.startDelay'),
         '',
         settings.startDelay,
         1, MAX_START_DELAY
@@ -1417,9 +1394,9 @@ function createBoostedMapSettings(settings) {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'boosted-maps-setupMethod',
-        getLocalizedText('Setup Method', 'Método de Configuração'),
+        'Setup Method', // Not in translations yet, keeping as-is
         '',
-        settings.setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        settings.setupMethod || t('mods.betterBoostedMaps.autoSetup'),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -1427,7 +1404,7 @@ function createBoostedMapSettings(settings) {
     // Auto-refill stamina setting
     const autoRefillStaminaDiv = createCheckboxSetting(
         'boosted-maps-autoRefillStamina',
-        getLocalizedText(UI_TEXT.LABELS.AUTO_REFILL_STAMINA, UI_TEXT.LABELS_PT.AUTO_REFILL_STAMINA),
+        t('mods.betterBoostedMaps.autoRefillStamina'),
         '',
         settings.autoRefillStamina
     );
@@ -1436,7 +1413,7 @@ function createBoostedMapSettings(settings) {
     // Faster autoplay setting
     const fasterAutoplayDiv = createCheckboxSetting(
         'boosted-maps-fasterAutoplay',
-        getLocalizedText(UI_TEXT.LABELS.FASTER_AUTOPLAY, UI_TEXT.LABELS_PT.FASTER_AUTOPLAY),
+        t('mods.betterBoostedMaps.fasterAutoplay'),
         '',
         settings.fasterAutoplay
     );
@@ -1445,7 +1422,7 @@ function createBoostedMapSettings(settings) {
     // Enable autoplant setting
     const enableAutoplantDiv = createCheckboxSetting(
         'boosted-maps-enableAutoplant',
-        getLocalizedText(UI_TEXT.LABELS.ENABLE_AUTOPLANT, UI_TEXT.LABELS_PT.ENABLE_AUTOPLANT),
+        t('mods.betterBoostedMaps.enableAutoplant'),
         '',
         settings.enableAutoplant
     );
@@ -1566,7 +1543,7 @@ function createMapsTab(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.SELECT_MAPS, UI_TEXT.DESCRIPTIONS_PT.SELECT_MAPS);
+    title.textContent = t('mods.betterBoostedMaps.selectMaps');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1595,7 +1572,7 @@ function createMapsTab(settings) {
     
     if (Object.keys(organizedMaps).length === 0) {
         const noMaps = document.createElement('div');
-        noMaps.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_MAPS_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_MAPS_AVAILABLE);
+        noMaps.textContent = t('mods.betterBoostedMaps.noMapsAvailable');
         noMaps.className = 'pixel-font-14';
         noMaps.style.color = '#888';
         scrollContainer.appendChild(noMaps);
@@ -1627,6 +1604,55 @@ function createMapsTab(settings) {
                     '14px',
                     isDisabled
                 );
+                
+                // Add floor dropdown only for selectable maps
+                if (!isDisabled) {
+                    const floorSelect = document.createElement('select');
+                    floorSelect.id = `floor-${id}`;
+                    floorSelect.className = 'pixel-font-16';
+                    floorSelect.setAttribute('data-map-id', id);
+                    floorSelect.style.cssText = `
+                        font-size: 10px;
+                        padding: 2px 18px 2px 6px;
+                        border-radius: 3px;
+                        font-weight: bold;
+                        cursor: pointer;
+                        outline: none;
+                        appearance: none;
+                        -webkit-appearance: none;
+                        -moz-appearance: none;
+                        min-width: 60px;
+                        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23ffffff' d='M1 0l4 4 4-4 1 1-5 5-5-5z'/%3E%3C/svg%3E");
+                        background-repeat: no-repeat;
+                        background-position: right 6px center;
+                        background-color: rgba(255, 211, 61, 0.2);
+                        color: rgb(255, 217, 61);
+                        border: 1px solid rgb(255, 217, 61);
+                        margin-left: auto;
+                    `;
+                    // Create options for floors 0-15
+                    for (let i = 0; i <= 15; i++) {
+                        const opt = document.createElement('option');
+                        opt.value = i.toString();
+                        opt.textContent = `${t('mods.betterBoostedMaps.floor')} ${i}`;
+                        floorSelect.appendChild(opt);
+                    }
+                    // Set initial value from settings (default: 0)
+                    const mapFloors = settings.mapFloors || {};
+                    floorSelect.value = (mapFloors[id] !== undefined ? mapFloors[id] : 0).toString();
+                    floorSelect.addEventListener('change', () => {
+                        saveSettings();
+                    });
+                    
+                    // Add floor dropdown to the checkbox container
+                    const checkboxContainer = mapDiv.querySelector('div[style*="display: flex"]');
+                    if (checkboxContainer) {
+                        checkboxContainer.appendChild(floorSelect);
+                    } else {
+                        mapDiv.appendChild(floorSelect);
+                    }
+                }
+                
                 scrollContainer.appendChild(mapDiv);
             });
         });
@@ -1731,7 +1757,7 @@ function createEquipmentTab(settings) {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.SELECT_EQUIPMENT, UI_TEXT.DESCRIPTIONS_PT.SELECT_EQUIPMENT);
+    title.textContent = t('mods.betterBoostedMaps.selectEquipment');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -1759,7 +1785,7 @@ function createEquipmentTab(settings) {
     
     if (allEquipment.length === 0) {
         const noEquipment = document.createElement('div');
-        noEquipment.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_EQUIPMENT_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_EQUIPMENT_AVAILABLE);
+        noEquipment.textContent = t('mods.betterBoostedMaps.noEquipmentAvailable');
         noEquipment.className = 'pixel-font-14';
         noEquipment.style.color = '#888';
         scrollContainer.appendChild(noEquipment);
@@ -2004,11 +2030,11 @@ function openSettingsModal() {
                             const settingsContent = createSettingsContent();
                             
                             modState.activeModal = context.api.ui.components.createModal({
-                                title: getLocalizedText(UI_TEXT.TITLES.BOOSTED_MAPS_SETTINGS, UI_TEXT.TITLES_PT.BOOSTED_MAPS_SETTINGS),
+                                title: t('mods.betterBoostedMaps.modalTitle'),
                                 width: MODAL_WIDTH,
                                 height: MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }],
+                                buttons: [{ text: t('mods.betterBoostedMaps.closeButton'), primary: true }],
                                 onClose: () => {
                                     console.log('[Better Boosted Maps] Settings modal closed');
                                     cleanupModal();
@@ -2024,7 +2050,7 @@ function openSettingsModal() {
                             };
                             document.addEventListener('keydown', modState.escKeyListener);
                             
-                            // Set modal dimensions
+                            // Set modal dimensions and apply settings
                             setTimeout(() => {
                                 const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
                                 if (dialog) {
@@ -2042,6 +2068,9 @@ function openSettingsModal() {
                                         contentElem.style.display = 'flex';
                                         contentElem.style.flexDirection = 'column';
                                     }
+                                    
+                                    // Apply saved floor settings
+                                    applyFloorSettings();
                                 }
                             }, 50);
                             
@@ -2052,10 +2081,7 @@ function openSettingsModal() {
                                     const footer = modalElement.querySelector('.flex.justify-end.gap-2');
                                     if (footer) {
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = getLocalizedText(
-                                            '✓ Settings auto-save when changed',
-                                            '✓ Configurações são salvas automaticamente quando alteradas'
-                                        );
+                                        autoSaveIndicator.textContent = t('mods.betterBoostedMaps.settingsAutoSave');
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -2105,9 +2131,9 @@ function openSettingsModal() {
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     const textMappings = {
-        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
-        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
-        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE]
+        'Auto-setup': [t('mods.betterBoostedMaps.autoSetup'), 'Auto-setup'],
+        'Start': [t('mods.betterBoostedMaps.start'), 'Start'],
+        'Close': [t('mods.betterBoostedMaps.closeButton'), 'Close']
     };
     const possibleTexts = textMappings[text] || [text];
     return buttons.find(button => possibleTexts.includes(button.textContent.trim()));
@@ -2195,6 +2221,14 @@ async function startBoostedMapFarming(force = false) {
                 roomId: farmCheck.roomId
             });
             await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
+            
+            // Set floor for this map (default to 0 if not configured)
+            const mapFloors = initialSettings.mapFloors || {};
+            const floor = mapFloors[farmCheck.roomId] !== undefined ? mapFloors[farmCheck.roomId] : 0;
+            console.log(`[Better Boosted Maps] Setting floor to ${floor} for map ${farmCheck.roomId}`);
+            globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
             console.log('[Better Boosted Maps] Navigation completed');
         } catch (error) {
             console.error('[Better Boosted Maps] Error navigating to map:', error);

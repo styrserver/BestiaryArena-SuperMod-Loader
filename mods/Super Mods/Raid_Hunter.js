@@ -28,60 +28,6 @@ const DEFAULT_RAID_START_DELAY = 3; // Default delay in seconds
 const AUTOMATION_ENABLED = true;
 const AUTOMATION_DISABLED = false;
 
-// UI Text Constants - Centralized text management for multi-language support
-const UI_TEXT = {
-    BUTTONS: {
-        ENABLED: 'Enabled',
-        SETTINGS: 'Settings',
-        CLOSE: 'Close',
-        START: 'Start',
-        AUTO_SETUP: 'Auto-setup',
-        REMOVE: 'Remove',
-        CONFIRM: 'Confirm'
-    },
-    BUTTONS_PT: {
-        ENABLED: 'Habilitado',
-        SETTINGS: 'Configurações',
-        CLOSE: 'Fechar',
-        START: 'Iniciar',
-        AUTO_SETUP: 'Autoconfigurar',
-        REMOVE: 'Remover',
-        CONFIRM: 'Confirmar'
-    },
-    LABELS: {
-        RAID_START_DELAY: 'Raid Start Delay (seconds)',
-        RAID_MAP_SELECTION: 'Select which raid maps to hunt:',
-        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
-        FASTER_AUTOPLAY: 'Faster Autoplay',
-        ENABLE_AUTOPLANT: 'Enable Autoplant',
-        WARNING_UNSELECTED: 'Unselected maps will be skipped'
-    },
-    LABELS_PT: {
-        RAID_START_DELAY: 'Delay de Início do Raid (segundos)',
-        RAID_MAP_SELECTION: 'Selecione quais mapas de raid caçar:',
-        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
-        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
-        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
-        WARNING_UNSELECTED: 'Mapas não selecionados serão ignorados'
-    },
-    TITLES: {
-        RAID_HUNTER_SETTINGS: 'Raid Hunter Settings',
-        AUTO_RAID_SETTINGS: 'Auto-Raid Settings',
-        OTHER_SETTINGS: 'Other Settings'
-    },
-    TITLES_PT: {
-        RAID_HUNTER_SETTINGS: 'Configurações do Raid Hunter',
-        AUTO_RAID_SETTINGS: 'Configurações de Auto-Raid',
-        OTHER_SETTINGS: 'Outras Configurações'
-    },
-    DESCRIPTIONS: {
-        RAID_MAP_SELECTION_DESC: 'Select which raid maps you want to auto-raid when detected:'
-    },
-    DESCRIPTIONS_PT: {
-        RAID_MAP_SELECTION_DESC: 'Selecione quais mapas de raid você quer auto-raidar quando detectados:'
-    }
-};
-
 // Timing constants - Standardized across all mods
 const NAVIGATION_DELAY = 500;           // Reduced from 1000ms for faster response
 const AUTO_SETUP_DELAY = 800;          // New standardized delay
@@ -653,7 +599,7 @@ function isBetterSetupsAvailable() {
  * @returns {Array} Array of available setup options
  */
 function getAvailableSetupOptions() {
-    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    const options = [t('mods.raidHunter.autoSetup')]; // Always include default with translation
     
     if (isBetterSetupsAvailable()) {
         try {
@@ -2080,10 +2026,10 @@ function createRaidClock() {
                 </div>
                 <div class="flex gap-1 mt-1">
                     <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="raid-hunter-toggle-btn">
-                        ${getLocalizedText('Disabled', 'Desabilitado')}
+                        ${'Disabled'}
                     </button>
                     <button class="focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight" id="raid-hunter-settings-btn">
-                        ${getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS)}
+                        ${t('mods.raidHunter.settingsButton')}
                     </button>
                 </div>
             </div>
@@ -2667,26 +2613,33 @@ function getEventNameForRoomId(roomId) {
 
 // Language detection function
 // Only checks game language, not browser language
-function isPortuguese() {
-    return document.documentElement.lang === 'pt-BR' || 
-           document.querySelector('html[lang="pt-BR"]') ||
-           window.location.href.includes('/pt/');
-}
+// Translation helper
+const t = (key) => {
+    if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) {
+        return context.api.i18n.t(key);
+    }
+    // Fallback to key if translation API is not available
+    return key;
+};
 
-// Get localized text based on current language
-function getLocalizedText(englishText, portugueseText) {
-    return isPortuguese() ? portugueseText : englishText;
-}
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+    let text = t(key);
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+        text = text.replace(`{${placeholder}}`, value);
+    });
+    return text;
+};
 
 // Finds button by text content - supports both English and Portuguese
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    // Define text mappings for different languages using centralized constants
+    // Define text mappings for different languages using translation system
     const textMappings = {
-        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
-        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
-        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE]
+        'Auto-setup': [t('mods.raidHunter.autoSetup'), 'Auto-setup'],
+        'Start': [t('mods.raidHunter.start'), 'Start'],
+        'Close': [t('mods.raidHunter.closeButton'), 'Close']
     };
     
     // Get the list of possible texts for the given text key
@@ -2812,10 +2765,10 @@ function updateToggleButton() {
     if (!toggleButton) return;
     
     if (isAutomationActive()) {
-        toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
+        toggleButton.textContent = t('mods.raidHunter.enabled');
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     } else {
-        toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
+        toggleButton.textContent = 'Disabled';
         toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-2 py-0.5 pb-[3px] pixel-font-16 flex-1 text-whiteHighlight';
     }
 }
@@ -3291,6 +3244,17 @@ async function handleEventOrRaid(roomId) {
             roomId: roomId
         });
         await new Promise(resolve => setTimeout(resolve, NAVIGATION_DELAY));
+        
+        // Set floor for this raid (default to 0 if not configured)
+        const raidFloors = settings.raidFloors || {};
+        const raidName = getEventNameForRoomId(roomId);
+        if (raidName) {
+            const floor = raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0;
+            console.log(`[Raid Hunter] Setting floor to ${floor} for ${raidName}`);
+            globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
         console.log('[Raid Hunter] Navigation completed');
         
         // Check automation status after navigation
@@ -3308,8 +3272,7 @@ async function handleEventOrRaid(roomId) {
         return;
     }
     
-    // Get user's selected setup method
-    const settings = loadSettings();
+    // Get user's selected setup method (settings already loaded above)
     const setupMethod = settings.setupMethod || 'Auto-setup';
     
     // Find and click the appropriate setup button
@@ -4132,11 +4095,11 @@ function openRaidHunterSettingsModal() {
                             
                             // Open modal using the same API as Cyclopedia
                             activeRaidHunterModal = context.api.ui.components.createModal({
-                                title: getLocalizedText(UI_TEXT.TITLES.RAID_HUNTER_SETTINGS, UI_TEXT.TITLES_PT.RAID_HUNTER_SETTINGS),
+                                title: t('mods.raidHunter.modalTitle'),
                                 width: RAID_HUNTER_MODAL_WIDTH,
                                 height: RAID_HUNTER_MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }], // Add Close button like other mods
+                                buttons: [{ text: t('mods.raidHunter.closeButton'), primary: true }], // Add Close button like other mods
                                 onClose: () => {
                                     console.log('[Raid Hunter] Settings modal closed');
                                     cleanupRaidHunterModal();
@@ -4151,10 +4114,7 @@ function openRaidHunterSettingsModal() {
                                     if (footer) {
                                         // Create auto-save indicator
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = getLocalizedText(
-                                            '✓ Settings auto-save when changed',
-                                            '✓ Configurações são salvas automaticamente quando alteradas'
-                                        );
+                                        autoSaveIndicator.textContent = t('mods.raidHunter.settingsAutoSave');
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -4208,8 +4168,10 @@ function openRaidHunterSettingsModal() {
                                     dialog.style.minHeight = RAID_HUNTER_MODAL_HEIGHT + 'px';
                                     dialog.style.maxHeight = RAID_HUNTER_MODAL_HEIGHT + 'px';
                                     
-                                    // Load and apply saved settings
-                                    loadAndApplySettings();
+                                    // Load and apply saved settings (with additional delay to ensure DOM is ready)
+                                    setTimeout(() => {
+                                        loadAndApplySettings();
+                                    }, 100);
                                 }
                             }, 50);
                         } catch (error) {
@@ -4280,9 +4242,9 @@ function createSettingsContent() {
     // Left column - Auto-Raid Settings
     const leftColumn = document.createElement('div');
     leftColumn.style.cssText = `
-        width: 250px;
-        min-width: 250px;
-        max-width: 250px;
+        width: 200px;
+        min-width: 200px;
+        max-width: 200px;
         display: flex;
         flex-direction: column;
         border-right: 1px solid ${COLOR_BORDER};
@@ -4336,7 +4298,7 @@ function createAutoRaidSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText(UI_TEXT.TITLES.AUTO_RAID_SETTINGS, UI_TEXT.TITLES_PT.AUTO_RAID_SETTINGS);
+    title.textContent = t('mods.raidHunter.autoRaidSettings');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -4366,7 +4328,7 @@ function createAutoRaidSettings() {
     `;
     
     const delayLabel = document.createElement('label');
-    delayLabel.textContent = getLocalizedText(UI_TEXT.LABELS.RAID_START_DELAY, UI_TEXT.LABELS_PT.RAID_START_DELAY);
+    delayLabel.textContent = t('mods.raidHunter.raidStartDelay');
     delayLabel.className = 'pixel-font-16';
     delayLabel.style.cssText = `
         font-weight: bold;
@@ -4396,9 +4358,9 @@ function createAutoRaidSettings() {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
-        getLocalizedText('Setup Method', 'Método de Configuração'),
+        'Setup Method', // Not in translations yet, keeping as-is
         '',
-        loadSettings().setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        loadSettings().setupMethod || t('mods.raidHunter.autoSetup'),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -4422,7 +4384,7 @@ function createAutoRaidSettings() {
     `;
     
     const staminaRefillSetting = createCheckboxSetting('autoRefillStamina', 
-        getLocalizedText('Auto-refill Stamina', 'Recarregar Stamina Automaticamente'), 
+        t('mods.raidHunter.autoRefillStamina'), 
         '', 
         false);
     staminaRefillDiv.appendChild(staminaRefillSetting);
@@ -4438,7 +4400,7 @@ function createAutoRaidSettings() {
     `;
     
     const fasterAutoplaySetting = createCheckboxSetting('fasterAutoplay', 
-        getLocalizedText('Faster Autoplay', 'Autoplay Mais Rápido'), 
+        t('mods.raidHunter.fasterAutoplay'), 
         '', 
         false);
     fasterAutoplayDiv.appendChild(fasterAutoplaySetting);
@@ -4454,7 +4416,7 @@ function createAutoRaidSettings() {
     `;
     
     const dragonPlantSetting = createCheckboxSetting('enableDragonPlant', 
-        getLocalizedText('Enable Autoplant', 'Ativar Vendedor Automático'), 
+        t('mods.raidHunter.enableAutoplant'), 
         '', 
         false);
     dragonPlantDiv.appendChild(dragonPlantSetting);
@@ -4472,10 +4434,7 @@ function createAutoRaidSettings() {
     `;
     
     const creditText = document.createElement('div');
-    creditText.innerHTML = getLocalizedText(
-        'Inspired by <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>',
-        'Inspirado por <a href="https://bestiaryarena.com/profile/kurak" target="_blank" style="color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;" onmouseover="this.style.color=\'#ffe066\'" onmouseout="this.style.color=\'#666\'">Kurak\'s Event Hunter</a>'
-    );
+    creditText.innerHTML = t('mods.raidHunter.creditText');
     creditText.className = 'pixel-font-16';
     creditText.style.cssText = `
         font-size: 10px;
@@ -4534,7 +4493,7 @@ function createRaidMapSelection() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText('Raid Map Selection', 'Seleção de Mapas de Raid');
+    title.textContent = t('mods.raidHunter.raidMapSelection');
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0;
@@ -4588,16 +4547,11 @@ function createRaidMapSelection() {
         pointer-events: none;
         line-height: 1.6;
     `;
-    tooltip.innerHTML = getLocalizedText(
-        `Priority Levels:<br><br>` +
+    // Priority tooltip - keeping as hardcoded HTML for now since it's complex
+    tooltip.innerHTML = `Priority Levels:<br><br>` +
         `<strong style="color: ${COLOR_RED}">High Priority:</strong> Highest priority - Never yields<br>` +
         `<strong style="color: ${COLOR_GREEN}">Medium Priority:</strong> Yields to High Priority, never yields to Better Tasker<br>` +
-        `<strong style="color: ${COLOR_YELLOW}">Low Priority:</strong> Yields to Medium/High Priority and Better Tasker when active`,
-        `Níveis de Prioridade:<br><br>` +
-        `<strong style="color: ${COLOR_RED}">Alta Prioridade:</strong> Prioridade mais alta - Nunca cede<br>` +
-        `<strong style="color: ${COLOR_GREEN}">Prioridade Média:</strong> Cede à Alta Prioridade, nunca cede ao Better Tasker<br>` +
-        `<strong style="color: ${COLOR_YELLOW}">Baixa Prioridade:</strong> Cede à Prioridade Média/Alta e ao Better Tasker quando ativo`
-    );
+        `<strong style="color: ${COLOR_YELLOW}">Low Priority:</strong> Yields to Medium/High Priority and Better Tasker when active`;
     helpIcon.appendChild(tooltip);
     
     // Show/hide tooltip on hover
@@ -4612,7 +4566,7 @@ function createRaidMapSelection() {
     section.appendChild(titleContainer);
     
     const description = document.createElement('div');
-    description.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.RAID_MAP_SELECTION_DESC, UI_TEXT.DESCRIPTIONS_PT.RAID_MAP_SELECTION_DESC);
+    description.textContent = t('mods.raidHunter.raidMapSelectionDesc');
     description.className = 'pixel-font-16';
     description.style.cssText = `
         margin-bottom: 10px;
@@ -4795,7 +4749,7 @@ function createRaidMapSelection() {
             // These are truly dynamic events that are not statically defined
             if (!EVENT_TEXTS.includes(raidName)) {
                 const eventBadge = document.createElement('span');
-                eventBadge.textContent = getLocalizedText('Event', 'Evento');
+                eventBadge.textContent = t('mods.raidHunter.event');
                 eventBadge.className = 'pixel-font-16';
                 eventBadge.style.cssText = `
                     font-size: 10px;
@@ -4825,15 +4779,15 @@ function createRaidMapSelection() {
                 appearance: none;
                 -webkit-appearance: none;
                 -moz-appearance: none;
-                min-width: 105px;
+                min-width: 90px;
                 background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23ffffff' d='M1 0l4 4 4-4 1 1-5 5-5-5z'/%3E%3C/svg%3E");
                 background-repeat: no-repeat;
                 background-position: right 6px center;
             `;
             const opts = [
-                {v:'low', t:getLocalizedText('Low Priority', 'Baixa Prioridade')},
-                {v:'medium', t:getLocalizedText('Medium Priority', 'Prioridade Média')},
-                {v:'high', t:getLocalizedText('High Priority', 'Alta Prioridade')}
+                {v:'low', t:t('mods.raidHunter.lowPriority')},
+                {v:'medium', t:t('mods.raidHunter.mediumPriority')},
+                {v:'high', t:t('mods.raidHunter.highPriority')}
             ];
             opts.forEach(o => {
                 const opt = document.createElement('option');
@@ -4851,6 +4805,44 @@ function createRaidMapSelection() {
                 autoSaveSettings();
             });
             raidDiv.appendChild(prioritySelect);
+            
+            // Floor dropdown for all raids
+            const floorSelect = document.createElement('select');
+            floorSelect.id = `floor-${raidName.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+            floorSelect.className = 'pixel-font-16';
+            floorSelect.setAttribute('data-raid-name', raidName);
+            floorSelect.style.cssText = `
+                font-size: 10px;
+                padding: 2px 18px 2px 6px;
+                border-radius: 3px;
+                font-weight: bold;
+                cursor: pointer;
+                outline: none;
+                appearance: none;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                min-width: 60px;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23ffffff' d='M1 0l4 4 4-4 1 1-5 5-5-5z'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 6px center;
+                background-color: rgba(255, 211, 61, 0.2);
+                color: rgb(255, 217, 61);
+                border: 1px solid rgb(255, 217, 61);
+            `;
+            // Create options for floors 0-15
+            for (let i = 0; i <= 15; i++) {
+                const opt = document.createElement('option');
+                opt.value = i.toString();
+                opt.textContent = `${t('mods.raidHunter.floor')} ${i}`;
+                floorSelect.appendChild(opt);
+            }
+            // Set initial value from settings (default: 0)
+            const raidFloors = settings.raidFloors || {};
+            floorSelect.value = (raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0).toString();
+            floorSelect.addEventListener('change', () => {
+                autoSaveSettings();
+            });
+            raidDiv.appendChild(floorSelect);
             
             mapContainer.appendChild(raidDiv);
         });
@@ -4919,9 +4911,10 @@ const DEFAULT_SETTINGS = {
     autoRefillStamina: false,
     fasterAutoplay: false,
     enableDragonPlant: false,
-    setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
+    setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
     enabledRaidMaps: [],
-    raidPriorities: {} // raidName -> 'low' | 'medium' | 'high'
+    raidPriorities: {}, // raidName -> 'low' | 'medium' | 'high'
+    raidFloors: {} // raidName -> 0-15
 };
 
 // Settings validation functions
@@ -4998,6 +4991,19 @@ function sanitizeSettings(settings) {
         sanitized.raidPriorities = {};
     }
     
+    // Validate raid floors
+    if (settings.raidFloors && typeof settings.raidFloors === 'object') {
+        sanitized.raidFloors = {};
+        Object.entries(settings.raidFloors).forEach(([raidName, floor]) => {
+            const floorValue = parseInt(floor);
+            if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
+                sanitized.raidFloors[raidName] = floorValue;
+            }
+        });
+    } else {
+        sanitized.raidFloors = {};
+    }
+    
     return sanitized;
 }
 
@@ -5026,7 +5032,7 @@ function autoSaveSettings() {
         
         inputs.forEach(input => {
             // Only process inputs that belong to Raid Hunter settings
-            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-') || input.id.startsWith('priority-')) {
+            if (input.id === 'raidDelay' || input.id === 'autoRefillStamina' || input.id === 'fasterAutoplay' || input.id === 'enableDragonPlant' || input.id === 'setupMethod' || input.id.startsWith('raid-') || input.id.startsWith('priority-') || input.id.startsWith('floor-')) {
                 if (input.type === 'checkbox') {
                     // Skip individual raid checkboxes since we process them separately
                     if (!input.id.startsWith('raid-')) {
@@ -5123,6 +5129,28 @@ function autoSaveSettings() {
         });
         
         settings.raidPriorities = raidPriorities;
+        
+        // Collect all floor dropdown values
+        const raidFloors = {};
+        document.querySelectorAll('select[id^="floor-"]').forEach(select => {
+            const raidName = select.getAttribute('data-raid-name');
+            if (raidName && select.value !== undefined) {
+                const floorValue = parseInt(select.value);
+                if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
+                    raidFloors[raidName] = floorValue;
+                }
+            }
+        });
+        
+        // Preserve floors for raids that aren't currently visible
+        const currentFloors = (currentSettings.raidFloors || {});
+        Object.keys(currentFloors).forEach(raidName => {
+            if (raidFloors[raidName] === undefined && enabledRaidMaps.includes(raidName)) {
+                raidFloors[raidName] = currentFloors[raidName];
+            }
+        });
+        
+        settings.raidFloors = raidFloors;
         
         // Validate and sanitize settings before saving
         const sanitizedSettings = sanitizeSettings(settings);
@@ -5221,6 +5249,21 @@ function loadAndApplySettings() {
                 if (raidName && settings.raidPriorities[raidName]) {
                     select.value = settings.raidPriorities[raidName];
                     try { stylePrioritySelect(select); } catch (_) {}
+                }
+            });
+        }
+
+        // Apply floor dropdown values for all raids
+        if (settings.raidFloors && typeof settings.raidFloors === 'object') {
+            document.querySelectorAll('select[id^="floor-"]').forEach(select => {
+                const raidName = select.getAttribute('data-raid-name');
+                if (raidName && settings.raidFloors[raidName] !== undefined) {
+                    const floorValue = settings.raidFloors[raidName];
+                    if (floorValue >= 0 && floorValue <= 15) {
+                        select.value = floorValue.toString();
+                    }
+                } else if (raidName) {
+                    select.value = '0';
                 }
             });
         }

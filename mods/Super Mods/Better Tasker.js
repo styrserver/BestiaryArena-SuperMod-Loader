@@ -5,76 +5,27 @@ console.log('[Better Tasker] initializing...');
 // 1. CONSTANTS
 // ============================================================================
 
-// UI Text Constants - Centralized text management for multi-language support
-const UI_TEXT = {
-    BUTTONS: {
-        ENABLED: 'Enabled',
-        SETTINGS: 'Settings',
-        CLOSE: 'Close',
-        START: 'Start',
-        REMOVE: 'Remove',
-        CONFIRM: 'Confirm',
-        AUTO_SETUP: 'Auto-setup',
-        NEW_TASK: 'New task'
-    },
-    BUTTONS_PT: {
-        ENABLED: 'Habilitado',
-        SETTINGS: 'Configurações', 
-        CLOSE: 'Fechar',
-        START: 'Iniciar',
-        REMOVE: 'Remover',
-        CONFIRM: 'Confirmar',
-        AUTO_SETUP: 'Autoconfigurar',
-        NEW_TASK: 'Nova tarefa'
-    },
-    LABELS: {
-        TASK_START_DELAY: 'Task Start Delay (seconds)',
-        AUTO_REFILL_STAMINA: 'Auto-refill Stamina',
-        FASTER_AUTOPLAY: 'Faster Autoplay',
-        AUTOCOMPLETE_TASKS: 'Autocomplete Tasks',
-        ENABLE_AUTOPLANT: 'Enable Autoplant',
-        CREATURE_SELECTION: 'Select which creatures you want to hunt for tasks:',
-        WARNING_UNSELECTED: 'Unselected creatures will cause active tasks to be removed'
-    },
-    LABELS_PT: {
-        TASK_START_DELAY: 'Delay de Início da Tarefa (segundos)',
-        AUTO_REFILL_STAMINA: 'Recarregar Stamina Automaticamente',
-        FASTER_AUTOPLAY: 'Autoplay Mais Rápido',
-        AUTOCOMPLETE_TASKS: 'Autocompletar Tarefas',
-        ENABLE_AUTOPLANT: 'Ativar Vendedor Automático de Planta Dragão',
-        CREATURE_SELECTION: 'Selecione quais criaturas você quer caçar para tarefas:',
-        WARNING_UNSELECTED: 'Criaturas não selecionadas causarão remoção de tarefas ativas'
-    },
-    DESCRIPTIONS: {
-        NO_CREATURES_AVAILABLE: 'No creatures available. Please refresh the page.'
-    },
-    DESCRIPTIONS_PT: {
-        NO_CREATURES_AVAILABLE: 'Nenhuma criatura disponível. Por favor, atualize a página.'
-    },
-    QUEST_TEXT: {
-        SUGGESTED_MAP: 'Suggested map:'
-    },
-    QUEST_TEXT_PT: {
-        SUGGESTED_MAP: 'Mapa sugerido:'
-    }
-};
-
 const MOD_ID = 'better-tasker';
 const TASKER_BUTTON_ID = `${MOD_ID}-settings-button`;
 const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
 
-// Language detection function
-// Only checks game language, not browser language
-function isPortuguese() {
-    return document.documentElement.lang === 'pt-BR' || 
-           document.querySelector('html[lang="pt-BR"]') ||
-           window.location.href.includes('/pt/');
-}
+// Translation helper
+const t = (key) => {
+    if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) {
+        return context.api.i18n.t(key);
+    }
+    // Fallback to key if translation API is not available
+    return key;
+};
 
-// Get localized text based on current language
-function getLocalizedText(englishText, portugueseText) {
-    return isPortuguese() ? portugueseText : englishText;
-}
+// Helper for dynamic translation with placeholders
+const tReplace = (key, replacements) => {
+    let text = t(key);
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+        text = text.replace(`{${placeholder}}`, value);
+    });
+    return text;
+};
 
 // Default settings constants
 const DEFAULT_TASK_START_DELAY = 3;
@@ -691,7 +642,7 @@ function isBetterSetupsAvailable() {
  * @returns {Array} Array of available setup options
  */
 function getAvailableSetupOptions() {
-    const options = [getLocalizedText('Auto-setup', 'Autoconfigurar')]; // Always include default with translation
+    const options = [t('mods.betterTasker.autoSetup')]; // Always include default with translation
     
     if (isBetterSetupsAvailable()) {
         try {
@@ -1631,7 +1582,7 @@ function findPawAndFurSection() {
 
 // Create the settings button
 function createSettingsButton() {
-    return createStyledButton(TASKER_BUTTON_ID, getLocalizedText(UI_TEXT.BUTTONS.SETTINGS, UI_TEXT.BUTTONS_PT.SETTINGS), 'blue', () => {
+    return createStyledButton(TASKER_BUTTON_ID, t('mods.betterTasker.settingsButton'), 'blue', () => {
         console.log('[Better Tasker] Settings button clicked');
         openTaskerSettingsModal();
     });
@@ -1639,7 +1590,7 @@ function createSettingsButton() {
 
 // Create the toggle button
 function createToggleButton() {
-    return createStyledButton(TASKER_TOGGLE_ID, getLocalizedText('Disabled', 'Desabilitado'), 'red', () => {
+    return createStyledButton(TASKER_TOGGLE_ID, 'Disabled', 'red', () => {
         console.log('[Better Tasker] Toggle button clicked');
         toggleTasker();
     });
@@ -2000,11 +1951,11 @@ function updateToggleButton() {
     
     switch (taskerState) {
         case TASKER_STATES.DISABLED:
-            toggleButton.textContent = getLocalizedText('Disabled', 'Desabilitado');
+            toggleButton.textContent = 'Disabled';
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-red active:frame-pressed-1-red surface-red gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             break;
         case TASKER_STATES.NEW_TASK_ONLY:
-            toggleButton.textContent = getLocalizedText('New Task+', 'Nova Task+');
+            toggleButton.textContent = 'New Task+';
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             // Set custom blue background
             toggleButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png")';
@@ -2012,7 +1963,7 @@ function updateToggleButton() {
             toggleButton.style.backgroundPosition = 'center';
             break;
         case TASKER_STATES.ENABLED:
-            toggleButton.textContent = getLocalizedText(UI_TEXT.BUTTONS.ENABLED, UI_TEXT.BUTTONS_PT.ENABLED);
+            toggleButton.textContent = t('mods.betterTasker.enabled');
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-green active:frame-pressed-1-green surface-green gap-1 px-1 py-0.5 pixel-font-16 flex-1 text-whiteHighlight';
             break;
     }
@@ -2816,11 +2767,11 @@ function openTaskerSettingsModal() {
                             
                             // Open modal
                             activeTaskerModal = context.api.ui.components.createModal({
-                                title: getLocalizedText('Better Tasker Settings', 'Configurações do Better Tasker'),
+                                title: t('mods.betterTasker.modalTitle'),
                                 width: TASKER_MODAL_WIDTH,
                                 height: TASKER_MODAL_HEIGHT,
                                 content: settingsContent,
-                                buttons: [{ text: getLocalizedText(UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE), primary: true }],
+                                buttons: [{ text: t('mods.betterTasker.closeButton'), primary: true }],
                                 onClose: () => {
                                     console.log('[Better Tasker] Settings modal closed');
                                     cleanupTaskerModal();
@@ -2860,10 +2811,7 @@ function openTaskerSettingsModal() {
                                     if (footer) {
                                         // Create auto-save indicator
                                         const autoSaveIndicator = document.createElement('div');
-                                        autoSaveIndicator.textContent = getLocalizedText(
-                                            '✓ Settings auto-save when changed',
-                                            '✓ Configurações são salvas automaticamente quando alteradas'
-                                        );
+                                        autoSaveIndicator.textContent = t('mods.betterTasker.settingsAutoSave');
                                         autoSaveIndicator.className = 'pixel-font-16';
                                         autoSaveIndicator.style.cssText = `
                                             font-size: 11px;
@@ -2939,9 +2887,9 @@ function createSettingsContent() {
     // Left column - Auto-Task Settings
     const leftColumn = document.createElement('div');
     leftColumn.style.cssText = `
-        width: 250px;
-        min-width: 250px;
-        max-width: 250px;
+        width: 200px;
+        min-width: 200px;
+        max-width: 200px;
         display: flex;
         flex-direction: column;
         border-right: 1px solid #444;
@@ -2995,7 +2943,7 @@ function createGeneralSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText('Auto-Task Settings', 'Configurações de Auto-Task');
+    title.textContent = 'Auto-Task Settings'; // Not in translations yet, keeping as-is
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 10px 0;
@@ -3026,7 +2974,7 @@ function createGeneralSettings() {
     `;
     
     const taskDelayLabel = document.createElement('label');
-    taskDelayLabel.textContent = getLocalizedText(UI_TEXT.LABELS.TASK_START_DELAY, UI_TEXT.LABELS_PT.TASK_START_DELAY);
+    taskDelayLabel.textContent = t('mods.betterTasker.taskStartDelay');
     taskDelayLabel.className = 'pixel-font-16';
     taskDelayLabel.style.cssText = `
         font-weight: bold;
@@ -3058,9 +3006,9 @@ function createGeneralSettings() {
     // Setup method selection
     const setupMethodDiv = createDropdownSetting(
         'setupMethod',
-        getLocalizedText('Setup Method', 'Método de Configuração'),
+        'Setup Method', // Not in translations yet, keeping as-is
         '',
-        loadSettings().setupMethod || getLocalizedText('Auto-setup', 'Autoconfigurar'),
+        loadSettings().setupMethod || t('mods.betterTasker.autoSetup'),
         getAvailableSetupOptions()
     );
     settingsWrapper.appendChild(setupMethodDiv);
@@ -3068,7 +3016,7 @@ function createGeneralSettings() {
     // Auto-refill Stamina setting
     const staminaRefillSetting = createCheckboxSetting(
         'autoRefillStamina',
-        getLocalizedText(UI_TEXT.LABELS.AUTO_REFILL_STAMINA, UI_TEXT.LABELS_PT.AUTO_REFILL_STAMINA),
+        t('mods.betterTasker.autoRefillStamina'),
         '',
         false
     );
@@ -3077,7 +3025,7 @@ function createGeneralSettings() {
     // Faster Autoplay setting
     const fasterAutoplaySetting = createCheckboxSetting(
         'fasterAutoplay',
-        getLocalizedText(UI_TEXT.LABELS.FASTER_AUTOPLAY, UI_TEXT.LABELS_PT.FASTER_AUTOPLAY),
+        t('mods.betterTasker.fasterAutoplay'),
         '',
         false
     );
@@ -3086,7 +3034,7 @@ function createGeneralSettings() {
     // Auto-complete Tasks setting
     const autoCompleteSetting = createCheckboxSetting(
         'autoCompleteTasks',
-        getLocalizedText(UI_TEXT.LABELS.AUTOCOMPLETE_TASKS, UI_TEXT.LABELS_PT.AUTOCOMPLETE_TASKS),
+        t('mods.betterTasker.autocompleteTasks'),
         '',
         true
     );
@@ -3095,7 +3043,7 @@ function createGeneralSettings() {
     // Enable Autoplant setting
     const dragonPlantSetting = createCheckboxSetting(
         'enableDragonPlant',
-        getLocalizedText(UI_TEXT.LABELS.ENABLE_AUTOPLANT, UI_TEXT.LABELS_PT.ENABLE_AUTOPLANT),
+        t('mods.betterTasker.enableAutoplant'),
         '',
         false
     );
@@ -3145,7 +3093,7 @@ function createMonsterSelectionSettings() {
     `;
     
     const title = document.createElement('h3');
-    title.textContent = getLocalizedText('Monster Selection', 'Seleção de Monstros');
+    title.textContent = 'Monster Selection'; // Not in translations yet, keeping as-is
     title.className = 'pixel-font-16';
     title.style.cssText = `
         margin: 0 0 15px 0;
@@ -3156,7 +3104,7 @@ function createMonsterSelectionSettings() {
     section.appendChild(title);
     
     const description = document.createElement('div');
-    description.textContent = getLocalizedText(UI_TEXT.LABELS.CREATURE_SELECTION, UI_TEXT.LABELS_PT.CREATURE_SELECTION);
+    description.textContent = t('mods.betterTasker.creatureSelection');
     description.className = 'pixel-font-16';
     description.style.cssText = `
         margin-bottom: 15px;
@@ -3199,7 +3147,7 @@ function createMonsterSelectionSettings() {
     
     if (creatures.length === 0) {
         const noCreaturesDiv = document.createElement('div');
-        noCreaturesDiv.textContent = getLocalizedText(UI_TEXT.DESCRIPTIONS.NO_CREATURES_AVAILABLE, UI_TEXT.DESCRIPTIONS_PT.NO_CREATURES_AVAILABLE);
+        noCreaturesDiv.textContent = t('mods.betterTasker.noCreaturesAvailable');
         noCreaturesDiv.className = 'pixel-font-16';
         noCreaturesDiv.style.cssText = `
             color: #888;
@@ -3244,10 +3192,7 @@ function createMonsterSelectionSettings() {
             `;
             label.setAttribute('for', checkbox.id);
             if (isUnselectable) {
-                label.setAttribute('title', getLocalizedText(
-                    'This creature cannot appear in tasker tasks',
-                    'Esta criatura não pode aparecer nas tarefas'
-                ));
+                label.setAttribute('title', t('mods.betterTasker.creatureCannotAppearTooltip'));
             }
             
         // Create warning symbol for unselected creatures
@@ -3265,10 +3210,7 @@ function createMonsterSelectionSettings() {
         
         if (!isUnselectable) {
             warningSymbol.textContent = '⚠️';
-            warningSymbol.setAttribute('title', getLocalizedText(
-                'Unselected creatures will cause active tasks to be removed',
-                'Criaturas não selecionadas causarão remoção de tasks ativas'
-            ));
+            warningSymbol.setAttribute('title', t('mods.betterTasker.warningUnselected'));
         } else {
             // Keep blank space for alignment
             warningSymbol.textContent = '';
@@ -3299,10 +3241,10 @@ function createMonsterSelectionSettings() {
         const checkboxes = monsterContainer.querySelectorAll('input[type="checkbox"]:not(:disabled)');
         const totalCreatures = checkboxes.length;
         const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-        warning.textContent = getLocalizedText(
-            `⚠️ Warning: Unselected creatures will cause active tasks to be removed! (${selectedCount}/${totalCreatures} selected creatures)`,
-            `⚠️ Aviso: Criaturas não selecionadas causarão remoção de tasks ativas! (${selectedCount}/${totalCreatures} criaturas selecionadas)`
-        );
+        warning.textContent = tReplace('mods.betterTasker.warningUnselectedCreatures', {
+            selectedCount: selectedCount,
+            totalCreatures: totalCreatures
+        });
     };
     
     // Add warning before monster container
@@ -3377,7 +3319,7 @@ function loadSettings() {
         autoRefillStamina: false,
         fasterAutoplay: false,
         enableDragonPlant: false,
-        setupMethod: getLocalizedText('Auto-setup', 'Autoconfigurar'),  // Default to Auto-setup
+        setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
         // Default all creatures to enabled, except unselectable ones
         ...Object.fromEntries(
             (window.creatureDatabase?.ALL_CREATURES || []).map(creature => 
@@ -3600,6 +3542,11 @@ async function handleQuestLogState(roomId) {
     });
     await sleep(NAVIGATION_DELAY);
     
+    // Set floor to 0 (default)
+    console.log('[Better Tasker] Setting floor to 0');
+    globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: 0 }) });
+    await sleep(100);
+    
     // Wait for map to load
     await sleep(AUTOMATION_CHECK_DELAY);
     console.log('[Better Tasker] Navigation to suggested map completed via API');
@@ -3714,13 +3661,9 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 setupButton.click();
                 await sleep(AUTO_SETUP_DELAY);
                 
-                // Enable autoplay mode (checks Raid Hunter internally to avoid interrupting raids)
+                // Enable autoplay mode
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                const autoplayEnabled = await ensureAutoplayMode();
-                if (!autoplayEnabled) {
-                    console.log('[Better Tasker] Autoplay not enabled (Raid Hunter may be raiding) - aborting setup');
-                    return true; // Return success but skip further setup - raid takes priority
-                }
+                await ensureAutoplayMode();
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -3836,13 +3779,9 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 setupButton.click();
                 await sleep(AUTO_SETUP_DELAY);
                 
-                // Enable autoplay mode (checks Raid Hunter internally to avoid interrupting raids)
+                // Enable autoplay mode
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                const autoplayEnabled = await ensureAutoplayMode();
-                if (!autoplayEnabled) {
-                    console.log('[Better Tasker] Autoplay not enabled (Raid Hunter may be raiding) - aborting setup');
-                    return; // Exit early - raid takes priority
-                }
+                await ensureAutoplayMode();
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -4475,13 +4414,6 @@ function ensureAutoplayMode() {
     // Check if another mod is controlling autoplay
     if (window.AutoplayManager.isControlledByOther('Better Tasker')) {
         console.log('[Better Tasker] Cannot switch to autoplay - controlled by another mod');
-        return false;
-    }
-    
-    // CRITICAL: Always check if Raid Hunter is actively raiding before taking autoplay control
-    // This ensures raids continue uninterrupted even if Better Tasker accepts a task during a raid
-    if (isRaidHunterRaiding()) {
-        console.log('[Better Tasker] Raid Hunter is actively raiding - skipping autoplay control to avoid interrupting raid');
         return false;
     }
     

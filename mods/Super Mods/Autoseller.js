@@ -31,7 +31,7 @@
     // Operation delays for UI settling and processing
     const OPERATION_DELAYS = {
         // Common delay for UI settling before operations (used by sell, squeeze, disenchant, and dragon plant)
-        UI_SETTLE_MS: 1000,
+        UI_SETTLE_MS: 500,
         BEFORE_DRAGON_PLANT_ACTIVATE_MS: 300,  // Delay for activating Dragon Plant after game end
         AFTER_GAME_END_BEFORE_ACTIVATE_MS: 200, // Delay after game end before checking Dragon Plant
         
@@ -144,6 +144,7 @@
     let menuColorObserver = null; // MutationObserver for menu color updates
     let checkboxListeners = []; // Track checkbox event listeners for cleanup
     let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
+    let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
     
     // Translation helper
     const t = (key) => {
@@ -197,7 +198,9 @@
         autoplantGenesMin: 80,
         autoplantKeepGenesEnabled: true,
         autoplantAlwaysDevourBelow: 49,
-        autoplantAlwaysDevourEnabled: false
+        autoplantAlwaysDevourEnabled: false,
+        // Per-creature gene ranges to keep (prevents selling/devouring)
+        creatureKeepRanges: {} // { "CreatureName": { min: number, max: number } }
     };
     
     // =======================
@@ -367,6 +370,57 @@
     // Initialize localStorage with defaults if not exists
     if (!localStorage.getItem('autoseller-settings')) {
         localStorage.setItem('autoseller-settings', JSON.stringify(DEFAULT_SETTINGS));
+    }
+    
+    // =======================
+    // Creature Keep Range Helpers
+    // =======================
+    
+    /**
+     * Get the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     * @returns {Object|null} Keep range { min: number, max: number } or null
+     */
+    function getCreatureKeepRange(creatureName) {
+        const settings = getSettings();
+        const ranges = settings.creatureKeepRanges || {};
+        return ranges[creatureName] || null;
+    }
+    
+    /**
+     * Set the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     * @param {number} min - Minimum gene percentage
+     * @param {number} max - Maximum gene percentage
+     */
+    function setCreatureKeepRange(creatureName, min, max) {
+        const settings = getSettings();
+        const ranges = { ...(settings.creatureKeepRanges || {}) };
+        ranges[creatureName] = { min, max };
+        setSettings({ creatureKeepRanges: ranges });
+    }
+    
+    /**
+     * Clear the keep range for a creature
+     * @param {string} creatureName - Name of the creature
+     */
+    function clearCreatureKeepRange(creatureName) {
+        const settings = getSettings();
+        const ranges = { ...(settings.creatureKeepRanges || {}) };
+        delete ranges[creatureName];
+        setSettings({ creatureKeepRanges: ranges });
+    }
+    
+    /**
+     * Check if a creature should be kept based on its gene range
+     * @param {string} creatureName - Name of the creature
+     * @param {number} totalGenes - Total gene percentage
+     * @returns {boolean} True if creature should be kept
+     */
+    function shouldKeepCreatureByRange(creatureName, totalGenes) {
+        const keepRange = getCreatureKeepRange(creatureName);
+        if (!keepRange) return false;
+        return totalGenes >= keepRange.min && totalGenes <= keepRange.max;
     }
 
     // =======================
@@ -1082,10 +1136,12 @@
         }
     }
     
-    async function removeMonstersFromLocalInventory(idsToRemove, retryCount = 0) {
+    async function removeMonstersFromLocalInventory(idsToRemove, retryCount = 0, verificationRetryCount = 0) {
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 500;
         const VERIFICATION_DELAY = 10; // ms - wait for state to update
+        const VERIFICATION_RETRY_DELAYS = [1000, 2000, 4000]; // ms - delays for verification retries
+        const MAX_VERIFICATION_RETRIES = 3;
         
         try {
             // Validation
@@ -1137,11 +1193,19 @@
                 },
             });
             
-            // Wait for state to update
+            // Wait for state to update (initial delay)
             await new Promise(resolve => setTimeout(resolve, VERIFICATION_DELAY));
             
-            // Verify the update
-            const postState = player.getSnapshot();
+            // Verification with retry logic
+            let postState = player.getSnapshot();
+            let postCount = postState?.context?.monsters?.length ?? preCount;
+            let removedCount = preCount - postCount;
+            
+            // Wait 1000ms before first verification check
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Check if removal was successful
+            postState = player.getSnapshot();
             if (!postState?.context?.monsters) {
                 console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Could not verify update - state unavailable`);
                 inventoryUpdateTracker.recordFailure();
@@ -1150,18 +1214,29 @@
                 if (retryCount < MAX_RETRIES) {
                     console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
                     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
+                    return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1, 0);
                 }
                 
                 return { success: false, removed: [] };
             }
             
-            const postCount = postState.context.monsters.length;
-            const removedCount = preCount - postCount;
+            postCount = postState.context.monsters.length;
+            removedCount = preCount - postCount;
+            
+            // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
+            if (removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+                const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
+                console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return removeMonstersFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
+            }
             
             if (removedCount > 0) {
                 console.log(`[${modName}][SUCCESS][removeMonstersFromLocalInventory] Removed ${removedCount} monsters. Inventory: ${preCount} -> ${postCount}`);
                 inventoryUpdateTracker.recordSuccess(removedCount);
+            } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
+                console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
+                inventoryUpdateTracker.recordFailure();
             }
             
             return { 
@@ -1179,17 +1254,19 @@
             if (retryCount < MAX_RETRIES) {
                 console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-                return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1);
+                return removeMonstersFromLocalInventory(idsToRemove, retryCount + 1, 0);
             }
             
             return { success: false, removed: [], error: e.message };
         }
     }
     
-    async function removeEquipmentFromLocalInventory(idsToRemove, retryCount = 0) {
+    async function removeEquipmentFromLocalInventory(idsToRemove, retryCount = 0, verificationRetryCount = 0) {
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 500;
         const VERIFICATION_DELAY = 10; // ms - wait for state to update
+        const VERIFICATION_RETRY_DELAYS = [1000, 2000, 4000]; // ms - delays for verification retries
+        const MAX_VERIFICATION_RETRIES = 3;
         
         try {
             // Validation
@@ -1254,29 +1331,47 @@
                 },
             });
             
-            // Wait for state to update
+            // Wait for state to update (initial delay)
             await new Promise(resolve => setTimeout(resolve, VERIFICATION_DELAY));
             
-            // Verify the update
-            const postState = player.getSnapshot();
-            if (!postState?.context?.equips) {
+            // Verification with retry logic
+            let postState = player.getSnapshot();
+            let postCount = (postState?.context?.equips?.length ?? postState?.equips?.length) ?? preCount;
+            let removedCount = preCount - postCount;
+            
+            // Wait 1000ms before first verification check
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Check if removal was successful
+            postState = player.getSnapshot();
+            if (!postState?.context?.equips && !postState?.equips) {
                 console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Could not verify update - state unavailable`);
                 
                 // Retry if we haven't exceeded max retries
                 if (retryCount < MAX_RETRIES) {
                     console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
                     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-                    return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1);
+                    return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1, 0);
                 }
                 
                 return { success: false, removed: [] };
             }
             
-            const postCount = postState.context.equips.length;
-            const removedCount = preCount - postCount;
+            postCount = postState.context?.equips?.length ?? postState.equips?.length ?? preCount;
+            removedCount = preCount - postCount;
+            
+            // If removal wasn't successful and we haven't exceeded verification retries, retry with increasing delays
+            if (removedCount === 0 && verificationRetryCount < MAX_VERIFICATION_RETRIES) {
+                const delay = VERIFICATION_RETRY_DELAYS[verificationRetryCount] || VERIFICATION_RETRY_DELAYS[VERIFICATION_RETRY_DELAYS.length - 1];
+                console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Verification failed, retrying verification after ${delay}ms (attempt ${verificationRetryCount + 1}/${MAX_VERIFICATION_RETRIES})...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return removeEquipmentFromLocalInventory(idsToRemove, retryCount, verificationRetryCount + 1);
+            }
             
             if (removedCount > 0) {
                 console.log(`[${modName}][SUCCESS][removeEquipmentFromLocalInventory] Removed ${removedCount} equipment. Inventory: ${preCount} -> ${postCount}`);
+            } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
+                console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
             }
             
             return { 
@@ -1293,7 +1388,7 @@
             if (retryCount < MAX_RETRIES) {
                 console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
                 await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)));
-                return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1);
+                return removeEquipmentFromLocalInventory(idsToRemove, retryCount + 1, 0);
             }
             
             return { success: false, removed: [], error: e.message };
@@ -2215,6 +2310,8 @@
             container: placeholder,
             settingKey: 'autoplantIgnoreList',
             insertBefore: statusArea,
+            actionTitle: 'Sell',
+            enableContextMenu: true, // Enable context menu for autoseller
             onUpdate: (selectedCreatures) => {
                 // Update plant monster filter with new ignore list (for autoplant mode)
                 const currentSettings = getSettings();
@@ -2309,7 +2406,7 @@
     }
 
     // Helper function to create creature boxes for Autoplant
-    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature}) {
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false}) {
         const box = document.createElement('div');
         box.style.display = 'flex';
         box.style.flexDirection = 'column';
@@ -2336,7 +2433,14 @@
         p.style.margin = '0';
         p.style.padding = '0';
         p.style.textAlign = 'center';
-        p.style.color = 'rgb(255, 255, 255)';
+        // Set color based on title: "Sell"/"Squeeze"/"Disenchant" = red, "Keep" = green, otherwise white
+        if (title === 'Sell' || title === 'Squeeze' || title === 'Disenchant') {
+            p.style.color = 'rgb(255, 100, 100)'; // Red
+        } else if (title === 'Keep') {
+            p.style.color = 'rgb(100, 255, 100)'; // Green
+        } else {
+            p.style.color = 'rgb(255, 255, 255)'; // White (default)
+        }
         titleEl.appendChild(p);
         box.appendChild(titleEl);
         
@@ -2348,7 +2452,6 @@
         
         items.forEach(name => {
             const item = document.createElement('div');
-            item.textContent = name;
             item.className = 'pixel-font-14 autoplant-creature-item';
             item.style.color = 'rgb(230, 215, 176)';
             item.style.cursor = 'pointer';
@@ -2356,6 +2459,33 @@
             item.style.borderRadius = '2px';
             item.style.textAlign = 'left';
             item.style.marginBottom = '1px';
+            item.style.position = 'relative';
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '4px';
+            
+            // Add visual indicator if creature has a keep range (before the name)
+            // Show grey lock when in creatures list (inactive), colored when in ignore list (active)
+            const keepRange = getCreatureKeepRange(name);
+            if (keepRange) {
+                const indicator = document.createElement('span');
+                indicator.textContent = '🔒';
+                const statusText = isIgnoreList ? 'Active' : 'Inactive';
+                indicator.title = `Keep range: ${keepRange.min}-${keepRange.max}% (${statusText})`;
+                indicator.style.fontSize = '10px';
+                indicator.style.flexShrink = '0';
+                // Grey when inactive (in creatures list), colored when active (in ignore list)
+                if (!isIgnoreList) {
+                    indicator.style.opacity = '0.5';
+                    indicator.style.filter = 'grayscale(100%)';
+                }
+                item.appendChild(indicator);
+            }
+            
+            // Add creature name text
+            const nameText = document.createElement('span');
+            nameText.textContent = name;
+            item.appendChild(nameText);
             
             const handleMouseEnter = () => {
                 item.style.background = 'rgba(255,255,255,0.08)';
@@ -2386,11 +2516,368 @@
             item.addEventListener('mouseup', handleMouseUp);
             item.addEventListener('click', handleClick);
             
+            // Only add context menu for autoseller (autoplant/autosell), not for autosqueeze/autoduster
+            if (enableContextMenu) {
+                const handleContextMenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Show context menu at cursor position
+                    createCreatureContextMenu(name, e.clientX, e.clientY, () => {
+                        // Refresh the creature columns to show updated indicators
+                        // Find the columns container by traversing up the DOM tree
+                        let currentElement = item;
+                        let columnsContainer = null;
+                        while (currentElement && !columnsContainer) {
+                            currentElement = currentElement.parentElement;
+                            if (currentElement && currentElement.classList && currentElement.classList.contains('creature-columns-container')) {
+                                columnsContainer = currentElement;
+                            }
+                        }
+                        
+                        if (columnsContainer) {
+                            // Trigger a custom event that the parent can listen to
+                            const refreshEvent = new CustomEvent('creatureKeepRangeUpdated', {
+                                detail: { creatureName: name }
+                            });
+                            columnsContainer.dispatchEvent(refreshEvent);
+                        }
+                    });
+                };
+                
+                item.addEventListener('contextmenu', handleContextMenu);
+            }
+            
             scrollContainer.appendChild(item);
         });
         
         box.appendChild(scrollContainer);
         return box;
+    }
+    
+    /**
+     * Creates a context menu for setting creature keep ranges
+     * @param {string} creatureName - Name of the creature
+     * @param {number} x - X position for the menu
+     * @param {number} y - Y position for the menu
+     * @param {Function} onClose - Callback when menu is closed
+     * @returns {HTMLElement} The context menu element
+     */
+    function createCreatureContextMenu(creatureName, x, y, onClose) {
+        // Close any existing context menu before opening a new one
+        if (openContextMenu && openContextMenu.closeMenu) {
+            openContextMenu.closeMenu();
+        }
+        
+        const settings = getSettings();
+        const currentRange = getCreatureKeepRange(creatureName);
+        
+        // Create overlay to close menu on outside click
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.zIndex = '9998';
+        overlay.style.backgroundColor = 'transparent';
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.cursor = 'default';
+        
+        // Create menu container
+        const menu = document.createElement('div');
+        menu.style.position = 'fixed';
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.style.zIndex = '9999';
+        menu.style.minWidth = '200px';
+        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.border = '4px solid transparent';
+        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderRadius = '6px';
+        menu.style.padding = '12px';
+        menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+        
+        // Title
+        const title = document.createElement('div');
+        title.className = 'pixel-font-16';
+        title.textContent = creatureName;
+        title.style.color = '#ffe066';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '8px';
+        title.style.textAlign = 'center';
+        menu.appendChild(title);
+        
+        // Description
+        const desc = document.createElement('div');
+        desc.className = 'pixel-font-14';
+        desc.textContent = t('mods.autoseller.keepRangeDescription') || 'Keep creatures with genes between:';
+        desc.style.color = '#cccccc';
+        desc.style.fontSize = '12px';
+        desc.style.marginBottom = '8px';
+        desc.style.textAlign = 'center';
+        menu.appendChild(desc);
+        
+        // Input container
+        const inputContainer = document.createElement('div');
+        inputContainer.style.display = 'flex';
+        inputContainer.style.alignItems = 'center';
+        inputContainer.style.gap = '6px';
+        inputContainer.style.marginBottom = '12px';
+        inputContainer.style.justifyContent = 'center';
+        
+        // Min input
+        const minInput = document.createElement('input');
+        minInput.type = 'number';
+        minInput.min = '0';
+        minInput.max = '100';
+        minInput.step = '1';
+        minInput.value = currentRange ? currentRange.min : '0';
+        minInput.className = 'pixel-font-14';
+        Object.assign(minInput.style, {
+            width: '50px',
+            padding: '4px',
+            fontSize: '12px',
+            textAlign: 'center',
+            backgroundColor: '#2a2a2a',
+            color: '#ffe066',
+            border: '1px solid #ffe066',
+            borderRadius: '3px'
+        });
+        
+        // Between text
+        const betweenText = document.createElement('span');
+        betweenText.className = 'pixel-font-14';
+        betweenText.textContent = t('mods.autoseller.and') || 'and';
+        betweenText.style.color = '#cccccc';
+        betweenText.style.fontSize = '12px';
+        
+        // Max input
+        const maxInput = document.createElement('input');
+        maxInput.type = 'number';
+        maxInput.min = '0';
+        maxInput.max = '100';
+        maxInput.step = '1';
+        maxInput.value = currentRange ? currentRange.max : '100';
+        maxInput.className = 'pixel-font-14';
+        Object.assign(maxInput.style, {
+            width: '50px',
+            padding: '4px',
+            fontSize: '12px',
+            textAlign: 'center',
+            backgroundColor: '#2a2a2a',
+            color: '#ffe066',
+            border: '1px solid #ffe066',
+            borderRadius: '3px'
+        });
+        
+        // Percent text
+        const percentText = document.createElement('span');
+        percentText.className = 'pixel-font-14';
+        percentText.textContent = '%';
+        percentText.style.color = '#cccccc';
+        percentText.style.fontSize = '12px';
+        
+        inputContainer.appendChild(minInput);
+        inputContainer.appendChild(betweenText);
+        inputContainer.appendChild(maxInput);
+        inputContainer.appendChild(percentText);
+        menu.appendChild(inputContainer);
+        
+        // Button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '6px';
+        buttonContainer.style.justifyContent = 'center';
+        
+        // Save button
+        const saveButton = document.createElement('button');
+        saveButton.className = 'pixel-font-14';
+        saveButton.textContent = t('mods.autoseller.save') || 'Save';
+        applyButtonStyles(saveButton, true, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        // Add hover effect to Save button (active button)
+        saveButton.addEventListener('mouseenter', () => {
+            saveButton.style.backgroundColor = '#2a4a2a';
+            saveButton.style.borderColor = '#4CAF50';
+        });
+        saveButton.addEventListener('mouseleave', () => {
+            saveButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.ACTIVE_GREEN_BG;
+            saveButton.style.borderColor = UI_CONSTANTS.BUTTON_COLORS.BORDER;
+        });
+        
+        saveButton.addEventListener('click', () => {
+            const min = Math.max(0, Math.min(100, parseInt(minInput.value, 10) || 0));
+            const max = Math.max(0, Math.min(100, parseInt(maxInput.value, 10) || 100));
+            
+            // Ensure min <= max
+            const finalMin = Math.min(min, max);
+            const finalMax = Math.max(min, max);
+            
+            setCreatureKeepRange(creatureName, finalMin, finalMax);
+            closeMenu();
+        });
+        
+        // Clear button
+        const clearButton = document.createElement('button');
+        clearButton.className = 'pixel-font-14';
+        clearButton.textContent = t('mods.autoseller.clear') || 'Clear';
+        applyButtonStyles(clearButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        
+        // Add hover effect to Clear button (inactive button)
+        clearButton.addEventListener('mouseenter', () => {
+            clearButton.style.backgroundColor = '#2a2a2a';
+            clearButton.style.color = '#ff6b6b';
+            clearButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        clearButton.addEventListener('mouseleave', () => {
+            clearButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            clearButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            clearButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        clearButton.addEventListener('click', () => {
+            clearCreatureKeepRange(creatureName);
+            closeMenu();
+        });
+        
+        // Cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'pixel-font-14';
+        cancelButton.textContent = t('mods.autoseller.cancel') || 'Cancel';
+        applyButtonStyles(cancelButton, false, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        
+        // Add hover effect to Cancel button (inactive button)
+        cancelButton.addEventListener('mouseenter', () => {
+            cancelButton.style.backgroundColor = '#2a2a2a';
+            cancelButton.style.color = '#4CAF50';
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.GREEN;
+        });
+        cancelButton.addEventListener('mouseleave', () => {
+            cancelButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            cancelButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        cancelButton.addEventListener('click', closeMenu);
+        
+        buttonContainer.appendChild(saveButton);
+        if (currentRange) {
+            buttonContainer.appendChild(clearButton);
+        }
+        buttonContainer.appendChild(cancelButton);
+        menu.appendChild(buttonContainer);
+        
+        // Close menu function
+        function closeMenu() {
+            // Remove event listeners before removing from DOM
+            overlay.removeEventListener('mousedown', overlayClickHandler);
+            overlay.removeEventListener('click', overlayClickHandler);
+            document.removeEventListener('keydown', escHandler);
+            
+            // Remove modal click handlers if they exist
+            if (openContextMenu && openContextMenu.modalClickHandler && openContextMenu.modalContent) {
+                openContextMenu.modalContent.removeEventListener('mousedown', openContextMenu.modalClickHandler);
+                openContextMenu.modalContent.removeEventListener('click', openContextMenu.modalClickHandler);
+            }
+            
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+            if (menu.parentNode) {
+                menu.parentNode.removeChild(menu);
+            }
+            // Clear the global reference
+            if (openContextMenu && (openContextMenu.overlay === overlay || openContextMenu.menu === menu)) {
+                openContextMenu = null;
+            }
+            if (onClose) {
+                onClose();
+            }
+        }
+        
+        // Store reference to this menu
+        openContextMenu = {
+            overlay: overlay,
+            menu: menu,
+            closeMenu: closeMenu
+        };
+        
+        // Close on overlay click/mousedown (use mousedown for better reliability)
+        const overlayClickHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+        };
+        
+        // Close on ESC key
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeMenu();
+            }
+        };
+        
+        // Append to document first (overlay first, then menu on top)
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
+        
+        // Attach event listeners after elements are in DOM
+        overlay.addEventListener('mousedown', overlayClickHandler);
+        overlay.addEventListener('click', overlayClickHandler);
+        document.addEventListener('keydown', escHandler);
+        
+        // Also close menu when clicking inside the autoseller modal (but outside the menu)
+        const modalContent = document.querySelector('[role="dialog"][data-state="open"]');
+        if (modalContent) {
+            const modalClickHandler = (e) => {
+                // Only close if click is not on the menu itself
+                if (!menu.contains(e.target)) {
+                    closeMenu();
+                    modalContent.removeEventListener('mousedown', modalClickHandler);
+                    modalContent.removeEventListener('click', modalClickHandler);
+                }
+            };
+            modalContent.addEventListener('mousedown', modalClickHandler);
+            modalContent.addEventListener('click', modalClickHandler);
+            
+            // Store handler for cleanup
+            openContextMenu.modalClickHandler = modalClickHandler;
+            openContextMenu.modalContent = modalContent;
+        }
+        
+        // Prevent clicks on menu from closing it (stop propagation to overlay)
+        menu.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        menu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Adjust position if menu goes off screen
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+        }
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+        }
+        
+        // Focus first input
+        minInput.focus();
+        minInput.select();
+        
+        return menu;
     }
 
     // =======================
@@ -2404,9 +2891,11 @@
      * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList', 'autosqueezeIgnoreList')
      * @param {Function} options.onUpdate - Callback when ignore list is updated
      * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
+     * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Squeeze', 'Disenchant')
+     * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableCreatures, selectedCreatures, renderCreatureColumns, saveIgnoreList }
      */
-    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore }) {
+    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = 'Sell', enableContextMenu = false }) {
         let availableCreatures = [...getAllAutoplantCreatures()];
         let selectedCreatures = [];
         
@@ -2453,15 +2942,22 @@
                 } else {
                     container.appendChild(columnsContainer);
                 }
+                
+                // Listen for keep range updates to refresh the display (only add once)
+                columnsContainer.addEventListener('creatureKeepRangeUpdated', () => {
+                    renderCreatureColumns();
+                });
             } else {
                 columnsContainer.innerHTML = '';
             }
 
-            // Available creatures column
+            // Available creatures column (keep ranges inactive here)
             const availableBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.creatures'),
+                title: actionTitle,
                 items: availableCreatures,
                 selectedCreature: null,
+                isIgnoreList: false,
+                enableContextMenu: enableContextMenu,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
@@ -2475,11 +2971,13 @@
             availableBox.style.flex = '1 1 0';
             availableBox.style.minHeight = '0';
 
-            // Selected creatures column
+            // Selected creatures column (keep ranges active here)
             const selectedBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.ignoreList'),
+                title: 'Keep',
                 items: selectedCreatures,
                 selectedCreature: null,
+                isIgnoreList: true,
+                enableContextMenu: enableContextMenu,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
@@ -2515,9 +3013,11 @@
      * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autodusterIgnoreList')
      * @param {Function} options.onUpdate - Callback when ignore list is updated
      * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
+     * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Disenchant')
+     * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableEquipment, selectedEquipment, renderEquipmentColumns, saveIgnoreList }
      */
-    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore }) {
+    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = 'Sell', enableContextMenu = false }) {
         // Get equipment list from equipment database (similar to Better Exaltation Chest)
         function generateEquipmentList() {
             const equipmentDatabase = window.equipmentDatabase;
@@ -2577,11 +3077,13 @@
                 columnsContainer.innerHTML = '';
             }
 
-            // Available equipment column
+            // Available equipment column (keep ranges inactive here)
             const availableBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.equipment'),
+                title: actionTitle,
                 items: availableEquipment,
                 selectedCreature: null,
+                isIgnoreList: false,
+                enableContextMenu: enableContextMenu,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, equipmentName);
                     availableEquipment = availableEquipment.filter(e => e !== equipmentName);
@@ -2595,11 +3097,13 @@
             availableBox.style.flex = '1 1 0';
             availableBox.style.minHeight = '0';
 
-            // Selected equipment column
+            // Selected equipment column (keep ranges active here)
             const selectedBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.ignoreList'),
+                title: 'Keep',
                 items: selectedEquipment,
                 selectedCreature: null,
+                isIgnoreList: true,
+                enableContextMenu: enableContextMenu,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, equipmentName);
                     selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
@@ -2657,7 +3161,7 @@
                                 return false;
                             }
                             
-                            // Always devour creatures below absolute threshold (ignores ignore list) - only if enabled
+                            // Always devour creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
                             if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
                                 return true;
                             }
@@ -2669,6 +3173,16 @@
                             
                             // For creatures between thresholds (or all if keep genes disabled), check ignore list
                             if (monsterName && ignoreList.includes(monsterName)) {
+                                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                                const keepRange = getCreatureKeepRange(monsterName);
+                                if (keepRange) {
+                                    // If creature has a keep range, only keep if within range, otherwise devour
+                                    if (shouldKeepCreatureByRange(monsterName, monster.totalGenes)) {
+                                        return false; // Keep - within range
+                                    }
+                                    return true; // Devour - outside range
+                                }
+                                // No keep range set - normal ignore list behavior (keep it)
                                 return false;
                             }
                             
@@ -2824,7 +3338,7 @@
                 genesInputMin.step = '1';
                 genesInputMin.value = settings[genesMinKey] !== undefined ? settings[genesMinKey] : (opts.defaultMin || 80);
                 Object.assign(genesInputMin.style, {
-                    width: '60px',
+                    width: '50px',
                     padding: inputStyles.PADDING,
                     fontSize: inputStyles.FONT_SIZE_SMALL,
                     textAlign: 'center',
@@ -2847,7 +3361,7 @@
                 genesInputMax.step = '1';
                 genesInputMax.value = settings[genesMaxKey] !== undefined ? settings[genesMaxKey] : (opts.defaultMax || 100);
                 Object.assign(genesInputMax.style, {
-                    width: '60px',
+                    width: '50px',
                     padding: inputStyles.PADDING,
                     fontSize: inputStyles.FONT_SIZE_SMALL,
                     textAlign: 'center',
@@ -2991,6 +3505,7 @@
                     container: section,
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
+                    actionTitle: 'Disenchant',
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count
@@ -3005,6 +3520,7 @@
                     container: section,
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
+                    actionTitle: 'Squeeze',
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count
@@ -3552,12 +4068,25 @@
                             const goldReceived = apiResponse[0].result.data.json.goldValue;
                             
                             stateManager.updateSessionStats('sold', 1, goldReceived);
-                            stateManager.markProcessed([id]);
-                            await removeMonstersFromLocalInventory([id]);
+                            // Remove from local inventory and verify removal before marking as processed
+                            const removalResult = await removeMonstersFromLocalInventory([id]);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed([id]);
+                            } else {
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory after selling. Will retry on next batch.`);
+                            }
                         } else if (!result.success && result.status === 404) {
                             // 404 means creature no longer exists on server - always remove from local inventory
-                            stateManager.markProcessed([id]);
-                            await removeMonstersFromLocalInventory([id]);
+                            const removalResult = await removeMonstersFromLocalInventory([id]);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed([id]);
+                            } else {
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove monster ${id} from local inventory (404). Will retry on next batch.`);
+                            }
                         } else if (!result.success) {
                             console.warn(`[${modName}][WARN][processEligibleMonsters] Sell API failed for ID ${id}: HTTP ${result.status}`);
                         }
@@ -3661,17 +4190,38 @@
                         }
                         
                         stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
-                        stateManager.markProcessed(serverIds);
                         
                         // Remove using LOCAL state IDs (these are what exist in the UI)
                         if (ids.length > 0) {
                             await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.BEFORE_REMOVE_FROM_INVENTORY_MS));
-                            await removeMonstersFromLocalInventory(ids);
+                            // Remove from local inventory and verify removal before marking as processed
+                            const removalResult = await removeMonstersFromLocalInventory(ids);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed(serverIds);
+                            } else {
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove ${ids.length} monsters from local inventory after squeezing. Will retry on next batch.`);
+                            }
+                        } else {
+                            // No local IDs found, but API succeeded - mark as processed anyway
+                            stateManager.markProcessed(serverIds);
                         }
                     } else if (!result.success && result.status === 404) {
                         // 404 means creatures no longer exist on server - always remove from local inventory
-                        stateManager.markProcessed(serverIds);
-                        await removeMonstersFromLocalInventory(ids);
+                        if (ids.length > 0) {
+                            const removalResult = await removeMonstersFromLocalInventory(ids);
+                            if (removalResult.success) {
+                                // Only mark as processed after successful removal verification
+                                stateManager.markProcessed(serverIds);
+                            } else {
+                                // Removal failed - log warning but don't mark as processed so it can be retried
+                                console.warn(`[${modName}][WARN][processEligibleMonsters] Failed to remove ${ids.length} monsters from local inventory (404). Will retry on next batch.`);
+                            }
+                        } else {
+                            // No local IDs found, but 404 means they're gone - mark as processed anyway
+                            stateManager.markProcessed(serverIds);
+                        }
                     } else if (!result.success) {
                         console.warn(`[${modName}][WARN][processEligibleMonsters] Squeeze API failed: HTTP ${result.status}`);
                         continue;
@@ -3786,12 +4336,25 @@
                 if (result.success) {
                     // Track equipment count (each equipment = 25 dust as per specification)
                     stateManager.updateSessionStats('disenchanted', 1, 1);
-                    stateManager.markProcessed([equipmentId]);
-                    await removeEquipmentFromLocalInventory([equipmentId]);
+                    // Remove from local inventory and verify removal before marking as processed
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (removalResult.success) {
+                        // Only mark as processed after successful removal verification
+                        stateManager.markProcessed([equipmentId]);
+                    } else {
+                        // Removal failed - log warning but don't mark as processed so it can be retried
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting. Will retry on next batch.`);
+                    }
                 } else if (result.status === 404) {
                     // 404 means equipment no longer exists on server - always remove from local inventory
-                    stateManager.markProcessed([equipmentId]);
-                    await removeEquipmentFromLocalInventory([equipmentId]);
+                    const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
+                    if (removalResult.success) {
+                        // Only mark as processed after successful removal verification
+                        stateManager.markProcessed([equipmentId]);
+                    } else {
+                        // Removal failed - log warning but don't mark as processed so it can be retried
+                        console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404). Will retry on next batch.`);
+                    }
                 } else if (result.status === 429) {
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
                     continue;
@@ -5430,7 +5993,7 @@
                                 const magicResist = invMonster.magicResist || 0;
                                 const totalGenes = hp + ad + ap + armor + magicResist;
                                 
-                                // Always sell creatures below absolute threshold (if enabled) - OVERRIDES ignore list
+                                // Always sell creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
                                 if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
                                     return true;
                                 }
@@ -5439,6 +6002,8 @@
                                 if (keepGenesEnabled && totalGenes >= minGenes) {
                                     return false;
                                 }
+                                
+                                // Get creature name for keep range and ignore list check
                                 let creatureName = null;
                                 if (invMonster.gameId && globalThis.state && globalThis.state.utils && globalThis.state.utils.getMonster) {
                                     try {
@@ -5452,6 +6017,16 @@
                                 }
                                 
                                 if (creatureName && ignoreList.includes(creatureName)) {
+                                    // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                                    const keepRange = getCreatureKeepRange(creatureName);
+                                    if (keepRange) {
+                                        // If creature has a keep range, only keep if within range, otherwise sell
+                                        if (shouldKeepCreatureByRange(creatureName, totalGenes)) {
+                                            return false; // Keep - within range
+                                        }
+                                        return true; // Sell - outside range
+                                    }
+                                    // No keep range set - normal ignore list behavior (keep it)
                                     return false;
                                 }
                                 
@@ -5660,6 +6235,16 @@
                     if (navBtn && navBtn.parentNode) navBtn.parentNode.removeChild(navBtn);
                     if (responsiveStyle && responsiveStyle.parentNode) responsiveStyle.parentNode.removeChild(responsiveStyle);
                     if (widgetStyle && widgetStyle.parentNode) widgetStyle.parentNode.removeChild(widgetStyle);
+                    
+                    // Close any open context menu
+                    if (openContextMenu && openContextMenu.closeMenu) {
+                        try {
+                            openContextMenu.closeMenu();
+                        } catch (error) {
+                            console.warn('[Autoseller] Error closing context menu:', error);
+                        }
+                        openContextMenu = null;
+                    }
                     
                     // 4. Stop observers
                     stopDragonPlantObserver();
