@@ -11,6 +11,9 @@ const TASKER_TOGGLE_ID = `${MOD_ID}-toggle-button`;
 
 // Translation helper
 const t = (key) => {
+    if (typeof api !== 'undefined' && api.i18n && api.i18n.t) {
+        return api.i18n.t(key);
+    }
     if (typeof context !== 'undefined' && context.api && context.api.i18n && context.api.i18n.t) {
         return context.api.i18n.t(key);
     }
@@ -680,8 +683,8 @@ function hasSavedSetup(button) {
  * @returns {HTMLElement|null} The button element or null if not found
  */
 function findSetupButton(option) {
-    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
-        return findButtonByText('Auto-setup');
+    if (option === t('mods.betterTasker.autoSetup')) {
+        return findButtonByText(t('mods.betterTasker.autoSetup'));
     }
     
     // Look for Better Setups buttons with patterns "Setup (LabelName)" or "Save (LabelName)"
@@ -699,11 +702,12 @@ function findSetupButton(option) {
             console.log(`[Better Tasker] Button has saved setup (green) - using it`);
             return setupButton;
         } else {
-            console.log(`[Better Tasker] Button has no saved setup (grey) - falling back to Auto-setup`);
+            const autoSetupText = t('mods.betterTasker.autoSetup');
+            console.log(`[Better Tasker] Button has no saved setup (grey) - falling back to ${autoSetupText}`);
             // Fallback to Auto-setup if the selected button has no saved setup
-            const autoSetupButton = findButtonByText('Auto-setup');
+            const autoSetupButton = findButtonByText(autoSetupText);
             if (autoSetupButton) {
-                console.log(`[Better Tasker] Using Auto-setup as fallback`);
+                console.log(`[Better Tasker] Using ${autoSetupText} as fallback`);
                 return autoSetupButton;
             }
         }
@@ -3701,7 +3705,7 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Paw and Fur Society section found, looking for suggested map...');
                 // Look for suggested map text within this section
                 const allParagraphs = pawAndFurSection.querySelectorAll('p.pixel-font-14');
-                const suggestedMapText = getLocalizedText(UI_TEXT.QUEST_TEXT.SUGGESTED_MAP, UI_TEXT.QUEST_TEXT_PT.SUGGESTED_MAP);
+                const suggestedMapText = t('mods.betterTasker.suggestedMap');
                 for (const p of allParagraphs) {
                     if (p.textContent && p.textContent.includes(suggestedMapText)) {
                         suggestedMapLink = p.querySelector('span.action-link');
@@ -4079,12 +4083,12 @@ function clickAllCloseButtons() {
     const closeButtons = document.querySelectorAll('button');
     let clickedCount = 0;
     
-    // Use centralized text mapping for close button detection
-    const closeTexts = [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE];
+    // Get close button text in current language
+    const closeText = t('controls.close');
     
     for (const button of closeButtons) {
         const buttonText = button.textContent.trim();
-        if (closeTexts.includes(buttonText)) {
+        if (buttonText === closeText) {
             console.log(`[Better Tasker] Clicking close button: "${buttonText}"`);
             button.click();
             clickedCount++;
@@ -4341,20 +4345,36 @@ function enableAutosellerDragonPlant() {
     }
 }
 
+// Helper to get both language versions of a translation key
+function getBothLanguages(key) {
+    const current = t(key);
+    // Hardcode Portuguese translations for common buttons
+    const ptMap = {
+        'mods.betterTasker.autoSetup': 'Autoconfigurar',
+        'mods.betterTasker.start': 'Iniciar',
+        'controls.close': 'Fechar',
+        'mods.betterTasker.newTask': 'Nova tarefa',
+        'mods.betterTasker.remove': 'Remover',
+        'mods.betterTasker.confirm': 'Confirmar'
+    };
+    const pt = ptMap[key] || current;
+    return current === pt ? [current] : [current, pt];
+}
+
 // Finds button by text content - supports both English and Portuguese
 function findButtonByText(text) {
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    // Define text mappings for different languages using centralized constants
+    // Define text mappings for different languages using translation keys
     const textMappings = {
-        'Auto-setup': [UI_TEXT.BUTTONS.AUTO_SETUP, UI_TEXT.BUTTONS_PT.AUTO_SETUP],
-        'Start': [UI_TEXT.BUTTONS.START, UI_TEXT.BUTTONS_PT.START],
-        'Close': [UI_TEXT.BUTTONS.CLOSE, UI_TEXT.BUTTONS_PT.CLOSE],
-        'New task': [UI_TEXT.BUTTONS.NEW_TASK, UI_TEXT.BUTTONS_PT.NEW_TASK],
-        'Remove': [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE],
+        'Auto-setup': getBothLanguages('mods.betterTasker.autoSetup'),
+        'Start': getBothLanguages('mods.betterTasker.start'),
+        'Close': getBothLanguages('controls.close'),
+        'New task': getBothLanguages('mods.betterTasker.newTask'),
+        'Remove': getBothLanguages('mods.betterTasker.remove'),
         'Remove current task': ['Remove current task', 'Remover tarefa atual'],
         'Remove task': ['Remove task', 'Remover tarefa'],
-        'Confirm': [UI_TEXT.BUTTONS.CONFIRM, UI_TEXT.BUTTONS_PT.CONFIRM]
+        'Confirm': getBothLanguages('mods.betterTasker.confirm')
     };
     
     // Get the list of possible texts for the given text key
@@ -4370,9 +4390,9 @@ function findButtonByText(text) {
 function findButtonByPartialText(textKey) {
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    // Define text mappings for different languages using centralized constants
+    // Define text mappings for different languages using translation keys
     const textMappings = {
-        'Remove': [UI_TEXT.BUTTONS.REMOVE, UI_TEXT.BUTTONS_PT.REMOVE]
+        'Remove': getBothLanguages('mods.betterTasker.remove')
     };
     
     // Get the list of possible texts for the given text key
