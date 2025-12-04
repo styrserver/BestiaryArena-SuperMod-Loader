@@ -129,9 +129,14 @@
     
     // Cleanup references
     let boardSubscription1 = null;
-    let boardSubscription2 = null;
+    // Removed boardSubscription2 - all processing now happens at game end
     let playerSubscription = null;
     let debounceTimer = null;
+    
+    // Store latest serverResults from board subscription
+    let latestServerResults = null;
+    // Track the last processed serverResults seed to avoid processing the same results twice
+    let lastProcessedServerResultsSeed = null;
     
     // Event handler references for cleanup
     let emitNewGameHandler1 = null;
@@ -145,6 +150,11 @@
     let checkboxListeners = []; // Track checkbox event listeners for cleanup
     let dragonPlantDebounceTimer = null; // Debounce timer for dragon plant observer
     let openContextMenu = null; // Track currently open context menu { overlay, menu, closeMenu }
+    
+    // Timeout tracking for memory leak prevention
+    let timeoutIds = []; // Track all setTimeout calls for cleanup
+    let isCleaningUp = false; // Flag to prevent execution during cleanup
+    let gameEndSubscription = null; // Track game.world.onGameEnd subscription
     
     // Translation helper
     const t = (key) => {
@@ -554,7 +564,7 @@
                     }
                 }
             });
-            console.log(`[Autoseller] Found ${battleRewardMonsters.length} monsters, ${rewardMonsterIds.size} unique IDs`);
+            // No logging needed - processing logs will show when items are actually processed
         }
         
         return { battleRewardMonsters, rewardMonsterIds };
@@ -609,7 +619,7 @@
                     }
                 }
             });
-            console.log(`[Autoseller] Found ${battleRewardEquipment.length} equipment, ${rewardEquipmentIds.size} unique IDs`);
+            // No logging needed - processing logs will show when items are actually processed
         }
         
         return { battleRewardEquipment, rewardEquipmentIds };
@@ -751,7 +761,7 @@
             const apiResponse = result.data;
             if (apiResponse && apiResponse[0]?.result?.data?.json?.dustDiff !== undefined) {
                 const dustGained = apiResponse[0].result.data.json.dustDiff;
-                console.log(`[Autoseller] Disenchanted equipment, dust: ${dustGained}`);
+                // Log removed - consolidated with batch result
                 return {
                     success: true,
                     dustGained: dustGained
@@ -1175,7 +1185,7 @@
             const preCount = preState.context.monsters.length;
             const idsToRemoveSet = new Set(idsToRemove);
             
-            console.log(`[${modName}][INFO][removeMonstersFromLocalInventory] Attempting to remove ${idsToRemove.length} IDs. Found ${preState.context.monsters.filter(m => idsToRemoveSet.has(m.id)).length} in current inventory (${preCount} total monsters)`);
+            // Removed verbose INFO log - only log on success/error
             
             // Perform state update
             player.send({
@@ -1232,7 +1242,7 @@
             }
             
             if (removedCount > 0) {
-                console.log(`[${modName}][SUCCESS][removeMonstersFromLocalInventory] Removed ${removedCount} monsters. Inventory: ${preCount} -> ${postCount}`);
+                // Removed verbose success log - inventory updates are implicit in action logs
                 inventoryUpdateTracker.recordSuccess(removedCount);
             } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
                 console.warn(`[${modName}][WARN][removeMonstersFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
@@ -1297,7 +1307,7 @@
             const preCount = preState.context.equips.length;
             const idsToRemoveSet = new Set(idsToRemove);
             
-            console.log(`[${modName}][INFO][removeEquipmentFromLocalInventory] Attempting to remove ${idsToRemove.length} IDs. Found ${preState.context.equips.filter(e => idsToRemoveSet.has(e.id)).length} in current inventory (${preCount} total equipment)`);
+            // Removed verbose INFO log - only log on success/error
             
             // Perform state update
             player.send({
@@ -1369,7 +1379,7 @@
             }
             
             if (removedCount > 0) {
-                console.log(`[${modName}][SUCCESS][removeEquipmentFromLocalInventory] Removed ${removedCount} equipment. Inventory: ${preCount} -> ${postCount}`);
+                // Removed verbose success log - inventory updates are implicit in action logs
             } else if (verificationRetryCount >= MAX_VERIFICATION_RETRIES) {
                 console.warn(`[${modName}][WARN][removeEquipmentFromLocalInventory] Verification failed after ${MAX_VERIFICATION_RETRIES} retries. Inventory count unchanged: ${preCount}`);
             }
@@ -2310,7 +2320,7 @@
             container: placeholder,
             settingKey: 'autoplantIgnoreList',
             insertBefore: statusArea,
-            actionTitle: 'Sell',
+            actionTitle: t('mods.autoseller.actionTitleSell'),
             enableContextMenu: true, // Enable context menu for autoseller
             onUpdate: (selectedCreatures) => {
                 // Update plant monster filter with new ignore list (for autoplant mode)
@@ -2434,9 +2444,15 @@
         p.style.padding = '0';
         p.style.textAlign = 'center';
         // Set color based on title: "Sell"/"Squeeze"/"Disenchant" = red, "Keep" = green, otherwise white
-        if (title === 'Sell' || title === 'Squeeze' || title === 'Disenchant') {
+        // Check against both English and translated versions for compatibility
+        const sellTitle = t('mods.autoseller.actionTitleSell');
+        const squeezeTitle = t('mods.autoseller.actionTitleSqueeze');
+        const disenchantTitle = t('mods.autoseller.actionTitleDisenchant');
+        const keepTitle = t('mods.autoseller.actionTitleKeep');
+        if (title === 'Sell' || title === 'Squeeze' || title === 'Disenchant' || 
+            title === sellTitle || title === squeezeTitle || title === disenchantTitle) {
             p.style.color = 'rgb(255, 100, 100)'; // Red
-        } else if (title === 'Keep') {
+        } else if (title === 'Keep' || title === keepTitle) {
             p.style.color = 'rgb(100, 255, 100)'; // Green
         } else {
             p.style.color = 'rgb(255, 255, 255)'; // White (default)
@@ -2895,7 +2911,11 @@
      * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableCreatures, selectedCreatures, renderCreatureColumns, saveIgnoreList }
      */
-    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = 'Sell', enableContextMenu = false }) {
+    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false }) {
+        // Use translation if actionTitle not provided, otherwise use provided value
+        if (!actionTitle) {
+            actionTitle = t('mods.autoseller.actionTitleSell');
+        }
         let availableCreatures = [...getAllAutoplantCreatures()];
         let selectedCreatures = [];
         
@@ -2973,7 +2993,7 @@
 
             // Selected creatures column (keep ranges active here)
             const selectedBox = createAutoplantCreaturesBox({
-                title: 'Keep',
+                title: t('mods.autoseller.actionTitleKeep'),
                 items: selectedCreatures,
                 selectedCreature: null,
                 isIgnoreList: true,
@@ -3017,7 +3037,11 @@
      * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableEquipment, selectedEquipment, renderEquipmentColumns, saveIgnoreList }
      */
-    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = 'Sell', enableContextMenu = false }) {
+    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false }) {
+        // Use translation if actionTitle not provided, otherwise use provided value
+        if (!actionTitle) {
+            actionTitle = t('mods.autoseller.actionTitleSell');
+        }
         // Get equipment list from equipment database (similar to Better Exaltation Chest)
         function generateEquipmentList() {
             const equipmentDatabase = window.equipmentDatabase;
@@ -3099,7 +3123,7 @@
 
             // Selected equipment column (keep ranges active here)
             const selectedBox = createAutoplantCreaturesBox({
-                title: 'Keep',
+                title: t('mods.autoseller.actionTitleKeep'),
                 items: selectedEquipment,
                 selectedCreature: null,
                 isIgnoreList: true,
@@ -3191,7 +3215,7 @@
                     };
                 },
             });
-            console.log(`[Autoseller] Plant monster filter set (ignoring ${ignoreList.length} creatures)`);
+            // Filter set - no logging needed unless there's an issue
         } catch (error) {
             console.error('[Autoseller] Error setting plantMonsterFilter:', error);
         }
@@ -3505,7 +3529,7 @@
                     container: section,
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
-                    actionTitle: 'Disenchant',
+                    actionTitle: t('mods.autoseller.actionTitleDisenchant'),
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count
@@ -3520,7 +3544,7 @@
                     container: section,
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
-                    actionTitle: 'Squeeze',
+                    actionTitle: t('mods.autoseller.actionTitleSqueeze'),
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count
@@ -3800,7 +3824,7 @@
                                     const threshold = DRAGON_PLANT_CONFIG.GOLD_THRESHOLD;
                                     const percentToThreshold = currentPlantGold ? Math.round((currentPlantGold / threshold) * 100) : 0;
                                     
-                                    console.log(`[Autoseller] Dragon Plant devoured ${devouredCount} creatures for ${goldReceived} gold | Total: ${currentPlantGold || 'unknown'} / ${threshold} (${percentToThreshold}%)`);
+                                    console.log(`[Autoseller] Plant: +${goldReceived}g (${devouredCount} creatures) | Total: ${currentPlantGold}/${threshold} (${percentToThreshold}%)`);
                                     stateManager.updateSessionStats('devoured', devouredCount, goldReceived);
                                     
                                     // Check if we should autocollect now that plant gold has increased
@@ -3867,6 +3891,8 @@
         
         processedIds: new Set(),
         
+        pendingEquipmentIds: new Set(),
+        
         errorStats: {
             fetchErrors: 0,
             squeezeErrors: 0,
@@ -3930,11 +3956,41 @@
                 disenchantedDust: 0
             };
             this.processedIds.clear();
+            this.pendingEquipmentIds.clear();
             this.notifyUIUpdate();
         },
         
         clearProcessedIds() {
             this.processedIds.clear();
+        },
+        
+        addPendingEquipment(id) {
+            if (id) {
+                // Safety limit to prevent memory leak (max 100 pending equipment)
+                if (this.pendingEquipmentIds.size >= 100) {
+                    console.warn('[Autoseller] Pending equipment list reached maximum size (100), clearing oldest entries');
+                    // Remove oldest entries (convert to array, remove first half, recreate set)
+                    const idsArray = Array.from(this.pendingEquipmentIds);
+                    const toKeep = idsArray.slice(Math.floor(idsArray.length / 2));
+                    this.pendingEquipmentIds.clear();
+                    toKeep.forEach(equipId => this.pendingEquipmentIds.add(equipId));
+                }
+                this.pendingEquipmentIds.add(id);
+            }
+        },
+        
+        removePendingEquipment(id) {
+            if (id) {
+                this.pendingEquipmentIds.delete(id);
+            }
+        },
+        
+        getPendingEquipmentIds() {
+            return new Set(this.pendingEquipmentIds);
+        },
+        
+        clearPendingEquipment() {
+            this.pendingEquipmentIds.clear();
         },
         
         getSessionStats() {
@@ -4028,7 +4084,7 @@
                     return;
                 }
                 
-                console.log(`[Autoseller] Selling ${toSell.length} monsters`);
+                // Log will be combined with result
                 const batchSize = SELL_RATE_LIMIT.BATCH_SIZE;
                 for (let i = 0; i < toSell.length; i += batchSize) {
                     const batch = toSell.slice(i, i + batchSize);
@@ -4041,8 +4097,12 @@
                         
                         const id = monster.id;
                         
+                        // Check if cleaning up before proceeding
+                        if (isCleaningUp) return;
+                        
                         // Delay before selling and removing (allows UI to settle)
                         await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
+                        if (isCleaningUp) return;
                         
                         await apiRateLimiter.waitForSlot();
                         apiRateLimiter.recordRequest();
@@ -4054,6 +4114,7 @@
                         if (!result.success && result.status === 429) {
                             console.warn(`[${modName}][WARN][processEligibleMonsters] Rate limited (429) for monster ${id}, waiting...`);
                             await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
+                            if (isCleaningUp) return;
                             continue;
                         }
                         
@@ -4092,10 +4153,12 @@
                         }
                         
                         await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+                        if (isCleaningUp) return;
                     }
                     
                     if (i + batchSize < toSell.length) {
                         await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                        if (isCleaningUp) return;
                     }
                 }
             } else if (type === 'squeeze') {
@@ -4103,7 +4166,7 @@
                     return;
                 }
                 
-                console.log(`[Autoseller] Squeezing ${toSqueeze.length} monsters`);
+                // Log will be combined with result
                 for (let i = 0; i < toSqueeze.length; i += SELL_RATE_LIMIT.BATCH_SIZE) {
                     const batch = toSqueeze.slice(i, i + SELL_RATE_LIMIT.BATCH_SIZE);
                     
@@ -4156,8 +4219,12 @@
                         continue;
                     }
                     
+                    // Check if cleaning up before proceeding
+                    if (isCleaningUp) return;
+                    
                     // Delay before squeezing (allows UI to settle)
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
+                    if (isCleaningUp) return;
                     
                     await apiRateLimiter.waitForSlot();
                     apiRateLimiter.recordRequest();
@@ -4186,7 +4253,7 @@
                         const squeezedCount = Math.floor(dustReceived / API_CONSTANTS.DUST_PER_CREATURE);
                         
                         if (dustReceived > 0) {
-                            console.log(`[Autoseller] Squeezed ${squeezedCount} monsters for ${dustReceived} dust`);
+                            console.log(`[Autoseller] Squeezed ${squeezedCount} monsters → ${dustReceived} dust`);
                         }
                         
                         stateManager.updateSessionStats('squeezed', squeezedCount, dustReceived);
@@ -4231,6 +4298,7 @@
                 
                     if (i + SELL_RATE_LIMIT.BATCH_SIZE < toSqueeze.length) {
                         await new Promise(res => setTimeout(res, SELL_RATE_LIMIT.BATCH_DELAY_MS));
+                        if (isCleaningUp) return;
                     }
                 }
             }
@@ -4249,80 +4317,66 @@
                 return;
             }
             
-            // STRICTLY only process equipment from serverResults
-            if (!rewardEquipmentIds || rewardEquipmentIds.size === 0) {
-                return;
-            }
-            
-            if (!Array.isArray(inventoryEquipment) || inventoryEquipment.length === 0) {
-                return;
-            }
-            
-            // Match inventory equipment ONLY by exact server ID match
-            const matchedEquipment = filterEquipmentByServerIds(inventoryEquipment, rewardEquipmentIds);
-            
-            if (matchedEquipment.length === 0) {
-                return;
-            }
-            
-            // CRITICAL SAFETY CHECK: Verify all matched equipment have valid server IDs that are in rewardEquipmentIds
-            const invalidEquipment = matchedEquipment.filter(eq => !eq || !eq.id || !rewardEquipmentIds.has(eq.id));
-            if (invalidEquipment.length > 0) {
-                return;
-            }
-            
-            // Filter equipment that should be disenchanted
-            const toDisenchant = [];
-            
-            for (const invEquipment of matchedEquipment) {
-                // CRITICAL SAFETY CHECK: Double-verify this equipment is in rewardEquipmentIds
-                if (!invEquipment || !invEquipment.id || !rewardEquipmentIds.has(invEquipment.id)) {
-                    continue;
-                }
-                
-                // Skip if already processed
-                if (invEquipment.id && stateManager.isProcessed(invEquipment.id)) {
-                    continue;
-                }
-                
-                // Get equipment details
-                const equipment = getEquipmentDetails(invEquipment);
-                if (!equipment) {
-                    continue;
-                }
-                
-                // CRITICAL SAFETY CHECK: Verify equipment ID is still in rewardEquipmentIds before processing
-                if (!rewardEquipmentIds.has(equipment.id)) {
-                    continue;
-                }
-                
-                // Check ignore list
+            // Helper function to filter equipment that should be disenchanted
+            function filterEquipmentForDisenchant(inventoryEquipmentList, settings, rewardEquipmentIds = null, isPending = false) {
+                const toDisenchant = [];
                 const ignoreList = settings.autodusterIgnoreList || [];
-                if (ignoreList.includes(equipment.name)) {
-                    continue;
-                }
                 
-                // Check if equipment should be disenchanted
-                if (shouldDisenchantEquipment(equipment, settings)) {
+                for (const invEquipment of inventoryEquipmentList) {
+                    const equipmentId = invEquipment?.id;
+                    
+                    // Skip if no ID
+                    if (!equipmentId) {
+                        continue;
+                    }
+                    
+                    // For new equipment: verify it's in rewardEquipmentIds
+                    if (rewardEquipmentIds && !rewardEquipmentIds.has(equipmentId)) {
+                        continue;
+                    }
+                    
+                    // Skip if already processed
+                    if (stateManager.isProcessed(equipmentId)) {
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Get equipment details
+                    const equipment = getEquipmentDetails(invEquipment);
+                    if (!equipment) {
+                        if (isPending) {
+                            // Equipment details unavailable - remove from pending to prevent memory leak
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Check ignore list
+                    if (ignoreList.includes(equipment.name)) {
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
+                    // Check if equipment should be disenchanted
+                    if (!shouldDisenchantEquipment(equipment, settings)) {
+                        if (isPending) {
+                            stateManager.removePendingEquipment(equipmentId);
+                        }
+                        continue;
+                    }
+                    
                     toDisenchant.push(equipment);
                 }
+                
+                return toDisenchant;
             }
             
-            if (toDisenchant.length === 0) {
-                return;
-            }
-            
-            console.log(`[Autoseller] Disenchanting ${toDisenchant.length} equipment`);
-            
-            // Process each equipment item
-            for (const equipment of toDisenchant) {
-                const equipmentId = equipment.id;
-                
-                // CRITICAL SAFETY CHECK: Final verification before API call
-                if (!rewardEquipmentIds.has(equipmentId)) {
-                    continue;
-                }
-                
+            // Helper function to process equipment disenchanting
+            async function processEquipmentDisenchant(equipmentId, isPending = false) {
                 // Delay before disenchanting (allows UI to settle)
                 await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.UI_SETTLE_MS));
                 
@@ -4341,10 +4395,18 @@
                     if (removalResult.success) {
                         // Only mark as processed after successful removal verification
                         stateManager.markProcessed([equipmentId]);
+                        // Remove from pending list on success
+                        stateManager.removePendingEquipment(equipmentId);
                     } else {
                         // Removal failed - log warning but don't mark as processed so it can be retried
                         console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory after disenchanting. Will retry on next batch.`);
+                        // Keep in pending list for retry
+                        if (!isPending) {
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
                     }
+                    // Return result for consolidated logging
+                    return { success: true, dustGained: result.dustGained || 0 };
                 } else if (result.status === 404) {
                     // 404 means equipment no longer exists on server - always remove from local inventory
                     const removalResult = await removeEquipmentFromLocalInventory([equipmentId]);
@@ -4355,13 +4417,136 @@
                         // Removal failed - log warning but don't mark as processed so it can be retried
                         console.warn(`[Autoseller] Failed to remove equipment ${equipmentId} from local inventory (404). Will retry on next batch.`);
                     }
+                    // Remove from pending list on 404 (equipment doesn't exist)
+                    stateManager.removePendingEquipment(equipmentId);
+                    return { success: false, status: 404 };
                 } else if (result.status === 429) {
                     await new Promise(resolve => setTimeout(resolve, OPERATION_DELAYS.RATE_LIMIT_RETRY_MS));
-                    continue;
+                    // Keep in pending list for retry
+                    if (!isPending) {
+                        stateManager.addPendingEquipment(equipmentId);
+                    }
+                    return { success: false, status: 429 };
+                } else {
+                    // Other errors - keep in pending list for retry
+                    console.warn(`[Autoseller] Failed to disenchant equipment ${equipmentId}, will retry. Status: ${result.status || 'unknown'}`);
+                    if (!isPending) {
+                        stateManager.addPendingEquipment(equipmentId);
+                    }
+                    return { success: false, status: result.status };
                 }
                 
                 // Delay between disenchant operations
                 await new Promise(resolve => setTimeout(resolve, SELL_RATE_LIMIT.DELAY_BETWEEN_SELLS_MS));
+            }
+            
+            // Process new equipment from serverResults if available
+            if (rewardEquipmentIds && rewardEquipmentIds.size > 0) {
+                if (!Array.isArray(inventoryEquipment) || inventoryEquipment.length === 0) {
+                    // If no inventory, add all equipment IDs to pending for retry when inventory is available
+                    for (const equipmentId of rewardEquipmentIds) {
+                        if (!stateManager.isProcessed(equipmentId)) {
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
+                    }
+                } else {
+                    // Match inventory equipment ONLY by exact server ID match
+                    const matchedEquipment = filterEquipmentByServerIds(inventoryEquipment, rewardEquipmentIds);
+                    
+                    // Track which equipment IDs from serverResults are not yet in inventory
+                    const matchedIds = new Set(matchedEquipment.map(eq => eq?.id).filter(Boolean));
+                    for (const equipmentId of rewardEquipmentIds) {
+                        if (!matchedIds.has(equipmentId) && !stateManager.isProcessed(equipmentId)) {
+                            // Equipment found in serverResults but not yet in inventory - add to pending for retry
+                            stateManager.addPendingEquipment(equipmentId);
+                        }
+                    }
+                    
+                    if (matchedEquipment.length > 0) {
+                        // CRITICAL SAFETY CHECK: Verify all matched equipment have valid server IDs that are in rewardEquipmentIds
+                        const invalidEquipment = matchedEquipment.filter(eq => !eq || !eq.id || !rewardEquipmentIds.has(eq.id));
+                        if (invalidEquipment.length === 0) {
+                            // Filter equipment that should be disenchanted
+                            const toDisenchant = filterEquipmentForDisenchant(matchedEquipment, settings, rewardEquipmentIds, false);
+                            
+                            if (toDisenchant.length > 0) {
+                                let disenchantedCount = 0;
+                                let totalDust = 0;
+                                
+                                // Process each equipment item
+                                for (const equipment of toDisenchant) {
+                                    const equipmentId = equipment.id;
+                                    
+                                    // CRITICAL SAFETY CHECK: Final verification before API call
+                                    if (!rewardEquipmentIds.has(equipmentId)) {
+                                        continue;
+                                    }
+                                    
+                                    // Add to pending list before attempting disenchant
+                                    stateManager.addPendingEquipment(equipmentId);
+                                    
+                                    const result = await processEquipmentDisenchant(equipmentId, false);
+                                    if (result && result.success) {
+                                        disenchantedCount++;
+                                        totalDust += result.dustGained || 0;
+                                    }
+                                }
+                                
+                                if (disenchantedCount > 0) {
+                                    console.log(`[Autoseller] Disenchanted ${disenchantedCount} equipment → ${totalDust} dust`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check and retry pending equipment IDs (always check, even if no new equipment)
+            const pendingIds = stateManager.getPendingEquipmentIds();
+            if (pendingIds.size > 0) {
+                // Fetch current inventory
+                const currentInventory = await fetchServerEquipment();
+                const inventoryIds = new Set((currentInventory || []).map(eq => eq?.id).filter(Boolean));
+                
+                // Remove pending IDs that are no longer in inventory (memory leak prevention)
+                for (const pendingId of pendingIds) {
+                    if (!inventoryIds.has(pendingId)) {
+                        // Equipment no longer in inventory - remove from pending
+                        stateManager.removePendingEquipment(pendingId);
+                    }
+                }
+                
+                // Get updated pending list after cleanup
+                const remainingPendingIds = stateManager.getPendingEquipmentIds();
+                
+                if (remainingPendingIds.size > 0 && currentInventory && currentInventory.length > 0) {
+                    // Filter inventory to only include pending equipment IDs
+                    const pendingEquipment = currentInventory.filter(invEquipment => 
+                        invEquipment && invEquipment.id && remainingPendingIds.has(invEquipment.id)
+                    );
+                    
+                    if (pendingEquipment.length > 0) {
+                        // Filter equipment that should be disenchanted (with pending cleanup)
+                        const toDisenchant = filterEquipmentForDisenchant(pendingEquipment, settings, null, true);
+                        
+                        if (toDisenchant.length > 0) {
+                            let disenchantedCount = 0;
+                            let totalDust = 0;
+                            
+                            for (const equipment of toDisenchant) {
+                                const result = await processEquipmentDisenchant(equipment.id, true);
+                                if (result && result.success) {
+                                    disenchantedCount++;
+                                    totalDust += result.dustGained || 0;
+                                }
+                            }
+                            
+                            if (disenchantedCount > 0) {
+                                console.log(`[Autoseller] Retried ${disenchantedCount} pending equipment → ${totalDust} dust`);
+                            }
+                        }
+                    }
+                }
             }
         } catch (e) {
             console.error(`[${modName}][ERROR][processEligibleEquipment] Failed to disenchant equipment. Error: ${e.message}`, e);
@@ -5249,9 +5434,23 @@
             boardSubscription1 = globalThis.state.board.subscribe((state) => {
                 const mode = state.context.mode;
                 
+                // Capture serverResults when available, but only update if it's actually different
+                if (state.context?.serverResults) {
+                    const newServerResults = state.context.serverResults;
+                    const newSeed = newServerResults.seed;
+                    const currentSeed = latestServerResults?.seed;
+                    
+                    // Only update if this is a different serverResults (different seed)
+                    if (newSeed !== currentSeed) {
+                        latestServerResults = newServerResults;
+                    }
+                    // If same seed, silently skip (board subscription fires multiple times on state changes)
+                }
+                
                 if (mode === 'autoplay') {
                     // Small delay to ensure autoplay UI is rendered
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
                         // Manage widget based on current settings (autosell/autoplant/off)
                         manageAutosellerWidget();
                         updateAutosellerSessionWidget();
@@ -5259,6 +5458,7 @@
                         // Apply localStorage to game checkbox when autoplay starts
                         applyLocalStorageToGameCheckbox();
                     }, 100);
+                    timeoutIds.push(timeoutId);
                 } else if (mode !== 'autoplay') {
                     // Remove widget when not in autoplay mode
                     const widget = getAutosellerWidget();
@@ -5272,18 +5472,22 @@
             // Listen for game start/end events for additional widget updates
             emitNewGameHandler1 = () => {
                 if (shouldShowAutosellerWidget()) {
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
                         updateAutosellerSessionWidget();
                     }, 100);
+                    timeoutIds.push(timeoutId);
                 }
             };
             globalThis.state.board.on('emitNewGame', emitNewGameHandler1);
             
             emitEndGameHandler1 = () => {
                 if (shouldShowAutosellerWidget()) {
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) return;
                         updateAutosellerSessionWidget();
                     }, 100);
+                    timeoutIds.push(timeoutId);
                 }
             };
             globalThis.state.board.on('emitEndGame', emitEndGameHandler1);
@@ -5497,7 +5701,8 @@
         console.log(`[${modName}] User clicked Dragon Plant checkbox in autoplay session`);
         
         // Use a small delay to let the game update the checkbox state first
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            if (isCleaningUp) return;
             const gameCheckbox = widgetBottom.querySelector('button[role="checkbox"]');
             if (gameCheckbox) {
                 const newState = gameCheckbox.getAttribute('aria-checked') === 'true';
@@ -5525,6 +5730,7 @@
                 updateAutosellerSessionWidget();
             }
         }, 50);
+        timeoutIds.push(timeoutId);
     }
     
     function stopDragonPlantObserver() {
@@ -5548,6 +5754,137 @@
     // 13. Game End Listener for Dragon Plant
     // =======================
     
+    // Helper function to get creature name from monster data
+    function getCreatureNameFromMonster(invMonster) {
+        if (!invMonster?.gameId || !globalThis.state?.utils?.getMonster) {
+            return null;
+        }
+        try {
+            const monsterData = globalThis.state.utils.getMonster(invMonster.gameId);
+            return monsterData?.metadata?.name || null;
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    // Helper function to calculate total genes from monster stats
+    function calculateTotalGenes(invMonster) {
+        const hp = invMonster.hp || 0;
+        const ad = invMonster.ad || 0;
+        const ap = invMonster.ap || 0;
+        const armor = invMonster.armor || 0;
+        const magicResist = invMonster.magicResist || 0;
+        return hp + ad + ap + armor + magicResist;
+    }
+    
+    // Helper function to filter monsters for autosell
+    function filterMonstersForAutosell(matchedMonsters, settings) {
+        if (settings.autoMode !== 'autosell' || matchedMonsters.length === 0) {
+            return [];
+        }
+        
+        const minGenes = settings.autoplantGenesMin ?? 80;
+        const keepGenesEnabled = true;
+        const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
+        const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
+        const ignoreList = settings.autoplantIgnoreList || [];
+        
+        const filteredMonsters = matchedMonsters.filter(invMonster => {
+            if (isShinyCreature(invMonster)) return false;
+            
+            const totalGenes = calculateTotalGenes(invMonster);
+            
+            // Always sell creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
+            if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
+                return true;
+            }
+            
+            // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
+            if (keepGenesEnabled && totalGenes >= minGenes) {
+                return false;
+            }
+            
+            // Get creature name for keep range and ignore list check
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            
+            if (creatureName && ignoreList.includes(creatureName)) {
+                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                const keepRange = getCreatureKeepRange(creatureName);
+                if (keepRange) {
+                    // If creature has a keep range, only keep if within range, otherwise sell
+                    return !shouldKeepCreatureByRange(creatureName, totalGenes);
+                }
+                // No keep range set - normal ignore list behavior (keep it)
+                return false;
+            }
+            
+            return true;
+        });
+        
+        return filteredMonsters.slice(0, 1);
+    }
+    
+    // Helper function to filter monsters for autosqueeze
+    async function filterMonstersForAutosqueeze(matchedMonsters, settings) {
+        if (!settings.autosqueezeChecked || matchedMonsters.length === 0) {
+            return [];
+        }
+        
+        const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
+        const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
+        const ignoreList = settings.autosqueezeIgnoreList || [];
+        const hasDaycare = hasDaycareIconInInventory();
+        let daycareMonsterIds = [];
+        
+        if (hasDaycare) {
+            daycareMonsterIds = await fetchDaycareData();
+        }
+        
+        const filterStats = {
+            total: matchedMonsters.length,
+            locked: 0,
+            shiny: 0,
+            inDaycare: 0,
+            inIgnoreList: 0,
+            geneRange: 0,
+            passed: 0
+        };
+        
+        const filteredMonsters = matchedMonsters.filter(invMonster => {
+            if (invMonster.locked) {
+                filterStats.locked++;
+                return false;
+            }
+            if (isShinyCreature(invMonster)) {
+                filterStats.shiny++;
+                return false;
+            }
+            if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {
+                filterStats.inDaycare++;
+                return false;
+            }
+            
+            const creatureName = getCreatureNameFromMonster(invMonster);
+            if (creatureName && ignoreList.includes(creatureName)) {
+                filterStats.inIgnoreList++;
+                return false;
+            }
+            
+            const totalGenes = calculateTotalGenes(invMonster);
+            if (totalGenes < squeezeMinGenes || totalGenes > squeezeMaxGenes) {
+                filterStats.geneRange++;
+                return false;
+            }
+            
+            filterStats.passed++;
+            return true;
+        });
+        
+        // No verbose logging - only log when processing actually happens
+        
+        return filteredMonsters;
+    }
+    
     function setupGameEndListener() {
         if (globalThis.state?.board?.on) {
             // Listen for new game events to access the world object
@@ -5558,12 +5895,97 @@
                     return;
                 }
                 
+                // Don't clear latestServerResults here - the board subscription (setupAutosellerWidgetObserver)
+                // will automatically update it with the new game's serverResults when available
+                
                 // Subscribe to world.onGameEnd which fires when battle animation completes
-                game.world.onGameEnd.once(() => {
-                    setTimeout(() => {
+                // This is when inventory is actually updated with new creatures/equipment
+                // Note: .once() may not return a cancellable subscription, but we track it for reference
+                game.world.onGameEnd.once(async () => {
+                    if (isCleaningUp) return;
+                    const timeoutId = setTimeout(async () => {
+                        if (isCleaningUp || !stateManager.canRun()) {
+                            return;
+                        }
+                        
                         checkAndActivateDragonPlant();
+                        
+                        // Process creatures and equipment at game end when inventory is actually updated
+                        const settings = getSettings();
+                        
+                        if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
+                            return;
+                        }
+                        
+                        // Try to get serverResults from stored value (from board subscription) or from snapshot
+                        let serverResults = latestServerResults;
+                        let serverResultsSource = 'latestServerResults';
+                        if (!serverResults) {
+                            const boardState = globalThis.state?.board?.getSnapshot?.();
+                            serverResults = boardState?.context?.serverResults;
+                            serverResultsSource = 'boardSnapshot';
+                        }
+                        
+                        if (!serverResults) {
+                            console.warn('[Autoseller] Game end: No serverResults found - cannot process items');
+                            return;
+                        }
+                        
+                        // Check if we've already processed this serverResults (using seed as unique identifier)
+                        const currentSeed = serverResults.seed;
+                        if (currentSeed === lastProcessedServerResultsSeed) {
+                            return; // Already processed, skip silently
+                        }
+                        
+                        // Extract creatures and equipment from serverResults
+                        const { rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
+                        const { rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
+                        
+                        // Fetch inventory at game end (when it's actually updated)
+                        const inventorySnapshot = await fetchServerMonsters();
+                        
+                        // Process monsters (autosell/autosqueeze)
+                        if (rewardMonsterIds.size > 0) {
+                            // Match inventory monsters ONLY by exact server ID match (NOT gameId)
+                            const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
+                            
+                            if (matchedMonsters.length > 0) {
+                                // Process autosell
+                                if (settings.autoMode === 'autosell') {
+                                    const monstersToSell = filterMonstersForAutosell(matchedMonsters, settings);
+                                    if (monstersToSell.length > 0) {
+                                        console.log('[Autoseller] Processing autosell for', monstersToSell.length, 'monsters');
+                                        await processEligibleMonsters(monstersToSell, 'sell');
+                                    }
+                                }
+                                
+                                // Process autosqueeze
+                                if (settings.autosqueezeChecked) {
+                                    const monstersToSqueeze = await filterMonstersForAutosqueeze(matchedMonsters, settings);
+                                    if (monstersToSqueeze.length > 0) {
+                                        console.log('[Autoseller] Processing autosqueeze for', monstersToSqueeze.length, 'monsters');
+                                        await processEligibleMonsters(monstersToSqueeze, 'squeeze');
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Process equipment (autoduster)
+                        if (settings.autodusterChecked && rewardEquipmentIds.size > 0) {
+                            console.log('[Autoseller] Processing autoduster for', rewardEquipmentIds.size, 'equipment');
+                            const inventoryEquipment = await fetchServerEquipment();
+                            await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment);
+                        }
+                        
+                        // Mark this serverResults as processed (using seed as unique identifier)
+                        // Don't clear latestServerResults - let the board subscription overwrite it naturally
+                        // when the next game's serverResults arrives
+                        lastProcessedServerResultsSeed = currentSeed;
                     }, OPERATION_DELAYS.AFTER_GAME_END_BEFORE_ACTIVATE_MS);
+                    timeoutIds.push(timeoutId);
                 });
+                // Store reference (though .once() may not be cancellable)
+                gameEndSubscription = game.world.onGameEnd;
             };
             globalThis.state.board.on('newGame', emitNewGameHandler2);
             
@@ -5800,7 +6222,11 @@
         }
         
         // Step 2: Wait for inventory to open, then click Dragon Plant
-        setTimeout(() => {
+        const timeoutId1 = setTimeout(() => {
+            if (isCleaningUp) {
+                isCollecting = false;
+                return;
+            }
             const dragonPlantItem = document.querySelector(`.sprite.item.id-${DRAGON_PLANT_CONFIG.ITEM_ID}`);
             if (!dragonPlantItem) {
                 console.log('[Autoseller] Dragon Plant item not found in inventory');
@@ -5820,13 +6246,21 @@
             itemButton.click();
             
             // Step 3: Wait for item details, then start collect loop
-            setTimeout(() => {
+            const timeoutId2 = setTimeout(() => {
+                if (isCleaningUp) {
+                    isCollecting = false;
+                    return;
+                }
                 let collectCount = 0;
                 let retryCount = 0;
                 const MAX_RETRIES = 3;
                 
                 // Recursive function to collect multiple times
                 const collectLoop = () => {
+                    if (isCleaningUp) {
+                        isCollecting = false;
+                        return;
+                    }
                     // Safety check: prevent infinite loops
                     if (collectCount >= DRAGON_PLANT_CONFIG.MAX_COLLECT_ITERATIONS) {
                         closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
@@ -5838,7 +6272,8 @@
                     if (!collectButton) {
                         if (retryCount < MAX_RETRIES) {
                             retryCount++;
-                            setTimeout(collectLoop, 200);
+                            const timeoutId = setTimeout(collectLoop, 200);
+                            timeoutIds.push(timeoutId);
                             return;
                         }
                         closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
@@ -5852,7 +6287,11 @@
                     collectCount++;
                     
                     // Step 4: Wait then check if we should collect again
-                    setTimeout(() => {
+                    const timeoutId = setTimeout(() => {
+                        if (isCleaningUp) {
+                            isCollecting = false;
+                            return;
+                        }
                         const currentGold = getPlantGold();
                         
                         if (currentGold !== undefined && currentGold !== null && currentGold >= DRAGON_PLANT_CONFIG.GOLD_THRESHOLD) {
@@ -5861,12 +6300,15 @@
                             closeDialogs(() => verifyAndUpdateCooldown(initialGold, collectCount));
                         }
                     }, DRAGON_PLANT_CONFIG.TIMINGS.AFTER_COLLECT);
+                    timeoutIds.push(timeoutId);
                 };
                 
                 // Start the collect loop
                 collectLoop();
             }, DRAGON_PLANT_CONFIG.TIMINGS.ITEM_DETAILS_OPEN);
+            timeoutIds.push(timeoutId2);
         }, DRAGON_PLANT_CONFIG.TIMINGS.INVENTORY_OPEN);
+        timeoutIds.push(timeoutId1);
     }
     
     // Helper: Verify collection success and update cooldown
@@ -5927,187 +6369,14 @@
         // (ignore mod loader config, use localStorage as single source of truth)
         updatePlantMonsterFilter();
         
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            if (isCleaningUp) return;
             updateAutosellerNavButtonColor();
         }, 1000);
+        timeoutIds.push(timeoutId);
         
-        let lastProcessedBattleKey = null;
-        if (globalThis.state.board && globalThis.state.board.subscribe) {
-            boardSubscription2 = globalThis.state.board.subscribe(async ({ context }) => {
-                const serverResults = context.serverResults;
-                if (!serverResults || !serverResults.rewardScreen || typeof serverResults.rewardScreen.gameTicks !== 'number') return;
-                
-                const seed = serverResults.seed;
-                const gameTicks = serverResults.rewardScreen.gameTicks;
-                const battleKey = `${seed}:${gameTicks}`;
-                if (battleKey === lastProcessedBattleKey) return;
-                lastProcessedBattleKey = battleKey;
-                
-                const inventorySnapshot = await fetchServerMonsters();
-                const waitSeconds = gameTicks / 16;
-                
-                // Reduced buffer from 5s to 2s for faster activation
-                setTimeout(async () => {
-                    if (!stateManager.canRun()) {
-                        return;
-                    }
-                    
-                    const settings = getSettings();
-                    
-                    if (!settings.autoMode && !settings.autosqueezeChecked && !settings.autodusterChecked) {
-                        return;
-                    }
-                    
-                    // Process autoplant: handled by checkAndActivateDragonPlant() via game end listener
-                    // (removed duplicate clickDragonPlantButton() call to prevent double clicks)
-                    
-                    // Extract creatures from serverResults (current battle rewards only)
-                    const { battleRewardMonsters, rewardMonsterIds } = extractMonstersFromServerResults(serverResults);
-                    
-                    // Extract equipment from serverResults (current battle rewards only)
-                    const { battleRewardEquipment, rewardEquipmentIds } = extractEquipmentFromServerResults(serverResults);
-                    
-                    // Filter inventory to only include creatures from this battle
-                    // CRITICAL: For both autosell and autosqueeze, we MUST only process creatures from serverResults
-                    let monstersToSell = [];
-                    let monstersToSqueeze = [];
-                    
-                    if (rewardMonsterIds.size > 0) {
-                        // Match inventory monsters ONLY by exact server ID match (NOT gameId)
-                        const matchedMonsters = filterMonstersByServerIds(inventorySnapshot, rewardMonsterIds);
-                        
-                        // Process autosell filtering
-                        if (settings.autoMode === 'autosell') {
-                            // Apply gene threshold filtering using autoplant thresholds
-                            const minGenes = settings.autoplantGenesMin ?? 80;
-                            const keepGenesEnabled = true; // Always enabled - autosqueezer handles 80%+ creatures
-                            const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
-                            const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
-                            const ignoreList = settings.autoplantIgnoreList || [];
-                            
-                            let filteredMonsters = matchedMonsters.filter(invMonster => {
-                                const hp = invMonster.hp || 0;
-                                const ad = invMonster.ad || 0;
-                                const ap = invMonster.ap || 0;
-                                const armor = invMonster.armor || 0;
-                                const magicResist = invMonster.magicResist || 0;
-                                const totalGenes = hp + ad + ap + armor + magicResist;
-                                
-                                // Always sell creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
-                                if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
-                                    return true;
-                                }
-                                
-                                // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
-                                if (keepGenesEnabled && totalGenes >= minGenes) {
-                                    return false;
-                                }
-                                
-                                // Get creature name for keep range and ignore list check
-                                let creatureName = null;
-                                if (invMonster.gameId && globalThis.state && globalThis.state.utils && globalThis.state.utils.getMonster) {
-                                    try {
-                                        const monsterData = globalThis.state.utils.getMonster(invMonster.gameId);
-                                        if (monsterData && monsterData.metadata && monsterData.metadata.name) {
-                                            creatureName = monsterData.metadata.name;
-                                        }
-                                    } catch (e) {
-                                        // Ignore errors
-                                    }
-                                }
-                                
-                                if (creatureName && ignoreList.includes(creatureName)) {
-                                    // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
-                                    const keepRange = getCreatureKeepRange(creatureName);
-                                    if (keepRange) {
-                                        // If creature has a keep range, only keep if within range, otherwise sell
-                                        if (shouldKeepCreatureByRange(creatureName, totalGenes)) {
-                                            return false; // Keep - within range
-                                        }
-                                        return true; // Sell - outside range
-                                    }
-                                    // No keep range set - normal ignore list behavior (keep it)
-                                    return false;
-                                }
-                                
-                                return true;
-                            });
-                            
-                            monstersToSell = filteredMonsters.slice(0, 1);
-                        }
-                        
-                        if (settings.autosqueezeChecked) {
-                            const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
-                            const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
-                            const ignoreList = settings.autosqueezeIgnoreList || [];
-                            const hasDaycare = hasDaycareIconInInventory();
-                            let daycareMonsterIds = [];
-                            
-                            if (hasDaycare) {
-                                daycareMonsterIds = await fetchDaycareData();
-                            }
-                            
-                            let filteredMonsters = matchedMonsters.filter(invMonster => {
-                                if (invMonster.locked) {
-                                    return false;
-                                }
-                                
-                                if (isShinyCreature(invMonster)) {
-                                    return false;
-                                }
-                                
-                                if (hasDaycare && daycareMonsterIds.includes(invMonster.id)) {
-                                    return false;
-                                }
-                                
-                                let creatureName = null;
-                                if (invMonster.gameId && globalThis.state && globalThis.state.utils && globalThis.state.utils.getMonster) {
-                                    try {
-                                        const monsterData = globalThis.state.utils.getMonster(invMonster.gameId);
-                                        if (monsterData && monsterData.metadata && monsterData.metadata.name) {
-                                            creatureName = monsterData.metadata.name;
-                                        }
-                                    } catch (e) {
-                                        // Ignore errors
-                                    }
-                                }
-                                
-                                if (creatureName && ignoreList.includes(creatureName)) {
-                                    return false;
-                                }
-                                
-                                const hp = invMonster.hp || 0;
-                                const ad = invMonster.ad || 0;
-                                const ap = invMonster.ap || 0;
-                                const armor = invMonster.armor || 0;
-                                const magicResist = invMonster.magicResist || 0;
-                                const totalGenes = hp + ad + ap + armor + magicResist;
-                                
-                                return totalGenes >= squeezeMinGenes && totalGenes <= squeezeMaxGenes;
-                            });
-                            
-                            monstersToSqueeze = filteredMonsters;
-                        }
-                    }
-                    
-                    // Process autosqueeze if enabled
-                    if (settings.autosqueezeChecked && monstersToSqueeze.length > 0) {
-                        await processEligibleMonsters(monstersToSqueeze, 'squeeze');
-                    }
-                    
-                    // Process autosell if autosell mode is enabled
-                    if (settings.autoMode === 'autosell' && monstersToSell.length > 0) {
-                        await processEligibleMonsters(monstersToSell, 'sell');
-                    }
-                    
-                    // Process autoduster if enabled
-                    if (settings.autodusterChecked && rewardEquipmentIds.size > 0) {
-                        const inventoryEquipment = await fetchServerEquipment();
-                        await processEligibleEquipment(rewardEquipmentIds, inventoryEquipment);
-                    }
-                }, (waitSeconds + 2) * 1000); // Reduced buffer from 5s to 2s for faster activation
-            });
-        }
+        // Removed boardSubscription2 - all processing now happens at game end when inventory is actually updated
+        // (see setupGameEndListener for processing logic)
     }
     
     if (typeof window !== 'undefined' && window.registerMod) {
@@ -6201,14 +6470,7 @@
                         }
                     }
                     
-                    if (boardSubscription2) {
-                        try {
-                            boardSubscription2.unsubscribe();
-                            boardSubscription2 = null;
-                        } catch (error) {
-                            console.warn('[Autoseller] Error unsubscribing board2:', error);
-                        }
-                    }
+                    // Removed boardSubscription2 cleanup - no longer used
                     
                     if (playerSubscription) {
                         try {
@@ -6219,11 +6481,23 @@
                         }
                     }
                     
-                    // 2. Clear timers
+                    // 2. Set cleanup flag and clear all timers
+                    isCleaningUp = true;
+                    
                     if (debounceTimer) {
                         clearTimeout(debounceTimer);
                         debounceTimer = null;
                     }
+                    
+                    // Clear all tracked timeouts
+                    timeoutIds.forEach(id => {
+                        try {
+                            clearTimeout(id);
+                        } catch (error) {
+                            console.warn('[Autoseller] Error clearing timeout:', error);
+                        }
+                    });
+                    timeoutIds = [];
                     
                     // 3. Remove DOM elements
                     const widget = document.getElementById(UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_WIDGET);
@@ -6327,10 +6601,12 @@
                     delete window.autoplantStatusSummary;
                     delete window.__autosellerLoaded;
                     
-                    // 9. Verify cleanup was successful
+                    // 9. Reset cleanup flag
+                    isCleaningUp = false;
+                    
+                    // 10. Verify cleanup was successful
                     const remainingReferences = [
                         boardSubscription1,
-                        boardSubscription2,
                         playerSubscription,
                         debounceTimer,
                         dragonPlantDebounceTimer,
@@ -6338,7 +6614,8 @@
                         emitNewGameHandler1,
                         emitNewGameHandler2,
                         emitEndGameHandler1,
-                        menuColorObserver
+                        menuColorObserver,
+                        gameEndSubscription
                     ].filter(Boolean);
                     
                     if (remainingReferences.length > 0) {

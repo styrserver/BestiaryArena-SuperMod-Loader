@@ -637,7 +637,9 @@ function hasSavedSetup(button) {
  * @returns {HTMLElement|null} The button element or null if not found
  */
 function findSetupButton(option) {
-    if (option === getLocalizedText('Auto-setup', 'Autoconfigurar')) {
+    // Check if option matches Auto-setup (either translated or literal)
+    const autoSetupTranslated = t('mods.raidHunter.autoSetup');
+    if (option === autoSetupTranslated || option === 'Auto-setup') {
         return findButtonByText('Auto-setup');
     }
     
@@ -3224,9 +3226,11 @@ async function handleEventOrRaid(roomId) {
     // Show toast notification
     showToast('Starting Raid Hunter');
 
+    // Load settings once at the beginning (used throughout the function)
+    const settings = loadSettings();
+
     try {
         // User-configurable initial delay (standardized timing)
-        const settings = loadSettings();
         const startDelay = (settings.raidDelay || DEFAULT_START_DELAY) * 1000;
         console.log(`[Raid Hunter] Waiting ${startDelay/1000}s before navigation...`);
         await new Promise(resolve => setTimeout(resolve, startDelay));
@@ -3293,9 +3297,6 @@ async function handleEventOrRaid(roomId) {
         cancelCurrentRaid('automation disabled after auto-setup');
         return;
     }
-    
-    // Load settings once for all raid configuration
-    const raidSettings = loadSettings();
 
     // Enable autoplay mode
     console.log('[Raid Hunter] Enabling autoplay mode...');
@@ -3336,7 +3337,7 @@ async function handleEventOrRaid(roomId) {
     }
 
     // Enable Bestiary Automator's autorefill stamina if Raid Hunter setting is enabled
-    if (raidSettings.autoRefillStamina) {
+    if (settings.autoRefillStamina) {
         console.log('[Raid Hunter] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
         setTimeout(() => {
@@ -3350,7 +3351,7 @@ async function handleEventOrRaid(roomId) {
             }
         }, 500);
     }
-    if (raidSettings.fasterAutoplay) {
+    if (settings.fasterAutoplay) {
         console.log('[Raid Hunter] Faster autoplay enabled - enabling Bestiary Automator faster autoplay...');
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
         setTimeout(() => {
@@ -3364,7 +3365,7 @@ async function handleEventOrRaid(roomId) {
             }
         }, 500);
     }
-    if (raidSettings.enableDragonPlant) {
+    if (settings.enableDragonPlant) {
         console.log('[Raid Hunter] Dragon Plant enabled - enabling via Autoseller...');
         enableAutosellerDragonPlant();
     }
