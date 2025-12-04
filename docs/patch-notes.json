@@ -4,6 +4,18 @@
   },
   "notes": [
   {
+    "version": "3.1.3",
+    "changes": [
+      { "type": "added", "mod": "Autoseller", "text": "Added right-click context menu on creatures to set per-creature gene keep ranges" },
+      { "type": "added", "mod": "Better Boosted Maps", "text": "Added floor selection (0-15) dropdown for each boosted map" },
+      { "type": "added", "mod": "Raid Hunter", "text": "Added floor selection (0-15) dropdown for each raid map" },
+      { "type": "added", "mod": "Better Tasker", "text": "Added default floor 0 for task navigation" },
+      { "type": "changed", "mod": "Better Boosted Maps", "text": "Migrated to centralized translation API (i18n)" },
+      { "type": "changed", "mod": "Better Tasker", "text": "Migrated to centralized translation API (i18n)" },
+      { "type": "changed", "mod": "Raid Hunter", "text": "Migrated to centralized translation API (i18n)" }
+    ]
+  },
+  {
     "version": "3.1.2",
     "changes": [
       { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed Supreme potions being used below threshold due to inventory not updating for tier 5 potions" },
