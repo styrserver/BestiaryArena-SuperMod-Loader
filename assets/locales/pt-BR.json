@@ -844,6 +844,11 @@
       "genesMinThreshold": "Limite mínimo de genes para {label}",
       "genesMaxThreshold": "Limite máximo de genes para {label}",
       "keepRangeDescription": "Manter criaturas com genes entre:",
+      "actionTitleSell": "Vender",
+      "actionTitleKeep": "Manter",
+      "actionTitleSqueeze": "Espremer",
+      "actionTitleDisenchant": "Desencantar",
+      "actionTitlePlant": "Plantar",
       "save": "Salvar",
       "clear": "Limpar",
       "cancel": "Cancelar"

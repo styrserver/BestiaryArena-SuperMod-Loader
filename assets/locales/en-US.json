@@ -843,6 +843,11 @@
       "genesMinThreshold": "Minimum gene threshold for {label}",
       "genesMaxThreshold": "Maximum gene threshold for {label}",
       "keepRangeDescription": "Keep creatures with genes between:",
+      "actionTitleSell": "Sell",
+      "actionTitleKeep": "Keep",
+      "actionTitleSqueeze": "Squeeze",
+      "actionTitleDisenchant": "Disenchant",
+      "actionTitlePlant": "Plant",
       "save": "Save",
       "clear": "Clear",
       "cancel": "Cancel"

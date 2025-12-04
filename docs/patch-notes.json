@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.1.5",
+    "changes": [
+      { "type": "added", "mod": "Autoseller", "text": "Fixes for autoseller, autosqueezer and autoduster" },
+      { "type": "fixed", "mod": "Core", "text": "Translation fixes that caused errors in alot of different mods" }
+    ]
+  },
+  {
     "version": "3.1.4",
     "changes": [
       { "type": "fixed", "mod": "Better Tasker", "text": "Fixed translation errors: replaced getLocalizedText and UI_TEXT references with centralized translation API" }
