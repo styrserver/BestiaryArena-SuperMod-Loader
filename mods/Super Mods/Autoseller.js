@@ -2322,6 +2322,7 @@
             insertBefore: statusArea,
             actionTitle: t('mods.autoseller.actionTitleSell'),
             enableContextMenu: true, // Enable context menu for autoseller
+            showKeepRangeLock: true, // Show lock icon for autoseller
             onUpdate: (selectedCreatures) => {
                 // Update plant monster filter with new ignore list (for autoplant mode)
                 const currentSettings = getSettings();
@@ -2416,7 +2417,7 @@
     }
 
     // Helper function to create creature boxes for Autoplant
-    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false}) {
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false}) {
         const box = document.createElement('div');
         box.style.display = 'flex';
         box.style.flexDirection = 'column';
@@ -2482,20 +2483,23 @@
             
             // Add visual indicator if creature has a keep range (before the name)
             // Show grey lock when in creatures list (inactive), colored when in ignore list (active)
-            const keepRange = getCreatureKeepRange(name);
-            if (keepRange) {
-                const indicator = document.createElement('span');
-                indicator.textContent = '🔒';
-                const statusText = isIgnoreList ? 'Active' : 'Inactive';
-                indicator.title = `Keep range: ${keepRange.min}-${keepRange.max}% (${statusText})`;
-                indicator.style.fontSize = '10px';
-                indicator.style.flexShrink = '0';
-                // Grey when inactive (in creatures list), colored when active (in ignore list)
-                if (!isIgnoreList) {
-                    indicator.style.opacity = '0.5';
-                    indicator.style.filter = 'grayscale(100%)';
+            // Only show lock for autoseller, not autosqueezer
+            if (showKeepRangeLock) {
+                const keepRange = getCreatureKeepRange(name);
+                if (keepRange) {
+                    const indicator = document.createElement('span');
+                    indicator.textContent = '🔒';
+                    const statusText = isIgnoreList ? 'Active' : 'Inactive';
+                    indicator.title = `Keep range: ${keepRange.min}-${keepRange.max}% (${statusText})`;
+                    indicator.style.fontSize = '10px';
+                    indicator.style.flexShrink = '0';
+                    // Grey when inactive (in creatures list), colored when active (in ignore list)
+                    if (!isIgnoreList) {
+                        indicator.style.opacity = '0.5';
+                        indicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(indicator);
                 }
-                item.appendChild(indicator);
             }
             
             // Add creature name text
@@ -2911,7 +2915,7 @@
      * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableCreatures, selectedCreatures, renderCreatureColumns, saveIgnoreList }
      */
-    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false }) {
+    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false, showKeepRangeLock = false }) {
         // Use translation if actionTitle not provided, otherwise use provided value
         if (!actionTitle) {
             actionTitle = t('mods.autoseller.actionTitleSell');
@@ -2978,6 +2982,7 @@
                 selectedCreature: null,
                 isIgnoreList: false,
                 enableContextMenu: enableContextMenu,
+                showKeepRangeLock: showKeepRangeLock,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
@@ -2998,6 +3003,7 @@
                 selectedCreature: null,
                 isIgnoreList: true,
                 enableContextMenu: enableContextMenu,
+                showKeepRangeLock: showKeepRangeLock,
                 onSelectCreature: (creatureName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
@@ -3545,6 +3551,7 @@
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
                     actionTitle: t('mods.autoseller.actionTitleSqueeze'),
+                    showKeepRangeLock: false, // Don't show lock for autosqueeze
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count

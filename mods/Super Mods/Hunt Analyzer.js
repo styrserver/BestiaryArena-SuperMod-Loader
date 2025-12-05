@@ -1011,9 +1011,9 @@ function stopInternalClock() {
 }
 
 // =======================
-// 2.7.a Rank Pointer Coordination
+// 2.7.a Manual Runner Coordination
 // =======================
-// Rank Pointer coordination is now handled event-driven in updateInternalClock()
+// Manual Runner coordination is now handled event-driven in updateInternalClock()
 // No polling needed - manual timing is already started on newGame events and mode changes
 
 // Update the internal clock by watching DOM autoplay timer
@@ -1024,15 +1024,15 @@ function updateInternalClock() {
   const isAutoplayRunning = mode === 'autoplay' && currentAutoplayTime && currentAutoplayTime > 0;
   // Lightweight heartbeat only when something interesting changes below
   
-  // Check Rank Pointer coordination (event-driven, no polling)
-  // If Rank Pointer is running and we're in manual mode, ensure timing is active
+  // Check Manual Runner coordination (event-driven, no polling)
+  // If Manual Runner is running and we're in manual mode, ensure timing is active
   if (mode === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
     try {
-      const rankPointerRunning = !!(window.__modCoordination && window.__modCoordination.rankPointerRunning);
-      if (rankPointerRunning) {
+      const manualRunnerRunning = !!(window.__modCoordination && window.__modCoordination.manualRunnerRunning);
+      if (manualRunnerRunning) {
         HuntAnalyzerState.timeTracking.manualActive = true;
         HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();
-        console.log('[Hunt Analyzer] Manual timing: started due to Rank Pointer (event-driven)');
+        console.log('[Hunt Analyzer] Manual timing: started due to Manual Runner (event-driven)');
       }
     } catch (_) {}
   }

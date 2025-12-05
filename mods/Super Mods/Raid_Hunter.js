@@ -8,7 +8,7 @@ console.log('[Raid Hunter] Initializing...');
 const MOD_ID = 'raid-hunter';
 const RAID_CLOCK_ID = `${MOD_ID}-raid-clock`;
 
-// Key event constants and helper (align with Rank Pointer)
+// Key event constants and helper (align with Manual Runner)
 const ESC_KEY_EVENT_INIT = {
     key: 'Escape',
     code: 'Escape',
@@ -201,9 +201,9 @@ function isBoostedMapsActive() {
 
 // Helper function to check if raid processing can proceed based on priority
 function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
-    // Rank Pointer coordination: pause while Rank Pointer runs
-    if (window.__modCoordination?.rankPointerRunning) {
-        console.log(`[Raid Hunter] Rank Pointer running during ${context} - skipping`);
+    // Manual Runner coordination: pause while Manual Runner runs
+    if (window.__modCoordination?.manualRunnerRunning) {
+        console.log(`[Raid Hunter] Manual Runner running during ${context} - skipping`);
         return false;
     }
     // Board Analyzer always blocks (highest priority system task)
@@ -264,8 +264,8 @@ function canProcessRaidWithPriority(raidPriority, context = 'raid processing') {
 
 // Helper function to check if raid processing can proceed (backwards compatibility)
 function canProcessRaid(context = 'raid processing') {
-    if (window.__modCoordination?.rankPointerRunning) {
-        console.log(`[Raid Hunter] Rank Pointer running during ${context} - skipping`);
+    if (window.__modCoordination?.manualRunnerRunning) {
+        console.log(`[Raid Hunter] Manual Runner running during ${context} - skipping`);
         return false;
     }
     if (isBoardAnalyzerRunning) {
@@ -1486,14 +1486,14 @@ function handleBoardAnalyzerCoordination() {
         if (!window.__modCoordination) return;
         
         const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
-        const rankPointerRunning = window.__modCoordination.rankPointerRunning === true;
+        const manualRunnerRunning = window.__modCoordination.manualRunnerRunning === true;
         
-        if ((boardAnalyzerRunning || rankPointerRunning) && !isBoardAnalyzerRunning) {
+        if ((boardAnalyzerRunning || manualRunnerRunning) && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Raid Hunter monitoring
-            console.log('[Raid Hunter] Coordination active (Board Analyzer or Rank Pointer) - pausing monitoring');
+            console.log('[Raid Hunter] Coordination active (Board Analyzer or Manual Runner) - pausing monitoring');
             isBoardAnalyzerRunning = true;
             pauseRaidHunterMonitoring();
-        } else if (!boardAnalyzerRunning && !rankPointerRunning && isBoardAnalyzerRunning) {
+        } else if (!boardAnalyzerRunning && !manualRunnerRunning && isBoardAnalyzerRunning) {
             // Board Analyzer finished - resume Raid Hunter monitoring
             console.log('[Raid Hunter] Coordination cleared - resuming monitoring');
             isBoardAnalyzerRunning = false;

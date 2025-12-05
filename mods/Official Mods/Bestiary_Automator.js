@@ -29,7 +29,8 @@ const defaultConfig = {
     great: true,
     ultimate: true,
     supreme: true
-  }
+  },
+  thresholdsEnabled: true
 };
 
 // Storage key for localStorage
@@ -722,18 +723,22 @@ const findLowestTierPotion = (inventory) => {
       continue;
     }
     
-    // Check if quantity meets threshold
-    const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
-      ? config.potionQuantityThresholds[potionName]
-      : 0;
-    
-    if (potionCount <= threshold) {
-      console.log(`[Bestiary Automator] Tier ${tier} (${potionName}) potion quantity (${potionCount}) does not exceed threshold (${threshold}), skipping`);
-      continue;
+    // Check if quantity meets threshold (only if thresholds are enabled)
+    let threshold = 0;
+    if (config.thresholdsEnabled) {
+      threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+        ? config.potionQuantityThresholds[potionName]
+        : 0;
+      
+      if (potionCount <= threshold) {
+        console.log(`[Bestiary Automator] Tier ${tier} (${potionName}) potion quantity (${potionCount}) does not exceed threshold (${threshold}), skipping`);
+        continue;
+      }
     }
     
     // This potion is available, enabled, and meets threshold
-    console.log(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (threshold: ${threshold})`);
+    const thresholdInfo = config.thresholdsEnabled ? `threshold: ${threshold}` : 'thresholds disabled';
+    console.log(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (${thresholdInfo})`);
     return tier;
   }
   
@@ -953,6 +958,7 @@ const refillStaminaViaAPI = async () => {
       }
       
       // Make API call with silent error handling for expected 404s
+      // The fetch interceptor will handle 404s gracefully, but we still check here
       try {
         const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.staminaPotion?batch=1', {
           method: 'POST',
@@ -977,18 +983,22 @@ const refillStaminaViaAPI = async () => {
           const status = response.status;
           
           // Handle 400/403/404 errors (no potions or invalid request) - these are expected, handle silently
+          // The fetch interceptor should have already converted these to 200 responses,
+          // but we check here as a fallback
           if (status === 400 || status === 403 || status === 404) {
+            // Silently handle - no console logging for expected errors
             removeStaminaPotionFromInventory(potionTier);
             break;
           }
           
-          // For other errors, log and break
+          // For other unexpected errors, log at debug level (not error level)
           let errorMessage = '';
           try {
             const errorBody = await response.text();
             errorMessage = errorBody ? ` - ${errorBody.substring(0, 200)}` : '';
           } catch (_) {}
-          console.log(`[Bestiary Automator] API call failed with status ${status}${errorMessage}`);
+          // Use console.log instead of console.error for unexpected but non-critical errors
+          console.log(`[Bestiary Automator] API call returned unexpected status ${status}${errorMessage}`);
           break;
         }
         
@@ -1039,7 +1049,13 @@ const refillStaminaViaAPI = async () => {
         }
         
       } catch (error) {
-        console.error('[Bestiary Automator] Error in API call:', error);
+        // Only log unexpected errors (not network errors which are handled by fetch interceptor)
+        // Network errors from 404s are expected and handled gracefully
+        if (!error.message || (!error.message.includes('404') && !error.message.includes('Not Found'))) {
+          console.log('[Bestiary Automator] Unexpected error in API call:', error.message || error);
+        }
+        // Remove potion from inventory on any error
+        removeStaminaPotionFromInventory(potionTier);
         break;
       }
     }
@@ -1151,13 +1167,20 @@ const hasStaminaPotions = () => {
         continue;
       }
       
-      // Check if quantity meets threshold
-      const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
-        ? config.potionQuantityThresholds[potionName]
-        : 0;
-      
-      if (potionCount > threshold) {
-        return true;
+      // Check if quantity meets threshold (only if thresholds are enabled)
+      if (config.thresholdsEnabled) {
+        const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+          ? config.potionQuantityThresholds[potionName]
+          : 0;
+        
+        if (potionCount > threshold) {
+          return true;
+        }
+      } else {
+        // If thresholds are disabled, any potion count > 0 is valid
+        if (potionCount > 0) {
+          return true;
+        }
       }
     }
     
@@ -1235,7 +1258,9 @@ const removeStaminaPotionFromInventory = (potionTier = 1) => {
 // Store original fetch function
 let originalFetch = null;
 
-// Intercept fetch requests to handle 403 errors from stamina potion API
+// Intercept fetch requests to handle 404 errors from stamina potion API gracefully
+// Note: Browser console may still show 404 errors - these are expected when potions are unavailable
+// and are handled gracefully by this interceptor
 const setupStaminaPotionErrorHandler = () => {
   try {
     // Store original fetch if not already stored
@@ -1269,17 +1294,32 @@ const setupStaminaPotionErrorHandler = () => {
           // Use default tier if parsing fails
         }
         
-        // Check inventory before making the call to prevent unnecessary 404s
+        // Enhanced pre-flight check: verify potion availability before making API call
         const inventory = getPlayerInventory();
         if (inventory) {
           const potionKey = `stamina${potionTier}`;
           const potionCount = inventory[potionKey] || 0;
-          if (potionCount <= 0) {
-            // Potion not available - remove from inventory and prevent the API call
-            // This prevents the browser from logging a 404 error
-            removeStaminaPotionFromInventory(potionTier);
-            // Return a response that won't trigger browser console errors
-            // The calling code checks response.ok and then data, so this is safe
+          
+          // Also check if this potion type is enabled
+          const potionName = getPotionNameFromTier(potionTier);
+          const isPotionEnabled = potionName && config.potionEnabled && config.potionEnabled[potionName];
+          
+          // Check threshold (only if thresholds are enabled)
+          let thresholdCheck = false;
+          if (config.thresholdsEnabled) {
+            const threshold = potionName && config.potionQuantityThresholds 
+              ? (config.potionQuantityThresholds[potionName] || 0)
+              : 0;
+            thresholdCheck = potionCount <= threshold;
+          }
+          
+          if (potionCount <= 0 || !isPotionEnabled || thresholdCheck) {
+            // Potion not available, disabled, or below threshold - prevent the API call
+            // This prevents unnecessary 404 errors in the console
+            if (potionCount <= 0) {
+              removeStaminaPotionFromInventory(potionTier);
+            }
+            // Return a successful mock response - the calling code handles null data gracefully
             return Promise.resolve(new Response(JSON.stringify([{
               result: {
                 data: {
@@ -1294,12 +1334,17 @@ const setupStaminaPotionErrorHandler = () => {
           }
         }
         
+        // Make the actual fetch call with error handling
+        // Note: Browser may still log 404s in console - these are expected when server inventory
+        // differs from local inventory and are handled gracefully below
         return originalFetch.apply(this, args).then(async response => {
           // Check for client/server errors (400, 401, 403, 404) - these are expected when potions aren't available
+          // This can happen if server inventory differs from local inventory
           if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404) {
-            // Remove the potion from local inventory immediately (expected behavior for 404s)
+            // Remove the potion from local inventory immediately (expected behavior)
             removeStaminaPotionFromInventory(potionTier);
-            // Return a successful mock response to prevent browser console errors
+            // Return a successful mock response - the calling code handles null data gracefully
+            // This prevents the error from propagating, though browser may still log the 404
             return new Response(JSON.stringify([{
               result: {
                 data: {
@@ -1315,9 +1360,9 @@ const setupStaminaPotionErrorHandler = () => {
           
           return response;
         }).catch(error => {
-          // Silently handle network errors
+          // Handle network errors gracefully
           removeStaminaPotionFromInventory(potionTier);
-          // Return a successful mock response to prevent browser console errors
+          // Return a successful mock response - the calling code handles null data gracefully
           return new Response(JSON.stringify([{
             result: {
               data: {
@@ -3056,11 +3101,17 @@ const setupPotionCheckboxAutoSave = (checkbox, potionType) => {
     // Update associated threshold input disabled state
     const thresholdInput = document.getElementById(`${potionType}-threshold-input`);
     if (thresholdInput) {
-      thresholdInput.disabled = !checkbox.checked;
+      thresholdInput.disabled = !config.thresholdsEnabled || !checkbox.checked;
     }
     updatePotionWarning();
     autoSaveConfig(`potionEnabled.${potionType}`, checkbox.checked);
   });
+  
+  // Set initial disabled state for threshold input
+  const thresholdInput = document.getElementById(`${potionType}-threshold-input`);
+  if (thresholdInput) {
+    thresholdInput.disabled = !config.thresholdsEnabled || !checkbox.checked;
+  }
 };
 
 // Helper function to setup potion threshold input with auto-save
@@ -3125,9 +3176,35 @@ const createConfigPanel = () => {
   potionHeaderLabel.textContent = t('mods.automator.potion');
   potionHeaderLabel.style.cssText = 'margin-right: 10px; min-width: 120px; display: inline-block; text-align: center;';
   
-  const thresholdHeaderLabel = document.createElement('span');
-  thresholdHeaderLabel.textContent = t('mods.automator.threshold');
-  thresholdHeaderLabel.style.cssText = 'width: 80px; display: inline-block; text-align: center;';
+  // Create threshold toggle button
+  const thresholdToggleButton = document.createElement('button');
+  thresholdToggleButton.textContent = t('mods.automator.threshold');
+  thresholdToggleButton.id = 'threshold-toggle-button';
+  thresholdToggleButton.type = 'button';
+  thresholdToggleButton.style.cssText = 'width: 80px; padding: 4px 8px; background-color: ' + (config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)') + '; color: white; border: 1px solid ' + (config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)') + '; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; transition: background-color 0.2s, border-color 0.2s;';
+  thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
+  
+  // Toggle threshold functionality
+  thresholdToggleButton.addEventListener('click', () => {
+    config.thresholdsEnabled = !config.thresholdsEnabled;
+    saveConfigToStorage(config);
+    
+    // Update button appearance
+    thresholdToggleButton.style.backgroundColor = config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)';
+    thresholdToggleButton.style.borderColor = config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)';
+    thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
+    
+    // Enable/disable all threshold inputs
+    const thresholdInputs = ['mini', 'strong', 'great', 'ultimate', 'supreme'].map(type => 
+      document.getElementById(`${type}-threshold-input`)
+    );
+    thresholdInputs.forEach(input => {
+      if (input) {
+        const checkbox = document.getElementById(`${input.id.replace('-threshold-input', '')}-potion-checkbox`);
+        input.disabled = !config.thresholdsEnabled || !checkbox?.checked;
+      }
+    });
+  });
   
   // Create info icon with tooltip for threshold
   const thresholdInfoIcon = document.createElement('img');
@@ -3138,7 +3215,7 @@ const createConfigPanel = () => {
   
   potionHeaderRow.appendChild(checkboxSpacer);
   potionHeaderRow.appendChild(potionHeaderLabel);
-  potionHeaderRow.appendChild(thresholdHeaderLabel);
+  potionHeaderRow.appendChild(thresholdToggleButton);
   potionHeaderRow.appendChild(thresholdInfoIcon);
   
   // Create container for items above Advanced section
@@ -3421,10 +3498,10 @@ const createConfigPanel = () => {
     input.value = Math.max(min, Math.min(max, value));
     input.style.cssText = 'width: 80px; padding: 5px; background-color: #222; color: #fff; border: 1px solid #444;';
     
-    // Disable input when checkbox is unchecked
-    input.disabled = !checked;
+    // Disable input when checkbox is unchecked or thresholds are disabled
+    input.disabled = !config.thresholdsEnabled || !checked;
     checkbox.addEventListener('change', () => {
-      input.disabled = !checkbox.checked;
+      input.disabled = !config.thresholdsEnabled || !checkbox.checked;
       updatePotionWarning();
       // Note: auto-save is handled by event listeners added in setTimeout block
       // to avoid duplicate saves
@@ -3887,8 +3964,8 @@ function updateSettingsModalUI() {
       
       if (checkbox) {
         checkbox.checked = config.potionEnabled[potionType];
-        // Update input disabled state
-        if (thresholdInput) thresholdInput.disabled = !checkbox.checked;
+        // Update input disabled state (disabled if thresholds are disabled OR checkbox is unchecked)
+        if (thresholdInput) thresholdInput.disabled = !config.thresholdsEnabled || !checkbox.checked;
         if (!checkbox.hasAttribute('data-listener-added')) {
           setupPotionCheckboxAutoSave(checkbox, potionType);
           checkbox.setAttribute('data-listener-added', 'true');
@@ -3908,6 +3985,14 @@ function updateSettingsModalUI() {
       fasterAutoplayInput.value = config.fasterAutoplayMs;
       setupNumberInputAutoSave(fasterAutoplayInput, 'fasterAutoplayMs', 0, 3000);
       fasterAutoplayInput.setAttribute('data-listener-added', 'true');
+    }
+    
+    // Update threshold toggle button state
+    const thresholdToggleButton = document.getElementById('threshold-toggle-button');
+    if (thresholdToggleButton) {
+      thresholdToggleButton.style.backgroundColor = config.thresholdsEnabled ? 'rgb(76, 175, 80)' : 'rgb(231, 76, 60)';
+      thresholdToggleButton.style.borderColor = config.thresholdsEnabled ? 'rgb(69, 160, 73)' : 'rgb(211, 47, 47)';
+      thresholdToggleButton.title = config.thresholdsEnabled ? 'Thresholds enabled (click to disable)' : 'Thresholds disabled (click to enable)';
     }
     
     // Update potion warning visibility after updating UI

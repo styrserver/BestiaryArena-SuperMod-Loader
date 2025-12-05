@@ -2632,7 +2632,7 @@ function createConfigPanel(startAnalysisCallback) {
   stopWhenTicksContainer.appendChild(stopWhenTicksInput);
   content.appendChild(stopWhenTicksContainer);
 
-  // Warning if no ally creatures on board (parity with Rank Pointer)
+  // Warning if no ally creatures on board (parity with Manual Runner)
   const hasAlly = hasAllyCreaturesOnBoard();
   if (!hasAlly) {
     const warningMsg = document.createElement('div');

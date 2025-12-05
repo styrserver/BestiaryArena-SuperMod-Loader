@@ -304,13 +304,14 @@ Advanced raid automation system for Bestiary Arena:
 - Real-time raid status monitoring with countdown timers and queue system for multiple raids
 - Comprehensive settings panel for customization and raid map selection
 
-#### Rank Pointer
-Automates repeated manual runs until victory or a target S+ rank:
+#### Manual Runner
+Automates repeated manual runs until victory, target S+ rank, or maximum floor:
 - Starts fights and auto-closes reward screens between attempts
 - Tracks attempts, defeats, stamina spent, and rank points
-- Optional target: stop on S+X based on map and team size
+- Optional targets: stop on S+X based on map and team size, or reach a maximum floor
+- Automatically advances to next floor after victory when using Maximum Floor mode
 - Copy replay/seed from the results modal
-- Streamlines rank grinding for efficient progression and S+ achievement
+- Streamlines rank grinding and floor progression for efficient achievement
 
 #### RunTracker
 Local run data tracking and storage system:

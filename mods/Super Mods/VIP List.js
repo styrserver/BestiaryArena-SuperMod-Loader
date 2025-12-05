@@ -343,7 +343,7 @@ function saveSortPreference() {
 }
 
 // Load config from localStorage (preferred) or context.config
-// Similar to Rank Pointer's approach - prioritize localStorage
+// Similar to Manual Runner's approach - prioritize localStorage
 function loadVIPListConfig() {
   const saved = storage.get(STORAGE_KEYS.CONFIG);
   if (saved !== null) {
@@ -11461,7 +11461,7 @@ exports = {
       // Clear any stale cache entries from previous sessions
       PlayerDataFetcher.clearCache();
       
-      // Ensure config is loaded from localStorage first (prioritize localStorage like Rank Pointer)
+      // Ensure config is loaded from localStorage first (prioritize localStorage like Manual Runner)
       loadVIPListConfig();
       
       startAccountMenuObserver();

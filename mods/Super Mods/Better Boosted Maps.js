@@ -855,9 +855,9 @@ function isBetterTaskerTasking() {
 
 // Check if Better Boosted Maps can run (only if no raids or tasks)
 function canRunBoostedMaps() {
-    // Pause while Rank Pointer is running to avoid conflicts
-    if (window.__modCoordination?.rankPointerRunning === true) {
-        console.log('[Better Boosted Maps] Rank Pointer running - skipping boosted maps');
+    // Pause while Manual Runner is running to avoid conflicts
+    if (window.__modCoordination?.manualRunnerRunning === true) {
+        console.log('[Better Boosted Maps] Manual Runner running - skipping boosted maps');
         return false;
     }
     // Board Analyzer always blocks (highest priority system task)

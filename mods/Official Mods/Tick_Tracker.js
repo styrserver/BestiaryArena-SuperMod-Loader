@@ -11,9 +11,6 @@ const defaultConfig = {
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
 
-// Force enabled to always start false (don't persist this setting)
-config.enabled = false;
-
 // Constants
 const MOD_ID = 'tick-tracker';
 const BUTTON_ID = `${MOD_ID}-button`;
@@ -277,17 +274,20 @@ function updateTickWidget() {
 
 // Start tracking game ticks
 function startTracking() {
-  if (isTracking) {
-    // Already tracking
-    return;
+  const wasAlreadyTracking = isTracking;
+  
+  if (!isTracking) {
+    console.log('Starting tick tracking...');
+    isTracking = true;
+  } else {
+    console.log('Tracking already active, ensuring observer is set up...');
   }
   
-      console.log('Starting tick tracking...');
-  isTracking = true;
-  
   try {
-    // Listen for new game events to subscribe to onGameEnd
-    globalThis.state.board.on('newGame', (event) => {
+    // Only set up event listener if not already tracking (to avoid duplicate listeners)
+    if (!wasAlreadyTracking) {
+      // Listen for new game events to subscribe to onGameEnd
+      globalThis.state.board.on('newGame', (event) => {
       console.log('New game event detected');
       
       const world = event.world;
@@ -358,9 +358,10 @@ function startTracking() {
           }
         });
       }
-    });
+      });
+    }
     
-    // Start the widget observer to inject when autoplay UI appears
+    // Always set up the widget observer (needed on reload even if already tracking)
     setupWidgetObserver();
   } catch (error) {
     console.error('Error setting up tick tracking:', error);
@@ -670,6 +671,12 @@ function init() {
   // Start tracking if enabled
   if (config.enabled) {
     startTracking();
+    // Also try to create widget immediately if autoplay container is already visible
+    setTimeout(() => {
+      if (config.enabled && !document.getElementById(WIDGET_ID)) {
+        createOrUpdateWidget();
+      }
+    }, 2000); // Wait 2 seconds for page to fully load
   }
   
       console.log('Tick Tracker initialized');

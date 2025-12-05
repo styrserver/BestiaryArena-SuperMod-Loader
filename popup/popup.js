@@ -997,7 +997,7 @@ const modDescriptions = {
   'Guilds': 'Guild management and interaction features.',
   'Hunt Analyzer': 'Analyze and optimize hunting strategies.',
   'Raid Hunter': 'Enhanced raid hunting features and tracking.',
-  'Rank Pointer': 'Track and display rank information.',
+  'Manual Runner': 'Run manual mode until victory with automatic floor progression.',
   'Stamina Optimizer': 'Optimize stamina usage and management.',
   'VIP List': 'Manage and view VIP list features.'
 };
@@ -1023,7 +1023,7 @@ const superModNames = [
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
-  'Rank Pointer.js',
+  'Manual Runner.js',
   'RunTracker.js',
   'Stamina Optimizer.js',
   'VIP List.js'

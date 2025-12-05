@@ -1490,17 +1490,17 @@ function handleBoardAnalyzerCoordination() {
         if (!window.__modCoordination) return;
         
         const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
-        const rankPointerRunning = window.__modCoordination.rankPointerRunning === true;
+        const manualRunnerRunning = window.__modCoordination.manualRunnerRunning === true;
         
-        if ((boardAnalyzerRunning || rankPointerRunning) && !isBoardAnalyzerRunning) {
+        if ((boardAnalyzerRunning || manualRunnerRunning) && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Better Tasker automation
-            console.log('[Better Tasker] Coordination active (Board Analyzer or Rank Pointer) - pausing task automation');
+            console.log('[Better Tasker] Coordination active (Board Analyzer or Manual Runner) - pausing task automation');
             isBoardAnalyzerRunning = true;
             
             if (taskerState === TASKER_STATES.ENABLED) {
                 stopAutomation();
             }
-        } else if (!boardAnalyzerRunning && !rankPointerRunning && isBoardAnalyzerRunning) {
+        } else if (!boardAnalyzerRunning && !manualRunnerRunning && isBoardAnalyzerRunning) {
             // Board Analyzer finished - resume Better Tasker automation if enabled
             console.log('[Better Tasker] Coordination cleared - checking if automation should resume');
             isBoardAnalyzerRunning = false;
