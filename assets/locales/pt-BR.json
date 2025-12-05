@@ -384,7 +384,7 @@
       "noAllyWarning": "⚠️ Nenhuma criatura aliada no tabuleiro. Por favor, coloque pelo menos uma criatura aliada antes de iniciar."
     },
     "manualRunner": {
-      "buttonText": "Manual Runner",
+      "buttonText": "Executor Manual",
       "buttonTooltip": "Executar modo manual até a vitória (reinicia após derrota)",
       "configTitle": "Configuração do Manual Runner",
       "stopWhenLabel": "Parar quando:",
@@ -886,6 +886,7 @@
       "mediumPriority": "Prioridade Média",
       "highPriority": "Alta Prioridade",
       "floor": "Andar",
+      "autoFloorTooltip": "Auto: Começa no andar 1, avança em vitória até o andar 10. Redefine para o andar 0 após vitória no andar 10 ou 10 derrotas consecutivas. Vitória redefine o contador de derrotas.",
       "creditText": "Inspirado por <a href=\"https://bestiaryarena.com/profile/kurak\" target=\"_blank\" style=\"color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;\" onmouseover=\"this.style.color='#ffe066'\" onmouseout=\"this.style.color='#666'\">Kurak's Event Hunter</a>"
     },
     "betterTasker": {

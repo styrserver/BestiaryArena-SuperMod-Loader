@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.1.7",
+    "changes": [
+      { "type": "added", "mod": "Raid Hunter", "text": "Added \"Auto\" floor option" },
+      { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed PointsRestored handling in stamina refill" }
+    ]
+  },
+  {
     "version": "3.1.6",
     "changes": [
       { "type": "added", "mod": "Manual Runner", "text": "Added Maximum Floor feature: automatically advances to next floor after victory until reaching target floor" },

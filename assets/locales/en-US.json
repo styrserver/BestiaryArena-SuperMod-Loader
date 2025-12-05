@@ -885,6 +885,7 @@
       "mediumPriority": "Medium Priority",
       "highPriority": "High Priority",
       "floor": "Floor",
+      "autoFloorTooltip": "Auto: Starts at floor 1, advances on victory until floor 10. Resets to floor 0 after victory on floor 10 or 10 consecutive defeats. Victory resets the defeat counter.",
       "creditText": "Inspired by <a href=\"https://bestiaryarena.com/profile/kurak\" target=\"_blank\" style=\"color: #666; text-decoration: none; font-size: 10px; cursor: pointer; transition: color 0.2s ease;\" onmouseover=\"this.style.color='#ffe066'\" onmouseout=\"this.style.color='#666'\">Kurak's Event Hunter</a>"
     },
     "betterTasker": {
