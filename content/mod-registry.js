@@ -65,7 +65,7 @@ export const SUPER_MODS = [
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
-  'Rank Pointer.js',
+  'Manual Runner.js',
   'RunTracker.js',
   'Stamina Optimizer.js',
   'VIP List.js'

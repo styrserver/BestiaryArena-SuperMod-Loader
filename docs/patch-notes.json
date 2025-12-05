@@ -4,10 +4,19 @@
   },
   "notes": [
   {
+    "version": "3.1.6",
+    "changes": [
+      { "type": "added", "mod": "Manual Runner", "text": "Added Maximum Floor feature: automatically advances to next floor after victory until reaching target floor" },
+      { "type": "changed", "mod": "Manual Runner", "text": "Renamed from Rank Pointer to Manual Runner" },
+      { "type": "fixed", "mod": "Autoseller", "text": "Fixed lock icon appearing in autosqueezer when creature keep range is set in autoseller" },
+      { "type": "changed", "mod": "Tick Tracker", "text": "Made Tick Tracker persistent through page reloads." }
+    ]
+  },
+  {
     "version": "3.1.5",
     "changes": [
-      { "type": "added", "mod": "Autoseller", "text": "Fixes for autoseller, autosqueezer and autoduster" },
-      { "type": "fixed", "mod": "Core", "text": "Translation fixes that caused errors in alot of different mods" }
+      { "type": "added", "mod": "Autoseller", "text": "Fixes for autoseller, autosqueezer and autoduster." },
+      { "type": "fixed", "mod": "Core", "text": "Translation fixes that caused errors in alot of different mods." }
     ]
   },
   {
