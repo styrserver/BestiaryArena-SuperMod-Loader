@@ -279,6 +279,81 @@ function canProcessRaid(context = 'raid processing') {
     return true;
 }
 
+// Get current floor (0-15)
+function getCurrentFloor() {
+    try {
+        const currentFloor = globalThis.state.board.get().context.floor;
+        if (typeof currentFloor === 'number' && currentFloor >= 0 && currentFloor <= 15) {
+            return currentFloor;
+        }
+        console.warn('[Raid Hunter] Invalid floor value:', currentFloor);
+        return 0;
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting current floor:', error);
+        return 0;
+    }
+}
+
+// Advance to the next floor
+function advanceToNextFloor() {
+    try {
+        const currentFloor = getCurrentFloor();
+        if (currentFloor >= 15) {
+            console.warn('[Raid Hunter] Already at maximum floor (15), cannot advance');
+            return false;
+        }
+        
+        const nextFloor = currentFloor + 1;
+        console.log(`[Raid Hunter] Advancing from floor ${currentFloor} to floor ${nextFloor}`);
+        
+        globalThis.state.board.trigger.setState({ 
+            fn: (prev) => ({ ...prev, floor: nextFloor }) 
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('[Raid Hunter] Error advancing to next floor:', error);
+        return false;
+    }
+}
+
+// Detect victory/defeat from serverResults (similar to Manual_Runner)
+async function detectVictoryDefeat() {
+    try {
+        // Wait a bit for serverResults to be available
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Check board context for serverResults
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        let serverResults = boardContext?.serverResults;
+        
+        // Also check gameTimer context
+        const gameTimerContext = globalThis.state.gameTimer.getSnapshot().context;
+        const gameState = gameTimerContext.state;
+        
+        let isVictory = gameState === 'victory';
+        
+        if (serverResults?.rewardScreen) {
+            const serverVictory = typeof serverResults.rewardScreen.victory === 'boolean' ? serverResults.rewardScreen.victory : false;
+            console.log(`[Raid Hunter] Victory detection - gameState: ${gameState}, serverVictory: ${serverVictory}`);
+            
+            // Use serverResults as authoritative for victory
+            if (typeof serverResults.rewardScreen.victory === 'boolean') {
+                isVictory = serverVictory;
+            }
+        } else {
+            console.log(`[Raid Hunter] No serverResults available, using gameState: ${gameState}`);
+        }
+        
+        console.log(`[Raid Hunter] Final victory determination: ${isVictory}`);
+        return isVictory;
+    } catch (error) {
+        console.error('[Raid Hunter] Error detecting victory/defeat:', error);
+        // Default to defeat on error to be safe
+        return false;
+    }
+}
+
 // Helper function to cancel current raid and cleanup
 function cancelCurrentRaid(reason = 'unknown') {
     console.log(`[Raid Hunter] Cancelling raid: ${reason}`);
@@ -1217,6 +1292,10 @@ let isAutomationEnabled = AUTOMATION_DISABLED; // Default to disabled
 let raidQueue = [];
 let isCurrentlyRaiding = false;
 let currentRaidInfo = null;
+
+// Auto floor state management (per-raid)
+// Stores current auto floor (1-10) and consecutive defeat count for each raid when in "auto" mode
+let autoFloorState = {}; // { raidName: { currentFloor: number, consecutiveDefeats: number } }
 
 // Raid retry system
 let raidRetryCount = 0;
@@ -2853,9 +2932,81 @@ function interruptCurrentRaid(callback) {
 }
 
 // Stops autoplay when raid ends
-function stopAutoplayOnRaidEnd() {
+async function stopAutoplayOnRaidEnd() {
     try {
         console.log('[Raid Hunter] Raid ended - checking for more raids in queue');
+        
+        // Handle auto floor progression if applicable
+        if (currentRaidInfo) {
+            const raidName = currentRaidInfo.name;
+            const settings = loadSettings();
+            const raidFloors = settings.raidFloors || {};
+            const floorSetting = raidFloors[raidName];
+            
+            if (floorSetting === 'auto') {
+                console.log('[Raid Hunter] Auto floor mode active - detecting victory/defeat');
+                
+                // Detect victory/defeat
+                const isVictory = await detectVictoryDefeat();
+                const currentFloor = getCurrentFloor();
+                
+                // Initialize auto floor state if not exists
+                if (!autoFloorState[raidName]) {
+                    autoFloorState[raidName] = { currentFloor: 1, consecutiveDefeats: 0 };
+                }
+                
+                const autoState = autoFloorState[raidName];
+                
+                if (isVictory) {
+                    // Victory: reset defeat counter
+                    autoState.consecutiveDefeats = 0;
+                    console.log(`[Raid Hunter] Victory on floor ${currentFloor} - resetting defeat counter`);
+                    
+                    if (currentFloor < 10) {
+                        // Advance to next floor
+                        const nextFloor = currentFloor + 1;
+                        autoState.currentFloor = nextFloor;
+                        // Set the floor in game state for next attempt
+                        globalThis.state.board.trigger.setState({ 
+                            fn: (prev) => ({ ...prev, floor: nextFloor }) 
+                        });
+                        console.log(`[Raid Hunter] Advancing to floor ${nextFloor}`);
+                    } else if (currentFloor === 10) {
+                        // Victory on floor 10: set floor to 0 and continue farming
+                        autoState.currentFloor = 0;
+                        // Update settings to floor 0 (exit auto mode)
+                        const updatedSettings = loadSettings();
+                        if (!updatedSettings.raidFloors) {
+                            updatedSettings.raidFloors = {};
+                        }
+                        updatedSettings.raidFloors[raidName] = 0;
+                        localStorage.setItem('raidHunterSettings', JSON.stringify(updatedSettings));
+                        console.log(`[Raid Hunter] Victory on floor 10 - setting floor to 0 and continuing farming`);
+                    }
+                } else {
+                    // Defeat: increment consecutive defeat counter
+                    autoState.consecutiveDefeats++;
+                    console.log(`[Raid Hunter] Defeat on floor ${currentFloor} - consecutive defeats: ${autoState.consecutiveDefeats}`);
+                    
+                    if (autoState.consecutiveDefeats >= 10) {
+                        // 10 consecutive defeats: set floor to 0 and continue farming
+                        autoState.currentFloor = 0;
+                        autoState.consecutiveDefeats = 0;
+                        // Update settings to floor 0 (exit auto mode)
+                        const updatedSettings = loadSettings();
+                        if (!updatedSettings.raidFloors) {
+                            updatedSettings.raidFloors = {};
+                        }
+                        updatedSettings.raidFloors[raidName] = 0;
+                        localStorage.setItem('raidHunterSettings', JSON.stringify(updatedSettings));
+                        console.log(`[Raid Hunter] 10 consecutive defeats reached - setting floor to 0 and continuing farming`);
+                    } else {
+                        // Continue on current floor (defeat counter persists)
+                        console.log(`[Raid Hunter] Continuing on floor ${currentFloor} (${autoState.consecutiveDefeats}/10 consecutive defeats)`);
+                    }
+                }
+            }
+        }
         
         // CRITICAL: Reset state FIRST to ensure queue rebuild excludes current raid
         isCurrentlyRaiding = false;
@@ -3253,8 +3404,22 @@ async function handleEventOrRaid(roomId) {
         const raidFloors = settings.raidFloors || {};
         const raidName = getEventNameForRoomId(roomId);
         if (raidName) {
-            const floor = raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0;
-            console.log(`[Raid Hunter] Setting floor to ${floor} for ${raidName}`);
+            const floorSetting = raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0;
+            let floor;
+            
+            if (floorSetting === 'auto') {
+                // Auto mode: use tracked auto floor state, defaulting to 1
+                if (!autoFloorState[raidName]) {
+                    autoFloorState[raidName] = { currentFloor: 1, consecutiveDefeats: 0 };
+                }
+                floor = autoFloorState[raidName].currentFloor;
+                console.log(`[Raid Hunter] Auto floor mode for ${raidName} - setting floor to ${floor} (consecutive defeats: ${autoFloorState[raidName].consecutiveDefeats})`);
+            } else {
+                // Numeric floor setting
+                floor = floorSetting;
+                console.log(`[Raid Hunter] Setting floor to ${floor} for ${raidName}`);
+            }
+            
             globalThis.state.board.trigger.setState({ fn: (prev) => ({ ...prev, floor: floor }) });
             await new Promise(resolve => setTimeout(resolve, 100));
         }
@@ -4830,17 +4995,49 @@ function createRaidMapSelection() {
                 color: rgb(255, 217, 61);
                 border: 1px solid rgb(255, 217, 61);
             `;
-            // Create options for floors 0-15
+            // Create options for floors 0-15 and "auto"
             for (let i = 0; i <= 15; i++) {
                 const opt = document.createElement('option');
                 opt.value = i.toString();
                 opt.textContent = `${t('mods.raidHunter.floor')} ${i}`;
                 floorSelect.appendChild(opt);
             }
+            // Add "auto" option
+            const autoOpt = document.createElement('option');
+            autoOpt.value = 'auto';
+            autoOpt.textContent = 'Auto';
+            autoOpt.title = t('mods.raidHunter.autoFloorTooltip');
+            floorSelect.appendChild(autoOpt);
+            
             // Set initial value from settings (default: 0)
             const raidFloors = settings.raidFloors || {};
-            floorSelect.value = (raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0).toString();
+            const floorValue = raidFloors[raidName] !== undefined ? raidFloors[raidName] : 0;
+            floorSelect.value = floorValue.toString();
+            
+            // Update tooltip based on selected value
+            const updateTooltip = () => {
+                if (floorSelect.value === 'auto') {
+                    floorSelect.title = t('mods.raidHunter.autoFloorTooltip');
+                } else {
+                    floorSelect.title = '';
+                }
+            };
+            updateTooltip(); // Set initial tooltip
+            
             floorSelect.addEventListener('change', () => {
+                const raidName = floorSelect.getAttribute('data-raid-name');
+                // Update tooltip
+                updateTooltip();
+                // If switching away from "auto", clear the auto floor state
+                if (raidName && floorSelect.value !== 'auto' && autoFloorState[raidName]) {
+                    delete autoFloorState[raidName];
+                    console.log(`[Raid Hunter] Cleared auto floor state for ${raidName} (switched to floor ${floorSelect.value})`);
+                }
+                // If switching to "auto", initialize the state
+                if (raidName && floorSelect.value === 'auto' && !autoFloorState[raidName]) {
+                    autoFloorState[raidName] = { currentFloor: 1, consecutiveDefeats: 0 };
+                    console.log(`[Raid Hunter] Initialized auto floor state for ${raidName} (starting at floor 1)`);
+                }
                 autoSaveSettings();
             });
             raidDiv.appendChild(floorSelect);
@@ -4996,9 +5193,14 @@ function sanitizeSettings(settings) {
     if (settings.raidFloors && typeof settings.raidFloors === 'object') {
         sanitized.raidFloors = {};
         Object.entries(settings.raidFloors).forEach(([raidName, floor]) => {
-            const floorValue = parseInt(floor);
-            if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
-                sanitized.raidFloors[raidName] = floorValue;
+            // Accept "auto" as a valid value
+            if (floor === 'auto') {
+                sanitized.raidFloors[raidName] = 'auto';
+            } else {
+                const floorValue = parseInt(floor);
+                if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
+                    sanitized.raidFloors[raidName] = floorValue;
+                }
             }
         });
     } else {
@@ -5136,9 +5338,14 @@ function autoSaveSettings() {
         document.querySelectorAll('select[id^="floor-"]').forEach(select => {
             const raidName = select.getAttribute('data-raid-name');
             if (raidName && select.value !== undefined) {
-                const floorValue = parseInt(select.value);
-                if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
-                    raidFloors[raidName] = floorValue;
+                // Accept "auto" as a valid value
+                if (select.value === 'auto') {
+                    raidFloors[raidName] = 'auto';
+                } else {
+                    const floorValue = parseInt(select.value);
+                    if (!isNaN(floorValue) && floorValue >= 0 && floorValue <= 15) {
+                        raidFloors[raidName] = floorValue;
+                    }
                 }
             }
         });

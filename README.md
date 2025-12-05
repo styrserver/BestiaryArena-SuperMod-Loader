@@ -168,7 +168,7 @@ Automatically sells or squeezes creatures based on gene thresholds and user sett
 - Integrated with the mod loader's configuration system
 - Real-time tracking of gold and dust earnings
 
-##### Better Analytics
+#### Better Analytics
 Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations to the damage analyzer:
 - Real-time damage per second (DPS) calculations displayed next to damage values
 - Automatic tracking of damage changes throughout the game session
@@ -176,7 +176,7 @@ Adds comprehensive damage per tick (DPT) tracking and real-time DPS calculations
 - Auto-opening of the impact analyzer panel for seamless tracking
 - Accurate DPS calculations using server game ticks for precise timing
 
-##### Better Boosted Maps
+#### Better Boosted Maps
 Automates daily boosted map farming with intelligent coordination:
 - Automatically farms the daily boosted map when conditions are met
 - Coordinates with Raid Hunter and Better Tasker to prevent automation conflicts
@@ -184,7 +184,7 @@ Automates daily boosted map farming with intelligent coordination:
 - Auto-setup and autoplay integration for seamless execution
 - Configurable settings including stamina refill, faster autoplay, and autoplant
 
-##### Better Exaltation Chest
+#### Better Exaltation Chest
 Enhances the Exaltation Chest interface with automated opening and intelligent equipment management:
 - Auto-opening functionality with configurable speed and disenchanting settings
 - Equipment filtering by tier, stat requirements, and customizable criteria
@@ -248,14 +248,6 @@ Advanced quest automation system that streamlines task completion and management
 - Smart quest button management with visual tasking indicators
 - Integration with Raid Hunter for seamless automation switching
 
-#### Mod Settings
-Centralized mod configuration and backup system with UI enhancements:
-- Stamina timer showing exact time when stamina will be full with real-time tracking
-- Visual enhancements: Max Creatures and Shinies highlighting with 6 customizable color themes (Prismatic, Demonic, Frosty, Venomous, Divine, Undead)
-- Favorites system to mark creatures with custom symbols (heart or stat icons) and Shiny Enemies feature for battles
-- Live player count display in header with 30-second updates and setup labels visibility toggle
-- Backup/restore configuration including active mods, settings, and game data with integrated settings panel
-
 #### Cyclopedia
 A comprehensive game data viewer and player profile manager with advanced features:
 - **Monster Database**: Browse and search all monsters with detailed stats, abilities, and locations
@@ -288,6 +280,22 @@ Advanced autoplay and loot tracking system:
 - View session summaries and performance metrics
 - Export data for further analysis
 
+#### Manual Runner
+Automates repeated manual runs until victory, target S+ rank, or maximum floor:
+- Automatically starts fights and closes reward screens between attempts
+- Tracks comprehensive statistics including attempts, defeats, victories, stamina spent, and rank points
+- Multiple stop conditions: any victory, target S+ rank based on map and team size, or reach maximum floor
+- Automatically advances to next floor after victory when using Maximum Floor mode
+- Results modal with detailed statistics and ability to copy replay/seed for successful runs
+
+#### Mod Settings
+Centralized mod configuration and backup system with UI enhancements:
+- Stamina timer showing exact time when stamina will be full with real-time tracking
+- Visual enhancements: Max Creatures and Shinies highlighting with 6 customizable color themes (Prismatic, Demonic, Frosty, Venomous, Divine, Undead)
+- Favorites system to mark creatures with custom symbols (heart or stat icons) and Shiny Enemies feature for battles
+- Live player count display in header with 30-second updates and setup labels visibility toggle
+- Backup/restore configuration including active mods, settings, and game data with integrated settings panel
+
 #### Outfiter
 Comprehensive outfit management system:
 - Browse and preview all available outfits
@@ -303,15 +311,6 @@ Advanced raid automation system for Bestiary Arena:
 - Stamina monitoring and auto-refill integration with Bestiary Automator
 - Real-time raid status monitoring with countdown timers and queue system for multiple raids
 - Comprehensive settings panel for customization and raid map selection
-
-#### Manual Runner
-Automates repeated manual runs until victory, target S+ rank, or maximum floor:
-- Starts fights and auto-closes reward screens between attempts
-- Tracks attempts, defeats, stamina spent, and rank points
-- Optional targets: stop on S+X based on map and team size, or reach a maximum floor
-- Automatically advances to next floor after victory when using Maximum Floor mode
-- Copy replay/seed from the results modal
-- Streamlines rank grinding and floor progression for efficient achievement
 
 #### RunTracker
 Local run data tracking and storage system:

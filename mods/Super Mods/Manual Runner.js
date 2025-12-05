@@ -2441,7 +2441,7 @@ function createConfigPanel() {
   // Create and return the config panel
   const panel = api.ui.createConfigPanel({
     id: CONFIG_PANEL_ID,
-    title: 'Manual Runner Configuration',
+    title: t('mods.manualRunner.configTitle'),
     modId: MOD_ID,
     content: content,
     buttons: buttons

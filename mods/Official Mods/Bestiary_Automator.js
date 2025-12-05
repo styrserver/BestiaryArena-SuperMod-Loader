@@ -1016,7 +1016,7 @@ const refillStaminaViaAPI = async () => {
             updateStaminaWillBeFullAt(data.nextStaminaWillBeFullAt);
           }
           
-          const pointsRestored = data.pointsRestored || 0;
+          const pointsRestored = data?.pointsRestored || 0;
           
           // Update tracked stamina from API response
           if (pointsRestored > 0 && trackedStamina !== null) {
