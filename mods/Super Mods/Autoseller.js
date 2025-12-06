@@ -2927,8 +2927,13 @@
         const savedSettings = getSettings();
         const savedIgnoreList = savedSettings[settingKey];
         if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
+            // Use saved settings (backward compatible)
             selectedCreatures = [...savedIgnoreList];
             availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
+        } else {
+            // Default to all creatures in Keep column for safety
+            selectedCreatures = [...availableCreatures];
+            availableCreatures = [];
         }
         
         // Ensure both lists are sorted alphabetically
@@ -3017,8 +3022,8 @@
             selectedBox.style.flex = '1 1 0';
             selectedBox.style.minHeight = '0';
 
-            columnsContainer.appendChild(availableBox);
             columnsContainer.appendChild(selectedBox);
+            columnsContainer.appendChild(availableBox);
         }
         
         // Initial render
@@ -3064,8 +3069,13 @@
         const savedSettings = getSettings();
         const savedIgnoreList = savedSettings[settingKey];
         if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
+            // Use saved settings (backward compatible)
             selectedEquipment = [...savedIgnoreList];
             availableEquipment = availableEquipment.filter(e => !selectedEquipment.includes(e));
+        } else {
+            // Default to all equipment in Keep column for safety
+            selectedEquipment = [...availableEquipment];
+            availableEquipment = [];
         }
         
         // Ensure both lists are sorted alphabetically
@@ -3147,8 +3157,8 @@
             selectedBox.style.flex = '1 1 0';
             selectedBox.style.minHeight = '0';
 
-            columnsContainer.appendChild(availableBox);
             columnsContainer.appendChild(selectedBox);
+            columnsContainer.appendChild(availableBox);
         }
         
         // Initial render

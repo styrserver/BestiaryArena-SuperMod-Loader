@@ -572,7 +572,7 @@ const setRefillingFlag = () => {
   try {
     window.__modCoordination = window.__modCoordination || {};
     window.__modCoordination.automatorRefilling = true;
-    console.log('[Bestiary Automator] Set automatorRefilling flag - other mods should pause');
+    // Only log flag changes, not every check
   } catch (_) {}
 };
 
@@ -580,10 +580,13 @@ const clearRefillingFlag = () => {
   try {
     if (window.__modCoordination) {
       window.__modCoordination.automatorRefilling = false;
-      console.log('[Bestiary Automator] Cleared automatorRefilling flag - other mods can resume');
+      // Only log flag changes, not every check
     }
   } catch (_) {}
 };
+
+// Track if automator is making the API call (for fetch interceptor)
+let automatorMakingAPICall = false;
 
 // Helper to check if Game State API is available
 const isGameStateAPIAvailable = () => {
@@ -647,16 +650,8 @@ const getCurrentStaminaFromGameStateAPI = () => {
       const staminaWillBeFullAt = playerContext.staminaWillBeFullAt;
       const timeUntilFull = staminaWillBeFullAt - currentTime;
       
-      console.log('[Bestiary Automator] === Stamina Calculation Debug ===');
-      console.log(`[Bestiary Automator] Max stamina: ${maxStamina}`);
-      console.log(`[Bestiary Automator] Current time: ${currentTime} (${new Date(currentTime).toLocaleString()})`);
-      console.log(`[Bestiary Automator] Stamina will be full at: ${staminaWillBeFullAt} (${new Date(staminaWillBeFullAt).toLocaleString()})`);
-      console.log(`[Bestiary Automator] Time until full: ${timeUntilFull}ms (${(timeUntilFull / 1000).toFixed(1)}s)`);
-      
       // If already full or past the timestamp, stamina is at max
       if (timeUntilFull <= 0) {
-        console.log(`[Bestiary Automator] ✅ Stamina is FULL (calculated from timestamp): ${maxStamina}`);
-        console.log('[Bestiary Automator] === End Calculation ===');
         return maxStamina;
       }
       
@@ -666,11 +661,6 @@ const getCurrentStaminaFromGameStateAPI = () => {
       const staminaMissing = Math.ceil(timeUntilFullMinutes);
       const currentStamina = Math.max(0, maxStamina - staminaMissing);
       
-      console.log(`[Bestiary Automator] Time until full: ${timeUntilFullMinutes.toFixed(2)} minutes`);
-      console.log(`[Bestiary Automator] Stamina missing (rounded up): ${staminaMissing}`);
-      console.log(`[Bestiary Automator] Calculation: ${maxStamina} - ${staminaMissing} = ${currentStamina}`);
-      console.log(`[Bestiary Automator] ✅ Calculated current stamina: ${currentStamina} / ${maxStamina}`);
-      console.log('[Bestiary Automator] === End Calculation ===');
       return currentStamina;
     }
     
@@ -740,6 +730,13 @@ const findLowestTierPotion = (inventory) => {
     const thresholdInfo = config.thresholdsEnabled ? `threshold: ${threshold}` : 'thresholds disabled';
     console.log(`[Bestiary Automator] Found usable tier ${tier} (${potionName}) potion: ${potionCount} available (${thresholdInfo})`);
     return tier;
+  }
+  
+  // No usable potions found after checking all tiers
+  if (config.thresholdsEnabled) {
+    console.log('[Bestiary Automator] No potions found that exceed thresholds - all potions are at or below their threshold limits');
+  } else {
+    console.log('[Bestiary Automator] No enabled potions found in inventory');
   }
   
   return null;
@@ -827,6 +824,14 @@ const refillStaminaWithRetry = async (elStamina, staminaElement) => {
         break;
       }
       
+      // Safety check: if thresholds are enabled, verify potions still meet threshold
+      // (This should not happen since we force API method when thresholds are enabled,
+      // but adding as a safeguard)
+      if (config.thresholdsEnabled && !hasStaminaPotions()) {
+        console.log('[Bestiary Automator] Potions no longer meet threshold during DOM refill, stopping');
+        break;
+      }
+      
       retryCount++;
       
       clickButtonWithText('mods.automator.usePotion');
@@ -908,9 +913,12 @@ const refillStaminaViaAPI = async () => {
     
     // Check if any enabled potions are available before starting refill
     if (!hasStaminaPotions()) {
+      console.log('[Bestiary Automator] No enabled potions available that meet thresholds, skipping refill');
       clearRefillingFlag();
       return false;
     }
+    
+    console.log('[Bestiary Automator] Potions available, starting refill process...');
     
     if (!isGameStateAPIAvailable()) {
       clearRefillingFlag();
@@ -931,8 +939,11 @@ const refillStaminaViaAPI = async () => {
       // Find lowest tier potion available
       const potionTier = findLowestTierPotion(inventory);
       if (!potionTier) {
+        console.log('[Bestiary Automator] No usable potions found in inventory, stopping refill');
         break;
       }
+      
+      console.log(`[Bestiary Automator] Using potion tier ${potionTier} for refill`);
       
       const potionKey = `stamina${potionTier}`;
       const potionCountAvailable = inventory[potionKey] || 0;
@@ -941,6 +952,20 @@ const refillStaminaViaAPI = async () => {
       if (potionCountAvailable <= 0) {
         removeStaminaPotionFromInventory(potionTier);
         break;
+      }
+      
+      // Get potion name for threshold checking
+      const potionName = getPotionNameFromTier(potionTier);
+      
+      // Re-check threshold before using (in case inventory changed)
+      if (potionName && config.thresholdsEnabled) {
+        const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+          ? config.potionQuantityThresholds[potionName]
+          : 0;
+        if (potionCountAvailable <= threshold) {
+          console.log(`[Bestiary Automator] Potion ${potionName} count (${potionCountAvailable}) is at or below threshold (${threshold}), skipping`);
+          break;
+        }
       }
       
       // Wait for rate limit before using potion
@@ -955,11 +980,24 @@ const refillStaminaViaAPI = async () => {
           removeStaminaPotionFromInventory(potionTier);
           break;
         }
+        
+        // Final threshold check
+        if (potionName && config.thresholdsEnabled) {
+          const threshold = config.potionQuantityThresholds && config.potionQuantityThresholds[potionName] !== undefined
+            ? config.potionQuantityThresholds[potionName]
+            : 0;
+          if (finalPotionCount <= threshold) {
+            console.log(`[Bestiary Automator] Final check: Potion ${potionName} count (${finalPotionCount}) is at or below threshold (${threshold}), skipping`);
+            break;
+          }
+        }
       }
       
       // Make API call with silent error handling for expected 404s
       // The fetch interceptor will handle 404s gracefully, but we still check here
       try {
+        // Set flag so fetch interceptor knows this is an automator call
+        automatorMakingAPICall = true;
         const response = await fetch('https://bestiaryarena.com/api/trpc/inventory.staminaPotion?batch=1', {
           method: 'POST',
           headers: {
@@ -1005,7 +1043,7 @@ const refillStaminaViaAPI = async () => {
         const result = await response.json();
         const data = extractAPIResponseData(result);
         
-        if (data) {
+        if (data && typeof data === 'object') {
           // Update inventory state from API response
           if (data.inventoryDiff) {
             updateInventoryFromDiff(data.inventoryDiff);
@@ -1057,6 +1095,9 @@ const refillStaminaViaAPI = async () => {
         // Remove potion from inventory on any error
         removeStaminaPotionFromInventory(potionTier);
         break;
+      } finally {
+        // Always clear the flag after the API call
+        automatorMakingAPICall = false;
       }
     }
     
@@ -1073,6 +1114,18 @@ const refillStaminaViaAPI = async () => {
 // Refill stamina if needed - chooses method based on config
 const refillStaminaIfNeeded = async () => {
   if (!config.autoRefillStamina) {
+    return;
+  }
+  
+  // If thresholds are enabled, force API method for accurate threshold enforcement
+  // DOM-based methods cannot control which potion the game UI selects
+  if (config.thresholdsEnabled && !config.useApiForStaminaRefill) {
+    // Only log once when this condition is first encountered
+    if (!window.__automatorApiMethodLogged) {
+      console.log('[Bestiary Automator] Thresholds enabled - using API method for accurate threshold enforcement');
+      window.__automatorApiMethodLogged = true;
+    }
+    await refillStaminaViaAPI();
     return;
   }
   
@@ -1141,11 +1194,15 @@ let maxStamina = null;
 const hasStaminaPotions = () => {
   try {
     if (!globalThis.state || !globalThis.state.player) {
+      console.log('[Bestiary Automator] Game State API not available for potion check');
       return false;
     }
     
     const playerContext = globalThis.state.player.getSnapshot().context;
     const inventory = playerContext.inventory || {};
+    
+    let foundPotion = false;
+    let rejectionReasons = [];
     
     // Check all potion tiers (1-5: Mini, Strong, Great, Ultimate, Supreme)
     for (let tier = 1; tier <= 5; tier++) {
@@ -1163,7 +1220,9 @@ const hasStaminaPotions = () => {
       }
       
       // Check if this potion type is enabled
-      if (!config.potionEnabled || !config.potionEnabled[potionName]) {
+      const isEnabled = config.potionEnabled && config.potionEnabled[potionName];
+      if (!isEnabled) {
+        rejectionReasons.push(`${potionName} (${potionCount}) - disabled`);
         continue;
       }
       
@@ -1174,17 +1233,27 @@ const hasStaminaPotions = () => {
           : 0;
         
         if (potionCount > threshold) {
-          return true;
+          console.log(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, threshold: ${threshold})`);
+          foundPotion = true;
+          break;
+        } else {
+          rejectionReasons.push(`${potionName} (${potionCount}) - below threshold (${threshold})`);
         }
       } else {
         // If thresholds are disabled, any potion count > 0 is valid
-        if (potionCount > 0) {
-          return true;
-        }
+        console.log(`[Bestiary Automator] Found usable potion: ${potionName} (${potionCount} available, thresholds disabled)`);
+        foundPotion = true;
+        break;
       }
     }
     
-    return false;
+    if (!foundPotion && rejectionReasons.length > 0) {
+      console.log(`[Bestiary Automator] Potions found but not usable: ${rejectionReasons.join(', ')}`);
+    } else if (!foundPotion) {
+      console.log('[Bestiary Automator] No stamina potions found in inventory');
+    }
+    
+    return foundPotion;
   } catch (error) {
     console.error('[Bestiary Automator] Error checking stamina potions:', error);
     return false;
@@ -1294,43 +1363,47 @@ const setupStaminaPotionErrorHandler = () => {
           // Use default tier if parsing fails
         }
         
-        // Enhanced pre-flight check: verify potion availability before making API call
-        const inventory = getPlayerInventory();
-        if (inventory) {
-          const potionKey = `stamina${potionTier}`;
-          const potionCount = inventory[potionKey] || 0;
-          
-          // Also check if this potion type is enabled
-          const potionName = getPotionNameFromTier(potionTier);
-          const isPotionEnabled = potionName && config.potionEnabled && config.potionEnabled[potionName];
-          
-          // Check threshold (only if thresholds are enabled)
-          let thresholdCheck = false;
-          if (config.thresholdsEnabled) {
-            const threshold = potionName && config.potionQuantityThresholds 
-              ? (config.potionQuantityThresholds[potionName] || 0)
-              : 0;
-            thresholdCheck = potionCount <= threshold;
-          }
-          
-          if (potionCount <= 0 || !isPotionEnabled || thresholdCheck) {
-            // Potion not available, disabled, or below threshold - prevent the API call
-            // This prevents unnecessary 404 errors in the console
-            if (potionCount <= 0) {
-              removeStaminaPotionFromInventory(potionTier);
+        // Only apply blocking logic if the automator is making this call
+        // This allows manual potion usage to work regardless of automator settings
+        if (automatorMakingAPICall) {
+          // Enhanced pre-flight check: verify potion availability before making API call
+          const inventory = getPlayerInventory();
+          if (inventory) {
+            const potionKey = `stamina${potionTier}`;
+            const potionCount = inventory[potionKey] || 0;
+            
+            // Also check if this potion type is enabled
+            const potionName = getPotionNameFromTier(potionTier);
+            const isPotionEnabled = potionName && config.potionEnabled && config.potionEnabled[potionName];
+            
+            // Check threshold (only if thresholds are enabled)
+            let thresholdCheck = false;
+            if (config.thresholdsEnabled) {
+              const threshold = potionName && config.potionQuantityThresholds 
+                ? (config.potionQuantityThresholds[potionName] || 0)
+                : 0;
+              thresholdCheck = potionCount <= threshold;
             }
-            // Return a successful mock response - the calling code handles null data gracefully
-            return Promise.resolve(new Response(JSON.stringify([{
-              result: {
-                data: {
-                  json: null
-                }
+            
+            if (potionCount <= 0 || !isPotionEnabled || thresholdCheck) {
+              // Potion not available, disabled, or below threshold - prevent the API call
+              // This prevents unnecessary 404 errors in the console
+              if (potionCount <= 0) {
+                removeStaminaPotionFromInventory(potionTier);
               }
-            }]), {
-              status: 200,
-              statusText: 'OK',
-              headers: { 'Content-Type': 'application/json' }
-            }));
+              // Return a successful mock response - the calling code handles null data gracefully
+              return Promise.resolve(new Response(JSON.stringify([{
+                result: {
+                  data: {
+                    json: null
+                  }
+                }
+              }]), {
+                status: 200,
+                statusText: 'OK',
+                headers: { 'Content-Type': 'application/json' }
+              }));
+            }
           }
         }
         
