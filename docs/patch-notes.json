@@ -4,6 +4,14 @@
   },
   "notes": [
   {
+    "version": "3.1.9",
+    "changes": [
+      { "type": "changed", "mod": "Autoseller", "text": "Reordered columns to show Keep before Action (Sell/Squeeze/Disenchant) for better safety" },
+      { "type": "changed", "mod": "Autoseller", "text": "Default all creatures and equipment to Keep column when no saved settings exist to prevent accidental selling/squeezing/disenchanting" },
+      { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed manual potion usage being blocked by automator settings, fixed threshold enforcement to prevent using potions below threshold, fixed null access error in pointsRestored handling, and consolidated verbose logging" }
+    ]
+  },
+  {
     "version": "3.1.8",
     "changes": [
       { "type": "fixed", "mod": "Raid Hunter", "text": "Fixed auto mode in floors for raid hunter" }
