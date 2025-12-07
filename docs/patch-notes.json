@@ -4,6 +4,15 @@
   },
   "notes": [
   {
+    "version": "3.1.10",
+    "changes": [
+      { "type": "added", "mod": "Guilds", "text": "Added Guild Coins system: earn coins randomly on victories." },
+      { "type": "changed", "mod": "Autoseller", "text": "Styling changes to Autoseller." },
+      { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed tick history saving after reload and standardized logging prefix." },
+      { "type": "changed", "mod": "Better Forge", "text": "Optimized logging and performance" }
+    ]
+  },
+  {
     "version": "3.1.9",
     "changes": [
       { "type": "changed", "mod": "Autoseller", "text": "Reordered columns to show Keep before Action (Sell/Squeeze/Disenchant) for better safety" },
