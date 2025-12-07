@@ -117,6 +117,7 @@ const getGuildMembersApiUrl = (guildId) => getApiUrl(`members/${guildId}`);
 const getGuildChatApiUrl = (guildId) => getApiUrl(`chat/${guildId}`);
 const getGuildInvitesApiUrl = (guildId) => getApiUrl(`invites/${guildId}`);
 const getPlayerGuildApiUrl = () => getApiUrl('players');
+const getGuildCoinsApiUrl = () => getApiUrl('coins');
 
 // =======================
 // Utility Functions
@@ -1174,6 +1175,360 @@ async function decryptGuildMessage(encryptedText, guildId) {
     }
     return encryptedText;
   }
+}
+
+// =======================
+// Guild Coins System
+// =======================
+
+// Derive an encryption key from player username (only player can decrypt their own coins)
+async function deriveGuildCoinsKey(username) {
+  try {
+    const encoder = new TextEncoder();
+    const password = encoder.encode(username.toLowerCase());
+    
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      password,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits', 'deriveKey']
+    );
+    
+    const salt = encoder.encode('guild-coins-salt');
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    
+    return key;
+  } catch (error) {
+    console.error('[Guilds] Error deriving guild coins key:', error);
+    throw error;
+  }
+}
+
+// Encrypt coin count
+async function encryptCoinCount(count, username) {
+  try {
+    const key = await deriveGuildCoinsKey(username);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(count.toString());
+    
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      data
+    );
+    
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    return btoa(String.fromCharCode(...combined));
+  } catch (error) {
+    console.error('[Guilds] Error encrypting coin count:', error);
+    throw error;
+  }
+}
+
+// Decrypt coin count
+async function decryptCoinCount(encryptedText, username) {
+  try {
+    if (!encryptedText || typeof encryptedText !== 'string') {
+      return 0;
+    }
+    
+    let combined;
+    try {
+      combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+    } catch (e) {
+      return 0;
+    }
+    
+    if (combined.length < 13) {
+      return 0;
+    }
+    
+    const key = await deriveGuildCoinsKey(username);
+    
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encrypted
+    );
+    
+    const decoder = new TextDecoder();
+    const countStr = decoder.decode(decrypted);
+    const count = parseInt(countStr, 10);
+    return isNaN(count) ? 0 : count;
+  } catch (error) {
+    console.warn('[Guilds] Error decrypting coin count:', error);
+    return 0;
+  }
+}
+
+// Get player's guild coins from Firebase
+async function getGuildCoins() {
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      return 0;
+    }
+    
+    const hashedPlayer = await hashUsername(currentPlayer);
+    const response = await fetch(`${getGuildCoinsApiUrl()}/${hashedPlayer}.json`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return 0;
+      }
+      throw new Error(`Failed to fetch coins: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data || !data.encrypted) {
+      return 0;
+    }
+    
+    return await decryptCoinCount(data.encrypted, currentPlayer);
+  } catch (error) {
+    console.error('[Guilds] Error getting guild coins:', error);
+    return 0;
+  }
+}
+
+// Add guild coins and save to Firebase
+async function addGuildCoins(amount) {
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      throw new Error('Player name not available');
+    }
+    
+    if (amount <= 0) {
+      return;
+    }
+    
+    const currentCoins = await getGuildCoins();
+    const newCoins = currentCoins + amount;
+    const encrypted = await encryptCoinCount(newCoins, currentPlayer);
+    const hashedPlayer = await hashUsername(currentPlayer);
+    
+    console.log('[Guilds][Coins] Saving coins to Firebase', { hashedPlayer, amount, newCoins });
+    await firebaseRequest(
+      `${getGuildCoinsApiUrl()}/${hashedPlayer}`,
+      'PUT',
+      { encrypted },
+      'save guild coins'
+    );
+    
+    console.log(`[Guilds][Coins] Added ${amount} guild coins. New total: ${newCoins}`);
+    return newCoins;
+  } catch (error) {
+    console.error('[Guilds][Coins] Error adding guild coins:', error);
+    throw error;
+  }
+}
+
+// Show toast notification when coins drop (similar to Raid_Hunter.js)
+function showGuildCoinNotification(amount) {
+  try {
+    // Get or create the main toast container
+    let mainContainer = document.getElementById('guild-coins-toast-container');
+    if (!mainContainer) {
+      mainContainer = document.createElement('div');
+      mainContainer.id = 'guild-coins-toast-container';
+      mainContainer.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        inset: 16px 16px 64px;
+        pointer-events: none;
+      `;
+      document.body.appendChild(mainContainer);
+    }
+    
+    // Count existing toasts to calculate stacking position
+    const existingToasts = mainContainer.querySelectorAll('.toast-item');
+    const stackOffset = existingToasts.length * 46;
+    
+    // Create the flex container for this specific toast
+    const flexContainer = document.createElement('div');
+    flexContainer.className = 'toast-item';
+    flexContainer.style.cssText = `
+      left: 0px;
+      right: 0px;
+      display: flex;
+      position: absolute;
+      transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+      transform: translateY(-${stackOffset}px);
+      bottom: 0px;
+      justify-content: flex-end;
+    `;
+    
+    // Create toast button
+    const toast = document.createElement('button');
+    toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+    
+    // Create widget structure
+    const widgetTop = document.createElement('div');
+    widgetTop.className = 'widget-top h-2.5';
+    
+    const widgetBottom = document.createElement('div');
+    widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+    
+    // Add guild coin icon
+    const iconImg = document.createElement('img');
+    iconImg.alt = 'Guild Coin';
+    iconImg.src = getGuildAssetUrl('Guild_Coin.PNG');
+    iconImg.className = 'pixelated';
+    iconImg.style.cssText = 'width: 16px; height: 16px;';
+    widgetBottom.appendChild(iconImg);
+    
+    // Add message
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'text-left';
+    messageDiv.textContent = `Guild Coin obtained! (+${amount})`;
+    widgetBottom.appendChild(messageDiv);
+    
+    // Assemble toast
+    toast.appendChild(widgetTop);
+    toast.appendChild(widgetBottom);
+    flexContainer.appendChild(toast);
+    mainContainer.appendChild(flexContainer);
+    
+    console.log(`[Guilds] Toast shown: Guild Coin obtained! (+${amount})`);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+      if (flexContainer && flexContainer.parentNode) {
+        flexContainer.parentNode.removeChild(flexContainer);
+        
+        // Update positions of remaining toasts
+        const toasts = mainContainer.querySelectorAll('.toast-item');
+        toasts.forEach((toast, index) => {
+          const offset = index * 46;
+          toast.style.transform = `translateY(-${offset}px)`;
+        });
+      }
+    }, 3000);
+    
+  } catch (error) {
+    console.error('[Guilds] Error showing coin toast:', error);
+  }
+}
+
+// Board subscription for coin drops
+let guildCoinsBoardSubscription = null;
+let lastProcessedSeed = null;
+
+function setupGuildCoinsDropSystem() {
+  if (guildCoinsBoardSubscription) {
+    return; // Already set up
+  }
+  
+  if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+    console.log('[Guilds] Setting up guild coins drop system...');
+    guildCoinsBoardSubscription = globalThis.state.board.subscribe(({ context }) => {
+      const serverResults = context.serverResults;
+      if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
+        return;
+      }
+      
+      // Only drop on victories
+      if (!serverResults.rewardScreen.victory) {
+        return;
+      }
+      
+      const seed = serverResults.seed;
+      
+      // Skip duplicate seeds
+      if (seed === lastProcessedSeed) {
+        return;
+      }
+      
+      lastProcessedSeed = seed;
+      
+      // Roll 10% drop chance
+      const roll = Math.random();
+      console.log('[Guilds][Coins] Victory detected, seed:', seed, 'roll:', roll);
+      if (roll <= 0.10) {
+        addGuildCoins(1).then((newTotal) => {
+          showGuildCoinNotification(1);
+          // Update display if guild panel is open
+          updateGuildCoinsDisplay();
+          console.log('[Guilds][Coins] Drop awarded. Total coins:', newTotal);
+        }).catch((error) => {
+          console.error('[Guilds][Coins] Error adding guild coin:', error);
+        });
+      } else {
+        console.log('[Guilds][Coins] No drop this victory (roll >= 0.10)');
+      }
+    });
+  }
+}
+
+// Update coin display in footer
+let guildCoinsDisplayElement = null;
+
+async function updateGuildCoinsDisplay() {
+  try {
+    if (!guildCoinsDisplayElement) {
+      return;
+    }
+    
+    const coins = await getGuildCoins();
+    guildCoinsDisplayElement.textContent = coins.toLocaleString();
+  } catch (error) {
+    console.error('[Guilds] Error updating coin display:', error);
+  }
+}
+
+// Setup guild coins display in modal footer (reusable function)
+async function setupGuildCoinsInFooter(buttonContainer) {
+  // Check if coins display already exists in this container
+  if (buttonContainer.querySelector('.guild-coins-display')) {
+    return;
+  }
+  
+  // Add coin display first (matching Better Forge dust display style)
+  const coinsDisplay = document.createElement('div');
+  coinsDisplay.className = 'pixel-font-16 frame-pressed-1 surface-darker flex items-center justify-end gap-1 px-1.5 pb-px text-right text-whiteRegular mr-auto guild-coins-display';
+  
+  const coinIcon = document.createElement('img');
+  coinIcon.src = getGuildAssetUrl('Guild_Coin.PNG');
+  coinIcon.alt = 'Guild Coins';
+  coinIcon.style.cssText = 'width: 16px; height: 16px;';
+  
+  const coinAmount = document.createElement('span');
+  coinAmount.className = 'guild-coins-amount';
+  coinAmount.textContent = '0';
+  
+  // Set as main display element for update function
+  guildCoinsDisplayElement = coinAmount;
+  
+  coinsDisplay.appendChild(coinIcon);
+  coinsDisplay.appendChild(coinAmount);
+  
+  // Load and display current coin count
+  const coins = await getGuildCoins();
+  coinAmount.textContent = coins.toLocaleString();
+  
+  // Insert coins display first (left side)
+  buttonContainer.insertBefore(coinsDisplay, buttonContainer.firstChild);
 }
 
 // =======================
@@ -5658,7 +6013,17 @@ async function openGuildPanel(viewGuildId = null) {
 
   contentDiv.appendChild(rightPanel);
 
-  const setupFooter = (buttonContainer) => {
+  const setupFooter = async (buttonContainer) => {
+    // Add guild coins display
+    await setupGuildCoinsInFooter(buttonContainer);
+    
+    // Set the coin amount element for updates
+    const coinAmount = buttonContainer.querySelector('.guild-coins-amount');
+    if (coinAmount && !guildCoinsDisplayElement) {
+      guildCoinsDisplayElement = coinAmount;
+    }
+    
+    // Add back button before the Close button (so Back and Close are together on the right)
     const backBtn = document.createElement('button');
     backBtn.textContent = t('mods.guilds.backButton');
     backBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
@@ -5668,7 +6033,15 @@ async function openGuildPanel(viewGuildId = null) {
       if (dialog) dialog.remove();
       showGuildBrowser();
     });
-    buttonContainer.insertBefore(backBtn, buttonContainer.firstChild);
+    
+    // Find the Close button and insert Back button before it
+    const closeButton = buttonContainer.querySelector('button:last-child');
+    if (closeButton) {
+      buttonContainer.insertBefore(backBtn, closeButton);
+    } else {
+      // Fallback: if no Close button found, just append
+      buttonContainer.appendChild(backBtn);
+    }
   };
 
   const modalTitle = guild.abbreviation ? `${guild.name} [${guild.abbreviation}]` : guild.name;
@@ -6165,6 +6538,53 @@ function getEquipmentImageUrl(slotType) {
   
   // Last resort: return path and let the browser try (will likely fail but better than nothing)
   console.warn('[Equipment] Could not determine extension runtime URL, using relative path:', imagePath);
+  return imagePath;
+}
+
+// Helper function to get guild asset URL (similar to getEquipmentImageUrl)
+function getGuildAssetUrl(filename) {
+  const imagePath = '/assets/guild/' + filename;
+  
+  // Use cached base URL if available
+  if (cachedExtensionBaseUrl) {
+    const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+    const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+    return base + path;
+  }
+  
+  // Try multiple methods to get extension runtime URL (same as equipment)
+  try {
+    const api = window.browserAPI || window.chrome || window.browser;
+    if (api && api.runtime) {
+      if (api.runtime.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
+        const url = api.runtime.getURL(imagePath);
+        if (url && url.includes('://') && !url.includes('://invalid')) {
+          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+          if (baseUrlMatch) {
+            cachedExtensionBaseUrl = baseUrlMatch[0];
+          }
+          return url;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Guilds] Error getting URL from browser API:', e);
+  }
+  
+  // Try window.BESTIARY_EXTENSION_BASE_URL
+  if (typeof window !== 'undefined') {
+    if (window.BESTIARY_EXTENSION_BASE_URL && !cachedExtensionBaseUrl) {
+      cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+    }
+    if (cachedExtensionBaseUrl) {
+      const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+      const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+      return base + path;
+    }
+  }
+  
+  // Last resort: return path
+  console.warn('[Guilds] Could not determine extension runtime URL, using relative path:', imagePath);
   return imagePath;
 }
 
@@ -7865,6 +8285,12 @@ function showEquipmentModal() {
             flex: '1 1 0'
           });
         }
+        
+        // Add guild coins display to footer
+        const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
+        if (buttonContainer) {
+          setupGuildCoinsInFooter(buttonContainer);
+        }
       }, 0);
     }
   });
@@ -8020,6 +8446,9 @@ async function initializeGuilds() {
 
   // Start menu observer
   startAccountMenuObserver();
+  
+  // Initialize guild coins drop system
+  setupGuildCoinsDropSystem();
 }
 
 async function syncGuildFromFirebase(currentPlayer) {
@@ -8242,6 +8671,18 @@ exports = {
       } catch (error) {
         console.error('[Guilds] Error clearing caches:', error);
       }
+      
+      // Clean up guild coins board subscription
+      if (guildCoinsBoardSubscription) {
+        if (typeof guildCoinsBoardSubscription === 'function') {
+          guildCoinsBoardSubscription();
+        }
+        guildCoinsBoardSubscription = null;
+      }
+      
+      // Clear coin display element reference
+      guildCoinsDisplayElement = null;
+      lastProcessedSeed = null;
       
       console.log('[Guilds] Cleaned up successfully');
       return true;

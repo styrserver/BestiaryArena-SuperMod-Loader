@@ -1,5 +1,5 @@
 // Tick Tracker Mod for Bestiary Arena
-console.log('Tick Tracker Mod initializing...');
+console.log('[Tick Tracker]', 'Mod initializing...');
 
 // Configuration with defaults
 const defaultConfig = {
@@ -25,10 +25,12 @@ let tickHistory = [];
 let onGameEndUnsubscribe = null;
 let activeWidget = null;
 let widgetObserver = null;
+let newGameListenerRegistered = false;
 
 // Translations
 // Use shared translation system via API
 const t = (key) => api.i18n.t(key);
+const LOG_PREFIX = '[Tick Tracker]';
 
 // Function to copy text to clipboard
 function copyToClipboard(text) {
@@ -43,7 +45,7 @@ function copyToClipboard(text) {
   try {
     success = document.execCommand('copy');
   } catch (err) {
-    console.error('Failed to copy text:', err);
+    console.error(LOG_PREFIX, 'Failed to copy text:', err);
   }
   
   document.body.removeChild(textarea);
@@ -61,7 +63,7 @@ function createTickWidget() {
   // Look for the autoplay widget container
   const autoplayContainer = document.querySelector(".widget-bottom[data-minimized='false']");
   if (!autoplayContainer) {
-    console.log("No autoplay widget container found");
+    console.log(LOG_PREFIX, 'No autoplay widget container found');
     return null;
   }
   
@@ -274,21 +276,22 @@ function updateTickWidget() {
 
 // Start tracking game ticks
 function startTracking() {
-  const wasAlreadyTracking = isTracking;
-  
   if (!isTracking) {
-    console.log('Starting tick tracking...');
+    console.log(LOG_PREFIX, 'Starting tick tracking...');
     isTracking = true;
   } else {
-    console.log('Tracking already active, ensuring observer is set up...');
+    console.log(LOG_PREFIX, 'Tracking already active, ensuring observer is set up...');
   }
   
   try {
-    // Only set up event listener if not already tracking (to avoid duplicate listeners)
-    if (!wasAlreadyTracking) {
+    // Always ensure we have the newGame listener after reloads
+    if (!newGameListenerRegistered) {
       // Listen for new game events to subscribe to onGameEnd
       globalThis.state.board.on('newGame', (event) => {
-      console.log('New game event detected');
+        // Skip if tracking is disabled at the moment
+        if (!isTracking) return;
+
+        console.log(LOG_PREFIX, 'New game event detected');
       
       const world = event.world;
       if (world && world.onGameEnd && typeof world.onGameEnd.subscribe === 'function') {
@@ -302,17 +305,17 @@ function startTracking() {
         }
         
         // Subscribe to game end event
-        onGameEndUnsubscribe = world.onGameEnd.subscribe((winner) => {
-          console.log(`Game ended with winner: ${winner}`);
+          onGameEndUnsubscribe = world.onGameEnd.subscribe((winner) => {
+            console.log(LOG_PREFIX, `Game ended with winner: ${winner}`);
           
           try {
             // Get current tick count from tick engine
             const currentTick = world.tickEngine.getCurrentTick();
-            console.log(`Game ended with ${currentTick} ticks`);
+              console.log(LOG_PREFIX, `Game ended with ${currentTick} ticks`);
             
             // Get seed from RNG
             const seed = world.RNG.seed;
-            console.log(`Game seed: ${seed}`);
+              console.log(LOG_PREFIX, `Game seed: ${seed}`);
             
             // Get grade if available (may not be in all game modes)
             let grade = null;
@@ -323,7 +326,7 @@ function startTracking() {
               grade = timerContext.readableGrade;
               rankPoints = timerContext.rankPoints;
             } catch (e) {
-              console.log('Could not get grade from gameTimer:', e);
+                console.log(LOG_PREFIX, 'Could not get grade from gameTimer:', e);
             }
             
             // Record the tick data
@@ -354,17 +357,18 @@ function startTracking() {
             onGameEndUnsubscribe();
             onGameEndUnsubscribe = null;
           } catch (error) {
-            console.error('Error processing game end:', error);
+            console.error(LOG_PREFIX, 'Error processing game end:', error);
           }
         });
       }
       });
+      newGameListenerRegistered = true;
     }
     
     // Always set up the widget observer (needed on reload even if already tracking)
     setupWidgetObserver();
   } catch (error) {
-    console.error('Error setting up tick tracking:', error);
+    console.error(LOG_PREFIX, 'Error setting up tick tracking:', error);
     isTracking = false;
   }
 }
@@ -382,7 +386,7 @@ function stopTracking() {
     try {
       onGameEndUnsubscribe();
     } catch (e) {
-      console.error('Error unsubscribing from game end:', e);
+      console.error(LOG_PREFIX, 'Error unsubscribing from game end:', e);
     }
     onGameEndUnsubscribe = null;
   }
@@ -396,7 +400,7 @@ function stopTracking() {
   // Remove widget if exists
   removeWidget();
   
-      console.log('Tick tracking stopped');
+  console.log(LOG_PREFIX, 'Tick tracking stopped');
 }
 
 // Toggle tick tracking
@@ -447,7 +451,7 @@ function saveTickHistory() {
 function loadTickHistory() {
   if (config.tickHistory && Array.isArray(config.tickHistory)) {
     tickHistory = config.tickHistory;
-    console.log(`Loaded ${tickHistory.length} tick history entries`);
+    console.log(LOG_PREFIX, `Loaded ${tickHistory.length} tick history entries`);
   }
 }
 
@@ -605,10 +609,10 @@ function setupWidgetObserver() {
         const autoplayContainer = document.querySelector(".widget-bottom[data-minimized='false']");
         
         if (autoplayContainer && !document.getElementById(WIDGET_ID)) {
-          console.log('Autoplay container detected, adding widget');
+          console.log(LOG_PREFIX, 'Autoplay container detected, adding widget');
           createOrUpdateWidget();
         } else if (!autoplayContainer && document.getElementById(WIDGET_ID)) {
-                      console.log('Autoplay container removed, removing widget');
+          console.log(LOG_PREFIX, 'Autoplay container removed, removing widget');
           removeWidget();
         }
       }
@@ -623,12 +627,12 @@ function setupWidgetObserver() {
     attributeFilter: ['data-minimized'] 
   });
   
-      console.log('Widget observer set up');
+  console.log(LOG_PREFIX, 'Widget observer set up');
 }
 
 // Initialize the mod
 function init() {
-      console.log('Tick Tracker initializing...');
+  console.log(LOG_PREFIX, 'Initializing...');
   
   // Load saved tick history
   loadTickHistory();
@@ -679,7 +683,7 @@ function init() {
     }, 2000); // Wait 2 seconds for page to fully load
   }
   
-      console.log('Tick Tracker initialized');
+  console.log(LOG_PREFIX, 'Initialized');
 }
 
 // Initialize the mod

@@ -5070,7 +5070,7 @@
             const btn = document.createElement('button');
             btn.className = `${UI_CONSTANTS.CSS_CLASSES.AUTOSELLER_NAV_BTN} focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5`;
             btn.setAttribute('data-selected', 'false');
-            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/autoplay.png" alt="${t('mods.autoseller.navButton')}" width="11" height="11" class="pixelated"><span class="hidden sm:inline">${t('mods.autoseller.navButton')}</span>`;
+            btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/goldpile.png" alt="${t('mods.autoseller.navButton')}" width="12" height="12" class="pixelated"><span class="hidden sm:inline">${t('mods.autoseller.navButton')}</span>`;
             btn.onclick = openAutosellerModal;
             
             li.appendChild(btn);
@@ -5102,107 +5102,34 @@
             style.id = 'autoseller-widget-css';
             style.textContent = `
             #autoseller-session-widget {
-                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
-                border: 6px solid transparent;
-                border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
-                border-radius: 6px;
-                box-shadow: 0 2px 12px 0 #000a;
-                min-width: 240px;
-                max-width: 320px;
                 font-family: 'Satoshi', 'Trebuchet MS', Arial, sans-serif;
-                overflow: visible;
-                position: relative;
-            }
-            #autoseller-session-widget .widget-top {
-                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
-                font-family: var(--font-filled);
-                font-size: 16px;
-                line-height: 1;
-                letter-spacing: .0625rem;
-                word-spacing: -.1875rem;
-                padding-left: .25rem;
-                padding-right: .25rem;
-                color: rgb(144 144 144/var(--tw-text-opacity,1));
-                height: 20px;
-                min-height: 20px;
-                max-height: 20px;
-                letter-spacing: 1px;
-                display: flex;
-                align-items: center;
-                border-bottom: none;
-                margin-bottom: 0;
-                position: relative;
-                z-index: 1;
-                overflow: visible;
-            }
-            #autoseller-session-widget .minimize-btn {
-                margin-left: auto;
-                border: none;
-                background: transparent;
-                color: rgb(144 144 144/var(--tw-text-opacity,1));
-                border-radius: 3px;
-                font-family: var(--font-filled);
-                font-size: 16px;
-                line-height: 1;
-                letter-spacing: .0625rem;
-                word-spacing: -.1875rem;
-                padding-left: .25rem;
-                padding-right: .25rem;
-                cursor: pointer;
-                width: 24px;
-                height: 20px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: background 0.2s;
-            }
-            #autoseller-session-widget .minimize-btn:hover {
-                background: #fff2;
+                max-width: 360px;
             }
             #autoseller-session-widget .stat-row {
                 display: grid;
                 grid-template-columns: auto 1fr 1fr;
                 gap: 8px;
-                justify-content: center;
-                margin: 0;
                 align-items: center;
                 width: 100%;
-                background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
-                border: none;
-                border-radius: 0;
-                padding: 8px;
+                padding: 10px;
                 box-sizing: border-box;
-                min-height: 70px;
             }
             #autoseller-session-widget .stat-row.single-tab {
-                min-height: 50px;
+                padding-top: 12px;
+                padding-bottom: 12px;
             }
             #autoseller-session-widget .separator {
                 grid-column: 1 / -1;
-                height: 6px;
-                margin: 0;
-                background: transparent;
-                border: none;
-                opacity: 0.3;
-                width: 100%;
-                min-width: 100%;
-                max-width: 100%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            #autoseller-session-widget .separator::after {
-                content: '';
-                width: 100%;
                 height: 1px;
+                margin: 2px 0;
                 background: #ffe066;
+                opacity: 0.35;
             }
             #autoseller-session-widget .stat-label {
                 font-family: pixel-font-16, monospace;
                 font-size: 13px;
                 color: #fff;
                 font-weight: bold;
-                margin-bottom: 0;
                 display: flex;
                 align-items: center;
                 justify-content: flex-start;
@@ -5219,15 +5146,13 @@
                 justify-content: flex-start;
                 text-align: left;
                 width: 100%;
+                gap: 4px;
             }
             #autoseller-session-widget .stat-icon {
                 width: 14px;
                 height: 14px;
                 vertical-align: middle;
-                margin-right: 3px;
             }
-            
-
             `;
             document.head.appendChild(style);
         }
@@ -5332,14 +5257,37 @@
         const isSingleTab = enabledTabCount === 1;
         const statRowClass = isSingleTab ? 'stat-row single-tab' : 'stat-row';
         
-        widget.innerHTML = `
-            <div class="widget-top widget-top-text">${t('mods.autoseller.widgetTitle')}</div>
-            <div class="widget-bottom p-0">
-                <div class="${statRowClass}">
-                    ${statRows.join('')}
-                </div>
-            </div>
-        `;
+        // Build header (match Tick Tracker widget style)
+        const header = document.createElement('div');
+        header.className = 'widget-top widget-top-text flex items-center gap-1.5';
+        const headerIcon = document.createElement('img');
+        headerIcon.src = 'https://bestiaryarena.com/assets/icons/goldpile.png';
+        headerIcon.style.width = '12px';
+        headerIcon.style.height = '12px';
+        header.appendChild(headerIcon);
+        header.appendChild(document.createTextNode(t('mods.autoseller.widgetTitle')));
+
+        // Clear history/session stats button (matches Tick Tracker style)
+        const clearButton = document.createElement('button');
+        clearButton.className = 'ml-auto flex h-5 w-5 items-center justify-center rounded-md hover:bg-black/40';
+        clearButton.title = 'Clear session stats';
+        clearButton.innerHTML = '×';
+        clearButton.onclick = () => {
+            stateManager.resetSession();
+            updateAutosellerSessionWidget();
+        };
+        header.appendChild(clearButton);
+
+        widget.appendChild(header);
+
+        // Build body with stats
+        const body = document.createElement('div');
+        body.className = 'widget-bottom p-0';
+        const statWrapper = document.createElement('div');
+        statWrapper.className = statRowClass;
+        statWrapper.innerHTML = statRows.join('');
+        body.appendChild(statWrapper);
+        widget.appendChild(body);
         
         // Inject styles when widget is actually created
         injectAutosellerWidgetStyles();
