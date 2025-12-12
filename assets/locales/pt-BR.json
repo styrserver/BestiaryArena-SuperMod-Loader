@@ -185,6 +185,7 @@
       "menuAdvanced": "Avançado",
       "menuBackup": "Backup",
       "menuModCoordination": "Coordenação de Mods",
+      "modCoordinationWarning": "Aviso: Não altere nenhum valor a menos que você saiba o que está fazendo. As configurações de coordenação de mods afetam como os mods interagem entre si e valores incorretos podem causar comportamento inesperado.",
       "modCoordinationDescription": "Ajuste as prioridades dos mods para controlar quais mods executam primeiro. Prioridade maior = executa primeiro (0-255).",
       "modCoordinationRefresh": "🔄 Atualizar",
       "modCoordinationNotAvailable": "Sistema de Coordenação de Mods não disponível. Por favor, atualize a página.",

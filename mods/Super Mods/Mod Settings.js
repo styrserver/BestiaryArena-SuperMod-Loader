@@ -2104,6 +2104,12 @@ function showSettingsModal() {
         const modCoordinationContent = document.createElement('div');
         modCoordinationContent.innerHTML = `
           <div style="margin-bottom: 15px;">
+            <div style="display: flex; align-items: flex-start; gap: 8px; padding: 10px; background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 4px; margin-bottom: 15px;">
+              <span style="font-size: 18px; color: #ffc107; flex-shrink: 0;">⚠️</span>
+              <p style="color: #ffc107; margin: 0; font-size: 13px; line-height: 1.4;">
+                ${t('mods.betterUI.modCoordinationWarning')}
+              </p>
+            </div>
             <p style="color: #a6adc8; margin: 0 0 10px 0; font-size: 13px;">
               ${t('mods.betterUI.modCoordinationDescription')}
             </p>

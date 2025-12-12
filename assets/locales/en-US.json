@@ -185,6 +185,7 @@
       "menuAdvanced": "Advanced",
       "menuBackup": "Backup",
       "menuModCoordination": "Mod Coordination",
+      "modCoordinationWarning": "Warning: Do not change any values unless you know what you are doing. Mod coordination settings affect how mods interact with each other and incorrect values may cause unexpected behavior.",
       "modCoordinationDescription": "Adjust mod priorities to control which mods run first. Higher priority = runs first (0-255).",
       "modCoordinationRefresh": "🔄 Refresh",
       "modCoordinationNotAvailable": "Mod Coordination system not available. Please refresh the page.",

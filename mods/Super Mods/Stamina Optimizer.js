@@ -66,7 +66,7 @@ const CONFIG_PANEL_ID = `${MOD_ID}-config-panel`;
 
 const DEFAULT_MAX_STAMINA = 350;
 const DEFAULT_MIN_STAMINA = 100;
-const DEFAULT_ACTIONS = ['boosted-maps'];
+const DEFAULT_ACTIONS = ['autoplay'];
 
 const AUTOMATION_ENABLED = true;
 const AUTOMATION_DISABLED = false;
