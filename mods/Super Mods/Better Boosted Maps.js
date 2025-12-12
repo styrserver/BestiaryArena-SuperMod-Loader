@@ -686,6 +686,12 @@ function createSelectAllNoneButtons(idPrefix, scrollContainer) {
 // Check if raid automation is active
 function isRaidHunterRaiding() {
     try {
+        // Use coordination system if available
+        if (window.ModCoordination) {
+            return window.ModCoordination.isModActive('Raid Hunter');
+        }
+        
+        // Fallback to old method for backward compatibility
         if (typeof window !== 'undefined') {
             // Check if raid automation is enabled
             const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
@@ -817,6 +823,12 @@ function shouldFarmBoostedMap() {
 // Check if task automation is active
 function isBetterTaskerTasking() {
     try {
+        // Use coordination system if available
+        if (window.ModCoordination) {
+            return window.ModCoordination.isModActive('Better Tasker');
+        }
+        
+        // Fallback to old method for backward compatibility
         if (typeof window !== 'undefined') {
             // Check quest button control or active task operations
             const hasBetterTaskerQuestButtonControl = window.QuestButtonManager?.getCurrentOwner() === 'Better Tasker';
@@ -855,17 +867,35 @@ function isBetterTaskerTasking() {
 
 // Check if Better Boosted Maps can run (only if no raids or tasks)
 function canRunBoostedMaps() {
-    // Pause while Manual Runner is running to avoid conflicts
-    if (window.__modCoordination?.manualRunnerRunning === true) {
+    if (!modState.enabled) {
+        return false;
+    }
+    
+    // Use coordination system if available
+    if (window.ModCoordination) {
+        const canRun = window.ModCoordination.canModRun('Better Boosted Maps', [
+            'Board Analyzer',
+            'Manual Runner',
+            'Raid Hunter',
+            'Better Tasker'
+            // Note: Stamina Optimizer check removed - it only blocks when enabling autoplay, not during navigation
+        ]);
+        if (!canRun) {
+            console.log('[Better Boosted Maps] Cannot run - blocked by higher priority mod');
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Check if blocking mods are active
+    if (window.ModCoordination?.isModActive('Manual Runner')) {
         console.log('[Better Boosted Maps] Manual Runner running - skipping boosted maps');
         return false;
     }
     // Board Analyzer always blocks (highest priority system task)
-    if (window.__modCoordination?.boardAnalyzerRunning === true) {
+    if (window.ModCoordination?.isModActive('Board Analyzer')) {
         console.log('[Better Boosted Maps] Board Analyzer running - skipping boosted maps');
-        return false;
-    }
-    if (!modState.enabled) {
         return false;
     }
     
@@ -883,64 +913,7 @@ function canRunBoostedMaps() {
     return true;
 }
 
-// Generic mod coordination setup
-function setupModCoordination(modName, intervalKey, stateKey, checkFunction) {
-    if (modState.coordination[intervalKey]) {
-        clearInterval(modState.coordination[intervalKey]);
-    }
-    
-    // Check initial state immediately
-    modState.coordination[stateKey] = checkFunction();
-    if (modState.coordination[stateKey]) {
-        console.log(`[Better Boosted Maps] ${modName} already active at startup - will not start boosted maps`);
-        updateExposedState();
-    }
-    
-    // Check status every 10 seconds
-    modState.coordination[intervalKey] = setInterval(() => {
-        const wasActive = modState.coordination[stateKey];
-        modState.coordination[stateKey] = checkFunction();
-        
-        // Log state changes (coordination happens silently)
-        if (modState.coordination[stateKey] && !wasActive) {
-            console.log(`[Better Boosted Maps] ${modName} started - pausing boosted map automation`);
-            updateExposedState();
-        } else if (!modState.coordination[stateKey] && wasActive) {
-            console.log(`[Better Boosted Maps] ${modName} stopped - checking if boosted maps can resume`);
-            updateExposedState();
-        }
-    }, 10000);
-    
-    console.log(`[Better Boosted Maps] ${modName} coordination set up`);
-}
-
-// Setup raid coordination monitoring
-function setupRaidHunterCoordination() {
-    setupModCoordination('Raid Hunter', 'raidHunterInterval', 'isRaidHunterActive', isRaidHunterRaiding);
-}
-
-// Setup task coordination monitoring
-function setupBetterTaskerCoordination() {
-    setupModCoordination('Better Tasker', 'betterTaskerInterval', 'isBetterTaskerActive', isBetterTaskerTasking);
-}
-
-// Cleanup coordination intervals
-function cleanupCoordination() {
-    if (modState.coordination.raidHunterInterval) {
-        clearInterval(modState.coordination.raidHunterInterval);
-        modState.coordination.raidHunterInterval = null;
-    }
-    
-    if (modState.coordination.betterTaskerInterval) {
-        clearInterval(modState.coordination.betterTaskerInterval);
-        modState.coordination.betterTaskerInterval = null;
-    }
-    
-    modState.coordination.isRaidHunterActive = false;
-    modState.coordination.isBetterTaskerActive = false;
-    
-    console.log('[Better Boosted Maps] Coordination cleanup completed');
-}
+// Old coordination functions removed - now using event-driven ModCoordination system
 
 // =======================
 // 3.3. Daily State Monitoring
@@ -950,6 +923,16 @@ function setupDailyStateMonitoring() {
     // Unsubscribe if already monitoring
     if (modState.dailySubscription) {
         modState.dailySubscription.unsubscribe();
+    }
+    
+    // Check if game state is available before subscribing
+    if (!globalThis.state || !globalThis.state.daily) {
+        console.log('[Better Boosted Maps] ⏳ Game state not ready, retrying daily state monitoring...');
+        // Retry after a delay
+        setTimeout(() => {
+            setupDailyStateMonitoring();
+        }, 2000);
+        return;
     }
     
     // Store initial boosted map
@@ -1117,6 +1100,11 @@ function toggleBoostedMaps() {
     updateToggleButton();
     saveBoostedMapsState();
     
+    // Update coordination system state
+    if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Better Boosted Maps', { enabled: modState.enabled });
+    }
+    
     if (modState.enabled) {
         console.log('[Better Boosted Maps] Enabled - setting up mod coordination');
         setupRaidHunterCoordination();
@@ -1130,6 +1118,11 @@ function toggleBoostedMaps() {
     } else {
         console.log('[Better Boosted Maps] Disabled - cleaning up coordination');
         cleanupCoordination();
+        
+        // Update coordination system state
+        if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Better Boosted Maps', { active: false });
+        }
         
         // Cleanup daily subscription
         if (modState.dailySubscription) {
@@ -2145,6 +2138,11 @@ function cancelBoostedMapFarming(reason = 'unknown') {
     modState.farming.isActive = false;
     modState.farming.currentMapInfo = null;
     
+    // Update coordination system state
+    if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Better Boosted Maps', { active: false });
+    }
+    
     // Stop stamina tooltip monitoring
     stopStaminaTooltipMonitoring();
 }
@@ -2193,6 +2191,11 @@ async function startBoostedMapFarming(force = false) {
         
         modState.farming.isActive = true;
         modState.farming.currentMapInfo = farmCheck;
+        
+        // Update coordination system state
+        if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Better Boosted Maps', { active: true });
+        }
         
         console.log(`[Better Boosted Maps] Starting boosted map farming: ${farmCheck.roomName}`);
         
@@ -2261,6 +2264,13 @@ async function startBoostedMapFarming(force = false) {
         
         // Load settings once for all configuration
         const settings = loadSettings();
+        
+        // Check if Stamina Optimizer would block before enabling autoplay
+        if (window.staminaOptimizerWouldBlock && window.staminaOptimizerWouldBlock('Better Boosted Maps')) {
+            console.log('[Better Boosted Maps] Stamina Optimizer would block - not enabling autoplay mode');
+            cancelBoostedMapFarming('Stamina Optimizer would block autoplay');
+            return;
+        }
         
         // Enable autoplay mode
         console.log('[Better Boosted Maps] Enabling autoplay mode...');
@@ -2681,14 +2691,39 @@ function monitorQuestLog() {
 function init() {
     console.log('[Better Boosted Maps] Initializing...');
     
+    // Register with mod coordination system
+    if (window.ModCoordination) {
+        window.ModCoordination.registerMod('Better Boosted Maps', {
+            priority: 10,
+            metadata: { description: 'Automated boosted map farming system' }
+        });
+        
+        // Subscribe to mod state changes instead of polling
+        window.ModCoordination.on('modActiveChanged', (data) => {
+            if (data.modName === 'Raid Hunter') {
+                modState.coordination.isRaidHunterActive = data.active;
+                updateExposedState();
+            } else if (data.modName === 'Better Tasker') {
+                modState.coordination.isBetterTaskerActive = data.active;
+                updateExposedState();
+            } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
+                // Check if we can run when these mods change state
+                updateExposedState();
+            }
+        });
+    }
+    
     loadBoostedMapsState();
     monitorQuestLog();
     
-    // Setup mod coordination if enabled
+    // Update coordination system state
+    if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Better Boosted Maps', { enabled: modState.enabled });
+    }
+    
+    // Setup daily state monitoring if enabled
     if (modState.enabled) {
-        console.log('[Better Boosted Maps] Mod is enabled - setting up coordination');
-        setupRaidHunterCoordination();
-        setupBetterTaskerCoordination();
+        console.log('[Better Boosted Maps] Mod is enabled - setting up daily state monitoring');
         setupDailyStateMonitoring();
         
         // Check and start boosted map farming after delay
@@ -2717,6 +2752,11 @@ function exposeBoostedMapsState() {
             isFarming: modState.farming.isActive,
             currentMap: modState.farming.currentMapInfo
         };
+        
+        // Update coordination system state
+        if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Better Boosted Maps', { active: modState.farming.isActive });
+        }
     }
 }
 
@@ -2765,6 +2805,11 @@ context.exports = {
         // Clear stamina cache
         modState.staminaCache.currentMapId = null;
         modState.staminaCache.cost = null;
+        
+        // Unregister from coordination system
+        if (window.ModCoordination) {
+            window.ModCoordination.unregisterMod('Better Boosted Maps');
+        }
         
         // Clean up exposed state
         if (window.betterBoostedMapsState) {

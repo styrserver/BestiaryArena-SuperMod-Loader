@@ -1252,12 +1252,16 @@ async function waitForModCoordinationTasks(options = {}) {
   const start = performance.now();
   let waitAttempts = 0;
 
+  // Get automator metadata once to avoid duplicate calls
+  const automatorState = window.ModCoordination?.getModState('Bestiary Automator');
+  const automatorMetadata = automatorState?.metadata || {};
+  
   const getActiveOperations = () => {
     const ops = [];
-    if (window.__modCoordination?.automatorRefilling) ops.push('refilling stamina');
-    if (window.__modCoordination?.automatorCollectingRewards) ops.push('collecting rewards');
-    if (window.__modCoordination?.automatorHandlingDaycare) ops.push('handling daycare');
-    if (window.__modCoordination?.automatorCollectingSeashell) ops.push('collecting seashell');
+    if (automatorMetadata.refilling) ops.push('refilling stamina');
+    if (automatorMetadata.collectingRewards) ops.push('collecting rewards');
+    if (automatorMetadata.handlingDaycare) ops.push('handling daycare');
+    if (automatorMetadata.collectingSeashell) ops.push('collecting seashell');
     return ops;
   };
 
@@ -1265,10 +1269,10 @@ async function waitForModCoordinationTasks(options = {}) {
   const initialOps = getActiveOperations();
   const contextSuffix = context ? ` [${context}]` : '';
   console.log(`[Manual Runner] Checking coordination flags${contextSuffix}:`, {
-    automatorRefilling: !!window.__modCoordination?.automatorRefilling,
-    automatorCollectingRewards: !!window.__modCoordination?.automatorCollectingRewards,
-    automatorHandlingDaycare: !!window.__modCoordination?.automatorHandlingDaycare,
-    automatorCollectingSeashell: !!window.__modCoordination?.automatorCollectingSeashell,
+    automatorRefilling: !!automatorMetadata.refilling,
+    automatorCollectingRewards: !!automatorMetadata.collectingRewards,
+    automatorHandlingDaycare: !!automatorMetadata.handlingDaycare,
+    automatorCollectingSeashell: !!automatorMetadata.collectingSeashell,
     activeOperations: initialOps.length > 0 ? initialOps : 'none'
   });
 
@@ -3153,11 +3157,10 @@ async function runAnalysis() {
   let runningModal = null;
   
   try {
-    // Signal to other mods that Manual Runner is running (for coordination)
-    try {
-      window.__modCoordination = window.__modCoordination || {};
-      window.__modCoordination.manualRunnerRunning = true;
-    } catch (_) {}
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Manual Runner', { active: true });
+    }
     // Compute target S+ rank points based on current setup and stop condition
     let targetRankPoints = null;
     if (config.stopCondition !== 'any') {
@@ -3285,11 +3288,15 @@ async function runAnalysis() {
       console.log('[Manual Runner] runAnalysis finally: Ensuring state is reset. Current state:', analysisState.state);
       analysisState.reset();
     }
-    // Clear coordination flag so other mods may resume safely
-    try {
-      window.__modCoordination = window.__modCoordination || {};
-      window.__modCoordination.manualRunnerRunning = false;
-    } catch (_) {}
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Manual Runner', { active: false });
+    }
+    
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Manual Runner', { active: false });
+    }
   }
 }
 
@@ -3300,6 +3307,15 @@ async function runAnalysis() {
 // Initialize UI
 function init() {
   console.log('[Manual Runner] Initializing UI...');
+  
+  // Register with mod coordination system
+  if (window.ModCoordination) {
+    window.ModCoordination.registerMod('Manual Runner', {
+      priority: 150,
+      metadata: { description: 'Manual run analysis system' }
+    });
+    window.ModCoordination.updateModState('Manual Runner', { enabled: true });
+  }
   
   // Add the main button
   api.ui.addButton({
@@ -3385,12 +3401,11 @@ function cleanupManualRunner() {
       }
     }
     
-    // 9. Clear coordination flags
-    try {
-      if (window.__modCoordination) {
-        window.__modCoordination.manualRunnerRunning = false;
-      }
-    } catch (_) {}
+    // 9. Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Manual Runner', { active: false });
+      window.ModCoordination.unregisterMod('Manual Runner');
+    }
     
     console.log('[Manual Runner] Cleanup completed successfully');
   } catch (error) {

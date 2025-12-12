@@ -4,6 +4,15 @@
 
 console.log('[Bestiary Automator] initializing...');
 
+// Register with mod coordination system
+if (window.ModCoordination) {
+    window.ModCoordination.registerMod('Bestiary Automator', {
+        priority: 50,
+        metadata: { description: 'Automated game assistance system' }
+    });
+    window.ModCoordination.updateModState('Bestiary Automator', { enabled: true });
+}
+
 // Configuration with defaults
 const defaultConfig = {
   enabled: false,
@@ -150,9 +159,9 @@ const canTransitionTo = (newState) => {
 
 // Helper functions for automation
 
-// Check if Board Analyzer is running (repeated check pattern)
+// Check if Board Analyzer is running
 const isBoardAnalyzerRunning = () => {
-  return !!(window.__modCoordination && window.__modCoordination.boardAnalyzerRunning);
+  return window.ModCoordination?.isModActive('Board Analyzer') || false;
 };
 
 // Simulate ESC key press (repeated pattern)
@@ -465,10 +474,22 @@ const isAutoplayMode = () => {
 // Check if game is in a state where automation should run
 const isGameActive = () => {
   try {
-    // Check if Board Analyzer is running - if so, pause automation
-    if (isBoardAnalyzerRunning()) {
-      console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
-      return false;
+    // Use coordination system if available
+    if (window.ModCoordination) {
+      const canRun = window.ModCoordination.canModRun('Bestiary Automator', [
+        'Board Analyzer',
+        'Manual Runner'
+      ]);
+      if (!canRun) {
+        console.log('[Bestiary Automator] Cannot run - blocked by higher priority mod');
+        return false;
+      }
+    } else {
+      // Fallback: Check if Board Analyzer is running - if so, pause automation
+      if (isBoardAnalyzerRunning()) {
+        console.log('[Bestiary Automator] Board Analyzer is running, pausing automation');
+        return false;
+      }
     }
     
     // Check if Game State API is available
@@ -487,10 +508,23 @@ const isGameActive = () => {
 // Simple game readiness check for stamina refill
 const isGameReadyForStaminaRefill = () => {
   try {
-    // Check if Board Analyzer is running - if so, pause automation
-    if (isBoardAnalyzerRunning()) {
-      console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
-      return false;
+    // Use coordination system if available
+    if (window.ModCoordination) {
+      const canRun = window.ModCoordination.canModRun('Bestiary Automator', [
+        'Board Analyzer',
+        'Manual Runner'
+      ]);
+      if (!canRun) {
+        console.log('[Bestiary Automator] Cannot refill stamina - blocked by higher priority mod');
+        return false;
+      }
+    } else {
+      // Fallback to old method for backward compatibility
+      // Check if Board Analyzer is running - if so, pause automation
+      if (isBoardAnalyzerRunning()) {
+        console.log('[Bestiary Automator] Board Analyzer is running, pausing stamina refill');
+        return false;
+      }
     }
     
     // Simple check: just verify stamina element exists
@@ -570,17 +604,22 @@ const getCurrentStaminaFromState = () => {
 // Helper functions for mod coordination
 const setRefillingFlag = () => {
   try {
-    window.__modCoordination = window.__modCoordination || {};
-    window.__modCoordination.automatorRefilling = true;
-    // Only log flag changes, not every check
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Bestiary Automator', {
+        metadata: { refilling: true }
+      });
+    }
   } catch (_) {}
 };
 
 const clearRefillingFlag = () => {
   try {
-    if (window.__modCoordination) {
-      window.__modCoordination.automatorRefilling = false;
-      // Only log flag changes, not every check
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Bestiary Automator', {
+        metadata: { refilling: false }
+      });
     }
   } catch (_) {}
 };
@@ -1487,8 +1526,11 @@ const takeRewardsIfAvailable = async () => {
     
     // Signal to other mods that we're collecting rewards (for coordination)
     try {
-      window.__modCoordination = window.__modCoordination || {};
-      window.__modCoordination.automatorCollectingRewards = true;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { collectingRewards: true }
+        });
+      }
     } catch (_) {}
     
     // Open rewards menu
@@ -1520,14 +1562,22 @@ const takeRewardsIfAvailable = async () => {
     
     // Clear the flag after collecting is complete
     try {
-      window.__modCoordination.automatorCollectingRewards = false;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { collectingRewards: false }
+        });
+      }
     } catch (_) {}
     
   } catch (error) {
     console.error('[Bestiary Automator] Error taking rewards:', error);
     // Always clear the flag even on error
     try {
-      window.__modCoordination.automatorCollectingRewards = false;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { collectingRewards: false }
+        });
+      }
     } catch (_) {}
   }
 };
@@ -1841,8 +1891,11 @@ const handleDayCare = async () => {
   try {
     // Signal to other mods that we're handling daycare (for coordination)
     try {
-      window.__modCoordination = window.__modCoordination || {};
-      window.__modCoordination.automatorHandlingDaycare = true;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { handlingDaycare: true }
+        });
+      }
     } catch (_) {}
     
     // Single query with early exit - if no blip elements, skip processing
@@ -1850,7 +1903,11 @@ const handleDayCare = async () => {
     if (blipElements.length === 0) {
       // Clear the flag if no daycare to handle
       try {
-        window.__modCoordination.automatorHandlingDaycare = false;
+        if (window.ModCoordination) {
+          window.ModCoordination.updateModState('Bestiary Automator', {
+            metadata: { handlingDaycare: false }
+          });
+        }
       } catch (_) {}
       return;
     }
@@ -2043,14 +2100,22 @@ const handleDayCare = async () => {
     
     // Clear the flag after daycare is complete
     try {
-      window.__modCoordination.automatorHandlingDaycare = false;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { handlingDaycare: false }
+        });
+      }
     } catch (_) {}
     
   } catch (error) {
     console.error('[Bestiary Automator] Error handling day care:', error);
     // Always clear the flag even on error
     try {
-      window.__modCoordination.automatorHandlingDaycare = false;
+      if (window.ModCoordination) {
+        window.ModCoordination.updateModState('Bestiary Automator', {
+          metadata: { handlingDaycare: false }
+        });
+      }
     } catch (_) {}
   }
 };
@@ -4135,6 +4200,11 @@ context.exports = {
     fasterAutoplayExecutedThisSession = false;
     fasterAutoplayRunning = false;
     rewardsCollectedThisSession = false;
+    
+    // Unregister from coordination system
+    if (window.ModCoordination) {
+      window.ModCoordination.unregisterMod('Bestiary Automator');
+    }
     
     console.log('[Bestiary Automator] Cleanup completed');
   },

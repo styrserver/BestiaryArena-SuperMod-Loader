@@ -61,15 +61,6 @@ const ANALYSIS_STATES = {
 // 2. Global State & Classes
 // =======================
 
-// Global state management for mod coordination
-if (!window.__modCoordination) {
-  window.__modCoordination = {
-    boardAnalyzerRunning: false,
-    boardAnalyzerStartTime: null,
-    boardAnalyzerEndTime: null
-  };
-}
-
 // Track active modals to ensure they can be closed properly
 let activeRunningModal = null;
 let activeConfigPanel = null;
@@ -1219,17 +1210,13 @@ function restoreBoardState() {
   try {
     console.log('Restoring board state...');
     
-    // Reset global coordination state to allow other mods to resume
-    if (window.__modCoordination) {
-      window.__modCoordination.boardAnalyzerRunning = false;
-      window.__modCoordination.boardAnalyzerEndTime = Date.now();
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Board Analyzer', { 
+        active: false,
+        metadata: { endTime: Date.now() }
+      });
       console.log('[Board Analyzer] Analysis finished - other mods can resume');
-      
-      // Small delay to ensure other mods detect the state change
-      setTimeout(() => {
-        // Force a small state change to trigger any watchers
-        window.__modCoordination.boardAnalyzerRunning = false;
-      }, TURBO_RESET_DELAY_MS);
     }
     
     // Stop any running game
@@ -1699,10 +1686,16 @@ function initializeAnalysis() {
 
 // Helper function to setup analysis environment
 function setupAnalysisEnvironment() {
-  // Set global state to indicate Board Analyzer is running
-  window.__modCoordination.boardAnalyzerRunning = true;
-  window.__modCoordination.boardAnalyzerStartTime = Date.now();
-  window.__modCoordination.boardAnalyzerEndTime = null;
+  // Update coordination system state
+  if (window.ModCoordination) {
+    window.ModCoordination.updateModState('Board Analyzer', { 
+      active: true,
+      metadata: { 
+        startTime: Date.now(),
+        endTime: null
+      }
+    });
+  }
   
   console.log('[Board Analyzer] Analysis started - other mods should pause');
   
@@ -1893,10 +1886,16 @@ async function runSingleAnalysis(i, thisAnalysisId, statusCallback, statsCalcula
 
 // Helper function to initialize analysis environment
 function initializeAnalysisEnvironment() {
-  // Set global state to indicate Board Analyzer is running
-  window.__modCoordination.boardAnalyzerRunning = true;
-  window.__modCoordination.boardAnalyzerStartTime = Date.now();
-  window.__modCoordination.boardAnalyzerEndTime = null;
+  // Update coordination system state
+  if (window.ModCoordination) {
+    window.ModCoordination.updateModState('Board Analyzer', { 
+      active: true,
+      metadata: { 
+        startTime: Date.now(),
+        endTime: null
+      }
+    });
+  }
   
   console.log('[Board Analyzer] Analysis started - other mods should pause');
   
@@ -3529,6 +3528,14 @@ async function runAnalysis() {
 function init() {
   console.log('Board Analyzer initializing UI...');
   
+  // Register with mod coordination system
+  if (window.ModCoordination) {
+    window.ModCoordination.registerMod('Board Analyzer', {
+      priority: 200, // Highest priority (system task)
+      metadata: { description: 'Board analysis system' }
+    });
+    window.ModCoordination.updateModState('Board Analyzer', { enabled: true });
+  }
   
   // Make sure turbo mode is disabled on startup
   if (turboActive) {
@@ -3562,7 +3569,7 @@ function init() {
 // Initialize the mod
 init();
 
-// Export functionality
+  // Export functionality
 context.exports = {
   analyze: showConfigAndPrepareAnalysis, // Opens config panel with analysis callback
   updateConfig: (newConfig) => {
@@ -3572,6 +3579,10 @@ context.exports = {
   // Cleanup function for modal manager
   cleanup: () => {
     modalManager.closeAll();
+    // Unregister from coordination system
+    if (window.ModCoordination) {
+      window.ModCoordination.unregisterMod('Board Analyzer');
+    }
   }
 };
 

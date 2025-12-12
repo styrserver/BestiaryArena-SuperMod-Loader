@@ -126,6 +126,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - `content/` - Content scripts that are injected into the game page
   - `client.js` - Main client-side API and functionality
   - `injector.js` - Injects the client code into the game page
+  - `mod-coordination.mjs` - Global mod coordination system for managing mod states, priorities, and resource control
   - `local_mods.js` - Manages local mods
 - `docs/` - Documentation for mod developers
 - `database/` - Stores persistent data and tooltips used by mods (e.g., `media.txt`, `inventory-database.js`, `maps-database.js`)

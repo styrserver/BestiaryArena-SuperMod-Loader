@@ -1028,7 +1028,7 @@ function updateInternalClock() {
   // If Manual Runner is running and we're in manual mode, ensure timing is active
   if (mode === 'manual' && !HuntAnalyzerState.timeTracking.manualActive) {
     try {
-      const manualRunnerRunning = !!(window.__modCoordination && window.__modCoordination.manualRunnerRunning);
+      const manualRunnerRunning = window.ModCoordination?.isModActive('Manual Runner') || false;
       if (manualRunnerRunning) {
         HuntAnalyzerState.timeTracking.manualActive = true;
         HuntAnalyzerState.timeTracking.manualSessionStartMs = Date.now();

@@ -5856,7 +5856,7 @@
             // Use separate handler to avoid overwriting emitNewGameHandler1 from setupAutosellerWidgetObserver
             emitNewGameHandler2 = (game) => {
                 // Skip during Board Analyzer runs
-                if (window.__modCoordination?.boardAnalyzerRunning) {
+                if (window.ModCoordination?.isModActive('Board Analyzer')) {
                     return;
                 }
                 
@@ -6097,7 +6097,7 @@
         }
         
         // Skip if Board Analyzer is running
-        if (window.__modCoordination?.boardAnalyzerRunning) {
+        if (window.ModCoordination?.isModActive('Board Analyzer')) {
             console.log('[Autoseller] Board Analyzer is running, skipping autocollect');
             return;
         }
@@ -6323,6 +6323,12 @@
     // =======================
     
     function initAutoseller() {
+        // Register the mod with the coordination system
+        if (window.ModCoordination) {
+            window.ModCoordination.registerMod('Autoseller', { priority: 1 });
+            window.ModCoordination.updateModState('Autoseller', { enabled: true });
+        }
+        
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
@@ -6566,10 +6572,19 @@
                     delete window.autoplantStatusSummary;
                     delete window.__autosellerLoaded;
                     
-                    // 9. Reset cleanup flag
+                    // 9. Unregister from mod coordination system
+                    if (window.ModCoordination) {
+                        try {
+                            window.ModCoordination.cleanupMod('Autoseller');
+                        } catch (error) {
+                            console.warn('[Autoseller] Error unregistering from ModCoordination:', error);
+                        }
+                    }
+                    
+                    // 10. Reset cleanup flag
                     isCleaningUp = false;
                     
-                    // 10. Verify cleanup was successful
+                    // 11. Verify cleanup was successful
                     const remainingReferences = [
                         boardSubscription1,
                         playerSubscription,

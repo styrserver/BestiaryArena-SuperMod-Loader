@@ -726,71 +726,11 @@ function findSetupButton(option) {
 let questLogObserver = null;
 
 // ============================================================================
-// 2.1. CONTROL MANAGER CLASS
+// 2.1. CONTROL MANAGER ACCESS
 // ============================================================================
-
-// Reusable control manager class for coordination between mods
-class ControlManager {
-    constructor(name, uniqueProperties = {}) {
-        this.name = name;
-        this.currentOwner = null;
-        
-        // Add any unique properties specific to this manager
-        Object.assign(this, uniqueProperties);
-    }
-    
-    // Request control (returns true if successful)
-    requestControl(modName) {
-        if (this.currentOwner === null || this.currentOwner === modName) {
-            this.currentOwner = modName;
-            console.log(`[${this.name}] Control granted to ${modName}`);
-            return true;
-        }
-        console.log(`[${this.name}] Control denied to ${modName} (currently owned by ${this.currentOwner})`);
-        return false;
-    }
-    
-    // Release control
-    releaseControl(modName) {
-        if (this.currentOwner === modName) {
-            this.currentOwner = null;
-            console.log(`[${this.name}] Control released by ${modName}`);
-            return true;
-        }
-        return false;
-    }
-    
-    // Check if mod has control
-    hasControl(modName) {
-        return this.currentOwner === modName;
-    }
-    
-    // Get current owner
-    getCurrentOwner() {
-        return this.currentOwner;
-    }
-}
-
-// ============================================================================
-// 2.2. CONTROL MANAGER INSTANCES
-// ============================================================================
-
-// Quest Button Manager for coordination between mods
-window.QuestButtonManager = window.QuestButtonManager || new ControlManager('Quest Button Manager', {
-    originalState: null,
-    validationInterval: null
-});
-
-// Autoplay Manager for coordination between mods
-window.AutoplayManager = window.AutoplayManager || new ControlManager('Autoplay Manager', {
-    originalMode: null,
-    isControlledByOther(modName) {
-        return this.currentOwner !== null && this.currentOwner !== modName;
-    }
-});
-
-// Bestiary Automator Settings Manager for coordination between mods
-window.BestiaryAutomatorSettingsManager = window.BestiaryAutomatorSettingsManager || new ControlManager('Bestiary Automator Settings Manager');
+// Control managers are provided by mod-coordination.mjs
+// Access them via window.QuestButtonManager, window.AutoplayManager, etc.
+// These are initialized by ModCoordination.initializeDefaultManagers()
 
 // Raid Hunter coordination state
 let isRaidHunterActive = false;
@@ -1357,6 +1297,55 @@ function setupPageVisibilityMonitoring() {
     console.log('[Better Tasker] Page visibility monitoring set up');
 }
 
+// Handle Raid Hunter state changes (event-driven)
+function handleRaidHunterStateChange(isActive) {
+    const wasRaidHunterActive = isRaidHunterActive;
+    isRaidHunterActive = isActive;
+    
+    // If Raid Hunter just became active and we're running automation, pause it (but keep game state monitoring for new tasks)
+    if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+        console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation (keeping game state monitoring for new tasks)');
+        pauseAutomationDuringRaid();
+    }
+    
+    // If Raid Hunter stopped raiding and we were enabled, resume automation
+    if (!isRaidHunterActive && wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+        console.log('[Better Tasker] Raid Hunter stopped raiding - resuming task automation');
+        // Small delay before resuming to ensure Raid Hunter has fully stopped
+        setTimeout(async () => {
+            if (!isRaidHunterRaiding() && taskerState === TASKER_STATES.ENABLED) {
+                // Now that Raid Hunter has stopped, we can safely disable its Bestiary Automator settings
+                // and enable our own if needed
+                handleRaidHunterStopped();
+                
+                // Check if we have an active task that needs resumption
+                const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+                const task = playerContext?.questLog?.task;
+                const hasActiveTask = !!(task && task.gameId);
+                
+                if (hasActiveTask) {
+                    console.log('[Better Tasker] Active task found after raid - checking current map');
+                    
+                    // Check if we're already on the correct task map
+                    const currentRoomId = getCurrentRoomId();
+                    const onCorrectMap = currentRoomId && taskingMapId && currentRoomId === taskingMapId;
+                    
+                    if (onCorrectMap) {
+                        console.log('[Better Tasker] Already on correct task map - continuing task');
+                        taskNavigationCompleted = true;
+                    } else {
+                        console.log(`[Better Tasker] Not on task map (current: ${currentRoomId}, expected: ${taskingMapId}) - will navigate`);
+                        taskNavigationCompleted = false;
+                    }
+                }
+                
+                // Start automation (automationInterval already null from pauseAutomationDuringRaid)
+                startAutomation();
+            }
+        }, 3000);
+    }
+}
+
 // Monitor Raid Hunter coordination
 function setupRaidHunterCoordination() {
     if (raidHunterCoordinationInterval) {
@@ -1366,56 +1355,66 @@ function setupRaidHunterCoordination() {
     // Set up page visibility monitoring FIRST - this ensures immediate detection when page becomes visible
     setupPageVisibilityMonitoring();
     
-    // Check Raid Hunter status every 10 seconds
-    raidHunterCoordinationInterval = setInterval(() => {
-        const wasRaidHunterActive = isRaidHunterActive;
-        isRaidHunterActive = isRaidHunterRaiding();
-        
-        // If Raid Hunter just became active and we're running automation, pause it (but keep game state monitoring for new tasks)
-        if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
-            console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation (keeping game state monitoring for new tasks)');
+    // Use coordination system if available, otherwise fallback to polling
+    if (window.ModCoordination) {
+        // Check initial state
+        isRaidHunterActive = window.ModCoordination.isModActive('Raid Hunter');
+        if (isRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+            console.log('[Better Tasker] Raid Hunter is actively raiding - automation will be paused');
             pauseAutomationDuringRaid();
         }
-        
-        // If Raid Hunter stopped raiding and we were enabled, resume automation
-        if (!isRaidHunterActive && wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
-            console.log('[Better Tasker] Raid Hunter stopped raiding - resuming task automation');
-            // Small delay before resuming to ensure Raid Hunter has fully stopped
-            setTimeout(async () => {
-                if (!isRaidHunterRaiding() && taskerState === TASKER_STATES.ENABLED) {
-                    // Now that Raid Hunter has stopped, we can safely disable its Bestiary Automator settings
-                    // and enable our own if needed
-                    handleRaidHunterStopped();
-                    
-                    // Check if we have an active task that needs resumption
-                    const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-                    const task = playerContext?.questLog?.task;
-                    const hasActiveTask = !!(task && task.gameId);
-                    
-                    if (hasActiveTask) {
-                        console.log('[Better Tasker] Active task found after raid - checking current map');
+        // Events are already subscribed in init()
+    } else {
+        // Fallback to polling for backward compatibility
+        // Check Raid Hunter status every 10 seconds
+        raidHunterCoordinationInterval = setInterval(() => {
+            const wasRaidHunterActive = isRaidHunterActive;
+            isRaidHunterActive = isRaidHunterRaiding();
+            
+            // If Raid Hunter just became active and we're running automation, pause it (but keep game state monitoring for new tasks)
+            if (isRaidHunterActive && !wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+                console.log('[Better Tasker] Raid Hunter started raiding - pausing task automation (keeping game state monitoring for new tasks)');
+                pauseAutomationDuringRaid();
+            }
+            
+            // If Raid Hunter stopped raiding and we were enabled, resume automation
+            if (!isRaidHunterActive && wasRaidHunterActive && taskerState === TASKER_STATES.ENABLED) {
+                console.log('[Better Tasker] Raid Hunter stopped raiding - resuming task automation');
+                // Small delay before resuming to ensure Raid Hunter has fully stopped
+                setTimeout(async () => {
+                    if (!isRaidHunterRaiding() && taskerState === TASKER_STATES.ENABLED) {
+                        // Now that Raid Hunter has stopped, we can safely disable its Bestiary Automator settings
+                        // and enable our own if needed
+                        handleRaidHunterStopped();
                         
-                        // Check if we're already on the correct task map
-                        const currentRoomId = getCurrentRoomId();
-                        const onCorrectMap = currentRoomId && taskingMapId && currentRoomId === taskingMapId;
+                        // Check if we have an active task that needs resumption
+                        const playerContext = globalThis.state?.player?.getSnapshot()?.context;
+                        const task = playerContext?.questLog?.task;
+                        const hasActiveTask = !!(task && task.gameId);
                         
-                        if (onCorrectMap) {
-                            console.log('[Better Tasker] Already on correct task map - continuing task');
-                            taskNavigationCompleted = true;
-                        } else {
-                            console.log(`[Better Tasker] Not on task map (current: ${currentRoomId}, expected: ${taskingMapId}) - will navigate`);
-                            taskNavigationCompleted = false;
+                        if (hasActiveTask) {
+                            console.log('[Better Tasker] Active task found after raid - checking current map');
+                            
+                            // Check if we're already on the correct task map
+                            const currentRoomId = getCurrentRoomId();
+                            const onCorrectMap = currentRoomId && taskingMapId && currentRoomId === taskingMapId;
+                            
+                            if (onCorrectMap) {
+                                console.log('[Better Tasker] Already on correct task map - continuing task');
+                                taskNavigationCompleted = true;
+                            } else {
+                                console.log(`[Better Tasker] Not on task map (current: ${currentRoomId}, expected: ${taskingMapId}) - will navigate`);
+                                taskNavigationCompleted = false;
+                            }
                         }
+                        
+                        // Start automation (automationInterval already null from pauseAutomationDuringRaid)
+                        startAutomation();
                     }
-                    
-                    // Start automation (automationInterval already null from pauseAutomationDuringRaid)
-                    startAutomation();
-                }
-            }, 3000);
-        }
-    }, 10000);
-    
-    console.log('[Better Tasker] Raid Hunter coordination set up');
+                }, 3000);
+            }
+        }, 10000);
+    }
 }
 
 // Handle when Raid Hunter stops raiding
@@ -1476,8 +1475,7 @@ function cleanupRaidHunterCoordination() {
 // Check if Board Analyzer is currently running
 function isBoardAnalyzerActive() {
     try {
-        if (!window.__modCoordination) return false;
-        return window.__modCoordination.boardAnalyzerRunning === true;
+        return window.ModCoordination?.isModActive('Board Analyzer') || false;
     } catch (error) {
         console.error('[Better Tasker] Error checking Board Analyzer status:', error);
         return false;
@@ -1487,10 +1485,10 @@ function isBoardAnalyzerActive() {
 // Handle Board Analyzer coordination - pause Better Tasker when Board Analyzer runs
 function handleBoardAnalyzerCoordination() {
     try {
-        if (!window.__modCoordination) return;
+        if (!window.ModCoordination) return;
         
-        const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
-        const manualRunnerRunning = window.__modCoordination.manualRunnerRunning === true;
+        const boardAnalyzerRunning = window.ModCoordination.isModActive('Board Analyzer');
+        const manualRunnerRunning = window.ModCoordination.isModActive('Manual Runner');
         
         if ((boardAnalyzerRunning || manualRunnerRunning) && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Better Tasker automation
@@ -1526,8 +1524,6 @@ function setupBoardAnalyzerCoordination() {
     boardAnalyzerCoordinationInterval = setInterval(() => {
         handleBoardAnalyzerCoordination();
     }, 2000);
-    
-    console.log('[Better Tasker] Board Analyzer coordination set up');
 }
 
 // Clean up Board Analyzer coordination
@@ -1932,6 +1928,12 @@ function toggleTasker() {
             resetState('navigation');
             updateExposedState();
             break;
+    }
+    
+    // Update coordination system state
+    if (window.ModCoordination) {
+        const isEnabled = taskerState === TASKER_STATES.ENABLED || taskerState === TASKER_STATES.NEW_TASK_ONLY;
+        window.ModCoordination.updateModState('Better Tasker', { enabled: isEnabled });
     }
     
     saveTaskerState();
@@ -3667,7 +3669,11 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Enable autoplay mode
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                await ensureAutoplayMode();
+                const autoplayEnabled = ensureAutoplayMode();
+                if (!autoplayEnabled) {
+                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod)');
+                    return false;
+                }
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -3785,7 +3791,11 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 
                 // Enable autoplay mode
                 console.log('[Better Tasker] Enabling autoplay mode...');
-                await ensureAutoplayMode();
+                const autoplayEnabled = ensureAutoplayMode();
+                if (!autoplayEnabled) {
+                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod)');
+                    return false;
+                }
                 await sleep(AUTOPLAY_SETUP_DELAY);
                 
                 // Enable Bestiary Automator settings if configured
@@ -4471,6 +4481,12 @@ function ensureAutoplayMode() {
         }
     }
     // After init phase (20s), or if no raids, proceed normally
+    
+    // Check if Stamina Optimizer would block before starting autoplay
+    if (window.staminaOptimizerWouldBlock && window.staminaOptimizerWouldBlock('Better Tasker')) {
+        console.log('[Better Tasker] Stamina Optimizer would block - not switching to autoplay mode');
+        return false;
+    }
     
     return withControl(window.AutoplayManager, 'Better Tasker', () => {
         const boardContext = globalThis.state.board.getSnapshot().context;
@@ -6141,6 +6157,8 @@ function runAutomationTasks() {
             return;
         }
         
+        // Note: Stamina Optimizer check removed from here - it only blocks when enabling autoplay in ensureAutoplayMode()
+        
         // Don't run automation if task hunting is ongoing
         if (taskHuntingOngoing) {
             console.log('[Better Tasker] Task hunting ongoing, skipping automation');
@@ -7024,11 +7042,34 @@ async function openQuestLogAndAcceptTask() {
 function init() {
     console.log('[Better Tasker] Better Tasker initializing');
     
+    // Register with mod coordination system
+    if (window.ModCoordination) {
+        window.ModCoordination.registerMod('Better Tasker', {
+            priority: 90,
+            metadata: { description: 'Automated task hunting system' }
+        });
+        
+        // Subscribe to mod state changes instead of polling
+        window.ModCoordination.on('modActiveChanged', (data) => {
+            if (data.modName === 'Raid Hunter') {
+                handleRaidHunterStateChange(data.active);
+            } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
+                handleBoardAnalyzerCoordination();
+            }
+        });
+    }
+    
     // Track init time for init-phase coordination checks
     window.betterTaskerInitTime = Date.now();
     
     // Load tasker state from localStorage first
     loadTaskerState();
+    
+    // Update coordination system state
+    if (window.ModCoordination) {
+        const isEnabled = taskerState === TASKER_STATES.ENABLED || taskerState === TASKER_STATES.NEW_TASK_ONLY;
+        window.ModCoordination.updateModState('Better Tasker', { enabled: isEnabled });
+    }
     
     // Only set up Raid Hunter coordination if tasker is enabled
     if (taskerState === TASKER_STATES.ENABLED) {
@@ -7208,6 +7249,11 @@ function cleanupBetterTasker() {
         resetState('full');
         // Don't reset taskNavigationCompleted in cleanup - let it persist
         
+        // Unregister from coordination system
+        if (window.ModCoordination) {
+            window.ModCoordination.unregisterMod('Better Tasker');
+        }
+        
         console.log('[Better Tasker] Mod cleanup completed');
     } catch (error) {
         console.error('[Better Tasker] Error during mod cleanup:', error);
@@ -7227,6 +7273,8 @@ function exposeTaskerState() {
             // Ignore errors, hasActiveTask remains false
         }
         
+        const isActive = taskOperationInProgress || taskHuntingOngoing || pendingTaskCompletion || hasActiveTask;
+        
         window.betterTaskerState = {
             taskOperationInProgress: taskOperationInProgress,
             taskHuntingOngoing: taskHuntingOngoing,
@@ -7235,6 +7283,11 @@ function exposeTaskerState() {
             taskNavigationCompleted: taskNavigationCompleted,
             hasActiveTask: hasActiveTask
         };
+        
+        // Update coordination system state
+        if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Better Tasker', { active: isActive });
+        }
     }
 }
 

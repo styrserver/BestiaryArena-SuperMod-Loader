@@ -56,7 +56,17 @@ try {
 }
 
 // =======================
-// 2. DOM Selectors & Constants
+// 2. Helper Functions
+// =======================
+
+// Check if blocking mods (Board Analyzer or Autoscroller) are active
+function isBlockedByAnalysisMods() {
+  return window.ModCoordination?.isModActive('Board Analyzer') || 
+         window.ModCoordination?.isModActive('Autoscroller');
+}
+
+// =======================
+// 3. DOM Selectors & Constants
 // =======================
 
 // DOM selectors
@@ -1803,6 +1813,7 @@ function showSettingsModal() {
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
       { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
       { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false },
+      { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
@@ -2089,6 +2100,58 @@ function showSettingsModal() {
           <a href="https://github.com/styrserver/BestiaryArena-SuperMod-Loader/blob/main/docs/chat_documentation.md" target="_blank" rel="noopener noreferrer" style="color: #4a9eff; text-decoration: none; font-size: 13px;">📖 ${t('mods.betterUI.vipListChatDocumentation')}</a>
         `;
         rightColumn.appendChild(vipListFooter);
+      } else if (categoryId === 'mod-coordination') {
+        const modCoordinationContent = document.createElement('div');
+        modCoordinationContent.innerHTML = `
+          <div style="margin-bottom: 15px;">
+            <p style="color: #a6adc8; margin: 0 0 10px 0; font-size: 13px;">
+              ${t('mods.betterUI.modCoordinationDescription')}
+            </p>
+            <div id="mod-coordination-list" style="display: flex; flex-direction: column; gap: 4px;">
+              <!-- Mod priority inputs will be dynamically generated here -->
+            </div>
+          </div>
+        `;
+        rightColumn.appendChild(modCoordinationContent);
+        
+        // Load and display mod priorities
+        scheduleTimeout(() => {
+          const statusMap = loadAndDisplayModPriorities(modCoordinationContent);
+          
+          // Subscribe to mod state changes to update status dynamically
+          if (window.ModCoordination) {
+            // Listen for enabled state changes
+            const unsubscribeEnabled = window.ModCoordination.on('modEnabledChanged', (data) => {
+              const statusSpan = statusMap[data.modName];
+              if (statusSpan) {
+                // Get current mod state
+                const modState = window.ModCoordination.getModState(data.modName);
+                if (modState) {
+                  const priorityInput = statusSpan.parentElement.querySelector('input[data-mod-name="' + data.modName + '"]');
+                  const currentPriority = priorityInput ? parseInt(priorityInput.value) : modState.priority;
+                  updatePriorityStatus(statusSpan, modState, currentPriority);
+                }
+              }
+            });
+            
+            // Listen for active state changes
+            const unsubscribeActive = window.ModCoordination.on('modActiveChanged', (data) => {
+              const statusSpan = statusMap[data.modName];
+              if (statusSpan) {
+                // Get current mod state
+                const modState = window.ModCoordination.getModState(data.modName);
+                if (modState) {
+                  const priorityInput = statusSpan.parentElement.querySelector('input[data-mod-name="' + data.modName + '"]');
+                  const currentPriority = priorityInput ? parseInt(priorityInput.value) : modState.priority;
+                  updatePriorityStatus(statusSpan, modState, currentPriority);
+                }
+              }
+            });
+            
+            // Store unsubscribe functions for cleanup (if needed)
+            modCoordinationContent._unsubscribers = [unsubscribeEnabled, unsubscribeActive];
+          }
+        }, 0);
       } else if (categoryId === 'backup') {
         const backupContent = document.createElement('div');
         backupContent.innerHTML = `
@@ -3142,7 +3205,7 @@ function removeFavoriteHearts() {
 // Update heart icons on creature portraits
 function updateFavoriteHearts(targetUniqueId = null) {
   // Skip if Board Analyzer or Autoscroller is running
-  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
+  if (isBlockedByAnalysisMods()) {
     return;
   }
   
@@ -3732,7 +3795,7 @@ function injectMaxCreaturesCSS(colorOption, colorKey) {
 
 function applyMaxCreatures() {
   // Skip if Board Analyzer or Autoscroller is running
-  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
+  if (isBlockedByAnalysisMods()) {
     return;
   }
   
@@ -3856,7 +3919,7 @@ function injectMaxShiniesCSS(colorOption, colorKey) {
 
 function applyMaxShinies() {
   // Skip if Board Analyzer or Autoscroller is running
-  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
+  if (isBlockedByAnalysisMods()) {
     return;
   }
   
@@ -3981,7 +4044,7 @@ function isEnemyByHealthBar(battleContainer) {
 
 function applyShinyEnemies() {
   // Skip if Board Analyzer or Autoscroller is running
-  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
+  if (isBlockedByAnalysisMods()) {
     return;
   }
   
@@ -4614,7 +4677,7 @@ function startBattleBoardObserver() {
   
   const processBattleMutations = (mutations) => {
     // Skip if Board Analyzer or Autoscroller is running
-    if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) {
+    if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) {
       return;
     }
     
@@ -4830,7 +4893,7 @@ function startBattleBoardObserver() {
   if (globalThis.state?.board?.on) {
     try {
       newGameUnsubscribe = globalThis.state.board.on('emitNewGame', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
+        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
         console.log('[Mod Settings] New game started, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -4839,7 +4902,7 @@ function startBattleBoardObserver() {
       
       // Listen for game end event
       endGameUnsubscribe = globalThis.state.board.on('emitEndGame', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
+        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
         console.log('[Mod Settings] Game ended, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -4848,7 +4911,7 @@ function startBattleBoardObserver() {
       
       // Listen for auto-setup board event
       autoSetupUnsubscribe = globalThis.state.board.on('autoSetupBoard', (event) => {
-        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
+        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
         console.log('[Mod Settings] Auto-setup detected, re-applying shiny enemies...');
         scheduleTimeout(() => {
           applyShinyEnemies();
@@ -4867,7 +4930,7 @@ function startBattleBoardObserver() {
       let lastEnemyCount = 0;
       
       boardConfigUnsubscribe = globalThis.state.board.subscribe((state) => {
-        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.autoscrollerRunning) return;
+        if (window.ModCoordination?.isModActive('Board Analyzer') || window.ModCoordination?.isModActive('Autoscroller')) return;
         
         const boardConfig = state.context?.boardConfig;
         if (!boardConfig || !Array.isArray(boardConfig)) return;
@@ -5462,6 +5525,264 @@ function addPlayercountHeaderButton() {
     startPlayerCountUpdates();
   };
   tryInsert();
+}
+
+// =======================
+// 15. Mod Coordination Priority Management
+// =======================
+
+const MOD_COORDINATION_STORAGE_KEY = 'mod-coordination-priorities';
+
+// Load saved priority overrides from localStorage
+function loadModPriorities() {
+  try {
+    const saved = localStorage.getItem(MOD_COORDINATION_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : {};
+  } catch (error) {
+    console.error('[Mod Settings] Error loading mod priorities:', error);
+    return {};
+  }
+}
+
+// Save priority overrides to localStorage
+function saveModPriorities(priorities) {
+  try {
+    localStorage.setItem(MOD_COORDINATION_STORAGE_KEY, JSON.stringify(priorities));
+    console.log('[Mod Settings] Mod priorities saved:', priorities);
+  } catch (error) {
+    console.error('[Mod Settings] Error saving mod priorities:', error);
+  }
+}
+
+// Load and display mod priorities in the UI
+function loadAndDisplayModPriorities(container) {
+  const listContainer = container.querySelector('#mod-coordination-list');
+  if (!listContainer) return {};
+  
+  // Clear existing content (but preserve info text)
+  const infoText = listContainer.querySelector('p');
+  listContainer.innerHTML = '';
+  
+  // Get all registered mods from ModCoordination
+  if (!window.ModCoordination) {
+    listContainer.innerHTML = `<p style="color: #888; font-size: 13px;">${t('mods.betterUI.modCoordinationNotAvailable')}</p>`;
+    return {};
+  }
+  
+  const allMods = window.ModCoordination.getAllMods();
+  if (allMods.length === 0) {
+    listContainer.innerHTML = `<p style="color: #888; font-size: 13px;">${t('mods.betterUI.modCoordinationNoMods')}</p>`;
+    return {};
+  }
+  
+  // Load saved priorities
+  const savedPriorities = loadModPriorities();
+  
+  // Map to store status spans for dynamic updates (modName -> statusSpan)
+  const statusMap = {};
+  
+  // Create input for each mod
+  allMods.forEach(mod => {
+    const modRow = document.createElement('div');
+    modRow.style.cssText = 'display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1);';
+    
+    // Mod name label
+    const nameLabel = document.createElement('span');
+    nameLabel.textContent = mod.name;
+    nameLabel.style.cssText = 'flex: 1; color: #ccc; font-size: 12px; min-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+    
+    // Priority input
+    const priorityInput = document.createElement('input');
+    priorityInput.type = 'number';
+    priorityInput.min = '0';
+    priorityInput.max = '255';
+    priorityInput.step = '1';
+    const currentPriority = savedPriorities[mod.name] !== undefined ? savedPriorities[mod.name] : mod.priority;
+    priorityInput.value = currentPriority;
+    priorityInput.style.cssText = 'width: 50px; padding: 3px 4px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; text-align: center; font-size: 12px;';
+    priorityInput.setAttribute('data-mod-name', mod.name);
+    priorityInput.setAttribute('data-original-priority', mod.priority);
+    priorityInput.setAttribute('data-current-priority', currentPriority);
+    
+    // Status indicator
+    const statusSpan = document.createElement('span');
+    statusSpan.style.cssText = 'font-size: 10px; color: #888; min-width: 70px; text-align: right;';
+    updatePriorityStatus(statusSpan, mod, parseInt(priorityInput.value));
+    
+    // Store status span in map for dynamic updates
+    statusMap[mod.name] = statusSpan;
+    
+    // Reset button (only show if priority is modified)
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = t('mods.betterUI.modCoordinationReset');
+    resetBtn.style.cssText = 'padding: 2px 6px; font-size: 10px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 3px; cursor: pointer; opacity: 0.7;';
+    resetBtn.title = t('mods.betterUI.modCoordinationResetTooltip');
+    if (currentPriority === mod.priority) {
+      resetBtn.style.display = 'none';
+    }
+    
+    // Handle input change
+    priorityInput.addEventListener('change', () => {
+      const newPriority = Math.max(0, Math.min(255, parseInt(priorityInput.value) || 0));
+      priorityInput.value = newPriority;
+      
+      // Update ModCoordination
+      if (window.ModCoordination) {
+        const oldPriority = parseInt(priorityInput.getAttribute('data-current-priority') || currentPriority);
+        const success = window.ModCoordination.updateModPriority(mod.name, newPriority);
+        if (success) {
+          console.log(`[Mod Settings] Updated priority for ${mod.name}: ${oldPriority} → ${newPriority}`);
+          
+          // Update the current priority attribute
+          priorityInput.setAttribute('data-current-priority', newPriority);
+          
+          // Save to localStorage
+          const updatedPriorities = loadModPriorities();
+          const originalPriority = parseInt(priorityInput.getAttribute('data-original-priority'));
+          if (newPriority === originalPriority) {
+            delete updatedPriorities[mod.name];
+          } else {
+            updatedPriorities[mod.name] = newPriority;
+          }
+          saveModPriorities(updatedPriorities);
+          
+          // Update status and reset button visibility
+          updatePriorityStatus(statusSpan, mod, newPriority);
+          resetBtn.style.display = newPriority === originalPriority ? 'none' : 'block';
+        } else {
+          console.error(`[Mod Settings] Failed to update priority for ${mod.name}`);
+          priorityInput.value = currentPriority; // Revert to current value
+        }
+      }
+    });
+    
+    // Handle reset button
+    resetBtn.addEventListener('click', () => {
+      // Get the original priority from the mod's default (stored in data attribute)
+      const originalPriority = parseInt(priorityInput.getAttribute('data-original-priority'));
+      priorityInput.value = originalPriority;
+      
+      // Update ModCoordination
+      if (window.ModCoordination) {
+        const currentPriority = parseInt(priorityInput.getAttribute('data-current-priority') || priorityInput.value);
+        const success = window.ModCoordination.updateModPriority(mod.name, originalPriority);
+        if (success) {
+          // Update the current priority attribute
+          priorityInput.setAttribute('data-current-priority', originalPriority);
+          
+          // Remove from saved priorities
+          const updatedPriorities = loadModPriorities();
+          delete updatedPriorities[mod.name];
+          saveModPriorities(updatedPriorities);
+          
+          // Update status and hide reset button
+          updatePriorityStatus(statusSpan, mod, originalPriority);
+          resetBtn.style.display = 'none';
+          
+          console.log(`[Mod Settings] Reset priority for ${mod.name}: ${currentPriority} → ${originalPriority}`);
+        } else {
+          console.error(`[Mod Settings] Failed to reset priority for ${mod.name}`);
+        }
+      }
+    });
+    
+    modRow.appendChild(nameLabel);
+    modRow.appendChild(priorityInput);
+    modRow.appendChild(statusSpan);
+    modRow.appendChild(resetBtn);
+    
+    listContainer.appendChild(modRow);
+  });
+  
+  // Add info text at bottom
+  const infoTextElement = document.createElement('p');
+  infoTextElement.style.cssText = 'margin-top: 15px; color: #888; font-size: 12px; font-style: italic;';
+  infoTextElement.textContent = t('mods.betterUI.modCoordinationChangesInfo');
+  listContainer.appendChild(infoTextElement);
+  
+  // Add reset all button at bottom
+  const resetAllContainer = document.createElement('div');
+  resetAllContainer.style.cssText = 'margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);';
+  
+  const resetAllBtn = document.createElement('button');
+  resetAllBtn.textContent = t('mods.betterUI.modCoordinationResetAll') || 'Reset All';
+  resetAllBtn.style.cssText = 'padding: 6px 12px; font-size: 12px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; cursor: pointer; width: 100%;';
+  resetAllBtn.title = t('mods.betterUI.modCoordinationResetAllTooltip') || 'Reset all mod priorities to their default values';
+  
+  resetAllBtn.addEventListener('click', () => {
+    if (!window.ModCoordination) return;
+    
+    const allMods = window.ModCoordination.getAllMods();
+    let resetCount = 0;
+    
+    // Reset each mod to its original priority
+    allMods.forEach(mod => {
+      const priorityInput = listContainer.querySelector(`input[data-mod-name="${mod.name}"]`);
+      if (!priorityInput) return;
+      
+      const originalPriority = parseInt(priorityInput.getAttribute('data-original-priority'));
+      const currentPriority = parseInt(priorityInput.getAttribute('data-current-priority') || priorityInput.value);
+      
+      // Only reset if it's been modified
+      if (currentPriority !== originalPriority) {
+        priorityInput.value = originalPriority;
+        priorityInput.setAttribute('data-current-priority', originalPriority);
+        
+        // Update ModCoordination
+        const success = window.ModCoordination.updateModPriority(mod.name, originalPriority);
+        if (success) {
+          resetCount++;
+          
+          // Update status and reset button visibility
+          const statusSpan = statusMap[mod.name];
+          if (statusSpan) {
+            updatePriorityStatus(statusSpan, mod, originalPriority);
+          }
+          
+          const resetBtn = priorityInput.parentElement.querySelector('button');
+          if (resetBtn && resetBtn !== resetAllBtn) {
+            resetBtn.style.display = 'none';
+          }
+        }
+      }
+    });
+    
+    // Clear saved priorities from localStorage
+    if (resetCount > 0) {
+      saveModPriorities({});
+      console.log(`[Mod Settings] Reset ${resetCount} mod priority(ies) to default`);
+    } else {
+      console.log('[Mod Settings] No mod priorities to reset');
+    }
+  });
+  
+  resetAllContainer.appendChild(resetAllBtn);
+  listContainer.appendChild(resetAllContainer);
+  
+  // Return status map for dynamic updates
+  return statusMap;
+}
+
+// Update priority status indicator
+function updatePriorityStatus(statusSpan, mod, currentPriority) {
+  const originalPriority = mod.priority;
+  const isModified = currentPriority !== originalPriority;
+  
+  if (mod.active) {
+    statusSpan.textContent = t('mods.betterUI.modCoordinationStatusActive');
+    statusSpan.style.color = '#4ade80';
+  } else if (mod.enabled) {
+    statusSpan.textContent = t('mods.betterUI.modCoordinationStatusEnabled');
+    statusSpan.style.color = '#60a5fa';
+  } else {
+    statusSpan.textContent = t('mods.betterUI.modCoordinationStatusDisabled');
+    statusSpan.style.color = '#888';
+  }
+  
+  if (isModified) {
+    statusSpan.textContent += t('mods.betterUI.modCoordinationStatusModified');
+    statusSpan.style.color = '#fbbf24';
+  }
 }
 
 // =======================

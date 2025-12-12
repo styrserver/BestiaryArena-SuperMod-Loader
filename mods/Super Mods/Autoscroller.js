@@ -1854,11 +1854,10 @@
   async function startAutoscroll() {
     setUILocked(true);
     
-    // Set coordination flag to pause Mod Settings updates
-    if (!window.__modCoordination) {
-      window.__modCoordination = {};
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Autoscroller', { active: true });
     }
-    window.__modCoordination.autoscrollerRunning = true;
     
     // Update summon scroll counts to reflect current inventory before starting
     updateSummonScrollCounts();
@@ -1934,9 +1933,9 @@
   function stopAutoscroll() {
     autoscrolling = false;
     
-    // Clear coordination flag to resume Mod Settings updates
-    if (window.__modCoordination) {
-      window.__modCoordination.autoscrollerRunning = false;
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Autoscroller', { active: false });
     }
     
     if (rateLimitedInterval) {
@@ -3224,9 +3223,9 @@
             stopAutoscroll();
           }
           
-          // Clear coordination flag when modal closes
-          if (window.__modCoordination) {
-            window.__modCoordination.autoscrollerRunning = false;
+          // Update coordination system state
+          if (window.ModCoordination) {
+            window.ModCoordination.updateModState('Autoscroller', { active: false });
           }
           
           // Clear modal cache since modal is closing
@@ -3554,9 +3553,10 @@
       stopAutoscroll();
     }
     
-    // Clear coordination flag
-    if (window.__modCoordination) {
-      window.__modCoordination.autoscrollerRunning = false;
+    // Update coordination system state
+    if (window.ModCoordination) {
+      window.ModCoordination.updateModState('Autoscroller', { active: false });
+      window.ModCoordination.unregisterMod('Autoscroller');
     }
     
     if (buttonCheckInterval) {
@@ -3627,11 +3627,14 @@
   function initializeAutoscroller() {
     console.log('[Autoscroller] initializing...');
     
-    // Initialize coordination object for mod coordination
-    if (!window.__modCoordination) {
-      window.__modCoordination = {};
+    // Register with mod coordination system
+    if (window.ModCoordination) {
+      window.ModCoordination.registerMod('Autoscroller', {
+        priority: 120,
+        metadata: { description: 'Automatic scroll summoning system' }
+      });
+      window.ModCoordination.updateModState('Autoscroller', { enabled: true });
     }
-    window.__modCoordination.autoscrollerRunning = false;
     
     // Log database integration status
     if (window.inventoryDatabase) {

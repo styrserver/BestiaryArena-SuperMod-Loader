@@ -8,8 +8,42 @@ const defaultConfig = {
   showMilliseconds: true
 };
 
-// Initialize with saved config or defaults
-const config = Object.assign({}, defaultConfig, context.config);
+// Storage key for localStorage
+const STORAGE_KEY = 'tick-tracker-config';
+
+// Load config with single source of truth: localStorage > context > defaults
+const loadConfig = () => {
+  try {
+    // Try localStorage first
+    const savedData = localStorage.getItem(STORAGE_KEY);
+    if (savedData) {
+      const savedConfig = JSON.parse(savedData);
+      const loadedConfig = Object.assign({}, defaultConfig, savedConfig);
+      return loadedConfig;
+    }
+  } catch (error) {
+    console.error('[Tick Tracker] Error loading config from localStorage:', error);
+  }
+  
+  // Fallback to context or defaults
+  const fallbackConfig = Object.assign({}, defaultConfig, context.config || {});
+  return fallbackConfig;
+};
+
+// Save config to localStorage (consolidated helper)
+const saveConfigToStorage = (configToSave) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configToSave));
+    console.log('[Tick Tracker] Config saved to localStorage successfully');
+    return true;
+  } catch (error) {
+    console.error('[Tick Tracker] Error saving config to localStorage:', error);
+    return false;
+  }
+};
+
+// Initialize config
+const config = loadConfig();
 
 // Constants
 const MOD_ID = 'tick-tracker';
@@ -431,7 +465,8 @@ function toggleTracking() {
     stopTracking();
   }
   
-  // Save configuration
+  // Save configuration to localStorage and mod loader
+  saveConfigToStorage(config);
   api.service.updateScriptConfig(context.hash, config);
 }
 
@@ -550,7 +585,8 @@ function createConfigPanel() {
           config.maxEntries = parseInt(document.getElementById('max-entries-input').value, 10);
           config.showMilliseconds = document.getElementById('ms-input').checked;
           
-          // Save configuration
+          // Save configuration to localStorage and mod loader
+          saveConfigToStorage(config);
           api.service.updateScriptConfig(context.hash, config);
           
           // Apply changes

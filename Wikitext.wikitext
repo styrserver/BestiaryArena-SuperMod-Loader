@@ -112,6 +112,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 * <code>content/</code> - Content scripts that are injected into the game page
 ** <code>client.js</code> - Main client-side API and functionality
 ** <code>injector.js</code> - Injects the client code into the game page
+** <code>mod-coordination.mjs</code> - Global mod coordination system for managing mod states, priorities, and resource control
 ** <code>local_mods.js</code> - Manages local mods
 ** <code>ba-sandbox-utils.mjs</code> - Sandbox utility functions
 ** <code>utility_injector.js</code> - Utility injection system

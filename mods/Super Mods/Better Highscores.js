@@ -498,7 +498,7 @@
   function isBoardAnalyzing() {
     try {
       // Use the global coordination flag set by Board Analyzer
-      const isAnalyzing = window.__modCoordination?.boardAnalyzerRunning || false;
+      const isAnalyzing = window.ModCoordination?.isModActive('Board Analyzer') || false;
       
       // Track state changes and trigger restore when analysis ends
       if (isAnalyzing !== BetterHighscoresState.isBoardAnalyzing) {
