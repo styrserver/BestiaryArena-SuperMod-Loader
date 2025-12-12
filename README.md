@@ -51,7 +51,7 @@ The extension provides a modern, store-like popup interface for managing your mo
 
 - **Store-like Grid Layout**: Browse mods in an organized grid view with visual mod cards
 - **Search Functionality**: Quickly find mods by name using the search bar
-- **Category Filtering**: Filter mods by category (All, Original Mods, SuperMods, Custom Mods) with enabled/total counts
+- **Category Filtering**: Filter mods by category (All, Original Mods, SuperMods, OT Mods, Custom Mods) with enabled/total counts
 - **Mod Cards**: Each mod displays with:
   - Mod name and category badge (color-coded by type)
   - Description of mod functionality
@@ -133,6 +133,7 @@ Mods have access to the game's state through `globalThis.state`, which provides 
 - `mods/` - Local mod files, organized as follows:
   - `Official Mods/` - Core mods that provide essential gameplay enhancements and are included by default.
   - `Super Mods/` - Advanced mods with comprehensive features, included by default (see below for details).
+  - `OT Mods/` - Community and social mods, included by default (see below for details).
 - `popup/` - Extension popup UI
 - `background.js` - Background script for the extension
 - `manifest.json` - Extension manifest
@@ -151,7 +152,7 @@ The extension comes with several powerful mods that demonstrate different featur
 
 ### Super Mods
 
-These are advanced mods that provide comprehensive game enhancement features. All 24 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
 
 #### Autoscroller
 Automates summon scroll usage to collect specific creatures:
@@ -265,14 +266,6 @@ Automates dice rolling for stat rerolling:
 - Displays roll count and status in a custom panel
 - Configurable target thresholds for optimal stat optimization
 
-#### Guilds
-Social guild system for creating and managing player communities:
-- Create, join, and manage guilds with role-based permissions (Leader, Officer, Member)
-- Encrypted guild chat with real-time messaging and system notifications
-- Member management with invite, kick, promote, and demote functionality
-- Guild browser to search and discover available guilds
-- Transfer leadership and edit guild information with comprehensive settings
-
 #### Hunt Analyzer
 Advanced autoplay and loot tracking system:
 - Track detailed statistics from autoplay sessions
@@ -328,6 +321,18 @@ Automatically manages stamina levels by starting/stopping gameplay (by [btlucas]
 - Coordinates with Raid Hunter, Better Tasker, and Better Boosted Maps to prevent conflicts
 - Monitors Bestiary Automator refills to avoid interfering with stamina refills
 - Automatic gameplay pause when stamina drops below minimum threshold
+
+### OT Mods
+
+These are community and social mods that enhance player interaction and community features. All 2 OT Mods listed below are included by default in this loader:
+
+#### Guilds
+Social guild system for creating and managing player communities:
+- Create, join, and manage guilds with role-based permissions (Leader, Officer, Member)
+- Encrypted guild chat with real-time messaging and system notifications
+- Member management with invite, kick, promote, and demote functionality
+- Guild browser to search and discover available guilds
+- Transfer leadership and edit guild information with comprehensive settings
 
 #### VIP List
 Player management system for tracking favorite players:

@@ -306,6 +306,12 @@ function executeOutfiter() {
     
     console.log('[Outfiter] Enabled - executing outfit operations');
 
+    // Check if player state is available
+    if (!globalThis.state?.player) {
+      console.warn('[Outfiter] Player state not available yet');
+      return false;
+    }
+
     // Set outfits in player state (merge with existing outfits)
     const outfitIds = getOutfitIds();
     globalThis.state.player.trigger.setState({

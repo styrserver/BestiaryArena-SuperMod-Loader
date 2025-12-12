@@ -1506,6 +1506,11 @@ const takeRewardsIfAvailable = async () => {
   }
   
   try {
+    // Check if player state is available
+    if (!globalThis.state?.player) {
+      return;
+    }
+    
     // Check if player has reached the target level for rewards
     const playerContext = globalThis.state.player.getSnapshot().context;
     const currentExp = playerContext.exp;

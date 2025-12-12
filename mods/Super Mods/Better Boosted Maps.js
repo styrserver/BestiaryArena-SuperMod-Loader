@@ -1107,8 +1107,6 @@ function toggleBoostedMaps() {
     
     if (modState.enabled) {
         console.log('[Better Boosted Maps] Enabled - setting up mod coordination');
-        setupRaidHunterCoordination();
-        setupBetterTaskerCoordination();
         setupDailyStateMonitoring();
         
         // Check and start boosted map farming after delay
@@ -1117,7 +1115,6 @@ function toggleBoostedMaps() {
         }, 3000); // 3 second delay
     } else {
         console.log('[Better Boosted Maps] Disabled - cleaning up coordination');
-        cleanupCoordination();
         
         // Update coordination system state
         if (window.ModCoordination) {
@@ -2778,7 +2775,6 @@ context.exports = {
     checkAndStartBoostedMapFarming: checkAndStartBoostedMapFarming,
     cleanup: () => {
         console.log('[Better Boosted Maps] Cleaning up...');
-        cleanupCoordination();
         
         // Cleanup daily subscription
         if (modState.dailySubscription) {

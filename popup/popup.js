@@ -1018,14 +1018,19 @@ const superModNames = [
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
-  'Guilds.js',
   'Hunt Analyzer.js',
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js',
+  'Stamina Optimizer.js'
+];
+
+// OT Mods list - kept in sync with mod-registry.js
+const otModNames = [
+  'Bosses.js',
+  'Guilds.js',
   'VIP List.js'
 ];
 
@@ -1048,6 +1053,7 @@ function normalizeModName(name) {
 function getModCategory(mod) {
   const modFileName = mod.name.split('/').pop();
   if (mod.type === 'manual') return 'custom';
+  if (otModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'ot';
   if (superModNames.some(n => normalizeModName(n) === normalizeModName(modFileName))) return 'super';
   return 'official';
 }
@@ -1081,6 +1087,7 @@ async function getCategoryDisplayName(category) {
   const categoryNames = {
     'official': await getTranslation('popup.categoryOfficial', 'Original Mods'),
     'super': await getTranslation('popup.categorySuper', 'SuperMods'),
+    'ot': await getTranslation('popup.categoryOt', 'OT Mods'),
     'custom': await getTranslation('popup.categoryCustom', 'Custom Mods')
   };
   return categoryNames[category] || category;
@@ -1204,6 +1211,7 @@ async function updateCategoryCounts(mods) {
   const counts = {
     official: { total: 0, enabled: 0 },
     super: { total: 0, enabled: 0 },
+    ot: { total: 0, enabled: 0 },
     custom: { total: 0, enabled: 0 }
   };
 
@@ -1220,6 +1228,7 @@ async function updateCategoryCounts(mods) {
   // Update filter button labels
   const officialFilter = document.querySelector('.category-filter[data-category="official"]');
   const superFilter = document.querySelector('.category-filter[data-category="super"]');
+  const otFilter = document.querySelector('.category-filter[data-category="ot"]');
   const customFilter = document.querySelector('.category-filter[data-category="custom"]');
 
   if (officialFilter) {
@@ -1236,6 +1245,14 @@ async function updateCategoryCounts(mods) {
       superFilter.textContent = `${categoryText} (${counts.super.enabled}/${counts.super.total})`;
     } else {
       superFilter.textContent = await getTranslation('popup.categorySuper', 'SuperMods');
+    }
+  }
+  if (otFilter) {
+    if (counts.ot.total > 0) {
+      const categoryText = await getTranslation('popup.categoryOt', 'OT Mods');
+      otFilter.textContent = `${categoryText} (${counts.ot.enabled}/${counts.ot.total})`;
+    } else {
+      otFilter.textContent = await getTranslation('popup.categoryOt', 'OT Mods');
     }
   }
   if (customFilter) {
