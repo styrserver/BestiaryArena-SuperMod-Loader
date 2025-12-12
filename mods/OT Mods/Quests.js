@@ -19,6 +19,12 @@ const QUEST_ITEMS_MODAL_WIDTH = 500;
 const QUEST_ITEMS_MODAL_HEIGHT = 180;
 const KING_GUILD_COIN_REWARD = 50;
 
+const SILVER_TOKEN_CONFIG = {
+  productName: 'Silver Token',
+  icon: 'Silver_Token.gif',
+  description: 'A small silver coin used to greet King Tibianus.'
+};
+
 const KING_COPPER_KEY_MISSION = {
   id: 'king_copper_key',
   title: 'Retrieve King Tibianus belongings',
@@ -108,6 +114,7 @@ const COPPER_KEY_CONFIG = {
 
 
 const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
+const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
 // =======================
 // 2. State & Observers
@@ -143,6 +150,9 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
   let questLogObserver = null;
   let questLogMonitorInterval = null;
   let questLogObserverTimeout = null;
+  let kingModeActive = false;
+  let lastQuestLogContainer = null;
+  let missionsToggleButton = null;
 
   // =======================
   // 3. Helper Functions
@@ -675,6 +685,16 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       }
     }
 
+    // Add Silver Token (starter coin)
+    const silverTokenDef = {
+      name: SILVER_TOKEN_CONFIG.productName,
+      icon: SILVER_TOKEN_CONFIG.icon,
+      description: SILVER_TOKEN_CONFIG.description
+    };
+    if (!productDefinitions.find(p => p.name === silverTokenDef.name)) {
+      productDefinitions.push(silverTokenDef);
+    }
+
     // Add Obsidian Knife (for active red dragon mission only)
     if (includeObsidianKnife) {
       const obsidianKnifeDef = {
@@ -1172,7 +1192,7 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 
   async function getKingTibianusProgress(playerName) {
     if (!playerName) {
-      return { accepted: false, completed: false };
+      return { accepted: false, completed: false, __isEmpty: true };
     }
     const hashedPlayer = await hashUsername(playerName);
     const data = await fetchFirebaseData(
@@ -1180,8 +1200,8 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       'fetch King Tibianus progress',
       null
     );
-    if (!data) {
-      return { accepted: false, completed: false };
+    if (!data || Object.keys(data).length === 0) {
+      return { accepted: false, completed: false, __isEmpty: true };
     }
     // New shape preferred: nested copper/dragon
     if (data.copper || data.dragon) {
@@ -1193,13 +1213,16 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
         dragon: {
           accepted: !!(data.dragon && data.dragon.accepted),
           completed: !!(data.dragon && data.dragon.completed)
-        }
+        },
+        __isEmpty: false
       };
     }
     // Backward compatibility: flat accepted/completed
+    const emptyFlat = (data.accepted === undefined && data.completed === undefined);
     return {
       accepted: data.accepted === true,
-      completed: data.completed === true
+      completed: data.completed === true,
+      __isEmpty: emptyFlat
     };
   }
 
@@ -1274,6 +1297,13 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       console.log('[Quests Mod] Loading quest items from Firebase on initialization...');
       // Clear cache first to ensure fresh data
       clearQuestItemsCache();
+      try {
+        const playerName = getCurrentPlayerName();
+        const kingProgress = await getKingTibianusProgress(playerName);
+        await grantStarterSilverTokenIfNeeded(kingProgress, playerName);
+      } catch (err) {
+        console.warn('[Quests Mod] Could not grant starter Silver Token on init:', err);
+      }
       const products = await getQuestItems(false); // Force fetch, don't use cache
       console.log('[Quests Mod] Quest items loaded:', products);
     } catch (error) {
@@ -1367,6 +1397,83 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
     } catch (error) {
       console.error('[Quests Mod][Quest Items] Error adding quest item:', error);
       throw error;
+    }
+  }
+
+  async function consumeQuestItem(productName, amount) {
+    try {
+      const currentPlayer = getCurrentPlayerName();
+      if (!currentPlayer) {
+        throw new Error('Player name not available');
+      }
+      if (amount <= 0) {
+        return false;
+      }
+
+      const currentProducts = await getQuestItems(false);
+      const currentCount = currentProducts[productName] || 0;
+      if (currentCount < amount) {
+        return false;
+      }
+
+      const newCount = currentCount - amount;
+      const updatedProducts = { ...currentProducts };
+      if (newCount > 0) {
+        updatedProducts[productName] = newCount;
+      } else {
+        delete updatedProducts[productName];
+      }
+
+      const encrypted = await encryptQuestItems(updatedProducts, currentPlayer);
+      const hashedPlayer = await hashUsername(currentPlayer);
+
+      console.log('[Quests Mod][Quest Items] Consuming from Firebase', { hashedPlayer, productName, amount, newCount });
+      await firebaseRequest(
+        `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+        'PUT',
+        { encrypted },
+        'save quest items'
+      );
+
+      cachedQuestItems = updatedProducts;
+      return true;
+    } catch (error) {
+      console.error('[Quests Mod][Quest Items] Error consuming quest item:', error);
+      return false;
+    }
+  }
+
+  async function hasSilverToken() {
+    try {
+      // Prefer cached items if available to avoid races just after grant
+      if (cachedQuestItems && cachedQuestItems[SILVER_TOKEN_CONFIG.productName] > 0) {
+        return true;
+      }
+      const items = await getQuestItems(true);
+      return (items && items[SILVER_TOKEN_CONFIG.productName] > 0);
+    } catch (error) {
+      console.error('[Quests Mod] Error checking Silver Token:', error);
+      return false;
+    }
+  }
+
+  async function grantStarterSilverTokenIfNeeded(progress, playerName) {
+    try {
+      if (!progress || !progress.__isEmpty || !playerName) {
+        return;
+      }
+      const hasToken = await hasSilverToken();
+      if (hasToken) {
+        return;
+      }
+      await addQuestItem(SILVER_TOKEN_CONFIG.productName, 1);
+      await saveKingTibianusProgress(playerName, {
+        copper: { accepted: false, completed: false },
+        dragon: { accepted: false, completed: false }
+      });
+      console.log('[Quests Mod] Granted starter Silver Token to new player (no King progress)');
+    } catch (error) {
+      console.error('[Quests Mod] Error granting starter Silver Token:', error);
     }
   }
 
@@ -2526,13 +2633,6 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       messageContainer.style.overflowY = 'auto';
       messageContainer.id = 'king-tibianus-messages';
       
-      // Initial greeting
-      const greetingP = document.createElement('p');
-      greetingP.className = 'inline text-monster';
-      greetingP.style.color = 'rgb(135, 206, 250)'; // Light blue/cyan color
-      greetingP.textContent = 'King Tibianus: I greet thee, my loyal subject.';
-      messageContainer.appendChild(greetingP);
-      
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isKing = false) {
         const messageP = document.createElement('p');
@@ -2556,6 +2656,19 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
           messageContainer.scrollTop = messageContainer.scrollHeight;
         }, 0);
       }
+      
+      // If the starter coin was already spent (no token in inventory), greet normally
+      (async () => {
+        try {
+          const hasToken = await hasSilverToken();
+          if (!hasToken) {
+            addMessageToConversation('King Tibianus', 'I greet thee, my loyal subject.', true);
+          }
+        } catch (err) {
+          console.warn('[Quests Mod] Could not check token for initial greeting:', err);
+          addMessageToConversation('King Tibianus', 'I greet thee, my loyal subject.', true);
+        }
+      })();
       
       row1.appendChild(imageContainer);
       row1.appendChild(messageContainer);
@@ -2592,11 +2705,19 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       row2.appendChild(col1);
       row2.appendChild(col2);
 
+      function setRow2Disabled(disabled) {
+        if (!row2) return;
+        row2.style.pointerEvents = disabled ? 'none' : 'auto';
+        row2.style.filter = disabled ? 'grayscale(1) brightness(0.6)' : 'none';
+        row2.style.opacity = disabled ? '0.6' : '1';
+      }
+
       const kingChatState = {
         progressCopper: { accepted: false, completed: false },
         progressDragon: { accepted: false, completed: false },
         missionOffered: false,
-        awaitingKeyConfirm: false
+        awaitingKeyConfirm: false,
+        starterCoinThanked: false
       };
       const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION];
 
@@ -2973,6 +3094,7 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
         try {
           const playerName = getCurrentPlayerName();
           const progress = await getKingTibianusProgress(playerName);
+          await grantStarterSilverTokenIfNeeded(progress, playerName);
           // Backward compatibility: old shape {accepted, completed}
           if (progress && progress.accepted !== undefined) {
             kingChatState.progressCopper = {
@@ -2992,6 +3114,13 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
               accepted: !!progress.dragon.accepted,
               completed: !!progress.dragon.completed
             };
+          }
+          // Grey out missions/log until starter coin is handed in
+          try {
+            const tokenHeld = await hasSilverToken();
+            setRow2Disabled(tokenHeld && !kingChatState.starterCoinThanked);
+          } catch (err) {
+            console.warn('[Quests Mod] Could not set row2 disabled state:', err);
           }
           activeMission = currentMission();
           selectedMissionId = null;
@@ -3167,6 +3296,37 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
       let latestMessage = null;
       const thankYouText = kingStrings.thankYou;
       
+      async function maybeHandleStarterCoin(lowerText) {
+        if (kingChatState.starterCoinThanked) {
+          return null;
+        }
+        if (lowerText.trim() !== 'hail the king') {
+          return null;
+        }
+        let hasToken = await hasSilverToken();
+        if (!hasToken) {
+          // Edge case: user sent hail before starter token grant completed; grant now if eligible
+          try {
+            const playerName = getCurrentPlayerName();
+            const progress = await getKingTibianusProgress(playerName);
+            await grantStarterSilverTokenIfNeeded(progress, playerName);
+            hasToken = await hasSilverToken();
+          } catch (err) {
+            console.warn('[Quests Mod] Could not grant starter token during hail:', err);
+          }
+        }
+        if (!hasToken) {
+          return null;
+        }
+        const consumed = await consumeQuestItem(SILVER_TOKEN_CONFIG.productName, 1);
+        if (consumed) {
+          kingChatState.starterCoinThanked = true;
+          setRow2Disabled(false);
+          return 'I thank thee for the coin.';
+        }
+        return null;
+      }
+
       // Send message function
       async function sendMessageToKing() {
         const text = textarea.value.trim();
@@ -3187,6 +3347,17 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
           pendingResponseTimeout = null;
         }
         
+        // If the king has not received the starter coin yet, only accept the exact hail phrase
+        const tokenHeld = await hasSilverToken();
+        if (tokenHeld && !kingChatState.starterCoinThanked) {
+          if (lowerText.trim() !== 'hail the king') {
+            // Do not respond; awaiting correct hail to hand over coin
+            textarea.value = '';
+            textarea.style.height = '27px';
+            return;
+          }
+        }
+
         // Refresh mission context (in case first mission just completed)
         activeMission = currentMission();
         kingStrings = buildStrings(activeMission);
@@ -3249,7 +3420,12 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 
         let kingResponse = '';
         
-        if (mentionsKey || mentionsDragon) {
+        const starterCoinResponse = await maybeHandleStarterCoin(lowerText);
+
+        if (starterCoinResponse) {
+          kingResponse = starterCoinResponse;
+          kingChatState.missionOffered = false;
+        } else if (mentionsKey || mentionsDragon) {
           if (currentProgress.completed) {
             kingResponse = kingStrings.missionCompleted;
             kingChatState.missionOffered = false;
@@ -3473,6 +3649,154 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
     return null;
   }
 
+  function findQuestLogFooter() {
+    const selectors = [
+      '.widget-bottom .flex.justify-end.gap-2',
+      '.flex.justify-end.gap-2'
+    ];
+
+    for (const selector of selectors) {
+      const footer = document.querySelector(selector);
+      if (footer && footer.closest('div[role="dialog"]')) {
+        return footer;
+      }
+    }
+
+    return null;
+  }
+
+  function getKingTabElement() {
+    const kingTab = document.getElementById(KING_TIBIANUS_TAB_ID);
+    return kingTab && isInDOM(kingTab) ? kingTab : null;
+  }
+
+  function updateMissionsButtonState() {
+    if (!missionsToggleButton) return;
+    missionsToggleButton.setAttribute('aria-pressed', kingModeActive ? 'true' : 'false');
+    missionsToggleButton.textContent = kingModeActive ? 'Back' : 'Missions';
+  }
+
+  function showAllQuestLogWidgets(questLogContainer, kingTab) {
+    if (!questLogContainer) return;
+
+    const children = Array.from(questLogContainer.children);
+    children.forEach(child => {
+      if (child === kingTab) {
+        if (!child.dataset.questsOriginalDisplay) {
+          child.dataset.questsOriginalDisplay = child.style.display || '';
+        }
+        child.style.display = 'none';
+      } else {
+        if (child.dataset && child.dataset.questsOriginalDisplay !== undefined) {
+          child.style.display = child.dataset.questsOriginalDisplay;
+        } else {
+          child.style.display = '';
+        }
+      }
+
+      if (child?.dataset?.questsOriginalDisplay !== undefined) {
+        delete child.dataset.questsOriginalDisplay;
+      }
+    });
+  }
+
+  function hideQuestLogWidgetsExceptKing(questLogContainer, kingTab) {
+    if (!questLogContainer || !kingTab) return;
+
+    const children = Array.from(questLogContainer.children);
+    children.forEach(child => {
+      if (!child.dataset) return;
+
+      if (!child.dataset.questsOriginalDisplay) {
+        child.dataset.questsOriginalDisplay = child.style.display || '';
+      }
+      child.style.display = child === kingTab ? '' : 'none';
+    });
+  }
+
+  function resetQuestLogView(questLogContainer = findQuestLogContainer()) {
+    const kingTab = getKingTabElement();
+    if (!questLogContainer) {
+      kingModeActive = false;
+      updateMissionsButtonState();
+      if (kingTab) {
+        kingTab.style.display = 'none';
+      }
+      return;
+    }
+
+    showAllQuestLogWidgets(questLogContainer, kingTab);
+    kingModeActive = false;
+    if (kingTab) {
+      kingTab.style.display = 'none';
+    }
+    updateMissionsButtonState();
+  }
+
+  function toggleKingQuestLogView() {
+    const questLogContainer = findQuestLogContainer();
+    if (!questLogContainer) return;
+
+    if (!getKingTabElement()) {
+      createKingTibianusTab();
+    }
+    const kingTab = getKingTabElement();
+    if (!kingTab) return;
+
+    verifyKingTibianusTabPosition();
+
+    if (!kingModeActive) {
+      hideQuestLogWidgetsExceptKing(questLogContainer, kingTab);
+      kingModeActive = true;
+    } else {
+      resetQuestLogView(questLogContainer);
+    }
+    updateMissionsButtonState();
+  }
+
+  function ensureMissionsFooterButton() {
+    const footer = findQuestLogFooter();
+    if (!footer) return;
+
+    let missionsButton = document.getElementById(KING_MISSIONS_BUTTON_ID);
+    if (!missionsButton) {
+      missionsButton = document.createElement('button');
+      missionsButton.id = KING_MISSIONS_BUTTON_ID;
+      missionsButton.type = 'button';
+      missionsButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1-blue active:frame-pressed-1-blue surface-blue gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+      missionsButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
+      missionsButton.textContent = 'Missions';
+      missionsButton.addEventListener('click', toggleKingQuestLogView);
+
+      const closeButton = Array.from(footer.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Close');
+      if (closeButton) {
+        footer.insertBefore(missionsButton, closeButton);
+      } else {
+        footer.appendChild(missionsButton);
+      }
+    }
+
+    missionsToggleButton = missionsButton;
+    updateMissionsButtonState();
+  }
+
+  function handleQuestLogReady(questLogContainer) {
+    if (!questLogContainer) return;
+
+    ensureMissionsFooterButton();
+    const kingTab = getKingTabElement();
+
+    if (lastQuestLogContainer !== questLogContainer) {
+      lastQuestLogContainer = questLogContainer;
+      kingModeActive = false;
+      if (kingTab) {
+        kingTab.style.display = 'none';
+      }
+      showAllQuestLogWidgets(questLogContainer, kingTab);
+      updateMissionsButtonState();
+    }
+  }
+
   function findRaidHunterTab() {
     const questLogContainer = findQuestLogContainer();
     if (!questLogContainer) return null;
@@ -3539,6 +3863,8 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
         </div>
       </div>
     `;
+    tabElement.dataset.questsOriginalDisplay = tabElement.style.display || '';
+    tabElement.style.display = 'none';
 
     // Find Raid Hunter tab and place before it (at the top)
     const raidHunterTab = findRaidHunterTab();
@@ -3641,28 +3967,30 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
   }
 
   function tryImmediateKingTibianusCreation() {
+    const questLogContainer = findQuestLogContainer();
+    if (!questLogContainer) {
+      return false;
+    }
+
+    // Final verification - check for the exact Quest Log header structure
+    const questLogHeader = document.querySelector('h2[id*="radix-"][class*="widget-top"] p[id*="radix-"]');
+    if (!questLogHeader || questLogHeader.textContent !== 'Quest Log') {
+      console.log('[Quests Mod] Quest Log verification failed');
+      return false; // Not the actual Quest Log, abort
+    }
+
     const existingTab = document.getElementById(KING_TIBIANUS_TAB_ID);
     if (existingTab) {
       // Tab exists, verify its position
       verifyKingTibianusTabPosition();
+      handleQuestLogReady(questLogContainer);
       return false;
     }
     
-    const questLogContainer = findQuestLogContainer();
-    if (questLogContainer) {
-      // Final verification - check for the exact Quest Log header structure
-      const questLogHeader = document.querySelector('h2[id*="radix-"][class*="widget-top"] p[id*="radix-"]');
-      if (!questLogHeader || questLogHeader.textContent !== 'Quest Log') {
-        console.log('[Quests Mod] Quest Log verification failed');
-        return false; // Not the actual Quest Log, abort
-      }
-      
-      console.log('[Quests Mod] Quest Log verified');
-      createKingTibianusTab();
-      return true;
-    }
-    
-    return false;
+    console.log('[Quests Mod] Quest Log verified');
+    createKingTibianusTab();
+    handleQuestLogReady(questLogContainer);
+    return true;
   }
 
   function checkForQuestLogContent(node) {
