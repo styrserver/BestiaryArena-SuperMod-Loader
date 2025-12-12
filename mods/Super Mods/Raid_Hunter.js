@@ -623,8 +623,13 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
     staminaRecoveryCallback = onRecovered;
     let hasStaminaIssue = true;
     
-    // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
+        // PRIMARY METHOD: Interval-based API checking for progress tracking (every 5 seconds)
     const staminaCheckInterval = setInterval(() => {
+        // Skip if page is transitioning (visibility change in progress)
+        if (isPageVisibilityTransitioning) {
+            return;
+        }
+        
         const currentStamina = getCurrentStamina();
         
         // Also check if tooltip disappeared (double-check)
@@ -642,9 +647,13 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
             clearInterval(staminaCheckInterval);
             stopStaminaTooltipMonitoring();
             
-            // Execute saved callback
-            if (typeof callback === 'function') {
+            // Execute saved callback (only if not transitioning)
+            if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
                 callback();
+            } else if (isPageVisibilityTransitioning) {
+                console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
+                // Restart monitoring since we skipped the callback
+                startStaminaTooltipMonitoring(callback, requiredStamina);
             }
         } else if (tooltipStillExists && requiredStamina) {
             // Show progress if we know required stamina
@@ -658,6 +667,11 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
     
     // BACKUP METHOD: MutationObserver for tooltip removal (instant detection)
     staminaTooltipObserver = new MutationObserver((mutations) => {
+        // Skip if page is transitioning (visibility change in progress)
+        if (isPageVisibilityTransitioning) {
+            return;
+        }
+        
         for (const mutation of mutations) {
             mutation.removedNodes.forEach((node) => {
                 if (node.nodeType === Node.ELEMENT_NODE) {
@@ -676,9 +690,13 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
                         clearInterval(staminaCheckInterval);
                         stopStaminaTooltipMonitoring();
                         
-                        // Execute saved callback
-                        if (typeof callback === 'function') {
+                        // Execute saved callback (only if not transitioning)
+                        if (typeof callback === 'function' && !isPageVisibilityTransitioning) {
                             callback();
+                        } else if (isPageVisibilityTransitioning) {
+                            console.log('[Raid Hunter] Skipping stamina recovery callback - page visibility transition in progress');
+                            // Restart monitoring since we skipped the callback
+                            startStaminaTooltipMonitoring(callback, requiredStamina);
                         }
                     }
                 }
@@ -1360,6 +1378,7 @@ let autoFloorLastProcessedSeed = null;
 // Page visibility handling for foreground/background transitions
 let pageVisibilityHandler = null;
 let lastPageVisibilityChange = 0;
+let isPageVisibilityTransitioning = false; // Flag to prevent stamina callbacks during visibility transitions
 
 // Window message listener for allModsLoaded signal (stored for cleanup)
 let windowMessageHandler = null;
@@ -1388,6 +1407,14 @@ function handlePageVisibilityChange() {
         
         if (document.visibilityState === 'visible') {
             console.log('[Raid Hunter] Page became visible - checking for active raids and reclaiming control if needed');
+            
+            // Set flag to prevent stamina callbacks from interfering during visibility transition
+            isPageVisibilityTransitioning = true;
+            
+            // Clear flag after a short delay to allow DOM to stabilize
+            setTimeout(() => {
+                isPageVisibilityTransitioning = false;
+            }, 2000); // 2 second delay for DOM to stabilize
             
             // CRITICAL: Check game state FIRST (works even if mod was reloaded and variables were reset)
             const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
@@ -3806,23 +3833,43 @@ async function handleEventOrRaid(roomId) {
                 // Autoplay session is actually running - just continue monitoring
                 console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
                 startStaminaTooltipMonitoring(continuousStaminaMonitoring);
-            } else {
-                // Autoplay session is not running - need to click Start button
-                console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
-                
-                // Find and click Start button
-                const startButton = findButtonByText('Start');
-                if (!startButton) {
-                    console.log('[Raid Hunter] Start button not found after stamina recovery');
-                    handleRaidFailure('Start button not found after stamina recovery');
-                    return;
-                }
-                
-                console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
-                startButton.click();
-                
-                // Set up stamina depletion monitoring for the new autoplay session
-                const handleStaminaDepletion = () => {
+                        } else {
+                            // Autoplay session is not running - need to click Start button
+                            console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
+                            
+                            // Wait if page is transitioning (visibility change in progress)
+                            if (isPageVisibilityTransitioning) {
+                                console.log('[Raid Hunter] Page visibility transition in progress - waiting before clicking Start');
+                                setTimeout(() => {
+                                    // Retry the callback after transition completes
+                                    continuousStaminaMonitoring();
+                                }, 2500); // Wait slightly longer than transition flag
+                                return;
+                            }
+                            
+                            // Find and click Start button with retry logic
+                            const tryClickStart = (retries = 3, delay = 500) => {
+                                const startButton = findButtonByText('Start');
+                                if (!startButton) {
+                                    if (retries > 0) {
+                                        console.log(`[Raid Hunter] Start button not found - retrying in ${delay}ms (${retries} retries left)`);
+                                        setTimeout(() => tryClickStart(retries - 1, delay), delay);
+                                    } else {
+                                        console.log('[Raid Hunter] Start button not found after stamina recovery (all retries exhausted)');
+                                        // Don't cancel raid - just restart monitoring in case button appears later
+                                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                                    }
+                                    return;
+                                }
+                                
+                                console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
+                                startButton.click();
+                            };
+                            
+                            tryClickStart();
+                            
+                            // Set up stamina depletion monitoring for the new autoplay session
+                            const handleStaminaDepletion = () => {
                     const continuousStaminaMonitoring = () => {
                         console.log('[Raid Hunter] Stamina recovered - checking autoplay state');
                         
@@ -3850,10 +3897,43 @@ async function handleEventOrRaid(roomId) {
                             console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
                             startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                         } else {
-                            // User changed mode (manual or sandbox) - respect their choice and stop monitoring
-                            console.log(`[Raid Hunter] Mode changed to ${boardContext.mode} - stopping stamina monitoring`);
-                            stopStaminaTooltipMonitoring();
-                            cancelCurrentRaid('User changed mode during stamina wait');
+                            // Autoplay session is not running - need to click Start button
+                            console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
+                            
+                            // Wait if page is transitioning (visibility change in progress)
+                            if (isPageVisibilityTransitioning) {
+                                console.log('[Raid Hunter] Page visibility transition in progress - waiting before clicking Start');
+                                setTimeout(() => {
+                                    // Retry the callback after transition completes
+                                    continuousStaminaMonitoring();
+                                }, 2500); // Wait slightly longer than transition flag
+                                return;
+                            }
+                            
+                            // Find and click Start button with retry logic
+                            const tryClickStart = (retries = 3, delay = 500) => {
+                                const startButton = findButtonByText('Start');
+                                if (!startButton) {
+                                    if (retries > 0) {
+                                        console.log(`[Raid Hunter] Start button not found - retrying in ${delay}ms (${retries} retries left)`);
+                                        setTimeout(() => tryClickStart(retries - 1, delay), delay);
+                                    } else {
+                                        console.log('[Raid Hunter] Start button not found after stamina recovery (all retries exhausted)');
+                                        // Don't cancel raid - just restart monitoring in case button appears later
+                                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                                        return;
+                                    }
+                                    return;
+                                }
+                                
+                                console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
+                                startButton.click();
+                                
+                                // Continue monitoring for stamina depletion
+                                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                            };
+                            
+                            tryClickStart();
                         }
                     };
                     
@@ -3959,19 +4039,40 @@ async function handleEventOrRaid(roomId) {
             // Autoplay session is not running - need to click Start button
             console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
             
-            // Find and click Start button
-            const startButton = findButtonByText('Start');
-            if (!startButton) {
-                console.log('[Raid Hunter] Start button not found after stamina recovery');
-                cancelCurrentRaid('Start button not found after stamina recovery');
+            // Wait if page is transitioning (visibility change in progress)
+            if (isPageVisibilityTransitioning) {
+                console.log('[Raid Hunter] Page visibility transition in progress - waiting before clicking Start');
+                setTimeout(() => {
+                    // Retry the callback after transition completes
+                    continuousStaminaMonitoring();
+                }, 2500); // Wait slightly longer than transition flag
                 return;
             }
             
-            console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
-            startButton.click();
+            // Find and click Start button with retry logic
+            const tryClickStart = (retries = 3, delay = 500) => {
+                const startButton = findButtonByText('Start');
+                if (!startButton) {
+                    if (retries > 0) {
+                        console.log(`[Raid Hunter] Start button not found - retrying in ${delay}ms (${retries} retries left)`);
+                        setTimeout(() => tryClickStart(retries - 1, delay), delay);
+                    } else {
+                        console.log('[Raid Hunter] Start button not found after stamina recovery (all retries exhausted)');
+                        // Don't cancel raid - just restart monitoring in case button appears later
+                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        return;
+                    }
+                    return;
+                }
+                
+                console.log('[Raid Hunter] Clicking Start button after stamina recovery...');
+                startButton.click();
+                
+                // Continue monitoring for stamina depletion
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+            };
             
-            // Continue monitoring for stamina depletion
-            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+            tryClickStart();
         }
     };
     

@@ -1099,6 +1099,16 @@ function isRaidHunterRaiding() {
     try {
         // Check if Raid Hunter mod is loaded and actively raiding
         if (typeof window !== 'undefined') {
+            // Use coordination system if available (primary check)
+            if (window.ModCoordination) {
+                const isActive = window.ModCoordination.isModActive('Raid Hunter');
+                if (isActive) {
+                    console.log('[Better Tasker] Raid Hunter is actively raiding (via coordination system)');
+                    return true;
+                }
+            }
+            
+            // Fallback to old method for backward compatibility
             // First check if Raid Hunter is actually enabled
             const raidHunterEnabled = localStorage.getItem('raidHunterAutomationEnabled');
             if (raidHunterEnabled !== 'true') {
@@ -3671,17 +3681,18 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Enabling autoplay mode...');
                 const autoplayEnabled = ensureAutoplayMode();
                 if (!autoplayEnabled) {
-                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod)');
-                    return false;
+                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod) - will still try to click Start button');
+                    // Don't return - continue to check stamina and try clicking Start button
+                } else {
+                    await sleep(AUTOPLAY_SETUP_DELAY);
+                    
+                    // Enable Bestiary Automator settings if configured
+                    enableBestiaryAutomatorSettings();
+                    
+                    // Wait for Bestiary Automator to initialize
+                    console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                    await sleep(BESTIARY_INIT_WAIT);
                 }
-                await sleep(AUTOPLAY_SETUP_DELAY);
-                
-                // Enable Bestiary Automator settings if configured
-                enableBestiaryAutomatorSettings();
-                
-                // Wait for Bestiary Automator to initialize
-                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
-                await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
                 console.log('[Better Tasker] Validating settings after navigation...');
@@ -3690,6 +3701,138 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 // Set flag BEFORE checking stamina to prevent rechecking during ongoing task
                 taskNavigationCompleted = true;
                 console.log('[Better Tasker] Task navigation flag set - will not repeat quest log navigation during ongoing task');
+                
+                // Check stamina before clicking Start button
+                console.log('[Better Tasker] Checking stamina status...');
+                const staminaCheck = hasInsufficientStamina();
+                
+                if (staminaCheck.insufficient) {
+                    console.log(`[Better Tasker] Insufficient stamina (needs ${staminaCheck.cost}) - starting monitoring`);
+                    
+                    // Start stamina recovery monitoring (tooltip + API for progress) with continuous monitoring
+                    const continuousStaminaMonitoring = () => {
+                        console.log('[Better Tasker] Stamina recovered - checking autoplay state');
+                        
+                        // Check if still valid to continue
+                        if (!taskHuntingOngoing) {
+                            console.log('[Better Tasker] Task no longer active during stamina recovery');
+                            stopStaminaTooltipMonitoring();
+                            return;
+                        }
+                        
+                        // Check if user is still on correct tasking map
+                        if (!isOnCorrectTaskingMap()) {
+                            console.log('[Better Tasker] User changed map - stopping stamina monitoring');
+                            stopStaminaTooltipMonitoring();
+                            resetState('navigation');
+                            return;
+                        }
+                        
+                        // Check if autoplay session is actually running (not just mode enabled)
+                        const boardContext = globalThis.state.board.getSnapshot().context;
+                        const isAutoplayMode = boardContext.mode === 'autoplay';
+                        const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
+                        
+                        if (isAutoplayMode && isAutoplaySessionRunning) {
+                            // Autoplay session is actually running - just continue monitoring
+                            console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        } else {
+                            // Autoplay session is not running - need to click Start button
+                            console.log('[Better Tasker] Autoplay session not running - clicking Start button');
+                            
+                            // Find and click Start button
+                            const startButton = findButtonByText('Start');
+                            if (!startButton) {
+                                console.log('[Better Tasker] Start button not found after stamina recovery');
+                                resetState('navigation');
+                                return;
+                            }
+                            
+                            console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                            startButton.click();
+                            
+                            // Continue monitoring for stamina depletion
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        }
+                    };
+                    
+                    startStaminaTooltipMonitoring(continuousStaminaMonitoring, staminaCheck.cost); // Pass required stamina
+                    
+                    return true; // Exit - monitoring will handle the rest
+                }
+                
+                // Stamina is sufficient - proceed with Start button
+                console.log('[Better Tasker] Stamina sufficient - finding Start button...');
+                const startButton = findButtonByText('Start');
+                if (!startButton) {
+                    console.log('[Better Tasker] Start button not found');
+                    return false;
+                }
+                
+                console.log('[Better Tasker] Clicking Start button...');
+                startButton.click();
+                
+                // Set task hunting flag to prevent further automation
+                taskHuntingOngoing = true;
+                updateExposedState();
+                console.log('[Better Tasker] Task hunting flag set - automation disabled until task completion');
+                
+                // Modify quest button appearance to show tasking state
+                modifyQuestButtonForTasking();
+                questButtonModifiedForTasking = true;
+                
+                // Start quest button validation monitoring for task hunting
+                startQuestButtonValidation();
+                
+                // Start continuous stamina monitoring for depletion during autoplay
+                const continuousStaminaMonitoring = () => {
+                    console.log('[Better Tasker] Stamina recovered - checking autoplay state');
+                    
+                    // Check if still valid to continue
+                    if (!taskHuntingOngoing) {
+                        console.log('[Better Tasker] Task no longer active during stamina recovery');
+                        stopStaminaTooltipMonitoring();
+                        return;
+                    }
+                    
+                    // Check if user is still on correct tasking map
+                    if (!isOnCorrectTaskingMap()) {
+                        console.log('[Better Tasker] User changed map - stopping stamina monitoring');
+                        stopStaminaTooltipMonitoring();
+                        return;
+                    }
+                    
+                    // Check if autoplay session is actually running (not just mode enabled)
+                    const boardContext = globalThis.state.board.getSnapshot().context;
+                    const isAutoplayMode = boardContext.mode === 'autoplay';
+                    const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
+                    
+                    if (isAutoplayMode && isAutoplaySessionRunning) {
+                        // Autoplay session is actually running - just continue monitoring
+                        console.log('[Better Tasker] Autoplay session running - continuing stamina monitoring');
+                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                    } else {
+                        // Autoplay session is not running - need to click Start button
+                        console.log('[Better Tasker] Autoplay session not running - clicking Start button');
+                        
+                        // Find and click Start button
+                        const startButton = findButtonByText('Start');
+                        if (!startButton) {
+                            console.log('[Better Tasker] Start button not found after stamina recovery');
+                            resetState('navigation');
+                            return;
+                        }
+                        
+                        console.log('[Better Tasker] Clicking Start button after stamina recovery...');
+                        startButton.click();
+                        
+                        // Continue monitoring for stamina depletion
+                        startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                    }
+                };
+                
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
                 
                 return true; // Navigation successful
             } else {
@@ -3793,17 +3936,18 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                 console.log('[Better Tasker] Enabling autoplay mode...');
                 const autoplayEnabled = ensureAutoplayMode();
                 if (!autoplayEnabled) {
-                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod)');
-                    return false;
+                    console.log('[Better Tasker] Autoplay mode could not be enabled (blocked by Stamina Optimizer or other mod) - will still try to click Start button');
+                    // Don't return - continue to check stamina and try clicking Start button
+                } else {
+                    await sleep(AUTOPLAY_SETUP_DELAY);
+                    
+                    // Enable Bestiary Automator settings if configured
+                    enableBestiaryAutomatorSettings();
+                    
+                    // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
+                    console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                    await sleep(BESTIARY_INIT_WAIT);
                 }
-                await sleep(AUTOPLAY_SETUP_DELAY);
-                
-                // Enable Bestiary Automator settings if configured
-                enableBestiaryAutomatorSettings();
-                
-                // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
-                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
-                await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
                 console.log('[Better Tasker] Validating settings after navigation...');
