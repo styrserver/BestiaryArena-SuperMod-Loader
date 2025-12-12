@@ -24,6 +24,7 @@ Mods execute in a specific order to ensure dependencies are resolved correctly:
 
 - `executeModsInOrder()` function handles proper sequential execution
 - Official Mods load before Super Mods
+- OT Mods load after Super Mods
 - User scripts load after all file-based mods
 
 ### 4. **User-Generated Scripts Integration**
@@ -42,6 +43,7 @@ The system follows this exact order:
 3. **Local Mods** (in order):
    - **Official Mods**
    - **Super Mods**
+   - **OT Mods**
    - **User-Generated Scripts** (from localStorage)
 
 ## Benefits

@@ -161,7 +161,7 @@ async function checkFileExists(modName) {
         } catch (error) {
           console.warn(`Firefox: Error getting URL for ${modName}:`, error);
           // In Firefox, if we can't get a URL, still assume the file exists for known files
-          if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/')) {
+          if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/') || modName.includes('OT Mods/')) {
             console.log(`Firefox: Assuming known file ${modName} exists despite URL error`);
             return true;
           }
@@ -170,7 +170,7 @@ async function checkFileExists(modName) {
       }
       
       // If we can't get a URL, assume database files and known mods exist in Firefox
-      if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/')) {
+      if (modName.startsWith('database/') || modName.includes('Super Mods/') || modName.includes('Official Mods/') || modName.includes('OT Mods/')) {
         console.log(`Firefox: Assuming known file ${modName} exists`);
         return true;
       }
@@ -239,7 +239,7 @@ async function loadModRegistry() {
 }
 
 async function listAllModFiles() {
-  // Only include .js files from Official Mods and Super Mods
+  // Only include .js files from Official Mods, Super Mods, and OT Mods
   // User-generated scripts are handled separately via localStorage
   const registry = await loadModRegistry();
   return registry.getAllMods();
@@ -470,8 +470,9 @@ async function initLocalMods() {
           if (modName.startsWith('database/')) return 0;
           if (modName.startsWith('Official Mods/')) return 1;
           if (modName.startsWith('Super Mods/')) return 2;
-          if (modName.startsWith('User Mods/')) return 3;
-          return 4; // Unknown mods go last
+          if (modName.startsWith('OT Mods/')) return 3;
+          if (modName.startsWith('User Mods/')) return 4;
+          return 5; // Unknown mods go last
         };
         
         const orderA = getModOrder(a.name);
@@ -881,14 +882,15 @@ window.addEventListener('message', function(event) {
           }
         }
         
-        // Sort mods in the correct order: Database -> Official -> Super -> User
+        // Sort mods in the correct order: Database -> Official -> Super -> OT -> User
         const sortedMods = Array.from(existingByName.values()).sort((a, b) => {
           const getModOrder = (modName) => {
             if (modName.startsWith('database/')) return 0;
             if (modName.startsWith('Official Mods/')) return 1;
             if (modName.startsWith('Super Mods/')) return 2;
-            if (modName.startsWith('User Mods/')) return 3;
-            return 4; // Unknown mods go last
+            if (modName.startsWith('OT Mods/')) return 3;
+            if (modName.startsWith('User Mods/')) return 4;
+            return 5; // Unknown mods go last
           };
           
           const orderA = getModOrder(a.name);
@@ -913,11 +915,12 @@ window.addEventListener('message', function(event) {
         console.log(`[Local Mods] Found ${enabledMods.length} enabled mods, isBatchExecuting: ${isBatchExecuting}`);
         if (enabledMods.length > 0 && !isBatchExecuting) {
           console.log(`Executing ${enabledMods.length} enabled mods in correct order:`);
-          console.log('Loading order: Database -> Official -> Super -> User');
+          console.log('Loading order: Database -> Official -> Super -> OT -> User');
           enabledMods.forEach((mod, index) => {
             const category = mod.name.startsWith('database/') ? 'Database' :
                            mod.name.startsWith('Official Mods/') ? 'Official' :
                            mod.name.startsWith('Super Mods/') ? 'Super' :
+                           mod.name.startsWith('OT Mods/') ? 'OT' :
                            mod.name.startsWith('User Mods/') ? 'User' : 'Unknown';
             console.log(`  ${index + 1}. [${category}] ${mod.name}`);
           });

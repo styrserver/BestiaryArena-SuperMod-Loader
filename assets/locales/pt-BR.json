@@ -57,6 +57,7 @@
     "categoryAll": "Todos",
     "categoryOfficial": "Mods Originais",
     "categorySuper": "SuperMods",
+    "categoryOt": "OT Mods",
     "categoryCustom": "Mods Personalizados",
     "noModsFound": "Nenhum mod encontrado correspondendo à sua busca.",
     "addScript": "Adicionar Script",
@@ -824,6 +825,7 @@
       "validationMaxMin": "Stamina máxima deve ser maior que a mínima",
       "validationMaxRange": "Stamina máxima deve estar entre 1 e 1000",
       "validationMinRange": "Stamina mínima deve estar entre 1 e 1000",
+      "validationAtLeastOneAction": "Pelo menos uma ação deve ser selecionada",
       "closeButton": "Fechar",
       "enabled": "Habilitado",
       "settings": "Configurações",
@@ -954,6 +956,15 @@
       "noEquipmentAvailable": "Nenhum equipamento disponível",
       "settingsAutoSave": "✓ Configurações são salvas automaticamente quando alteradas",
       "floor": "Andar"
+    },
+    "bosses": {
+      "modalTitle": "Produtos de Criaturas",
+      "loading": "Carregando produtos de criaturas...",
+      "close": "Fechar",
+      "count": "Quantidade: {count}",
+      "emptyState": "Ainda não há produtos de criaturas. Derrote o Dragon Lord para obtê-los!",
+      "errorLoading": "Erro ao carregar produtos de criaturas. Tente novamente.",
+      "productObtained": "{productName} obtido! (+{amount})"
     }
   }
 }

@@ -556,6 +556,7 @@ async function showWelcomeModal() {
     // Handle case where mod counts couldn't be fetched
     const officialCount = modCounts?.official || 'Multiple';
     const superCount = modCounts?.super || 'Multiple';
+    const otCount = modCounts?.ot || 'Multiple';
     
     const modal = api.ui.components.createModal({
       title: 'Welcome to Bestiary Arena Mod Loader!',
@@ -575,6 +576,7 @@ async function showWelcomeModal() {
             <div style="text-align: left; color: #a6adc8; line-height: 1.8;">
               <p><strong>🔧 ${officialCount} Official Mods:</strong> Bestiary Automator, Board Analyzer, Hero Editor, Custom Display, and more! <em>(Enabled by default)</em></p>
               <p><strong>🚀 ${superCount} Super Mods:</strong> Autoseller, Cyclopedia, Hunt Analyzer, Outfiter, Raid Hunter, <em>Manual Runner</em>, and more! <em>(Disabled by default)</em></p>
+              <p><strong>👥 ${otCount} OT Mods:</strong> Guilds, VIP List, and more community features! <em>(Disabled by default)</em></p>
               <p><strong>⚙️ Configuration:</strong> Import/export your settings and mod preferences</p>
               <p><strong>📊 Dashboard:</strong> Access the SuperMod dashboard for advanced features</p>
               <p><strong>🎛️ Popup Controls:</strong> Enable/disable mods directly from the extension popup</p>
@@ -590,7 +592,7 @@ async function showWelcomeModal() {
             </div>
             <div style="background: rgba(0,255,0,0.1); border: 1px solid rgba(0,255,0,0.3); border-radius: 8px; padding: 15px; flex: 1; min-width: 300px; transition: all 0.2s ease;">
               <p style="color: #a6adc8; margin: 0; font-size: 14px;">
-                <strong>💡 Tip:</strong> Click the extension icon to open the popup where you can enable/disable mods. Official Mods are enabled by default, but Super Mods need to be manually enabled as needed!
+                <strong>💡 Tip:</strong> Click the extension icon to open the popup where you can enable/disable mods. Official Mods are enabled by default, but Super Mods and OT Mods need to be manually enabled as needed!
               </p>
             </div>
           </div>

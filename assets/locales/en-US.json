@@ -57,6 +57,7 @@
     "categoryAll": "All",
     "categoryOfficial": "Original Mods",
     "categorySuper": "SuperMods",
+    "categoryOt": "OT Mods",
     "categoryCustom": "Custom Mods",
     "noModsFound": "No mods found matching your search.",
     "addScript": "Add Script",
@@ -823,6 +824,7 @@
       "validationMaxMin": "Max stamina must be greater than min stamina",
       "validationMaxRange": "Max stamina must be between 1 and 1000",
       "validationMinRange": "Min stamina must be between 1 and 1000",
+      "validationAtLeastOneAction": "At least one action must be selected",
       "closeButton": "Close",
       "enabled": "Enabled",
       "settings": "Settings",
@@ -953,6 +955,15 @@
       "noEquipmentAvailable": "No equipment available",
       "settingsAutoSave": "✓ Settings auto-save when changed",
       "floor": "Floor"
+    },
+    "bosses": {
+      "modalTitle": "Creature Products",
+      "loading": "Loading creature products...",
+      "close": "Close",
+      "count": "Count: {count}",
+      "emptyState": "No creature products yet. Defeat Dragon Lord to obtain them!",
+      "errorLoading": "Error loading creature products. Please try again.",
+      "productObtained": "{productName} obtained! (+{amount})"
     }
   }
 }

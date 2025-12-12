@@ -60,14 +60,19 @@ export const SUPER_MODS = [
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
-  'Guilds.js',
   'Hunt Analyzer.js',
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js',
+  'Stamina Optimizer.js'
+];
+
+// OT mods - community/social mods
+export const OT_MODS = [
+  'Bosses.js',
+  'Guilds.js',
   'VIP List.js'
 ];
 
@@ -112,13 +117,14 @@ export const HIDDEN_MODS = [
 
 /**
  * Get all mods organized by category with full paths
- * @returns {Object} Object with database, official, and super arrays
+ * @returns {Object} Object with database, official, super, and ot arrays
  */
 export function getAllModsByCategory() {
   return {
     database: DATABASE_MODS.map(name => `database/${name}`),
     official: OFFICIAL_MODS.map(name => `Official Mods/${name}`),
-    super: SUPER_MODS.map(name => `Super Mods/${name}`)
+    super: SUPER_MODS.map(name => `Super Mods/${name}`),
+    ot: OT_MODS.map(name => `OT Mods/${name}`)
   };
 }
 
@@ -128,7 +134,7 @@ export function getAllModsByCategory() {
  */
 export function getAllMods() {
   const categories = getAllModsByCategory();
-  return [...categories.database, ...categories.official, ...categories.super];
+  return [...categories.database, ...categories.official, ...categories.super, ...categories.ot];
 }
 
 /**
@@ -140,7 +146,8 @@ export function getModCounts() {
     database: DATABASE_MODS.length,
     official: OFFICIAL_MODS.length,
     super: SUPER_MODS.length,
-    total: DATABASE_MODS.length + OFFICIAL_MODS.length + SUPER_MODS.length
+    ot: OT_MODS.length,
+    total: DATABASE_MODS.length + OFFICIAL_MODS.length + SUPER_MODS.length + OT_MODS.length
   };
 }
 
@@ -165,12 +172,13 @@ export function isHiddenMod(modName) {
 /**
  * Get category for a mod based on its path
  * @param {string} modPath - Full path to the mod
- * @returns {string} Category name ('database', 'official', 'super', or 'user')
+ * @returns {string} Category name ('database', 'official', 'super', 'ot', or 'user')
  */
 export function getModCategory(modPath) {
   if (modPath.startsWith('database/')) return 'database';
   if (modPath.startsWith('Official Mods/')) return 'official';
   if (modPath.startsWith('Super Mods/')) return 'super';
+  if (modPath.startsWith('OT Mods/')) return 'ot';
   if (modPath.startsWith('User Mods/')) return 'user';
   return 'unknown';
 }
@@ -191,6 +199,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DATABASE_MODS,
     OFFICIAL_MODS,
     SUPER_MODS,
+    OT_MODS,
     DEFAULT_ENABLED_MODS,
     HIDDEN_MODS,
     getAllModsByCategory,
