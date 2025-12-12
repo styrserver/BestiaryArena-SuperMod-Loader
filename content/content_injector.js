@@ -37,19 +37,43 @@ if (window.DEBUG) console.log('Mods base URL:', modsBaseUrl);
 
 // Script injection function
 function injectScript(filePath) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = browserAPI.runtime.getURL(filePath);
+    const scriptUrl = browserAPI.runtime.getURL(filePath);
+    script.src = scriptUrl;
     script.type = filePath.endsWith('.mjs') ? 'module' : 'text/javascript';
+    
+    console.warn(`[Content Injector] Injecting script: ${filePath}`);
+    console.warn(`[Content Injector] Script URL: ${scriptUrl}`);
+    console.warn(`[Content Injector] Script type: ${script.type}`);
+    
     script.onload = function() {
+      console.warn(`[Content Injector] ✓ Script ${filePath} loaded successfully`);
       if (window.DEBUG) console.log(`Script ${filePath} injected and loaded`);
       resolve();
     };
+    
     script.onerror = function(error) {
-      console.error(`Error loading script ${filePath}:`, error);
-      resolve(); // Resolve anyway to continue the chain
+      console.error(`[Content Injector] ✗ ERROR loading script ${filePath}:`, error);
+      console.error(`[Content Injector] Script URL was: ${scriptUrl}`);
+      console.error(`[Content Injector] Error details:`, {
+        error,
+        filePath,
+        scriptUrl,
+        scriptType: script.type,
+        readyState: script.readyState
+      });
+      reject(error);
     };
+    
+    try {
     (document.head || document.documentElement).appendChild(script);
+      console.warn(`[Content Injector] Script element appended to DOM`);
+    } catch (e) {
+      console.error(`[Content Injector] Failed to append script:`, e);
+      reject(e);
+    }
+    
     if (window.DEBUG) console.log(`Script ${filePath} injection started`);
   });
 }
@@ -63,6 +87,41 @@ async function loadScripts() {
     
     // Short delay to ensure API is ready
     await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Load mod coordination system before mods
+    console.warn('[Content Injector] ===== Loading mod-coordination.mjs =====');
+    try {
+        await injectScript('content/mod-coordination.mjs');
+        console.warn('[Content Injector] mod-coordination.mjs injection promise resolved');
+    } catch (error) {
+        console.error('[Content Injector] ✗ CRITICAL: Failed to inject mod-coordination.mjs:', error);
+        console.error('[Content Injector] Error stack:', error?.stack);
+    }
+    
+    // Verify ModCoordination is available
+    console.warn('[Content Injector] Checking for window.ModCoordination...');
+    let retries = 0;
+    while (!window.ModCoordination && retries < 20) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        retries++;
+        if (retries % 5 === 0) {
+            console.warn(`[Content Injector] Waiting for ModCoordination... (attempt ${retries}/20)`);
+        }
+    }
+    
+    if (window.ModCoordination) {
+        console.warn('[Content Injector] ✓ ModCoordination system verified and ready');
+        console.warn('[Content Injector] ModCoordination methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(window.ModCoordination)).filter(name => name !== 'constructor'));
+    } else {
+        console.error('[Content Injector] ✗ ModCoordination system NOT available after injection!');
+        console.error('[Content Injector] window.ModCoordination:', window.ModCoordination);
+        console.error('[Content Injector] typeof window.ModCoordination:', typeof window.ModCoordination);
+    }
+    
+    if (window.DEBUG) console.log('Mod coordination system loaded');
+    
+    // Short delay to ensure coordination system is ready
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Then load local_mods.js
     await injectScript('content/local_mods.js');

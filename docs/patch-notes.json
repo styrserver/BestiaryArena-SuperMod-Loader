@@ -4,6 +4,14 @@
   },
   "notes": [
   {
+    "version": "3.2.0",
+    "changes": [
+      { "type": "changed", "mod": "Core", "text": "Migrated Mod Coordination to mod-coordination.mjs" },
+      { "type": "added", "mod": "Mod Settings", "text": "Added mod coordination tab" },
+      { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed saved state" }
+    ]
+  },
+  {
     "version": "3.1.10",
     "changes": [
       { "type": "added", "mod": "Guilds", "text": "Added Guild Coins system: earn coins randomly on victories." },

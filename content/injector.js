@@ -20,13 +20,26 @@ console.log = function(...args) {
 function injectScript(file) {
   console.log(`Injecting script: ${file}`);
   const script = document.createElement('script');
-  script.setAttribute('type', 'text/javascript');
-  script.setAttribute('src', browserAPI.runtime.getURL(file));
+  const scriptUrl = browserAPI.runtime.getURL(file);
+  const scriptType = file.endsWith('.mjs') ? 'module' : 'text/javascript';
+  
+  script.setAttribute('type', scriptType);
+  script.setAttribute('src', scriptUrl);
+  
+  if (window.DEBUG) {
+    console.log(`[Injector] Injecting: ${file}`);
+    console.log(`[Injector] Script URL: ${scriptUrl}`);
+    console.log(`[Injector] Script type: ${scriptType}`);
+  }
+  
   script.onload = function() {
+    if (window.DEBUG) console.log(`[Injector] Script loaded successfully: ${file}`);
     console.log(`Script loaded successfully: ${file}`);
     this.remove();
   };
   script.onerror = function(error) {
+    console.error(`[Injector] ✗ ERROR loading script ${file}:`, error);
+    console.error(`[Injector] Script URL was: ${scriptUrl}`);
     console.error(`Error loading script ${file}:`, error);
   };
   (document.head || document.documentElement).appendChild(script);
@@ -69,23 +82,69 @@ clientScript.onload = function() {
   // Inject again to ensure URLs are available
   injectExtensionURLs();
   
-  // Wait a short time to ensure API is ready
-  setTimeout(() => {
-    // Then inject local_mods.js to set up local mods
-    const localModsScript = injectScript('content/local_mods.js');
-    localModsScript.onload = function() {
-      localModsInjected = true;
-      console.log('Local mods script loaded');
+  // Check if API is ready immediately, otherwise wait briefly
+  const checkAPIReady = () => {
+    if (window.BestiaryModAPI && window.BestiaryModAPI.ready) {
+      // API is ready, proceed immediately
+      loadModCoordination();
+    } else {
+      // Wait a short time for API to initialize (reduced from 500ms to 100ms)
+      setTimeout(() => {
+        loadModCoordination();
+      }, 100);
+    }
+  };
+  
+  function loadModCoordination() {
+    // Load mod coordination system BEFORE local_mods.js
+    if (window.DEBUG) console.log('[Injector] Loading mod-coordination.mjs');
+    const modCoordinationScript = injectScript('content/mod-coordination.mjs');
+    modCoordinationScript.onload = function() {
+      if (window.DEBUG) console.log('[Injector] mod-coordination.mjs script element loaded');
       
-      // Inject URLs once more after both scripts are loaded
-      injectExtensionURLs();
-      
-      // Let the background script know we're ready for mods
-      browserAPI.runtime.sendMessage({ action: 'contentScriptReady' }, function(response) {
-        console.log('Background script notified that content script is ready');
-      });
+      // ES modules execute asynchronously, check immediately and then with minimal delay
+      let retries = 0;
+      const checkModCoordination = setInterval(() => {
+        retries++;
+        if (window.ModCoordination) {
+          if (window.DEBUG) console.log('[Injector] ModCoordination verified and ready');
+          clearInterval(checkModCoordination);
+          // Continue with local_mods.js injection
+          injectLocalMods();
+        } else if (retries >= 10) {
+          // Reduced from 30 retries (1.5s) to 10 retries (500ms) - ES modules should load faster
+          clearInterval(checkModCoordination);
+          // Continue anyway - the script may have loaded in a different context
+          injectLocalMods();
+        }
+      }, 50);
     };
-  }, 500);
+    modCoordinationScript.onerror = function(error) {
+      console.error('[Injector] ✗ ERROR loading mod-coordination.mjs:', error);
+      // Continue anyway
+      injectLocalMods();
+    };
+    
+    function injectLocalMods() {
+      // Then inject local_mods.js to set up local mods
+      const localModsScript = injectScript('content/local_mods.js');
+      localModsScript.onload = function() {
+        localModsInjected = true;
+        console.log('Local mods script loaded');
+        
+        // Inject URLs once more after both scripts are loaded
+        injectExtensionURLs();
+        
+        // Let the background script know we're ready for mods
+        browserAPI.runtime.sendMessage({ action: 'contentScriptReady' }, function(response) {
+          console.log('Background script notified that content script is ready');
+        });
+      };
+    }
+  }
+  
+  // Start checking immediately
+  checkAPIReady();
 };
 
 console.log('Bestiary Arena Mod Loader - Injection sequence initiated');

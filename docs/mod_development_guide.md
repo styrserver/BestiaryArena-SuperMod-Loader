@@ -32,6 +32,15 @@ This guide provides comprehensive documentation on creating mods for Bestiary Ar
     - [User Experience](#user-experience)
     - [Code Quality](#code-quality)
     - [Compatibility](#compatibility)
+  - [Mod Coordination System](#mod-coordination-system)
+    - [Overview](#overview)
+    - [Registering Your Mod](#registering-your-mod)
+    - [Updating Mod State](#updating-mod-state)
+    - [Checking Other Mods](#checking-other-mods)
+    - [Resource Control](#resource-control)
+    - [Event Subscriptions](#event-subscriptions)
+    - [Cleanup](#cleanup)
+    - [Priority System](#priority-system)
   - [Examples](#examples)
     - [Simple Mod: Show Current Monster Count](#simple-mod-show-current-monster-count)
     - [Advanced Mod: Map Analysis Tool](#advanced-mod-map-analysis-tool)
@@ -703,6 +712,280 @@ For more details on the game state API, see the [Game State API Documentation](g
 ### Compatibility
 
 - Test your mod with different game versions
+- Use the Mod Coordination System to prevent conflicts with other mods (see [Mod Coordination System](#mod-coordination-system))
+
+## Mod Coordination System
+
+The Mod Coordination System provides a centralized way for mods to communicate their active states, manage shared resources, and prevent conflicts. This system replaces the old `window.__modCoordination` approach with a more robust, event-driven architecture.
+
+### Overview
+
+The coordination system is available globally as `window.ModCoordination` and is loaded automatically before mods via `content/mod-coordination.mjs`. It provides:
+- **Mod State Management**: Register mods and track their active/enabled states
+- **Priority System**: Automatically handle conflicts based on mod priorities (0-255 range)
+- **Resource Control**: Manage exclusive access to shared resources through ControlManager instances
+- **Event System**: Subscribe to state changes instead of polling
+- **Control Managers**: Pre-configured managers for common resources (questButton, autoplay, bestiaryAutomatorSettings)
+
+### Registering Your Mod
+
+Register your mod when it initializes:
+
+```javascript
+function initMyMod() {
+    // Register with the coordination system
+    if (window.ModCoordination) {
+        window.ModCoordination.registerMod('My Mod Name', {
+            priority: 50,  // Higher priority = runs first (0-255 range)
+            metadata: {
+                description: 'Description of what your mod does'
+            }
+        });
+    }
+    
+    // ... rest of initialization
+}
+```
+
+**Priority Guidelines:**
+- **200**: System-level analysis tools (Board Analyzer)
+- **150**: Manual automation (Manual Runner)
+- **120**: Background automation (Autoscroller)
+- **100**: Event-driven automation (Raid Hunter)
+- **90**: Task automation (Better Tasker)
+- **50**: General automation (Bestiary Automator)
+- **10**: Farming automation (Better Boosted Maps)
+- **5**: Optimization tools (Stamina Optimizer)
+- **1**: Passive utilities (Autoseller)
+
+### Updating Mod State
+
+Update your mod's state when it becomes active or inactive:
+
+```javascript
+// When your mod starts an operation
+if (window.ModCoordination) {
+    window.ModCoordination.updateModState('My Mod Name', { active: true });
+}
+
+// When your mod finishes an operation
+if (window.ModCoordination) {
+    window.ModCoordination.updateModState('My Mod Name', { active: false });
+}
+
+// Update enabled state when user toggles the mod
+if (window.ModCoordination) {
+    window.ModCoordination.updateModState('My Mod Name', { enabled: true });
+}
+```
+
+### Checking Other Mods
+
+Check if other mods are active before performing operations:
+
+```javascript
+// Check if a specific mod is active
+if (window.ModCoordination?.isModActive('Board Analyzer')) {
+    console.log('Board Analyzer is running, skipping operation');
+    return;
+}
+
+// Check if mod can run based on blocking mods
+if (window.ModCoordination) {
+    const canRun = window.ModCoordination.canModRun('My Mod Name', [
+        'Board Analyzer',
+        'Manual Runner'
+    ]);
+    if (!canRun) {
+        console.log('Cannot run - blocked by higher priority mod');
+        return;
+    }
+}
+```
+
+### Resource Control
+
+Request and release control of shared resources. Resources are managed through ControlManager instances:
+
+```javascript
+// Get or create a control manager for a resource
+if (window.ModCoordination) {
+    const manager = window.ModCoordination.getControlManager('autoplay', {
+        // Optional: custom properties for this manager
+    });
+}
+
+// Request control before using the resource
+if (window.ModCoordination) {
+    // Request control (returns true if successful)
+    if (!window.ModCoordination.requestControl('autoplay', 'My Mod Name')) {
+        console.log('Failed to get autoplay control, another mod has it');
+        return;
+    }
+    
+    // Optional: Force takeover (use with caution)
+    // window.ModCoordination.requestControl('autoplay', 'My Mod Name', { force: true });
+    
+    // Use the resource...
+    startAutoplay();
+}
+
+// Release control when done
+if (window.ModCoordination) {
+    window.ModCoordination.releaseControl('autoplay', 'My Mod Name');
+}
+
+// Check if you have control
+if (window.ModCoordination?.hasControl('autoplay', 'My Mod Name')) {
+    console.log('I have control of autoplay');
+}
+```
+
+**Default Control Managers:**
+- `'questButton'` - Quest button control (QuestButtonManager)
+- `'autoplay'` - Autoplay control (AutoplayManager)
+- `'bestiaryAutomatorSettings'` - Bestiary Automator settings control
+
+You can also create custom control managers for other resources.
+
+### Event Subscriptions
+
+Subscribe to state changes instead of polling:
+
+```javascript
+// Subscribe to mod registration events
+if (window.ModCoordination) {
+    const unsubscribeRegistered = window.ModCoordination.on('modRegistered', (data) => {
+        console.log('Mod registered:', data.modName);
+    });
+    
+    // Subscribe to mod enabled/disabled changes
+    window.ModCoordination.on('modEnabledChanged', (data) => {
+        if (data.modName === 'Manual Runner') {
+            console.log('Manual Runner enabled:', data.enabled);
+        }
+    });
+    
+    // Subscribe to mod active/inactive changes
+    window.ModCoordination.on('modActiveChanged', (data) => {
+        if (data.modName === 'Manual Runner') {
+            console.log('Manual Runner active:', data.active);
+            if (data.active) {
+                pauseMyMod();
+            } else {
+                checkAndResumeMyMod();
+            }
+        }
+    });
+    
+    // Subscribe to priority changes
+    window.ModCoordination.on('modPriorityChanged', (data) => {
+        console.log(`Priority changed for ${data.modName}: ${data.oldPriority} → ${data.priority}`);
+    });
+    
+    // Subscribe to control events
+    window.ModCoordination.on('controlGranted', (data) => {
+        console.log(`${data.modName} gained control of ${data.resourceName}`);
+    });
+    
+    window.ModCoordination.on('controlReleased', (data) => {
+        console.log(`${data.modName} released control of ${data.resourceName}`);
+    });
+    
+    window.ModCoordination.on('controlTaken', (data) => {
+        console.log(`${data.to} took control from ${data.from} for ${data.resourceName}`);
+    });
+    
+    // Unsubscribe when done (optional)
+    // unsubscribeRegistered();
+}
+```
+
+### Additional Methods
+
+The coordination system provides several utility methods:
+
+```javascript
+// Get mod state
+const modState = window.ModCoordination?.getModState('My Mod Name');
+if (modState) {
+    console.log('Mod enabled:', modState.enabled);
+    console.log('Mod active:', modState.active);
+    console.log('Mod priority:', modState.priority);
+}
+
+// Check if mod is enabled
+if (window.ModCoordination?.isModEnabled('My Mod Name')) {
+    console.log('Mod is enabled');
+}
+
+// Check if mod is active
+if (window.ModCoordination?.isModActive('My Mod Name')) {
+    console.log('Mod is active');
+}
+
+// Get all registered mods (sorted by priority)
+const allMods = window.ModCoordination?.getAllMods();
+allMods.forEach(mod => {
+    console.log(`${mod.name}: priority ${mod.priority}, enabled: ${mod.enabled}, active: ${mod.active}`);
+});
+
+// Get active mods sorted by priority
+const activeMods = window.ModCoordination?.getActiveModsByPriority();
+console.log('Active mods:', activeMods.map(m => m.name));
+
+// Update mod priority
+window.ModCoordination?.updateModPriority('My Mod Name', 100);
+
+// Get coordination summary
+const summary = window.ModCoordination?.getSummary();
+console.log('Registered mods:', summary.registeredMods);
+console.log('Active mods:', summary.activeMods);
+console.log('Resources:', summary.resources);
+```
+
+### Cleanup
+
+Properly unregister when your mod is disabled:
+
+```javascript
+function cleanup() {
+    // ... other cleanup code ...
+    
+    // Release all resources first
+    if (window.ModCoordination) {
+        const modState = window.ModCoordination.getModState('My Mod Name');
+        if (modState) {
+            modState.resources.forEach(resource => {
+                window.ModCoordination.releaseControl(resource, 'My Mod Name');
+            });
+        }
+    }
+    
+    // Unregister from coordination system
+    if (window.ModCoordination) {
+        try {
+            window.ModCoordination.unregisterMod('My Mod Name');
+        } catch (error) {
+            console.warn('Error unregistering from ModCoordination:', error);
+        }
+    }
+}
+```
+
+### Priority System
+
+The coordination system uses priorities to automatically resolve conflicts:
+- Higher priority mods can block lower priority mods
+- When checking `canModRun()`, mods with higher or equal priority will block execution
+- Resource control requests respect priorities - higher priority mods can take control
+
+**Best Practices:**
+- Use event subscriptions instead of polling for better performance
+- Always check if `window.ModCoordination` exists before using it
+- Provide fallback behavior for backward compatibility with older mods
+- Update your mod's state accurately to help other mods coordinate properly
+- Release resource control promptly when done to avoid blocking other mods
 - The game uses XState v3, which may have breaking changes compared to previous versions
 - Ensure your mod works well with other mods
 - Use feature detection instead of assuming availability
