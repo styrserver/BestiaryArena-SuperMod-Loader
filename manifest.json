@@ -72,7 +72,7 @@
         "assets/locales/*",
         "assets/equipment/*",
         "assets/guild/*",
-        "assets/creatureproducts/*",
+        "assets/quests/*",
         "mods/*",
         "database/*"
       ],

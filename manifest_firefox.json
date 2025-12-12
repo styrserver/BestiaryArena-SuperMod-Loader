@@ -83,6 +83,7 @@
     "assets/locales/*",
     "assets/equipment/*",
     "assets/guild/*",
+    "assets/quests/*",
     "mods/*",
     "database/*",
     "database/playereq-database.js",

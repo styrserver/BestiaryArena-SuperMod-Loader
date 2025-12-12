@@ -1029,7 +1029,7 @@ const superModNames = [
 
 // OT Mods list - kept in sync with mod-registry.js
 const otModNames = [
-  'Bosses.js',
+  'Quests.js',
   'Guilds.js',
   'VIP List.js'
 ];

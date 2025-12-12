@@ -6,10 +6,10 @@
   {
     "version": "3.2.0",
     "changes": [
-      { "type": "changed", "mod": "Core", "text": "Migrated Mod Coordination to mod-coordination.mjs" },
-      { "type": "added", "mod": "Mod Settings", "text": "Added mod coordination tab" },
-      { "type": "added", "mod": "Bosses", "text": "Added creature products as drops: collect rare items from defeating specific creatures" },
-      { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed saved state" }
+      { "type": "changed", "mod": "Core", "text": "Migrated Mod Coordination to mod-coordination.mjs." },
+      { "type": "added", "mod": "Mod Settings", "text": "Added mod coordination tab." },
+      { "type": "added", "mod": "Quests", "text": "Added King Tibianus quest line!" },
+      { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed saved state." }
     ]
   },
   {
