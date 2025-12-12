@@ -8,6 +8,7 @@
     "changes": [
       { "type": "changed", "mod": "Core", "text": "Migrated Mod Coordination to mod-coordination.mjs." },
       { "type": "added", "mod": "Mod Settings", "text": "Added mod coordination tab." },
+      { "type": "added", "mod": "Quests", "text": "New players receive a Silver Token to greet King Tibianus; first hail consumes it and he thanks you." },
       { "type": "added", "mod": "Quests", "text": "Added King Tibianus quest line!" },
       { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed saved state." }
     ]

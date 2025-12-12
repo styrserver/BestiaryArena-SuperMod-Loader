@@ -963,7 +963,8 @@
       "count": "Count: {count}",
       "emptyState": "No quest items yet. Defeat Dragon Lord to obtain them!",
       "errorLoading": "Error loading quest items. Please try again.",
-      "productObtained": "{productName} obtained! (+{amount})"
+      "productObtained": "{productName} obtained! (+{amount})",
+      "starterCoinThanks": "I thank thee for the coin."
     }
   }
 }
