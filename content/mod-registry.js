@@ -71,7 +71,7 @@ export const SUPER_MODS = [
 
 // OT mods - community/social mods
 export const OT_MODS = [
-  'Bosses.js',
+  'Quests.js',
   'Guilds.js',
   'VIP List.js'
 ];

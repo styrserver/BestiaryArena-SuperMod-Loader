@@ -957,13 +957,13 @@
       "settingsAutoSave": "✓ Configurações são salvas automaticamente quando alteradas",
       "floor": "Andar"
     },
-    "bosses": {
-      "modalTitle": "Produtos de Criaturas",
-      "loading": "Carregando produtos de criaturas...",
+    "quests": {
+      "modalTitle": "Itens de Missão",
+      "loading": "Carregando itens de missão...",
       "close": "Fechar",
       "count": "Quantidade: {count}",
-      "emptyState": "Ainda não há produtos de criaturas. Derrote o Dragon Lord para obtê-los!",
-      "errorLoading": "Erro ao carregar produtos de criaturas. Tente novamente.",
+      "emptyState": "Ainda não há itens de missão. Derrote o Dragon Lord para obtê-los!",
+      "errorLoading": "Erro ao carregar itens de missão. Tente novamente.",
       "productObtained": "{productName} obtido! (+{amount})"
     }
   }

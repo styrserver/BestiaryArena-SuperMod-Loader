@@ -956,13 +956,13 @@
       "settingsAutoSave": "✓ Settings auto-save when changed",
       "floor": "Floor"
     },
-    "bosses": {
-      "modalTitle": "Creature Products",
-      "loading": "Loading creature products...",
+    "quests": {
+      "modalTitle": "Quest Items",
+      "loading": "Loading quest items...",
       "close": "Close",
       "count": "Count: {count}",
-      "emptyState": "No creature products yet. Defeat Dragon Lord to obtain them!",
-      "errorLoading": "Error loading creature products. Please try again.",
+      "emptyState": "No quest items yet. Defeat Dragon Lord to obtain them!",
+      "errorLoading": "Error loading quest items. Please try again.",
       "productObtained": "{productName} obtained! (+{amount})"
     }
   }
