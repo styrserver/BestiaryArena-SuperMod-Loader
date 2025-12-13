@@ -99,6 +99,109 @@ const FIREBASE_CONFIG = {
   firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app'
 };
 
+// Al Dee standard responses (non-mission related)
+const AL_DEE_RESPONSES = {
+  'hi': 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!',
+  'hello': 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!',
+  'how are you': 'I\'m fine. I\'m so glad to have you here as my customer.',
+  'tools': 'As an adventurer, you should always have at least a backpack, a rope, a shovel, a weapon, an armor and a shield.',
+  'offer': 'Just ask me for a trade to see my offers.',
+  'trade': 'Take a look in the trade window to your right.',
+  'gold': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
+  'money': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
+  'backpack': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
+  'rope': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
+  'ropes': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
+  'shovel': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
+  'weapon': 'Oh, I\'m sorry, but I don\'t deal with weapons. That\'s Obi\'s or Lee\'Delle\'s business. I could offer you a pick in exchange for a small axe if you should happen to own one.',
+  'armor': 'Armor and shields can be bought at Dixi\'s or at Lee\'Delle\'s. Dixi runs that shop near Obi\'s.',
+  'shield': 'Armor and shields can be bought at Dixi\'s or at Lee\'Delle\'s. Dixi runs that shop near Obi\'s.',
+  'food': 'Hmm, the best address to look for food might be Willie or Billy. Norma also has some snacks for sale.',
+  'potions': 'Sorry, I don\'t sell potions. You should visit Lily for that.',
+  'cookies': 'I you want to find someone who may want to buy your cookies, you should meet Lily.',
+  'fishing': 'I sell fishing rods and worms if you want to fish. Simply ask me for a trade.',
+  'cooking': 'I you want to find someone who may want to buy your cookies, you should meet Lily.',
+  'fish': 'No thanks. I don\'t like fish.',
+  'torch': 'No thank you. I can already overstock the market with torches.',
+  'worms': 'I have enough worms myself and don\'t want any more. Use them for fishing.',
+  'bone': 'You better put that bone back there where you dug it out.',
+  'help': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
+  'information': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
+  'job': 'I\'m a merchant. Just ask me for a trade to see my offers.',
+  'name': 'My name is Al Dee, but you can call me Al. Can I interest you in a trade?',
+  'time': 'It\'s about 0:00 am. I\'m so sorry, I have no watches to sell. Do you want to buy something else?',
+  'premium': 'As a premium adventurer you have many advantages. You really should check them out!',
+  'king': 'The king encouraged salesmen to travel here, but only I dared to take the risk, and a risk it was!',
+  'sell': 'Just ask me for a trade to see what I buy from you.',
+  'wares': 'Just ask me for a trade to see my offers.',
+  'stuff': 'Just ask me for a trade to see my offers.',
+  'pick': 'Picks are hard to come by. I trade them only in exchange for high quality small axes. Would you like to make that deal?',
+  'small axe': 'Picks are hard to come by. I trade them only in exchange for high quality small axes. Would you like to make that deal?',
+  'dungeon': 'If you want to explore the dungeons such as the sewers, you have to equip yourself with the vital stuff I am selling. It\'s vital in the deepest sense of the word.',
+  'sewers': 'Oh, our sewer system is very primitive - it\'s so primitive that it\'s overrun by rats. But the stuff I sell is safe from them. Just ask me for a trade to see it!',
+  'vital': 'Well, vital means - necessary for you to survive!',
+  'rats': 'Rats plague our sewers. You can sell fresh rat corpses to Seymour or Tom the tanner.',
+  'monsters': 'If you want to challenge monsters in the dungeons, you need some weapons and armor from the local merchants.',
+  'merchants': 'To view the offers of a merchant, simply talk to him or her and ask for a trade. They will gladly show you their offers and also the things they buy from you.',
+  'tibia': 'One day I will return to the continent as a rich, a very rich man!',
+  'rookgaard': 'On the island of Rookgaard you can gather important experiences to prepare yourself for mainland.',
+  'mainland': 'Have you ever wondered what that \'main\' is people are talking about? Well, once you\'ve reached level 8, you should talk to the oracle. You can choose a profession afterwards and explore much more of Tibia.',
+  'profession': 'You will learn everything you need to know about professions once you\'ve reached the Island of Destiny.',
+  'island of destiny': 'The Island of Destiny can be reached via the oracle once you are level 8. This trip will help you choose your profession!',
+  'thais': 'Thais is a crowded town.',
+  'academy': 'The big building in the centre of Rookgaard. They have a library, a training centre, a bank and the room of the oracle. Seymour is the teacher there.',
+  'bank': 'A bank is quite useful. You can deposit your money safely there. This way you don\'t have to carry it around with you all the time. You could also invest your money in my wares!',
+  'oracle': 'You can find the oracle on the top floor of the academy, just above Seymour. Go there when you are level 8.',
+  'temple': 'The monk Cipfried takes care of our temple. He can heal you if you\'re badly injured or poisoned.',
+  'citizen': 'If you tell me the name of a citizen, I\'ll tell you what I know about him or her.',
+  'dallheim': 'Some call him a hero. He protects the town from monsters.',
+  'zerbrus': 'Some call him a hero. He protects the town from monsters.',
+  'al dee': 'Yep, that\'s me. Smart of you to notice that!',
+  'amber': 'She\'s currently recovering from her travels in the academy. It\'s always nice to chat with her!',
+  'billy': 'This is a local farmer. If you need fresh food to regain your health, it\'s a good place to go. He\'s only trading with premium adventurers though.',
+  'cipfried': 'He is just an old monk. However, he can heal you if you are badly injured or poisoned.',
+  'dixi': 'She\'s Obi\'s granddaughter and deals with armors and shields. Her shop is south west of town, close to the temple.',
+  'hyacinth': 'He mostly stays by himself. He\'s a hermit outside of town - good luck finding him.',
+  'lee delle': 'If you are a premium adventurer, you should check out Lee\'Delle\'s shop. She lives in the western part of town, just across the bridge.',
+  'lily': 'She sells health potions and antidote potions. Also, she buys blueberries and cookies in case you find any.',
+  'loui': 'No idea who that is.',
+  'norma': 'She used to sell equipment, but I think she has opened a small bar now. Talks about changing her name to \'Mary\' and such, strange girl.',
+  'obi': 'He sells weapons. His shop is south west of town, close to the temple.',
+  'paulie': 'He\'s the local bank clerk.',
+  'santiago': 'He dedicated his life to welcome newcomers to this island.',
+  'seymour': 'Seymour is a teacher running the academy. He has many important information about Tibia.',
+  'tom': 'He\'s the local tanner. You could try selling fresh corpses or leather to him.',
+  'willie': 'This is a local farmer. If you need fresh food to regain your health, it\'s a good place to go. However, many monsters also carry food such as meat or cheese. Or you could simply pick blueberries.',
+  'zirella': 'Poor old woman, her son Tom never visits her.',
+  'bye': 'Bye, bye Player.',
+  'mission': 'I don\'t have any missions for you right now. Come back later.',
+  'missions': 'I don\'t have any missions for you right now. Come back later.',
+  'quest': 'I don\'t have any missions for you right now. Come back later.',
+  'task': 'I don\'t have any missions for you right now. Come back later.'
+};
+
+function getAlDeeResponse(message, playerName = 'Player') {
+  const lowerMessage = message.toLowerCase().trim();
+
+  // Check for exact matches first (longer phrases first)
+  const sortedKeys = Object.keys(AL_DEE_RESPONSES).sort((a, b) => b.length - a.length);
+
+  for (const keyword of sortedKeys) {
+    if (lowerMessage.includes(keyword.toLowerCase())) {
+      let response = AL_DEE_RESPONSES[keyword];
+      // Replace "Player" with actual player name in responses that contain it
+      if (response.includes('Player')) {
+        response = response.replace(/Player/g, playerName);
+      }
+      return response;
+    }
+  }
+
+  // Default response if no match found - also replace Player with actual name
+  let defaultResponse = 'Hello, hello, Player! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!';
+  return defaultResponse.replace(/Player/g, playerName);
+}
+
 // =======================
 // Quest Items Configuration
 // Maps creature gameId to their quest item drops
@@ -207,6 +310,23 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   let kingModeActive = false;
   let lastQuestLogContainer = null;
   let missionsToggleButton = null;
+
+  // King Tibianus chat state
+  const kingChatState = {
+    progressCopper: { accepted: false, completed: false },
+    progressDragon: { accepted: false, completed: false },
+    progressLetter: { accepted: false, completed: false },
+    missionOffered: false,
+    offeredMission: null,
+    awaitingKeyConfirm: false,
+    starterCoinThanked: false
+  };
+
+  // Tile 79 right-click system state
+  let tile79RightClickEnabled = false;
+  let tile79ContextMenu = null;
+  let tile79BoardSubscription = null;
+  let tile79PlayerSubscription = null;
 
   // =======================
   // 3. Helper Functions
@@ -426,13 +546,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   // Helper function to find the key sprite (id-2970) within a tile element
   function findKeySprite(tileElement) {
     if (!tileElement) return null;
-    
+
     // Try direct selectors first
     let spriteDiv = tileElement.querySelector('.sprite.item.id-2970') ||
                    tileElement.querySelector('.sprite.item.relative.id-2970');
-    
+
     if (spriteDiv) return spriteDiv;
-    
+
     // Fallback: search all sprites by class list
     const allSprites = tileElement.querySelectorAll('.sprite.item');
     for (const sprite of allSprites) {
@@ -440,9 +560,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         return sprite;
       }
     }
-    
+
     return null;
   }
+
   
   // Animate the key sprite with a funky animation
   function animateCopperKey(tileIndex) {
@@ -762,6 +883,17 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       productDefinitions.push(mapColourDef);
     }
 
+    // Add Fishing Rod (shop item)
+    const fishingRodDef = {
+      name: 'Fishing Rod',
+      icon: 'Fishing_Rod.gif',
+      description: 'A sturdy fishing rod perfect for catching fish in local waters.',
+      rarity: 2
+    };
+    if (!productDefinitions.find(p => p.name === fishingRodDef.name)) {
+      productDefinitions.push(fishingRodDef);
+    }
+
     // Add Obsidian Knife (for active red dragon mission only)
     if (includeObsidianKnife) {
       const obsidianKnifeDef = {
@@ -842,6 +974,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   function getLetterFromAlDeeFirebasePath() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/letter-al-dee-rewards`;
+  }
+
+  function getAlDeeShopPurchasesPath() {
+    return `${FIREBASE_CONFIG.firebaseUrl}/quests/al-dee-shop-purchases`;
   }
 
   // Get current player name
@@ -1417,6 +1553,37 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       'save King Tibianus progress'
     );
     console.log('[Quests Mod][King Tibianus] Progress saved', normalized);
+  }
+
+  async function getAlDeeShopPurchases(playerName) {
+    if (!playerName) return {};
+    const hashedPlayer = await hashUsername(playerName);
+    try {
+      const response = await firebaseRequest(
+        `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
+        'GET',
+        null,
+        'get Al Dee shop purchases'
+      );
+      return response || {};
+    } catch (error) {
+      console.warn('[Quests Mod][Al Dee Shop] Error getting purchases:', error);
+      return {};
+    }
+  }
+
+  async function saveAlDeeShopPurchase(playerName, itemId, purchased = true) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    const purchases = await getAlDeeShopPurchases(playerName);
+    purchases[itemId] = purchased;
+    await firebaseRequest(
+      `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
+      'PUT',
+      purchases,
+      'save Al Dee shop purchase'
+    );
+    console.log('[Quests Mod][Al Dee Shop] Purchase saved:', itemId);
   }
 
   function getCompletedMissionsCount(progress) {
@@ -2258,6 +2425,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     });
   }
 
+  function showStampedLetterDeliveredToast() {
+    showToast({
+      productName: 'Stamped Letter',
+      message: 'Delivered to Al Dee!',
+      duration: 5000,
+      logPrefix: '[Quests Mod][Al Dee]'
+    });
+  }
+
   function clearAllTimeouts() {
     clearTimeoutOrInterval(buttonCheckInterval);
     clearTimeoutOrInterval(buttonRetryTimeout);
@@ -2565,6 +2741,171 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
     box.appendChild(contentWrapper);
     return box;
+  }
+
+  async function refreshQuestItemsModal() {
+    // Check if quest items modal is currently open
+    const existingModal = document.querySelector('div[role="dialog"][data-state="open"] h2.widget-top-text p');
+    if (existingModal && existingModal.textContent === 'Quest Items') {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (dialog) {
+        const contentDiv = dialog.querySelector('.widget-bottom');
+        if (contentDiv) {
+          // Clear existing content and reload
+          contentDiv.innerHTML = '';
+
+          // Rebuild the modal content (similar to showQuestItemsModal but without creating new modal)
+          try {
+            clearQuestItemsCache();
+            const products = await getQuestItems(false);
+            const hideCopperKey = await isCopperKeyMissionCompleted();
+            const redDragonActive = await isRedDragonMissionActive();
+            const redDragonCompleted = await isRedDragonMissionCompleted();
+            const displayProducts = { ...products };
+            console.log('[Quests Mod][Quest Items] Refreshing display products:', displayProducts);
+
+            if (hideCopperKey) {
+              delete displayProducts[COPPER_KEY_CONFIG.productName];
+              delete displayProducts[MAP_COLOUR_CONFIG.productName];
+            }
+            if (redDragonCompleted) {
+              delete displayProducts['Red Dragon Leather'];
+              delete displayProducts['Red Dragon Scale'];
+            }
+
+            const productDefinitions = buildProductDefinitions({
+              includeCopperKey: !hideCopperKey,
+              includeObsidianKnife: redDragonActive,
+              includeDragonClaw: redDragonCompleted || (displayProducts['Dragon Claw'] > 0)
+            });
+
+            // Recreate the modal layout
+            const mainContainer = document.createElement('div');
+            mainContainer.style.cssText = 'width: 100%; height: 100%; max-width: 500px; min-height: 180px; max-height: 180px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; gap: 8px; color: rgb(230, 215, 176);';
+
+            // Left column: Products list
+            const productsListContainer = document.createElement('div');
+            productsListContainer.style.cssText = 'flex: 1 0 0px; display: flex; flex-direction: column; margin: 0px; padding: 0px; min-height: 0px; height: 100%; background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat; border-width: 4px; border-style: solid; border-color: transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill / 1 / 0 stretch; border-radius: 6px; overflow: hidden; width: 180px;';
+
+            const leftHeader = document.createElement('h2');
+            leftHeader.className = 'widget-top widget-top-text pixel-font-16';
+            leftHeader.style.cssText = 'margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255);';
+            const leftHeaderP = document.createElement('p');
+            leftHeaderP.className = 'pixel-font-16';
+            leftHeaderP.style.cssText = 'margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);';
+            leftHeaderP.textContent = 'Quest Items';
+            leftHeader.appendChild(leftHeaderP);
+            productsListContainer.appendChild(leftHeader);
+
+            const leftContent = document.createElement('div');
+            leftContent.className = 'column-content-wrapper';
+            leftContent.style.cssText = 'flex: 1 1 0px; height: 100%; min-height: 0px; overflow-y: auto; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 8px;';
+
+            const productGrid = document.createElement('div');
+            productGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, 34px); gap: 2px; overflow: hidden auto; height: 100%; align-content: start;';
+
+            // Add products to grid
+            let hasAnyProducts = false;
+            for (const productDef of productDefinitions) {
+              const count = displayProducts[productDef.name] || 0;
+
+              // Skip products the user doesn't own
+              if (count <= 0) {
+                continue;
+              }
+
+              hasAnyProducts = true;
+
+              // Create clickable product item button
+              const productItem = document.createElement('button');
+              productItem.style.cssText = `
+                padding: 0;
+                border: none;
+                background: none;
+                cursor: pointer;
+                width: 34px;
+                height: 34px;
+              `;
+
+              // Create container-slot structure like item portraits
+              const containerSlot = createProductSlot(productDef, count, false, productDef.rarity || 5);
+              productItem.appendChild(containerSlot);
+
+              productGrid.appendChild(productItem);
+            }
+
+            leftContent.appendChild(productGrid);
+            productsListContainer.appendChild(leftContent);
+            mainContainer.appendChild(productsListContainer);
+
+            // Right column: Details
+            const detailsContainer = document.createElement('div');
+            detailsContainer.style.cssText = 'flex: 1 0 0px; display: flex; flex-direction: column; margin: 0px; padding: 0px; min-height: 0px; height: 100%; background: url("https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png") repeat; border-width: 4px; border-style: solid; border-color: transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill / 1 / 0 stretch; border-radius: 6px; overflow: hidden; width: 280px;';
+
+            const rightHeader = document.createElement('h2');
+            rightHeader.className = 'widget-top widget-top-text pixel-font-16';
+            rightHeader.style.cssText = 'margin: 0px; padding: 2px 8px; text-align: center; color: rgb(255, 255, 255);';
+            const rightHeaderP = document.createElement('p');
+            rightHeaderP.className = 'pixel-font-16';
+            rightHeaderP.style.cssText = 'margin: 0px; padding: 0px; text-align: center; color: rgb(255, 255, 255);';
+            rightHeaderP.textContent = 'Details';
+            rightHeader.appendChild(rightHeaderP);
+            detailsContainer.appendChild(rightHeader);
+
+            const rightContent = document.createElement('div');
+            rightContent.className = 'column-content-wrapper';
+            rightContent.style.cssText = 'flex: 1 1 0px; height: 100%; min-height: 0px; overflow-y: auto; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; padding: 8px;';
+
+            const detailsWrapper = document.createElement('div');
+            detailsWrapper.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 8px; overflow-y: auto; height: 100%;';
+
+            // Selected item display
+            const selectedItemDisplay = document.createElement('div');
+            selectedItemDisplay.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 8px; width: 100%;';
+            const selectedItemSlot = document.createElement('div');
+            selectedItemSlot.className = 'container-slot surface-darker';
+            selectedItemSlot.style.cssText = 'width: 34px; height: 34px;';
+            selectedItemSlot.setAttribute('data-hoverable', 'false');
+            selectedItemSlot.setAttribute('data-highlighted', 'false');
+            selectedItemSlot.setAttribute('data-disabled', 'false');
+            selectedItemDisplay.appendChild(selectedItemSlot);
+
+            const selectedItemInfo = document.createElement('div');
+            selectedItemInfo.style.cssText = 'flex: 1 1 0%;';
+            selectedItemDisplay.appendChild(selectedItemInfo);
+
+            // Description box
+            const descriptionBox = document.createElement('div');
+            descriptionBox.style.cssText = 'min-height: 72px; padding: 2px 4px; width: 100%; box-sizing: border-box; background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border-width: 4px; border-style: solid; border-color: transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill / 1 / 0 stretch;';
+
+            detailsWrapper.appendChild(selectedItemDisplay);
+            detailsWrapper.appendChild(descriptionBox);
+            rightContent.appendChild(detailsWrapper);
+            detailsContainer.appendChild(rightContent);
+            mainContainer.appendChild(detailsContainer);
+
+            contentDiv.appendChild(mainContainer);
+
+            // Add separator and close button
+            const separator = document.createElement('div');
+            separator.className = 'separator my-2.5';
+            separator.setAttribute('role', 'none');
+            contentDiv.appendChild(separator);
+
+            const buttonContainer = document.createElement('div');
+            buttonContainer.className = 'flex justify-end gap-2';
+            const closeButton = document.createElement('button');
+            closeButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+            closeButton.textContent = 'Close';
+            buttonContainer.appendChild(closeButton);
+            contentDiv.appendChild(buttonContainer);
+
+          } catch (error) {
+            console.error('[Quests Mod][Quest Items] Error refreshing modal:', error);
+          }
+        }
+      }
+    }
   }
 
   async function showQuestItemsModal() {
@@ -2994,21 +3335,21 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   function getKingTibianusResponse(message, playerName = 'Player') {
     const lowerMessage = message.toLowerCase().trim();
-    
+
     // Check for exact matches first (longer phrases first)
     const sortedKeys = Object.keys(KING_TIBIANUS_RESPONSES).sort((a, b) => b.length - a.length);
-    
+
     for (const keyword of sortedKeys) {
       if (lowerMessage.includes(keyword.toLowerCase())) {
         let response = KING_TIBIANUS_RESPONSES[keyword];
-        // Replace "Player" with actual player name in bye response
-        if (keyword === 'bye') {
-          response = response.replace('Player', playerName);
+        // Replace "Player" with actual player name in responses that contain it
+        if (response.includes('Player')) {
+          response = response.replace(/Player/g, playerName);
         }
         return response;
       }
     }
-    
+
     // Default response if no match found
     return 'I greet thee, my loyal subject.';
   }
@@ -3140,15 +3481,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         row2.style.opacity = disabled ? '0.6' : '1';
       }
 
-      const kingChatState = {
-        progressCopper: { accepted: false, completed: false },
-        progressDragon: { accepted: false, completed: false },
-        progressLetter: { accepted: false, completed: false },
-        missionOffered: false,
-        offeredMission: null,
-        awaitingKeyConfirm: false,
-        starterCoinThanked: false
-      };
+      // kingChatState is now defined globally
       const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
 
       // Random responses when Tibianus doesn't understand the player's input
@@ -3168,20 +3501,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         return MISSIONS.find(m => m.id === id);
       }
 
-      function getMissionProgress(mission) {
-        if (!mission) return { accepted: false, completed: false };
-        if (mission.id === KING_COPPER_KEY_MISSION.id) return kingChatState.progressCopper;
-        if (mission.id === KING_RED_DRAGON_MISSION.id) return kingChatState.progressDragon;
-        if (mission.id === KING_LETTER_MISSION.id) return kingChatState.progressLetter;
-        return { accepted: false, completed: false };
-      }
-
-      function setMissionProgress(mission, progress) {
-        if (!mission) return;
-        if (mission.id === KING_COPPER_KEY_MISSION.id) kingChatState.progressCopper = progress;
-        if (mission.id === KING_RED_DRAGON_MISSION.id) kingChatState.progressDragon = progress;
-        if (mission.id === KING_LETTER_MISSION.id) kingChatState.progressLetter = progress;
-      }
+      // getMissionProgress and setMissionProgress are defined globally for Tile 79 functionality
 
       function areAllMissionsCompleted() {
         return MISSIONS.every(mission => getMissionProgress(mission).completed);
@@ -3696,6 +4016,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
                 showStampedLetterReceivedToast();
                 console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
+
+                // Check if player is in sewers and enable Tile 79 immediately
+                setTimeout(() => {
+                  if (shouldEnableTile79RightClick()) {
+                    updateTile79RightClickState();
+                    console.log('[Quests Mod][King Tibianus] Tile 79 enabled immediately after letter exchange (player in sewers)');
+                  }
+                }, 500); // Small delay to ensure UI updates
               } else {
                 console.warn('[Quests Mod][King Tibianus] Player has no Letter from Al Dee to exchange');
               }
@@ -4215,9 +4543,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       modalContent.appendChild(footerContainer);
 
       // Load existing progress when modal opens
-      renderKingQuestUI();
-      loadKingTibianusProgress();
-      updateGuildCoinDisplay();
+      loadKingTibianusProgress().then(() => {
+        renderKingQuestUI();
+        updateGuildCoinDisplay();
+      });
       
       contentDiv.appendChild(modalContent);
       
@@ -4239,6 +4568,593 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         dialogTimeout = null;
       }, 0);
       
+      modalTimeout = null;
+    }, 50);
+  }
+
+  // Al Dee Modal (similar to King Tibianus modal)
+  function showAlDeeModal() {
+    // Clear any pending modal timeouts
+    clearTimeoutOrInterval(modalTimeout);
+    clearTimeoutOrInterval(dialogTimeout);
+
+    // Close any existing modals first
+    for (let i = 0; i < 2; i++) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+    }
+
+    modalTimeout = setTimeout(() => {
+      const contentDiv = document.createElement('div');
+      applyModalContentStyles(contentDiv, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
+
+      const alDeeIconUrl = getQuestItemsAssetUrl('Al_Dee.gif');
+
+      // Create modal content with greeting message
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'display: flex; flex-direction: column; gap: 12px; padding: 0; height: 100%;';
+
+      // Row 1: Top row with image and message
+      const row1 = document.createElement('div');
+      row1.className = 'grid gap-3 sm:grid-cols-[min-content_1fr]';
+      row1.style.cssText = 'align-self: center;';
+
+      const imageContainer = document.createElement('div');
+      imageContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
+      imageContainer.style.cssText = 'width: 110px; min-width: 110px; height: 100%; padding: 0; align-self: stretch;';
+
+      const alDeeImgWrapper = document.createElement('div');
+      alDeeImgWrapper.style.cssText = 'width: 110px; height: 100%; display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box;';
+
+      const alDeeImg = document.createElement('img');
+      alDeeImg.src = alDeeIconUrl;
+      alDeeImg.alt = 'Al Dee';
+      alDeeImg.className = 'pixelated';
+      alDeeImg.style.cssText = 'width: 96px; height: 64px; object-fit: contain; image-rendering: pixelated;';
+      alDeeImgWrapper.appendChild(alDeeImg);
+      imageContainer.appendChild(alDeeImgWrapper);
+
+      const messageContainer = document.createElement('div');
+      messageContainer.className = 'tooltip-prose pixel-font-16 frame-pressed-1 surface-dark flex w-full flex-col gap-1 p-2 text-whiteRegular';
+      messageContainer.style.width = '290px';
+      messageContainer.style.height = '90px';
+      messageContainer.style.maxHeight = '90px';
+      messageContainer.style.overflowY = 'auto';
+      messageContainer.id = 'al-dee-messages';
+
+      // Confusion responses for Al Dee (merchant style)
+      const AL_DEE_CONFUSION_RESPONSES = [
+        'I\'m just a rope merchant, not a mind reader. What do you want?',
+        'These words mean nothing to me. Speak of ropes or tools!',
+        'I deal in ropes and equipment, not riddles. Be clearer!',
+        'Your meaning escapes me. Perhaps you need some rope to tie your thoughts together?',
+        'I don\'t understand that gibberish. Ask about my wares instead!'
+      ];
+
+      function getRandomAlDeeConfusionResponse() {
+        return AL_DEE_CONFUSION_RESPONSES[Math.floor(Math.random() * AL_DEE_CONFUSION_RESPONSES.length)];
+      }
+
+      // Function to add message to conversation
+      function addMessageToConversation(sender, text, isAlDee = false) {
+        const messageP = document.createElement('p');
+
+        if (isAlDee) {
+          // Al Dee messages use the same style as initial greeting
+          messageP.className = 'inline text-monster';
+          messageP.style.color = 'rgb(135, 206, 250)';
+          messageP.textContent = sender + ': ' + text;
+        } else {
+          // Player messages - same font style as Al Dee, lavender/purple color
+          messageP.className = 'inline text-monster';
+          messageP.style.color = 'rgb(200, 180, 255)'; // Lavender/light purple color
+          messageP.textContent = sender + ': ' + text;
+        }
+
+        messageContainer.appendChild(messageP);
+
+        // Scroll to bottom
+        setTimeout(() => {
+          messageContainer.scrollTop = messageContainer.scrollHeight;
+        }, 0);
+      }
+
+      // Add welcome message
+      const playerName = getCurrentPlayerName() || 'Player';
+      const welcomeMessage = 'Hello, hello, ' + playerName + '! Please come in, look, and buy! I\'m a specialist for all sorts of tools. Just ask me for a trade to see my offers!';
+      addMessageToConversation('Al Dee', welcomeMessage, true);
+
+      row1.appendChild(imageContainer);
+      row1.appendChild(messageContainer);
+
+      // Row 2: Shop interface
+      const row2 = document.createElement('div');
+      row2.style.cssText = 'display: grid; grid-template-rows: repeat(auto-fill, 60px); align-items: start; gap: 8px; padding: 8px; background: rgba(0, 0, 0, 0.3); border-radius: 4px; flex: 1 1 0; min-height: 0; overflow-y: auto;';
+
+      // Function to create a shop item
+      function createShopItem(iconName, itemName, price, displayName, itemId) {
+        const shopItem = document.createElement('div');
+        shopItem.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px; background: rgba(255, 255, 255, 0.05); border-radius: 2px; height: 60px; box-sizing: border-box;';
+
+        // Item icon container
+        const itemIconContainer = document.createElement('div');
+        itemIconContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
+        itemIconContainer.style.cssText = 'width: 32px; height: 32px; flex-shrink: 0;';
+
+        const itemIcon = document.createElement('img');
+        itemIcon.src = getQuestItemsAssetUrl(iconName);
+        itemIcon.alt = itemName;
+        itemIcon.className = 'pixelated';
+        itemIcon.style.cssText = 'width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated;';
+        itemIconContainer.appendChild(itemIcon);
+
+        // Item name and price container
+        const infoContainer = document.createElement('div');
+        infoContainer.style.cssText = 'display: flex; flex-direction: column; flex: 1; min-width: 0;';
+
+        const itemNameDisplay = document.createElement('div');
+        itemNameDisplay.className = 'pixel-font-12 text-whiteRegular';
+        itemNameDisplay.textContent = displayName;
+        itemNameDisplay.style.cssText = 'font-weight: bold; margin-bottom: 2px;';
+
+        const priceDisplay = document.createElement('div');
+        priceDisplay.className = 'pixel-font-12 text-whiteRegular';
+        priceDisplay.textContent = price + ' guild coins';
+        priceDisplay.style.cssText = 'display: flex; align-items: center; gap: 2px;';
+
+        // Guild coin icon for price
+        const coinIcon = document.createElement('img');
+        coinIcon.src = cachedExtensionBaseUrl ? constructUrl(cachedExtensionBaseUrl, '/assets/guild/Guild_Coin.PNG') : '/assets/guild/Guild_Coin.PNG';
+        coinIcon.alt = 'Guild Coin';
+        coinIcon.className = 'pixelated';
+        coinIcon.style.cssText = 'width: 12px; height: 12px; object-fit: contain; image-rendering: pixelated;';
+        priceDisplay.insertBefore(coinIcon, priceDisplay.firstChild);
+
+        infoContainer.appendChild(itemNameDisplay);
+        infoContainer.appendChild(priceDisplay);
+
+        // Buy button
+        const buyButton = document.createElement('button');
+        buyButton.type = 'button';
+        buyButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pixel-font-12';
+        buyButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; height: 24px; font-size: 12px; flex-shrink: 0;';
+
+        // Check if item has been purchased
+        const playerName = getCurrentPlayerName();
+        let isPurchased = false;
+        if (playerName) {
+          getAlDeeShopPurchases(playerName).then(purchases => {
+            isPurchased = purchases[itemId] === true;
+            updateButtonState();
+          }).catch(() => {
+            updateButtonState();
+          });
+        }
+
+        function updateButtonState() {
+          if (isPurchased) {
+            buyButton.textContent = 'Bought';
+            buyButton.disabled = true;
+            buyButton.style.filter = 'grayscale(100%)';
+            buyButton.style.opacity = '0.6';
+          } else {
+            buyButton.textContent = 'Buy';
+            buyButton.disabled = false;
+            buyButton.style.filter = '';
+            buyButton.style.opacity = '';
+          }
+        }
+
+        // Initialize button state
+        updateButtonState();
+
+        // Buy button click handler
+        buyButton.addEventListener('click', async () => {
+          try {
+            // Check if player has enough guild coins
+            const coinsGetter = globalThis.getGuildCoins ||
+              (globalThis.Guilds && globalThis.Guilds.getGuildCoins) ||
+              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.getGuildCoins) ||
+              (typeof getGuildCoins === 'function' ? getGuildCoins : null);
+
+            if (!coinsGetter) {
+              addMessageToConversation('Al Dee', 'Sorry, I cannot check your guild coins right now.', true);
+              return;
+            }
+
+            const currentCoins = await coinsGetter();
+            if (currentCoins < price) {
+              addMessageToConversation('Al Dee', `You don't have enough guild coins! You need ${price} guild coins to buy ${displayName.toLowerCase()}.`, true);
+              return;
+            }
+
+            // Deduct coins and give item
+            const coinsDeduct = globalThis.deductGuildCoins ||
+              (globalThis.Guilds && globalThis.Guilds.deductGuildCoins) ||
+              (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.deductGuildCoins) ||
+              (typeof deductGuildCoins === 'function' ? deductGuildCoins : null);
+
+            if (coinsDeduct) {
+              await coinsDeduct(price); // Deduct coins
+
+              // Add item to quest items inventory
+              try {
+                await addQuestItem(displayName, 1);
+                console.log('[Al Dee Shop] Added', displayName, 'to quest items inventory');
+              } catch (inventoryError) {
+                console.error('[Al Dee Shop] Error adding item to inventory:', inventoryError);
+              }
+
+              // Mark as purchased in Firebase
+              await saveAlDeeShopPurchase(playerName, itemId, true);
+
+              // Update button state
+              isPurchased = true;
+              updateButtonState();
+
+              addMessageToConversation('Al Dee', `Thank you for your business! Here's your ${displayName.toLowerCase()}.`, true);
+
+              // Update guild coin display
+              updateGuildCoinDisplay();
+
+              // Refresh quest items modal if it's open
+              refreshQuestItemsModal();
+            } else {
+              addMessageToConversation('Al Dee', 'Sorry, there seems to be an issue with deducting guild coins.', true);
+            }
+          } catch (error) {
+            console.error('[Al Dee Shop] Error processing purchase:', error);
+            addMessageToConversation('Al Dee', 'Sorry, something went wrong with the purchase.', true);
+          }
+        });
+
+        // Assemble the shop item
+        shopItem.appendChild(itemIconContainer);
+        shopItem.appendChild(infoContainer);
+        shopItem.appendChild(buyButton);
+
+        return shopItem;
+      }
+
+      // Add shop items to the grid
+      row2.appendChild(createShopItem('Fishing_Rod.gif', 'Fishing Rod', 100, 'Fishing Rod', 'fishing_rod'));
+
+      // Row 3: Chat input area (matches King Tibianus exactly)
+      const row3 = document.createElement('div');
+      row3.style.cssText = `
+        padding: 0;
+        border-top: 0;
+        margin: 0;
+        background: rgba(255, 255, 255, 0.05);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex-shrink: 0;
+      `;
+
+      const inputRow = document.createElement('div');
+      inputRow.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'king-tibianus-chat-input';
+      textarea.setAttribute('wrap', 'off');
+      textarea.placeholder = 'Type your message to Al Dee...';
+      textarea.style.cssText = `
+        flex: 1;
+        height: 28px;
+        max-height: 28px;
+        min-height: 28px;
+        padding: 4px 6px;
+        background-color: #333;
+        border: 4px solid transparent;
+        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        color: rgb(255, 255, 255);
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 18px;
+        resize: none;
+        box-sizing: border-box;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow-x: hidden;
+        overflow-y: hidden;
+        outline: none;
+      `;
+
+      // Handle Enter key and focus/blur events like King Tibianus
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessageToAlDee();
+        }
+      });
+
+      // Remove focus outline/border
+      textarea.addEventListener('focus', () => {
+        textarea.style.outline = 'none';
+        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+      });
+
+      textarea.addEventListener('blur', () => {
+        textarea.style.outline = 'none';
+        textarea.style.borderImage = 'url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill';
+      });
+      // Handle Enter key
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessageToAlDee();
+        }
+      });
+
+      const sendButton = document.createElement('button');
+      sendButton.textContent = 'Send';
+      sendButton.className = 'primary';
+      sendButton.style.cssText = `
+        height: 28px;
+        padding: 4px 10px;
+        white-space: nowrap;
+        font-size: 13px;
+        line-height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: url('https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png') center center / cover;
+        border: 4px solid transparent;
+        border-image: url("https://bestiaryarena.com/_next/static/media/1-frame.f1ab7b00.png") 4 fill;
+        color: rgb(255, 255, 255);
+        cursor: pointer;
+        font-family: inherit;
+      `;
+
+      async function sendMessageToAlDee() {
+        const text = textarea.value.trim();
+        if (!text || text.length === 0) {
+          return;
+        }
+
+        // Get player name
+        const playerName = getCurrentPlayerName() || 'Player';
+        const lowerText = text.toLowerCase();
+
+        // Add player message to conversation
+        addMessageToConversation(playerName, text, false);
+
+        // Clear input
+        textarea.value = '';
+
+        // Check for stamped letter delivery mission
+        let missionCompleted = false;
+        if (lowerText.includes('letter') || lowerText.includes('deliver') || lowerText.includes('king') || lowerText.includes('tibianus')) {
+          try {
+            const currentProducts = await getQuestItems();
+            const hasStampedLetter = (currentProducts['Stamped Letter'] || 0) > 0;
+
+            if (hasStampedLetter) {
+              // Remove the stamped letter from inventory
+              await consumeQuestItem('Stamped Letter', 1);
+              console.log('[Quests Mod][Al Dee] Stamped Letter delivered, consuming from inventory');
+
+              // Show delivery toast
+              showStampedLetterDeliveredToast();
+
+              // Award guild coins
+              const coinsAdder = globalThis.addGuildCoins ||
+                (globalThis.Guilds && globalThis.Guilds.addGuildCoins) ||
+                (globalThis.BestiaryModAPI && globalThis.BestiaryModAPI.guilds && globalThis.BestiaryModAPI.guilds.addGuildCoins) ||
+                (typeof addGuildCoins === 'function' ? addGuildCoins : null);
+
+              if (coinsAdder) {
+                await coinsAdder(50);
+                console.log('[Quests Mod][Al Dee] Awarded 50 guild coins for letter delivery');
+              } else {
+                console.warn('[Quests Mod][Al Dee] addGuildCoins not available, skipping guild coin reward');
+              }
+
+              // Mark the letter mission as completed
+              setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: true });
+              console.log('[Quests Mod][Al Dee] Letter delivery mission completed');
+
+              // Save progress to Firebase
+              const playerName = getCurrentPlayerName();
+              if (playerName) {
+                await saveKingTibianusProgress(playerName, {
+                  copper: kingChatState.progressCopper,
+                  dragon: kingChatState.progressDragon,
+                  letter: kingChatState.progressLetter
+                });
+                console.log('[Quests Mod][Al Dee] Letter mission progress saved to Firebase');
+              }
+
+              // Update guild coin display
+              updateGuildCoinDisplay();
+
+              // Mark mission as completed
+              missionCompleted = true;
+
+              // Queue special mission completion response
+              setTimeout(() => {
+                addMessageToConversation('Al Dee', 'Ah, finally! The king\'s stamped letter. Thank you for delivering it, ' + playerName + '. Here\'s 50 guild coins as a reward for your service.', true);
+              }, 1000);
+
+              return; // Exit early, don't show regular transcript response
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Al Dee] Error checking/delivering stamped letter:', error);
+          }
+        }
+
+        // Get transcript response (handles all standard Al Dee dialogue)
+        let alDeeResponse = getAlDeeResponse(text, playerName);
+
+        // If we got the default response back, it means Al Dee doesn't understand - use confusion response
+        const defaultResponse = `Hello, hello, ${playerName}! Please come in, look, and buy! I'm a specialist for all sorts of tools. Just ask me for a trade to see my offers!`;
+        if (alDeeResponse === defaultResponse) {
+          alDeeResponse = getRandomAlDeeConfusionResponse();
+        }
+
+        // Check if this is a bye message to close the modal
+        const isBye = lowerText.includes('bye');
+        if (isBye) {
+          // Close modal after a short delay
+          setTimeout(() => {
+            if (modalRef?.close) {
+              modalRef.close();
+            } else {
+              const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+              if (dialog && dialog.parentNode) {
+                dialog.parentNode.removeChild(dialog);
+              } else {
+                closeDialogWithFallback(0);
+              }
+            }
+          }, 2000);
+        }
+
+        // Queue Al Dee's response with a delay
+        setTimeout(() => {
+          addMessageToConversation('Al Dee', alDeeResponse, true);
+        }, 1000);
+      }
+
+      sendButton.addEventListener('click', sendMessageToAlDee);
+
+      inputRow.appendChild(textarea);
+      inputRow.appendChild(sendButton);
+      row3.appendChild(inputRow);
+
+      modalContent.appendChild(row1);
+      modalContent.appendChild(row2);
+      modalContent.appendChild(row3);
+
+      // Footer with guild coins display and close button (same structure as King Tibianus)
+      let customFooter = null;
+      let customSeparator = null;
+      let guildCoinAmountSpan = null;
+
+      function removeDefaultModalFooter(dialog) {
+        try {
+          if (!dialog) return;
+          const separators = dialog.querySelectorAll('.separator');
+          separators.forEach(el => {
+            if (el !== customSeparator) {
+              el.remove();
+            }
+          });
+          const buttonRows = dialog.querySelectorAll('.flex.justify-end.gap-2');
+          buttonRows.forEach(row => {
+            if (row !== customFooter && !row.querySelector('.guild-coins-display')) {
+              row.remove();
+            }
+          });
+        } catch (error) {
+          console.warn('[Quests Mod][Al Dee] Could not remove default modal footer:', error);
+        }
+      }
+
+      const footer = document.createElement('div');
+      footer.className = 'flex justify-end gap-2 items-center';
+      footer.style.cssText = 'width: 100%;';
+      customFooter = footer;
+
+      // Guild coin display
+      const guildCoinIconUrl = cachedExtensionBaseUrl ? constructUrl(cachedExtensionBaseUrl, '/assets/guild/Guild_Coin.PNG') : '/assets/guild/Guild_Coin.PNG';
+      const coinDisplay = document.createElement('div');
+      coinDisplay.className = 'pixel-font-16 frame-pressed-1 surface-darker flex items-center justify-end gap-1 px-1.5 pb-px text-right text-whiteRegular mr-auto guild-coins-display';
+      coinDisplay.style.cssText = 'box-sizing: border-box;';
+
+      const coinImg = document.createElement('img');
+      coinImg.src = guildCoinIconUrl;
+      coinImg.alt = 'Guild Coins';
+      coinImg.style.cssText = 'width: 16px; height: 16px;';
+
+      guildCoinAmountSpan = document.createElement('span');
+      guildCoinAmountSpan.className = 'guild-coins-amount';
+      guildCoinAmountSpan.textContent = '...';
+
+      coinDisplay.appendChild(coinImg);
+      coinDisplay.appendChild(guildCoinAmountSpan);
+      footer.appendChild(coinDisplay);
+
+      const footerCloseBtn = document.createElement('button');
+      footerCloseBtn.type = 'button';
+      footerCloseBtn.textContent = 'Close';
+      footerCloseBtn.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14 [&_svg]:size-[11px] [&_svg]:mb-[1px] [&_svg]:mt-[2px]';
+      footerCloseBtn.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; max-height: 21px; height: 21px; font-size: 14px;';
+      footerCloseBtn.addEventListener('click', () => {
+        if (modalRef?.close) {
+          modalRef.close();
+        } else {
+          const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+          if (dialog && dialog.parentNode) {
+            dialog.parentNode.removeChild(dialog);
+          } else {
+            closeDialogWithFallback(0);
+          }
+        }
+      });
+      footer.appendChild(footerCloseBtn);
+
+      const footerContainer = document.createElement('div');
+      footerContainer.style.cssText = 'display: flex; flex-direction: column; gap: 0; width: 100%;';
+
+      const separator = document.createElement('div');
+      separator.className = 'separator my-2.5';
+      separator.setAttribute('role', 'none');
+      customSeparator = separator;
+      footerContainer.appendChild(separator);
+
+      footerContainer.appendChild(footer);
+      modalContent.appendChild(footerContainer);
+
+      // Function to update guild coin display
+      async function updateGuildCoinDisplay() {
+        if (!guildCoinAmountSpan) return;
+        guildCoinAmountSpan.textContent = '...';
+        try {
+          const coinsGetter =
+            globalThis.getGuildCoins ||
+            (globalThis.Guilds && globalThis.Guilds.getGuildCoins) ||
+            (globalThis.BestiaryModAPI &&
+             globalThis.BestiaryModAPI.guilds &&
+             globalThis.BestiaryModAPI.guilds.getGuildCoins) ||
+            (typeof getGuildCoins === 'function' ? getGuildCoins : null);
+          if (!coinsGetter) {
+            console.error('[Quests Mod][Al Dee] getGuildCoins not available; cannot show guild coins.');
+            guildCoinAmountSpan.textContent = '?';
+            return;
+          }
+          const amount = await coinsGetter();
+          guildCoinAmountSpan.textContent = Number.isFinite(amount) ? amount : '?';
+        } catch (error) {
+          console.error('[Quests Mod][Al Dee] Error updating guild coins display:', error);
+          guildCoinAmountSpan.textContent = '?';
+        }
+      }
+
+      contentDiv.appendChild(modalContent);
+
+      // Update guild coin display
+      updateGuildCoinDisplay();
+
+      const modal = api.ui.components.createModal({
+        title: 'Al Dee',
+        width: KING_TIBI_MODAL_WIDTH,
+        height: KING_TIBI_MODAL_HEIGHT,
+        content: contentDiv,
+        buttons: []
+      });
+
+      modalRef = modal;
+
+      dialogTimeout = setTimeout(() => {
+        const dialog = modal?.element || document.querySelector('div[role="dialog"][data-state="open"]');
+        if (dialog) {
+          applyDialogStyles(dialog, KING_TIBI_MODAL_WIDTH, KING_TIBI_MODAL_HEIGHT);
+          removeDefaultModalFooter(dialog);
+        }
+        dialogTimeout = null;
+      }, 0);
+
       modalTimeout = null;
     }, 50);
   }
@@ -4776,6 +5692,433 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     console.log('[Quests Mod] Quest log monitoring stopped');
   }
 
+  // Helper functions for mission progress
+  function getMissionProgress(mission) {
+    if (!mission) return { accepted: false, completed: false };
+    if (mission.id === KING_COPPER_KEY_MISSION.id) return kingChatState.progressCopper;
+    if (mission.id === KING_RED_DRAGON_MISSION.id) return kingChatState.progressDragon;
+    if (mission.id === KING_LETTER_MISSION.id) return kingChatState.progressLetter;
+    return { accepted: false, completed: false };
+  }
+
+  function setMissionProgress(mission, progress) {
+    if (!mission) return;
+    if (mission.id === KING_COPPER_KEY_MISSION.id) kingChatState.progressCopper = progress;
+    if (mission.id === KING_RED_DRAGON_MISSION.id) kingChatState.progressDragon = progress;
+    if (mission.id === KING_LETTER_MISSION.id) kingChatState.progressLetter = progress;
+  }
+
+  // =======================
+  // Tile 79 Right-Click System
+  // =======================
+
+  // Debug function to check Firebase mission state
+  window.checkMissionState = async function() {
+    console.log('[Quests Mod][Dev] Checking current mission state...');
+    try {
+      const playerName = getCurrentPlayerName();
+      console.log('[Quests Mod][Dev] Player name:', playerName);
+      console.log('[Quests Mod][Dev] Local kingChatState:', kingChatState);
+
+      if (playerName) {
+        // Try to fetch from Firebase
+        const progress = await getKingTibianusProgress(playerName);
+        console.log('[Quests Mod][Dev] Firebase progress:', progress);
+      }
+
+      const currentProgress = getMissionProgress(KING_LETTER_MISSION);
+      console.log('[Quests Mod][Dev] Current mission progress:', currentProgress);
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error checking mission state:', error);
+    }
+  };
+
+  // Debug function to manually set mission progress (for testing)
+  window.setMissionAccepted = async function(missionId = 'king_letter_al_dee') {
+    console.log('[Quests Mod][Dev] Manually setting mission as accepted:', missionId);
+    try {
+      if (missionId === 'king_letter_al_dee') {
+        setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: false });
+        console.log('[Quests Mod][Dev] KING_LETTER_MISSION set to accepted locally');
+
+        // Save to Firebase
+        const playerName = getCurrentPlayerName();
+        if (playerName) {
+          const progress = {
+            copper: kingChatState.progressCopper,
+            dragon: kingChatState.progressDragon,
+            letter: kingChatState.progressLetter
+          };
+          await saveKingTibianusProgress(playerName, progress);
+          console.log('[Quests Mod][Dev] Mission progress saved to Firebase');
+        }
+      }
+      // Force update tile 79 state
+      updateTile79RightClickState();
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error setting mission progress:', error);
+    }
+  };
+
+  // Debug function to manually test tile 79 functionality
+  window.debugTile79 = function() {
+    console.log('[Quests Mod][Tile 79] Manual debug check');
+    console.log('[Quests Mod][Tile 79] Subscription status:', {
+      boardSubscription: !!tile79BoardSubscription,
+      playerSubscription: !!tile79PlayerSubscription,
+      rightClickEnabled: tile79RightClickEnabled
+    });
+    console.log('[Quests Mod][Tile 79] Current game state:', {
+      roomId: globalThis.state?.selectedMap?.selectedRoom?.id,
+      roomName: globalThis.state?.utils?.ROOM_NAME?.[globalThis.state?.selectedMap?.selectedRoom?.id],
+      missionProgress: getMissionProgress(KING_LETTER_MISSION),
+      questItems: cachedQuestItems,
+      tileElement: !!getTileElement(79)
+    });
+    updateTile79RightClickState();
+  };
+
+  // Set up event-driven subscriptions for Tile 79 right-click functionality
+  function setupTile79Observer() {
+    // Subscribe to board state changes to detect room changes
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      tile79BoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        console.log('[Quests Mod][Tile 79] Board state changed, checking conditions');
+        updateTile79RightClickState(boardContext);
+      });
+      console.log('[Quests Mod][Tile 79] Board subscription set up');
+    }
+
+    // Subscribe to player state changes to detect inventory changes (Stamped Letter)
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
+      tile79PlayerSubscription = globalThis.state.player.subscribe((playerState) => {
+        console.log('[Quests Mod][Tile 79] Player state changed, checking conditions');
+        updateTile79RightClickState();
+      });
+      console.log('[Quests Mod][Tile 79] Player subscription set up');
+    }
+
+    // Initial check when subscriptions are set up
+    setTimeout(() => {
+      console.log('[Quests Mod][Tile 79] Initial state check');
+      updateTile79RightClickState();
+    }, 500);
+
+    console.log('[Quests Mod][Tile 79] Event-driven subscriptions set up');
+    console.log('[Quests Mod][Tile 79] Will respond to: room changes (board state) and inventory changes (player state)');
+  }
+
+  // Update Tile 79 right-click state based on current conditions
+  function updateTile79RightClickState(boardContext = null) {
+    console.log('[Quests Mod][Tile 79] updateTile79RightClickState called');
+    try {
+      const shouldBeEnabled = shouldEnableTile79RightClick(boardContext);
+      const tile79Element = getTileElement(79);
+
+      console.log('[Quests Mod][Tile 79] Checking conditions:', {
+        shouldBeEnabled,
+        tile79ElementExists: !!tile79Element,
+        tile79RightClickEnabled
+      });
+
+      if (shouldBeEnabled && tile79Element && !tile79RightClickEnabled) {
+        // Enable right-click - add to document with capture to intercept events before they reach the tile
+        document.addEventListener('contextmenu', handleTile79RightClickDocument, true); // Use capture phase on document
+
+        // Temporarily enable pointer events on the tile
+        tile79Element.style.pointerEvents = 'auto';
+
+        tile79RightClickEnabled = true;
+        console.log('[Quests Mod][Tile 79] Right-click enabled - document listener added and pointer events enabled');
+      } else if (!shouldBeEnabled && tile79RightClickEnabled) {
+        // Disable right-click - remove document listener and restore tile pointer events
+        document.removeEventListener('contextmenu', handleTile79RightClickDocument, true);
+
+        // Restore pointer events on tile 79
+        if (tile79Element) {
+          tile79Element.style.pointerEvents = ''; // Remove inline style to restore CSS default
+        }
+
+        tile79RightClickEnabled = false;
+        console.log('[Quests Mod][Tile 79] Right-click disabled - document listener removed and pointer events restored');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Tile 79] Error updating right-click state:', error);
+    }
+  }
+
+  // Handle right-click on Tile 79
+  function handleTile79RightClick(event) {
+    console.log('[Quests Mod][Tile 79] Right-click detected - showing Visit Al Dee menu!', event);
+
+    // Be very aggressive about preventing the browser context menu
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    // Create our custom context menu
+    createTile79ContextMenu(event.clientX, event.clientY);
+
+    return false;
+  }
+
+  // Handle right-click events on document and check if they originated from Tile 79
+  function handleTile79RightClickDocument(event) {
+    const tile79Element = getTileElement(79);
+    if (!tile79Element) return;
+
+    // Check if the event target is inside the tile 79 element
+    if (tile79Element.contains(event.target)) {
+      console.log('[Quests Mod][Tile 79] Right-click detected on tile 79 via document listener!', event);
+
+      // Be very aggressive about preventing the browser context menu
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+
+      // Create our custom context menu
+      createTile79ContextMenu(event.clientX, event.clientY);
+
+      return false;
+    }
+  }
+
+  // Check if Tile 79 should be right-clickable
+  function shouldEnableTile79RightClick(boardContext = null) {
+    try {
+      // Use provided board context or get from global state
+      const context = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+      const currentRoomId = context?.selectedMap?.selectedRoom?.id || globalThis.state?.selectedMap?.selectedRoom?.id;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const isInSewers = roomNames && currentRoomId && roomNames[currentRoomId] === 'Sewers';
+
+      console.log('[Quests Mod][Tile 79] Room check:', {
+        currentRoomId,
+        roomName: roomNames?.[currentRoomId],
+        isInSewers
+      });
+
+      if (!isInSewers) return false;
+
+      // Check if KING_LETTER_MISSION is active or completed (source of truth: Firebase-loaded kingChatState)
+      const letterMissionProgress = getMissionProgress(KING_LETTER_MISSION);
+      const isMissionAccessible = letterMissionProgress.accepted || letterMissionProgress.completed;
+
+      console.log('[Quests Mod][Tile 79] Mission check:', {
+        state: letterMissionProgress,
+        accessible: isMissionAccessible
+      });
+
+      if (!isMissionAccessible) {
+        return false;
+      }
+
+      // For completed missions, always allow access. For active missions, require stamped letter.
+      if (letterMissionProgress.completed) {
+        console.log('[Quests Mod][Tile 79] Mission completed - allowing permanent access');
+        return true;
+      }
+
+      // Check if user has Stamped Letter in quest items (not regular player inventory)
+      const currentProducts = cachedQuestItems || {};
+      const hasStampedLetter = (currentProducts['Stamped Letter'] || 0) > 0;
+
+      console.log('[Quests Mod][Tile 79] Quest items check:', {
+        questItems: currentProducts,
+        hasStampedLetter
+      });
+
+      return hasStampedLetter;
+    } catch (error) {
+      console.error('[Quests Mod][Tile 79] Error checking right-click conditions:', error);
+      return false;
+    }
+  }
+
+  // Check if user has Stamped Letter in quest items
+  function hasStampedLetter() {
+    try {
+      const currentProducts = cachedQuestItems || {};
+      return (currentProducts['Stamped Letter'] || 0) > 0;
+    } catch (error) {
+      console.error('[Quests Mod][Tile 79] Error checking for Stamped Letter:', error);
+      return false;
+    }
+  }
+
+  // Create context menu for Tile 79 with "Visit Al Dee" button
+  function createTile79ContextMenu(x, y) {
+    console.log('[Quests Mod][Tile 79] Creating context menu at', x, y);
+
+    // Close any existing context menu
+    if (tile79ContextMenu && tile79ContextMenu.closeMenu) {
+      tile79ContextMenu.closeMenu();
+    }
+
+    // Create overlay to close menu on outside click
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9998';
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+
+    // Create menu container
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = '9999';
+    menu.style.minWidth = '120px';
+    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '8px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+
+    // Minimal design - no title or description, just the button
+
+    // Button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'center';
+
+    // "Visit Al Dee" button
+    const visitAlDeeButton = document.createElement('button');
+    visitAlDeeButton.className = 'pixel-font-14';
+    visitAlDeeButton.textContent = 'Visit Al Dee';
+    visitAlDeeButton.style.width = '120px';
+    visitAlDeeButton.style.height = '28px';
+    visitAlDeeButton.style.fontSize = '12px';
+    visitAlDeeButton.style.backgroundColor = '#2a4a2a';
+    visitAlDeeButton.style.color = '#4CAF50';
+    visitAlDeeButton.style.border = '1px solid #4CAF50';
+    visitAlDeeButton.style.borderRadius = '4px';
+    visitAlDeeButton.style.cursor = 'pointer';
+    visitAlDeeButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
+    visitAlDeeButton.style.fontWeight = 'bold';
+
+    // Add hover effects
+    visitAlDeeButton.addEventListener('mouseenter', () => {
+      visitAlDeeButton.style.backgroundColor = '#1a2a1a';
+      visitAlDeeButton.style.borderColor = '#66BB6A';
+    });
+    visitAlDeeButton.addEventListener('mouseleave', () => {
+      visitAlDeeButton.style.backgroundColor = '#2a4a2a';
+      visitAlDeeButton.style.borderColor = '#4CAF50';
+    });
+
+    // Handle click - show Al Dee modal
+    visitAlDeeButton.addEventListener('click', () => {
+      showAlDeeModal();
+      closeMenu();
+    });
+
+    buttonContainer.appendChild(visitAlDeeButton);
+    menu.appendChild(buttonContainer);
+
+    // Event handlers
+    const overlayClickHandler = (e) => {
+      if (e.target === overlay) {
+        closeMenu();
+      }
+    };
+
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    // Close menu function
+    function closeMenu() {
+      // Remove event listeners
+      overlay.removeEventListener('mousedown', overlayClickHandler);
+      overlay.removeEventListener('click', overlayClickHandler);
+      document.removeEventListener('keydown', escHandler);
+
+      // Remove from DOM
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      if (menu.parentNode) {
+        menu.parentNode.removeChild(menu);
+      }
+
+      // Clear reference
+      tile79ContextMenu = null;
+    }
+
+    // Add event listeners
+    overlay.addEventListener('mousedown', overlayClickHandler);
+    overlay.addEventListener('click', overlayClickHandler);
+    document.addEventListener('keydown', escHandler);
+
+    // Add to DOM
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+
+    console.log('[Quests Mod][Tile 79] Visit Al Dee context menu created and added to DOM');
+
+    // Store reference
+    tile79ContextMenu = { overlay, menu, closeMenu };
+
+    return tile79ContextMenu;
+  }
+
+
+  // Teleport to Al Dee's location
+  function teleportToAlDee() {
+    try {
+      console.log('[Quests Mod][Tile 79] Teleporting to Al Dee...');
+
+      // Al Dee is located in Rookgaard. We need to navigate to his location.
+      // Based on the quest description, Al Dee is a rope merchant in Rookgaard.
+      // From the game documentation, Al Dee is located north in Rookgaard.
+      // Since we don't have the exact room ID, we'll try to navigate to the main Rookgaard area.
+      // This may need to be updated with the correct room ID for Al Dee's shop
+
+      // Try to find the main Rookgaard room ID
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      let alDeeRoomId = null;
+
+      if (roomNames) {
+        // Look for a room that might be the main Rookgaard area
+        for (const [roomId, name] of Object.entries(roomNames)) {
+          if (name && name.toLowerCase().includes('rookgaard') && !name.toLowerCase().includes('sewers')) {
+            alDeeRoomId = roomId;
+            break;
+          }
+        }
+      }
+
+      // Fallback to a common pattern if we can't find it
+      if (!alDeeRoomId) {
+        alDeeRoomId = 'rk'; // Fallback assumption
+        console.warn('[Quests Mod][Tile 79] Could not find Rookgaard room ID, using fallback:', alDeeRoomId);
+      }
+
+      // Use the same navigation method as Better Tasker
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: alDeeRoomId
+      });
+
+      // Show success message
+      showToast('Teleported to Al Dee!', 'success');
+
+      console.log('[Quests Mod][Tile 79] Teleported to Al Dee successfully');
+    } catch (error) {
+      console.error('[Quests Mod][Tile 79] Error teleporting to Al Dee:', error);
+      showToast('Failed to teleport to Al Dee', 'error');
+    }
+  }
+
   // =======================
   // 7. Cleanup & Initialization
   // =======================
@@ -4847,6 +6190,51 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     
     // Cleanup quest log monitoring
     stopQuestLogMonitoring();
+
+    // Cleanup Tile 79 system
+    cleanupTile79System();
+  }
+
+  function cleanupTile79System() {
+    // Remove event listener from document and restore tile pointer events
+    if (tile79RightClickEnabled) {
+      document.removeEventListener('contextmenu', handleTile79RightClickDocument, true);
+
+      // Restore pointer events on tile 79
+      const tile79Element = getTileElement(79);
+      if (tile79Element) {
+        tile79Element.style.pointerEvents = ''; // Remove inline style to restore CSS default
+      }
+
+      tile79RightClickEnabled = false;
+    }
+
+    // Close any open context menu
+    if (tile79ContextMenu && tile79ContextMenu.closeMenu) {
+      tile79ContextMenu.closeMenu();
+    }
+
+    // Unsubscribe from board state
+    if (tile79BoardSubscription) {
+      try {
+        tile79BoardSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 79] Error unsubscribing from board:', e);
+      }
+      tile79BoardSubscription = null;
+    }
+
+    // Unsubscribe from player state
+    if (tile79PlayerSubscription) {
+      try {
+        tile79PlayerSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Tile 79] Error unsubscribing from player:', e);
+      }
+      tile79PlayerSubscription = null;
+    }
+
+    console.log('[Quests Mod][Tile 79] System cleaned up');
   }
 
   // Initialize
@@ -4857,9 +6245,73 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   
   // Load quest items from Firebase on initialization
   loadQuestItemsOnInit();
-  
+
+  // Load mission progress from Firebase on initialization
+  loadMissionProgressOnInit();
+
+  async function loadMissionProgressOnInit() {
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.log('[Quests Mod] No player name available for mission progress loading');
+        return;
+      }
+
+      const progress = await getKingTibianusProgress(playerName);
+
+      // Update kingChatState with loaded progress
+      if (progress) {
+        // Backward compatibility: old shape {accepted, completed}
+        if (progress.accepted !== undefined) {
+          kingChatState.progressCopper = {
+            accepted: progress.accepted,
+            completed: progress.completed
+          };
+        }
+        // New shape {copper:{}, dragon:{}, letter:{}}
+        if (progress.copper) {
+          kingChatState.progressCopper = {
+            accepted: !!progress.copper.accepted,
+            completed: !!progress.copper.completed
+          };
+        }
+        if (progress.dragon) {
+          kingChatState.progressDragon = {
+            accepted: !!progress.dragon.accepted,
+            completed: !!progress.dragon.completed
+          };
+        }
+        if (progress.letter) {
+          kingChatState.progressLetter = {
+            accepted: !!progress.letter.accepted,
+            completed: !!progress.letter.completed
+          };
+        }
+
+        console.log('[Quests Mod] Mission progress loaded from Firebase:', {
+          copper: kingChatState.progressCopper,
+          dragon: kingChatState.progressDragon,
+          letter: kingChatState.progressLetter
+        });
+      } else {
+        console.log('[Quests Mod] No mission progress found in Firebase');
+      }
+    } catch (error) {
+      console.error('[Quests Mod] Error loading mission progress on init:', error);
+    }
+  }
+
   // Start monitoring for quest log
   startQuestLogMonitoring();
+
+  // Load mission progress from Firebase on initialization and then setup Tile 79
+  loadMissionProgressOnInit().then(() => {
+    // Set up Tile 79 right-click system after mission progress is loaded
+    setupTile79Observer();
+  }).catch(error => {
+    console.error('[Quests Mod] Failed to load mission progress, setting up Tile 79 anyway:', error);
+    setupTile79Observer();
+  });
   
   // Cleanup on mod unload
   if (typeof context !== 'undefined' && context.exports) {

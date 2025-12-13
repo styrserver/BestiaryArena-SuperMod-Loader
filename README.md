@@ -61,7 +61,7 @@ The extension provides a modern, store-like popup interface for managing your mo
 - **Storage Usage Display**: Monitor extension storage usage in real-time
 - **Extras Section**: Collapsible section containing:
   - **Debug Mode**: Toggle console logging for all mods
-  - **Outfiter**: Locally unlock all outfits in the outfit selector
+  - **Outfiter**: Access all outfits in the outfit selector
   - **Welcome Page**: Enable/disable the welcome page on next load
   - **Patch Notes**: View latest changes and updates
 - **Add Script Section**: Collapsible section for importing mods from GitHub Gists (supports both hash and full URL)
@@ -324,7 +324,7 @@ Automatically manages stamina levels by starting/stopping gameplay (by [btlucas]
 
 ### OT Mods
 
-These are community and social mods that enhance player interaction and community features. All 2 OT Mods listed below are included by default in this loader:
+These are community and social mods that enhance player interaction and community features. All 3 OT Mods listed below are included by default in this loader:
 
 #### Guilds
 Social guild system for creating and managing player communities:
@@ -341,6 +341,14 @@ Player management system for tracking favorite players:
 - Quick access to player profiles and Cyclopedia from dropdown menu
 - Automatic data refresh when opening the VIP list modal
 - Accessible from the account menu for convenient management
+
+#### Quests
+Comprehensive quest system that enhances the game's quest mechanics and NPC interactions:
+- Enhanced quest tracking and mission management
+- Improved NPC interactions and dialogue systems
+- Quest item management and trading system with proper UI integration
+- Firebase integration for mission progress tracking across sessions
+- Interactive quest dialogs with completion tracking
 
 ### Official Mods
 

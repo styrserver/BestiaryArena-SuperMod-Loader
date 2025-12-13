@@ -1344,14 +1344,53 @@ async function addGuildCoins(amount) {
   }
 }
 
+// Deduct guild coins and save to Firebase
+async function deductGuildCoins(amount) {
+  try {
+    const currentPlayer = getCurrentPlayerName();
+    if (!currentPlayer) {
+      throw new Error('Player name not available');
+    }
+
+    if (amount <= 0) {
+      throw new Error('Deduction amount must be positive');
+    }
+
+    const currentCoins = await getGuildCoins();
+    if (currentCoins < amount) {
+      throw new Error(`Insufficient guild coins. Have: ${currentCoins}, Need: ${amount}`);
+    }
+
+    const newCoins = currentCoins - amount;
+    const encrypted = await encryptCoinCount(newCoins, currentPlayer);
+    const hashedPlayer = await hashUsername(currentPlayer);
+
+    console.log('[Guilds][Coins] Saving deducted coins to Firebase', { hashedPlayer, amount, newCoins });
+    await firebaseRequest(
+      `${getGuildCoinsApiUrl()}/${hashedPlayer}`,
+      'PUT',
+      { encrypted },
+      'deduct guild coins'
+    );
+
+    console.log(`[Guilds][Coins] Deducted ${amount} guild coins. New total: ${newCoins}`);
+    return newCoins;
+  } catch (error) {
+    console.error('[Guilds][Coins] Error deducting guild coins:', error);
+    throw error;
+  }
+}
+
 // Expose coin helpers globally so other mods (e.g., Quests) can reuse them
 if (typeof globalThis !== 'undefined') {
   globalThis.Guilds = globalThis.Guilds || {};
   globalThis.Guilds.getGuildCoins = getGuildCoins;
   globalThis.Guilds.addGuildCoins = addGuildCoins;
+  globalThis.Guilds.deductGuildCoins = deductGuildCoins;
   // Also set direct globals for compatibility
   globalThis.getGuildCoins = globalThis.getGuildCoins || getGuildCoins;
   globalThis.addGuildCoins = globalThis.addGuildCoins || addGuildCoins;
+  globalThis.deductGuildCoins = globalThis.deductGuildCoins || deductGuildCoins;
 }
 
 // =======================
@@ -6405,7 +6444,7 @@ function isQuestsModEnabled() {
 
 // Helper functions for special backpacks
 function isSpecialBackpack(gameId) {
-  return SPECIAL_BACKPACK_IDS.includes(gameId);
+  return SPECIAL_BACKPACK_IDS.includes(parseInt(gameId));
 }
 
 function getBackpackName(gameId) {
@@ -6413,22 +6452,11 @@ function getBackpackName(gameId) {
 }
 
 async function getBackpackCountFromInventory(backpackId, inventory) {
-  // Fur_Backpack (99999) is stored as creature product, not in inventory
-  if (backpackId === 99999) {
-    try {
-      const creatureProducts = await getCreatureProducts();
-      console.log('[Equipment] Creature products:', creatureProducts);
-      // Check multiple possible product name formats
-      const count = creatureProducts['Fur Backpack'] || 
-                    creatureProducts['Fur_Backpack'] || 
-                    creatureProducts['fur backpack'] ||
-                    creatureProducts['fur_backpack'] || 0;
-      console.log('[Equipment] Fur_Backpack count found:', count);
-      return count;
-    } catch (error) {
-      console.error('[Guilds] Error getting Fur_Backpack count:', error);
-      return 0;
-    }
+  // Fur_Backpack (99999) is a special backpack that can always be equipped
+  // (it's not stored as a creature product or quest item)
+  if (parseInt(backpackId) === 99999) {
+    console.log('[Equipment] Fur_Backpack is a special backpack - always available for equipping');
+    return 1; // Always return 1 so it can be equipped
   }
   
   if (!inventory) return 1;
@@ -6451,10 +6479,13 @@ async function getBackpackCountFromInventory(backpackId, inventory) {
 }
 
 function createBackpackEquipmentItem(backpackId, itemData, count) {
+  const backpackName = itemData?.metadata?.name || getBackpackName(backpackId);
+  console.log(`[Equipment] Creating backpack item ${backpackId}: name="${backpackName}", itemData:`, itemData);
+
   return {
     id: `backpack_${backpackId}`,
     gameId: backpackId,
-    name: itemData?.metadata?.name || getBackpackName(backpackId),
+    name: backpackName,
     tier: itemData?.tier || 1,
     count: count
     // Note: Backpacks have no stat field
@@ -6720,7 +6751,7 @@ function getEquipmentImageUrl(slotType) {
 
 // Helper function to get creature products asset URL (for Fur_Backpack)
 function getCreatureProductsAssetUrl(filename) {
-  const imagePath = '/assets/creatureproducts/' + filename;
+  const imagePath = '/assets/quests/' + filename;
   
   // Use cached base URL if available
   if (cachedExtensionBaseUrl) {
@@ -6954,6 +6985,30 @@ function createEquipmentSlot(slotType, x, y, name) {
   (async () => {
     const equippedItem = await getEquippedItem(slotType);
     if (equippedItem) {
+      // Special handling for Fur_Backpack (gameId 99999)
+      if (parseInt(equippedItem.gameId) === 99999) {
+        const containerSlot = document.createElement('div');
+        containerSlot.className = 'container-slot surface-darker';
+        containerSlot.setAttribute('data-hoverable', 'true');
+        containerSlot.setAttribute('data-highlighted', 'false');
+        containerSlot.setAttribute('data-disabled', 'false');
+        containerSlot.style.cssText = 'width: 34px; height: 34px;';
+
+        const rarityDiv = document.createElement('div');
+        rarityDiv.className = 'has-rarity relative grid h-full place-items-center';
+
+        const iconImg = document.createElement('img');
+        iconImg.src = getCreatureProductsAssetUrl('Fur_Backpack.gif');
+        iconImg.alt = 'Fur Backpack';
+        iconImg.className = 'pixelated';
+        iconImg.style.cssText = 'width: 32px; height: 32px; image-rendering: pixelated;';
+
+        rarityDiv.appendChild(iconImg);
+        containerSlot.appendChild(rarityDiv);
+        slot.appendChild(containerSlot);
+        return;
+      }
+
       // Show equipped item
       try {
         const equipData = globalThis.state?.utils?.getEquipment(equippedItem.gameId);
@@ -7182,8 +7237,18 @@ async function getEquippedItems() {
       }
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     const data = await response.json();
+
+    // Fix any existing Fur Backpack equipment that might have wrong name
+    Object.keys(data || {}).forEach(slotType => {
+      const item = data[slotType];
+      if (item && parseInt(item.gameId) === 99999 && item.name !== 'Fur Backpack') {
+        console.log('[Equipment] Fixing Fur Backpack name from:', item.name, 'to: Fur Backpack');
+        item.name = 'Fur Backpack';
+      }
+    });
+
     return data || {};
   } catch (error) {
     console.error('[Equipment] Error loading equipped items from Firebase:', error);
@@ -7433,12 +7498,12 @@ async function calculateEquipmentStats() {
           });
         }
         
-        // Verify slot type matches database if available
-        if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT) {
+        // Verify slot type matches database if available (skip for special backpacks)
+        if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT && !isSpecialBackpack(item.gameId)) {
           const normalizedSlot = normalizeSlotTypeForDb(slotType);
           const slotEquipment = playerEqDb.EQUIPMENT_BY_SLOT[normalizedSlot] || [];
           const itemInSlot = slotEquipment.includes(item.name);
-          
+
           if (!itemInSlot) {
             console.warn(`[Equipment] Item ${item.name} may not belong to slot ${slotType} according to database`);
           }
@@ -7597,7 +7662,7 @@ async function updateSlotDisplay(slotType) {
   
   if (equippedItem) {
     // Special handling for Fur_Backpack (gameId 99999)
-    if (equippedItem.gameId === 99999) {
+    if (parseInt(equippedItem.gameId) === 99999) {
       const containerSlot = document.createElement('div');
       containerSlot.className = 'container-slot surface-darker';
       containerSlot.setAttribute('data-hoverable', 'true');
@@ -7617,6 +7682,7 @@ async function updateSlotDisplay(slotType) {
       rarityDiv.appendChild(iconImg);
       containerSlot.appendChild(rarityDiv);
       slot.appendChild(containerSlot);
+      return;
     } else {
       // Show equipped item
       try {
@@ -7766,34 +7832,40 @@ async function getUserOwnedEquipment() {
     const inventory = playerContext.inventory || {};
     
     for (const backpackId of SPECIAL_BACKPACK_IDS) {
+      console.log(`[Equipment] Processing special backpack ID: ${backpackId}`);
+
       // Skip Fur_Backpack if Quests mod is not enabled
-      if (backpackId === 99999 && !isQuestsModEnabled()) {
+      if (parseInt(backpackId) === 99999 && !isQuestsModEnabled()) {
+        console.log('[Equipment] Skipping Fur_Backpack - Quests mod not enabled');
         continue;
       }
-      
+
       // Check if already in list
       const alreadyExists = individualEquipment.some(eq => eq.gameId === backpackId);
-      if (alreadyExists) continue;
-      
+      if (alreadyExists) {
+        console.log(`[Equipment] Backpack ${backpackId} already exists in equipment list`);
+        continue;
+      }
+
       // Try to get item data for this ID (might work even for inventory items)
       let itemData = null;
       try {
         itemData = globalThis.state?.utils?.getEquipment(backpackId);
+        console.log(`[Equipment] Item data for backpack ${backpackId}:`, itemData);
       } catch (e) {
+        console.log(`[Equipment] Failed to get item data for backpack ${backpackId}:`, e);
         // getEquipment might fail for inventory items, that's okay
       }
-      
+
       // Get count from inventory or creature products (async for Fur_Backpack)
       const count = await getBackpackCountFromInventory(backpackId, inventory);
-      
-      // For Fur_Backpack, log for debugging
-      if (backpackId === 99999) {
-        console.log('[Equipment] Fur_Backpack count:', count, '| Quests mod enabled:', isQuestsModEnabled());
-      }
-      
+      console.log(`[Equipment] Backpack ${backpackId} count: ${count}`);
+
       // Always show all backpacks (including Fur_Backpack) so they can be equipped
       // Count will be 0 if player doesn't have it yet, but they can still see it
-      individualEquipment.push(createBackpackEquipmentItem(backpackId, itemData, count || 1));
+      const backpackItem = createBackpackEquipmentItem(backpackId, itemData, count || 1);
+      console.log(`[Equipment] Created backpack item for ${backpackId}:`, backpackItem);
+      individualEquipment.push(backpackItem);
     }
     
     const sortedEquipment = individualEquipment.sort((a, b) => {
@@ -7887,6 +7959,8 @@ function createEquipmentSearchBar() {
 }
 
 function createEquipmentButton(equipment, onSelect) {
+  console.log(`[Equipment] Creating selection button for equipment:`, equipment);
+
   const btn = document.createElement('button');
   btn.setAttribute('data-equipment', equipment.name);
   btn.setAttribute('data-equipment-id', equipment.id);
@@ -7919,9 +7993,10 @@ function createEquipmentButton(equipment, onSelect) {
   let isFurBackpack = false;
   
   // Special handling for Fur_Backpack (gameId 99999)
-  if (equipment.gameId === 99999) {
+  if (parseInt(equipment.gameId) === 99999) {
     isFurBackpack = true;
     isInventoryItem = true;
+    equipName = 'Fur Backpack';
   } else {
     try {
       const equipData = globalThis.state?.utils?.getEquipment(equipment.gameId);
@@ -7944,7 +8019,12 @@ function createEquipmentButton(equipment, onSelect) {
   const playerEqDb = window.playerEquipmentDatabase;
   let equipmentSlot = 'Unknown';
   let targetSlotType = null; // Store the actual slot type for equipping
-  if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT) {
+
+  // Special handling for backpacks
+  if (isSpecialBackpack(equipment.gameId)) {
+    targetSlotType = 'bag';
+    equipmentSlot = 'Backpack';
+  } else if (playerEqDb && playerEqDb.EQUIPMENT_BY_SLOT) {
     for (const [slotType, items] of Object.entries(playerEqDb.EQUIPMENT_BY_SLOT)) {
       if (items.includes(equipName)) {
         targetSlotType = slotType; // Store the database slot type
@@ -8160,6 +8240,7 @@ function createEquipmentButton(equipment, onSelect) {
 }
 
 function renderEquipmentList(scrollArea, equipmentItems, onSelect) {
+  console.log('[Equipment] Rendering equipment list with items:', equipmentItems);
   scrollArea.innerHTML = '';
   
   if (!equipmentItems.length) {
@@ -8262,7 +8343,8 @@ async function getArsenalContent() {
     div.style.cssText = 'padding: 10px; display: flex; flex-direction: column; gap: 0; height: 100%; width: 100%; box-sizing: border-box;';
     
     const availableEquipment = await getUserOwnedEquipment();
-    
+    console.log('[Equipment] Arsenal loaded with equipment:', availableEquipment);
+
     const { searchContainer, searchInput, filterBtn } = createEquipmentSearchBar();
     div.appendChild(searchContainer);
     
