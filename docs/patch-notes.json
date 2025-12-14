@@ -4,6 +4,14 @@
   },
   "notes": [
   {
+    "version": "3.2.2",
+    "changes": [
+      { "type": "added", "mod": "Quests", "text": "Added mission to Al Dee. Also some various improvements." },
+      { "type": "changed", "mod": "Mod Settings", "text": "Hunt Analyzer and VIP List tabs now only appear when their respective mods are enabled." },
+      { "type": "fixed", "mod": "Stamina Optimizer", "text": "Bug fixes and other improvements." }
+    ]
+  },
+  {
     "version": "3.2.0",
     "changes": [
       { "type": "changed", "mod": "Core", "text": "Migrated Mod Coordination to mod-coordination.mjs." },
