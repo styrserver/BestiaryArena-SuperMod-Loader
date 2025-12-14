@@ -1808,15 +1808,28 @@ function showSettingsModal() {
     }
     
     // Create menu items for left column
-    const menuItems = [
+    let menuItems = [
       { id: 'creatures', label: t('mods.betterUI.menuCreatures'), selected: true },
       { id: 'ui', label: t('mods.betterUI.menuUI'), selected: false },
-      { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false },
-      { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false },
       { id: 'mod-coordination', label: t('mods.betterUI.menuModCoordination'), selected: false },
       { id: 'advanced', label: t('mods.betterUI.menuAdvanced'), selected: false },
       { id: 'backup', label: t('mods.betterUI.menuBackup'), selected: false }
     ];
+
+    // Check if Hunt Analyzer mod is enabled and add the tab if it is
+    const huntAnalyzerMod = window.localMods.find(mod => mod.name === 'Super Mods/Hunt Analyzer.js');
+    if (huntAnalyzerMod?.enabled) {
+      // Insert Hunt Analyzer tab after ui
+      menuItems.splice(2, 0, { id: 'hunt-analyzer', label: t('mods.betterUI.menuHuntAnalyzer'), selected: false });
+    }
+
+    // Check if VIP List mod is enabled and add the tab if it is
+    const vipListMod = window.localMods.find(mod => mod.name === 'OT Mods/VIP List.js');
+    if (vipListMod?.enabled) {
+      // Insert VIP List tab after hunt-analyzer (or after ui if hunt-analyzer is not enabled)
+      const insertPosition = huntAnalyzerMod?.enabled ? 3 : 2;
+      menuItems.splice(insertPosition, 0, { id: 'vip-list', label: t('mods.betterUI.menuVipList'), selected: false });
+    }
     
     menuItems.forEach(item => {
       const menuItem = document.createElement('div');

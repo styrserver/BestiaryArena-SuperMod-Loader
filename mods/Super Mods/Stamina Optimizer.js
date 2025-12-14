@@ -1040,7 +1040,7 @@ function startAllMods() {
     }
 }
 
-// Execute the configured actions (in priority order)
+// Execute the configured actions (only boosted maps)
 function executeAction() {
     const settings = loadSettings();
     const actions = settings.actions || DEFAULT_ACTIONS;
@@ -1052,29 +1052,9 @@ function executeAction() {
     
     console.log(`[Stamina Optimizer] Executing actions: ${actions.join(', ')}`);
     
-    // Execute actions in priority order: Raid Hunter > Better Tasker > Better Boosted Maps
-    const actionOrder = ['raid-hunter', 'better-tasker', 'boosted-maps'];
-
-    for (const action of actionOrder) {
-        if (actions.includes(action)) {
-            switch (action) {
-                case 'boosted-maps':
-                    startBoostedMapFarming();
-                    // If boosted maps starts successfully, don't try other lower priority actions
-                    if (isCurrentlyActive) return;
-                    break;
-                case 'raid-hunter':
-                    startRaidHunter();
-                    // If raid hunter starts successfully, don't try other lower priority actions
-                    if (isCurrentlyActive) return;
-                    break;
-                case 'better-tasker':
-                    startBetterTasker();
-                    // If better tasker starts successfully, don't try other lower priority actions
-                    if (isCurrentlyActive) return;
-                    break;
-            }
-        }
+    // Only boosted maps is supported
+    if (actions.includes('boosted-maps')) {
+        startBoostedMapFarming();
     }
 }
 
@@ -1144,51 +1124,20 @@ function monitorStamina() {
                     // Autoplay is running but we didn't start it - check if we should stop it
                     const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
                     
-                    // Check if the mod controlling autoplay is in our configured actions
-                    // (settings already loaded at the start of monitorStamina function)
-                    const actions = settings.actions || DEFAULT_ACTIONS;
-                    
-                    // Map mod names to action values
-                    const modToActionMap = {
-                        'Raid Hunter': 'raid-hunter',
-                        'Better Tasker': 'better-tasker',
-                        'Better Boosted Maps': 'boosted-maps'
-                    };
-                    
-                    // Check if the current owner is in our configured actions
-                    // If currentOwner is null/undefined, try to detect which mod is active
+                    // Check if Better Boosted Maps is controlling autoplay
+                    // Only stop if it's Better Boosted Maps (our only supported action)
                     let detectedMod = currentOwner;
                     if (!detectedMod) {
                         // Try to detect via active mod functions
-                        if (isRaidHunterActive()) {
-                            detectedMod = 'Raid Hunter';
-                        } else if (isBetterTaskerActive()) {
-                            detectedMod = 'Better Tasker';
-                        } else if (isBoostedMapsActive()) {
+                        if (isBoostedMapsActive()) {
                             detectedMod = 'Better Boosted Maps';
                         }
                     }
                     
-                    let shouldStop = false;
-                    if (detectedMod) {
-                        const actionValue = modToActionMap[detectedMod];
-                        if (actionValue && actions.includes(actionValue)) {
-                            // Mod is in configured actions - we should stop it
-                            shouldStop = true;
-                        } else {
-                            // Mod is not in configured actions - don't stop it
-                            console.log(`[Stamina Optimizer] ⚠️ Stamina (${currentStamina}) < min (${minStamina}) but ${detectedMod} is not in configured actions - not stopping`);
-                            return; // Exit early - don't try to stop
-                        }
-                    } else {
-                        // No owner or unknown owner - autoplay action has been removed, don't stop
-                        console.log(`[Stamina Optimizer] ⚠️ Stamina (${currentStamina}) < min (${minStamina}) but no mod detected controlling autoplay - not stopping`);
+                    // Only stop if it's Better Boosted Maps
+                    if (detectedMod !== 'Better Boosted Maps' && !isBoostedMapsActive()) {
+                        console.log(`[Stamina Optimizer] ⚠️ Stamina (${currentStamina}) < min (${minStamina}) but not Better Boosted Maps - not stopping`);
                         return; // Exit early - don't try to stop
-                    }
-                    
-                    // Only proceed if we should stop
-                    if (!shouldStop) {
-                        return;
                     }
                     
                     // Check if a high-priority mod is blocking us (only Board Analyzer and Manual Runner have higher priority)
@@ -1334,43 +1283,19 @@ function startAutoplayStateMonitoring() {
                     } else {
                         // Only log once on initialization to avoid spam, and only if it's unexpected
                         if (!hasLoggedAutoplayDetection) {
-                            const settings = loadSettings();
-                            const actions = settings.actions || DEFAULT_ACTIONS;
-                            
-                            // Identify which mod (if any) is controlling autoplay
                             const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
                             let ownerInfo = 'player';
                             let isExpected = false;
                             
-                            // Check if any of the configured actions match
-                            if (Array.isArray(actions)) {
-                                if (actions.includes('boosted-maps') && (currentOwner === 'Better Boosted Maps' || isBoostedMapsActive())) {
-                                    ownerInfo = currentOwner || 'Better Boosted Maps (likely)';
-                                    isExpected = true;
-                                } else if (actions.includes('raid-hunter') && (currentOwner === 'Raid Hunter' || isRaidHunterActive())) {
-                                    ownerInfo = currentOwner || 'Raid Hunter (likely)';
-                                    isExpected = true;
-                                } else if (actions.includes('better-tasker') && (currentOwner === 'Better Tasker' || isBetterTaskerActive())) {
-                                    ownerInfo = currentOwner || 'Better Tasker (likely)';
-                                    isExpected = true;
-                                } else if (actions.includes('autoplay') && currentOwner === null) {
-                                    ownerInfo = 'player';
-                                    isExpected = true;
-                                } else {
-                                    // Determine owner info for logging
-                                    if (currentOwner) {
-                                        ownerInfo = currentOwner;
-                                    } else if (isBoostedMapsActive()) {
-                                        ownerInfo = 'Better Boosted Maps (likely)';
-                                    } else if (isRaidHunterActive()) {
-                                        ownerInfo = 'Raid Hunter (likely)';
-                                    } else if (isBetterTaskerActive()) {
-                                        ownerInfo = 'Better Tasker (likely)';
-                                    }
-                                }
+                            // Check if Better Boosted Maps is active (our only supported action)
+                            if (currentOwner === 'Better Boosted Maps' || isBoostedMapsActive()) {
+                                ownerInfo = currentOwner || 'Better Boosted Maps (likely)';
+                                isExpected = true;
+                            } else if (currentOwner) {
+                                ownerInfo = currentOwner;
                             }
                             
-                            // Only log if it's unexpected (not the intended behavior)
+                            // Only log if it's unexpected (not Better Boosted Maps)
                             if (!isExpected) {
                                 console.log(`[Stamina Optimizer] Autoplay is running (started by ${ownerInfo}) - monitoring stamina and will stop if needed`);
                             }
@@ -1800,8 +1725,6 @@ function createSettingsContent() {
     
     const currentActions = settings.actions || DEFAULT_ACTIONS;
     const actionOptions = [
-        { value: 'raid-hunter', label: t('mods.staminaOptimizer.actionRaidHunter') },
-        { value: 'better-tasker', label: t('mods.staminaOptimizer.actionBetterTasker') },
         { value: 'boosted-maps', label: t('mods.staminaOptimizer.actionBoostedMaps') }
     ];
     
@@ -1987,19 +1910,24 @@ function loadSettings() {
             
             // Migrate from old single action to new actions array
             if (settings.action && !settings.actions) {
-                if (settings.action === 'all') {
-                    settings.actions = ['raid-hunter', 'better-tasker', 'boosted-maps', 'autoplay'];
-                } else {
-                    settings.actions = [settings.action];
-                }
+                // Always migrate to boosted-maps (only supported action now)
+                settings.actions = ['boosted-maps'];
                 // Remove old action field and save migrated settings
                 delete settings.action;
                 saveSettings(settings);
             }
             
-            // Ensure actions is an array
+            // Ensure actions is an array and only contains boosted-maps
             if (!Array.isArray(settings.actions) || settings.actions.length === 0) {
                 settings.actions = DEFAULT_ACTIONS;
+            } else {
+                // Filter out any non-boosted-maps actions (migration from old versions)
+                const validActions = settings.actions.filter(action => action === 'boosted-maps');
+                if (validActions.length === 0) {
+                    settings.actions = DEFAULT_ACTIONS;
+                } else {
+                    settings.actions = validActions;
+                }
             }
             
             return settings;
@@ -2055,10 +1983,7 @@ function autoSaveSettings() {
         // Collect selected actions from checkboxes
         const actions = [];
         const actionCheckboxes = [
-            { id: 'action-raid-hunter', value: 'raid-hunter' },
-            { id: 'action-better-tasker', value: 'better-tasker' },
-            { id: 'action-boosted-maps', value: 'boosted-maps' },
-            { id: 'action-autoplay', value: 'autoplay' }
+            { id: 'action-boosted-maps', value: 'boosted-maps' }
         ];
         
         actionCheckboxes.forEach(({ id, value }) => {
@@ -2101,21 +2026,15 @@ function loadAndApplySettings() {
         
         // Handle migration from old single action to new actions array
         let currentActions = settings.actions || DEFAULT_ACTIONS;
-        if (settings.action && !settings.actions) {
-            // Migrate old single action to array
-            if (settings.action === 'all') {
-                currentActions = ['raid-hunter', 'better-tasker', 'boosted-maps', 'autoplay'];
-            } else {
-                currentActions = [settings.action];
-            }
+        // Only boosted-maps is supported now
+        currentActions = currentActions.filter(action => action === 'boosted-maps');
+        if (currentActions.length === 0) {
+            currentActions = DEFAULT_ACTIONS;
         }
         
         // Apply action checkboxes
         const actionCheckboxes = [
-            { id: 'action-raid-hunter', value: 'raid-hunter' },
-            { id: 'action-better-tasker', value: 'better-tasker' },
-            { id: 'action-boosted-maps', value: 'boosted-maps' },
-            { id: 'action-autoplay', value: 'autoplay' }
+            { id: 'action-boosted-maps', value: 'boosted-maps' }
         ];
         
         actionCheckboxes.forEach(({ id, value }) => {
@@ -2354,32 +2273,19 @@ if (typeof context !== 'undefined') {
 window.staminaOptimizerIsActive = () => isCurrentlyActive;
 
 // Check if Stamina Optimizer would block starting autoplay (stamina is low)
-// modName: Name of the mod requesting autoplay (optional) - only blocks if mod is in configured actions
+// modName: Name of the mod requesting autoplay (optional) - only blocks Better Boosted Maps
 window.staminaOptimizerWouldBlock = (modName = null) => {
     if (!isAutomationEnabled) {
         return false; // Not enabled, won't block
     }
     
     try {
-        const settings = loadSettings();
-        const actions = settings.actions || DEFAULT_ACTIONS;
-        
-        // Map mod names to action values
-        const modToActionMap = {
-            'Raid Hunter': 'raid-hunter',
-            'Better Tasker': 'better-tasker',
-            'Better Boosted Maps': 'boosted-maps'
-        };
-        
-        // If modName is provided, check if it's in the configured actions
-        if (modName) {
-            const actionValue = modToActionMap[modName];
-            if (actionValue && !actions.includes(actionValue)) {
-                // Mod is not in configured actions - don't block
-                return false;
-            }
+        // Only block Better Boosted Maps (our only supported action)
+        if (modName && modName !== 'Better Boosted Maps') {
+            return false; // Don't block other mods
         }
         
+        const settings = loadSettings();
         const minStamina = settings.minStamina || DEFAULT_MIN_STAMINA;
         const currentStamina = getCurrentStamina();
         

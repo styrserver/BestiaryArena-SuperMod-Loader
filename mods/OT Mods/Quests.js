@@ -19,11 +19,23 @@ const QUEST_ITEMS_MODAL_WIDTH = 500;
 const QUEST_ITEMS_MODAL_HEIGHT = 180;
 const KING_GUILD_COIN_REWARD = 50;
 
+// Toast duration constants (in milliseconds)
+const TOAST_DURATION_DEFAULT = 5000;      // 5 seconds - general notifications
+const TOAST_DURATION_IMPORTANT = 10000;   // 10 seconds - important quest milestones
+
 const SILVER_TOKEN_CONFIG = {
   productName: 'Silver Token',
   icon: 'Silver_Token.gif',
   description: 'A small silver coin used to greet King Tibianus.',
   rarity: 4
+};
+
+// Fishing system configuration
+const FISHING_CONFIG = {
+  SPRITE_IDS: ['12706', '622', '4597', '4609', '4598'], 
+  ANIMATION_SIZE: 64,
+  ANIMATION_DURATION: 500, // milliseconds
+  MAP_SWITCH_DELAY: 500 // milliseconds
 };
 
 const KING_COPPER_KEY_MISSION = {
@@ -80,6 +92,24 @@ const KING_LETTER_MISSION = {
   rewardCoins: KING_GUILD_COIN_REWARD
 };
 
+const AL_DEE_FISHING_MISSION = {
+  id: 'al_dee_fishing_gold',
+  title: 'Fishing for gold',
+  prompt: 'Ah, adventurer! I dropped my Small Axe in the waters of a cave while being hunted by minotaurs and goblins. Will you help me retrieve it?',
+  accept: 'Thank you! I\'ll be waiting here for my Small Axe.',
+  askForItem: 'Have you found my Small Axe?',
+  complete: 'My Small Axe! You found it! Here\'s a Dwarven Pickaxe as a reward for your help.',
+  missingItem: 'You claim yes but I see no Small Axe. Return when you have it!',
+  keepSearching: 'Then keep searching for my axe and return when you find it.',
+  answerYesNo: 'Answer yes or no: have you found my Small Axe?',
+  alreadyCompleted: 'You already helped me find my Small Axe. Thank you again!',
+  alreadyActive: 'You\'re already helping me find my Small Axe. Bring it back when you find it!',
+  objectiveLine1: 'Find Al Dee\'s Small Axe in the waters of a cave.',
+  objectiveLine2: 'Return the Small Axe to Al Dee.',
+  hint: 'Search underwater areas or caves where minotaurs and goblins roam.',
+  rewardCoins: 50
+};
+
 const KING_ARENA_RANKS = [
   'Scout of the Arena',      // 0 missions
   'Sentinel of the Arena',   // 1 mission
@@ -127,6 +157,7 @@ const AL_DEE_RESPONSES = {
   'bone': 'You better put that bone back there where you dug it out.',
   'help': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
   'information': 'If you need general equipment, just ask me for a trade. I can also provide you with some general hints about the game.',
+  'iron ore': 'Hmm.. King Tibianus might be interested in this Iron Ore...',
   'job': 'I\'m a merchant. Just ask me for a trade to see my offers.',
   'name': 'My name is Al Dee, but you can call me Al. Can I interest you in a trade?',
   'time': 'It\'s about 0:00 am. I\'m so sorry, I have no watches to sell. Do you want to buy something else?',
@@ -174,10 +205,13 @@ const AL_DEE_RESPONSES = {
   'willie': 'This is a local farmer. If you need fresh food to regain your health, it\'s a good place to go. However, many monsters also carry food such as meat or cheese. Or you could simply pick blueberries.',
   'zirella': 'Poor old woman, her son Tom never visits her.',
   'bye': 'Bye, bye Player.',
-  'mission': 'I don\'t have any missions for you right now. Come back later.',
-  'missions': 'I don\'t have any missions for you right now. Come back later.',
-  'quest': 'I don\'t have any missions for you right now. Come back later.',
-  'task': 'I don\'t have any missions for you right now. Come back later.'
+  'mission': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
+  'missions': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
+  'quest': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
+  'task': 'I have a task for you if you\'re willing to help. Would you like to hear about my lost Small Axe?',
+  'help': 'I could use some help retrieving my Small Axe from the waters. Would you like to hear about it?',
+  'axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.',
+  'small axe': 'Ah, my Small Axe! It fell into the cave waters while I was fleeing from minotaurs and goblins.'
 };
 
 function getAlDeeResponse(message, playerName = 'Player') {
@@ -245,6 +279,13 @@ const ROOKGAARD_GLOBAL_DROPS = [
     dropChance: 0.01, // 1% chance from any creature in Rookgaard
     description: 'Feeling lost?\nWould you give all your gold for a rope now?\nAl Dee\'s shop - come to where the ropes are!',
     rarity: 1
+  },
+  {
+    name: 'Iron Ore',
+    icon: 'Iron_Ore.gif',
+    dropChance: 0.01, // 1% chance from any creature in Rookgaard
+    description: 'A chunk of iron ore, useful for crafting and forging.',
+    rarity: 2
   }
 ];
 
@@ -288,6 +329,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   let buttonRetryTimeout = null;
   let modalTimeout = null;
   let dialogTimeout = null;
+  const toastTimers = new Set(); // Track active toast timers for cleanup
   const buttonEventListeners = new Map(); // Track event listeners for cleanup
   
   // Quest items drop system state
@@ -316,6 +358,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     progressCopper: { accepted: false, completed: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
+    progressAlDeeFishing: { accepted: false, completed: false },
     missionOffered: false,
     offeredMission: null,
     awaitingKeyConfirm: false,
@@ -327,6 +370,34 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   let tile79ContextMenu = null;
   let tile79BoardSubscription = null;
   let tile79PlayerSubscription = null;
+
+  // Fishing system state - consolidated for better organization
+  const fishingState = {
+    enabled: false,
+    manuallyDisabled: false, // Track if user manually disabled fishing (prevents automatic re-enabling)
+    contextMenu: null,
+    subscriptions: {
+      board: null,
+      player: null
+    },
+    tiles: new Set(), // Track water tiles that are currently enabled
+    clickedTile: null, // Store the tile that was right-clicked for animation positioning
+    currentRoomId: null, // Track current room to avoid unnecessary rescanning
+    alDeeMissionAttempts: 0, // Track fishing attempts in Goblin Bridge during Al Dee mission
+    // King Tibianus Iron Ore quest state
+    ironOreQuestActive: false,
+    ironOreQuestStartTime: null,
+    ironOreQuestCompleted: false,
+    ironOreQuestExpired: false // True when timer expired but reward not yet claimed
+  };
+
+  // Legacy aliases for backward compatibility
+  const waterFishingEnabled = fishingState.enabled;
+  const waterFishingContextMenu = fishingState.contextMenu;
+  const waterFishingBoardSubscription = fishingState.subscriptions.board;
+  const waterFishingPlayerSubscription = fishingState.subscriptions.player;
+  const waterTiles = fishingState.tiles;
+  const clickedWaterTile = fishingState.clickedTile;
 
   // =======================
   // 3. Helper Functions
@@ -564,7 +635,77 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     return null;
   }
 
-  
+
+  // Helper function to find all water tiles on the current map
+  function findWaterTiles() {
+    console.log('[Quests Mod][Water Fishing] findWaterTiles called - scanning for sprites');
+
+    // Generate selector from configuration
+    const waterSelector = FISHING_CONFIG.SPRITE_IDS
+      .map(id => `.sprite.item.relative.id-${id}`)
+      .join(', ');
+
+    console.log('[Quests Mod][Water Fishing] Using selector:', waterSelector);
+
+    // Find all water sprites using configuration
+    const allWaterSprites = document.querySelectorAll(waterSelector);
+    const waterTileContainers = [];
+
+    console.log('[Quests Mod][Water Fishing] Found water sprite elements:', allWaterSprites.length);
+    console.log('[Quests Mod][Water Fishing] Total sprites on page:', document.querySelectorAll('.sprite.item.relative').length);
+
+    // Debug all water sprites
+    console.log('[Quests Mod][Water Fishing] Water sprites details:');
+    allWaterSprites.forEach((sprite, index) => {
+      const tileId = sprite.closest('[id^="tile-index-"]')?.id;
+      console.log(`  [${index}] classes: "${sprite.className}", parent tile: "${tileId}"`);
+    });
+
+    // Process all water sprites in a single loop
+    for (const sprite of allWaterSprites) {
+      let tileContainer = sprite.closest('[id^="tile-index-"]');
+      if (tileContainer && !waterTileContainers.includes(tileContainer)) {
+        waterTileContainers.push(tileContainer);
+        console.log('[Quests Mod][Water Fishing] Added water tile:', tileContainer.id, `(sprite: ${sprite.className.split(' ').pop()})`);
+      }
+    }
+
+    console.log('[Quests Mod][Water Fishing] Found water tiles:', waterTileContainers.length);
+    console.log('[Quests Mod][Water Fishing] Tile containers:', waterTileContainers.map(t => t.id));
+    return waterTileContainers;
+  }
+
+  // Helper function to get tile container from water sprite
+  function getWaterTileContainer(waterSprite) {
+    return waterSprite.closest('[id^="tile-index-"]');
+  }
+
+  // Helper function to set pointer events on tiles
+  function setTilePointerEvents(tiles, enabled) {
+    tiles.forEach(tile => {
+      tile.style.pointerEvents = enabled ? 'auto' : '';
+      console.log(`[Quests Mod][Water Fishing] ${enabled ? 'Enabled' : 'Disabled'} fishing on tile:`, tile.id);
+    });
+  }
+
+  // Enable right-clicking on all water tiles
+  function enableWaterTileRightClick() {
+    const waterTileElements = findWaterTiles();
+    waterTileElements.forEach(tile => {
+      if (!fishingState.tiles.has(tile)) {
+        tile.style.pointerEvents = 'auto';
+        fishingState.tiles.add(tile);
+        console.log('[Quests Mod][Water Fishing] Enabled right-click on water tile:', tile.id);
+      }
+    });
+  }
+
+  // Disable right-clicking on all water tiles
+  function disableWaterTileRightClick() {
+    setTilePointerEvents(fishingState.tiles, false);
+    fishingState.tiles.clear();
+  }
+
   // Animate the key sprite with a funky animation
   function animateCopperKey(tileIndex) {
     try {
@@ -928,6 +1069,39 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     };
     if (!productDefinitions.find(p => p.name === stampedLetterDef.name)) {
       productDefinitions.push(stampedLetterDef);
+    }
+
+    // Add Small Axe (for Al Dee fishing mission)
+    const smallAxeDef = {
+      name: 'Small Axe',
+      icon: 'Small_Axe.gif',
+      description: 'A small but sturdy axe, useful for chopping wood and combat.',
+      rarity: 2
+    };
+    if (!productDefinitions.find(p => p.name === smallAxeDef.name)) {
+      productDefinitions.push(smallAxeDef);
+    }
+
+    // Add Magnet (reward for Iron Ore quest)
+    const magnetDef = {
+      name: 'Magnet',
+      icon: 'Magnet.gif',
+      description: 'A powerful magnet that can attract metal objects from afar.',
+      rarity: 3
+    };
+    if (!productDefinitions.find(p => p.name === magnetDef.name)) {
+      productDefinitions.push(magnetDef);
+    }
+
+    // Add Dwarven Pickaxe (reward for returning Small Axe to Al Dee)
+    const dwarvenPickaxeDef = {
+      name: 'Dwarven Pickaxe',
+      icon: 'Dwarven_Pickaxe.gif',
+      description: 'It is a masterpiece of dwarvish smithery and made of especially hard steel.',
+      rarity: 4
+    };
+    if (!productDefinitions.find(p => p.name === dwarvenPickaxeDef.name)) {
+      productDefinitions.push(dwarvenPickaxeDef);
     }
 
     // Add global Rookgaard drops to product definitions
@@ -1422,7 +1596,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       'letter_from_al_dee': 'Letter from Al Dee',
       'letter': 'Letter from Al Dee',
       'stamped letter': 'Stamped Letter',
-      'stamped_letter': 'Stamped Letter'
+      'stamped_letter': 'Stamped Letter',
+      'small axe': 'Small Axe',
+      'small_axe': 'Small Axe',
+      'magnet': 'Magnet'
     };
     const normalized = {};
     for (const [key, value] of Object.entries(products)) {
@@ -1435,7 +1612,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   // Dev helper to grant quest items for testing (exposed to console)
   function registerDevGrantHelper() {
-    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0 } = {}) {
+    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0 } = {}) {
       try {
         if (leather > 0) {
           await addQuestItem('Red Dragon Leather', leather);
@@ -1446,7 +1623,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         if (letter > 0) {
           await addQuestItem('Letter from Al Dee', letter);
         }
-        console.log('[Quests Mod][Dev] Granted', { leather, scale, letter });
+        if (ironOre > 0) {
+          await addQuestItem('Iron Ore', ironOre);
+        }
+        if (smallAxe > 0) {
+          await addQuestItem('Small Axe', smallAxe);
+        }
+        console.log('[Quests Mod][Dev] Granted', { leather, scale, letter, ironOre, smallAxe });
       } catch (err) {
         console.error('[Quests Mod][Dev] Grant failed:', err);
       }
@@ -1497,8 +1680,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     if (!data || Object.keys(data).length === 0) {
       return { accepted: false, completed: false, __isEmpty: true };
     }
-    // New shape preferred: nested copper/dragon/letter
-    if (data.copper || data.dragon || data.letter) {
+    // New shape preferred: nested copper/dragon/letter/alDeeFishing/ironOre
+    if (data.copper || data.dragon || data.letter || data.alDeeFishing || data.ironOre) {
       return {
         copper: {
           accepted: !!(data.copper && data.copper.accepted),
@@ -1511,6 +1694,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         letter: {
           accepted: !!(data.letter && data.letter.accepted),
           completed: !!(data.letter && data.letter.completed)
+        },
+        alDeeFishing: {
+          accepted: !!(data.alDeeFishing && data.alDeeFishing.accepted),
+          completed: !!(data.alDeeFishing && data.alDeeFishing.completed)
+        },
+        ironOre: {
+          active: !!(data.ironOre && data.ironOre.active),
+          startTime: data.ironOre && data.ironOre.startTime ? data.ironOre.startTime : null,
+          completed: !!(data.ironOre && data.ironOre.completed)
         },
         __isEmpty: false
       };
@@ -1527,7 +1719,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function saveKingTibianusProgress(playerName, progress) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    const normalized = (progress && (progress.copper || progress.dragon || progress.letter))
+    const normalized = (progress && (progress.copper || progress.dragon || progress.letter || progress.alDeeFishing || progress.ironOre))
       ? {
           copper: {
             accepted: !!(progress.copper && progress.copper.accepted),
@@ -1540,6 +1732,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           letter: {
             accepted: !!(progress.letter && progress.letter.accepted),
             completed: !!(progress.letter && progress.letter.completed)
+          },
+          alDeeFishing: {
+            accepted: !!(progress.alDeeFishing && progress.alDeeFishing.accepted),
+            completed: !!(progress.alDeeFishing && progress.alDeeFishing.completed)
+          },
+          ironOre: {
+            active: !!(progress.ironOre && progress.ironOre.active),
+            startTime: progress.ironOre && progress.ironOre.startTime ? progress.ironOre.startTime : null,
+            completed: !!(progress.ironOre && progress.ironOre.completed)
           }
         }
       : {
@@ -1553,6 +1754,30 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       'save King Tibianus progress'
     );
     console.log('[Quests Mod][King Tibianus] Progress saved', normalized);
+  }
+
+  async function deleteKingTibianusProgress(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await firebaseRequest(
+      `${getKingTibianusProgressPath()}/${hashedPlayer}`,
+      'DELETE',
+      null,
+      'delete King Tibianus progress'
+    );
+    console.log('[Quests Mod][King Tibianus] Progress deleted for player:', playerName);
+  }
+
+  async function deleteQuestItems(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await firebaseRequest(
+      `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+      'DELETE',
+      null,
+      'delete quest items'
+    );
+    console.log('[Quests Mod][Quest Items] All quest items deleted for player:', playerName);
   }
 
   async function getAlDeeShopPurchases(playerName) {
@@ -1597,6 +1822,12 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
     if (progress.dragon) {
       if (progress.dragon.completed) count++;
+    }
+    if (progress.letter) {
+      if (progress.letter.completed) count++;
+    }
+    if (progress.alDeeFishing) {
+      if (progress.alDeeFishing.completed) count++;
     }
 
     // Handle legacy flat structure for backward compatibility
@@ -1735,6 +1966,57 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
+  async function isAlDeeFishingMissionActive() {
+    try {
+      const missionProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
+      return missionProgress && missionProgress.accepted && !missionProgress.completed;
+    } catch (error) {
+      console.warn('[Quests Mod][Quest Items] Error checking Al Dee fishing mission:', error);
+      return false;
+    }
+  }
+
+  // Get gameIds for Al Dee's dwarf monsters
+  async function getAlDeeDwarfGameIds() {
+    const dwarfNames = ['Dwarf', 'Dwarf Guard', 'Dwarf Soldier', 'Dwarf Geomancer', 'Sweaty Cyclops'];
+    const gameIds = [];
+
+    for (const name of dwarfNames) {
+      // Try multiple methods to find the gameId
+      let gameId = null;
+
+      if (window.BestiaryModAPI?.utility?.maps?.monsterNamesToGameIds) {
+        gameId = window.BestiaryModAPI.utility.maps.monsterNamesToGameIds.get(name.toLowerCase());
+      }
+
+      if (!gameId && window.creatureDatabase?.findMonsterByName) {
+        const monster = window.creatureDatabase.findMonsterByName(name);
+        if (monster) gameId = monster.gameId;
+      }
+
+      if (!gameId && globalThis.state?.utils?.getMonster) {
+        // Fallback: search through all monsters
+        for (let i = 1; i < 1000 && !gameId; i++) {
+          try {
+            const monster = globalThis.state.utils.getMonster(i);
+            if (monster?.metadata?.name === name) {
+              gameId = i;
+            }
+          } catch (e) { break; }
+        }
+      }
+
+      if (gameId) {
+        gameIds.push(gameId);
+        console.log(`[Quests Mod][Al Dee Fishing] Found ${name} gameId: ${gameId}`);
+      } else {
+        console.warn(`[Quests Mod][Al Dee Fishing] Could not find gameId for ${name}`);
+      }
+    }
+
+    return gameIds;
+  }
+
   async function isRedDragonMissionCompleted() {
     try {
       const playerName = getCurrentPlayerName();
@@ -1751,6 +2033,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   }
 
   async function addQuestItem(productName, amount) {
+    console.log('[Quests Mod][Quest Items] addQuestItem called:', productName, amount);
     try {
       const currentPlayer = getCurrentPlayerName();
       if (!currentPlayer) {
@@ -1763,8 +2046,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       
       const currentProducts = await getQuestItems(false); // Force fetch to get latest (normalized)
       const currentCount = currentProducts[productName] || 0;
-      // Cap various quest items to 1, red dragon materials at 30
+      // Cap various quest items to 1, red dragon materials at 30, iron ore at 2
       const isRedDragonMaterial = productName === 'Red Dragon Scale' || productName === 'Red Dragon Leather';
+      const isIronOre = productName === 'Iron Ore';
       const isUniqueItem = [
         'Copper Key',
         'Map to the Mines',
@@ -1772,10 +2056,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         'Dragon Claw',
         'Obsidian Knife',
         'Letter from Al Dee',
-        'Stamped Letter'
+        'Stamped Letter',
+        'Small Axe',
+        'Magnet',
+        'Dwarven Pickaxe'
       ].includes(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
+                      isIronOre ? Math.min(1, currentCount + amount) :
                       isUniqueItem ? Math.min(1, currentCount + amount) :
                       currentCount + amount;
       
@@ -1788,12 +2076,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       const hashedPlayer = await hashUsername(currentPlayer);
       
       console.log('[Quests Mod][Quest Items] Saving to Firebase', { hashedPlayer, productName, amount, newCount });
-      await firebaseRequest(
+      console.log('[Quests Mod][Quest Items] About to make Firebase request...');
+      const firebaseResult = await firebaseRequest(
         `${getQuestItemsApiUrl()}/${hashedPlayer}`,
         'PUT',
         { encrypted },
         'save quest items'
       );
+      console.log('[Quests Mod][Quest Items] Firebase request completed:', firebaseResult);
       
       // Update cache
       cachedQuestItems = updatedProducts;
@@ -2025,6 +2315,17 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             }
           }
 
+          // If this is a dwarf loot source for Al Dee fishing, require the mission to be active
+          const alDeeDwarfGameIds = await getAlDeeDwarfGameIds();
+          const isAlDeeDwarfLoot = alDeeDwarfGameIds.includes(creatureGameId);
+          if (isAlDeeDwarfLoot) {
+            const alDeeFishingActive = await isAlDeeFishingMissionActive();
+            if (!alDeeFishingActive) {
+              console.log('[Quests Mod][Quest Items] Al Dee dwarf loot skipped; mission not active');
+              return;
+            }
+          }
+
           // Get creature name for logging (fallback if no config)
           const creatureName = creatureConfig ? creatureConfig.creatureName : `Creature ${creatureGameId}`;
           console.log(`[Quests Mod][Quest Items] ${creatureName} victory detected (gameId: ${creatureGameId}), seed:`, seed, `, stamina spent: ${staminaSpent}`);
@@ -2048,6 +2349,25 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             }
           } else {
             console.log(`[Quests Mod][Quest Items] No creature-specific drops configured for ${creatureName}`);
+          }
+
+          // Process Al Dee fishing Iron Ore drops from dwarves
+          if (isAlDeeDwarfLoot) {
+            console.log(`[Quests Mod][Quest Items] Processing Al Dee fishing Iron Ore drop from ${creatureName} (gameId: ${creatureGameId}), seed:`, seed);
+
+            // Use a unique productIndex (9999) for Iron Ore to avoid conflicts
+            const roll = deterministicRandom(seed, creatureGameId, 9999);
+            // Drop roll calculated
+            console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ 1.0% | creature: ${creatureName})`);
+            if (roll <= 0.01) { // 1% chance
+              try {
+                await addQuestItem('Iron Ore', 1);
+                showQuestItemNotification('Iron Ore', 1);
+                console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
+              } catch (error) {
+                console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
+              }
+            }
           }
 
           // Process global Rookgaard drops (applies to ANY creature defeated in Rookgaard)
@@ -2292,8 +2612,32 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     });
   }
 
+  // Toast timer management helpers
+  function createToastTimer(callback, duration) {
+    const timerId = setTimeout(() => {
+      callback();
+      toastTimers.delete(timerId);
+    }, duration);
+    toastTimers.add(timerId);
+    return timerId;
+  }
+
+  function clearToastTimer(timerId) {
+    if (timerId && toastTimers.has(timerId)) {
+      clearTimeout(timerId);
+      toastTimers.delete(timerId);
+      return true;
+    }
+    return false;
+  }
+
+  function clearAllToastTimers() {
+    toastTimers.forEach(timerId => clearTimeout(timerId));
+    toastTimers.clear();
+  }
+
   // Generic toast notification function
-  function showToast({ productName, message, duration = 3000, logPrefix = '[Quests Mod]' }) {
+  function showToast({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
     try {
       const mainContainer = getToastContainer();
       const existingToasts = mainContainer.querySelectorAll('.toast-item');
@@ -2314,13 +2658,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       
       const toast = document.createElement('button');
       toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-      
+
       const widgetTop = document.createElement('div');
       widgetTop.className = 'widget-top h-2.5';
-      
+
       const widgetBottom = document.createElement('div');
       widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-      
+
       // Add product icon if productName provided
       if (productName) {
         const productDef = buildProductDefinitions().find(p => p.name === productName);
@@ -2329,25 +2673,39 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           widgetBottom.appendChild(iconImg);
         }
       }
-      
+
       const messageDiv = document.createElement('div');
       messageDiv.className = 'text-left';
       messageDiv.textContent = message;
       widgetBottom.appendChild(messageDiv);
-      
+
       toast.appendChild(widgetTop);
       toast.appendChild(widgetBottom);
       flexContainer.appendChild(toast);
       mainContainer.appendChild(flexContainer);
-      
+
       console.log(`${logPrefix} Toast shown: ${message}`);
-      
-      setTimeout(() => {
+
+      // Create timer and store ID for click handler
+      const timerId = createToastTimer(() => {
         if (flexContainer && flexContainer.parentNode) {
           flexContainer.parentNode.removeChild(flexContainer);
           updateToastPositions(mainContainer);
         }
       }, duration);
+
+      // Add click event listener for dismissal
+      toast.addEventListener('click', () => {
+        // Clear the timer if it exists
+        if (timerId) {
+          clearToastTimer(timerId);
+        }
+        // Remove the toast immediately
+        if (flexContainer && flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+          updateToastPositions(mainContainer);
+        }
+      });
       
     } catch (error) {
       console.error(`${logPrefix} Error showing toast:`, error);
@@ -2358,15 +2716,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName,
       message: tReplace('mods.quests.productObtained', { productName, amount }),
-      duration: 3000
+      duration: TOAST_DURATION_DEFAULT
     });
   }
 
   function showCopperKeyFoundToast() {
     showToast({
-      productName: COPPER_KEY_CONFIG.productName,
       message: 'Found Copper Key!',
-      duration: 10000,
+      duration: TOAST_DURATION_IMPORTANT,
       logPrefix: '[Quests Mod][Copper Key]'
     });
   }
@@ -2375,7 +2732,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: MAP_COLOUR_CONFIG.productName,
       message: 'Received Map!',
-      duration: 10000,
+      duration: TOAST_DURATION_IMPORTANT,
       logPrefix: '[Quests Mod][King Tibianus]'
     });
   }
@@ -2384,7 +2741,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: SILVER_TOKEN_CONFIG.productName,
       message: 'King Tibianus took your coin!',
-      duration: 5000,
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][King Tibianus]'
     });
   }
@@ -2393,7 +2750,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: MAP_COLOUR_CONFIG.productName,
       message: 'Navigated to the mines!',
-      duration: 3000,
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][Map Navigation]'
     });
   }
@@ -2402,7 +2759,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: 'Dragon Claw',
       message: 'Received Dragon Claw!',
-      duration: 5000,
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][King Tibianus]'
     });
   }
@@ -2411,7 +2768,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: 'Obsidian Knife',
       message: 'Received Obsidian Knife!',
-      duration: 5000,
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][King Tibianus]'
     });
   }
@@ -2420,7 +2777,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: 'Stamped Letter',
       message: 'Received Stamped Letter!',
-      duration: 5000,
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][King Tibianus]'
     });
   }
@@ -2429,7 +2786,16 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     showToast({
       productName: 'Stamped Letter',
       message: 'Delivered to Al Dee!',
-      duration: 5000,
+      duration: TOAST_DURATION_DEFAULT,
+      logPrefix: '[Quests Mod][Al Dee]'
+    });
+  }
+
+  function showSmallAxeReturnedToast() {
+    showToast({
+      productName: 'Small Axe',
+      message: 'Returned to Al Dee!',
+      duration: TOAST_DURATION_DEFAULT,
       logPrefix: '[Quests Mod][Al Dee]'
     });
   }
@@ -2440,6 +2806,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     clearTimeoutOrInterval(observerDebounceTimeout);
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
+    clearAllToastTimers();
     buttonCheckInterval = null;
     buttonRetryTimeout = null;
     observerDebounceTimeout = null;
@@ -2601,20 +2968,20 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       return false;
     }
     
-    // Find the backpack button with item ID 10327
+    // Find the equipment container button
     const allButtons = Array.from(inventoryContainer.querySelectorAll('button.focus-style-visible.active\\:opacity-70'));
-    const backpackButton = allButtons.find(button => {
-      const spriteDiv = button.querySelector('.id-10327');
-      return spriteDiv !== null && !button.classList.contains('quest-items-inventory-button');
+    const equipmentContainerButton = allButtons.find(button => {
+      const equipmentImg = button.querySelector('img[alt="equipments"][src*="/assets/icons/equipment-container.png"]');
+      return equipmentImg !== null && !button.classList.contains('quest-items-inventory-button');
     });
-    
-    if (!backpackButton) {
+
+    if (!equipmentContainerButton) {
       failedAttempts++;
       return false;
     }
-    
-    // Check if backpack button is still connected to DOM
-    if (!isInDOM(backpackButton)) {
+
+    // Check if equipment container button is still connected to DOM
+    if (!isInDOM(equipmentContainerButton)) {
       return false;
     }
     
@@ -2644,8 +3011,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     
     try {
       // Double-check target is still in DOM before inserting
-      if (isInDOM(backpackButton)) {
-        backpackButton.insertAdjacentElement('afterend', questItemsButton);
+      if (isInDOM(equipmentContainerButton)) {
+        equipmentContainerButton.insertAdjacentElement('afterend', questItemsButton);
         failedAttempts = 0;
         clearAllTimeouts();
       } else {
@@ -3055,8 +3422,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               const roomNames = globalThis.state?.utils?.ROOM_NAME;
               if (!roomNames) return false;
 
-              // Try to find Mine Hub or Kazoordoon in the room names
-              const targetNames = ['Mine Hub', 'Kazoordoon', 'Kazordoon'];
+              // Try to find Mine Hub or Kazordoon in the room names
+              const targetNames = ['Mine Hub', 'Kazordoon'];
               let targetRoomId = null;
 
               for (const targetName of targetNames) {
@@ -3137,7 +3504,59 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           descDiv.textContent = productDef.description;
           descDiv.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
           descFrame.appendChild(descDiv);
-          
+
+          // Add toggle button for Fishing Rod inside the description frame
+          if (productDef.name === 'Fishing Rod') {
+            // Create the toggle button
+            const toggleButton = document.createElement('button');
+            toggleButton.type = 'button';
+            toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-3 py-1 pixel-font-12';
+            toggleButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; height: 28px; font-size: 12px; margin-top: 8px; display: block; margin-left: auto; margin-right: auto;';
+
+            // Function to update button appearance based on fishing state
+            const updateButtonState = () => {
+              if (fishingState.enabled) {
+                toggleButton.textContent = 'Fishing Enabled';
+                toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")', 'important');
+                toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
+                toggleButton.style.setProperty('border-color', '#4CAF50', 'important'); // Green border
+              } else {
+                toggleButton.textContent = 'Fishing Disabled';
+                toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png")', 'important');
+                toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
+                toggleButton.style.setProperty('border-color', '#f44336', 'important'); // Red border
+              }
+            };
+
+            // Initialize button state
+            updateButtonState();
+
+            // Add click handler to toggle fishing
+            toggleButton.addEventListener('click', () => {
+              fishingState.enabled = !fishingState.enabled;
+              // Track manual preference - if user disables, remember it
+              fishingState.manuallyDisabled = !fishingState.enabled;
+              updateButtonState();
+
+              // Update fishing functionality based on new state (manual toggle)
+              updateWaterFishingState(true);
+
+              // Show toast notification
+              const toastMessage = fishingState.enabled ? 'Fishing enabled!' : 'Fishing disabled!';
+              const toastType = fishingState.enabled ? 'success' : 'info';
+
+              if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
+                api.ui.components.showToast({
+                  message: toastMessage,
+                  type: toastType,
+                  duration: TOAST_DURATION_DEFAULT
+                });
+              }
+            });
+
+            descFrame.appendChild(toggleButton);
+          }
+
           // Drop chance removed from display
           detailsContainer.appendChild(descFrame);
         };
@@ -3291,8 +3710,102 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     'treasure': 'The royal poodle Noodles is my greatest treasure!',
     'castle': 'Rain Castle is my home.',
     'dungeon': 'Dungeons are no places for kings.',
-    'help': 'Visit Quentin the monk for help.',
-    'druids': 'We need the druidic healing powers to fight evil.',
+  'help': 'Visit Quentin the monk for help.',
+  'iron ore': async () => {
+    try {
+      const currentPlayer = getCurrentPlayerName();
+      if (!currentPlayer) {
+        return 'Yes.. Iron Ore! Let me know if you find one!';
+      }
+
+      const currentProducts = await getQuestItems(false);
+      const ironOreCount = currentProducts['Iron Ore'] || 0;
+
+      // Check if quest timer has expired and reward is ready to be claimed
+      if (fishingState.ironOreQuestExpired && !fishingState.ironOreQuestCompleted) {
+        // Quest timer expired - award Magnet reward now that player is talking to us
+        console.log('[Quests Mod][King Tibianus] Awarding Magnet reward for expired Iron Ore quest');
+        try {
+          console.log('[Quests Mod][King Tibianus] Calling addQuestItem for Magnet...');
+          const result = await addQuestItem('Magnet', 1);
+          console.log('[Quests Mod][King Tibianus] addQuestItem result:', result);
+          showQuestItemNotification('Magnet', 1);
+          fishingState.ironOreQuestExpired = false;
+          fishingState.ironOreQuestCompleted = true;
+          console.log('[Quests Mod][King Tibianus] Magnet reward awarded successfully');
+
+          // Refresh quest items modal if it's open
+          setTimeout(() => {
+            refreshQuestItemsModal();
+            console.log('[Quests Mod][King Tibianus] Refreshed quest items modal');
+          }, 500);
+
+          // Save completed quest progress to Firebase
+          const currentPlayer = getCurrentPlayerName();
+          if (currentPlayer) {
+            const currentProgress = await getKingTibianusProgress(currentPlayer);
+            await saveKingTibianusProgress(currentPlayer, {
+              ...currentProgress,
+              ironOre: {
+                active: false,
+                startTime: null,
+                completed: true
+              }
+            });
+          }
+
+          return 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.';
+        } catch (err) {
+          console.error('[Quests Mod][King Tibianus] Error awarding Magnet:', err);
+          return 'Thank you for giving me an Iron Ore! Here\'s a small gift for you.';
+        }
+      }
+
+      // Check if quest is active and timer is still running
+      if (fishingState.ironOreQuestActive && fishingState.ironOreQuestStartTime) {
+        // Quest active but timer not expired
+        return 'Come back in a minute.';
+      }
+
+      // Check inventory for Iron Ore - this takes precedence over completion status
+      if (ironOreCount > 0) {
+        // Player has Iron Ore - take it and start timer
+        try {
+          await consumeQuestItem('Iron Ore', 1);
+          fishingState.ironOreQuestActive = true;
+          fishingState.ironOreQuestExpired = false; // Reset expired flag when starting new quest
+          fishingState.ironOreQuestStartTime = Date.now();
+
+          // Save quest progress to Firebase
+          const currentProgress = await getKingTibianusProgress(currentPlayer);
+          await saveKingTibianusProgress(currentPlayer, {
+            ...currentProgress,
+            ironOre: {
+              active: true,
+              startTime: fishingState.ironOreQuestStartTime,
+              completed: false
+            }
+          });
+
+          return 'Thank you! I\'ll give this to my guard... come back in a minute and I\'ll have something for you.';
+        } catch (err) {
+          console.error('[Quests Mod][King Tibianus] Error consuming Iron Ore:', err);
+          return 'Yes.. Iron Ore! Let me know if you find one!';
+        }
+      } else {
+        // Player has no Iron Ore - check if quest was ever completed
+        if (fishingState.ironOreQuestCompleted) {
+          return 'Another thank you for this ore, hope you enjoy the small gift I gave you!';
+        } else {
+          return 'Yes.. Iron Ore! Let me know if you find one!';
+        }
+      }
+    } catch (err) {
+      console.error('[Quests Mod][King Tibianus] Error in iron ore response:', err);
+      return 'Yes.. Iron Ore! Let me know if you find one!';
+    }
+  },
+  'druids': 'We need the druidic healing powers to fight evil.',
     'sorcerers': 'The magic of the sorcerers is a powerful tool to smite our enemies.',
     'paladins': 'The paladins are great protectors for Thais.',
     'knights': 'The brave knights are necessary for human survival in Thais.',
@@ -3333,7 +3846,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     'bye': 'Good bye, Player!'
   };
 
-  function getKingTibianusResponse(message, playerName = 'Player') {
+  async function getKingTibianusResponse(message, playerName = 'Player') {
     const lowerMessage = message.toLowerCase().trim();
 
     // Check for exact matches first (longer phrases first)
@@ -3342,8 +3855,19 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     for (const keyword of sortedKeys) {
       if (lowerMessage.includes(keyword.toLowerCase())) {
         let response = KING_TIBIANUS_RESPONSES[keyword];
+
+        // Handle async function responses
+        if (typeof response === 'function') {
+          try {
+            response = await response();
+          } catch (err) {
+            console.error('[Quests Mod][King Tibianus] Error getting dynamic response:', err);
+            response = 'I greet thee, my loyal subject.';
+          }
+        }
+
         // Replace "Player" with actual player name in responses that contain it
-        if (response.includes('Player')) {
+        if (response && response.includes && response.includes('Player')) {
           response = response.replace(/Player/g, playerName);
         }
         return response;
@@ -3482,7 +4006,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       }
 
       // kingChatState is now defined globally
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
+      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION];
 
       // Random responses when Tibianus doesn't understand the player's input
       const CONFUSION_RESPONSES = [
@@ -3910,6 +4434,18 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               completed: !!progress.letter.completed
             };
           }
+          if (progress && progress.alDeeFishing) {
+            kingChatState.progressAlDeeFishing = {
+              accepted: !!progress.alDeeFishing.accepted,
+              completed: !!progress.alDeeFishing.completed
+            };
+          }
+          if (progress && progress.alDeeFishing) {
+            kingChatState.progressAlDeeFishing = {
+              accepted: !!progress.alDeeFishing.accepted,
+              completed: !!progress.alDeeFishing.completed
+            };
+          }
           // Grey out missions/log until starter coin is handed in
           try {
             const tokenHeld = await hasSilverToken();
@@ -3957,7 +4493,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           await saveKingTibianusProgress(playerName, {
             copper: kingChatState.progressCopper,
             dragon: kingChatState.progressDragon,
-            letter: kingChatState.progressLetter
+            letter: kingChatState.progressLetter,
+            alDeeFishing: kingChatState.progressAlDeeFishing
           });
 
           // Add map to inventory when copper key mission is accepted
@@ -4057,7 +4594,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           await saveKingTibianusProgress(playerName, {
             copper: kingChatState.progressCopper,
             dragon: kingChatState.progressDragon,
-            letter: kingChatState.progressLetter
+            letter: kingChatState.progressLetter,
+            alDeeFishing: kingChatState.progressAlDeeFishing
           });
           if (shouldAwardDragonClaw) {
             try {
@@ -4185,12 +4723,18 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       let pendingResponseTimeout = null;
       let latestMessage = null;
       const thankYouText = kingStrings.thankYou;
-      
+
+      // Helper function to check if text is a valid hail phrase (case-insensitive)
+      function isValidHailPhrase(text) {
+        const trimmed = text.trim().toLowerCase();
+        return trimmed === 'hail' || trimmed === 'hail king' || trimmed === 'hail the king';
+      }
+
       async function maybeHandleStarterCoin(lowerText) {
         if (kingChatState.starterCoinThanked) {
           return null;
         }
-        if (lowerText.trim() !== 'hail the king') {
+        if (!isValidHailPhrase(lowerText)) {
           return null;
         }
         let hasToken = await hasSilverToken();
@@ -4237,10 +4781,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           pendingResponseTimeout = null;
         }
         
-        // If the king has not received the starter coin yet, only accept the exact hail phrase
+        // If the king has not received the starter coin yet, only accept valid hail phrases
         const tokenHeld = await hasSilverToken();
         if (tokenHeld && !kingChatState.starterCoinThanked) {
-          if (lowerText.trim() !== 'hail the king') {
+          if (!isValidHailPhrase(lowerText)) {
             // Do not respond; awaiting correct hail to hand over coin
             textarea.value = '';
             textarea.style.height = '27px';
@@ -4392,7 +4936,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           kingChatState.offeredMission = null;
         } else {
           // Check transcript responses before falling back to confusion
-          const transcriptResponse = getKingTibianusResponse(text, playerName);
+          const transcriptResponse = await getKingTibianusResponse(text, playerName);
           if (transcriptResponse && transcriptResponse !== 'I greet thee, my loyal subject.') {
             // If we got a meaningful transcript response, use it
             kingResponse = transcriptResponse;
@@ -4634,6 +5178,12 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         return AL_DEE_CONFUSION_RESPONSES[Math.floor(Math.random() * AL_DEE_CONFUSION_RESPONSES.length)];
       }
 
+      // Al Dee mission chat state
+      const alDeeChatState = {
+        offeringFishingMission: false,
+        awaitingAxeConfirm: false
+      };
+
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isAlDee = false) {
         const messageP = document.createElement('p');
@@ -4678,13 +5228,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         // Item icon container
         const itemIconContainer = document.createElement('div');
         itemIconContainer.className = 'container-slot surface-darker grid place-items-center overflow-hidden';
-        itemIconContainer.style.cssText = 'width: 32px; height: 32px; flex-shrink: 0;';
+        itemIconContainer.style.cssText = 'width: 34px; height: 34px; flex-shrink: 0;';
 
         const itemIcon = document.createElement('img');
         itemIcon.src = getQuestItemsAssetUrl(iconName);
         itemIcon.alt = itemName;
         itemIcon.className = 'pixelated';
-        itemIcon.style.cssText = 'width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated;';
+        itemIcon.style.cssText = 'width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated;';
         itemIconContainer.appendChild(itemIcon);
 
         // Item name and price container
@@ -4981,6 +5531,111 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           } catch (error) {
             console.error('[Quests Mod][Al Dee] Error checking/delivering stamped letter:', error);
           }
+        }
+
+        // Check for fishing mission keywords and Small Axe return
+        if (lowerText.includes('small axe') || lowerText.includes('axe') ||
+            (lowerText.includes('yes') && alDeeChatState.awaitingAxeConfirm)) {
+          try {
+            const currentProducts = await getQuestItems();
+            const hasSmallAxe = (currentProducts['Small Axe'] || 0) > 0;
+
+            if (hasSmallAxe) {
+              // Remove the Small Axe from inventory
+              await consumeQuestItem('Small Axe', 1);
+              showSmallAxeReturnedToast();
+              console.log('[Quests Mod][Al Dee] Small Axe returned, consuming from inventory');
+
+              // Award Dwarven Pickaxe
+              try {
+                await addQuestItem('Dwarven Pickaxe', 1);
+                showQuestItemNotification('Dwarven Pickaxe', 1);
+                console.log('[Quests Mod][Al Dee] Awarded Dwarven Pickaxe for axe return');
+              } catch (error) {
+                console.error('[Quests Mod][Al Dee] Error awarding Dwarven Pickaxe:', error);
+              }
+
+              // Mark mission as completed
+              setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: true });
+              console.log('[Quests Mod][Al Dee] Fishing mission completed');
+
+              // Save progress to Firebase
+              if (playerName) {
+                await saveKingTibianusProgress(playerName, {
+                  copper: kingChatState.progressCopper,
+                  dragon: kingChatState.progressDragon,
+                  letter: kingChatState.progressLetter,
+                  alDeeFishing: kingChatState.progressAlDeeFishing
+                });
+                console.log('[Quests Mod][Al Dee] Fishing mission progress saved to Firebase');
+              }
+
+              // Update guild coin display
+              updateGuildCoinDisplay();
+
+              // Queue special mission completion response
+              setTimeout(() => {
+                addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.complete.replace('Player', playerName), true);
+              }, 1000);
+
+              return; // Exit early, don't show regular transcript response
+            } else if (alDeeChatState.awaitingAxeConfirm) {
+              // Player said yes but has no Small Axe
+              setTimeout(() => {
+                addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.missingItem, true);
+              }, 1000);
+              alDeeChatState.awaitingAxeConfirm = false;
+              return;
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Al Dee] Error handling fishing mission:', error);
+          }
+        }
+
+        // Check for mission acceptance
+        if (lowerText.includes('yes') && alDeeChatState.offeringFishingMission) {
+          // Start the fishing mission
+          setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: false });
+          setTimeout(() => {
+            addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.accept, true);
+          }, 1000);
+          alDeeChatState.offeringFishingMission = false;
+
+          // Save progress
+          if (playerName) {
+            await saveKingTibianusProgress(playerName, {
+              copper: kingChatState.progressCopper,
+              dragon: kingChatState.progressDragon,
+              letter: kingChatState.progressLetter,
+              alDeeFishing: kingChatState.progressAlDeeFishing
+            });
+            console.log('[Quests Mod][Al Dee] Fishing mission accepted, progress saved to Firebase');
+          }
+
+          return;
+        }
+
+        // Check for mission offer trigger
+        if (lowerText.includes('mission') || lowerText.includes('missions') ||
+            lowerText.includes('task') || lowerText.includes('quest') || lowerText.includes('help')) {
+          const missionProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
+
+          if (missionProgress.completed) {
+            setTimeout(() => {
+              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.alreadyCompleted, true);
+            }, 1000);
+          } else if (missionProgress.accepted) {
+            setTimeout(() => {
+              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.alreadyActive, true);
+            }, 1000);
+          } else {
+            // Offer the mission with a 1 second delay
+            setTimeout(() => {
+              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.prompt, true);
+            }, 1000);
+            alDeeChatState.offeringFishingMission = true;
+          }
+          return;
         }
 
         // Get transcript response (handles all standard Al Dee dialogue)
@@ -5698,6 +6353,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     if (mission.id === KING_COPPER_KEY_MISSION.id) return kingChatState.progressCopper;
     if (mission.id === KING_RED_DRAGON_MISSION.id) return kingChatState.progressDragon;
     if (mission.id === KING_LETTER_MISSION.id) return kingChatState.progressLetter;
+    if (mission.id === AL_DEE_FISHING_MISSION.id) return kingChatState.progressAlDeeFishing;
     return { accepted: false, completed: false };
   }
 
@@ -5706,11 +6362,20 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     if (mission.id === KING_COPPER_KEY_MISSION.id) kingChatState.progressCopper = progress;
     if (mission.id === KING_RED_DRAGON_MISSION.id) kingChatState.progressDragon = progress;
     if (mission.id === KING_LETTER_MISSION.id) kingChatState.progressLetter = progress;
+    if (mission.id === AL_DEE_FISHING_MISSION.id) kingChatState.progressAlDeeFishing = progress;
   }
 
   // =======================
   // Tile 79 Right-Click System
   // =======================
+
+  // Debug functions for quest testing and development:
+  // - checkMissionState(): Check current mission state in console
+  // - setMissionAccepted(missionId): Set a mission as accepted (default: king_letter_al_dee)
+  // - resetQuest(missionId): Reset a quest to not accepted/not completed
+  //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'al_dee_fishing_gold'
+  // - resetAlDeeFishing(): Convenience function to reset Al Dee fishing mission specifically
+  // - resetAllQuests(): Reset ALL quests, quest items, DELETE all Firebase entries, and grant Silver Token
 
   // Debug function to check Firebase mission state
   window.checkMissionState = async function() {
@@ -5778,6 +6443,102 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     updateTile79RightClickState();
   };
 
+  // Debug function to reset quest progress (for testing)
+  window.resetQuest = async function(missionId) {
+    console.log('[Quests Mod][Dev] Resetting quest:', missionId);
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.error('[Quests Mod][Dev] No player name found');
+        return;
+      }
+
+      // Map mission IDs to their state properties
+      const missionMap = {
+        'king_copper_key': 'progressCopper',
+        'king_red_dragon': 'progressDragon',
+        'king_letter_al_dee': 'progressLetter',
+        'al_dee_fishing_gold': 'progressAlDeeFishing'
+      };
+
+      const stateKey = missionMap[missionId];
+      if (!stateKey) {
+        console.error('[Quests Mod][Dev] Unknown mission ID. Available IDs:', Object.keys(missionMap));
+        return;
+      }
+
+      // Reset local state
+      kingChatState[stateKey] = { accepted: false, completed: false };
+      console.log('[Quests Mod][Dev] Local state reset for', missionId);
+
+      // Save to Firebase
+      const progress = {
+        copper: kingChatState.progressCopper,
+        dragon: kingChatState.progressDragon,
+        letter: kingChatState.progressLetter,
+        alDeeFishing: kingChatState.progressAlDeeFishing
+      };
+
+      await saveKingTibianusProgress(playerName, progress);
+      console.log('[Quests Mod][Dev] Quest reset saved to Firebase for', missionId);
+
+      // Force update UI state
+      updateTile79RightClickState();
+      console.log('[Quests Mod][Dev] UI state updated');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error resetting quest:', error);
+    }
+  };
+
+  // Debug function to reset Al Dee fishing mission specifically
+  window.resetAlDeeFishing = async function() {
+    console.log('[Quests Mod][Dev] Resetting Al Dee fishing mission');
+    await resetQuest('al_dee_fishing_gold');
+  };
+
+  // Debug function to reset ALL quests and quest items
+  window.resetAllQuests = async function() {
+    console.log('[Quests Mod][Dev] Resetting ALL quests and quest items');
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.error('[Quests Mod][Dev] No player name found');
+        return;
+      }
+
+      // Reset local state for all quests
+      kingChatState.progressCopper = { accepted: false, completed: false };
+      kingChatState.progressDragon = { accepted: false, completed: false };
+      kingChatState.progressLetter = { accepted: false, completed: false };
+      kingChatState.progressAlDeeFishing = { accepted: false, completed: false };
+      console.log('[Quests Mod][Dev] Local quest state reset');
+
+      // Delete quest progress from Firebase
+      await deleteKingTibianusProgress(playerName);
+      console.log('[Quests Mod][Dev] Quest progress deleted from Firebase');
+
+      // Delete all quest items from Firebase
+      await deleteQuestItems(playerName);
+      console.log('[Quests Mod][Dev] Quest items deleted from Firebase');
+
+      // Clear local quest items cache
+      clearQuestItemsCache();
+      console.log('[Quests Mod][Dev] Local quest items cache cleared');
+
+      // Grant Silver Token so player can talk to King Tibianus
+      await addQuestItem(SILVER_TOKEN_CONFIG.productName, 1);
+      console.log('[Quests Mod][Dev] Granted Silver Token for King access');
+
+      // Force update UI state
+      updateTile79RightClickState();
+      console.log('[Quests Mod][Dev] UI state updated');
+
+      console.log('[Quests Mod][Dev] All quests and quest items reset complete');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error resetting all quests and quest items:', error);
+    }
+  };
+
   // Set up event-driven subscriptions for Tile 79 right-click functionality
   function setupTile79Observer() {
     // Subscribe to board state changes to detect room changes
@@ -5806,6 +6567,74 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
     console.log('[Quests Mod][Tile 79] Event-driven subscriptions set up');
     console.log('[Quests Mod][Tile 79] Will respond to: room changes (board state) and inventory changes (player state)');
+  }
+
+  // Helper function to get current room ID from board context or global state
+  function getCurrentRoomId(boardContext = null) {
+    const context = boardContext || globalThis.state?.board?.getSnapshot()?.context;
+    return context?.selectedMap?.selectedRoom?.id || globalThis.state?.selectedMap?.selectedRoom?.id;
+  }
+
+  // Set up event-driven subscriptions for fishing functionality
+  function setupWaterFishingObserver() {
+    // Subscribe to board state changes to detect map changes and new tiles/sprites being loaded
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      fishingState.subscriptions.board = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        const newRoomId = getCurrentRoomId(boardContext);
+
+        // Only rescan if the room has actually changed
+        if (fishingState.currentRoomId !== newRoomId) {
+          console.log('[Quests Mod][Water Fishing] Room changed from', fishingState.currentRoomId, 'to', newRoomId, '- cleaning up and rescanning for water tiles');
+
+          // Update current room ID
+          fishingState.currentRoomId = newRoomId;
+
+          // Reset Al Dee mission fishing attempts counter when changing rooms
+          fishingState.alDeeMissionAttempts = 0;
+          console.log('[Quests Mod][Water Fishing] Reset Al Dee mission fishing attempts counter due to room change');
+
+          // Clean up existing water tiles on map change
+          if (fishingState.enabled) {
+            disableWaterTileRightClick();
+            fishingState.tiles.clear();
+            fishingState.enabled = false; // Reset enabled flag so it can be re-enabled
+            console.log('[Quests Mod][Water Fishing] Cleaned up existing water tiles and reset enabled flag');
+          }
+
+          // Wait for new map sprites to load, then scan for water tiles
+          setTimeout(() => {
+            console.log('[Quests Mod][Water Fishing] Scanning for water tiles after map change delay - executing callback');
+            console.log('[Quests Mod][Water Fishing] Current DOM state - total sprites found:', document.querySelectorAll('.sprite.item.relative').length);
+            updateWaterFishingState();
+            console.log('[Quests Mod][Water Fishing] Callback execution completed');
+          }, FISHING_CONFIG.MAP_SWITCH_DELAY);
+        } else {
+          console.log('[Quests Mod][Water Fishing] Board state changed but room is still', newRoomId, '- skipping rescan');
+        }
+      });
+      console.log('[Quests Mod][Water Fishing] Board subscription set up');
+    }
+
+    // Subscribe to player state changes to detect Fishing Rod acquisition/loss
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
+      fishingState.subscriptions.player = globalThis.state.player.subscribe((playerState) => {
+        console.log('[Quests Mod][Water Fishing] Player state changed, checking Fishing Rod');
+        updateWaterFishingState();
+      });
+      console.log('[Quests Mod][Water Fishing] Player subscription set up');
+    }
+
+    // Initial check when subscriptions are set up
+    setTimeout(() => {
+      console.log('[Quests Mod][Water Fishing] Initial state check');
+      // Initialize current room ID
+      fishingState.currentRoomId = getCurrentRoomId();
+      console.log('[Quests Mod][Water Fishing] Initial room ID set to:', fishingState.currentRoomId);
+      updateWaterFishingState();
+    }, 500);
+
+    console.log('[Quests Mod][Water Fishing] Event-driven subscriptions set up');
+    console.log('[Quests Mod][Water Fishing] Will respond to: board changes and inventory changes (player state)');
   }
 
   // Update Tile 79 right-click state based on current conditions
@@ -5883,6 +6712,110 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
+  // Handle right-click on water tiles
+  function handleWaterFishingRightClick(event) {
+    console.log('[Quests Mod][Water Fishing] Right-click detected - showing Use Fishing Rod menu!', event);
+
+    // Be very aggressive about preventing the browser context menu
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    // Create our custom context menu
+    createWaterFishingContextMenu(event.clientX, event.clientY);
+
+    return false;
+  }
+
+  // Handle right-click events on document and check if they originated from water tiles
+  function handleWaterFishingRightClickDocument(event) {
+    // Check if the event target is inside any water tile
+    for (const waterTile of fishingState.tiles) {
+      if (waterTile.contains(event.target)) {
+        console.log('[Quests Mod][Water Fishing] Right-click detected on water tile via document listener!', event);
+
+        // Store the clicked tile for animation positioning
+        fishingState.clickedTile = waterTile;
+
+        // Be very aggressive about preventing the browser context menu
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        event.stopPropagation();
+
+        // Create our custom context menu
+        createWaterFishingContextMenu(event.clientX, event.clientY);
+
+        return false;
+      }
+    }
+  }
+
+  // Update water fishing state based on current conditions
+  function updateWaterFishingState(manualToggle = false) {
+    console.log('[Quests Mod][Water Fishing] updateWaterFishingState called', manualToggle ? '(manual)' : '(auto)');
+    try {
+      // If this is a manual toggle, apply the current fishingState.enabled directly
+      if (manualToggle) {
+        if (fishingState.enabled) {
+          // Enable fishing - add document listener and enable pointer events
+          document.addEventListener('contextmenu', handleWaterFishingRightClickDocument, true); // Use capture phase on document
+          enableWaterTileRightClick();
+          console.log('[Quests Mod][Water Fishing] Fishing manually enabled - document listener added and pointer events enabled');
+        } else {
+          // Disable fishing - remove document listener and restore tile pointer events
+          document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
+          disableWaterTileRightClick();
+
+          // Close any open context menu
+          if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
+            fishingState.contextMenu.closeMenu();
+          }
+          console.log('[Quests Mod][Water Fishing] Fishing manually disabled - document listener removed and pointer events restored');
+        }
+        return;
+      }
+
+      // Automatic logic (original behavior) - but respect manual preferences
+      const shouldBeEnabled = shouldEnableWaterFishing();
+
+      console.log('[Quests Mod][Water Fishing] Checking conditions:', {
+        shouldBeEnabled,
+        waterFishingEnabled,
+        manuallyDisabled: fishingState.manuallyDisabled
+      });
+
+      // Don't automatically enable if user manually disabled it
+      const canEnable = shouldBeEnabled && !fishingState.manuallyDisabled;
+
+      if (canEnable && !fishingState.enabled) {
+        // Enable fishing - add document listener and enable pointer events
+        document.addEventListener('contextmenu', handleWaterFishingRightClickDocument, true); // Use capture phase on document
+        enableWaterTileRightClick();
+
+        fishingState.enabled = true;
+        console.log('[Quests Mod][Water Fishing] Fishing enabled - document listener added and pointer events enabled');
+      } else if (!shouldBeEnabled && fishingState.enabled) {
+        // Disable fishing - remove document listener and restore tile pointer events
+        document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
+        disableWaterTileRightClick();
+
+        // Close any open context menu
+        if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
+          fishingState.contextMenu.closeMenu();
+        }
+
+        fishingState.enabled = false;
+        // Clear manual preference if automatically disabled (e.g., fishing rod lost)
+        if (!shouldBeEnabled) {
+          fishingState.manuallyDisabled = false;
+        }
+        console.log('[Quests Mod][Water Fishing] Fishing disabled - document listener removed and pointer events restored');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Water Fishing] Error updating water fishing state:', error);
+    }
+  }
+
   // Check if Tile 79 should be right-clickable
   function shouldEnableTile79RightClick(boardContext = null) {
     try {
@@ -5931,6 +6864,25 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       return hasStampedLetter;
     } catch (error) {
       console.error('[Quests Mod][Tile 79] Error checking right-click conditions:', error);
+      return false;
+    }
+  }
+
+  // Check if water fishing should be enabled (player has Fishing Rod)
+  function shouldEnableWaterFishing() {
+    try {
+      // Check if user has Fishing Rod in quest items
+      const currentProducts = cachedQuestItems || {};
+      const hasFishingRod = (currentProducts['Fishing Rod'] || 0) > 0;
+
+      console.log('[Quests Mod][Water Fishing] Quest items check:', {
+        questItems: currentProducts,
+        hasFishingRod
+      });
+
+      return hasFishingRod;
+    } catch (error) {
+      console.error('[Quests Mod][Water Fishing] Error checking fishing conditions:', error);
       return false;
     }
   }
@@ -6071,6 +7023,252 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     return tile79ContextMenu;
   }
 
+  // Create water fishing context menu at specified coordinates
+  function createWaterFishingContextMenu(x, y) {
+    console.log('[Quests Mod][Water Fishing] Creating context menu at', x, y);
+
+    // Close any existing context menu
+    if (waterFishingContextMenu && waterFishingContextMenu.closeMenu) {
+      waterFishingContextMenu.closeMenu();
+    }
+
+    // Create overlay to close menu on outside click
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9998';
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+
+    // Create menu container
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = '9999';
+    menu.style.minWidth = '120px';
+    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '8px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+
+    // Button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'center';
+
+    // "Use Fishing Rod" button
+    const useFishingRodButton = document.createElement('button');
+    useFishingRodButton.className = 'pixel-font-14';
+    useFishingRodButton.textContent = 'Use Fishing Rod';
+    useFishingRodButton.style.width = '140px';
+    useFishingRodButton.style.height = '28px';
+    useFishingRodButton.style.fontSize = '12px';
+    useFishingRodButton.style.backgroundColor = '#2a4a7a'; // Blue-ish color for water
+    useFishingRodButton.style.color = '#4FC3F7';
+    useFishingRodButton.style.border = '1px solid #4FC3F7';
+    useFishingRodButton.style.borderRadius = '4px';
+    useFishingRodButton.style.cursor = 'pointer';
+    useFishingRodButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
+    useFishingRodButton.style.fontWeight = 'bold';
+
+    // Add hover effects
+    useFishingRodButton.addEventListener('mouseenter', () => {
+      useFishingRodButton.style.backgroundColor = '#1a2a4a';
+      useFishingRodButton.style.borderColor = '#81D4FA';
+    });
+    useFishingRodButton.addEventListener('mouseleave', () => {
+      useFishingRodButton.style.backgroundColor = '#2a4a7a';
+      useFishingRodButton.style.borderColor = '#4FC3F7';
+    });
+
+    // Handle click - for now just show a message, can be expanded later
+    useFishingRodButton.addEventListener('click', async () => {
+      console.log('[Quests Mod][Water Fishing] Fishing rod used!');
+
+      // Get the water tile position for the animation (instead of menu position)
+      let animationX, animationY;
+      if (fishingState.clickedTile) {
+        const tileRect = fishingState.clickedTile.getBoundingClientRect();
+        animationX = tileRect.left + tileRect.width / 2;
+        animationY = tileRect.top + tileRect.height / 2;
+      } else {
+        // Fallback to menu position if tile not found
+        const rect = menu.getBoundingClientRect();
+        animationX = rect.left + rect.width / 2;
+        animationY = rect.top + rect.height / 2;
+      }
+
+      // Create the circular fishing animation
+      createFishingAnimation(animationX, animationY);
+
+      // Check if player is on Al Dee Fishing Mission and in Goblin Bridge
+      const alDeeMissionProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      const currentRoomId = getCurrentRoomId();
+      const isInGoblinBridge = roomNames && currentRoomId && roomNames[currentRoomId] === 'Goblin Bridge';
+      const isOnAlDeeMission = alDeeMissionProgress.accepted && !alDeeMissionProgress.completed;
+
+      let toastMessage = 'You found nothing.';
+
+      // Special handling for Al Dee Fishing Mission in Goblin Bridge
+      if (isOnAlDeeMission && isInGoblinBridge) {
+        fishingState.alDeeMissionAttempts++;
+        console.log(`[Quests Mod][Water Fishing] Al Dee mission fishing attempt #${fishingState.alDeeMissionAttempts} in Goblin Bridge`);
+
+        if (fishingState.alDeeMissionAttempts > 3) {
+          toastMessage = 'Seems as a magnet will help here.';
+        }
+      } else {
+        // Reset attempt counter when not on mission or not in Goblin Bridge
+        fishingState.alDeeMissionAttempts = 0;
+      }
+
+      // Implement fishing logic here
+      try {
+        // Check if player has Magnet and is in Goblin Bridge
+        const currentProducts = await getQuestItems();
+        const hasMagnet = (currentProducts['Magnet'] || 0) > 0;
+
+        if (hasMagnet && isInGoblinBridge) {
+          // Consume Magnet and add Small Axe
+          await consumeQuestItem('Magnet', 1);
+          await addQuestItem('Small Axe', 1);
+
+          toastMessage = 'You found a Small Axe with your Magnet!';
+          console.log('[Quests Mod][Water Fishing] Small Axe obtained using Magnet in Goblin Bridge');
+        } else if (isInGoblinBridge && !hasMagnet) {
+          toastMessage = 'You found nothing. Maybe a magnet would help?';
+          console.log('[Quests Mod][Water Fishing] No Magnet available for fishing in Goblin Bridge');
+        } else {
+          toastMessage = 'You found nothing.';
+          console.log('[Quests Mod][Water Fishing] Fishing in non-Goblin Bridge water');
+        }
+      } catch (error) {
+        console.error('[Quests Mod][Water Fishing] Error during fishing:', error);
+        toastMessage = 'Something went wrong while fishing.';
+      }
+
+      // Show fishing result toast
+      showToast({
+        message: toastMessage,
+        duration: TOAST_DURATION_DEFAULT,
+        logPrefix: '[Quests Mod][Water Fishing]'
+      });
+      closeMenu();
+    });
+
+    buttonContainer.appendChild(useFishingRodButton);
+    menu.appendChild(buttonContainer);
+
+    // Event handlers
+    const overlayClickHandler = (e) => {
+      if (e.target === overlay) {
+        closeMenu();
+      }
+    };
+
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    // Close menu function
+    function closeMenu() {
+      // Remove event listeners
+      overlay.removeEventListener('mousedown', overlayClickHandler);
+      overlay.removeEventListener('click', overlayClickHandler);
+      document.removeEventListener('keydown', escHandler);
+
+      // Remove from DOM
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      if (menu.parentNode) {
+        menu.parentNode.removeChild(menu);
+      }
+
+      // Clear reference
+      fishingState.contextMenu = null;
+    }
+
+    // Add event listeners
+    overlay.addEventListener('mousedown', overlayClickHandler);
+    overlay.addEventListener('click', overlayClickHandler);
+    document.addEventListener('keydown', escHandler);
+
+    // Add to DOM
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+
+    console.log('[Quests Mod][Water Fishing] Use Fishing Rod context menu created and added to DOM');
+
+    // Store reference
+    fishingState.contextMenu = { overlay, menu, closeMenu };
+
+    return fishingState.contextMenu;
+  }
+
+  // Create circular fishing animation at the specified coordinates
+  function createFishingAnimation(x, y) {
+    const animationContainer = document.createElement('div');
+    animationContainer.style.position = 'fixed';
+    animationContainer.style.left = `${x - FISHING_CONFIG.ANIMATION_SIZE / 2}px`; // Center the animation
+    animationContainer.style.top = `${y - FISHING_CONFIG.ANIMATION_SIZE / 2}px`;
+    animationContainer.style.width = `${FISHING_CONFIG.ANIMATION_SIZE}px`;
+    animationContainer.style.height = `${FISHING_CONFIG.ANIMATION_SIZE}px`;
+    animationContainer.style.pointerEvents = 'none';
+    animationContainer.style.zIndex = '10000'; // Above the context menu
+
+    // Create the circular animation element
+    const circle = document.createElement('div');
+    circle.style.width = '100%';
+    circle.style.height = '100%';
+    circle.style.borderRadius = '50%';
+    circle.style.border = '2px solid #4FC3F7'; // Water-blue color to match the button
+    circle.style.animation = `fishingRipple ${FISHING_CONFIG.ANIMATION_DURATION}ms ease-out forwards`;
+
+    // Add CSS animation if it doesn't exist
+    if (!document.getElementById('fishing-animation-styles')) {
+      const style = document.createElement('style');
+      style.id = 'fishing-animation-styles';
+      style.textContent = `
+        @keyframes fishingRipple {
+          0% {
+            transform: scale(0);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(0.8);
+            opacity: 0.7;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 0;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    animationContainer.appendChild(circle);
+    document.body.appendChild(animationContainer);
+
+    // Remove the animation after it completes
+    setTimeout(() => {
+      if (animationContainer.parentNode) {
+        animationContainer.parentNode.removeChild(animationContainer);
+      }
+    }, FISHING_CONFIG.ANIMATION_DURATION); // Match the animation duration
+  }
+
 
   // Teleport to Al Dee's location
   function teleportToAlDee() {
@@ -6193,6 +7391,16 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
     // Cleanup Tile 79 system
     cleanupTile79System();
+
+    // Cleanup water fishing system
+    cleanupWaterFishingSystem();
+
+    // Cleanup Iron Ore quest timer
+    if (ironOreQuestTimer) {
+      clearInterval(ironOreQuestTimer);
+      ironOreQuestTimer = null;
+      console.log('[Quests Mod][Iron Ore Quest] Timer stopped');
+    }
   }
 
   function cleanupTile79System() {
@@ -6235,6 +7443,42 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
 
     console.log('[Quests Mod][Tile 79] System cleaned up');
+  }
+
+  function cleanupWaterFishingSystem() {
+    // Remove event listener from document and restore tile pointer events
+    if (waterFishingEnabled) {
+      document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
+      disableWaterTileRightClick();
+      waterFishingEnabled = false;
+    }
+
+    // Close any open context menu
+    if (waterFishingContextMenu && waterFishingContextMenu.closeMenu) {
+      waterFishingContextMenu.closeMenu();
+    }
+
+    // Unsubscribe from board state
+    if (fishingState.subscriptions.board) {
+      try {
+        fishingState.subscriptions.board.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Water Fishing] Error unsubscribing from board:', e);
+      }
+      fishingState.subscriptions.board = null;
+    }
+
+    // Unsubscribe from player state
+    if (fishingState.subscriptions.player) {
+      try {
+        fishingState.subscriptions.player.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Water Fishing] Error unsubscribing from player:', e);
+      }
+      fishingState.subscriptions.player = null;
+    }
+
+    console.log('[Quests Mod][Water Fishing] System cleaned up');
   }
 
   // Initialize
@@ -6287,11 +7531,32 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             completed: !!progress.letter.completed
           };
         }
+        if (progress.alDeeFishing) {
+          kingChatState.progressAlDeeFishing = {
+            accepted: !!progress.alDeeFishing.accepted,
+            completed: !!progress.alDeeFishing.completed
+          };
+        }
+        if (progress.ironOre) {
+          fishingState.ironOreQuestActive = !!progress.ironOre.active;
+          fishingState.ironOreQuestStartTime = progress.ironOre.startTime;
+          fishingState.ironOreQuestCompleted = !!progress.ironOre.completed;
+          // If quest was started but not completed and not active, it means timer expired
+          fishingState.ironOreQuestExpired = !progress.ironOre.active &&
+                                             !progress.ironOre.completed &&
+                                             !!progress.ironOre.startTime;
+        }
 
         console.log('[Quests Mod] Mission progress loaded from Firebase:', {
           copper: kingChatState.progressCopper,
           dragon: kingChatState.progressDragon,
-          letter: kingChatState.progressLetter
+          letter: kingChatState.progressLetter,
+          alDeeFishing: kingChatState.progressAlDeeFishing,
+          ironOre: progress.ironOre ? {
+            active: fishingState.ironOreQuestActive,
+            expired: fishingState.ironOreQuestExpired,
+            completed: fishingState.ironOreQuestCompleted
+          } : null
         });
       } else {
         console.log('[Quests Mod] No mission progress found in Firebase');
@@ -6304,15 +7569,81 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   // Start monitoring for quest log
   startQuestLogMonitoring();
 
-  // Load mission progress from Firebase on initialization and then setup Tile 79
+  // Iron Ore quest timer - checks every 5 seconds for completed quests
+  let ironOreQuestTimer = null;
+  function startIronOreQuestTimer() {
+    if (ironOreQuestTimer) {
+      clearInterval(ironOreQuestTimer);
+    }
+
+    ironOreQuestTimer = setInterval(async () => {
+      try {
+        // Check if Iron Ore quest is active and timer has expired
+        if (fishingState.ironOreQuestActive &&
+            fishingState.ironOreQuestStartTime &&
+            !fishingState.ironOreQuestCompleted) {
+
+          const elapsedTime = Date.now() - fishingState.ironOreQuestStartTime;
+          if (elapsedTime >= 60000) { // 1 minute = 60000ms
+            // Timer expired - mark as ready for reward (don't award yet)
+            fishingState.ironOreQuestActive = false;
+            fishingState.ironOreQuestExpired = true; // New state: ready for reward
+            fishingState.ironOreQuestStartTime = null;
+
+            // Save progress to Firebase (active: false, but not completed yet)
+            const currentPlayer = getCurrentPlayerName();
+            if (currentPlayer) {
+              try {
+                const currentProgress = await getKingTibianusProgress(currentPlayer);
+                await saveKingTibianusProgress(currentPlayer, {
+                  ...currentProgress,
+                  ironOre: {
+                    active: false,
+                    startTime: null,
+                    completed: false // Not completed yet - waiting for player to claim reward
+                  }
+                });
+                console.log('[Quests Mod][Iron Ore Quest] Timer expired - ready for reward pickup');
+              } catch (err) {
+                console.error('[Quests Mod][Iron Ore Quest] Error saving expired timer state:', err);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Quests Mod][Iron Ore Quest] Error in timer check:', err);
+      }
+    }, 5000); // Check every 5 seconds
+
+    console.log('[Quests Mod][Iron Ore Quest] Timer started');
+  }
+
+  // Load mission progress from Firebase on initialization and then setup systems
   loadMissionProgressOnInit().then(() => {
+    // Always start with fishing disabled after reload
+    fishingState.enabled = false;
+    fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
+    updateWaterFishingState(true);
+
     // Set up Tile 79 right-click system after mission progress is loaded
     setupTile79Observer();
+    // Set up water fishing system
+    setupWaterFishingObserver();
   }).catch(error => {
-    console.error('[Quests Mod] Failed to load mission progress, setting up Tile 79 anyway:', error);
+    console.error('[Quests Mod] Failed to load mission progress, setting up systems anyway:', error);
+
+    // Always start with fishing disabled after reload
+    fishingState.enabled = false;
+    fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
+    updateWaterFishingState(true);
+
     setupTile79Observer();
+    setupWaterFishingObserver();
   });
-  
+
+  // Start Iron Ore quest timer
+  startIronOreQuestTimer();
+
   // Cleanup on mod unload
   if (typeof context !== 'undefined' && context.exports) {
     const originalCleanup = context.exports.cleanup;
