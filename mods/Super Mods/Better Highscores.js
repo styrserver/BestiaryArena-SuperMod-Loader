@@ -766,6 +766,7 @@
         const youIcon = document.createElement('img');
         youIcon.src = 'https://bestiaryarena.com/assets/icons/achievement.png';
         youIcon.alt = 'You';
+        youIcon.title = 'Your personal best record';
         Object.assign(youIcon.style, {
           width: '11px',
           height: '11px',
@@ -808,10 +809,11 @@
         
         // Add icon
         const icon = document.createElement('img');
-        icon.src = formattedEntry.isCurrentUser 
+        icon.src = formattedEntry.isCurrentUser
           ? 'https://bestiaryarena.com/assets/icons/achievement.png'
           : 'https://bestiaryarena.com/assets/icons/highscore.png';
         icon.alt = formattedEntry.isCurrentUser ? 'You' : 'Top';
+        icon.title = formattedEntry.isCurrentUser ? 'Your personal best record' : 'World record holder';
         Object.assign(icon.style, {
           width: '11px',
           height: '11px',
