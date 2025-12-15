@@ -107,7 +107,7 @@ const AL_DEE_FISHING_MISSION = {
   objectiveLine1: 'Find Al Dee\'s Small Axe in the waters of a cave.',
   objectiveLine2: 'Return the Small Axe to Al Dee.',
   hint: 'Search underwater areas or caves where minotaurs and goblins roam.',
-  rewardCoins: 50
+  rewardCoins: 0
 };
 
 const KING_ARENA_RANKS = [
@@ -329,7 +329,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   let buttonRetryTimeout = null;
   let modalTimeout = null;
   let dialogTimeout = null;
-  const toastTimers = new Set(); // Track active toast timers for cleanup
   const buttonEventListeners = new Map(); // Track event listeners for cleanup
   
   // Quest items drop system state
@@ -1150,6 +1149,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/letter-al-dee-rewards`;
   }
 
+  function getIronOreFirebasePath() {
+    return `${FIREBASE_CONFIG.firebaseUrl}/quests/iron-ore-rewards`;
+  }
+
   function getAlDeeShopPurchasesPath() {
     return `${FIREBASE_CONFIG.firebaseUrl}/quests/al-dee-shop-purchases`;
   }
@@ -1479,6 +1482,47 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
+  async function hasReceivedIronOre(playerName) {
+    if (!playerName) {
+      return false;
+    }
+
+    const hashedPlayer = await hashUsername(playerName);
+    const data = await fetchFirebaseData(
+      `${getIronOreFirebasePath()}/${hashedPlayer}`,
+      'check Iron Ore status',
+      null
+    );
+
+    return data && data.received === true;
+  }
+
+  // Mark Iron Ore as received in Firebase
+  async function markIronOreReceived(playerName) {
+    try {
+      if (!playerName) {
+        throw new Error('Player name not available');
+      }
+
+      const hashedPlayer = await hashUsername(playerName);
+      const data = {
+        received: true,
+        timestamp: Date.now()
+      };
+
+      await firebaseRequest(
+        `${getIronOreFirebasePath()}/${hashedPlayer}`,
+        'PUT',
+        data,
+        'mark Iron Ore received'
+      );
+
+      console.log('[Quests Mod] Iron Ore marked as received for player:', playerName);
+    } catch (error) {
+      console.error('[Quests Mod] Error marking Iron Ore as received:', error);
+    }
+  }
+
   // =======================
   // Encryption Functions
   // =======================
@@ -1610,28 +1654,40 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     return normalized;
   }
 
-  // Dev helper to grant quest items for testing (exposed to console)
+  // Dev helper to grant/remove quest items for testing (exposed to console)
+  // Use positive numbers to grant items, negative numbers to remove items
   function registerDevGrantHelper() {
-    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0 } = {}) {
+    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0 } = {}) {
       try {
-        if (leather > 0) {
-          await addQuestItem('Red Dragon Leather', leather);
-        }
-        if (scale > 0) {
-          await addQuestItem('Red Dragon Scale', scale);
-        }
-        if (letter > 0) {
-          await addQuestItem('Letter from Al Dee', letter);
-        }
-        if (ironOre > 0) {
-          await addQuestItem('Iron Ore', ironOre);
-        }
-        if (smallAxe > 0) {
-          await addQuestItem('Small Axe', smallAxe);
-        }
-        console.log('[Quests Mod][Dev] Granted', { leather, scale, letter, ironOre, smallAxe });
+        const actions = [];
+
+        // Helper function to handle both granting and removing
+        const processItem = async (itemName, amount, displayName) => {
+          if (amount > 0) {
+            await addQuestItem(itemName, amount);
+            actions.push(`+${amount} ${displayName}`);
+          } else if (amount < 0) {
+            const removed = await consumeQuestItem(itemName, Math.abs(amount));
+            if (removed) {
+              actions.push(`-${Math.abs(amount)} ${displayName}`);
+            } else {
+              actions.push(`Failed to remove ${Math.abs(amount)} ${displayName} (insufficient quantity)`);
+            }
+          }
+        };
+
+        await processItem('Red Dragon Leather', leather, 'Red Dragon Leather');
+        await processItem('Red Dragon Scale', scale, 'Red Dragon Scale');
+        await processItem('Letter from Al Dee', letter, 'Letter from Al Dee');
+        await processItem('Iron Ore', ironOre, 'Iron Ore');
+        await processItem('Small Axe', smallAxe, 'Small Axe');
+        await processItem('Copper Key', copperKey, 'Copper Key');
+        await processItem('Stamped Letter', stampedLetter, 'Stamped Letter');
+
+        console.log('[Quests Mod][Dev] Quest items modified:', actions.join(', '));
+        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter });
       } catch (err) {
-        console.error('[Quests Mod][Dev] Grant failed:', err);
+        console.error('[Quests Mod][Dev] Operation failed:', err);
       }
     };
   }
@@ -1778,6 +1834,42 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       'delete quest items'
     );
     console.log('[Quests Mod][Quest Items] All quest items deleted for player:', playerName);
+  }
+
+  async function deleteAlDeeShopPurchases(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await firebaseRequest(
+      `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
+      'DELETE',
+      null,
+      'delete Al Dee shop purchases'
+    );
+    console.log('[Quests Mod][Al Dee Shop] All shop purchases deleted for player:', playerName);
+  }
+
+  async function deleteCopperKeyReceived(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await firebaseRequest(
+      `${getCopperKeyFirebasePath()}/${hashedPlayer}`,
+      'DELETE',
+      null,
+      'delete Copper Key received status'
+    );
+    console.log('[Quests Mod][Copper Key] Copper Key received status deleted for player:', playerName);
+  }
+
+  async function deleteLetterFromAlDeeReceived(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await firebaseRequest(
+      `${getLetterFromAlDeeFirebasePath()}/${hashedPlayer}`,
+      'DELETE',
+      null,
+      'delete Letter from Al Dee received status'
+    );
+    console.log('[Quests Mod][Letter from Al Dee] Letter from Al Dee received status deleted for player:', playerName);
   }
 
   async function getAlDeeShopPurchases(playerName) {
@@ -2355,17 +2447,27 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           if (isAlDeeDwarfLoot) {
             console.log(`[Quests Mod][Quest Items] Processing Al Dee fishing Iron Ore drop from ${creatureName} (gameId: ${creatureGameId}), seed:`, seed);
 
-            // Use a unique productIndex (9999) for Iron Ore to avoid conflicts
-            const roll = deterministicRandom(seed, creatureGameId, 9999);
-            // Drop roll calculated
-            console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ 1.0% | creature: ${creatureName})`);
-            if (roll <= 0.01) { // 1% chance
-              try {
-                await addQuestItem('Iron Ore', 1);
-                showQuestItemNotification('Iron Ore', 1);
-                console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
-              } catch (error) {
-                console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
+            // Check if player has already received Iron Ore (one-time per account)
+            const currentPlayer = getCurrentPlayerName();
+            const hasReceived = await hasReceivedIronOre(currentPlayer);
+            if (hasReceived) {
+              console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
+            } else {
+              // Use a unique productIndex (9999) for Iron Ore to avoid conflicts
+              const roll = deterministicRandom(seed, creatureGameId, 9999);
+              // Drop roll calculated
+              console.log(`[Quests Mod][Quest Items] Iron Ore roll: ${(roll * 100).toFixed(1)}% (need ≤ 1.0% | creature: ${creatureName})`);
+              if (roll <= 0.01) { // 1% chance
+                try {
+                  await addQuestItem('Iron Ore', 1);
+                  showQuestItemNotification('Iron Ore', 1);
+                  console.log(`[Quests Mod][Quest Items] Iron Ore awarded from ${creatureName} (Al Dee fishing mission)`);
+
+                  // Mark as received for one-time item
+                  await markIronOreReceived(currentPlayer);
+                } catch (error) {
+                  console.error(`[Quests Mod][Quest Items] Error adding Iron Ore:`, error);
+                }
               }
             }
           }
@@ -2612,29 +2714,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     });
   }
 
-  // Toast timer management helpers
-  function createToastTimer(callback, duration) {
-    const timerId = setTimeout(() => {
-      callback();
-      toastTimers.delete(timerId);
-    }, duration);
-    toastTimers.add(timerId);
-    return timerId;
-  }
-
-  function clearToastTimer(timerId) {
-    if (timerId && toastTimers.has(timerId)) {
-      clearTimeout(timerId);
-      toastTimers.delete(timerId);
-      return true;
-    }
-    return false;
-  }
-
-  function clearAllToastTimers() {
-    toastTimers.forEach(timerId => clearTimeout(timerId));
-    toastTimers.clear();
-  }
+  // Toast timer management helpers - removed, using simple setTimeout instead
 
   // Generic toast notification function
   function showToast({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
@@ -2642,7 +2722,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       const mainContainer = getToastContainer();
       const existingToasts = mainContainer.querySelectorAll('.toast-item');
       const stackOffset = existingToasts.length * 46;
-      
+
       const flexContainer = document.createElement('div');
       flexContainer.className = 'toast-item';
       flexContainer.style.cssText = `
@@ -2655,7 +2735,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         bottom: 0px;
         justify-content: flex-end;
       `;
-      
+
       const toast = document.createElement('button');
       toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
 
@@ -2686,27 +2766,22 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
       console.log(`${logPrefix} Toast shown: ${message}`);
 
-      // Create timer and store ID for click handler
-      const timerId = createToastTimer(() => {
+      // Add click event listener for dismissal
+      toast.addEventListener('click', () => {
+        if (flexContainer && flexContainer.parentNode) {
+          flexContainer.parentNode.removeChild(flexContainer);
+          updateToastPositions(mainContainer);
+        }
+      });
+
+      // Auto-remove after duration
+      setTimeout(() => {
         if (flexContainer && flexContainer.parentNode) {
           flexContainer.parentNode.removeChild(flexContainer);
           updateToastPositions(mainContainer);
         }
       }, duration);
 
-      // Add click event listener for dismissal
-      toast.addEventListener('click', () => {
-        // Clear the timer if it exists
-        if (timerId) {
-          clearToastTimer(timerId);
-        }
-        // Remove the toast immediately
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateToastPositions(mainContainer);
-        }
-      });
-      
     } catch (error) {
       console.error(`${logPrefix} Error showing toast:`, error);
     }
@@ -2806,7 +2881,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     clearTimeoutOrInterval(observerDebounceTimeout);
     clearTimeoutOrInterval(modalTimeout);
     clearTimeoutOrInterval(dialogTimeout);
-    clearAllToastTimers();
+    // clearAllToastTimers(); - removed, no longer needed
     buttonCheckInterval = null;
     buttonRetryTimeout = null;
     observerDebounceTimeout = null;
@@ -3721,6 +3796,11 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       const currentProducts = await getQuestItems(false);
       const ironOreCount = currentProducts['Iron Ore'] || 0;
 
+      // Check if Al Dee fishing mission is completed - if so, Iron Ore quests shouldn't be claimable
+      if (kingChatState.progressAlDeeFishing.completed) {
+        return 'I appreciate your continued interest, but our business with iron ore is concluded.';
+      }
+
       // Check if quest timer has expired and reward is ready to be claimed
       if (fishingState.ironOreQuestExpired && !fishingState.ironOreQuestCompleted) {
         // Quest timer expired - award Magnet reward now that player is talking to us
@@ -3769,7 +3849,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
       // Check inventory for Iron Ore - this takes precedence over completion status
       if (ironOreCount > 0) {
-        // Player has Iron Ore - take it and start timer
+        // Check if Al Dee fishing mission is active and not completed - only take Iron Ore if mission is accepted but not finished
+        if (!kingChatState.progressAlDeeFishing.accepted) {
+          return 'Thats a fine looking rock you have there.';
+        }
+        if (kingChatState.progressAlDeeFishing.completed) {
+          return 'I appreciate the rock, but I have no further use for iron ore now that our business is concluded.';
+        }
+
+        // Player has Iron Ore and mission is active - take it and start timer
         try {
           await consumeQuestItem('Iron Ore', 1);
           fishingState.ironOreQuestActive = true;
@@ -4006,6 +4094,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       }
 
       // kingChatState is now defined globally
+      // King Tibianus missions and Al Dee fishing mission
       const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION];
 
       // Random responses when Tibianus doesn't understand the player's input
@@ -4362,6 +4451,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           const line2 = document.createElement('p');
           if (selectedMission.id === KING_RED_DRAGON_MISSION.id) {
             line2.textContent = 'Reward: Dragon Claw.';
+          } else if (selectedMission.id === AL_DEE_FISHING_MISSION.id) {
+            line2.textContent = 'Reward: Dwarven Pickaxe.';
           } else {
             line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
           }
@@ -5618,22 +5709,71 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         // Check for mission offer trigger
         if (lowerText.includes('mission') || lowerText.includes('missions') ||
             lowerText.includes('task') || lowerText.includes('quest') || lowerText.includes('help')) {
-          const missionProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
+          // Al Dee's missions only (can be expanded in the future)
+          const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION];
 
-          if (missionProgress.completed) {
+          function currentAlDeeMission() {
+            // Return the first incomplete mission, or null if all are completed
+            for (const mission of AL_DEE_MISSIONS) {
+              if (!getMissionProgress(mission).completed) {
+                return mission;
+              }
+            }
+            // All missions completed, no more missions available
+            return null;
+          }
+
+          function buildAlDeeStrings(mission) {
+            // Handle case where all missions are completed (mission is null)
+            if (!mission) {
+              return {
+                missionPrompt: 'All my tasks have been completed. Come back later for more tasks!',
+                thankYou: 'All my tasks have been completed.',
+                keyQuestion: 'All my tasks have been completed.',
+                keyComplete: 'All my tasks have been completed.',
+                keyScoldNoKey: 'All my tasks have been completed.',
+                keyKeepSearching: 'All my tasks have been completed.',
+                keyAnswerYesNo: 'All my tasks have been completed.',
+                missionCompleted: 'All my tasks have been completed.',
+                missionActive: 'All my tasks have been completed.'
+              };
+            }
+
+            return {
+              missionPrompt: mission.prompt,
+              thankYou: mission.accept,
+              keyQuestion: mission.askForItem || 'Have you found what I asked for?',
+              keyComplete: mission.complete,
+              keyScoldNoKey: mission.missingItem || 'You claim yes but lack what I asked for.',
+              keyKeepSearching: mission.keepSearching,
+              keyAnswerYesNo: mission.answerYesNo,
+              missionCompleted: mission.alreadyCompleted,
+              missionActive: mission.alreadyActive
+            };
+          }
+
+          const activeMission = currentAlDeeMission();
+          const strings = buildAlDeeStrings(activeMission);
+
+          if (!activeMission) {
+            // All Al Dee missions completed
             setTimeout(() => {
-              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.alreadyCompleted, true);
-            }, 1000);
-          } else if (missionProgress.accepted) {
-            setTimeout(() => {
-              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.alreadyActive, true);
+              addMessageToConversation('Al Dee', strings.missionPrompt, true);
             }, 1000);
           } else {
-            // Offer the mission with a 1 second delay
-            setTimeout(() => {
-              addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.prompt, true);
-            }, 1000);
-            alDeeChatState.offeringFishingMission = true;
+            const missionProgress = getMissionProgress(activeMission);
+
+            if (missionProgress.accepted) {
+              setTimeout(() => {
+                addMessageToConversation('Al Dee', strings.missionActive, true);
+              }, 1000);
+            } else {
+              // Offer the mission with a 1 second delay
+              setTimeout(() => {
+                addMessageToConversation('Al Dee', strings.missionPrompt, true);
+              }, 1000);
+              alDeeChatState.offeringFishingMission = true;
+            }
           }
           return;
         }
@@ -5641,11 +5781,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         // Get transcript response (handles all standard Al Dee dialogue)
         let alDeeResponse = getAlDeeResponse(text, playerName);
 
-        // If we got the default response back, it means Al Dee doesn't understand - use confusion response
-        const defaultResponse = `Hello, hello, ${playerName}! Please come in, look, and buy! I'm a specialist for all sorts of tools. Just ask me for a trade to see my offers!`;
-        if (alDeeResponse === defaultResponse) {
-          alDeeResponse = getRandomAlDeeConfusionResponse();
-        }
+        // Only use confusion response for messages that are truly nonsensical
+        // The default greeting response should be preserved for unrecognized but reasonable messages
+        // Confusion should only be used for messages that don't make any sense in context
 
         // Check if this is a bye message to close the modal
         const isBye = lowerText.includes('bye');
@@ -6375,7 +6513,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   // - resetQuest(missionId): Reset a quest to not accepted/not completed
   //   Available mission IDs: 'king_copper_key', 'king_red_dragon', 'king_letter_al_dee', 'al_dee_fishing_gold'
   // - resetAlDeeFishing(): Convenience function to reset Al Dee fishing mission specifically
-  // - resetAllQuests(): Reset ALL quests, quest items, DELETE all Firebase entries, and grant Silver Token
+  // - resetAllQuests(): Reset ALL quests, quest items, Al Dee shop purchases, Copper Key received status, DELETE all Firebase entries, and grant Silver Token
 
   // Debug function to check Firebase mission state
   window.checkMissionState = async function() {
@@ -6520,6 +6658,18 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       // Delete all quest items from Firebase
       await deleteQuestItems(playerName);
       console.log('[Quests Mod][Dev] Quest items deleted from Firebase');
+
+      // Delete Al Dee shop purchases from Firebase
+      await deleteAlDeeShopPurchases(playerName);
+      console.log('[Quests Mod][Dev] Al Dee shop purchases deleted from Firebase');
+
+      // Delete Copper Key received status from Firebase
+      await deleteCopperKeyReceived(playerName);
+      console.log('[Quests Mod][Dev] Copper Key received status deleted from Firebase');
+
+      // Delete Letter from Al Dee received status from Firebase
+      await deleteLetterFromAlDeeReceived(playerName);
+      console.log('[Quests Mod][Dev] Letter from Al Dee received status deleted from Firebase');
 
       // Clear local quest items cache
       clearQuestItemsCache();
@@ -7108,6 +7258,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       // Create the circular fishing animation
       createFishingAnimation(animationX, animationY);
 
+      // Emit fishing action event for Guilds mod skill tracking
+      const playerName = getCurrentPlayerName();
+      if (playerName && window.ModCoordination) {
+        console.log('[Quests Mod][Water Fishing] Emitting fishing action for skill tracking');
+        window.ModCoordination.emit('fishingAction', { playerName });
+      }
+
       // Check if player is on Al Dee Fishing Mission and in Goblin Bridge
       const alDeeMissionProgress = getMissionProgress(AL_DEE_FISHING_MISSION);
       const roomNames = globalThis.state?.utils?.ROOM_NAME;
@@ -7545,6 +7702,40 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           fishingState.ironOreQuestExpired = !progress.ironOre.active &&
                                              !progress.ironOre.completed &&
                                              !!progress.ironOre.startTime;
+        }
+
+        // If Al Dee fishing mission is completed, mark Iron Ore quest as completed
+        // since Iron Ore was part of that mission and the overall quest line is now done
+        if (kingChatState.progressAlDeeFishing.completed) {
+          if (fishingState.ironOreQuestActive) {
+            console.log('[Quests Mod] Al Dee fishing mission completed - marking active Iron Ore quest as completed');
+            fishingState.ironOreQuestActive = false;
+            fishingState.ironOreQuestExpired = false;
+            fishingState.ironOreQuestCompleted = true;
+            fishingState.ironOreQuestStartTime = null;
+          } else if (!fishingState.ironOreQuestCompleted) {
+            console.log('[Quests Mod] Al Dee fishing mission completed - marking Iron Ore quest as completed');
+            fishingState.ironOreQuestCompleted = true;
+          }
+
+          // Save the completed state to Firebase
+          const currentPlayer = getCurrentPlayerName();
+          if (currentPlayer) {
+            try {
+              const currentProgress = await getKingTibianusProgress(currentPlayer);
+              await saveKingTibianusProgress(currentPlayer, {
+                ...currentProgress,
+                ironOre: {
+                  active: false,
+                  startTime: null,
+                  completed: true
+                }
+              });
+              console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
+            } catch (err) {
+              console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
+            }
+          }
         }
 
         console.log('[Quests Mod] Mission progress loaded from Firebase:', {

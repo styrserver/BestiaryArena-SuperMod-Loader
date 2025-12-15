@@ -4,6 +4,7 @@
 'use strict';
 
 console.log('[Guilds] initializing...');
+console.log('[Guilds] DEBUG: Guilds.js file loaded and executing');
 
 // =======================
 // Configuration & Constants
@@ -82,6 +83,698 @@ const TIMEOUTS = {
   INITIAL_CHECK: 500,
   PLACEHOLDER_RESET: 3000
 };
+
+const TIBIA_SKILLS_CONFIG = [
+  {
+    key: 'guildPoints',
+    label: 'Guild Points',
+    icon: 'coin.png', // Keep full path for coin icon since it's in different folder
+    max: 100,
+    barColor: 'rgb(255, 215, 0)' // Gold color
+  },
+  {
+    key: 'magicLevel',
+    label: 'Magic Level',
+    icon: 'Magic_Level_Icon.png',
+    max: 0, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'axeFighting',
+    label: 'Axe Fighting',
+    icon: 'Axe_Fighting_Icon.png',
+    max: 10, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'swordFighting',
+    label: 'Sword Fighting',
+    icon: 'Sword_Fighting_Icon.png',
+    max: 10, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'clubFighting',
+    label: 'Club Fighting',
+    icon: 'Club_Fighting_Icon.png',
+    max: 10, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'distanceFighting',
+    label: 'Distance Fighting',
+    icon: 'Distance_Fighting_Icon.png',
+    max: 10, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'shielding',
+    label: 'Shielding',
+    icon: 'Shielding_Icon.png',
+    max: 10, // Will be dynamically set based on current level
+    barColor: 'rgb(128, 255, 128)' // Green color
+  },
+  {
+    key: 'fishing',
+    label: 'Fishing',
+    icon: 'Fishing_Icon.png',
+    max: 10,
+    barColor: 'rgb(128, 255, 128)' // Green color
+  }
+];
+
+const SKILL_PROGRESSION_CONFIG = {
+  ZERO_BASED_SKILLS: ['magicLevel'],
+  TEN_BASED_SKILLS: ['axeFighting', 'swordFighting', 'clubFighting', 'distanceFighting', 'shielding', 'fishing']
+};
+
+// Equipment to skill mapping
+const EQUIPMENT_SKILL_MAPPING = {
+  // Weapons that increase Axe Fighting
+  'Fire Axe': 'axeFighting',
+
+  // Weapons that increase Sword Fighting
+  'Bloody Edge': 'swordFighting',
+  'Epee': 'swordFighting',
+  'Giant Sword': 'swordFighting',
+  'Ice Rapier': 'swordFighting',
+  'Ratana': 'swordFighting',
+
+  // Weapons that increase Club Fighting
+  'Cranial Basher': 'clubFighting',
+
+  // Weapons that increase Distance Fighting
+  'Chain Bolter': 'distanceFighting',
+
+  // Weapons that increase Magic Level
+  'Glacial Rod': 'magicLevel',
+  'Hailstorm Rod': 'magicLevel',
+  'Springsprout Rod': 'magicLevel',
+  'Wand of Decay': 'magicLevel',
+
+  // Shields that increase Shielding
+  'Amazon Shield': 'shielding',
+  'Ectoplasmic Shield': 'shielding',
+  'Medusa Shield': 'shielding',
+  'Vampire Shield': 'shielding'
+};
+
+// Skill progression tracking
+// Skill progression formulas configuration
+// Each skill defines: base (starting battles/actions), growth (multiplier), startLevel (when skill becomes available)
+const SKILL_FORMULAS = {
+  // Standard weapon skills - start at level 10
+  axeFighting: { base: 25, growth: 1.096, startLevel: 10 },
+  swordFighting: { base: 25, growth: 1.096, startLevel: 10 },
+  clubFighting: { base: 25, growth: 1.096, startLevel: 10 },
+  distanceFighting: { base: 25, growth: 1.096, startLevel: 10 },
+
+  // Special cases
+  shielding: { base: 50, growth: 1.096, startLevel: 10 },      // Double difficulty of weapons
+  fishing: { base: 10, growth: 1.04, startLevel: 10 },         // Lower base, slower growth
+  magicLevel: { base: 10, growth: 1.072, startLevel: 0 }       // Starts at level 0, moderate growth
+};
+
+
+// Unified skill calculation function
+// Formula: ceil(base * growth^effectiveLevel) where effectiveLevel = max(0, currentLevel - startLevel)
+function calculateSkillBattles(currentLevel, skillConfig) {
+  const effectiveLevel = Math.max(0, currentLevel - skillConfig.startLevel);
+  return Math.ceil(skillConfig.base * Math.pow(skillConfig.growth, effectiveLevel));
+}
+
+// Input validation for skill calculations
+function validateSkillInputs(currentLevel, skillType) {
+  if (!Number.isInteger(currentLevel) || currentLevel < 0) {
+    throw new Error(`Invalid level: ${currentLevel}. Must be a non-negative integer.`);
+  }
+  if (!SKILL_FORMULAS[skillType]) {
+    throw new Error(`Unknown skill type: ${skillType}`);
+  }
+}
+
+// Calculate battles needed for next level
+function calculateBattlesForNextLevel(currentLevel, skillType) {
+  // Validate inputs
+  validateSkillInputs(currentLevel, skillType);
+
+  // Get skill configuration and calculate
+  const skillConfig = SKILL_FORMULAS[skillType];
+  return calculateSkillBattles(currentLevel, skillConfig);
+}
+
+// Calculate total battles needed to reach a specific level
+function calculateTotalBattlesForLevel(targetLevel, skillType) {
+  // Validate inputs
+  if (!Number.isInteger(targetLevel) || targetLevel < 0) {
+    throw new Error(`Invalid target level: ${targetLevel}. Must be a non-negative integer.`);
+  }
+  validateSkillInputs(0, skillType); // Validate skill type
+
+  const skillConfig = SKILL_FORMULAS[skillType];
+  let totalBattles = 0;
+  const startLevel = skillConfig.startLevel;
+
+  // Sum all level transitions from startLevel to targetLevel - 1
+  for (let level = startLevel; level < targetLevel; level++) {
+    totalBattles += calculateSkillBattles(level, skillConfig);
+  }
+
+  return totalBattles;
+}
+
+// Get skill type for equipment
+function getSkillForEquipment(equipmentName) {
+  return EQUIPMENT_SKILL_MAPPING[equipmentName] || null;
+}
+
+// Track battle progress for skills
+const skillBattleTracker = {
+  // Store battle counts for each skill (playerName -> skillType -> count)
+  battleCounts: new Map(),
+
+  // Get current battle count for a skill
+  getBattleCount(playerName, skillType) {
+    const playerData = this.battleCounts.get(playerName) || new Map();
+    return playerData.get(skillType) || 0;
+  },
+
+  // Increment battle count for a skill
+  async incrementBattleCount(playerName, skillType) {
+    if (!this.battleCounts.has(playerName)) {
+      this.battleCounts.set(playerName, new Map());
+    }
+    const playerData = this.battleCounts.get(playerName);
+    const currentCount = playerData.get(skillType) || 0;
+    const newCount = currentCount + 1;
+    playerData.set(skillType, newCount);
+
+    // Save progress to Firebase
+    await this.saveProgressToFirebase(playerName);
+  },
+
+  // Reset battle count for next level
+  resetBattleCount(playerName, skillType) {
+    if (this.battleCounts.has(playerName)) {
+      this.battleCounts.get(playerName).set(skillType, 0);
+    }
+  },
+
+  // Reset battle counts (for new tracking period)
+  resetCounts(playerName) {
+    this.battleCounts.delete(playerName);
+  },
+
+  // Load progress from Firebase
+  async loadProgressFromFirebase(playerName) {
+    try {
+      const normalizedName = sanitizeFirebaseKey(playerName);
+      const path = `${GUILD_CONFIG.firebaseUrl}/skill-progress/${normalizedName}.json`;
+
+      const response = await fetch(path);
+      if (response.ok) {
+        const data = await response.json();
+        if (data) {
+          // Convert plain object back to Map structure
+          const playerData = new Map();
+          Object.entries(data).forEach(([skillType, count]) => {
+            playerData.set(skillType, count);
+          });
+          this.battleCounts.set(playerName, playerData);
+          console.log('[Guilds] Loaded skill progress from Firebase:', playerName, data);
+        }
+      }
+    } catch (error) {
+      console.error('[Guilds] Error loading skill progress from Firebase:', error);
+    }
+  },
+
+  // Save progress to Firebase
+  async saveProgressToFirebase(playerName) {
+    try {
+      const playerData = this.battleCounts.get(playerName);
+      if (!playerData) return;
+
+      // Convert Map to plain object for Firebase
+      const progressData = {};
+      playerData.forEach((count, skillType) => {
+        progressData[skillType] = count;
+      });
+
+      const normalizedName = sanitizeFirebaseKey(playerName);
+      const path = `${GUILD_CONFIG.firebaseUrl}/skill-progress/${normalizedName}.json`;
+
+      const response = await fetch(path, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(progressData)
+      });
+
+      if (!response.ok) {
+        console.error('[Guilds] Failed to save skill progress:', response.status);
+      }
+    } catch (error) {
+      console.error('[Guilds] Error saving skill progress to Firebase:', error);
+    }
+  }
+};
+
+// Get currently equipped items that affect skills
+async function getSkillAffectingEquipment() {
+  const equippedItems = await getEquippedItems();
+  const skillEquipment = [];
+
+  for (const [slotType, item] of Object.entries(equippedItems)) {
+    if (item && item.name) {
+      const skillType = getSkillForEquipment(item.name);
+      if (skillType) {
+        skillEquipment.push({
+          slotType,
+          name: item.name,
+          skillType,
+          tier: item.tier || 0
+        });
+      }
+    }
+  }
+
+  return skillEquipment;
+}
+
+// Process skill increases after a battle (victory or defeat)
+async function processSkillIncreases() {
+  try {
+    const playerName = getCurrentPlayerName();
+    console.log('[Guilds] processSkillIncreases called for player:', playerName);
+    if (!playerName) {
+      console.log('[Guilds] No player name found, skipping skill increases');
+      return;
+    }
+
+    const skillEquipment = await getSkillAffectingEquipment();
+    console.log('[Guilds] Skill affecting equipment found:', skillEquipment.length, 'items');
+    if (skillEquipment.length === 0) {
+      console.log('[Guilds] No skill-affecting equipment found, skipping skill increases');
+      return;
+    }
+
+    // Get current skills
+    const currentSkills = await getPlayerSkillsFromFirebase(playerName);
+
+    // Track which skills were increased
+    const increasedSkills = [];
+
+    for (const equipment of skillEquipment) {
+      const { skillType } = equipment;
+      const currentLevel = currentSkills[skillType] || (SKILL_PROGRESSION_CONFIG.ZERO_BASED_SKILLS.includes(skillType) ? 0 : 10);
+
+      console.log(`[Guilds] Processing skill: ${skillType}, current level: ${currentLevel}, equipment:`, equipment.name);
+
+      // Increment battle count for this skill
+      await skillBattleTracker.incrementBattleCount(playerName, skillType);
+      const battleCount = skillBattleTracker.getBattleCount(playerName, skillType);
+
+      // Check if we've reached enough battles for a level up
+      const battlesNeeded = calculateBattlesForNextLevel(currentLevel, skillType);
+
+      console.log(`[Guilds] ${skillType}: ${battleCount}/${battlesNeeded} battles`);
+
+      if (battleCount >= battlesNeeded) {
+        // Level up!
+        const newLevel = currentLevel + 1;
+        currentSkills[skillType] = newLevel;
+        increasedSkills.push({
+          skillType,
+          oldLevel: currentLevel,
+          newLevel,
+          equipment: equipment.name
+        });
+
+        // Increment totalSkillIncreases if this is a TEN_BASED_SKILL that leveled up beyond base level
+        if (SKILL_PROGRESSION_CONFIG.TEN_BASED_SKILLS.includes(skillType) && newLevel > 10) {
+          currentSkills.totalSkillIncreases = (currentSkills.totalSkillIncreases || 0) + 1;
+          console.log(`[Guilds] totalSkillIncreases incremented to: ${currentSkills.totalSkillIncreases}`);
+        }
+
+        // Reset battle count for next level
+        skillBattleTracker.resetBattleCount(playerName, skillType);
+        // Save the reset progress to Firebase
+        await skillBattleTracker.saveProgressToFirebase(playerName);
+
+        console.log(`[Guilds] Skill increased: ${skillType} from ${currentLevel} to ${newLevel} (${equipment.name})`);
+      }
+    }
+
+    // Check for guild point awards before saving
+    let guildPointsToAward = 0;
+    if (increasedSkills.length > 0 && currentSkills.totalSkillIncreases) {
+      const oldTotal = currentSkills.totalSkillIncreases - increasedSkills.length; // Approximate previous total
+      const newTotal = currentSkills.totalSkillIncreases;
+
+      // Check if we crossed any multiples of 10
+      const oldMilestone = Math.floor(oldTotal / 10);
+      const newMilestone = Math.floor(newTotal / 10);
+
+      if (newMilestone > oldMilestone) {
+        guildPointsToAward = newMilestone - oldMilestone;
+        console.log(`[Guilds] Awarding ${guildPointsToAward} guild points for reaching ${newMilestone * 10} total skill increases`);
+      }
+    }
+
+    // Save updated skills if any were increased
+    if (increasedSkills.length > 0) {
+      const success = await savePlayerSkillsToFirebase(playerName, currentSkills);
+      if (success) {
+        // Show notification for skill increases
+        for (const increase of increasedSkills) {
+          showSkillIncreaseNotification(increase.skillType, increase.oldLevel, increase.newLevel, increase.equipment);
+        }
+
+        // Award guild points if earned
+        if (guildPointsToAward > 0) {
+          try {
+            await addGuildCoins(guildPointsToAward);
+            showGuildCoinNotification(guildPointsToAward);
+            console.log(`[Guilds] Awarded ${guildPointsToAward} guild points for skill progression!`);
+          } catch (error) {
+            console.error('[Guilds] Error awarding guild points for skill progression:', error);
+          }
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error('[Guilds] Error processing skill increases:', error);
+  }
+}
+
+// Process skill increase for fishing actions
+async function processFishingSkillIncrease(playerName) {
+  try {
+    if (!playerName) {
+      console.log('[Guilds] No player name provided to processFishingSkillIncrease');
+      return;
+    }
+
+    // Get current skills
+    const currentSkills = await getPlayerSkillsFromFirebase(playerName);
+    const skillType = 'fishing';
+    const currentLevel = currentSkills[skillType] || 10; // Fishing starts at level 10
+
+    console.log(`[Guilds] Processing fishing skill increase for ${playerName}: current level ${currentLevel}`);
+
+    // Increment battle count for fishing
+    await skillBattleTracker.incrementBattleCount(playerName, skillType);
+    const actionCount = skillBattleTracker.getBattleCount(playerName, skillType);
+
+    // Check if we've reached enough actions for a level up
+    const actionsNeeded = calculateBattlesForNextLevel(currentLevel, skillType);
+
+    console.log(`[Guilds] Fishing progress: ${actionCount}/${actionsNeeded} actions needed for level ${currentLevel} to ${currentLevel + 1}`);
+
+    if (actionCount >= actionsNeeded) {
+      // Level up!
+      const newLevel = currentLevel + 1;
+      currentSkills[skillType] = newLevel;
+
+      // Increment totalSkillIncreases for fishing skill
+      if (newLevel > 10) {
+        currentSkills.totalSkillIncreases = (currentSkills.totalSkillIncreases || 0) + 1;
+        console.log(`[Guilds] Fishing totalSkillIncreases incremented to: ${currentSkills.totalSkillIncreases}`);
+      }
+
+      console.log(`[Guilds] Fishing level up triggered: ${currentLevel} -> ${newLevel}`);
+
+      // Check for guild point awards
+      let guildPointsToAward = 0;
+      if (currentSkills.totalSkillIncreases) {
+        const oldTotal = currentSkills.totalSkillIncreases - 1; // Previous total before this increase
+        const newTotal = currentSkills.totalSkillIncreases;
+
+        // Check if we crossed any multiples of 10
+        const oldMilestone = Math.floor(oldTotal / 10);
+        const newMilestone = Math.floor(newTotal / 10);
+
+        if (newMilestone > oldMilestone) {
+          guildPointsToAward = newMilestone - oldMilestone;
+          console.log(`[Guilds] Fishing: Awarding ${guildPointsToAward} guild points for reaching ${newMilestone * 10} total skill increases`);
+        }
+      }
+
+      // Reset action count for next level
+      skillBattleTracker.resetBattleCount(playerName, skillType);
+      // Save the reset progress to Firebase
+      await skillBattleTracker.saveProgressToFirebase(playerName);
+
+      // Save updated skills
+      const success = await savePlayerSkillsToFirebase(playerName, currentSkills);
+      if (success) {
+        // Show notification for skill increase
+        try {
+          showSkillIncreaseNotification(skillType, currentLevel, newLevel, 'Fishing');
+          console.log(`[Guilds] Fishing skill increased: ${currentLevel} to ${newLevel} - notification shown`);
+
+          // Award guild points if earned
+          if (guildPointsToAward > 0) {
+            try {
+              await addGuildCoins(guildPointsToAward);
+              showGuildCoinNotification(guildPointsToAward);
+              console.log(`[Guilds] Fishing: Awarded ${guildPointsToAward} guild points for skill progression!`);
+            } catch (error) {
+              console.error('[Guilds] Fishing: Error awarding guild points for skill progression:', error);
+            }
+          }
+        } catch (notificationError) {
+          console.error(`[Guilds] Fishing skill increased: ${currentLevel} to ${newLevel} but notification failed:`, notificationError);
+        }
+      } else {
+        console.error(`[Guilds] Failed to save fishing skill increase to Firebase`);
+      }
+    }
+  } catch (error) {
+    console.error('[Guilds] Error processing fishing skill increase:', error);
+  }
+}
+
+// Show notification for skill increase using the same toast system as Quests mod
+function showSkillIncreaseNotification(skillType, oldLevel, newLevel, equipment) {
+  const skillConfig = TIBIA_SKILLS_CONFIG.find(config => config.key === skillType);
+  const skillName = skillConfig?.label || skillType;
+
+  // Use the same toast system as Quests mod for consistency
+  const message = `You've advanced from level ${oldLevel} to level ${newLevel}.`;
+
+  // Get or create the main toast container (same as Quests mod)
+  let mainContainer = document.getElementById('quest-items-toast-container');
+  if (!mainContainer) {
+    mainContainer = document.createElement('div');
+    mainContainer.id = 'quest-items-toast-container';
+    mainContainer.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10000;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    `;
+    document.body.appendChild(mainContainer);
+  }
+
+  const existingToasts = mainContainer.querySelectorAll('.toast-item');
+  const stackOffset = existingToasts.length * 46;
+
+  // Create the flex container for this specific toast
+  const flexContainer = document.createElement('div');
+  flexContainer.className = 'toast-item';
+  flexContainer.style.cssText = `
+    display: flex;
+    position: absolute;
+    transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+    transform: translateY(-${stackOffset}px);
+    bottom: 0px;
+    right: 0px;
+    justify-content: flex-end;
+  `;
+
+  const toast = document.createElement('button');
+  toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+  const widgetTop = document.createElement('div');
+  widgetTop.className = 'widget-top h-2.5';
+
+  const widgetBottom = document.createElement('div');
+  widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+  // Add skill icon if available
+  if (skillConfig?.icon) {
+    const iconImg = document.createElement('img');
+    const iconUrl = getSkillAssetUrl(skillConfig.icon);
+    console.log(`[Guilds] Loading skill icon: ${skillConfig.icon} -> ${iconUrl}`);
+    iconImg.src = iconUrl;
+    iconImg.style.cssText = `
+      width: 9px;
+      height: 9px;
+      object-fit: contain;
+      flex-shrink: 0;
+    `;
+    iconImg.onload = () => {
+      console.log(`[Guilds] Skill icon loaded successfully: ${skillConfig.icon}`);
+    };
+    iconImg.onerror = () => {
+      console.log(`[Guilds] Skill icon failed to load: ${skillConfig.icon}, using fallback`);
+      // Fallback to text icon if image fails to load
+      iconImg.style.display = 'none'; // Hide the broken image
+      const textIcon = document.createElement('span');
+      textIcon.textContent = '🎣'; // Use fishing rod emoji for fishing
+      textIcon.style.fontSize = '9px';
+      textIcon.style.flexShrink = '0';
+      widgetBottom.insertBefore(textIcon, iconImg); // Insert before the img
+    };
+    widgetBottom.appendChild(iconImg);
+  }
+
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'text-left';
+  messageDiv.textContent = message;
+  widgetBottom.appendChild(messageDiv);
+
+  toast.appendChild(widgetTop);
+  toast.appendChild(widgetBottom);
+  flexContainer.appendChild(toast);
+  mainContainer.appendChild(flexContainer);
+
+  console.log(`[Guilds] Skill Increase Toast: ${skillName} ${message} (${equipment})`);
+
+  // Add click event listener for dismissal (same as Quests mod)
+  toast.addEventListener('click', () => {
+    if (flexContainer && flexContainer.parentNode) {
+      flexContainer.parentNode.removeChild(flexContainer);
+      updateToastPositions(mainContainer);
+    }
+  });
+
+  // Auto-remove after 10 seconds (same as Quests mod's TOAST_DURATION_IMPORTANT)
+  setTimeout(() => {
+    if (flexContainer && flexContainer.parentNode) {
+      flexContainer.parentNode.removeChild(flexContainer);
+      updateToastPositions(mainContainer);
+    }
+  }, 10000);
+
+  // Helper function to update remaining toast positions (same as Quests mod)
+  function updateToastPositions(container) {
+    const toasts = container.querySelectorAll('.toast-item');
+    toasts.forEach((toast, index) => {
+      const offset = index * 46;
+      toast.style.transform = `translateY(-${offset}px)`;
+    });
+  }
+}
+
+// Initialize battle result tracking
+async function initializeSkillBattleTracking() {
+  // Set up battle detection using serverResults (same as Hunt Analyzer)
+  // This is more reliable than game timer events
+  if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+    console.log('[Guilds] Setting up battle detection using board subscription...');
+
+    skillBattleSubscription = globalThis.state.board.subscribe(({ context }) => {
+      const serverResults = context.serverResults;
+      if (!serverResults || !serverResults.rewardScreen || typeof serverResults.seed === 'undefined') {
+        return; // No battle results or seed, skip
+      }
+
+      const seed = serverResults.seed;
+
+      // Skip duplicate seeds (same battle processed multiple times)
+      if (seed === lastProcessedSkillSeed) {
+        return;
+      }
+
+      lastProcessedSkillSeed = seed;
+
+      console.log('[Guilds] Battle detected via serverResults:', {
+        victory: serverResults.rewardScreen.victory,
+        roomId: serverResults.rewardScreen.roomId,
+        seed: seed,
+        hasLoot: !!serverResults.rewardScreen.loot
+      });
+
+      // Process skill increases on victory OR defeat (same as Hunt Analyzer)
+      if (serverResults.rewardScreen.victory !== undefined) {
+        const battleResult = serverResults.rewardScreen.victory ? 'victory' : 'defeat';
+        console.log(`[Guilds] Battle ${battleResult} detected, processing skill increases...`);
+        processSkillIncreases();
+      }
+    });
+
+    console.log('[Guilds] Battle detection subscription registered');
+  } else {
+    console.warn('[Guilds] Board subscription not available, skill progression disabled');
+  }
+
+    // Load existing skill progress from Firebase
+    const currentPlayer = getCurrentPlayerName();
+    if (currentPlayer) {
+      await skillBattleTracker.loadProgressFromFirebase(currentPlayer);
+    }
+
+    console.log('[Guilds] Skill battle tracking initialized');
+
+  // Debug function for fishing skill tracking
+  window.debugFishingSkill = async function() {
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.log('[Guilds] No current player name found');
+        return;
+      }
+
+      const currentSkills = await getPlayerSkillsFromFirebase(playerName);
+      const currentLevel = currentSkills.fishing || 10;
+      const actionCount = skillBattleTracker.getBattleCount(playerName, 'fishing');
+      const actionsNeeded = calculateBattlesForNextLevel(currentLevel, 'fishing');
+
+      console.log('[Guilds] Fishing Skill Debug:');
+      console.log('  Player:', playerName);
+      console.log('  Current Level:', currentLevel);
+      console.log('  Action Count:', actionCount);
+      console.log('  Actions Needed for next level:', actionsNeeded);
+      console.log('  Progress:', `${actionCount}/${actionsNeeded}`);
+      console.log('  Ready to level up:', actionCount >= actionsNeeded);
+      console.log('  Total Skill Increases:', currentSkills.totalSkillIncreases || 0);
+      console.log('  Next Guild Point Milestone:', ((Math.floor((currentSkills.totalSkillIncreases || 0) / 10) + 1) * 10));
+
+      // Check if ModCoordination is available
+      if (window.ModCoordination) {
+        console.log('  ModCoordination available: ✓');
+      } else {
+        console.log('  ModCoordination available: ✗');
+      }
+
+    } catch (error) {
+      console.error('[Guilds] Error in debugFishingSkill:', error);
+    }
+  };
+
+  // Listen for fishing actions from Quests mod
+  if (typeof window !== 'undefined' && window.ModCoordination) {
+    window.ModCoordination.on('fishingAction', (data) => {
+      console.log('[Guilds] Fishing action event received:', data);
+      if (data && data.playerName) {
+        console.log('[Guilds] Fishing action detected for player:', data.playerName);
+        processFishingSkillIncrease(data.playerName);
+      } else {
+        console.warn('[Guilds] Fishing action event received but missing playerName:', data);
+      }
+    });
+    console.log('[Guilds] Fishing action listener registered');
+  } else {
+    console.warn('[Guilds] Mod coordination not available, fishing sync disabled');
+  }
+}
 
 // =======================
 // Translation Helpers
@@ -1617,6 +2310,10 @@ function showGuildCoinNotification(amount) {
 let guildCoinsBoardSubscription = null;
 let lastProcessedSeed = null;
 
+// Board subscription for skill progression
+let skillBattleSubscription = null;
+let lastProcessedSkillSeed = null;
+
 function setupGuildCoinsDropSystem() {
   if (guildCoinsBoardSubscription) {
     return; // Already set up
@@ -1672,9 +2369,9 @@ async function updateGuildCoinsDisplay() {
     if (!guildCoinsDisplayElement) {
       return;
     }
-    
+
     const coins = await getGuildCoins();
-    guildCoinsDisplayElement.textContent = coins.toLocaleString();
+    guildCoinsDisplayElement.textContent = formatNumber(coins);
   } catch (error) {
     console.error('[Guilds] Error updating coin display:', error);
   }
@@ -3225,10 +3922,10 @@ function openCyclopediaForPlayer(playerName) {
 async function getPlayerEquipmentFromFirebase(playerName) {
   try {
     if (!playerName) return {};
-    
+
     const normalizedName = sanitizeFirebaseKey(playerName);
     const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/equipment.json`;
-    
+
     const response = await fetch(path);
     if (!response.ok) {
       if (response.status === 404) {
@@ -3236,12 +3933,125 @@ async function getPlayerEquipmentFromFirebase(playerName) {
       }
       return {};
     }
-    
+
     const data = await response.json();
     return data || {};
   } catch (error) {
     console.error('[Guilds] Error fetching player equipment from Firebase:', error);
     return {};
+  }
+}
+
+// Calculate total skill increases from current skill levels
+function calculateTotalSkillIncreases(skills) {
+  let total = 0;
+  // Only count TEN_BASED_SKILLS (weapon skills) increases beyond base level 10
+  SKILL_PROGRESSION_CONFIG.TEN_BASED_SKILLS.forEach(skillType => {
+    const currentLevel = skills[skillType] || 10;
+    if (currentLevel > 10) {
+      total += (currentLevel - 10);
+    }
+  });
+  return total;
+}
+
+// Get default/base Tibia skills for new players
+function getDefaultSkills() {
+  return {
+    magicLevel: 0,      // Most skills start at 0 in Tibia
+    axeFighting: 10,    // Base level 10 for weapon skills
+    swordFighting: 10,
+    clubFighting: 10,
+    distanceFighting: 10,
+    shielding: 10,
+    fishing: 10,
+    totalSkillIncreases: 0  // Tracks cumulative skill increases for guild point awards
+  };
+}
+
+// Get player skills from Firebase
+async function getPlayerSkillsFromFirebase(playerName) {
+  try {
+    if (!playerName) return getDefaultSkills();
+
+    const normalizedName = sanitizeFirebaseKey(playerName);
+    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/skills.json`;
+
+    const response = await fetch(path);
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Player has no skills stored yet - initialize with base skills
+        console.log('[Guilds] No skills found for player, initializing with base skills:', playerName);
+        const defaultSkills = getDefaultSkills();
+
+        // Save the default skills to Firebase for future use
+        await savePlayerSkillsToFirebase(playerName, defaultSkills);
+
+        return defaultSkills;
+      }
+      return getDefaultSkills(); // Fallback to defaults on other errors
+    }
+
+    const data = await response.json();
+
+    // If skills data is empty or missing required skills, save base skills
+    if (!data || Object.keys(data).length === 0) {
+      console.log('[Guilds] Player has empty skills data, saving base skills:', playerName);
+      const defaultSkills = getDefaultSkills();
+      await savePlayerSkillsToFirebase(playerName, defaultSkills);
+      return defaultSkills;
+    }
+
+    // Ensure all required skills exist (for migration/updates)
+    const mergedSkills = { ...getDefaultSkills(), ...data };
+
+    // Calculate totalSkillIncreases if it doesn't exist (for migration)
+    if (!mergedSkills.hasOwnProperty('totalSkillIncreases') || mergedSkills.totalSkillIncreases === undefined) {
+      mergedSkills.totalSkillIncreases = calculateTotalSkillIncreases(mergedSkills);
+      console.log(`[Guilds] Calculated totalSkillIncreases for ${playerName}: ${mergedSkills.totalSkillIncreases}`);
+    }
+
+    // If merged skills differ from what's stored (missing base skills or totalSkillIncreases), update Firebase
+    const hasAllBaseSkills = Object.keys(getDefaultSkills()).every(key =>
+      data.hasOwnProperty(key)
+    );
+
+    if (!hasAllBaseSkills || !data.hasOwnProperty('totalSkillIncreases')) {
+      console.log('[Guilds] Player missing some base skills or totalSkillIncreases, updating Firebase:', playerName);
+      await savePlayerSkillsToFirebase(playerName, mergedSkills);
+    }
+
+    return mergedSkills;
+  } catch (error) {
+    console.error('[Guilds] Error fetching player skills from Firebase:', error);
+    return getDefaultSkills(); // Always return defaults on error
+  }
+}
+
+// Save player skills to Firebase
+async function savePlayerSkillsToFirebase(playerName, skillsData) {
+  try {
+    if (!playerName || !skillsData) return false;
+
+    const normalizedName = sanitizeFirebaseKey(playerName);
+    const path = `${GUILD_CONFIG.firebaseUrl}/player-equipment/${normalizedName}/skills.json`;
+
+    const response = await fetch(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(skillsData)
+    });
+
+    if (!response.ok) {
+      console.error('[Guilds] Failed to save player skills:', response.status, response.statusText);
+      return false;
+    }
+
+    console.log('[Guilds] Successfully saved player skills:', playerName, skillsData);
+    return true;
+  } catch (error) {
+    console.error('[Guilds] Error saving player skills to Firebase:', error);
+    return false;
   }
 }
 
@@ -3446,8 +4256,169 @@ function addPlayerEquipmentTooltip(slot, slotType, name) {
   slot.addEventListener('mousemove', updateTooltipPosition);
 }
 
+// Render Tibia skills stats in Cyclopedia style
+function renderTibiaSkillsStats(skillData) {
+  console.log('[Guilds] renderTibiaSkillsStats called with:', skillData);
+  try {
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2 revert-pixel-font-spacing whitespace-nowrap';
+    Object.assign(statsDiv.style, {
+      flex: '1 1 0',
+      textAlign: 'left',
+      width: '180px',
+      alignSelf: 'center',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-start',
+      boxSizing: 'border-box'
+    });
+
+    statsDiv.innerHTML = '';
+
+    console.log('[Guilds] TIBIA_SKILLS_CONFIG:', TIBIA_SKILLS_CONFIG);
+    TIBIA_SKILLS_CONFIG.forEach(stat => {
+      try {
+        console.log('[Guilds] Processing stat:', stat);
+        const value = skillData[stat.key] !== undefined ? skillData[stat.key] : 0;
+        const maxValue = stat.max || 100;
+        const percent = Math.max(0, Math.min(1, value / maxValue));
+        const barWidth = Math.round(percent * 100);
+        console.log('[Guilds] Stat', stat.key, '- value:', value, 'max:', maxValue, 'percent:', percent, 'barWidth:', barWidth);
+
+        const createStatRow = () => {
+          const statRow = document.createElement('div');
+          statRow.setAttribute('data-transparent', 'false');
+          statRow.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular data-[transparent=\'true\']:opacity-25';
+
+          const topRow = document.createElement('div');
+          topRow.className = 'flex justify-between items-center';
+
+          const left = document.createElement('span');
+          left.className = 'flex items-center';
+          left.style.gap = '2px';
+
+          const icon = document.createElement('img');
+          // Handle coin icon differently since it's in /assets/guild/, not /assets/skills/
+          if (stat.icon === 'coin.png') {
+            icon.src = getGuildAssetUrl('Guild_Coin.PNG'); // Use the actual guild coin icon
+          } else {
+            icon.src = getSkillAssetUrl(stat.icon);
+          }
+          icon.alt = stat.label;
+          Object.assign(icon.style, {
+            width: '9px',
+            height: '9px',
+            marginRight: '2px'
+          });
+
+          icon.onerror = () => {
+            icon.style.display = 'none';
+          };
+
+          left.appendChild(icon);
+
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = stat.label;
+          left.appendChild(nameSpan);
+
+          const valueSpan = document.createElement('span');
+          valueSpan.textContent = value;
+          valueSpan.className = 'text-right text-whiteExp';
+          Object.assign(valueSpan.style, {
+            textAlign: 'right',
+            minWidth: '3.5ch',
+            maxWidth: '5ch',
+            marginLeft: '6px',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            display: 'inline-block'
+          });
+
+          topRow.appendChild(left);
+          topRow.appendChild(valueSpan);
+
+          const barRow = document.createElement('div');
+          barRow.className = 'relative';
+
+          const barOuter = document.createElement('div');
+          barOuter.className = 'h-1 w-full border border-solid border-black bg-black frame-pressed-1 relative overflow-hidden duration-300 fill-mode-forwards gene-stats-bar-filled';
+          barOuter.style.animationDelay = '700ms';
+
+          const barFillWrap = document.createElement('div');
+          barFillWrap.className = 'absolute left-0 top-0 flex h-full w-full';
+
+          const barFill = document.createElement('div');
+          barFill.className = 'h-full shrink-0';
+          barFill.style.width = barWidth + '%';
+          barFill.style.background = stat.barColor || '#666';
+
+          barFillWrap.appendChild(barFill);
+          barOuter.appendChild(barFillWrap);
+
+          const barRight = document.createElement('div');
+          barRight.className = 'absolute left-full top-1/2 -translate-y-1/2';
+          barRight.style.display = 'block';
+
+          const skillBar = document.createElement('div');
+          skillBar.className = 'relative text-skillBar';
+
+          const spill1 = document.createElement('div');
+          spill1.className = 'spill-particles absolute left-full h-px w-0.5 bg-current';
+
+          const spill2 = document.createElement('div');
+          spill2.className = 'spill-particles-2 absolute left-full h-px w-0.5 bg-current';
+
+          skillBar.appendChild(spill1);
+          skillBar.appendChild(spill2);
+          barRight.appendChild(skillBar);
+
+          barRow.appendChild(barOuter);
+          barRow.appendChild(barRight);
+
+          statRow.appendChild(topRow);
+          statRow.appendChild(barRow);
+
+          return statRow;
+        };
+
+        const statRow = createStatRow();
+        console.log('[Guilds] Created stat row for', stat.key, ':', statRow);
+        statsDiv.appendChild(statRow);
+
+      } catch (statError) {
+        console.error('[Guilds] Error rendering skill stat:', stat, statError);
+      }
+    });
+
+    console.log('[Guilds] renderTibiaSkillsStats completed, returning statsDiv:', statsDiv);
+    return statsDiv;
+
+  } catch (error) {
+    console.error('[Guilds] ERROR in renderTibiaSkillsStats:', error);
+    console.error('[Guilds] Error stack:', error.stack);
+
+    const fallbackDiv = document.createElement('div');
+    fallbackDiv.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+    Object.assign(fallbackDiv.style, {
+      flex: '1 1 0',
+      textAlign: 'center',
+      width: '170px',
+      alignSelf: 'center',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      boxSizing: 'border-box',
+      color: '#999'
+    });
+    fallbackDiv.textContent = 'Skills unavailable';
+    return fallbackDiv;
+  }
+}
+
 // Show equipment modal for a player
 async function showPlayerEquipmentModal(playerName) {
+  console.log('[Guilds] showPlayerEquipmentModal CALLED with playerName:', playerName);
+  console.log('[Guilds] Starting custom player equipment modal...');
   try {
     // Close guild panel if open
     const guildPanel = document.querySelector('.guild-panel');
@@ -3479,9 +4450,9 @@ async function showPlayerEquipmentModal(playerName) {
     // Create modal content similar to col2 layout
     const contentDiv = document.createElement('div');
     contentDiv.style.cssText = `
-      width: 190px;
-      min-width: 190px;
-      max-width: 190px;
+      width: 220px;
+      min-width: 220px;
+      max-width: 220px;
       flex: 1 1 0;
       min-height: 0;
       display: flex;
@@ -3519,7 +4490,8 @@ async function showPlayerEquipmentModal(playerName) {
     equipmentBox.style.maxHeight = '200px';
     contentDiv.appendChild(equipmentBox);
     
-    // Row 2: Total stats section (50% height - fixed)
+    // Row 2: Tibia Skills section (50% height - fixed)
+    console.log('[Guilds] CUSTOM MODAL: Creating Tibia Skills section with Firebase data...');
     const detailsContainer = document.createElement('div');
     detailsContainer.setAttribute('data-details-container', 'true');
     detailsContainer.style.cssText = `
@@ -3529,58 +4501,41 @@ async function showPlayerEquipmentModal(playerName) {
       box-sizing: border-box;
       overflow-y: auto;
     `;
-    
-    const statsDiv = document.createElement('div');
-    statsDiv.style.cssText = `
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      width: 100%;
-      height: 100%;
-    `;
-    
-    // Total Guild Points
-    const totalDiv = document.createElement('div');
-    totalDiv.style.cssText = `
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 8px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 4px;
-    `;
-    
-    const totalLabel = document.createElement('div');
-    totalLabel.textContent = t('mods.guilds.equipment.totalGuildPoints') || 'Total Guild Points';
-    totalLabel.style.cssText = `
-      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-      font-size: 10px;
-      opacity: 0.7;
-    `;
-    
-    const totalValue = document.createElement('div');
-    totalValue.textContent = totalGuildPoints.toString();
-    totalValue.style.cssText = `
-      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
-      font-size: 18px;
-      font-weight: 600;
-    `;
-    
-    totalDiv.appendChild(totalLabel);
-    totalDiv.appendChild(totalValue);
-    statsDiv.appendChild(totalDiv);
-    
-    detailsContainer.appendChild(statsDiv);
-    
+
+    // Fetch skills from Firebase (will auto-initialize if needed)
+    const playerSkills = await getPlayerSkillsFromFirebase(playerName);
+
+    // Create skill data with actual values (no fallbacks needed since getPlayerSkillsFromFirebase handles defaults)
+    const skillData = {
+      guildPoints: Math.min(100, totalGuildPoints),
+      magicLevel: playerSkills.magicLevel,
+      axeFighting: playerSkills.axeFighting,
+      swordFighting: playerSkills.swordFighting,
+      clubFighting: playerSkills.clubFighting,
+      distanceFighting: playerSkills.distanceFighting,
+      shielding: playerSkills.shielding,
+      fishing: playerSkills.fishing
+    };
+
+    console.log('[Guilds] Skill data:', skillData);
+    console.log('[Guilds] Calling renderTibiaSkillsStats...');
+
+    const skillsStatsDiv = renderTibiaSkillsStats(skillData);
+    console.log('[Guilds] renderTibiaSkillsStats returned:', skillsStatsDiv);
+
+    // Increase width by 10px for better display
+    if (skillsStatsDiv) {
+      skillsStatsDiv.style.width = '180px';
+    }
+
+    detailsContainer.appendChild(skillsStatsDiv);
+    console.log('[Guilds] Added skills stats div to details container');
+
     const bottomBox = createEquipmentBox({
       title: t('mods.guilds.equipment.totalStatsTitle') || 'Total stats',
       content: detailsContainer
     });
-    bottomBox.style.flex = '0 0 200px';
-    bottomBox.style.height = '200px';
-    bottomBox.style.minHeight = '200px';
-    bottomBox.style.maxHeight = '200px';
+    bottomBox.style.flex = '1 1 auto';
     contentDiv.appendChild(bottomBox);
     
     // Create modal
@@ -3591,8 +4546,8 @@ async function showPlayerEquipmentModal(playerName) {
     
     const modal = api.ui.components.createModal({
       title: `${playerName}'s Equipment`,
-      width: 220,
-      height: 480,
+      width: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH,
+      height: PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT,
       content: contentDiv,
       buttons: [{
         text: t('mods.guilds.close') || 'Close',
@@ -3603,11 +4558,11 @@ async function showPlayerEquipmentModal(playerName) {
         }
       }]
     });
-    
+
     setTimeout(() => {
       const dialog = getOpenDialog();
       if (dialog) {
-        applyModalStyles(dialog, 220, 480);
+        applyModalStyles(dialog, PLAYER_EQUIPMENT_PANEL_DIMENSIONS.WIDTH, PLAYER_EQUIPMENT_PANEL_DIMENSIONS.HEIGHT);
         setupEscKeyHandler(dialog, () => {
           dialog.remove();
         });
@@ -5039,6 +5994,7 @@ async function openGuildPanel(viewGuildId = null) {
       
       // Add Equipment dropdown item
       dropdown.appendChild(createDropdownItem(t('mods.guilds.dropdownEquipment') || 'Equipment', () => {
+        console.log('[Guilds] Equipment dropdown clicked for player:', member.username);
         showPlayerEquipmentModal(member.username);
       }, dropdown, { fontSize: '13px' }));
       
@@ -6366,12 +7322,18 @@ function injectGuildMenuItem(menuElement) {
 // =======================
 
 const EQUIPMENT_CONFIG = {
-  MODAL_WIDTH: 490,
-  MODAL_HEIGHT: 490,
+  MODAL_WIDTH: 510,
+  MODAL_HEIGHT: 480,
   SLOT_SIZE: 32,
   SLOT_GAP: 4,
   // Base path for local equipment images (relative to extension root)
   IMAGE_BASE_PATH: '/assets/equipment/'
+};
+
+
+const PLAYER_EQUIPMENT_PANEL_DIMENSIONS = {
+  WIDTH: 250,
+  HEIGHT: 510
 };
 
 // Cache for extension base URL to avoid repeated lookups
@@ -6832,6 +7794,91 @@ function getGuildAssetUrl(filename) {
   
   // Last resort: return path
   console.warn('[Guilds] Could not determine extension runtime URL, using relative path:', imagePath);
+  return imagePath;
+}
+
+// Helper function to get skill asset URL (similar to getEquipmentImageUrl and getGuildAssetUrl)
+function getSkillAssetUrl(filename) {
+  const imagePath = '/assets/skills/' + filename;
+
+  // Use cached base URL if available
+  if (cachedExtensionBaseUrl) {
+    const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+    const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+    return base + path;
+  }
+
+  // Try multiple methods to get extension runtime URL (same as equipment)
+  try {
+    const api = window.browserAPI || window.chrome || window.browser;
+    if (api && api.runtime) {
+      if (api.runtime.id && api.runtime.id !== 'invalid' && api.runtime.getURL) {
+        const url = api.runtime.getURL(imagePath);
+        if (url && url.includes('://') && !url.includes('://invalid')) {
+          // Cache the base URL for future use
+          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+          if (baseUrlMatch) {
+            cachedExtensionBaseUrl = baseUrlMatch[0];
+          }
+          return url;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Skills] Error getting URL from browser API:', e);
+  }
+
+  // Method 2: Try global browserAPI (if available in mod context)
+  try {
+    if (typeof browserAPI !== 'undefined' && browserAPI?.runtime) {
+      if (browserAPI.runtime.id && browserAPI.runtime.id !== 'invalid' && browserAPI.runtime.getURL) {
+        const url = browserAPI.runtime.getURL(imagePath);
+        if (url && url.includes('://') && !url.includes('://invalid')) {
+          const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+          if (baseUrlMatch) {
+            cachedExtensionBaseUrl = baseUrlMatch[0];
+          }
+          return url;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Skills] Error getting URL from global browserAPI:', e);
+  }
+
+  // Method 3: Try constructing URL manually (less reliable)
+  try {
+    if (typeof browserAPI !== 'undefined' && browserAPI?.runtime?.id) {
+      const extensionId = browserAPI.runtime.id;
+      if (extensionId && extensionId !== 'invalid') {
+        const url = `chrome-extension://${extensionId}${imagePath}`;
+        const baseUrlMatch = url.match(/^(chrome-extension|moz-extension):\/\/[^/]+\//);
+        if (baseUrlMatch) {
+          cachedExtensionBaseUrl = baseUrlMatch[0];
+        }
+        return url;
+      }
+    }
+  } catch (e) {
+    console.warn('[Skills] Error constructing manual URL:', e);
+  }
+
+  // Method 4: Try window.BESTIARY_EXTENSION_BASE_URL (if set by content script)
+  try {
+    if (window.BESTIARY_EXTENSION_BASE_URL && !cachedExtensionBaseUrl) {
+      cachedExtensionBaseUrl = window.BESTIARY_EXTENSION_BASE_URL;
+    }
+    if (cachedExtensionBaseUrl) {
+      const base = cachedExtensionBaseUrl.endsWith('/') ? cachedExtensionBaseUrl : cachedExtensionBaseUrl + '/';
+      const path = imagePath.startsWith('/') ? imagePath.substring(1) : imagePath;
+      return base + path;
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  // Last resort: return path
+  console.warn('[Skills] Could not determine extension runtime URL, using relative path:', imagePath);
   return imagePath;
 }
 
@@ -8509,6 +9556,247 @@ function createEquipmentModalColumn(width) {
   return column;
 }
 
+// Render Tibia skills stats in Cyclopedia style
+function renderTibiaSkillsStats(skillData) {
+  console.log('[Guilds] renderTibiaSkillsStats called with:', skillData);
+  try {
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2 revert-pixel-font-spacing whitespace-nowrap';
+    Object.assign(statsDiv.style, {
+      flex: '1 1 0',
+      textAlign: 'left',
+      width: '180px',
+      alignSelf: 'center',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-start',
+      boxSizing: 'border-box'
+    });
+
+    statsDiv.innerHTML = '';
+
+    console.log('[Guilds] TIBIA_SKILLS_CONFIG:', TIBIA_SKILLS_CONFIG);
+    TIBIA_SKILLS_CONFIG.forEach(stat => {
+      try {
+        console.log('[Guilds] Processing stat:', stat);
+        const value = skillData[stat.key] !== undefined ? skillData[stat.key] :
+          (SKILL_PROGRESSION_CONFIG.ZERO_BASED_SKILLS.includes(stat.key) ? 0 : 10);
+
+        // Dynamically calculate progress based on current level for progression skills
+        let percent = 0;
+        if (SKILL_PROGRESSION_CONFIG.ZERO_BASED_SKILLS.includes(stat.key) ||
+            SKILL_PROGRESSION_CONFIG.TEN_BASED_SKILLS.includes(stat.key)) {
+          // Calculate actual progress towards next level based on battle count
+          const playerName = getCurrentPlayerName();
+          const battleCount = skillBattleTracker.getBattleCount(playerName, stat.key);
+          const battlesNeeded = calculateBattlesForNextLevel(value, stat.key);
+
+          if (battlesNeeded > 0) {
+            percent = Math.max(0, Math.min(1, battleCount / battlesNeeded));
+          }
+        } else {
+          // For non-progression skills (like fishing), use the old static calculation
+          const maxValue = stat.max;
+          percent = Math.max(0, Math.min(1, value / maxValue));
+        }
+
+        const barWidth = Math.round(percent * 100);
+        console.log('[Guilds] Stat', stat.key, '- value:', value, 'percent:', percent, 'barWidth:', barWidth);
+
+        const createStatRow = () => {
+          const statRow = document.createElement('div');
+          statRow.setAttribute('data-transparent', 'false');
+          statRow.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular data-[transparent=\'true\']:opacity-25';
+
+          const topRow = document.createElement('div');
+          topRow.className = 'flex justify-between items-center';
+
+          const left = document.createElement('span');
+          left.className = 'flex items-center';
+          left.style.gap = '2px';
+
+          const icon = document.createElement('img');
+          // Handle coin icon differently since it's in /assets/guild/, not /assets/skills/
+          if (stat.icon === 'coin.png') {
+            icon.src = getGuildAssetUrl('Guild_Coin.PNG'); // Use the actual guild coin icon
+          } else {
+            icon.src = getSkillAssetUrl(stat.icon);
+          }
+          icon.alt = stat.label;
+          Object.assign(icon.style, {
+            width: '9px',
+            height: '9px',
+            marginRight: '2px'
+          });
+
+          icon.onerror = () => {
+            icon.style.display = 'none';
+          };
+
+          left.appendChild(icon);
+
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = stat.label;
+          left.appendChild(nameSpan);
+
+          const valueSpan = document.createElement('span');
+          valueSpan.textContent = value;
+          valueSpan.className = 'text-right text-whiteExp';
+          Object.assign(valueSpan.style, {
+            textAlign: 'right',
+            minWidth: '3.5ch',
+            maxWidth: '5ch',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            display: 'inline-block'
+          });
+
+          topRow.appendChild(left);
+          topRow.appendChild(valueSpan);
+
+          const barRow = document.createElement('div');
+          barRow.className = 'relative';
+
+          const barOuter = document.createElement('div');
+          barOuter.className = 'h-1 w-full border border-solid border-black bg-black frame-pressed-1 relative overflow-hidden duration-300 fill-mode-forwards gene-stats-bar-filled';
+          barOuter.style.animationDelay = '700ms';
+
+          const barFillWrap = document.createElement('div');
+          barFillWrap.className = 'absolute left-0 top-0 flex h-full w-full';
+
+          const barFill = document.createElement('div');
+          barFill.className = 'h-full shrink-0';
+          barFill.style.width = barWidth + '%';
+          barFill.style.background = stat.barColor || '#666';
+
+          barFillWrap.appendChild(barFill);
+          barOuter.appendChild(barFillWrap);
+
+          // Add hover tooltip for battle progress (only for progression skills)
+          if (SKILL_PROGRESSION_CONFIG.ZERO_BASED_SKILLS.includes(stat.key) ||
+              SKILL_PROGRESSION_CONFIG.TEN_BASED_SKILLS.includes(stat.key)) {
+            let skillTooltip = null;
+
+            barOuter.addEventListener('mouseenter', (e) => {
+              const playerName = getCurrentPlayerName();
+              const actionCount = skillBattleTracker.getBattleCount(playerName, stat.key);
+              const actionsNeeded = calculateBattlesForNextLevel(value, stat.key);
+              const actionsLeft = Math.max(0, actionsNeeded - actionCount);
+
+              // Create tooltip
+              skillTooltip = createTooltipElement();
+              skillTooltip.innerHTML = '';
+
+              const tooltipContent = document.createElement('div');
+              tooltipContent.style.cssText = `
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+              `;
+
+              const isFishing = stat.key === 'fishing';
+              const actionType = isFishing ? 'Actions' : 'Battles';
+
+              const percentLeft = actionsNeeded > 0 ? Math.round((actionsLeft / actionsNeeded) * 100) : 0;
+              const nextLevel = value + 1;
+
+              const tooltipText = document.createElement('div');
+              tooltipText.textContent = `${percentLeft}% left to ${stat.label} ${nextLevel}`;
+              tooltipText.style.cssText = `
+                color: ${actionsLeft === 0 ? CSS_CONSTANTS.COLORS.SUCCESS : CSS_CONSTANTS.COLORS.TEXT_WHITE};
+                font-size: 11px;
+                line-height: 1.4;
+                font-weight: 600;
+              `;
+              tooltipContent.appendChild(tooltipText);
+
+              skillTooltip.appendChild(tooltipContent);
+
+              // Position and show tooltip
+              const rect = barOuter.getBoundingClientRect();
+              const tooltipRect = skillTooltip.getBoundingClientRect();
+              const position = calculateTooltipPosition(rect, tooltipRect);
+              skillTooltip.style.left = position.left + 'px';
+              skillTooltip.style.top = position.top + 'px';
+
+              showEquipmentTooltip(skillTooltip);
+            });
+
+            barOuter.addEventListener('mouseleave', () => {
+              if (skillTooltip) {
+                hideCurrentEquipmentTooltip();
+                skillTooltip = null;
+              }
+            });
+
+            // Add pointer cursor to indicate hoverable
+            barOuter.style.cursor = 'pointer';
+          }
+
+          const barRight = document.createElement('div');
+          barRight.className = 'absolute left-full top-1/2 -translate-y-1/2';
+          barRight.style.display = 'block';
+
+          const skillBar = document.createElement('div');
+          skillBar.className = 'relative text-skillBar';
+
+          const spill1 = document.createElement('div');
+          spill1.className = 'spill-particles absolute left-full h-px w-0.5 bg-current';
+
+          const spill2 = document.createElement('div');
+          spill2.className = 'spill-particles-2 absolute left-full h-px w-0.5 bg-current';
+
+          skillBar.appendChild(spill1);
+          skillBar.appendChild(spill2);
+          barRight.appendChild(skillBar);
+
+          barRow.appendChild(barOuter);
+          barRow.appendChild(barRight);
+
+          statRow.appendChild(topRow);
+          statRow.appendChild(barRow);
+
+          return statRow;
+        };
+
+        const statRow = createStatRow();
+        console.log('[Guilds] Created stat row for', stat.key, ':', statRow);
+        statsDiv.appendChild(statRow);
+
+      } catch (statError) {
+        console.error('[Guilds] Error rendering skill stat:', stat, statError);
+      }
+    });
+
+    console.log('[Guilds] renderTibiaSkillsStats completed, returning statsDiv:', statsDiv);
+    return statsDiv;
+
+  } catch (error) {
+    console.error('[Guilds] ERROR in renderTibiaSkillsStats:', error);
+    console.error('[Guilds] Error stack:', error.stack);
+
+    const fallbackDiv = document.createElement('div');
+    fallbackDiv.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+    Object.assign(fallbackDiv.style, {
+      flex: '1 1 0',
+      textAlign: 'center',
+      width: '170px',
+      alignSelf: 'center',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-start',
+      alignItems: 'center'
+    });
+
+    const errorText = document.createElement('div');
+    errorText.className = 'pixel-font-14 text-red-400';
+    errorText.textContent = 'Error loading skills';
+    fallbackDiv.appendChild(errorText);
+
+    return fallbackDiv;
+  }
+}
+
 async function showEquipmentModal() {
   if (!ensureModalApi()) return;
   
@@ -8542,7 +9830,7 @@ async function showEquipmentModal() {
   col1.appendChild(arsenalBox);
 
   // Column 2: Equipment Grid (split into 2 rows)
-  const col2 = createEquipmentModalColumn('200px');
+  const col2 = createEquipmentModalColumn('220px');
   
   // Row 1: Equipment section (50% height)
   const equipmentBox = createEquipmentBox({
@@ -8589,8 +9877,41 @@ async function showEquipmentModal() {
   bottomBox.style.minHeight = '191px';
   col2.appendChild(bottomBox);
   
-  // Initial stats display
-  updateEquipmentStats(detailsContainer);
+  // Initial Tibia skills display
+  console.log('[Guilds] OWN EQUIPMENT MODAL: Creating Tibia Skills section with Firebase data...');
+
+  // Fetch skills from Firebase (will auto-initialize if needed)
+  const playerSkills = await getPlayerSkillsFromFirebase(getCurrentPlayerName());
+
+  // Calculate total guild points from current equipment
+  const equippedItems = await getPlayerEquipmentFromFirebase(getCurrentPlayerName());
+  let totalGuildPoints = 0;
+  for (const [slotType, item] of Object.entries(equippedItems)) {
+    if (item && item.tier) {
+      totalGuildPoints += item.tier;
+    }
+  }
+
+  // Create skill data with actual values (no fallbacks needed since getPlayerSkillsFromFirebase handles defaults)
+  const skillData = {
+    guildPoints: Math.min(100, totalGuildPoints),
+    magicLevel: playerSkills.magicLevel,
+    axeFighting: playerSkills.axeFighting,
+    swordFighting: playerSkills.swordFighting,
+    clubFighting: playerSkills.clubFighting,
+    distanceFighting: playerSkills.distanceFighting,
+    shielding: playerSkills.shielding,
+    fishing: playerSkills.fishing
+  };
+
+  console.log('[Guilds] Own equipment skill data:', skillData);
+  console.log('[Guilds] Calling renderTibiaSkillsStats...');
+
+  const skillsStatsDiv = renderTibiaSkillsStats(skillData);
+  console.log('[Guilds] renderTibiaSkillsStats returned:', skillsStatsDiv);
+
+  detailsContainer.appendChild(skillsStatsDiv);
+  console.log('[Guilds] Own equipment skills stats added to container');
 
   contentDiv.appendChild(col1);
   contentDiv.appendChild(col2);
@@ -8620,33 +9941,14 @@ async function showEquipmentModal() {
         originalRemove();
       };
       
-      // Apply modal dimensions
+      // Apply modal dimensions using applyModalStyles like guild modal
       setTimeout(() => {
         if (!dialog) return;
-        
-        const dimensions = {
-          width: '490px',
-          height: '490px'
-        };
-        
-        Object.entries(dimensions).forEach(([prop, value]) => {
-          dialog.style[prop] = value;
-          dialog.style[`min${prop.charAt(0).toUpperCase() + prop.slice(1)}`] = value;
-          dialog.style[`max${prop.charAt(0).toUpperCase() + prop.slice(1)}`] = value;
-        });
-        
+
+        applyModalStyles(dialog, EQUIPMENT_CONFIG.MODAL_WIDTH, EQUIPMENT_CONFIG.MODAL_HEIGHT);
+
         dialog.classList.remove('max-w-[300px]');
-        
-        const contentWrapper = dialog.querySelector(':scope > div:not(:first-child)') || dialog.querySelector(':scope > div');
-        if (contentWrapper) {
-          Object.assign(contentWrapper.style, {
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            flex: '1 1 0'
-          });
-        }
-        
+
         // Add guild coins display to footer
         const buttonContainer = dialog.querySelector('.flex.justify-end.gap-2');
         if (buttonContainer) {
@@ -8758,7 +10060,10 @@ function syncGuildChatTabWithRetry(retries = 3, delay = 1000) {
 
 async function initializeGuilds() {
   console.log('[Guilds] initialized');
-  
+
+  // Initialize skill battle tracking
+  await initializeSkillBattleTracking();
+
   // Start periodic cache cleanup (every 5 minutes)
   if (!cacheCleanupInterval) {
     cacheCleanupInterval = setInterval(() => {
@@ -9011,13 +10316,7 @@ exports = {
         document.removeEventListener('click', guildDropdownClickHandler);
         guildDropdownClickHandler = null;
       }
-      
-      // Remove window message listener
-      if (windowMessageHandler && typeof window !== 'undefined') {
-        window.removeEventListener('message', windowMessageHandler);
-        windowMessageHandler = null;
-      }
-      
+
       // Clear cache cleanup interval
       if (cacheCleanupInterval) {
         clearInterval(cacheCleanupInterval);
@@ -9040,11 +10339,47 @@ exports = {
         }
         guildCoinsBoardSubscription = null;
       }
+
+      // Clean up skill battle subscription
+      if (skillBattleSubscription) {
+        try {
+          skillBattleSubscription.unsubscribe();
+        } catch (error) {
+          console.warn('[Guilds] Error unsubscribing skill battle subscription:', error);
+        }
+        skillBattleSubscription = null;
+      }
+      lastProcessedSkillSeed = null;
       
       // Clear coin display element reference
       guildCoinsDisplayElement = null;
       lastProcessedSeed = null;
-      
+
+      // Clean up persistent DOM elements
+      try {
+        // Remove any guild-related modals that might be left open
+        document.querySelectorAll('[data-guild-modal]').forEach(el => {
+          el.remove();
+        });
+
+        // Remove any guild dropdown menus that might be stuck open
+        document.querySelectorAll('.guild-dropdown-menu').forEach(el => {
+          el.remove();
+        });
+
+        // Remove any guild chat panels that might persist
+        document.querySelectorAll('[data-guild-chat-panel]').forEach(el => {
+          el.remove();
+        });
+
+        // Clean up any guild equipment modals
+        document.querySelectorAll('[data-guild-equipment-modal]').forEach(el => {
+          el.remove();
+        });
+      } catch (error) {
+        console.warn('[Guilds] Error during DOM cleanup:', error);
+      }
+
       console.log('[Guilds] Cleaned up successfully');
       return true;
     } catch (error) {
