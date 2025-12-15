@@ -322,6 +322,54 @@ function isAutoplayControlledByOther() {
     return true;
 }
 
+// Check if Better Boosted Maps is farming a valid boosted map - Returns: True if farming valid map (boolean)
+function isBoostedMapFarmingValid() {
+    try {
+        // Check if Better Boosted Maps is enabled and farming
+        const boostedState = window.betterBoostedMapsState;
+        if (!boostedState || !boostedState.enabled || !boostedState.isFarming) {
+            return false;
+        }
+        
+        // Check if there's current map info
+        if (!boostedState.currentMap) {
+            return false;
+        }
+        
+        // Load Better Boosted Maps settings
+        const settingsStr = localStorage.getItem('betterBoostedMapsSettings');
+        if (!settingsStr) {
+            return false;
+        }
+        
+        const settings = JSON.parse(settingsStr);
+        
+        // Check if the current map is enabled
+        const mapEnabled = settings.maps?.[boostedState.currentMap.roomId] !== false;
+        if (!mapEnabled) {
+            console.log('[Stamina Optimizer] Current boosted map is not enabled in Better Boosted Maps settings');
+            return false;
+        }
+        
+        // Check if the equipment is enabled
+        const equipmentName = boostedState.currentMap.equipmentName;
+        if (equipmentName) {
+            const equipId = equipmentName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const equipEnabled = settings.equipment?.[equipId] !== false;
+            if (!equipEnabled) {
+                console.log('[Stamina Optimizer] Current boosted equipment is not enabled in Better Boosted Maps settings');
+                return false;
+            }
+        }
+        
+        console.log('[Stamina Optimizer] Valid boosted map farming detected - will not stop');
+        return true;
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error checking boosted map validity:', error);
+        return false;
+    }
+}
+
 // Get reason why we cannot proceed (for logging) - Returns: Reason string or null (string|null)
 function getCannotProceedReason() {
     const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
@@ -794,6 +842,12 @@ function monitorStamina() {
     }
     if (currentStamina < minStamina) {
         if (isCurrentlyActive && wasInitiatedByMod) {
+            // Check if we're farming a valid boosted map - if so, don't stop
+            if (isBoostedMapFarmingValid()) {
+                console.log(`[Stamina Optimizer] ⏸️ Stamina (${currentStamina}) < min (${minStamina}) but farming valid boosted map - continuing`);
+                return;
+            }
+            
             console.log(`[Stamina Optimizer] ⏹️ Stamina (${currentStamina}) < min (${minStamina}) - stopping`);
             stopAutoplay().catch(error => {
                 console.error('[Stamina Optimizer] Error in stopAutoplay:', error);
