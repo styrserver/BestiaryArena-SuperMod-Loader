@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.2.3",
+    "changes": [
+      { "type": "added", "mod": "Guilds", "text": "Added skill progression system." },
+      { "type": "fixed", "mod": "Quests", "text": "Fixed stuck toast notifications, transcripts, and quest item handling." }
+    ]
+  },
+  {
     "version": "3.2.2",
     "changes": [
       { "type": "added", "mod": "Quests", "text": "Added mission to Al Dee. Also some various improvements." },
