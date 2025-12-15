@@ -4,6 +4,12 @@
   },
   "notes": [
   {
+    "version": "3.2.4",
+    "changes": [
+      { "type": "added", "mod": "Guilds", "text": "Added skill bonus system for equipment." }
+    ]
+  },
+  {
     "version": "3.2.3",
     "changes": [
       { "type": "added", "mod": "Guilds", "text": "Added skill progression system." },
