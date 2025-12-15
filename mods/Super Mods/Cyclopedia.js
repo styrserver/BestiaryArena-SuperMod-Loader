@@ -1992,8 +1992,8 @@ function removeCyclopediaFromMenus() {
   // Process all cyclopedia elements
   document.querySelectorAll('div, li').forEach(el => {
     if (el.textContent.trim().toLowerCase() === 'cyclopedia') {
-      // Skip elements that should be excluded (e.g., from VIP List)
-      if (el.hasAttribute('data-cyclopedia-exclude') || el.hasAttribute('data-vip-list-item')) {
+      // Skip elements that should be excluded
+      if (el.hasAttribute('data-cyclopedia-exclude')) {
         return;
       }
       

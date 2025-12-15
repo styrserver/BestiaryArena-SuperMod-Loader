@@ -994,12 +994,10 @@ const modDescriptions = {
   'Better Yasir': 'Improved Yasir interaction and features.',
   'Cyclopedia': 'Comprehensive creature and item encyclopedia.',
   'Dice Roller': 'Roll dice for various game mechanics.',
-  'Guilds': 'Guild management and interaction features.',
   'Hunt Analyzer': 'Analyze and optimize hunting strategies.',
   'Raid Hunter': 'Enhanced raid hunting features and tracking.',
   'Manual Runner': 'Run manual mode until victory with automatic floor progression.',
-  'Stamina Optimizer': 'Optimize stamina usage and management.',
-  'VIP List': 'Manage and view VIP list features.'
+  'Stamina Optimizer': 'Optimize stamina usage and management.'
 };
 
 // Super Mods list - kept in sync with mod-registry.js
@@ -1018,15 +1016,13 @@ const superModNames = [
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
-  'Guilds.js',
   'Hunt Analyzer.js',
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js',
-  'VIP List.js'
+  'Stamina Optimizer.js'
 ];
 
 const hiddenMods = [

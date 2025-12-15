@@ -123,6 +123,11 @@ let otherTimeouts = [];
 let allModsLoaded = false;
 let hasLoggedAutoplayDetection = false;
 let gracePeriodEndTime = 0; // Timestamp when grace period ends (0 = grace period active or not started)
+let lastMissingBoostedStateLog = 0;
+let lastMissingFunctionLog = 0;
+let functionRetryAttempts = 0;
+const MAX_FUNCTION_RETRY_ATTEMPTS = 3;
+const FUNCTION_RETRY_DELAY = 2000; // 2 seconds
 
 // ============================================================================
 // 3. STAMINA MONITORING FUNCTIONS
@@ -233,14 +238,56 @@ function isRaidHunterActive() {
 // Check if Better Boosted Maps is currently active - Returns: True if active (boolean)
 function isBoostedMapsActive() {
     try {
-        if (window.boostedMapsState?.isEnabled) {
-            return window.boostedMapsState.isCurrentlyFarming === true;
+        const boostedState = getBetterBoostedMapsState();
+        // Check the exposed state (Better Boosted Maps uses betterBoostedMapsState, not boostedMapsState)
+        if (boostedState) {
+            // Check if enabled and actively farming (Better Boosted Maps exposes 'enabled' and 'isFarming')
+            if (boostedState.enabled && boostedState.isFarming === true) {
+                return true;
+            }
         }
+        // Fallback: check autoplay control
         return hasAutoplayControl('Better Boosted Maps');
     } catch (error) {
         console.error('[Stamina Optimizer] Error checking Better Boosted Maps status:', error);
         return false;
     }
+}
+
+// Safely obtain Better Boosted Maps state from multiple sources
+function getBetterBoostedMapsState() {
+    try {
+        if (window.betterBoostedMapsState) {
+            return window.betterBoostedMapsState;
+        }
+        const modContext = window.modLoader?.getModContext?.('better-boosted-maps');
+        if (modContext?.exports?.betterBoostedMapsState) {
+            return modContext.exports.betterBoostedMapsState;
+        }
+        if (modContext?.exports?.state) {
+            return modContext.exports.state;
+        }
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error fetching Better Boosted Maps state:', error);
+    }
+    return null;
+}
+
+// Determine if Better Boosted Maps is enabled (fallbacks to stored value)
+function isBetterBoostedMapsEnabled() {
+    const boostedState = getBetterBoostedMapsState();
+    if (boostedState && typeof boostedState.enabled === 'boolean') {
+        return boostedState.enabled;
+    }
+    try {
+        const saved = localStorage.getItem('betterBoostedMapsEnabled');
+        if (saved !== null) {
+            return JSON.parse(saved) === true;
+        }
+    } catch (error) {
+        console.error('[Stamina Optimizer] Error reading Better Boosted Maps enabled state:', error);
+    }
+    return false;
 }
 
 // Check if Better Tasker is currently active - Returns: True if active (boolean)
@@ -506,29 +553,74 @@ async function stopAutoplay() {
 
 // Find mod function using multiple methods - functionName: Name of function (string), modContextKey: Context key (string), windowKey: Window key (optional string) - Returns: Found function or null (Function|null)
 function findModFunction(functionName, modContextKey, windowKey = null) {
+    // First, try direct window access (Better Boosted Maps exposes checkAndStartBoostedMapFarming directly on window)
+    if (window[functionName] && typeof window[functionName] === 'function') {
+        return window[functionName];
+    }
+    
+    // Try modLoader context
     if (window.modLoader?.getModContext) {
         try {
             const modContext = window.modLoader.getModContext(modContextKey);
-            if (modContext?.exports?.[functionName]) {
+            if (modContext?.exports?.[functionName] && typeof modContext.exports[functionName] === 'function') {
                 return modContext.exports[functionName];
             }
-            if (modContext?.[functionName]) {
+            if (modContext?.[functionName] && typeof modContext[functionName] === 'function') {
                 return modContext[functionName];
             }
         } catch (e) {
+            console.error(`[Stamina Optimizer] Error accessing modContext for ${modContextKey}:`, e);
         }
     }
-    if (windowKey && window[windowKey]?.[functionName]) {
+    
+    // Try windowKey object (only if different from direct window check)
+    if (windowKey && windowKey !== functionName && window[windowKey]?.[functionName] && typeof window[windowKey][functionName] === 'function') {
         return window[windowKey][functionName];
     }
-    if (window[functionName]) {
-        return window[functionName];
-    }
-    const stateKey = windowKey || modContextKey.replace(/-/g, '');
-    if (window[stateKey]?.[functionName]) {
+    
+    // Try state key (hyphenated to camelCase) - only if different from windowKey
+    const stateKey = modContextKey.replace(/-/g, '');
+    if (stateKey !== windowKey && window[stateKey]?.[functionName] && typeof window[stateKey][functionName] === 'function') {
         return window[stateKey][functionName];
     }
+    
+    // Only log detailed debug info on first failure (not on retries)
+    if (functionRetryAttempts === 0) {
+        console.log(`[Stamina Optimizer] ⚠️ Could not find ${functionName}`);
+        console.log(`[Stamina Optimizer]   Checked: window.${functionName}, modContext, window.${windowKey || stateKey}`);
+    }
+    
     return null;
+}
+
+// Helper function to actually trigger Better Boosted Maps (can be retried)
+function triggerBetterBoostedMapsFunction() {
+    const checkAndStartFunction = findModFunction(
+        'checkAndStartBoostedMapFarming',
+        'better-boosted-maps',
+        'betterBoostedMapsState'
+    );
+    
+    if (checkAndStartFunction && typeof checkAndStartFunction === 'function') {
+        // Reset retry counter on success
+        const wasRetrying = functionRetryAttempts > 0;
+        functionRetryAttempts = 0;
+        if (wasRetrying) {
+            console.log('[Stamina Optimizer] ✅ Successfully triggered Better Boosted Maps farming');
+        } else {
+            console.log('[Stamina Optimizer] Triggering Better Boosted Maps farming');
+        }
+        window.staminaOptimizerLastBoostedMapsTrigger = Date.now();
+        checkAndStartFunction(true);
+        const timeout = setTimeout(() => {
+            isStartingAutoplay = false;
+            const index = otherTimeouts.indexOf(timeout);
+            if (index > -1) otherTimeouts.splice(index, 1);
+        }, BOOSTED_MAPS_TRIGGER_WINDOW);
+        otherTimeouts.push(timeout);
+        return true;
+    }
+    return false;
 }
 
 // Start boosted map farming via Better Boosted Maps
@@ -538,12 +630,23 @@ function startBoostedMapFarming() {
             console.log('[Stamina Optimizer] Autoplay is player-initiated - not starting boosted map farming');
             return;
         }
-        if (!window.betterBoostedMapsState || !window.betterBoostedMapsState.enabled) {
-            console.log('[Stamina Optimizer] Better Boosted Maps is not enabled - cannot start boosted map farming');
-            return;
-        }
+        const boostedState = getBetterBoostedMapsState();
+        const boostedEnabled = isBetterBoostedMapsEnabled();
+        // Check if Better Boosted Maps is already active first (this handles timing issues better)
         if (isBoostedMapsActive()) {
             console.log('[Stamina Optimizer] Better Boosted Maps is already active - not interfering');
+            return;
+        }
+        // Check if Better Boosted Maps state is available and enabled
+        if (!boostedState && !boostedEnabled) {
+            const now = Date.now();
+            if (now - lastMissingBoostedStateLog > 5000) {
+                console.log('[Stamina Optimizer] Better Boosted Maps state not available yet - will retry (using fallback checks)');
+                lastMissingBoostedStateLog = now;
+            }
+        }
+        if (!boostedEnabled) {
+            console.log('[Stamina Optimizer] Better Boosted Maps is not enabled - cannot start boosted map farming');
             return;
         }
         const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
@@ -563,7 +666,7 @@ function startBoostedMapFarming() {
             }
         } catch (error) {
         }
-        if (window.betterBoostedMapsState.isFarming) {
+        if (boostedState?.isFarming) {
             console.log('[Stamina Optimizer] Better Boosted Maps is already farming');
             return;
         }
@@ -573,26 +676,50 @@ function startBoostedMapFarming() {
         }
         isStartingAutoplay = true;
         console.log('[Stamina Optimizer] Requested autoplay control before triggering Better Boosted Maps');
-        const checkAndStartFunction = findModFunction(
-            'checkAndStartBoostedMapFarming',
-            'better-boosted-maps',
-            'betterBoostedMapsState'
-        );
-        if (checkAndStartFunction && typeof checkAndStartFunction === 'function') {
-            console.log('[Stamina Optimizer] Triggering Better Boosted Maps farming (forced)');
-            window.staminaOptimizerLastBoostedMapsTrigger = Date.now();
-            checkAndStartFunction(true);
-            const timeout = setTimeout(() => {
-                isStartingAutoplay = false;
-                const index = otherTimeouts.indexOf(timeout);
+        
+        // Try to trigger the function
+        if (triggerBetterBoostedMapsFunction()) {
+            // Success - function was found and called
+            return;
+        }
+        
+        // Function not found - try retrying if we haven't exceeded max attempts
+        const now = Date.now();
+        if (functionRetryAttempts < MAX_FUNCTION_RETRY_ATTEMPTS) {
+            functionRetryAttempts++;
+            if (functionRetryAttempts === 1) {
+                console.log(`[Stamina Optimizer] ⏳ Better Boosted Maps function not found, retrying (${MAX_FUNCTION_RETRY_ATTEMPTS} attempts)...`);
+            }
+            const retryTimeout = setTimeout(() => {
+                const index = otherTimeouts.indexOf(retryTimeout);
                 if (index > -1) otherTimeouts.splice(index, 1);
-            }, BOOSTED_MAPS_TRIGGER_WINDOW);
-            otherTimeouts.push(timeout);
+                // Retry just the function lookup and call (we already have control)
+                if (triggerBetterBoostedMapsFunction()) {
+                    // Success on retry
+                    console.log(`[Stamina Optimizer] ✅ Better Boosted Maps function found on retry ${functionRetryAttempts}`);
+                    return;
+                }
+                // Still failed after retry - release control
+                if (functionRetryAttempts >= MAX_FUNCTION_RETRY_ATTEMPTS) {
+                    releaseControlAndResetState();
+                    isStartingAutoplay = false;
+                    functionRetryAttempts = 0;
+                }
+            }, FUNCTION_RETRY_DELAY);
+            otherTimeouts.push(retryTimeout);
+            // Don't release control yet - wait for retry
+            return;
         } else {
+            // Max retries exceeded - give up
             releaseControlAndResetState();
             isStartingAutoplay = false;
-            console.log('[Stamina Optimizer] Better Boosted Maps function not accessible - the mod may need to expose checkAndStartBoostedMapFarming');
-            console.log('[Stamina Optimizer] Note: Better Boosted Maps is enabled, but we cannot programmatically trigger it');
+            functionRetryAttempts = 0; // Reset for next time
+            const timeSinceLastLog = now - lastMissingFunctionLog;
+            if (timeSinceLastLog > 30000) { // Log at most once every 30 seconds
+                console.error('[Stamina Optimizer] ❌ Better Boosted Maps function not found after all retries');
+                console.log('[Stamina Optimizer] This usually means Better Boosted Maps failed to load or crashed during initialization');
+                lastMissingFunctionLog = now;
+            }
         }
     } catch (error) {
         console.error('[Stamina Optimizer] Error starting boosted map farming:', error);
@@ -633,8 +760,9 @@ function monitorStamina() {
     const now = Date.now();
     if (gracePeriodEndTime > 0 && now < gracePeriodEndTime) {
         const remainingSeconds = Math.ceil((gracePeriodEndTime - now) / 1000);
-        if (remainingSeconds % 5 === 0 || remainingSeconds <= 3) {
-            console.log(`[Stamina Optimizer] Waiting for mods to finish loading (${remainingSeconds}s remaining)...`);
+        // Only log at 10s, 5s, and when it ends
+        if (remainingSeconds === 10 || remainingSeconds === 5 || remainingSeconds === 1) {
+            console.log(`[Stamina Optimizer] ⏳ Waiting for mods to finish loading (${remainingSeconds}s remaining)...`);
         }
         return;
     }
@@ -648,7 +776,6 @@ function monitorStamina() {
     if (currentStamina >= maxStamina) {
         if (!isCurrentlyActive) {
             if (isPlayerInitiatedAutoplay()) {
-                console.log(`[Stamina Optimizer] Stamina (${currentStamina}) >= max (${maxStamina}) but autoplay is player-initiated - not interfering`);
                 return;
             }
             if (!wasBestiaryRefillRecent()) {
@@ -659,17 +786,15 @@ function monitorStamina() {
                 } else {
                     const reason = getCannotProceedReason();
                     if (reason) {
-                        console.log(`[Stamina Optimizer] Stamina (${currentStamina}) >= max (${maxStamina}) but ${reason} - waiting`);
+                        console.log(`[Stamina Optimizer] ⏸️ Stamina high but ${reason} - waiting`);
                     }
                 }
-            } else {
-                console.log('[Stamina Optimizer] Stamina >= max but Bestiary Automator recently refilled - skipping');
             }
         }
     }
     if (currentStamina < minStamina) {
         if (isCurrentlyActive && wasInitiatedByMod) {
-            console.log(`[Stamina Optimizer] Stamina (${currentStamina}) < min (${minStamina}) - stopping gameplay`);
+            console.log(`[Stamina Optimizer] ⏹️ Stamina (${currentStamina}) < min (${minStamina}) - stopping`);
             stopAutoplay().catch(error => {
                 console.error('[Stamina Optimizer] Error in stopAutoplay:', error);
             });
@@ -712,6 +837,18 @@ function startAutoplayStateMonitoring() {
         boardStateUnsubscribe = null;
     }
     try {
+        // Check if game state is available before subscribing
+        if (!globalThis.state || !globalThis.state.board) {
+            console.log('[Stamina Optimizer] ⏳ Game state not ready, retrying autoplay monitoring...');
+            // Retry after a delay
+            const retryTimeout = setTimeout(() => {
+                const index = otherTimeouts.indexOf(retryTimeout);
+                if (index > -1) otherTimeouts.splice(index, 1);
+                startAutoplayStateMonitoring();
+            }, 2000);
+            otherTimeouts.push(retryTimeout);
+            return;
+        }
         boardStateUnsubscribe = globalThis.state.board.subscribe((state) => {
             try {
                 const isAutoplay = state.context.mode === 'autoplay';
@@ -775,7 +912,7 @@ function startAutoplayStateMonitoring() {
                             let isExpected = false;
                             
                             // Check if Better Boosted Maps is enabled (even if not actively farming yet)
-                            const boostedMapsEnabled = window.boostedMapsState?.enabled === true;
+                            const boostedMapsEnabled = window.betterBoostedMapsState?.enabled === true;
                             
                             if (currentOwner) {
                                 ownerInfo = currentOwner;
@@ -1600,7 +1737,7 @@ let windowMessageHandler = (event) => {
         
         // Log when grace period ends
         const gracePeriodTimeout = setTimeout(() => {
-            console.log('[Stamina Optimizer] Grace period ended - now allowing actions');
+            console.log('[Stamina Optimizer] ✅ Grace period ended - ready for actions');
             const index = otherTimeouts.indexOf(gracePeriodTimeout);
             if (index > -1) otherTimeouts.splice(index, 1);
         }, MODS_LOADING_GRACE_PERIOD);

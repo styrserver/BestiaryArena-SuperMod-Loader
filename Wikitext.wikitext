@@ -257,14 +257,6 @@ Automates dice rolling for stat rerolling:
 * Displays roll count and status in a custom panel
 * Configurable target thresholds for optimal stat optimization
 
-==== Guilds ====
-Social guild system for creating and managing player communities:
-* Create, join, and manage guilds with role-based permissions (Leader, Officer, Member)
-* Encrypted guild chat with real-time messaging and system notifications
-* Member management with invite, kick, promote, and demote functionality
-* Guild browser to search and discover available guilds
-* Transfer leadership and edit guild information with comprehensive settings
-
 ==== Hunt Analyzer ====
 Advanced autoplay and loot tracking system:
 * Track detailed statistics from autoplay sessions
@@ -320,14 +312,6 @@ Automatically manages stamina levels by starting/stopping gameplay (by [https://
 * Coordinates with Raid Hunter, Better Tasker, and Better Boosted Maps to prevent conflicts
 * Monitors Bestiary Automator refills to avoid interfering with stamina refills
 * Automatic gameplay pause when stamina drops below minimum threshold
-
-==== VIP List ====
-Player management system for tracking favorite players:
-* Add players to your VIP list via search functionality
-* Display player information including level, status, rank points, and time sum with sortable columns
-* Quick access to player profiles and Cyclopedia from dropdown menu
-* Automatic data refresh when opening the VIP list modal
-* Accessible from the account menu for convenient management
 
 === Official Mods ===
 These are the core mods that provide essential gameplay enhancements. All 11 Official Mods listed below are included by default:

@@ -60,15 +60,13 @@ export const SUPER_MODS = [
   'Better Yasir.js',
   'Cyclopedia.js',
   'Dice_Roller.js',
-  'Guilds.js',
   'Hunt Analyzer.js',
   'Mod Settings.js',
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
   'RunTracker.js',
-  'Stamina Optimizer.js',
-  'VIP List.js'
+  'Stamina Optimizer.js'
 ];
 
 // Mods that are enabled by default for new users

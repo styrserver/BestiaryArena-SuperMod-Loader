@@ -410,7 +410,8 @@ const modState = {
     },
     farming: {
         isActive: false,
-        currentMapInfo: null
+        currentMapInfo: null,
+        isForced: false
     },
     dailySubscription: null,
     lastBoostedMap: null,
@@ -952,6 +953,16 @@ function setupDailyStateMonitoring() {
         modState.dailySubscription.unsubscribe();
     }
     
+    // Check if game state is available before subscribing
+    if (!globalThis.state || !globalThis.state.daily) {
+        console.log('[Better Boosted Maps] ⏳ Game state not ready, retrying daily state monitoring...');
+        // Retry after a delay
+        setTimeout(() => {
+            setupDailyStateMonitoring();
+        }, 2000);
+        return;
+    }
+    
     // Store initial boosted map
     const initialData = getBoostedMapData();
     if (initialData) {
@@ -1143,6 +1154,7 @@ function toggleBoostedMaps() {
         // Reset farming state
         modState.farming.isActive = false;
         modState.farming.currentMapInfo = null;
+        modState.farming.isForced = false;
     }
     
     // Update exposed state after toggle
@@ -2144,6 +2156,7 @@ function cancelBoostedMapFarming(reason = 'unknown') {
     console.log(`[Better Boosted Maps] Cancelling farming: ${reason}`);
     modState.farming.isActive = false;
     modState.farming.currentMapInfo = null;
+    modState.farming.isForced = false;
     
     // Stop stamina tooltip monitoring
     stopStaminaTooltipMonitoring();
@@ -2188,11 +2201,12 @@ async function startBoostedMapFarming(force = false) {
             }
         }
         
-        // Check if automation is still enabled before starting
-        if (!checkAutomationEnabled('before starting')) return;
+        // Check if automation is still enabled before starting (skip check if forced)
+        if (!force && !checkAutomationEnabled('before starting')) return;
         
         modState.farming.isActive = true;
         modState.farming.currentMapInfo = farmCheck;
+        modState.farming.isForced = force;
         
         console.log(`[Better Boosted Maps] Starting boosted map farming: ${farmCheck.roomName}`);
         
@@ -2210,8 +2224,8 @@ async function startBoostedMapFarming(force = false) {
         console.log(`[Better Boosted Maps] Waiting ${startDelay/1000}s before navigation...`);
         await new Promise(resolve => setTimeout(resolve, startDelay));
         
-        // Check automation status after initial delay
-        if (!checkAutomationEnabled('during navigation delay')) return;
+        // Check automation status after initial delay (skip check if forced)
+        if (!force && !checkAutomationEnabled('during navigation delay')) return;
         
         // Navigate to boosted map
         console.log('[Better Boosted Maps] Navigating to map...');
@@ -2236,8 +2250,8 @@ async function startBoostedMapFarming(force = false) {
             return;
         }
         
-        // Check automation status after navigation
-        if (!checkAutomationEnabled('after navigation')) return;
+        // Check automation status after navigation (skip check if forced)
+        if (!force && !checkAutomationEnabled('after navigation')) return;
         
         // Get user's selected setup method
         const setupSettings = loadSettings();
@@ -2256,8 +2270,8 @@ async function startBoostedMapFarming(force = false) {
         setupButton.click();
         await new Promise(resolve => setTimeout(resolve, AUTO_SETUP_DELAY));
         
-        // Check automation status after setup
-        if (!checkAutomationEnabled('after setup')) return;
+        // Check automation status after setup (skip check if forced)
+        if (!force && !checkAutomationEnabled('after setup')) return;
         
         // Load settings once for all configuration
         const settings = loadSettings();
@@ -2267,8 +2281,8 @@ async function startBoostedMapFarming(force = false) {
         globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
         await new Promise(resolve => setTimeout(resolve, AUTOPLAY_SETUP_DELAY));
         
-        // Check automation status after enabling autoplay
-        if (!checkAutomationEnabled('after enabling autoplay')) return;
+        // Check automation status after enabling autoplay (skip check if forced)
+        if (!force && !checkAutomationEnabled('after enabling autoplay')) return;
         
         // Enable integration features with retry logic
         if (settings.autoRefillStamina) {
@@ -2314,8 +2328,8 @@ async function startBoostedMapFarming(force = false) {
         
         console.log('[Better Boosted Maps] Stamina sufficient - checking automation status...');
         
-        // Check automation status before clicking Start button
-        if (!checkAutomationEnabled('before clicking Start')) return;
+        // Check automation status before clicking Start button (skip check if forced)
+        if (!force && !checkAutomationEnabled('before clicking Start')) return;
         
         // Find and click Start button
         console.log('[Better Boosted Maps] Looking for Start button...');
@@ -2330,8 +2344,8 @@ async function startBoostedMapFarming(force = false) {
         startButton.click();
         await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
         
-        // Final check after clicking Start button
-        if (!checkAutomationEnabled('after clicking Start')) return;
+        // Final check after clicking Start button (skip check if forced)
+        if (!force && !checkAutomationEnabled('after clicking Start')) return;
         
         // Watch for stamina depletion during autoplay, then start recovery monitoring
         const handleStaminaDepletion = () => {
@@ -2392,8 +2406,8 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
     return () => {
         console.log(`[Better Boosted Maps] ${logPrefix}`);
         
-        // Check if still valid to continue
-        if (!modState.enabled) {
+        // Check if still valid to continue (skip check if forced by another mod)
+        if (!modState.enabled && !modState.farming.isForced) {
             console.log('[Better Boosted Maps] Farming cancelled during stamina wait');
             stopStaminaTooltipMonitoring();
             return;
@@ -2761,6 +2775,7 @@ context.exports = {
         // Reset farming state
         modState.farming.isActive = false;
         modState.farming.currentMapInfo = null;
+        modState.farming.isForced = false;
         
         // Clear stamina cache
         modState.staminaCache.currentMapId = null;

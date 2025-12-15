@@ -6,7 +6,6 @@
   {
     "version": "3.1.10",
     "changes": [
-      { "type": "added", "mod": "Guilds", "text": "Added Guild Coins system: earn coins randomly on victories." },
       { "type": "changed", "mod": "Autoseller", "text": "Styling changes to Autoseller." },
       { "type": "fixed", "mod": "Tick Tracker", "text": "Fixed tick history saving after reload and standardized logging prefix." },
       { "type": "changed", "mod": "Better Forge", "text": "Optimized logging and performance" }
@@ -80,20 +79,16 @@
     "version": "3.1.1",
     "changes": [
       { "type": "added", "mod": "Cyclopedia", "text": "Added floors column to Rankings in characters tab after Time Sum" },
-      { "type": "added", "mod": "VIP List", "text": "Added floors column to VIP list display after Time Sum" },
       { "type": "added", "mod": "Mod Settings", "text": "Added \"Disable Run Tracker\" checkbox in Advanced section to enable/disable run tracking" },
       { "type": "fixed", "mod": "Better Tasker", "text": "Fixed Better Tasker interrupting ongoing raids when accepting tasks - now respects raid priorities" },
-      { "type": "changed", "mod": "Stamina Optimizer", "text": "Improved mod coordination, autoplay control management, and Bestiary Automator refill detection" },
-      { "type": "removed", "mod": "Board Advisor", "text": "Deprecated Board Advisor mod" }
+      { "type": "changed", "mod": "Stamina Optimizer", "text": "Improved mod coordination, autoplay control management, and Bestiary Automator refill detection" }
     ]
   },
   {
     "version": "3.1.0",
     "changes": [
-      { "type": "added", "mod": "Board Analyzer", "text": "Added floor information to analysis results display" },
       { "type": "changed", "mod": "Better Highscores", "text": "Updated Better Highscores for dungeon ascension" },
       { "type": "changed", "mod": "Cyclopedia", "text": "Updated cyclopedia for dungeon ascension" },
-      { "type": "changed", "mod": "Guilds", "text": "Updated Guilds for dungeon ascension: added floors to guild points calculation" },
       { "type": "changed", "mod": "RunTracker", "text": "Updated RunTracker for dungeon ascension" },
       { "type": "fixed", "mod": "Autoseller", "text": "Fixed autoseller widget not appearing" }
     ]
@@ -136,8 +131,7 @@
   {
     "version": "3.0.5",
     "changes": [
-      { "type": "fixed", "mod": "VIP List", "text": "Fixed 400 Bad Request errors when usernames start with . or $ by sanitizing Firebase keys" },
-      { "type": "fixed", "mod": "Guilds", "text": "Fixed 400 Bad Request errors when usernames start with . or $ in player equipment paths" }
+      { "type": "fixed", "mod": "Core", "text": "Fixed 400 Bad Request errors when usernames start with . or $ by sanitizing Firebase keys" }
     ]
   },
   {
@@ -159,9 +153,7 @@
   {
     "version": "3.0.2",
     "changes": [
-      { "type": "removed", "mod": "Autoscroller", "text": "Removed Gummy Raider and Yeti from available and selected creatures lists" },
-      { "type": "changed", "mod": "Guilds", "text": "Improved Guilds mod styling: refactored font system to use centralized constants, standardized to system-ui font for consistency, and unified font sizes across all elements" },
-      { "type": "changed", "mod": "Guilds", "text": "Redesigned guild administration panel with professional card-based layout, moved Guild Points to top, and made everything more compact" }
+      { "type": "removed", "mod": "Autoscroller", "text": "Removed Gummy Raider and Yeti from available and selected creatures lists" }
     ]
   },
   {
