@@ -5,13 +5,12 @@ function getAllEquipment() {
   const equipment = [];
   for (let i = 1; i < 1000; i++) {
     try {
-      // Use multiple fallbacks to access the game state
-      const state = globalThis.state || window.state || (typeof state !== 'undefined' ? state : null);
-      if (!state?.utils?.getEquipment) {
+      // Check game state is available
+      if (!globalThis.state?.utils?.getEquipment) {
         console.warn('[equipment-database.js] state.utils.getEquipment not available yet');
         break;
       }
-      const item = state.utils.getEquipment(i);
+      const item = globalThis.state.utils.getEquipment(i);
       if (item?.metadata?.name) {
         equipment.push({ gameId: i, ...item });
       }

@@ -5,12 +5,12 @@ function getAllMonsters() {
   const monsters = [];
   for (let i = 1; i < 1000; i++) {
     try {
-      const state = globalThis.state || window.state || (typeof state !== 'undefined' ? state : null);
-      if (!state?.utils?.getMonster) {
+      // Check game state is available
+      if (!globalThis.state?.utils?.getMonster) {
         console.warn('[creature-database.js] state.utils.getMonster not available yet');
         break;
       }
-      const monster = state.utils.getMonster(i);
+      const monster = globalThis.state.utils.getMonster(i);
       if (monster?.metadata?.name) {
         monsters.push({ 
           gameId: i, 
@@ -90,9 +90,8 @@ function findMonsterByName(name) {
 
 function waitForGameState(callback, retries = 0, maxRetries = 20) {
   try {
-    const state = globalThis.state || window.state;
-    const hasPlayerState = state?.player?.getSnapshot;
-    const hasBoardState = state?.board?.getSnapshot;
+    const hasPlayerState = globalThis.state?.player?.getSnapshot;
+    const hasBoardState = globalThis.state?.board?.getSnapshot;
     const hasUtils = state?.utils?.getMonster;
     
     if (hasPlayerState && hasBoardState && hasUtils) {

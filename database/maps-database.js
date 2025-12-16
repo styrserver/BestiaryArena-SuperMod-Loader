@@ -27,12 +27,12 @@ console.log('[maps-database.js] Loading maps database...');
 // Function to dynamically fetch all maps
 function getAllMaps() {
   try {
-    const state = globalThis.state || window.state || (typeof state !== 'undefined' ? state : null);
-    if (!state?.utils?.ROOMS) {
+    // Check game state is available
+    if (!globalThis.state?.utils?.ROOMS) {
       console.warn('[maps-database.js] state.utils.ROOMS not available yet');
       return [];
     }
-    return state.utils.ROOMS;
+    return globalThis.state.utils.ROOMS;
   } catch (e) {
     console.error('[maps-database.js] Error fetching maps:', e);
     return [];
