@@ -92,7 +92,7 @@ function waitForGameState(callback, retries = 0, maxRetries = 20) {
   try {
     const hasPlayerState = globalThis.state?.player?.getSnapshot;
     const hasBoardState = globalThis.state?.board?.getSnapshot;
-    const hasUtils = state?.utils?.getMonster;
+    const hasUtils = globalThis.state?.utils?.getMonster;
     
     if (hasPlayerState && hasBoardState && hasUtils) {
       callback();
