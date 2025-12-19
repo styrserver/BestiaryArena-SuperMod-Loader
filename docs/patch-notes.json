@@ -4,6 +4,13 @@
   },
   "notes": [
   {
+    "version": "3.2.5",
+    "changes": [
+      { "type": "fixed", "mod": "Core", "text": "Fixed core functionality for Christmas event." },
+      { "type": "fixed", "mod": "Quests", "text": "Bug fixes." }
+    ]
+  },
+  {
     "version": "3.2.4",
     "changes": [
       { "type": "added", "mod": "Guilds", "text": "Added skill bonus system for equipment." }

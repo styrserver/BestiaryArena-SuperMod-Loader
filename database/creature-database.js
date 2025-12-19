@@ -39,7 +39,7 @@ function buildCreatureDatabase() {
     }
     
     const allCreatureNames = allMonsters.map(m => m.metadata.name);
-    const hardcodedUnobtainable = ['Black Knight', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp'];
+    const hardcodedUnobtainable = ['Black Knight', 'Dharalion', 'Dead Tree', 'Dwarf Henchman', 'Earth Crystal', 'Energy Crystal', 'Lavahole', 'Magma Crystal', 'Monster Cauldron', 'Old Giant Spider', 'Orc', 'Regeneration Tank', 'Sweaty Cyclops', 'Tentugly', 'Willi Wasp', 'The Percht Queen'];
     
     const unobtainableFromMonsters = allMonsters
       .filter(m => hardcodedUnobtainable.includes(m.metadata.name))

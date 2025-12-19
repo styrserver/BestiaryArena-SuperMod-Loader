@@ -432,7 +432,7 @@ const inventoryTooltips = {
   dungeonAscension: {
     displayName: "Dungeon Ascension",
     text: 'Ascend your way through increasingly more difficult enemies. The higher you climb, the better the loot. How high can you go?',
-    icon: '/assets/icons/dungeon-ascension.png',
+    icon: '/assets/icons/floors.png',
     rarity: '5',
     obtain: 'Store (200,000 gold)'
   }
