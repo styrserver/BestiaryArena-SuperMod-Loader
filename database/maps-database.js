@@ -140,28 +140,160 @@ function isRaid(mapId) {
   return map ? map.raid === true : false;
 }
 
-// Build the database dynamically
-const mapsDatabase = buildMapsDatabase();
+function waitForGameState(callback, retries = 0, maxRetries = 20) {
+  try {
+    const hasRooms = globalThis.state?.utils?.ROOMS;
+    
+    if (hasRooms && Array.isArray(hasRooms) && hasRooms.length > 0) {
+      callback();
+    } else if (retries < maxRetries) {
+      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
+    } else {
+      console.warn('[maps-database.js] Game state not ready after max retries, building database anyway');
+      callback();
+    }
+  } catch (error) {
+    console.error('[maps-database.js] Error checking game state:', error);
+    if (retries < maxRetries) {
+      setTimeout(() => waitForGameState(callback, retries + 1, maxRetries), 250);
+    } else {
+      console.warn('[maps-database.js] Building database despite errors');
+      callback();
+    }
+  }
+}
 
-// Add utility functions to the database
-mapsDatabase.getAllMaps = getAllMaps;
-mapsDatabase.getMapById = getMapById;
-mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
-mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
-mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
-mapsDatabase.getRaidMaps = getRaidMaps;
-mapsDatabase.getNonRaidMaps = getNonRaidMaps;
-mapsDatabase.isRaid = isRaid;
+// Initialize database with lazy loading
+let mapsDatabase = null;
+let databaseInitialized = false;
 
-// Export for use in other mods
+function initializeDatabase() {
+  if (databaseInitialized) return mapsDatabase;
+  
+  mapsDatabase = buildMapsDatabase();
+  
+  // Add utility functions to the database
+  mapsDatabase.getAllMaps = getAllMaps;
+  mapsDatabase.getMapById = getMapById;
+  mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
+  mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
+  mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
+  mapsDatabase.getRaidMaps = getRaidMaps;
+  mapsDatabase.getNonRaidMaps = getNonRaidMaps;
+  mapsDatabase.isRaid = isRaid;
+  
+  databaseInitialized = true;
+  return mapsDatabase;
+}
+
+const placeholderDatabase = {
+  ALL_MAPS: [],
+  RAID_MAPS: [],
+  NON_RAID_MAPS: [],
+  MAPS_BY_DIFFICULTY: { 1: [], 2: [], 3: [] },
+  getAllMaps: function() {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getAllMaps ? mapsDatabase.getAllMaps() : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getAllMaps();
+  },
+  getMapById: function(mapId) {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getMapById ? mapsDatabase.getMapById(mapId) : null;
+    }
+    if (!databaseInitialized) {
+      return null;
+    }
+    return getMapById(mapId);
+  },
+  getMapsByDifficulty: function(difficulty) {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getMapsByDifficulty ? mapsDatabase.getMapsByDifficulty(difficulty) : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getMapsByDifficulty(difficulty);
+  },
+  getMapsByMaxTeamSize: function(teamSize) {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getMapsByMaxTeamSize ? mapsDatabase.getMapsByMaxTeamSize(teamSize) : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getMapsByMaxTeamSize(teamSize);
+  },
+  getMapsByStaminaCost: function(staminaCost) {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getMapsByStaminaCost ? mapsDatabase.getMapsByStaminaCost(staminaCost) : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getMapsByStaminaCost(staminaCost);
+  },
+  getRaidMaps: function() {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getRaidMaps ? mapsDatabase.getRaidMaps() : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getRaidMaps();
+  },
+  getNonRaidMaps: function() {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.getNonRaidMaps ? mapsDatabase.getNonRaidMaps() : [];
+    }
+    if (!databaseInitialized) {
+      return [];
+    }
+    return getNonRaidMaps();
+  },
+  isRaid: function(mapId) {
+    if (!databaseInitialized && mapsDatabase) {
+      return mapsDatabase.isRaid ? mapsDatabase.isRaid(mapId) : false;
+    }
+    if (!databaseInitialized) {
+      return false;
+    }
+    return isRaid(mapId);
+  }
+};
+
 const globalWindow = globalThis.window || window || (typeof window !== 'undefined' ? window : null);
-if (globalWindow) {
-  globalWindow.mapsDatabase = mapsDatabase;
-  console.log(`[maps-database.js] Loaded ${mapsDatabase.ALL_MAPS.length} maps dynamically (cached for all mods)`);
-  console.log(`[maps-database.js] Raid maps: ${mapsDatabase.RAID_MAPS.length}, Non-raid maps: ${mapsDatabase.NON_RAID_MAPS.length}`);
-  console.log('[maps-database.js] Maps by difficulty:', Object.keys(mapsDatabase.MAPS_BY_DIFFICULTY).map(d => `D${d}: ${mapsDatabase.MAPS_BY_DIFFICULTY[d].length}`).join(', '));
+if (globalWindow && !globalWindow.mapsDatabase) {
+  globalWindow.mapsDatabase = placeholderDatabase;
 }
-if (typeof module !== 'undefined') {
-  module.exports = mapsDatabase;
-}
+
+waitForGameState(() => {
+  initializeDatabase();
+  
+  if (globalWindow) {
+    Object.assign(globalWindow.mapsDatabase, mapsDatabase);
+    globalWindow.mapsDatabase.ALL_MAPS = mapsDatabase.ALL_MAPS;
+    globalWindow.mapsDatabase.RAID_MAPS = mapsDatabase.RAID_MAPS;
+    globalWindow.mapsDatabase.NON_RAID_MAPS = mapsDatabase.NON_RAID_MAPS;
+    globalWindow.mapsDatabase.MAPS_BY_DIFFICULTY = mapsDatabase.MAPS_BY_DIFFICULTY;
+    globalWindow.mapsDatabase.getAllMaps = getAllMaps;
+    globalWindow.mapsDatabase.getMapById = getMapById;
+    globalWindow.mapsDatabase.getMapsByDifficulty = getMapsByDifficulty;
+    globalWindow.mapsDatabase.getMapsByMaxTeamSize = getMapsByMaxTeamSize;
+    globalWindow.mapsDatabase.getMapsByStaminaCost = getMapsByStaminaCost;
+    globalWindow.mapsDatabase.getRaidMaps = getRaidMaps;
+    globalWindow.mapsDatabase.getNonRaidMaps = getNonRaidMaps;
+    globalWindow.mapsDatabase.isRaid = isRaid;
+    
+    console.log(`[maps-database.js] Loaded ${mapsDatabase.ALL_MAPS.length} maps dynamically (cached for all mods)`);
+    console.log(`[maps-database.js] Raid maps: ${mapsDatabase.RAID_MAPS.length}, Non-raid maps: ${mapsDatabase.NON_RAID_MAPS.length}`);
+    console.log('[maps-database.js] Maps by difficulty:', Object.keys(mapsDatabase.MAPS_BY_DIFFICULTY).map(d => `D${d}: ${mapsDatabase.MAPS_BY_DIFFICULTY[d].length}`).join(', '));
+  }
+  if (typeof module !== 'undefined') {
+    module.exports = mapsDatabase;
+  }
+});
 

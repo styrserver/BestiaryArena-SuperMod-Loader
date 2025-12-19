@@ -197,13 +197,13 @@
         autosqueezeGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
         autosqueezeGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
         autosqueezeMinCount: 1,
-        autosqueezeIgnoreList: [],
+        autosqueezeSqueezeList: [],
         autodusterChecked: false, // Default disabled
         autodusterGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
         autodusterGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
-        autodusterIgnoreList: [],
-        // Shared ignore list for both autoplant and autosell
-        autoplantIgnoreList: [],
+        autodusterDisenchantList: [],
+        // Shared sell list for both autoplant and autosell
+        autoplantSellList: [],
         // Shared gene thresholds for both autoplant and autosell
         autoplantGenesMin: 80,
         autoplantKeepGenesEnabled: true,
@@ -287,7 +287,7 @@
             checked: isAutoduster ? 'autodusterChecked' : 'autosqueezeChecked',
             genesMin: isAutoduster ? 'autodusterGenesMin' : 'autosqueezeGenesMin',
             genesMax: isAutoduster ? 'autodusterGenesMax' : 'autosqueezeGenesMax',
-            ignoreList: isAutoduster ? 'autodusterIgnoreList' : 'autosqueezeIgnoreList'
+            ignoreList: isAutoduster ? 'autodusterDisenchantList' : 'autosqueezeSqueezeList'
         };
     }
     
@@ -336,6 +336,57 @@
                     } catch (e) {
                         console.warn(`[${modName}][WARN][getSettings] Failed to save migrated settings`, e);
                     }
+                }
+            }
+            
+            // Migration: Convert old autodusterIgnoreList to new autodusterDisenchantList
+            // The old system kept items in the ignore list, new system disenchants items in the disenchant list
+            // Since the logic is inverted, clear old data for safety and disable autoduster
+            if ('autodusterIgnoreList' in stored && !('autodusterDisenchantList' in stored)) {
+                console.log(`[${modName}][INFO] Migrating autoduster from ignore list to disenchant list. Autoduster disabled for safety.`);
+                settings.autodusterDisenchantList = []; // Start fresh with empty disenchant list
+                settings.autodusterChecked = false; // Disable for safety
+                
+                // Save migrated settings
+                const { autodusterIgnoreList, ...cleanSettings } = settings;
+                try {
+                    localStorage.setItem('autoseller-settings', JSON.stringify(cleanSettings));
+                } catch (e) {
+                    console.warn(`[${modName}][WARN][getSettings] Failed to save migrated autoduster settings`, e);
+                }
+            }
+            
+            // Migration: Convert old autosqueezeIgnoreList to new autosqueezeSqueezeList
+            // The old system kept creatures in the ignore list, new system squeezes creatures in the squeeze list
+            // Since the logic is inverted, clear old data for safety and disable autosqueeze
+            if ('autosqueezeIgnoreList' in stored && !('autosqueezeSqueezeList' in stored)) {
+                console.log(`[${modName}][INFO] Migrating autosqueeze from ignore list to squeeze list. Autosqueeze disabled for safety.`);
+                settings.autosqueezeSqueezeList = []; // Start fresh with empty squeeze list
+                settings.autosqueezeChecked = false; // Disable for safety
+                
+                // Save migrated settings
+                const { autosqueezeIgnoreList, ...cleanSettings } = settings;
+                try {
+                    localStorage.setItem('autoseller-settings', JSON.stringify(cleanSettings));
+                } catch (e) {
+                    console.warn(`[${modName}][WARN][getSettings] Failed to save migrated autosqueeze settings`, e);
+                }
+            }
+            
+            // Migration: Convert old autoplantIgnoreList to new autoplantSellList
+            // The old system kept creatures in the ignore list, new system sells creatures in the sell list
+            // Since the logic is inverted, clear old data for safety and disable autoplant/autosell
+            if ('autoplantIgnoreList' in stored && !('autoplantSellList' in stored)) {
+                console.log(`[${modName}][INFO] Migrating autoplant/autosell from ignore list to sell list. Autoplant/Autosell disabled for safety.`);
+                settings.autoplantSellList = []; // Start fresh with empty sell list
+                settings.autoMode = null; // Disable for safety
+                
+                // Save migrated settings
+                const { autoplantIgnoreList, ...cleanSettings } = settings;
+                try {
+                    localStorage.setItem('autoseller-settings', JSON.stringify(cleanSettings));
+                } catch (e) {
+                    console.warn(`[${modName}][WARN][getSettings] Failed to save migrated autoplant settings`, e);
                 }
             }
             
@@ -721,15 +772,15 @@
             return false;
         }
         
-        const ignoreList = settings.autodusterIgnoreList || [];
+        const disenchantList = settings.autodusterDisenchantList || [];
         
-        // Check if equipment is in ignore list
-        if (equipment.name && ignoreList.includes(equipment.name)) {
-            return false;
+        // Only disenchant equipment that is explicitly in the disenchant list
+        if (equipment.name && disenchantList.includes(equipment.name)) {
+            return true;
         }
         
-        // Equipment should be dusted (no gene checking for equipment)
-        return true;
+        // Keep all equipment by default
+        return false;
     }
     
     /**
@@ -797,7 +848,7 @@
         const sellMinCount = settings.autosellMinCount ?? 1;
         const squeezeMinCount = settings.autosqueezeMinCount ?? 1;
         const maxExpThreshold = settings.autosellMaxExp ?? 52251;
-        const squeezeIgnoreList = settings.autosqueezeIgnoreList || [];
+        const squeezeSqueezeList = settings.autosqueezeSqueezeList || [];
         
         const toSqueeze = [];
         const toSell = [];
@@ -835,10 +886,10 @@
                         continue;
                     }
                     
-                    // Check ignore list
+                    // Check squeeze list - only squeeze creatures explicitly in the list
                     const creatureName = monster.name || (monster.gameId && globalThis.state?.utils?.getMonster?.(monster.gameId)?.metadata?.name);
-                    if (creatureName && squeezeIgnoreList.includes(creatureName)) {
-                        continue;
+                    if (!creatureName || !squeezeSqueezeList.includes(creatureName)) {
+                        continue; // Skip if not in squeeze list (keep by default)
                     }
                     
                     toSqueeze.push(monster);
@@ -2318,18 +2369,19 @@
         // Create creature filter columns using shared function (insert before status area)
         const creatureFilter = createCreatureFilterColumns({
             container: placeholder,
-            settingKey: 'autoplantIgnoreList',
+            settingKey: 'autoplantSellList',
             insertBefore: statusArea,
             actionTitle: t('mods.autoseller.actionTitleSell'),
             enableContextMenu: true, // Enable context menu for autoseller
             showKeepRangeLock: true, // Show lock icon for autoseller
+            reverseColumns: true, // Reverse columns for sell list
             onUpdate: (selectedCreatures) => {
-                // Update plant monster filter with new ignore list (for autoplant mode)
+                // Update plant monster filter with new sell list (for autoplant mode)
                 const currentSettings = getSettings();
                 if (currentSettings.autoMode === 'autoplant') {
                     updatePlantMonsterFilter(selectedCreatures);
                 }
-                // For autosell mode, ignore list is applied during processing
+                // For autosell mode, sell list is applied during processing
                 updateAutoplantStatus();
             }
         });
@@ -2343,7 +2395,7 @@
         
         // Update status function
         function updateAutoplantStatus() {
-            const ignoredCount = selectedCreatures.length;
+            const sellCount = selectedCreatures.length;
             const settings = getSettings();
             const currentMode = settings.autoMode;
             const isEnabled = currentMode === 'autoplant' || currentMode === 'autosell';
@@ -2360,8 +2412,11 @@
             const statusKey = isEnabled ? 'mods.autoseller.statusEnabled' : 'mods.autoseller.statusDisabled';
             let statusText = tReplace(statusKey, { type: modeLabel });
             
-            if (isEnabled && ignoredCount > 0) {
-                statusText += ' ' + tReplace('mods.autoseller.statusIgnoring', { count: ignoredCount });
+            if (isEnabled && sellCount > 0) {
+                const plural = sellCount === 1 ? '' : 's';
+                statusText += ' ' + `Selling ${sellCount} creature type${plural}.`;
+            } else if (isEnabled && sellCount === 0) {
+                statusText += ' ' + 'Keeping all creatures.';
             }
             
             summary.textContent = statusText;
@@ -2908,14 +2963,14 @@
      * Creates creature filter columns (Creatures and Ignore List) - shared between autoplant and autosqueeze
      * @param {Object} options - Configuration options
      * @param {HTMLElement} options.container - Container element to append columns to
-     * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList', 'autosqueezeIgnoreList')
+     * @param {string} options.settingKey - Settings key for action list (e.g., 'autoplantSellList', 'autosqueezeSqueezeList')
      * @param {Function} options.onUpdate - Callback when ignore list is updated
      * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
      * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Squeeze', 'Disenchant')
      * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableCreatures, selectedCreatures, renderCreatureColumns, saveIgnoreList }
      */
-    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false, showKeepRangeLock = false }) {
+    function createCreatureFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false, showKeepRangeLock = false, reverseColumns = false }) {
         // Use translation if actionTitle not provided, otherwise use provided value
         if (!actionTitle) {
             actionTitle = t('mods.autoseller.actionTitleSell');
@@ -2980,50 +3035,88 @@
                 columnsContainer.innerHTML = '';
             }
 
-            // Available creatures column (keep ranges inactive here)
-            const availableBox = createAutoplantCreaturesBox({
-                title: actionTitle,
-                items: availableCreatures,
-                selectedCreature: null,
-                isIgnoreList: false,
-                enableContextMenu: enableContextMenu,
-                showKeepRangeLock: showKeepRangeLock,
-                onSelectCreature: (creatureName) => {
-                    console.log(`[Autoseller] Added to ignore list (${settingKey}):`, creatureName);
+            // Determine which column shows which items based on reverseColumns
+            // When reverseColumns=true (for squeeze/action lists):
+            //   - LEFT: items NOT in list (keep) 
+            //   - RIGHT: items in list (action)
+            // When reverseColumns=false (for ignore lists):
+            //   - LEFT: items in list (keep/ignore)
+            //   - RIGHT: items NOT in list (action)
+            
+            const leftItems = reverseColumns ? availableCreatures : selectedCreatures;
+            const leftTitle = reverseColumns ? t('mods.autoseller.actionTitleKeep') : t('mods.autoseller.actionTitleKeep');
+            const leftIsIgnore = reverseColumns ? false : true;
+            const leftShowKeepRange = reverseColumns ? false : showKeepRangeLock;
+            const leftHandler = reverseColumns ? 
+                (creatureName) => {
+                    console.log(`[Autoseller] Added to action list (${settingKey}):`, creatureName);
                     availableCreatures = availableCreatures.filter(c => c !== creatureName);
                     selectedCreatures.push(creatureName);
                     selectedCreatures.sort();
                     renderCreatureColumns();
                     saveIgnoreList();
-                }
-            });
-            availableBox.style.width = '125px';
-            availableBox.style.flex = '1 1 0';
-            availableBox.style.minHeight = '0';
-
-            // Selected creatures column (keep ranges active here)
-            const selectedBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.actionTitleKeep'),
-                items: selectedCreatures,
-                selectedCreature: null,
-                isIgnoreList: true,
-                enableContextMenu: enableContextMenu,
-                showKeepRangeLock: showKeepRangeLock,
-                onSelectCreature: (creatureName) => {
-                    console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, creatureName);
+                } :
+                (creatureName) => {
+                    console.log(`[Autoseller] Removed from keep list (${settingKey}):`, creatureName);
                     selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
                     availableCreatures.push(creatureName);
                     availableCreatures.sort();
                     renderCreatureColumns();
                     saveIgnoreList();
-                }
-            });
-            selectedBox.style.width = '125px';
-            selectedBox.style.flex = '1 1 0';
-            selectedBox.style.minHeight = '0';
+                };
+            
+            const rightItems = reverseColumns ? selectedCreatures : availableCreatures;
+            const rightTitle = reverseColumns ? actionTitle : actionTitle;
+            const rightIsIgnore = reverseColumns ? true : false;
+            const rightShowKeepRange = reverseColumns ? showKeepRangeLock : false;
+            const rightHandler = reverseColumns ?
+                (creatureName) => {
+                    console.log(`[Autoseller] Removed from action list (${settingKey}):`, creatureName);
+                    selectedCreatures = selectedCreatures.filter(c => c !== creatureName);
+                    availableCreatures.push(creatureName);
+                    availableCreatures.sort();
+                    renderCreatureColumns();
+                    saveIgnoreList();
+                } :
+                (creatureName) => {
+                    console.log(`[Autoseller] Added to keep list (${settingKey}):`, creatureName);
+                    availableCreatures = availableCreatures.filter(c => c !== creatureName);
+                    selectedCreatures.push(creatureName);
+                    selectedCreatures.sort();
+                    renderCreatureColumns();
+                    saveIgnoreList();
+                };
 
-            columnsContainer.appendChild(selectedBox);
-            columnsContainer.appendChild(availableBox);
+            // Left column
+            const leftBox = createAutoplantCreaturesBox({
+                title: leftTitle,
+                items: leftItems,
+                selectedCreature: null,
+                isIgnoreList: leftIsIgnore,
+                enableContextMenu: enableContextMenu,
+                showKeepRangeLock: leftShowKeepRange,
+                onSelectCreature: leftHandler
+            });
+            leftBox.style.width = '125px';
+            leftBox.style.flex = '1 1 0';
+            leftBox.style.minHeight = '0';
+
+            // Right column
+            const rightBox = createAutoplantCreaturesBox({
+                title: rightTitle,
+                items: rightItems,
+                selectedCreature: null,
+                isIgnoreList: rightIsIgnore,
+                enableContextMenu: enableContextMenu,
+                showKeepRangeLock: rightShowKeepRange,
+                onSelectCreature: rightHandler
+            });
+            rightBox.style.width = '125px';
+            rightBox.style.flex = '1 1 0';
+            rightBox.style.minHeight = '0';
+
+            columnsContainer.appendChild(leftBox);
+            columnsContainer.appendChild(rightBox);
         }
         
         // Initial render
@@ -3041,14 +3134,14 @@
      * Creates equipment filter columns (Equipment and Ignore List) - for autoduster
      * @param {Object} options - Configuration options
      * @param {HTMLElement} options.container - Container element to append columns to
-     * @param {string} options.settingKey - Settings key for ignore list (e.g., 'autodusterIgnoreList')
+     * @param {string} options.settingKey - Settings key for disenchant list (e.g., 'autodusterDisenchantList')
      * @param {Function} options.onUpdate - Callback when ignore list is updated
      * @param {HTMLElement} options.insertBefore - Optional element to insert columns before
      * @param {string} options.actionTitle - Title for the action column (e.g., 'Sell', 'Disenchant')
      * @param {boolean} options.enableContextMenu - Whether to enable right-click context menu for gene keep ranges
      * @returns {Object} { availableEquipment, selectedEquipment, renderEquipmentColumns, saveIgnoreList }
      */
-    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false }) {
+    function createEquipmentFilterColumns({ container, settingKey, onUpdate, insertBefore, actionTitle = null, enableContextMenu = false, reverseColumns = false }) {
         // Use translation if actionTitle not provided, otherwise use provided value
         if (!actionTitle) {
             actionTitle = t('mods.autoseller.actionTitleSell');
@@ -3117,48 +3210,84 @@
                 columnsContainer.innerHTML = '';
             }
 
-            // Available equipment column (keep ranges inactive here)
-            const availableBox = createAutoplantCreaturesBox({
-                title: actionTitle,
-                items: availableEquipment,
-                selectedCreature: null,
-                isIgnoreList: false,
-                enableContextMenu: enableContextMenu,
-                onSelectCreature: (equipmentName) => {
-                    console.log(`[Autoseller] Added to ignore list (${settingKey}):`, equipmentName);
+            // Determine which column shows which items based on reverseColumns
+            // When reverseColumns=true (for disenchant lists):
+            //   - LEFT: items NOT in list (keep) 
+            //   - RIGHT: items in list (action)
+            // When reverseColumns=false (for ignore lists):
+            //   - LEFT: items in list (keep/ignore)
+            //   - RIGHT: items NOT in list (action)
+            
+            const leftItems = reverseColumns ? availableEquipment : selectedEquipment;
+            const leftTitle = reverseColumns ? t('mods.autoseller.actionTitleKeep') : t('mods.autoseller.actionTitleKeep');
+            const leftIsIgnore = reverseColumns ? false : true;
+            const leftHandler = reverseColumns ? 
+                (equipmentName) => {
+                    console.log(`[Autoseller] Added to disenchant list (${settingKey}):`, equipmentName);
                     availableEquipment = availableEquipment.filter(e => e !== equipmentName);
                     selectedEquipment.push(equipmentName);
                     selectedEquipment.sort();
                     renderEquipmentColumns();
                     saveIgnoreList();
-                }
-            });
-            availableBox.style.width = '125px';
-            availableBox.style.flex = '1 1 0';
-            availableBox.style.minHeight = '0';
-
-            // Selected equipment column (keep ranges active here)
-            const selectedBox = createAutoplantCreaturesBox({
-                title: t('mods.autoseller.actionTitleKeep'),
-                items: selectedEquipment,
-                selectedCreature: null,
-                isIgnoreList: true,
-                enableContextMenu: enableContextMenu,
-                onSelectCreature: (equipmentName) => {
-                    console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, equipmentName);
+                } :
+                (equipmentName) => {
+                    console.log(`[Autoseller] Removed from keep list (${settingKey}):`, equipmentName);
                     selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
                     availableEquipment.push(equipmentName);
                     availableEquipment.sort();
                     renderEquipmentColumns();
                     saveIgnoreList();
-                }
-            });
-            selectedBox.style.width = '125px';
-            selectedBox.style.flex = '1 1 0';
-            selectedBox.style.minHeight = '0';
+                };
+            
+            const rightItems = reverseColumns ? selectedEquipment : availableEquipment;
+            const rightTitle = reverseColumns ? actionTitle : actionTitle;
+            const rightIsIgnore = reverseColumns ? true : false;
+            const rightHandler = reverseColumns ?
+                (equipmentName) => {
+                    console.log(`[Autoseller] Removed from disenchant list (${settingKey}):`, equipmentName);
+                    selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
+                    availableEquipment.push(equipmentName);
+                    availableEquipment.sort();
+                    renderEquipmentColumns();
+                    saveIgnoreList();
+                } :
+                (equipmentName) => {
+                    console.log(`[Autoseller] Added to keep list (${settingKey}):`, equipmentName);
+                    availableEquipment = availableEquipment.filter(e => e !== equipmentName);
+                    selectedEquipment.push(equipmentName);
+                    selectedEquipment.sort();
+                    renderEquipmentColumns();
+                    saveIgnoreList();
+                };
 
-            columnsContainer.appendChild(selectedBox);
-            columnsContainer.appendChild(availableBox);
+            // Left column
+            const leftBox = createAutoplantCreaturesBox({
+                title: leftTitle,
+                items: leftItems,
+                selectedCreature: null,
+                isIgnoreList: leftIsIgnore,
+                enableContextMenu: enableContextMenu,
+                onSelectCreature: leftHandler
+            });
+            leftBox.style.width = '125px';
+            leftBox.style.flex = '1 1 0';
+            leftBox.style.minHeight = '0';
+
+            // Right column
+            const rightBox = createAutoplantCreaturesBox({
+                title: rightTitle,
+                items: rightItems,
+                selectedCreature: null,
+                isIgnoreList: rightIsIgnore,
+                enableContextMenu: enableContextMenu,
+                onSelectCreature: rightHandler
+            });
+            rightBox.style.width = '125px';
+            rightBox.style.flex = '1 1 0';
+            rightBox.style.minHeight = '0';
+
+            columnsContainer.appendChild(leftBox);
+            columnsContainer.appendChild(rightBox);
         }
         
         // Initial render
@@ -3176,7 +3305,7 @@
     // Plant Monster Filter Functions
     // =======================
     
-    function setPlantMonsterFilter(ignoreList) {
+    function setPlantMonsterFilter(sellList) {
         if (!globalThis.state?.clientConfig?.trigger?.setState) {
             console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
             return;
@@ -3201,7 +3330,7 @@
                                 return false;
                             }
                             
-                            // Always devour creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
+                            // Always devour creatures below absolute threshold (OVERRIDES keep range and sell list) - only if enabled
                             if (alwaysDevourEnabled && monster.totalGenes <= alwaysDevourBelow) {
                                 return true;
                             }
@@ -3211,9 +3340,10 @@
                                 return false;
                             }
                             
-                            // For creatures between thresholds (or all if keep genes disabled), check ignore list
-                            if (monsterName && ignoreList.includes(monsterName)) {
-                                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+                            // For creatures between thresholds (or all if keep genes disabled), check sell list
+                            // Only devour creatures that are explicitly in the sell list
+                            if (monsterName && sellList.includes(monsterName)) {
+                                // Check per-creature keep range ONLY if creature is in sell list (keep range is only active in sell list)
                                 const keepRange = getCreatureKeepRange(monsterName);
                                 if (keepRange) {
                                     // If creature has a keep range, only keep if within range, otherwise devour
@@ -3222,11 +3352,12 @@
                                     }
                                     return true; // Devour - outside range
                                 }
-                                // No keep range set - normal ignore list behavior (keep it)
-                                return false;
+                                // No keep range set - normal sell list behavior (devour it)
+                                return true;
                             }
                             
-                            return true;
+                            // Keep by default if not in sell list
+                            return false;
                         },
                     };
                 },
@@ -3255,9 +3386,9 @@
         
         // Only set filter if autoplant is enabled
         if (settings.autoMode === 'autoplant') {
-            // Use provided selectedCreatures, or fall back to saved ignore list from settings
-            const ignoreList = selectedCreatures.length > 0 ? selectedCreatures : (settings.autoplantIgnoreList || []);
-            setPlantMonsterFilter(ignoreList);
+            // Use provided selectedCreatures, or fall back to saved sell list from settings
+            const sellList = selectedCreatures.length > 0 ? selectedCreatures : (settings.autoplantSellList || []);
+            setPlantMonsterFilter(sellList);
         } else {
             removePlantMonsterFilter();
         }
@@ -3538,7 +3669,7 @@
             section.appendChild(statusArea);
             
             // Add filter columns (insert before status area, with autofit)
-            const ignoreListKey = opts.summaryType === 'Autoduster' ? 'autodusterIgnoreList' : 'autosqueezeIgnoreList';
+            const ignoreListKey = opts.summaryType === 'Autoduster' ? 'autodusterDisenchantList' : 'autosqueezeSqueezeList';
             if (opts.summaryType === 'Autoduster') {
                 // Use equipment filter columns for autoduster
                 createEquipmentFilterColumns({
@@ -3546,9 +3677,10 @@
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
                     actionTitle: t('mods.autoseller.actionTitleDisenchant'),
+                    reverseColumns: true, // Reverse columns for disenchant list
                     onUpdate: () => {
-                        // Ignore list is applied during processing
-                        // Update summary to show ignore count
+                        // Disenchant list is applied during processing
+                        // Update summary to show disenchant count
                         if (typeof updateSummary === 'function') {
                             updateSummary();
                         }
@@ -3562,9 +3694,10 @@
                     insertBefore: statusArea,
                     actionTitle: t('mods.autoseller.actionTitleSqueeze'),
                     showKeepRangeLock: false, // Don't show lock for autosqueeze
+                    reverseColumns: true, // Reverse columns for squeeze list
                     onUpdate: () => {
-                        // Ignore list is applied during processing
-                        // Update summary to show ignore count
+                        // Squeeze list is applied during processing
+                        // Update summary to show squeeze count
                         if (typeof updateSummary === 'function') {
                             updateSummary();
                         }
@@ -3728,11 +3861,13 @@
             if (opts.summaryType === 'Autoduster') {
                 // Autoduster doesn't have gene inputs, just show enabled/disabled status
                 if (checkbox.checked) {
-                    let statusText = t('mods.autoseller.summaryDisenchantingSimple') || 'Disenchanting equipment.';
-                    const ignoreList = settings.autodusterIgnoreList || [];
-                    if (ignoreList.length > 0) {
-                        const plural = ignoreList.length === 1 ? '' : 's';
-                        statusText += tReplace('mods.autoseller.ignoringEquipment', { count: ignoreList.length, plural });
+                    const disenchantList = settings.autodusterDisenchantList || [];
+                    let statusText;
+                    if (disenchantList.length > 0) {
+                        const plural = disenchantList.length === 1 ? '' : 's';
+                        statusText = `Disenchanting ${disenchantList.length} equipment type${plural}.`;
+                    } else {
+                        statusText = 'Keeping all equipment.';
                     }
                     summary.textContent = statusText;
                 } else {
@@ -3752,11 +3887,13 @@
                         summary.textContent = tReplace('mods.autoseller.summarySelling', { min: minVal, max: maxVal, minCount: minCountVal });
                     } else if (opts.summaryType === 'Autosqueeze') {
                         // Autosqueeze only processes serverResults, so no min count needed
-                        let statusText = tReplace('mods.autoseller.summarySqueezingFromRewards', { min: minVal, max: maxVal });
-                        const ignoreList = settings.autosqueezeIgnoreList || [];
-                        if (ignoreList.length > 0) {
-                            const plural = ignoreList.length === 1 ? '' : 's';
-                            statusText += tReplace('mods.autoseller.ignoringCreatures', { count: ignoreList.length, plural });
+                        const squeezeList = settings.autosqueezeSqueezeList || [];
+                        let statusText;
+                        if (squeezeList.length > 0) {
+                            const plural = squeezeList.length === 1 ? '' : 's';
+                            statusText = `Squeezing ${squeezeList.length} creature type${plural} with ${minVal}-${maxVal}%.`;
+                        } else {
+                            statusText = `Keeping all creatures with ${minVal}-${maxVal}%.`;
                         }
                         summary.textContent = statusText;
                     } else {
@@ -4337,7 +4474,7 @@
             // Helper function to filter equipment that should be disenchanted
             function filterEquipmentForDisenchant(inventoryEquipmentList, settings, rewardEquipmentIds = null, isPending = false) {
                 const toDisenchant = [];
-                const ignoreList = settings.autodusterIgnoreList || [];
+                const disenchantList = settings.autodusterDisenchantList || [];
                 
                 for (const invEquipment of inventoryEquipmentList) {
                     const equipmentId = invEquipment?.id;
@@ -4370,8 +4507,8 @@
                         continue;
                     }
                     
-                    // Check ignore list
-                    if (ignoreList.includes(equipment.name)) {
+                    // Only process equipment that is in the disenchant list
+                    if (!disenchantList.includes(equipment.name)) {
                         if (isPending) {
                             stateManager.removePendingEquipment(equipmentId);
                         }
@@ -5686,7 +5823,7 @@
                 // Update filter and widget
                 const currentSettings = getSettings();
                 if (newState) {
-                    updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                    updatePlantMonsterFilter(currentSettings.autoplantSellList || []);
                 } else {
                     removePlantMonsterFilter();
                 }
@@ -5752,38 +5889,40 @@
         const keepGenesEnabled = true;
         const alwaysDevourBelow = settings.autoplantAlwaysDevourBelow ?? 49;
         const alwaysDevourEnabled = settings.autoplantAlwaysDevourEnabled !== undefined ? settings.autoplantAlwaysDevourEnabled : false;
-        const ignoreList = settings.autoplantIgnoreList || [];
+        const sellList = settings.autoplantSellList || [];
         
         const filteredMonsters = matchedMonsters.filter(invMonster => {
             if (isShinyCreature(invMonster)) return false;
             
             const totalGenes = calculateTotalGenes(invMonster);
             
-            // Always sell creatures below absolute threshold (OVERRIDES keep range and ignore list) - only if enabled
+            // Always sell creatures below absolute threshold (OVERRIDES keep range and sell list) - only if enabled
             if (alwaysDevourEnabled && totalGenes <= alwaysDevourBelow) {
                 return true;
             }
             
-            // Keep creatures with minGenes or higher (if enabled) - OVERRIDES ignore list
+            // Keep creatures with minGenes or higher (if enabled) - OVERRIDES sell list
             if (keepGenesEnabled && totalGenes >= minGenes) {
                 return false;
             }
             
-            // Get creature name for keep range and ignore list check
+            // Get creature name for keep range and sell list check
             const creatureName = getCreatureNameFromMonster(invMonster);
             
-            if (creatureName && ignoreList.includes(creatureName)) {
-                // Check per-creature keep range ONLY if creature is in ignore list (keep range is only active in ignore list)
+            // Only sell creatures that are explicitly in the sell list
+            if (creatureName && sellList.includes(creatureName)) {
+                // Check per-creature keep range ONLY if creature is in sell list (keep range is only active in sell list)
                 const keepRange = getCreatureKeepRange(creatureName);
                 if (keepRange) {
                     // If creature has a keep range, only keep if within range, otherwise sell
                     return !shouldKeepCreatureByRange(creatureName, totalGenes);
                 }
-                // No keep range set - normal ignore list behavior (keep it)
-                return false;
+                // No keep range set - normal sell list behavior (sell it)
+                return true;
             }
             
-            return true;
+            // Keep by default if not in sell list
+            return false;
         });
         
         return filteredMonsters.slice(0, 1);
@@ -5797,7 +5936,7 @@
         
         const squeezeMinGenes = settings.autosqueezeGenesMin ?? 80;
         const squeezeMaxGenes = settings.autosqueezeGenesMax ?? 100;
-        const ignoreList = settings.autosqueezeIgnoreList || [];
+        const squeezeList = settings.autosqueezeSqueezeList || [];
         const hasDaycare = hasDaycareIconInInventory();
         let daycareMonsterIds = [];
         
@@ -5810,7 +5949,7 @@
             locked: 0,
             shiny: 0,
             inDaycare: 0,
-            inIgnoreList: 0,
+            notInSqueezeList: 0,
             geneRange: 0,
             passed: 0
         };
@@ -5830,9 +5969,10 @@
             }
             
             const creatureName = getCreatureNameFromMonster(invMonster);
-            if (creatureName && ignoreList.includes(creatureName)) {
-                filterStats.inIgnoreList++;
-                return false;
+            // Only squeeze creatures that are explicitly in the squeeze list
+            if (!creatureName || !squeezeList.includes(creatureName)) {
+                filterStats.notInSqueezeList++;
+                return false; // Keep by default
             }
             
             const totalGenes = calculateTotalGenes(invMonster);
@@ -6396,7 +6536,7 @@
                 applyLocalStorageToGameCheckbox();
                 
                 // Update plant monster filter
-                updatePlantMonsterFilter(currentSettings.autoplantIgnoreList || []);
+                updatePlantMonsterFilter(currentSettings.autoplantSellList || []);
                 
                 return true;
             },
