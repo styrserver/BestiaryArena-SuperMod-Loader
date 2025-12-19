@@ -77,7 +77,11 @@ if (typeof browserAPI === 'undefined') {
       // Use the extension's local copy instead of trying to fetch from bestiaryarena.com
       try {
         const runTime = browserAPI ? browserAPI.runtime : null;
-        script.src = runTime.getURL('assets/js/ui_components.js');
+        if (runTime && runTime.getURL) {
+          script.src = runTime.getURL('assets/js/ui_components.js');
+        } else {
+          console.warn('Browser runtime API not available, UI Components may not load');
+        }
       } catch (e) {
         console.log('Error loading UI Components:', e);
       }
