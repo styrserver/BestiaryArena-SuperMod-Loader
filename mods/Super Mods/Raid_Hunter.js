@@ -4112,9 +4112,15 @@ async function checkForExistingRaids() {
             return;
         }
         
+        // Check if game state is ready
+        if (!globalThis.state?.raids?.getSnapshot) {
+            console.log('[Raid Hunter] Game state not ready yet - skipping raid check');
+            return;
+        }
+        
         // First check if there are any raids available in the raid state
         const raidState = globalThis.state.raids.getSnapshot();
-        const currentRaidList = raidState.context.list || [];
+        const currentRaidList = raidState.context?.list || [];
         
         if (currentRaidList.length === 0) {
             console.log('[Raid Hunter] No raids currently available');
@@ -4123,6 +4129,12 @@ async function checkForExistingRaids() {
         
         console.log('[Raid Hunter] Found existing raids:', currentRaidList.length);
         console.log('[Raid Hunter] Active raid details:', currentRaidList);
+        
+        // Check if board state is ready
+        if (!globalThis.state?.board?.getSnapshot) {
+            console.log('[Raid Hunter] Board state not ready yet - will retry later');
+            return;
+        }
         
         // Check if we're already in autoplay mode and on a raid map
         const boardContext = globalThis.state.board.getSnapshot().context;
