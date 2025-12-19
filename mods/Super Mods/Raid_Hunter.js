@@ -472,7 +472,10 @@ const EVENT_TEXTS = [
     'Poacher Cave (Bear)',
     'Poacher Cave (Wolf)',
     'Dwarven Bank Heist',
-    'An Arcanist Ritual'
+    'An Arcanist Ritual',
+    'Ruprecht\'s Hut',
+    'Jolly Axeman Tavern',
+    'Dog Raceway'
 ];
 
 // Event to room ID mapping (FALLBACK ONLY - game state API is used first)
@@ -493,8 +496,18 @@ const EVENT_TO_ROOM_MAPPING = {
     'Poacher Cave (Bear)': 'kpob',
     'Poacher Cave (Wolf)': 'kpow',
     'Dwarven Bank Heist': 'vbank',
-    'An Arcanist Ritual': 'vdhar'
+    'An Arcanist Ritual': 'vdhar',
+    'Ruprecht\'s Hut': 'fxmas',
+    'Jolly Axeman Tavern': 'kxmas',
+    'Dog Raceway': 'vxmas'
 };
+
+// Temporary event raids that should show the "Event" badge in UI
+const TEMPORARY_EVENT_RAIDS = [
+    'Ruprecht\'s Hut',
+    'Jolly Axeman Tavern',
+    'Dog Raceway'
+];
 
 // ============================================================================
 // 1.1. STAMINA MONITORING FUNCTIONS
@@ -4912,7 +4925,8 @@ function createRaidMapSelection() {
         'Folda': [
             'Permafrosted Hole',
             'Jammed Mailbox',
-            'Frosted Bunker'
+            'Frosted Bunker',
+            'Ruprecht\'s Hut'
         ],
         'Ab\'Dendriel': [
             'Hedge Maze Trap',
@@ -4923,11 +4937,13 @@ function createRaidMapSelection() {
         ],
         'Kazordoon': [
             'Poacher Cave (Bear)',
-            'Poacher Cave (Wolf)'
+            'Poacher Cave (Wolf)',
+            'Jolly Axeman Tavern'
         ],
         'Venore': [
             'Dwarven Bank Heist',
-            'An Arcanist Ritual'
+            'An Arcanist Ritual',
+            'Dog Raceway'
         ]
     };
     
@@ -5053,9 +5069,8 @@ function createRaidMapSelection() {
             raidDiv.appendChild(checkbox);
             raidDiv.appendChild(label);
             
-            // Add "Event" badge only for raids NOT in the hardcoded EVENT_TEXTS list
-            // These are truly dynamic events that are not statically defined
-            if (!EVENT_TEXTS.includes(raidName)) {
+            // Add "Event" badge for temporary event raids
+            if (TEMPORARY_EVENT_RAIDS.includes(raidName)) {
                 const eventBadge = document.createElement('span');
                 eventBadge.textContent = t('mods.raidHunter.event');
                 eventBadge.className = 'pixel-font-16';
