@@ -35,11 +35,18 @@ const DEFAULT_TASK_START_DELAY = 3;
 
 // Creatures that cannot appear in tasker tasks
 const UNSELECTABLE_CREATURES = [
+    'Dwarf Merrymancer',
     'Firestarter',
+    'Goblin Gumslinger',
+    'Goblin Saboteur',
+    'Grynch Clan Commander',
     'Gummy Raider',
     'Polar Bear',
+    'Reindeer',
     'Swamp Troll',
+    'The Percht Queen',
     'Tortoise',
+    'Unionized Goblin',
     'Yeti'
 ];
 

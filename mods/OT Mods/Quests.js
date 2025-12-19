@@ -2138,7 +2138,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       
       const currentProducts = await getQuestItems(false); // Force fetch to get latest (normalized)
       const currentCount = currentProducts[productName] || 0;
-      // Cap various quest items to 1, red dragon materials at 30, iron ore at 2
+      // Cap various quest items to 1, red dragon materials at 30, iron ore at 1
       const isRedDragonMaterial = productName === 'Red Dragon Scale' || productName === 'Red Dragon Leather';
       const isIronOre = productName === 'Iron Ore';
       const isUniqueItem = [
@@ -7735,6 +7735,19 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             } catch (err) {
               console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
             }
+          }
+        }
+
+        // Clean up any remaining Iron Ore from inventory since quest is completed
+        if (fishingState.ironOreQuestCompleted) {
+          try {
+            const questItems = await getQuestItems(false);
+            if (questItems['Iron Ore'] && questItems['Iron Ore'] > 0) {
+              console.log('[Quests Mod] Removing leftover Iron Ore from inventory (quest completed)');
+              await consumeQuestItem('Iron Ore', questItems['Iron Ore']);
+            }
+          } catch (err) {
+            console.error('[Quests Mod] Error cleaning up Iron Ore on init:', err);
           }
         }
 

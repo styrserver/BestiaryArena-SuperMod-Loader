@@ -5431,11 +5431,11 @@ function updatePlayerCountDisplay(count) {
   if (!playerCountBtn) return;
   
   if (count !== null) {
-    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Players online: <span class="text-ally/80">${count}</span></span>`;
-    playerCountBtn.title = `Players online: ${count} (Last updated: ${playercountState.lastUpdateTime ? playercountState.lastUpdateTime.toLocaleTimeString() : 'Never'})`;
+    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-ally/80">${count}</span></span>`;
+    playerCountBtn.title = `Online: ${count} (Last updated: ${playercountState.lastUpdateTime ? playercountState.lastUpdateTime.toLocaleTimeString() : 'Never'})`;
     playerCountBtn.style.color = 'inherit';
   } else {
-    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Players online: <span class="text-error">?</span></span>`;
+    playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>`;
     playerCountBtn.title = 'Player count unavailable';
     playerCountBtn.style.color = 'inherit';
   }
@@ -5509,7 +5509,7 @@ function addPlayercountHeaderButton() {
     // Create the <li> and <span> (non-clickable)
     const li = document.createElement('li');
     const btn = document.createElement('span');
-    btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Players online: <span class="text-error">?</span></span>';
+    btn.innerHTML = '<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>';
     btn.className = 'playercount-header-btn';
     btn.title = 'Loading player count...';
     

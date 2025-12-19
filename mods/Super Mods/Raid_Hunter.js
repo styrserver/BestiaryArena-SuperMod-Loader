@@ -5208,8 +5208,8 @@ function createRaidMapSelection() {
                             'rook': 'Rookgaard',
                             'carlin': 'Carlin',
                             'folda': 'Folda',
-                            'ab': 'Ab\'Dendriel',
-                            'kaz': 'Kazordoon',
+                            'abdendriel': 'Ab\'Dendriel',
+                            'kazordoon': 'Kazordoon',
                             'venore': 'Venore'
                         };
                         return regionNameMap[region.id] || region.id;
@@ -5222,21 +5222,58 @@ function createRaidMapSelection() {
         return null;
     }
     
-    // Dynamically add active raids to their correct regions using game state API
+    // Enhanced: Add ALL raid maps from game state that aren't already in EVENT_TEXTS
+    // This ensures all raid maps are visible, with Event badges for non-core raids
     try {
         const knownStatic = new Set(Object.values(raidGroups).flat());
+        const regions = globalThis.state?.utils?.REGIONS;
+
+        if (regions && Array.isArray(regions)) {
+            for (const region of regions) {
+                if (region.rooms && Array.isArray(region.rooms)) {
+                    const regionName = (() => {
+                        const regionNameMap = {
+                            'rook': 'Rookgaard',
+                            'carlin': 'Carlin',
+                            'folda': 'Folda',
+                            'abdendriel': 'Ab\'Dendriel',
+                            'kazordoon': 'Kazordoon',
+                            'venore': 'Venore'
+                        };
+                        return regionNameMap[region.id] || region.id;
+                    })();
+
+                    // Initialize region if it doesn't exist
+                    if (!raidGroups[regionName]) {
+                        raidGroups[regionName] = [];
+                    }
+
+                    // Add all raid maps from this region that aren't already in EVENT_TEXTS
+                    for (const room of region.rooms) {
+                        if (room.raid === true) {
+                            const raidName = getEventNameForRoomId(room.id);
+                            if (raidName && !raidName.startsWith('Unknown') && !raidGroups[regionName].includes(raidName)) {
+                                raidGroups[regionName].push(raidName);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also add any currently active raids (fallback for edge cases)
         const raidState = globalThis.state?.raids?.getSnapshot?.();
         const list = raidState?.context?.list || [];
-        
+
         for (const raid of list) {
             const raidName = getEventNameForRoomId(raid.roomId);
             if (!raidName || raidName.startsWith('Unknown') || knownStatic.has(raidName)) {
                 continue; // Skip already added or invalid raids
             }
-            
+
             // Get the region for this raid
             const regionName = getRegionNameForRoomId(raid.roomId);
-            
+
             if (regionName && raidGroups[regionName]) {
                 // Add to the correct region
                 if (!raidGroups[regionName].includes(raidName)) {
@@ -5253,7 +5290,7 @@ function createRaidMapSelection() {
             }
         }
     } catch (error) {
-        console.error('[Raid Hunter] Error populating dynamic raids:', error);
+        console.error('[Raid Hunter] Error populating all raid maps:', error);
     }
 
     // Create checkboxes for each raid group

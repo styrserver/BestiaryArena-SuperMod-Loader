@@ -72,6 +72,7 @@ const EXCLUDED_EQUIPMENT = [
     'Fireborn Giant Armor',
     'Hailstorm Rod',
     'Jester Hat',
+    'Orclops Santa',
     'Paladin Armor',
     'Rubber Cap',
     'Steel Boots',

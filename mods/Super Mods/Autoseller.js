@@ -2929,7 +2929,10 @@
         if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
             // Use saved settings (backward compatible)
             selectedCreatures = [...savedIgnoreList];
-            availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
+            // Add all creatures that aren't in saved settings to Keep column (default to Keep)
+            const newCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
+            selectedCreatures = [...selectedCreatures, ...newCreatures];
+            availableCreatures = [];
         } else {
             // Default to all creatures in Keep column for safety
             selectedCreatures = [...availableCreatures];
@@ -3071,7 +3074,10 @@
         if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
             // Use saved settings (backward compatible)
             selectedEquipment = [...savedIgnoreList];
-            availableEquipment = availableEquipment.filter(e => !selectedEquipment.includes(e));
+            // Add all equipment that aren't in saved settings to Keep column (default to Keep)
+            const newEquipment = availableEquipment.filter(e => !selectedEquipment.includes(e));
+            selectedEquipment = [...selectedEquipment, ...newEquipment];
+            availableEquipment = [];
         } else {
             // Default to all equipment in Keep column for safety
             selectedEquipment = [...availableEquipment];
