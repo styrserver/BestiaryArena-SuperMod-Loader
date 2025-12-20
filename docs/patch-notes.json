@@ -4,6 +4,15 @@
   },
   "notes": [
     {
+      "version": "3.2.8",
+      "changes": [
+        { "type": "added", "mod": "Autoseller", "text": "Added automatic cleanup of unobtainable creatures from ignore lists during initialization" },
+        { "type": "changed", "mod": "Mod Settings", "text": "\"Use Game State for Stamina Refill\" checkbox is now disabled when thresholds are enabled in Bestiary Automator." },
+        { "type": "fixed", "mod": "Quests", "text": "Fixed Iron Ore drops." },
+        { "type": "fixed", "mod": "Bestiary Automator", "text": "Fixed Faster Autoplay to respect configured delay value instead of resetting to 0ms" }
+      ]
+    },
+    {
       "version": "3.2.7",
       "changes": [
         { "type": "fixed", "mod": "Quests", "text": "Transcript fixes for improved dialogue handling." },
