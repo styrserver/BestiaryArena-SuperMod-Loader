@@ -3,7 +3,22 @@
     "_comment": "Sort patch notes by: 1. Type, 2. mod, 3. text. Keep patch notes simple and concise."
   },
   "notes": [
-  {
+    {
+      "version": "3.2.7",
+      "changes": [
+        { "type": "fixed", "mod": "Quests", "text": "Transcript fixes for improved dialogue handling." },
+        { "type": "fixed", "mod": "Board Analyzer", "text": "Fixed replay data copied from chart showing incorrect floor." },
+        { "type": "changed", "mod": "VIP List", "text": "Improved chat performance." },
+        { "type": "changed", "mod": "Dice Roller", "text": "Hide shiny creatures from creature selection." }
+      ]
+    },
+    {
+      "version": "3.2.6",
+      "changes": [
+        { "type": "fixed", "mod": "Autoseller", "text": "Hotfix for Autoseller functionality." }
+      ]
+    },
+    {
     "version": "3.2.5",
     "changes": [
       { "type": "fixed", "mod": "Core", "text": "Fixed core functionality for Christmas event." },
