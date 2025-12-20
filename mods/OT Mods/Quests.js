@@ -2487,6 +2487,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
                   continue;
                 }
               }
+              if (globalDrop.name === 'Iron Ore') {
+                const currentPlayer = getCurrentPlayerName();
+                const hasReceived = await hasReceivedIronOre(currentPlayer);
+                if (hasReceived) {
+                  console.log('[Quests Mod][Quest Items] Iron Ore already received by this account, skipping drop');
+                  continue;
+                }
+              }
 
               // Calculate dynamic drop chance based on stamina spent: 1% per 3 stamina
               const baseDropChance = (staminaSpent / 3) * 0.01;
@@ -2505,6 +2513,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
                   if (globalDrop.name === 'Letter from Al Dee') {
                     const currentPlayer = getCurrentPlayerName();
                     await markLetterFromAlDeeReceived(currentPlayer);
+                  }
+                  if (globalDrop.name === 'Iron Ore') {
+                    const currentPlayer = getCurrentPlayerName();
+                    await markIronOreReceived(currentPlayer);
                   }
                 } catch (error) {
                   console.error(`[Quests Mod][Quest Items] Error adding ${globalDrop.name}:`, error);
@@ -3930,7 +3942,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     'sam': 'He is a skilled blacksmith and a loyal subject.',
     'letter': KING_LETTER_MISSION.prompt,
     'scroll': KING_LETTER_MISSION.prompt,
-    'al dee': 'Al Dee is a rope merchant in Rookgaard. If you have a letter from him, you should return it to him directly.',
+    'al dee': 'I haven\'t seen Al Dee for a while and don\'t know where he holds house. Let me know if you have any information about him!',
     'bye': 'Good bye, Player!'
   };
 

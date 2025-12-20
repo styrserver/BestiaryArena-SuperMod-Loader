@@ -2879,16 +2879,16 @@ const handleFasterAutoplay = async () => {
   }
   
   try {
-    // Set autoplay delay to 0 for instant execution
+    // Set autoplay delay to configured value
     globalThis.state.clientConfig.trigger.setState({
       fn: (prev) => ({
         ...prev,
-        autoplayDelayMs: 0
+        autoplayDelayMs: config.fasterAutoplayMs
       }),
     });
-    
+
     fasterAutoplayExecutedThisSession = true;
-    console.log('[Bestiary Automator] Faster Autoplay enabled - autoplay delay set to 0ms');
+    console.log(`[Bestiary Automator] Faster Autoplay enabled - autoplay delay set to ${config.fasterAutoplayMs}ms`);
   } catch (error) {
     console.warn('[Bestiary Automator] Could not set autoplay delay:', error);
   }

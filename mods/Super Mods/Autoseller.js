@@ -6325,6 +6325,79 @@
     // =======================
     
     function initAutoseller() {
+        // Defer cleanup until databases are available
+        function cleanupIgnoreListsWhenReady() {
+            // Check if databases are loaded
+            const availableCreatures = window.creatureDatabase?.ALL_CREATURES;
+            const availableEquipment = window.equipmentDatabase?.ALL_EQUIPMENT;
+
+            if (!availableCreatures || !availableEquipment) {
+                // Databases not ready yet, try again in 1 second
+                setTimeout(cleanupIgnoreListsWhenReady, 1000);
+                return;
+            }
+
+            // Databases are loaded, proceed with cleanup
+            try {
+                const settings = getSettings();
+                let hasChanges = false;
+
+                // Clean autoplant ignore list
+                if (settings.autoplantIgnoreList && Array.isArray(settings.autoplantIgnoreList)) {
+                    const originalCount = settings.autoplantIgnoreList.length;
+                    settings.autoplantIgnoreList = settings.autoplantIgnoreList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autoplantIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoplant ignore list: ${originalCount} → ${settings.autoplantIgnoreList.length} creatures`);
+                    }
+                }
+
+                // Clean autosqueeze ignore list
+                if (settings.autosqueezeIgnoreList && Array.isArray(settings.autosqueezeIgnoreList)) {
+                    const originalCount = settings.autosqueezeIgnoreList.length;
+                    settings.autosqueezeIgnoreList = settings.autosqueezeIgnoreList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autosqueezeIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autosqueeze ignore list: ${originalCount} → ${settings.autosqueezeIgnoreList.length} creatures`);
+                    }
+                }
+
+                // Clean autoduster ignore list
+                if (settings.autodusterIgnoreList && Array.isArray(settings.autodusterIgnoreList)) {
+                    const originalCount = settings.autodusterIgnoreList.length;
+                    settings.autodusterIgnoreList = settings.autodusterIgnoreList.filter(equipment =>
+                        availableEquipment.includes(equipment)
+                    );
+                    if (settings.autodusterIgnoreList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoduster ignore list: ${originalCount} → ${settings.autodusterIgnoreList.length} equipment`);
+                    }
+                }
+
+                // Save cleaned settings if any changes were made
+                if (hasChanges) {
+                    const settingsUpdate = {};
+                    if (settings.autoplantIgnoreList) settingsUpdate.autoplantIgnoreList = settings.autoplantIgnoreList;
+                    if (settings.autosqueezeIgnoreList) settingsUpdate.autosqueezeIgnoreList = settings.autosqueezeIgnoreList;
+                    if (settings.autodusterIgnoreList) settingsUpdate.autodusterIgnoreList = settings.autodusterIgnoreList;
+                    setSettings(settingsUpdate);
+                    console.log('[Autoseller] Ignore lists cleaned and saved');
+                } else {
+                    console.log('[Autoseller] Ignore lists are already clean');
+                }
+
+            } catch (error) {
+                console.warn('[Autoseller] Error during ignore list cleanup:', error);
+            }
+        }
+
+        // Start cleanup process (will retry until databases are available)
+        cleanupIgnoreListsWhenReady();
+
         // Register the mod with the coordination system
         if (window.ModCoordination) {
             window.ModCoordination.registerMod('Autoseller', { priority: 1 });

@@ -1995,11 +1995,13 @@ function showSettingsModal() {
         // Read Bestiary Automator config values BEFORE creating HTML to ensure correct initial state
         let useApiForStaminaRefill = false;
         let persistAutoRefill = false;
+        let thresholdsEnabled = true; // Default to true as per Bestiary Automator config
         try {
           const automatorConfig = localStorage.getItem('bestiary-automator-config');
           const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
           useApiForStaminaRefill = parsedConfig.useApiForStaminaRefill || false;
           persistAutoRefill = parsedConfig.persistAutoRefillOnRefresh || false;
+          thresholdsEnabled = parsedConfig.thresholdsEnabled !== false; // Default to true if not set
         } catch (error) {
           console.error('[Mod Settings] Error reading Bestiary Automator config for HTML:', error);
         }
@@ -2027,9 +2029,9 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="automator-api-stamina-refill-toggle" ${useApiForStaminaRefill ? 'checked' : ''} style="transform: scale(1.2);">
-              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.useApiForStaminaRefillWarning')}">⚠️ ${t('mods.betterUI.useApiForStaminaRefill')}</span>
+            <label style="display: flex; align-items: center; gap: 10px; ${thresholdsEnabled ? 'cursor: not-allowed; opacity: 0.5;' : 'cursor: pointer;'}">
+              <input type="checkbox" id="automator-api-stamina-refill-toggle" ${useApiForStaminaRefill ? 'checked' : ''} ${thresholdsEnabled ? 'disabled title="Cannot disable while thresholds are enabled in Bestiary Automator settings"' : ''} style="transform: scale(1.2);">
+              <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${thresholdsEnabled ? t('mods.betterUI.useApiForStaminaRefillWarning') + ' (Disabled while thresholds are enabled in Bestiary Automator)' : t('mods.betterUI.useApiForStaminaRefillWarning')}">⚠️ ${t('mods.betterUI.useApiForStaminaRefill')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -2473,18 +2475,40 @@ function showSettingsModal() {
       
       const automatorApiStaminaRefillCheckbox = content.querySelector('#automator-api-stamina-refill-toggle');
       if (automatorApiStaminaRefillCheckbox) {
-        // Set initial state from Bestiary Automator's config
-        try {
-          const automatorConfig = localStorage.getItem('bestiary-automator-config');
-          const parsedConfig = automatorConfig ? JSON.parse(automatorConfig) : {};
-          automatorApiStaminaRefillCheckbox.checked = parsedConfig.useApiForStaminaRefill || false;
-        } catch (error) {
-          console.error('[Mod Settings] Error reading Bestiary Automator config:', error);
-        }
-        
+        // Function to update checkbox state based on thresholds
+        const updateCheckboxState = () => {
+          try {
+            const automatorConfig = localStorage.getItem('bestiary-automator-config');
+            const config = automatorConfig ? JSON.parse(automatorConfig) : {};
+            const thresholdsEnabled = config.thresholdsEnabled !== false;
+            const label = automatorApiStaminaRefillCheckbox.closest('label');
+
+            if (thresholdsEnabled) {
+              automatorApiStaminaRefillCheckbox.disabled = true;
+              automatorApiStaminaRefillCheckbox.checked = true; // Force checked when thresholds enabled
+              automatorApiStaminaRefillCheckbox.title = 'Cannot disable while thresholds are enabled in Bestiary Automator settings';
+              label.style.cursor = 'not-allowed';
+              label.style.opacity = '0.5';
+              label.querySelector('span').title = t('mods.betterUI.useApiForStaminaRefillWarning') + ' (Disabled while thresholds are enabled in Bestiary Automator)';
+            } else {
+              automatorApiStaminaRefillCheckbox.disabled = false;
+              automatorApiStaminaRefillCheckbox.checked = config.useApiForStaminaRefill || false;
+              automatorApiStaminaRefillCheckbox.title = ''; // Clear the title when enabled
+              label.style.cursor = 'pointer';
+              label.style.opacity = '1';
+              label.querySelector('span').title = t('mods.betterUI.useApiForStaminaRefillWarning');
+            }
+          } catch (error) {
+            console.error('[Mod Settings] Error updating checkbox state:', error);
+          }
+        };
+
+        // Set initial state
+        updateCheckboxState();
+
         automatorApiStaminaRefillCheckbox.addEventListener('change', () => {
           const newValue = automatorApiStaminaRefillCheckbox.checked;
-          
+
           // Write directly to Bestiary Automator's localStorage
           try {
             const automatorConfig = localStorage.getItem('bestiary-automator-config');
@@ -2495,7 +2519,7 @@ function showSettingsModal() {
           } catch (error) {
             console.error('[Mod Settings] Error updating Bestiary Automator config:', error);
           }
-          
+
           // Also update runtime if Bestiary Automator is loaded
           if (window.bestiaryAutomator && typeof window.bestiaryAutomator.updateConfig === 'function') {
             window.bestiaryAutomator.updateConfig({
@@ -2504,6 +2528,26 @@ function showSettingsModal() {
             console.log('[Mod Settings] Updated Bestiary Automator runtime config');
           }
         });
+
+        // Listen for changes to Bestiary Automator config (in case thresholds are toggled)
+        const checkForConfigChanges = () => {
+          updateCheckboxState();
+        };
+
+        // Check for config changes every second while modal is open
+        const configCheckInterval = setInterval(checkForConfigChanges, 1000);
+
+        // Clear interval when modal closes
+        const modal = content.closest('.modal');
+        if (modal) {
+          const observer = new MutationObserver(() => {
+            if (!document.contains(modal)) {
+              clearInterval(configCheckInterval);
+              observer.disconnect();
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        }
       }
       
       const disableAutoReloadCheckbox = content.querySelector('#disable-auto-reload-toggle');
