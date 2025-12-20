@@ -3282,20 +3282,25 @@ function createReplayDataForRun(runResult) {
   try {
     // Get board data
     const boardData = getBoardData(runResult.seed);
-    
+
     if (!boardData) {
       console.error('Failed to get board data for run replay data');
       return null;
     }
-    
+
     console.log('Using board data for run replay data');
-    
+
+    // Override the floor with the current floor being analyzed
+    if (currentFloor !== null && currentFloor !== undefined) {
+      boardData.floor = currentFloor;
+    }
+
     // Verify the replay data is valid
     if (!verifyAndFixReplayData(boardData)) {
       console.error('Failed to create valid replay data for run:', runResult);
       return null;
     }
-    
+
     return boardData;
   } catch (error) {
     console.error('Error creating replay data for run:', error);

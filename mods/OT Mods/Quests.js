@@ -136,7 +136,7 @@ const AL_DEE_RESPONSES = {
   'how are you': 'I\'m fine. I\'m so glad to have you here as my customer.',
   'tools': 'As an adventurer, you should always have at least a backpack, a rope, a shovel, a weapon, an armor and a shield.',
   'offer': 'Just ask me for a trade to see my offers.',
-  'trade': 'Take a look in the trade window to your right.',
+  'trade': 'Take a look in the trade window below.',
   'gold': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
   'money': 'Well, no gold, no deal. Earn gold by fighting monsters and picking up the things they carry. Sell it to merchants to make profit!',
   'backpack': 'Yes, I am selling that. Simply ask me for a trade to view all my offers.',
@@ -3950,7 +3950,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             response = await response();
           } catch (err) {
             console.error('[Quests Mod][King Tibianus] Error getting dynamic response:', err);
-            response = 'I greet thee, my loyal subject.';
+            response = 'I greet thee, my loyal subject.'; // Valid response for error case
           }
         }
 
@@ -3962,8 +3962,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       }
     }
 
-    // Default response if no match found
-    return 'I greet thee, my loyal subject.';
+    // Default response if no match found - return null to indicate no keyword match
+    return null;
   }
 
   function showKingTibianusModal() {
@@ -5021,14 +5021,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             kingChatState.missionOffered = true;
             kingChatState.offeredMission = activeMission;
           }
-        } else if (lowerText.includes('hi') || lowerText.includes('hello') || lowerText.includes('hey') || lowerText.includes('greetings') || lowerText.includes('good day')) {
+        } else if (/\b(hi|hello|hey|greetings|good day)\b/.test(lowerText)) {
           kingResponse = 'I greet thee, my loyal subject.';
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
         } else {
           // Check transcript responses before falling back to confusion
           const transcriptResponse = await getKingTibianusResponse(text, playerName);
-          if (transcriptResponse && transcriptResponse !== 'I greet thee, my loyal subject.') {
+          if (transcriptResponse !== null) {
             // If we got a meaningful transcript response, use it
             kingResponse = transcriptResponse;
           } else {

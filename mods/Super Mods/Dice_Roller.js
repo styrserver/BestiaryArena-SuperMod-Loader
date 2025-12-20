@@ -586,6 +586,11 @@
     return matches;
   }
 
+  // Helper function to check if creature is shiny
+  function isShinyCreature(creature) {
+    return creature.shiny === true;
+  }
+
   // Helper function to sort creatures based on search type
   function sortCreatures(creatures, searchTerm) {
     return creatures.sort((a, b) => {
@@ -635,8 +640,6 @@
     
     // Helper function to parse search expressions with AND/OR operators
     parseSearchExpression: (creature, expression) => {
-      console.log(`[Dice Roller] parseSearchExpression: expression="${expression}"`);
-      
       // Helper function to handle incomplete operator syntax
       const handleIncompleteOperator = (conditions, operator, isAnd) => {
         const hasEmptyConditions = conditions.some(condition => condition === '');
@@ -644,7 +647,6 @@
         
         if (hasEmptyConditions || endsWithOperator) {
           const validConditions = conditions.filter(condition => condition !== '');
-          console.log(`[Dice Roller] Valid ${operator.toUpperCase()} conditions:`, validConditions);
           if (validConditions.length === 0) return true; // No valid conditions, show all
           
           const checkFunction = isAnd ? 'every' : 'some';
@@ -669,8 +671,7 @@
       // Check for AND operators (higher precedence)
       if (expression.toLowerCase().includes(' and')) {
         const andConditions = expression.split(/\s+and\s*/).map(condition => condition.trim());
-        console.log(`[Dice Roller] AND conditions:`, andConditions);
-        
+
         const incompleteResult = handleIncompleteOperator(andConditions, 'and', true);
         if (incompleteResult !== null) return incompleteResult;
         
@@ -1518,10 +1519,11 @@
     // Add scrollArea to wrapper
     scrollFlexWrapper.appendChild(scrollArea);
     
-    // Render initial creature list
+    // Render initial creature list (filter out shiny creatures)
     try {
-      const monsters = safeGetMonsters();
-      renderCreatureList(scrollArea, monsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
+      const allMonsters = safeGetMonsters();
+      const filteredMonsters = allMonsters.filter(monster => !isShinyCreature(monster));
+      renderCreatureList(scrollArea, filteredMonsters, onSelect, updateDetailsOnly, selectedGameId, getSelectedDiceTier, getAvailableStats, selectedDice, lastStatusMessage);
     } catch (e) {
       scrollArea.innerHTML = '<div style="color:#f66;text-align:center;padding:16px;grid-column: span 5;">Error loading creatures.</div>';
     }
@@ -1632,8 +1634,9 @@
     
     // Listen for search cleared events to restore full list
     addTrackedEventListener(scrollArea, 'searchCleared', () => {
-      // Re-render the full creature list
-      const monsters = safeGetMonsters();
+      // Re-render the full creature list (filter out shiny creatures)
+      const allMonsters = safeGetMonsters();
+      const monsters = allMonsters.filter(monster => !isShinyCreature(monster));
       if (!monsters.length) {
         scrollArea.innerHTML = '<div style="color:#bbb;text-align:center;padding:16px;grid-column: span 6;">No creatures found.</div>';
         return;
@@ -1735,12 +1738,9 @@
               .filter(monster => {
                 const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
                 const filterMatch = matchesTierFilter(monster, filterValue);
-                const overallMatch = searchMatch && filterMatch;
-                
-                if (!overallMatch && filterValue !== 'all') {
-                  console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
-                }
-                
+                const isNotShiny = !isShinyCreature(monster);
+                const overallMatch = searchMatch && filterMatch && isNotShiny;
+
                 return overallMatch;
               }),
             searchTerm
@@ -1817,14 +1817,9 @@
             .filter(monster => {
               const searchMatch = SearchMatcher.matchesSearch(monster, searchTerm);
               const filterMatch = matchesTierFilter(monster, filterValue);
-              const overallMatch = searchMatch && filterMatch;
-              
-              if (!overallMatch) {
-                console.log(`[Dice Roller] Creature ${monster.gameId} filtered out: searchMatch=${searchMatch}, filterMatch=${filterMatch}`);
-              } else {
-                console.log(`[Dice Roller] Creature ${monster.gameId} MATCHES: searchMatch=${searchMatch}, filterMatch=${filterMatch}, name="${monster.creatureName}"`);
-              }
-              
+              const isNotShiny = !isShinyCreature(monster);
+              const overallMatch = searchMatch && filterMatch && isNotShiny;
+
               return overallMatch;
             }),
           searchTerm

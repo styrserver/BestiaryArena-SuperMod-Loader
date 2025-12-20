@@ -34,6 +34,9 @@ const TIMEOUTS = {
 // Online status threshold (15 minutes in milliseconds)
 const ONLINE_THRESHOLD_MS = 15 * 60 * 1000;
 
+// Message retention period for initial chat loads (7 days in milliseconds)
+const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
 // CSS constants
 const CSS_CONSTANTS = {
   BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
@@ -1591,10 +1594,14 @@ async function sendGuildChatMessage(guildId, text) {
 async function getGuildChatMessages(guildId, limit = MESSAGES_PER_PAGE, endBefore = null) {
   try {
     let queryUrl = `${getGuildChatApiUrl(guildId)}.json?orderBy="$key"&limitToLast=${limit}`;
-    
+
     // If endBefore is provided, use endAt to get messages before that key
     if (endBefore !== null) {
       queryUrl += `&endAt="${endBefore}"`;
+    } else {
+      // For initial load (no endBefore), only get messages from the retention period
+      const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
+      queryUrl += `&startAt="${retentionCutoff.toString()}"`;
     }
     
     const response = await fetch(queryUrl);
@@ -2011,7 +2018,7 @@ async function loadOlderGuildChatMessages(container, guildId) {
   await loadOlderMessages(container, getGuildChatMessages, {
     loadingFlag: '_isLoadingOlderGuildChat',
     oldestIdKey: `_oldestLoadedMessageId_${guildKey}`,
-    fetchArgs: (oldestMessageId) => [guildId, MESSAGES_PER_PAGE * 2, oldestMessageId]
+    fetchArgs: (oldestMessageId) => [guildId, 10, oldestMessageId]
   });
 }
 
@@ -3727,10 +3734,14 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
     if (limit !== null) {
       // For pagination, use limitToLast to get most recent messages
       queryUrl += `&limitToLast=${limit}`;
-      
+
       // If endBefore is provided, use endAt to get messages before that key
       if (endBefore !== null) {
         queryUrl += `&endAt="${endBefore}"`;
+      } else {
+        // For initial load (no endBefore), only get messages from the retention period
+        const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
+        queryUrl += `&startAt="${retentionCutoff.toString()}"`;
       }
     }
     
@@ -5436,11 +5447,16 @@ async function getConversationMessages(otherPlayer, forceRefresh = false, limit 
       // For pagination, use limitToLast to get most recent messages
       sentUrl += `&limitToLast=${limit}`;
       receivedUrl += `&limitToLast=${limit}`;
-      
+
       // If endBefore is provided, use endAt to get messages before that key
       if (endBefore !== null) {
         sentUrl += `&endAt="${endBefore}"`;
         receivedUrl += `&endAt="${endBefore}"`;
+      } else {
+        // For initial load (no endBefore), only get messages from the retention period
+        const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
+        sentUrl += `&startAt="${retentionCutoff.toString()}"`;
+        receivedUrl += `&startAt="${retentionCutoff.toString()}"`;
       }
     }
     
@@ -5622,7 +5638,7 @@ async function loadOlderConversationMessages(container, playerName) {
   await loadOlderMessages(container, getConversationMessages, {
     loadingFlag: '_isLoadingOlderConversation',
     oldestIdKey: `_oldestLoadedMessageId_${playerKey}`,
-    fetchArgs: (oldestMessageId) => [playerName, false, MESSAGES_PER_PAGE * 2, oldestMessageId],
+    fetchArgs: (oldestMessageId) => [playerName, false, 10, oldestMessageId],
     playerName: playerName // Pass playerName for runs-only filter
   });
 }
@@ -6419,7 +6435,7 @@ async function loadOlderAllChatMessages(container) {
   await loadOlderMessages(container, getAllChatMessages, {
     loadingFlag: '_isLoadingOlderAllChat',
     oldestIdKey: '_oldestLoadedMessageId',
-    fetchArgs: (oldestMessageId) => [false, MESSAGES_PER_PAGE * 2, oldestMessageId]
+    fetchArgs: (oldestMessageId) => [false, 10, oldestMessageId]
   });
 }
 
