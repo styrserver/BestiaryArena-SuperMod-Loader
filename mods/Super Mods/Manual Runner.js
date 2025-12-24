@@ -3322,6 +3322,25 @@ function init() {
   createConfigPanel();
   
   console.log('[Manual Runner] UI initialized');
+  
+  // Expose state for coordination with other mods (e.g., Raid Hunter)
+  window.manualRunnerState = {
+    isRunning: () => analysisState.isRunning(),
+    isStopping: () => analysisState.isStopping(),
+    isIdle: () => analysisState.isIdle(),
+    canInterrupt: () => analysisState.isRunning() || analysisState.isStopping(),
+    forceStop: () => {
+      if (analysisState.isRunning()) {
+        console.log('[Manual Runner] Force stop requested by external mod');
+        analysisState.stop();
+        forceCloseAllModals();
+        return true;
+      }
+      return false;
+    }
+  };
+  
+  console.log('[Manual Runner] State exposed for mod coordination');
 }
 
 // =======================

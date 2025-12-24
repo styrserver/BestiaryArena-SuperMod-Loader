@@ -1246,11 +1246,22 @@ function isRaidHunterRaiding() {
                         if (timeSinceFirstCheck < 10000) { // Wait up to 10 seconds
                             console.log(`[Better Tasker] Still waiting for Raid Hunter to claim control... (${Math.round(timeSinceFirstCheck/1000)}s)`);
                             return true; // Continue yielding until Raid_Hunter processes all high-priority raids
+                        } else if (timeSinceFirstCheck < 60000) { // Maximum wait time: 60 seconds total
+                            // After initial timeout, keep yielding ONLY if Raid Hunter is actively raiding
+                            // This prevents stuck states where raids are available but not being processed
+                            if (isRaidHunterRaiding) {
+                                console.log('[Better Tasker] Raid Hunter timeout but actively raiding - continuing to yield');
+                                return true;
+                            } else {
+                                console.log('[Better Tasker] Raid Hunter timeout and not actively raiding - proceeding with Better Tasker to prevent stuck state');
+                                lastRaidHunterCheckTime = null; // Reset for next time
+                                // Fall through to continue with Better Tasker
+                            }
                         } else {
-                            // Timeout reached - Raid Hunter hasn't claimed control, but still yield for high-priority raids
-                            // Don't proceed - high-priority raids take precedence
-                            console.log('[Better Tasker] Raid Hunter timeout but high-priority raids still available - continuing to yield');
-                            return true;
+                            // Maximum timeout exceeded (60s) - proceed anyway to prevent permanent stuck states
+                            console.warn('[Better Tasker] ⚠️ Maximum wait time exceeded (60s) - proceeding with Better Tasker to prevent stuck state');
+                            lastRaidHunterCheckTime = null; // Reset for next time
+                            // Fall through to continue with Better Tasker
                         }
                     }
                     
