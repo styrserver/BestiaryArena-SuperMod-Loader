@@ -22,10 +22,40 @@ window.browserAPI = window.browserAPI || (typeof browser !== 'undefined' ? brows
     // Handle script loading events
     script.onload = function() {
       console.log('BA Utility Injector: Sandbox utils loaded successfully');
+      // After sandbox utils load, inject custom battles system
+      injectCustomBattles();
     };
     
     script.onerror = function(error) {
       console.error('BA Utility Injector: Error loading sandbox utils:', error);
+      // Still try to inject custom battles even if sandbox utils fails
+      injectCustomBattles();
+    };
+    
+    document.head.appendChild(script);
+  }
+  
+  // Function to inject custom battles system
+  function injectCustomBattles() {
+    console.log('BA Utility Injector: Injecting custom battles system');
+    
+    // Create and inject the script
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src = browserAPI.runtime.getURL('content/custom-battles.js');
+    
+    // Handle script loading events
+    script.onload = function() {
+      console.log('BA Utility Injector: Custom battles script element loaded');
+      // Note: Content scripts run in isolated context, so window.CustomBattles
+      // may not be visible here, but mods (which run in page context) will be able to see it.
+      // The script logs show it IS executing and setting window.CustomBattles in the page context.
+      console.log('BA Utility Injector: custom-battles.js loaded - mods will be able to access window.CustomBattles');
+    };
+    
+    script.onerror = function(error) {
+      console.error('BA Utility Injector: ✗ ERROR loading custom battles system:', error);
+      console.error('BA Utility Injector: Script URL was:', browserAPI.runtime.getURL('content/custom-battles.js'));
     };
     
     document.head.appendChild(script);

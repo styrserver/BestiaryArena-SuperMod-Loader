@@ -135,6 +135,34 @@ async function loadScripts() {
     await injectScript('content/ba-sandbox-utils.mjs');
     if (window.DEBUG) console.log('Sandbox utility script loaded');
     
+    // Load custom battles system
+    try {
+      await injectScript('content/custom-battles.js');
+      console.warn('[Content Injector] Custom battles script injection completed');
+      
+      // Verify CustomBattles is available (always check, not just in debug mode)
+      let retries = 0;
+      while (!window.CustomBattles && retries < 20) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        retries++;
+        if (retries % 5 === 0) {
+          console.warn(`[Content Injector] Waiting for CustomBattles... (attempt ${retries}/20)`);
+        }
+      }
+      
+      if (window.CustomBattles) {
+        console.warn('[Content Injector] ✓ CustomBattles system verified and ready');
+        console.warn('[Content Injector] CustomBattles.create available:', typeof window.CustomBattles.create);
+      } else {
+        console.error('[Content Injector] ✗ CustomBattles system NOT available after injection!');
+        console.error('[Content Injector] window.CustomBattles:', window.CustomBattles);
+        console.error('[Content Injector] typeof window.CustomBattles:', typeof window.CustomBattles);
+      }
+    } catch (error) {
+      console.error('[Content Injector] ✗ CRITICAL: Failed to inject custom-battles.js:', error);
+      console.error('[Content Injector] Error stack:', error?.stack);
+    }
+    
     // Send mod base URL and browser API info after scripts are loaded
     window.postMessage({
       from: 'BESTIARY_EXTENSION',

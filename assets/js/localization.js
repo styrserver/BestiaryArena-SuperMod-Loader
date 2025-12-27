@@ -2,21 +2,27 @@
 // This file provides centralized language detection and translation utilities
 
 // Language detection function
-// Checks browser language in popup context, game language otherwise
+// Checks stored preference first, then browser language in popup context, game language otherwise
 function isPortuguese() {
+    // Check if user has stored a language preference
+    const storedLang = localStorage.getItem('popup-language');
+    if (storedLang) {
+        return storedLang === 'pt-BR';
+    }
+
     // Check if we're in a popup context (extension popup page)
-    const isPopup = window.location.protocol === 'chrome-extension:' || 
+    const isPopup = window.location.protocol === 'chrome-extension:' ||
                     window.location.protocol === 'moz-extension:' ||
                     window.location.href.includes('/popup.html');
-    
+
     if (isPopup) {
         // In popup: check browser language
         const browserLang = navigator.language || navigator.languages?.[0] || '';
         return browserLang.toLowerCase().startsWith('pt');
     }
-    
+
     // In game/content script: check game language
-    return document.documentElement.lang === 'pt' || 
+    return document.documentElement.lang === 'pt' ||
            document.querySelector('html[lang="pt"]') ||
            window.location.href.includes('/pt/');
 }

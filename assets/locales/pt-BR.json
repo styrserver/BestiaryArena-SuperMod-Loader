@@ -592,6 +592,7 @@
       "columnStatus": "Status",
       "columnRankPoints": "Pontos de Rank",
       "columnTimeSum": "Soma de Tempo",
+      "columnFloors": "Andares",
       "statusOnline": "Online",
       "statusOffline": "Offline",
       "currentPlayerSuffix": "(você)",

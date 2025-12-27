@@ -4,6 +4,17 @@
   },
   "notes": [
     {
+      "version": "3.2.9",
+      "changes": [
+        { "type": "added", "mod": "Core", "text": "Added English/Portuguese language toggle in popup (requires closing and re-opening popup)." },
+        { "type": "changed", "mod": "Setup Manager", "text": "Improved modal UI" },
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Fixed persistence not working reliably through page reloads." },
+        { "type": "added", "mod": "Quests", "text": "Added new quest line to Al Dee." },
+        { "type": "fixed", "mod": "Raid Hunter", "text": "Small coordination fix." },
+        { "type": "fixed", "mod": "VIP List", "text": "Chat improvements and bug fixes." }
+      ]
+    },
+    {
       "version": "3.2.8",
       "changes": [
         { "type": "added", "mod": "Autoseller", "text": "Added automatic cleanup of unobtainable creatures from ignore lists during initialization" },

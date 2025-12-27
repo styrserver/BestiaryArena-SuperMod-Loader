@@ -109,15 +109,34 @@ clientScript.onload = function() {
         if (window.ModCoordination) {
           if (window.DEBUG) console.log('[Injector] ModCoordination verified and ready');
           clearInterval(checkModCoordination);
-          // Continue with local_mods.js injection
-          injectLocalMods();
+          // Load custom battles system before local_mods.js
+          injectCustomBattles();
         } else if (retries >= 10) {
           // Reduced from 30 retries (1.5s) to 10 retries (500ms) - ES modules should load faster
           clearInterval(checkModCoordination);
           // Continue anyway - the script may have loaded in a different context
-          injectLocalMods();
+          injectCustomBattles();
         }
       }, 50);
+      
+      function injectCustomBattles() {
+        console.log('[Injector] Loading custom-battles.js');
+        const customBattlesScript = injectScript('content/custom-battles.js');
+        customBattlesScript.onload = function() {
+          console.log('[Injector] custom-battles.js script element loaded');
+          // Note: Content scripts run in isolated context, so window.CustomBattles
+          // may not be visible here, but mods (which run in page context) will be able to see it.
+          // The script IS executing in the page context as evidenced by the logs.
+          console.log('[Injector] custom-battles.js loaded - mods will be able to access window.CustomBattles');
+          // Continue with local_mods.js injection
+          injectLocalMods();
+        };
+        customBattlesScript.onerror = function(error) {
+          console.error('[Injector] ✗ ERROR loading custom-battles.js:', error);
+          // Continue anyway
+          injectLocalMods();
+        };
+      }
     };
     modCoordinationScript.onerror = function(error) {
       console.error('[Injector] ✗ ERROR loading mod-coordination.mjs:', error);

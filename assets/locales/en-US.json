@@ -591,6 +591,7 @@
       "columnStatus": "Status",
       "columnRankPoints": "Rank Points",
       "columnTimeSum": "Time Sum",
+      "columnFloors": "Floors",
       "statusOnline": "Online",
       "statusOffline": "Offline",
       "currentPlayerSuffix": "(you)",
