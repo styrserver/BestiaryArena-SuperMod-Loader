@@ -28,7 +28,8 @@ document.addEventListener('utility-api-ready', () => {
 });
 
 // Create UI button using the API
-api.ui.addButton({
+let heroEditorButton = null;
+heroEditorButton = api.ui.addButton({
   id: 'hero-editor-button',
   text: t('mods.heroEditor.buttonText'),
   tooltip: t('mods.heroEditor.buttonTooltip'),
@@ -1127,10 +1128,59 @@ function showHeroEditorModal() {
   }
 }
 
+// Hide Hero Editor button
+function hideButton() {
+  try {
+    if (heroEditorButton) {
+      heroEditorButton.style.display = 'none';
+      console.log('[Hero Editor] Button hidden');
+    } else {
+      // Fallback: try to find by ID
+      const button = document.getElementById('hero-editor-button');
+      if (button) {
+        button.style.display = 'none';
+        console.log('[Hero Editor] Button hidden (fallback)');
+      }
+    }
+  } catch (error) {
+    console.error('[Hero Editor] Error hiding button:', error);
+  }
+}
+
+// Show Hero Editor button
+function showButton() {
+  try {
+    if (heroEditorButton) {
+      heroEditorButton.style.display = '';
+      console.log('[Hero Editor] Button shown');
+    } else {
+      // Fallback: try to find by ID
+      const button = document.getElementById('hero-editor-button');
+      if (button) {
+        button.style.display = '';
+        console.log('[Hero Editor] Button shown (fallback)');
+      }
+    }
+  } catch (error) {
+    console.error('[Hero Editor] Error showing button:', error);
+  }
+}
+
 // Export functionality
 context.exports = {
-  showEditor: showHeroEditorModal
+  showEditor: showHeroEditorModal,
+  hideButton: hideButton,
+  showButton: showButton
 };
+
+// Expose to window for inter-mod communication
+if (typeof window !== 'undefined') {
+  window.heroEditor = {
+    hideButton: hideButton,
+    showButton: showButton,
+    showEditor: showHeroEditorModal
+  };
+}
 
 // Cleanup function for Hero Editor mod (exposed for mod system)
 context.exports.cleanup = function() {

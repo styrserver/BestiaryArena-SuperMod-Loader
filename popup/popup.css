@@ -22,11 +22,45 @@ body {
 }
 
 header {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--theme-border, #313244);
   padding-bottom: 10px;
   flex-shrink: 0;
+}
+
+.language-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.lang-btn {
+  background: none;
+  border: 1px solid var(--theme-border, #555);
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 32px;
+  color: var(--theme-text, #e6d7b0);
+}
+
+.lang-btn:hover {
+  background: var(--theme-hover, #444);
+  border-color: var(--theme-accent, #777);
+}
+
+.lang-btn.active {
+  background: var(--theme-accent, #ffe066);
+  border-color: var(--theme-accent, #ffe066);
+  color: #000;
 }
 
 /* Patch Notes */
@@ -917,4 +951,37 @@ footer {
 }
 #dashboard-btn:hover {
   filter: brightness(1.2);
+}
+
+/* Category Filter Buttons */
+.category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+
+.category-filter {
+  background: var(--theme-card-bg, #2d2d2d);
+  border: 1px solid var(--theme-border, #444);
+  color: var(--theme-text, #e6d7b0);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  min-height: 26px;
+}
+
+.category-filter:hover {
+  background: var(--theme-hover, #444);
+  border-color: var(--theme-accent, #ffe066);
+}
+
+.category-filter.active {
+  background: var(--theme-accent, #ffe066);
+  color: #000;
+  border-color: var(--theme-accent, #ffe066);
 }

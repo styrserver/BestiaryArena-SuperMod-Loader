@@ -6655,6 +6655,31 @@ function createHuntAnalyzerButton() {
 // Create button immediately if API is ready
 createHuntAnalyzerButton();
 
+// Initialize persistence - load settings and data when mod loads
+function initializeHuntAnalyzerPersistence() {
+    if (typeof api !== 'undefined' && api) {
+        console.log('[Hunt Analyzer] Initializing persistence...');
+
+        // Load settings first
+        loadHuntAnalyzerSettings();
+
+        // Load persisted data
+        loadHuntAnalyzerData();
+
+        // Auto-reopen panel if conditions are met
+        autoReopenHuntAnalyzer();
+
+        console.log('[Hunt Analyzer] Persistence initialization complete');
+    } else {
+        // Retry if API not ready yet
+        console.log('[Hunt Analyzer] API not ready, retrying persistence initialization...');
+        setTimeout(initializeHuntAnalyzerPersistence, 100);
+    }
+}
+
+// Initialize persistence immediately
+initializeHuntAnalyzerPersistence();
+
 // Translation event handler
 const translationEventHandler = (event) => {
     console.log('[Hunt Analyzer] Translations loaded, updating UI elements...', event.detail);

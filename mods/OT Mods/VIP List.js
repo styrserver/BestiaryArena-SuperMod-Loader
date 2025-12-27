@@ -34,9 +34,6 @@ const TIMEOUTS = {
 // Online status threshold (15 minutes in milliseconds)
 const ONLINE_THRESHOLD_MS = 15 * 60 * 1000;
 
-// Message retention period for initial chat loads (7 days in milliseconds)
-const MESSAGE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-
 // CSS constants
 const CSS_CONSTANTS = {
   BACKGROUND_URL: 'https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png',
@@ -154,6 +151,55 @@ const getChatPrivilegesApiUrl = () => getApiUrl('chat-privileges');
 const getChatRequestsApiUrl = () => getApiUrl('chat-requests');
 const getBlockedPlayersApiUrl = () => getApiUrl('blocked-players');
 const getAllChatApiUrl = () => getApiUrl('all-chat');
+
+// =======================
+// Chat State Manager
+// =======================
+
+// Unified chat state manager to prevent mixing between All Chat, Guild Chat, and private chats
+const chatStateManager = {
+  _activeChatType: null,
+  _abortController: null,
+  
+  getActiveChatType() {
+    return this._activeChatType;
+  },
+  
+  setActiveChatType(type) {
+    // Abort any ongoing operations for previous chat type
+    if (this._abortController) {
+      this._abortController.abort();
+    }
+    
+    // Create new AbortController for this chat type
+    this._abortController = new AbortController();
+    this._activeChatType = type;
+    
+    // Also update the global activeAllChatTab for backward compatibility
+    activeAllChatTab = type;
+  },
+  
+  isChatTypeActive(expectedType) {
+    return this._activeChatType === expectedType && activeAllChatTab === expectedType;
+  },
+  
+  clearChatState() {
+    if (this._abortController) {
+      this._abortController.abort();
+      this._abortController = null;
+    }
+    this._activeChatType = null;
+    activeAllChatTab = null;
+  },
+  
+  getAbortController() {
+    return this._abortController;
+  },
+  
+  setAbortController(abortController) {
+    this._abortController = abortController;
+  }
+};
 
 // =======================
 // 3. State & Observers
@@ -1445,10 +1491,51 @@ async function decryptMessage(encryptedText, player1, player2) {
 // Guild Chat Functions
 // =======================
 
-// Get guild chat API URL
-function getGuildChatApiUrl(guildId) {
+// Validate chat API URL to ensure correct endpoint is used
+function validateChatApiUrl(url, expectedType) {
+  if (!url || typeof url !== 'string') {
+    console.error(`[VIP List] Invalid ${expectedType} API URL:`, url);
+    return false;
+  }
+  
+  if (expectedType === 'all-chat') {
+    if (!url.includes('/all-chat')) {
+      console.error('[VIP List] All Chat endpoint validation failed: URL does not contain /all-chat', url);
+      return false;
+    }
+    if (url.includes('/guilds/')) {
+      console.error('[VIP List] All Chat endpoint validation failed: URL contains /guilds/ (should be all-chat only)', url);
+      return false;
+    }
+  } else if (expectedType === 'guild-chat') {
+    if (!url.includes('/guilds/chat/')) {
+      console.error('[VIP List] Guild Chat endpoint validation failed: URL does not contain /guilds/chat/', url);
+      return false;
+    }
+    if (url.includes('/all-chat')) {
+      console.error('[VIP List] Guild Chat endpoint validation failed: URL contains /all-chat (should be guilds/chat only)', url);
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// Get guild chat API URL (VIP List specific)
+function getVipListGuildChatApiUrl(guildId) {
+  if (!guildId) {
+    console.error('[VIP List] getVipListGuildChatApiUrl called without guildId');
+    return null;
+  }
   const firebaseUrl = MESSAGING_CONFIG.firebaseUrl;
-  return `${firebaseUrl}/guilds/chat/${guildId}`;
+  const url = `${firebaseUrl}/guilds/chat/${guildId}`;
+  
+  // Validate URL doesn't accidentally point to All Chat
+  if (!validateChatApiUrl(url, 'guild-chat')) {
+    return null;
+  }
+  
+  return url;
 }
 
 // Get player's guild from localStorage (set by Guilds mod)
@@ -1571,7 +1658,7 @@ async function sendGuildChatMessage(guildId, text) {
     };
 
     const messageId = Date.now().toString();
-    const response = await fetch(`${getGuildChatApiUrl(guildId)}/${messageId}.json`, {
+    const response = await fetch(`${getVipListGuildChatApiUrl(guildId)}/${messageId}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(messageData)
@@ -1591,20 +1678,52 @@ async function sendGuildChatMessage(guildId, text) {
 // Get guild chat messages with pagination support
 // limit: maximum number of messages to fetch (default: MESSAGES_PER_PAGE)
 // endBefore: message ID to fetch messages before (for pagination)
-async function getGuildChatMessages(guildId, limit = MESSAGES_PER_PAGE, endBefore = null) {
+// abortController: AbortController to cancel the fetch request
+async function getGuildChatMessages(guildId, limit = MESSAGES_PER_PAGE, endBefore = null, abortController = null) {
   try {
-    let queryUrl = `${getGuildChatApiUrl(guildId)}.json?orderBy="$key"&limitToLast=${limit}`;
+    // Validate guild ID
+    if (!guildId) {
+      console.error('[VIP List] getGuildChatMessages called without guildId');
+      return [];
+    }
+    
+    // Get and validate API URL
+    const guildChatUrl = getVipListGuildChatApiUrl(guildId);
+    if (!guildChatUrl) {
+      console.error('[VIP List] Invalid Guild Chat API URL');
+      return [];
+    }
+    
+    // Validate URL doesn't accidentally point to All Chat
+    if (!validateChatApiUrl(guildChatUrl, 'guild-chat')) {
+      console.error('[VIP List] Guild Chat URL validation failed');
+      return [];
+    }
+    
+    let queryUrl = `${guildChatUrl}.json?orderBy="$key"&limitToLast=${limit}`;
 
     // If endBefore is provided, use endAt to get messages before that key
     if (endBefore !== null) {
       queryUrl += `&endAt="${endBefore}"`;
-    } else {
-      // For initial load (no endBefore), only get messages from the retention period
-      const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
-      queryUrl += `&startAt="${retentionCutoff.toString()}"`;
     }
     
-    const response = await fetch(queryUrl);
+    // Fetch guild chat messages with abort signal support
+    const fetchOptions = {};
+    if (abortController) {
+      fetchOptions.signal = abortController.signal;
+    }
+    
+    let response;
+    try {
+      response = await fetch(queryUrl, fetchOptions);
+    } catch (error) {
+      // If fetch was aborted, return empty array
+      if (error.name === 'AbortError' || abortController?.signal.aborted) {
+        return [];
+      }
+      throw error;
+    }
+    
     if (!response.ok) {
       if (response.status === 404) {
         return [];
@@ -2100,7 +2219,7 @@ function setupGuildChatScrollDetection(panel, messagesArea, scrollElement, guild
 }
 
 // Load guild chat conversation
-async function loadGuildChatConversation(container, guildId, forceScrollToBottom = false, checkCancelled = null) {
+async function loadGuildChatConversation(container, guildId, forceScrollToBottom = false, checkCancelled = null, abortController = null) {
   const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
   const guildKey = `guild-${guildId}`;
   const expectedTab = `guild-${guildId}`;
@@ -2111,26 +2230,59 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
   }
   panel[`_isLoadingGuildChat_${guildKey}`] = true;
   
+  // Show loading indicator if not already shown (for polling updates)
+  const wasLoadingIndicatorShown = container.querySelector('.chat-loading-indicator') !== null;
+  if (!wasLoadingIndicatorShown) {
+    showChatLoadingIndicator(container);
+  }
+  
   try {
     // Check if cancelled before starting
     if (checkCancelled && checkCancelled()) {
       return;
     }
+    if (abortController?.signal.aborted) {
+      return;
+    }
+    
+    // Verify we're actually loading for the expected guild tab using state manager
+    // If active chat type doesn't match, abort (user switched tabs)
+    if (!chatStateManager.isChatTypeActive(expectedTab)) {
+      return;
+    }
     
     // Check if initial load or refresh
     const existingMessages = container.querySelectorAll('[data-message-id]');
-    const isInitialLoad = existingMessages.length === 0;
+    
+    // CRITICAL: Clear container if it appears to be a tab switch (previous count was reset but container has messages)
+    // This prevents mixing messages from all-chat or private chats when switching to guild chat
+    const wasTabSwitch = (panel?.[`_previousMessageCount_${guildKey}`] ?? 0) === 0 && existingMessages.length > 0;
+    
+    if (wasTabSwitch) {
+      container.innerHTML = '';
+      if (panel) {
+        panel[`_previousMessageCount_${guildKey}`] = 0;
+        panel[`_oldestLoadedMessageId_${guildKey}`] = null;
+      }
+    }
+    
+    // Re-check after potential clear
+    const remainingMessages = container.querySelectorAll('[data-message-id]');
+    const isInitialLoad = remainingMessages.length === 0;
     
     // Load messages (all for updates, limited for initial load)
-    const messages = await getGuildChatMessages(guildId, isInitialLoad ? MESSAGES_PER_PAGE : undefined);
+    const messages = await getGuildChatMessages(guildId, isInitialLoad ? MESSAGES_PER_PAGE : undefined, null, abortController);
     
     // Check if cancelled after loading messages
     if (checkCancelled && checkCancelled()) {
       return;
     }
+    if (abortController?.signal.aborted) {
+      return;
+    }
     
-    // Verify active tab still matches expected guild tab
-    if (activeAllChatTab !== expectedTab) {
+    // Verify active chat type still matches expected guild tab
+    if (!chatStateManager.isChatTypeActive(expectedTab)) {
       return;
     }
     
@@ -2194,16 +2346,16 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
     // Track displayed message IDs to prevent duplicates
     const displayedMessageIds = getDisplayedMessageIds(container);
     
-    // Determine if we need a full rebuild
-    const needsFullRebuild = isInitialLoad || shouldRebuildChat(messages, previousMessageCount, existingMessages);
+    // Determine if we need a full rebuild (use remainingMessages after potential clear)
+    const needsFullRebuild = isInitialLoad || shouldRebuildChat(messages, previousMessageCount, remainingMessages);
     
     // Check if cancelled before modifying DOM
     if (checkCancelled && checkCancelled()) {
       return;
     }
     
-    // Verify active tab still matches expected guild tab
-    if (activeAllChatTab !== expectedTab) {
+    // Verify active chat type still matches expected guild tab
+    if (!chatStateManager.isChatTypeActive(expectedTab)) {
       return;
     }
     
@@ -2263,6 +2415,7 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
     const getMessageId = (msg) => msg.id || null;
     
     // Process messages using unified helper (handles date separators only on full rebuild)
+    // filterSystemMessages = false for guild chat (system messages should appear)
     const elementsToAppend = await processMessagesForChat(
       messages,
       messagesToProcess,
@@ -2270,11 +2423,15 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
       displayedMessageIds,
       container,
       getMessageId,
-      needsFullRebuild ? lastDateKey : null
+      needsFullRebuild ? lastDateKey : null,
+      false // Don't filter system messages in guild chat
     );
     
     // Final check: verify active tab still matches expected guild tab before appending messages
     if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    if (abortController?.signal.aborted) {
       return;
     }
     if (activeAllChatTab !== expectedTab) {
@@ -2310,8 +2467,12 @@ async function loadGuildChatConversation(container, guildId, forceScrollToBottom
     // Handle scrolling using unified function (consistent with all-chat and private chats)
     handleChatScroll(panel, container, shouldScrollToBottom, needsFullRebuild);
   } finally {
-    // Always clear loading flag
+    // Always clear loading flag and hide loading indicator
     if (panel) panel[`_isLoadingGuildChat_${guildKey}`] = false;
+    // Hide loading indicator if we showed it (for polling updates)
+    if (!wasLoadingIndicatorShown) {
+      hideChatLoadingIndicator(container);
+    }
   }
 }
 
@@ -3348,6 +3509,23 @@ async function sendAllChatMessage(text) {
     return false;
   }
   
+  // Validate that getAllChatApiUrl returns the correct endpoint
+  const allChatUrl = getAllChatApiUrl();
+  if (!allChatUrl || typeof allChatUrl !== 'string') {
+    console.error('[VIP List] Invalid All Chat API URL in sendAllChatMessage:', allChatUrl);
+    return false;
+  }
+  
+  if (!allChatUrl.includes('/all-chat')) {
+    console.error('[VIP List] All Chat endpoint validation failed in sendAllChatMessage: URL does not contain /all-chat', allChatUrl);
+    return false;
+  }
+  
+  if (allChatUrl.includes('/guilds/')) {
+    console.error('[VIP List] All Chat endpoint validation failed in sendAllChatMessage: URL contains /guilds/ (should be all-chat only)', allChatUrl);
+    return false;
+  }
+  
   if (!text || text.trim().length === 0) {
     return false;
   }
@@ -3379,7 +3557,8 @@ async function sendAllChatMessage(text) {
     };
     
     const messageId = Date.now().toString();
-    const response = await fetch(`${getAllChatApiUrl()}/${messageId}.json`, {
+    // Use the validated allChatUrl variable to ensure we're using the correct endpoint
+    const response = await fetch(`${allChatUrl}/${messageId}.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(message)
@@ -3642,6 +3821,23 @@ async function checkForAllChatMessages() {
     return [];
   }
   
+  // Validate that getAllChatApiUrl returns the correct endpoint
+  const allChatUrl = getAllChatApiUrl();
+  if (!allChatUrl || typeof allChatUrl !== 'string') {
+    console.error('[VIP List] Invalid All Chat API URL in checkForAllChatMessages:', allChatUrl);
+    return [];
+  }
+  
+  if (!allChatUrl.includes('/all-chat')) {
+    console.error('[VIP List] All Chat endpoint validation failed in checkForAllChatMessages: URL does not contain /all-chat', allChatUrl);
+    return [];
+  }
+  
+  if (allChatUrl.includes('/guilds/')) {
+    console.error('[VIP List] All Chat endpoint validation failed in checkForAllChatMessages: URL contains /guilds/ (should be all-chat only)', allChatUrl);
+    return [];
+  }
+  
   try {
     const currentPlayer = getCurrentPlayerName();
     if (!currentPlayer) {
@@ -3649,7 +3845,8 @@ async function checkForAllChatMessages() {
     }
     
     // Fetch all All Chat messages - use orderBy to ensure chronological order
-    let response = await fetch(`${getAllChatApiUrl()}.json?orderBy="$key"`);
+    // Use the validated allChatUrl variable to ensure we're using the correct endpoint
+    let response = await fetch(`${allChatUrl}.json?orderBy="$key"`);
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -3673,13 +3870,13 @@ async function checkForAllChatMessages() {
     for (const [id, msg] of Object.entries(data)) {
       if (!msg) continue;
       
+      // Filter out system messages (should only appear in guild chat)
+      if (isSystemMessage(msg)) {
+        continue;
+      }
+      
       // Filter out messages from blocked players
       if (msg.from) {
-        // Filter out system messages (should only appear in guild chat)
-        if (msg.from.toLowerCase() === 'system') {
-          continue;
-        }
-        
         const isBlocked = await isPlayerBlocked(msg.from);
         if (isBlocked) continue;
         
@@ -3708,11 +3905,101 @@ async function checkForAllChatMessages() {
   }
 }
 
+// =======================
+// System Message Filtering
+// =======================
+
+// Unified function to check if a message is a system message
+// System messages should only appear in Guild Chat, never in All Chat
+function isSystemMessage(msg) {
+  if (!msg) return false;
+  
+  // Check isSystem flag
+  if (msg.isSystem === true) return true;
+  
+  // Check from field (case-insensitive)
+  if (msg.from && msg.from.toLowerCase() === 'system') return true;
+  
+  // Check fromHashed field
+  if (msg.fromHashed && msg.fromHashed.toLowerCase() === 'system') return true;
+  
+  // Pattern matching for system message text
+  if (msg.text && typeof msg.text === 'string') {
+    const textLower = msg.text.toLowerCase();
+    const systemPatterns = [
+      'joined the guild',
+      'left the guild',
+      'invited',
+      'cancelled the invite',
+      'promoted',
+      'demoted',
+      'to the guild',
+      'transferred',
+      'leadership',
+      'changed the guild',
+      'guild was created',
+      'was created by',
+      'cancelled the invite for'
+    ];
+    
+    // Check for exact pattern matches
+    if (systemPatterns.some(pattern => textLower.includes(pattern))) return true;
+    
+    // Check for guild-related keywords combined with system message patterns
+    const guildKeywords = ['guild', 'invited', 'joined', 'left', 'cancelled', 'promoted', 'demoted'];
+    const hasGuildKeyword = guildKeywords.some(keyword => textLower.includes(keyword));
+    const looksLikeSystemMessage = textLower.includes(' to the guild') || 
+                                  textLower.includes(' was created') ||
+                                  textLower.includes(' transferred') ||
+                                  (textLower.includes('invited') && textLower.includes('to the guild')) ||
+                                  (textLower.includes('cancelled') && textLower.includes('invite'));
+    
+    if (hasGuildKeyword && looksLikeSystemMessage) return true;
+  }
+  
+  return false;
+}
+
+// Check if a DOM element contains a system message
+function isSystemMessageElement(el) {
+  if (!el) return false;
+  const text = el.textContent || '';
+  const fromSpan = el.querySelector('span[style*="font-weight: bold"]');
+  const fromText = fromSpan?.textContent || '';
+  const textLower = text.toLowerCase();
+  
+  return fromText.toLowerCase().includes('system') || 
+         (textLower.includes('invited') && textLower.includes('to the guild')) ||
+         (textLower.includes('guild') && textLower.includes('was created')) ||
+         (textLower.includes('cancelled') && textLower.includes('invite')) ||
+         (textLower.includes('joined') && textLower.includes('guild')) ||
+         (textLower.includes('left') && textLower.includes('guild')) ||
+         (textLower.includes('promoted') || textLower.includes('demoted'));
+}
+
 // Get all All Chat messages (for displaying in panel)
 // limit: maximum number of messages to fetch (default: null = all)
 // endBefore: message ID or timestamp to fetch messages before (for pagination)
-async function getAllChatMessages(forceRefresh = false, limit = null, endBefore = null) {
+// abortController: AbortController to cancel the fetch request
+async function getAllChatMessages(forceRefresh = false, limit = null, endBefore = null, abortController = null) {
   if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
+    return [];
+  }
+  
+  // Validate that getAllChatApiUrl returns the correct endpoint
+  const allChatUrl = getAllChatApiUrl();
+  if (!allChatUrl || typeof allChatUrl !== 'string') {
+    console.error('[VIP List] Invalid All Chat API URL:', allChatUrl);
+    return [];
+  }
+  
+  if (!allChatUrl.includes('/all-chat')) {
+    console.error('[VIP List] All Chat endpoint validation failed: URL does not contain /all-chat', allChatUrl);
+    return [];
+  }
+  
+  if (allChatUrl.includes('/guilds/')) {
+    console.error('[VIP List] All Chat endpoint validation failed: URL contains /guilds/ (should be all-chat only)', allChatUrl);
     return [];
   }
   
@@ -3722,14 +4009,11 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       return [];
     }
     
-    // Check cache first (only for full fetch without pagination)
-    let now = Date.now();
-    if (!forceRefresh && limit === null && endBefore === null && allChatCache.messages !== null && now < allChatCache.expiresAt) {
-      return allChatCache.messages;
-    }
+    // CACHE REMOVED: Always fetch from Firebase to prevent stale data and system message issues
     
     // Build query URL - always use orderBy to ensure chronological order
-    let queryUrl = `${getAllChatApiUrl()}.json?orderBy="$key"`;
+    // Use the validated allChatUrl variable to ensure we're using the correct endpoint
+    let queryUrl = `${allChatUrl}.json?orderBy="$key"`;
     
     if (limit !== null) {
       // For pagination, use limitToLast to get most recent messages
@@ -3738,15 +4022,25 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       // If endBefore is provided, use endAt to get messages before that key
       if (endBefore !== null) {
         queryUrl += `&endAt="${endBefore}"`;
-      } else {
-        // For initial load (no endBefore), only get messages from the retention period
-        const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
-        queryUrl += `&startAt="${retentionCutoff.toString()}"`;
       }
     }
     
-    // Fetch All Chat messages
-    let response = await fetch(queryUrl);
+    // Fetch All Chat messages with abort signal support
+    const fetchOptions = {};
+    if (abortController) {
+      fetchOptions.signal = abortController.signal;
+    }
+    
+    let response;
+    try {
+      response = await fetch(queryUrl, fetchOptions);
+    } catch (error) {
+      // If fetch was aborted, return empty array
+      if (error.name === 'AbortError' || abortController?.signal.aborted) {
+        return [];
+      }
+      throw error;
+    }
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -3764,18 +4058,25 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       return [];
     }
     
-    // Convert Firebase object to array and filter blocked players
+    // DEBUG: Log raw Firebase data
+    const rawMessageCount = Object.keys(data).length;
+    console.log(`[VIP List] [DEBUG] getAllChatMessages: Fetched ${rawMessageCount} raw messages from Firebase`);
+    
+    // Convert Firebase object to array and filter system messages and blocked players
     const messages = [];
+    let filteredSystemCount = 0;
+    
     for (const [id, msg] of Object.entries(data)) {
       if (!msg) continue;
       
+      // Filter out system messages (should only appear in guild chat)
+      if (isSystemMessage(msg)) {
+        filteredSystemCount++;
+        continue;
+      }
+      
       // Filter out messages from blocked players
       if (msg.from) {
-        // Filter out system messages (should only appear in guild chat)
-        if (msg.from.toLowerCase() === 'system') {
-          continue;
-        }
-        
         const isBlocked = await isPlayerBlocked(msg.from);
         if (isBlocked) continue;
         
@@ -3784,6 +4085,11 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       }
       
       messages.push({ id, ...msg });
+    }
+    
+    // DEBUG: Log filtering results
+    if (filteredSystemCount > 0) {
+      console.log(`[VIP List] [DEBUG] getAllChatMessages: Filtered ${filteredSystemCount} system messages out of ${rawMessageCount} total`);
     }
     
     messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -3798,18 +4104,91 @@ async function getAllChatMessages(forceRefresh = false, limit = null, endBefore 
       });
     }
     
-    // Cache the messages (only for full fetch without pagination)
-    if (limit === null && endBefore === null) {
-      now = Date.now();
-      allChatCache.messages = filteredMessages;
-      allChatCache.timestamp = now;
-      allChatCache.expiresAt = now + CACHE_TTL;
-    }
+    // CACHE REMOVED: No longer caching messages - always fetch fresh from Firebase
     
     return filteredMessages;
   } catch (error) {
     console.error('[VIP List] Error getting All Chat messages:', error);
     return [];
+  }
+}
+
+// Clean up All Chat messages older than specified age
+// ageMs: age in milliseconds (default: 30 days)
+async function cleanupOldAllChatMessages(ageMs = 30 * 24 * 60 * 60 * 1000) {
+  if (!getAllChatApiUrl() || !MESSAGING_CONFIG.enabled) {
+    return { deleted: 0, error: null };
+  }
+  
+  const allChatUrl = getAllChatApiUrl();
+  if (!allChatUrl || typeof allChatUrl !== 'string') {
+    return { deleted: 0, error: 'Invalid API URL' };
+  }
+  
+  if (!allChatUrl.includes('/all-chat')) {
+    return { deleted: 0, error: 'Invalid endpoint' };
+  }
+  
+  try {
+    const cutoffTime = Date.now() - ageMs;
+    
+    // Fetch all messages to check timestamps
+    const response = await fetch(`${allChatUrl}.json?orderBy="$key"`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { deleted: 0, error: null }; // No messages to clean
+      }
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (!data || typeof data !== 'object') {
+      return { deleted: 0, error: null };
+    }
+    
+    // Find messages older than cutoff
+    const messagesToDelete = [];
+    for (const [id, msg] of Object.entries(data)) {
+      if (!msg) continue;
+      
+      // Check timestamp (message ID is timestamp, or use msg.timestamp)
+      const msgTimestamp = msg.timestamp || parseInt(id) || 0;
+      if (msgTimestamp < cutoffTime) {
+        messagesToDelete.push(id);
+      }
+    }
+    
+    if (messagesToDelete.length === 0) {
+      return { deleted: 0, error: null };
+    }
+    
+    // Delete old messages in batches (Firebase has limits)
+    const BATCH_SIZE = 50;
+    let deletedCount = 0;
+    
+    for (let i = 0; i < messagesToDelete.length; i += BATCH_SIZE) {
+      const batch = messagesToDelete.slice(i, i + BATCH_SIZE);
+      const deletePromises = batch.map(msgId => 
+        fetch(`${allChatUrl}/${msgId}.json`, { method: 'DELETE' })
+          .then(response => {
+            if (response.ok) return 1;
+            return 0;
+          })
+          .catch(() => 0)
+      );
+      
+      const results = await Promise.all(deletePromises);
+      deletedCount += results.reduce((sum, count) => sum + count, 0);
+    }
+    
+    if (deletedCount > 0) {
+      console.log(`[VIP List] Cleaned up ${deletedCount} old All Chat messages (older than ${Math.round(ageMs / (24 * 60 * 60 * 1000))} days)`);
+    }
+    
+    return { deleted: deletedCount, error: null };
+  } catch (error) {
+    console.error('[VIP List] Error cleaning up old All Chat messages:', error);
+    return { deleted: 0, error: error.message };
   }
 }
 
@@ -4161,7 +4540,8 @@ function getLastDateKeyFromMessages(messages, previousCount, needsFullRebuild) {
 
 // Unified helper to process messages for any chat type
 // Returns array of elements to append (messages and optionally date separators)
-async function processMessagesForChat(messages, messagesToProcess, needsFullRebuild, displayedIds, container, getMessageIdFn, initialLastDateKey = null) {
+// filterSystemMessages: if true, filters out system messages (for All Chat). If false, includes them (for Guild Chat).
+async function processMessagesForChat(messages, messagesToProcess, needsFullRebuild, displayedIds, container, getMessageIdFn, initialLastDateKey = null, filterSystemMessages = true) {
   const elementsToAppend = [];
   let lastDateKey = initialLastDateKey;
   
@@ -4171,6 +4551,13 @@ async function processMessagesForChat(messages, messagesToProcess, needsFullRebu
   
   for (let i = 0; i < messagesToProcess.length; i++) {
     const msg = messagesToProcess[i];
+    
+    // Filter out system messages only if filterSystemMessages is true (for All Chat)
+    // System messages should appear in Guild Chat, so filterSystemMessages should be false for guild chat
+    if (filterSystemMessages && isSystemMessage(msg)) {
+      continue;
+    }
+    
     const msgId = getMessageIdFn(msg, messages, i) || msg.id;
     
     // Skip if already displayed
@@ -4274,6 +4661,11 @@ function appendElementsToContainer(container, elements) {
 async function addMessageToAllChatOptimistically(message, container, panel) {
   if (!container || !message) return;
   
+  // Filter out system messages (should only appear in guild chat)
+  if (isSystemMessage(message)) {
+    return;
+  }
+  
   const messageId = message.id || `msg-${message.timestamp}`;
   
   // Check if message already exists in DOM
@@ -4288,16 +4680,8 @@ async function addMessageToAllChatOptimistically(message, container, panel) {
   
   let lastDateKey = null;
   if (lastMessage) {
-    // Try to get date key from cache first (most reliable)
-    const lastMsgId = lastMessage.getAttribute('data-message-id');
-    if (allChatCache.messages && lastMsgId) {
-      const lastMsg = allChatCache.messages.find(msg => msg.id === lastMsgId);
-      if (lastMsg && lastMsg.timestamp) {
-        lastDateKey = getDateKey(lastMsg.timestamp);
-      }
-    }
-    
-    // Fallback: try to find date separator
+    // Get date key from DOM (cache removed - always use DOM)
+    // Try to find date separator
     if (!lastDateKey) {
       let prevElement = lastMessage.previousElementSibling;
       while (prevElement) {
@@ -5314,10 +5698,21 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
         const messagesArea = allChatPanel.querySelector('#chat-messages-all-chat');
         if (!messagesArea) return;
         
-        // Only check if All Chat tab is active (avoid unnecessary API calls)
-        if (activeAllChatTab === 'all-chat') {
+        // Only check if All Chat tab is active using state manager (avoid unnecessary API calls)
+        if (chatStateManager.isChatTypeActive('all-chat')) {
           try {
-            const allChatMessages = await getAllChatMessages();
+            // Get abortController from panel to cancel if tab switches
+            const abortController = allChatPanel._abortController || chatStateManager.getAbortController();
+            
+            // Check if cancelled before fetching
+            if (abortController?.signal.aborted) return;
+            
+            const allChatMessages = await getAllChatMessages(false, null, null, abortController);
+            
+            // Check if cancelled after fetching
+            if (abortController?.signal.aborted) return;
+            if (!chatStateManager.isChatTypeActive('all-chat')) return;
+            
             const latestTimestamp = allChatMessages.length > 0 ? allChatMessages[allChatMessages.length - 1]?.timestamp : null;
             const storedTimestamp = allChatPanel._lastTimestamp;
             
@@ -5326,22 +5721,46 @@ function setupPolling(interval = MESSAGING_CONFIG.checkInterval) {
             } else if (latestTimestamp > storedTimestamp || allChatMessages.length !== (allChatPanel._lastMessageCount || 0)) {
               allChatPanel._lastTimestamp = latestTimestamp;
               allChatPanel._lastMessageCount = allChatMessages.length;
-              await loadAllChatConversation(messagesArea);
+              
+              // Create checkCancelled callback for loadAllChatConversation
+              const checkCancelled = () => {
+                if (abortController?.signal.aborted) return true;
+                if (!chatStateManager.isChatTypeActive('all-chat')) return true;
+                return false;
+              };
+              
+              await loadAllChatConversation(messagesArea, false, false, checkCancelled, abortController);
             }
           } catch (error) {
-            if (error.message && !error.message.includes('401')) {
+            if (error.message && !error.message.includes('401') && !error.message.includes('AbortError')) {
               console.warn('[VIP List] Error checking All Chat messages:', error);
             }
           }
         }
         
-        // Check for new guild chat messages if guild tab is active
-        if (activeAllChatTab && activeAllChatTab.startsWith('guild-')) {
+        // Check for new guild chat messages if guild tab is active using state manager
+        const activeChatType = chatStateManager.getActiveChatType();
+        if (activeChatType && activeChatType.startsWith('guild-')) {
           try {
-            const guildId = activeAllChatTab.replace('guild-', '');
-            await loadGuildChatConversation(messagesArea, guildId, false);
+            const guildId = activeChatType.replace('guild-', '');
+            
+            // Get abortController from panel to cancel if tab switches
+            const abortController = allChatPanel._abortController || chatStateManager.getAbortController();
+            
+            // Check if cancelled before loading
+            if (abortController?.signal.aborted) return;
+            if (!chatStateManager.isChatTypeActive(activeChatType)) return;
+            
+            // Create checkCancelled callback for loadGuildChatConversation
+            const checkCancelled = () => {
+              if (abortController?.signal.aborted) return true;
+              if (!chatStateManager.isChatTypeActive(activeChatType)) return true;
+              return false;
+            };
+            
+            await loadGuildChatConversation(messagesArea, guildId, false, checkCancelled, abortController);
           } catch (error) {
-            if (error.message && !error.message.includes('401')) {
+            if (error.message && !error.message.includes('401') && !error.message.includes('AbortError')) {
               console.warn('[VIP List] Error checking Guild Chat messages:', error);
             }
           }
@@ -5452,11 +5871,6 @@ async function getConversationMessages(otherPlayer, forceRefresh = false, limit 
       if (endBefore !== null) {
         sentUrl += `&endAt="${endBefore}"`;
         receivedUrl += `&endAt="${endBefore}"`;
-      } else {
-        // For initial load (no endBefore), only get messages from the retention period
-        const retentionCutoff = Date.now() - MESSAGE_RETENTION_MS;
-        sentUrl += `&startAt="${retentionCutoff.toString()}"`;
-        receivedUrl += `&startAt="${retentionCutoff.toString()}"`;
       }
     }
     
@@ -6480,7 +6894,7 @@ function getDateKeyFromElement(element) {
 }
 
 // Load and display All Chat conversation
-async function loadAllChatConversation(container, forceScrollToBottom = false, forceRefresh = false, checkCancelled = null) {
+async function loadAllChatConversation(container, forceScrollToBottom = false, forceRefresh = false, checkCancelled = null, abortController = null) {
   const panel = container.closest('[id^="vip-chat-panel-all-chat"]');
   
   // Prevent concurrent loading (memory leak prevention)
@@ -6490,28 +6904,96 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
   
   panel._isLoadingAllChat = true;
   
+  // Show loading indicator if not already shown (for polling updates)
+  const wasLoadingIndicatorShown = container.querySelector('.chat-loading-indicator') !== null;
+  if (!wasLoadingIndicatorShown) {
+    showChatLoadingIndicator(container);
+  }
+  
   try {
     // Check if cancelled before starting
     if (checkCancelled && checkCancelled()) {
       return;
     }
-    // Check if we're loading initial messages or appending new ones
+    if (abortController?.signal.aborted) {
+      return;
+    }
+    
+    // CRITICAL: When loading all-chat, verify active chat type and clear container if needed
+    // This prevents mixing messages from guild chat or private chats when switching tabs
+    // The container is shared between all chat types, so we must ensure it's clean for all-chat
     const existingMessages = container.querySelectorAll('[data-message-id]');
-    const isInitialLoad = existingMessages.length === 0 || forceRefresh;
+    
+    // DEBUG: Check for system messages in DOM (indicates contamination from Guild Chat)
+    if (existingMessages.length > 0) {
+      const systemMessagesInDOM = Array.from(existingMessages).filter(el => isSystemMessageElement(el));
+      if (systemMessagesInDOM.length > 0) {
+        console.warn(`[VIP List] [DEBUG] Found ${systemMessagesInDOM.length} system messages in DOM - will clear container`);
+      }
+    }
+    
+    // Verify we're actually loading for the all-chat tab using state manager
+    if (!chatStateManager.isChatTypeActive('all-chat')) {
+      return;
+    }
+    
+    // CRITICAL FIX: Always clear container when loading all-chat if it has messages
+    // This prevents guild chat messages from appearing in all-chat after tab switches
+    // The container is shared, so messages from other chat types must be cleared
+    // 
+    // CRITICAL: Check if there are system messages in the container - if so, ALWAYS clear
+    // System messages should NEVER appear in All Chat, so their presence indicates
+    // messages from Guild Chat are present and must be cleared
+    const storedPreviousCount = panel?._previousMessageCount ?? 0;
+    const wasTabSwitch = storedPreviousCount === 0 && existingMessages.length > 0;
+    
+    // Check for system messages in existing messages (indicates Guild Chat contamination)
+    const hasSystemMessages = existingMessages.length > 0 && 
+                              Array.from(existingMessages).some(el => isSystemMessageElement(el));
+    
+    // Only allow incremental update if:
+    // - not forcing refresh
+    // - storedPreviousCount > 0 (we had all-chat messages before)
+    // - existingMessages.length matches storedPreviousCount (same messages, just appending new ones)
+    // - NO system messages present (system messages = Guild Chat contamination)
+    const isIncrementalUpdate = !forceRefresh && 
+                                !hasSystemMessages &&
+                                storedPreviousCount > 0 && 
+                                existingMessages.length > 0 && 
+                                existingMessages.length === storedPreviousCount;
+    
+    // Clear container unless this is a legitimate incremental update
+    // Always clear if: forcing refresh, tab switch detected, system messages present, or not incremental update
+    if (forceRefresh || wasTabSwitch || hasSystemMessages || !isIncrementalUpdate) {
+      container.innerHTML = '';
+      if (panel) {
+        panel._previousMessageCount = 0;
+        panel._oldestLoadedMessageId = null;
+      }
+    }
+    
+    // Check if we're loading initial messages or appending new ones
+    const remainingMessages = container.querySelectorAll('[data-message-id]');
+    const isInitialLoad = remainingMessages.length === 0 || forceRefresh;
     
     let messages;
     let forceRebuildForDateChange = false;
     if (isInitialLoad) {
-      // Load only the most recent 20 messages initially
-      messages = await getAllChatMessages(forceRefresh, MESSAGES_PER_PAGE);
+      // If forceRefresh is true, load all messages (user wants fresh data)
+      // Otherwise, load only the most recent 20 messages initially for faster loading
+      const limit = forceRefresh ? null : MESSAGES_PER_PAGE;
+      messages = await getAllChatMessages(forceRefresh, limit, null, abortController);
       
       // Check if cancelled after loading messages
       if (checkCancelled && checkCancelled()) {
         return;
       }
+      if (abortController?.signal.aborted) {
+        return;
+      }
       
-      // Verify active tab is still 'all-chat' before displaying
-      if (activeAllChatTab !== 'all-chat') {
+      // Verify active chat type is still 'all-chat' before displaying
+      if (!chatStateManager.isChatTypeActive('all-chat')) {
         return;
       }
       
@@ -6523,15 +7005,18 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       }
     } else {
       // For updates, fetch all new messages (will append to existing)
-      const allMessages = await getAllChatMessages(forceRefresh);
+      const allMessages = await getAllChatMessages(forceRefresh, null, null, abortController);
       
       // Check if cancelled after loading messages
       if (checkCancelled && checkCancelled()) {
         return;
       }
+      if (abortController?.signal.aborted) {
+        return;
+      }
       
-      // Verify active tab is still 'all-chat' before displaying
-      if (activeAllChatTab !== 'all-chat') {
+      // Verify active chat type is still 'all-chat' before displaying
+      if (!chatStateManager.isChatTypeActive('all-chat')) {
         return;
       }
       
@@ -6627,9 +7112,6 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     const hasNewMessages = isInitialLoad ? messages.length > 0 : messages.length > 0;
     const shouldScrollToBottom = forceScrollToBottom || (hasNewMessages && !isInitialLoad);
     
-    // Track displayed message IDs to prevent duplicates
-    const displayedMessageIds = getDisplayedMessageIds(container);
-    
     // Check if we need a full rebuild due to chronological order issues
     // (This happens when new messages have earlier timestamps than displayed messages)
     // If messages contains all messages (not just new ones), we detected older messages and need full rebuild
@@ -6644,6 +7126,9 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
     
     // Check if cancelled before modifying DOM
     if (checkCancelled && checkCancelled()) {
+      return;
+    }
+    if (abortController?.signal.aborted) {
       return;
     }
     
@@ -6667,6 +7152,10 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
         panel._oldestLoadedMessageId = messages[0].id;
       }
     }
+    
+    // Track displayed message IDs AFTER clearing (if rebuild) to prevent duplicates
+    // This ensures we use fresh IDs after container is cleared
+    const displayedMessageIds = getDisplayedMessageIds(container);
     
     if (messages.length === 0 && isInitialLoad) {
       const emptyMsg = createEmptyChatMessage(t('mods.vipList.allChatEmptyState'));
@@ -6711,46 +7200,147 @@ async function loadAllChatConversation(container, forceScrollToBottom = false, f
       }
     }
     
-    // Only process new messages if not rebuilding
-    // When not rebuilding, messages are already filtered to only new ones, so use them directly
-    const messagesToProcess = needsFullRebuild ? messages : messages;
-    
     // Message ID generator function (All Chat messages always have IDs)
     const getMessageId = (msg) => msg.id || null;
     
+    // Double-check displayed IDs right before processing (in case DOM changed)
+    // This prevents duplicates if loadAllChatConversation is called multiple times concurrently
+    const finalDisplayedIds = getDisplayedMessageIds(container);
+    
     // Process messages using unified helper (handles date separators only on full rebuild)
+    // filterSystemMessages = true for All Chat (system messages should NOT appear)
     const elementsToAppend = await processMessagesForChat(
       messages,
-      messagesToProcess,
+      messages,
       needsFullRebuild,
-      displayedMessageIds,
+      finalDisplayedIds,
       container,
       getMessageId,
-      needsFullRebuild ? lastDateKey : null
+      needsFullRebuild ? lastDateKey : null,
+      true // Filter system messages in All Chat
     );
+    
+    // Final safety check: verify no duplicates before appending (even during rebuild)
+    // This prevents duplicates if loadAllChatConversation is called multiple times concurrently
+    if (elementsToAppend.length > 0) {
+      const existingIds = new Set(Array.from(container.querySelectorAll('[data-message-id]')).map(el => el.getAttribute('data-message-id')));
+      
+      // Filter out any elements that would create duplicates
+      const filteredElements = [];
+      const filteredMessageElements = [];
+      let duplicateCount = 0;
+      
+      for (const el of elementsToAppend) {
+        const msgId = el.getAttribute?.('data-message-id');
+        if (!msgId) {
+          // Keep non-message elements (date separators, etc.) for now
+          filteredElements.push(el);
+        } else if (existingIds.has(msgId)) {
+          // Skip duplicate message
+          duplicateCount++;
+        } else {
+          // Add new message
+          filteredElements.push(el);
+          filteredMessageElements.push(el);
+          existingIds.add(msgId); // Track as we go to prevent duplicates within the batch
+        }
+      }
+      
+      if (duplicateCount > 0) {
+        console.warn(`[VIP List] Preventing ${duplicateCount} duplicate message(s) before appending`);
+        // If we found duplicates, it means messages were already added (race condition)
+        // Only append if we have new messages, otherwise skip to avoid duplicates and orphaned date separators
+        if (filteredMessageElements.length === 0) {
+          // All messages were duplicates - don't append anything (including date separators)
+          return;
+        }
+        
+        // If we have messages but also have date separators, we need to clean up orphaned separators
+        // Date separators should only appear before messages, so remove any trailing separators
+        // Keep separators that appear before messages in filteredMessageElements
+        const cleanedElements = [];
+        let lastWasSeparator = false;
+        for (let i = 0; i < filteredElements.length; i++) {
+          const el = filteredElements[i];
+          const isMessage = el.getAttribute?.('data-message-id');
+          if (isMessage) {
+            cleanedElements.push(el);
+            lastWasSeparator = false;
+          } else {
+            // It's a date separator - only keep it if there's a message after it
+            const hasMessageAfter = filteredElements.slice(i + 1).some(e => e.getAttribute?.('data-message-id'));
+            if (hasMessageAfter) {
+              cleanedElements.push(el);
+              lastWasSeparator = true;
+            }
+          }
+        }
+        
+        // Remove trailing separators
+        while (cleanedElements.length > 0 && !cleanedElements[cleanedElements.length - 1].getAttribute?.('data-message-id')) {
+          cleanedElements.pop();
+        }
+        
+        // Replace elementsToAppend with cleaned version
+        elementsToAppend.length = 0;
+        elementsToAppend.push(...cleanedElements);
+      }
+    }
+    
   
-    // Final check: verify active tab is still 'all-chat' before appending messages
+    // Final check: verify active chat type is still 'all-chat' before appending messages
     if (checkCancelled && checkCancelled()) {
       return;
     }
-    if (activeAllChatTab !== 'all-chat') {
+    if (abortController?.signal.aborted) {
+      return;
+    }
+    if (!chatStateManager.isChatTypeActive('all-chat')) {
       return;
     }
   
+    // Final duplicate check right before appending (catches race conditions)
+    if (elementsToAppend.length > 0) {
+      const currentDisplayedIds = new Set(Array.from(container.querySelectorAll('[data-message-id]')).map(el => el.getAttribute('data-message-id')));
+      const elementsToAppendIds = elementsToAppend
+        .map(el => el.getAttribute?.('data-message-id'))
+        .filter(id => id);
+      
+      const hasDuplicates = elementsToAppendIds.some(id => currentDisplayedIds.has(id));
+      if (hasDuplicates) {
+        console.warn(`[VIP List] Detected duplicates right before appending - skipping to prevent duplicate messages`);
+        // Update count and return without appending
+        if (panel) {
+          panel._previousMessageCount = currentDisplayedIds.size;
+        }
+        return;
+      }
+    }
+    
     // Append elements using DocumentFragment (reduces flicker)
     appendElementsToContainer(container, elementsToAppend);
     
-    // Update message count (total displayed messages)
+    // Final check: verify no system messages made it through
+    const displayedMessages = Array.from(container.querySelectorAll('[data-message-id]'));
+    const systemMessagesInDOM = displayedMessages.filter(el => isSystemMessageElement(el));
+    if (systemMessagesInDOM.length > 0) {
+      console.error(`[VIP List] ERROR: ${systemMessagesInDOM.length} system messages found in All Chat after loading!`);
+    }
+    
+    // Update message count
     if (panel) {
-      const totalDisplayed = container.querySelectorAll('[data-message-id]').length;
-      panel._previousMessageCount = totalDisplayed;
+      panel._previousMessageCount = displayedMessages.length;
     }
     
     // Handle scrolling
     handleChatScroll(panel, container, shouldScrollToBottom, needsFullRebuild);
   } finally {
-    // Always clear loading flag
+    // Always clear loading flag and hide loading indicator
     if (panel) panel._isLoadingAllChat = false;
+    // Hide loading indicator if we showed it (for polling updates)
+    if (!wasLoadingIndicatorShown) {
+      hideChatLoadingIndicator(container);
+    }
   }
 }
 
@@ -7359,8 +7949,14 @@ async function switchAllChatTab(playerName) {
     }
   }
   
-  // If a tab switch is already in progress, reset all state first
+  // If a tab switch is already in progress, cancel it and reset all state
   if (currentTabSwitchPromise) {
+    // Abort any ongoing fetch operations
+    if (panel._abortController) {
+      panel._abortController.abort();
+      panel._abortController = null;
+    }
+    
     // Cancel previous tab switch by resetting all state
     panel._isLoadingAllChat = false;
     panel._isLoadingOlderAllChat = false;
@@ -7368,6 +7964,13 @@ async function switchAllChatTab(playerName) {
     panel._lastTimestamp = null;
     panel._lastMessageCount = null;
     panel._lastRunsOnlyFilter = false;
+    
+    // Reset guild chat loading flags
+    for (const key of Object.keys(panel)) {
+      if (key.startsWith('_isLoadingGuildChat_')) {
+        panel[key] = false;
+      }
+    }
     
     // Hide any loading indicator
     hideChatLoadingIndicator(messagesArea);
@@ -7378,8 +7981,11 @@ async function switchAllChatTab(playerName) {
   
   // Track this tab switch
   const switchPromise = (async () => {
-    // Update active tab
-    activeAllChatTab = playerName;
+    // Update active chat type using state manager BEFORE clearing container
+    // This creates a new AbortController and aborts any previous operations
+    chatStateManager.setActiveChatType(playerName);
+    const abortController = chatStateManager.getAbortController();
+    panel._abortController = abortController;
     
     // Update tab styles to match game's native tab styling
     allChatTabs.forEach((tab, name) => {
@@ -7434,17 +8040,28 @@ async function switchAllChatTab(playerName) {
     
     try {
       // Check if this switch was cancelled (user clicked another tab)
-      const checkCancelled = () => currentTabSwitchPromise !== switchPromise;
+      const checkCancelled = () => {
+        if (currentTabSwitchPromise !== switchPromise) return true;
+        if (abortController.signal.aborted) return true;
+        if (!chatStateManager.isChatTypeActive(playerName)) return true;
+        return false;
+      };
       
       // Load appropriate conversation
-      // Use cache if available (5 seconds is fresh enough for switching tabs)
-      // Only force refresh on initial load or manual refresh
       // Always scroll to bottom when switching tabs
       if (playerName === 'all-chat') {
-        await loadAllChatConversation(messagesArea, true, false, checkCancelled); // Force scroll to bottom, use cache, pass cancellation check
+        // Always fetch fresh from Firebase (no cache)
+        await loadAllChatConversation(messagesArea, true, true, checkCancelled, abortController);
+        
+        // Final verification: check for system messages
+        const finalMessages = messagesArea.querySelectorAll('[data-message-id]');
+        const finalSystemMessages = Array.from(finalMessages).filter(el => isSystemMessageElement(el));
+        if (finalSystemMessages.length > 0) {
+          console.error(`[VIP List] ERROR: ${finalSystemMessages.length} system messages found in All Chat after loading!`);
+        }
         if (checkCancelled()) return; // Abort if cancelled
-        // Verify active tab still matches loaded messages
-        if (activeAllChatTab !== playerName) {
+        // Verify active chat type still matches loaded messages
+        if (!chatStateManager.isChatTypeActive(playerName)) {
           messagesArea.innerHTML = '';
           return;
         }
@@ -7452,10 +8069,10 @@ async function switchAllChatTab(playerName) {
       } else if (playerName.startsWith('guild-')) {
         // Guild chat tab
         const guildId = playerName.replace('guild-', '');
-        await loadGuildChatConversation(messagesArea, guildId, true, checkCancelled); // Force scroll to bottom, pass cancellation check
+        await loadGuildChatConversation(messagesArea, guildId, true, checkCancelled, abortController); // Force scroll to bottom, pass cancellation check and abort controller
         if (checkCancelled()) return; // Abort if cancelled
-        // Verify active tab still matches loaded messages
-        if (activeAllChatTab !== playerName) {
+        // Verify active chat type still matches loaded messages
+        if (!chatStateManager.isChatTypeActive(playerName)) {
           messagesArea.innerHTML = '';
           return;
         }
@@ -7466,8 +8083,8 @@ async function switchAllChatTab(playerName) {
         // Always scroll to bottom when switching tabs
         await loadConversation(playerName, messagesArea, true, false); // Force scroll to bottom, use cache
         if (checkCancelled()) return; // Abort if cancelled
-        // Verify active tab still matches loaded messages
-        if (activeAllChatTab !== playerName) {
+        // Verify active chat type still matches loaded messages
+        if (!chatStateManager.isChatTypeActive(playerName)) {
           messagesArea.innerHTML = '';
           return;
         }
@@ -7602,9 +8219,12 @@ async function switchAllChatTab(playerName) {
       // Hide loading indicator when done (whether successful or error)
       hideChatLoadingIndicator(messagesArea);
       
-      // Clear switch promise when done
+      // Clear switch promise and abort controller when done
       if (currentTabSwitchPromise === switchPromise) {
         currentTabSwitchPromise = null;
+        if (panel._abortController === abortController) {
+          panel._abortController = null;
+        }
       }
       
       // Prefetch conversations for other open tabs (background caching)
@@ -8141,6 +8761,10 @@ async function openAllChatPanel() {
     tabsContainer.appendChild(allChatTab);
     allChatTabs.set('all-chat', allChatTab);
     activeTab = 'all-chat';
+    
+    // Set chat state immediately to prevent loading before state is set
+    // This ensures loadAllChatConversation doesn't abort when called during auto-reopen
+    chatStateManager.setActiveChatType('all-chat');
   }
   
   // Sync guild chat tab (will add if player is in a guild, hide if not)
@@ -11496,6 +12120,12 @@ exports = {
         
         // Sync chat enabled status to Firebase
         syncChatEnabledStatus(true);
+        
+        // Clean up old All Chat messages (older than 30 days) on init
+        // Run asynchronously to not block initialization
+        cleanupOldAllChatMessages(30 * 24 * 60 * 60 * 1000).catch(error => {
+          console.error('[VIP List] Error during message cleanup:', error);
+        });
         
         // Auto-reopen chat panel if it was previously open
         autoReopenChatPanel();

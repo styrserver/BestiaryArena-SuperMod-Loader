@@ -16,12 +16,15 @@ const OBSERVER_MIN_INTERVAL = 100;
 const KING_TIBI_MODAL_WIDTH = 450;
 const KING_TIBI_MODAL_HEIGHT = 500;
 const QUEST_ITEMS_MODAL_WIDTH = 500;
-const QUEST_ITEMS_MODAL_HEIGHT = 180;
+const QUEST_ITEMS_MODAL_HEIGHT = 190;
 const KING_GUILD_COIN_REWARD = 50;
 
 // Toast duration constants (in milliseconds)
 const TOAST_DURATION_DEFAULT = 5000;      // 5 seconds - general notifications
 const TOAST_DURATION_IMPORTANT = 10000;   // 10 seconds - important quest milestones
+
+// Mornenion quest messages
+const MORNENION_DEFEATED_MESSAGE = 'The cave entrance is sealed. Mornenion has been defeated.';
 
 const SILVER_TOKEN_CONFIG = {
   productName: 'Silver Token',
@@ -32,10 +35,22 @@ const SILVER_TOKEN_CONFIG = {
 
 // Fishing system configuration
 const FISHING_CONFIG = {
-  SPRITE_IDS: ['12706', '622', '4597', '4609', '4598'], 
+  SPRITE_IDS: ['12706', '622', '4597', '4609', '4598'],
   ANIMATION_SIZE: 64,
   ANIMATION_DURATION: 500, // milliseconds
   MAP_SWITCH_DELAY: 500 // milliseconds
+};
+
+// Digging system configuration
+const MINING_CONFIG = {
+  TARGET_TILE_ID: '82', // Tile 82 on Hedge Maze
+  TARGET_MAP: "Hedge Maze", // Map name where mining is available
+  SPRITE_TRANSFORM: {
+    from: '1822', // Original sprite ID (the one to replace)
+    to: '385'    // Transformed sprite ID
+  },
+  ANIMATION_SIZE: 64,
+  ANIMATION_DURATION: 500 // milliseconds
 };
 
 const KING_COPPER_KEY_MISSION = {
@@ -98,7 +113,7 @@ const AL_DEE_FISHING_MISSION = {
   prompt: 'Ah, adventurer! I dropped my Small Axe in the waters of a cave while being hunted by minotaurs and goblins. Will you help me retrieve it?',
   accept: 'Thank you! I\'ll be waiting here for my Small Axe.',
   askForItem: 'Have you found my Small Axe?',
-  complete: 'My Small Axe! You found it! Here\'s a Dwarven Pickaxe as a reward for your help.',
+  complete: 'My Small Axe! You found it! Here\'s a Light Shovel as a reward for your help.',
   missingItem: 'You claim yes but I see no Small Axe. Return when you have it!',
   keepSearching: 'Then keep searching for my axe and return when you find it.',
   answerYesNo: 'Answer yes or no: have you found my Small Axe?',
@@ -107,6 +122,24 @@ const AL_DEE_FISHING_MISSION = {
   objectiveLine1: 'Find Al Dee\'s Small Axe in the waters of a cave.',
   objectiveLine2: 'Return the Small Axe to Al Dee.',
   hint: 'Search underwater areas or caves where minotaurs and goblins roam.',
+  rewardCoins: 0
+};
+
+const AL_DEE_GOLDEN_ROPE_MISSION = {
+  id: 'al_dee_golden_rope',
+  title: 'The search for the Light',
+  prompt: 'Ah, adventurer! I\'ve lost my precious elvenhair rope to those tricky elves. It\'s said to have magical properties that can lead one to great treasures. Will you help me find it?',
+  accept: 'Excellent! I\'ll be waiting here for my elvenhair rope. Please return it when you find it!',
+  askForItem: 'Have you found my elvenhair rope?',
+  complete: 'My elvenhair rope! You found it! Thank you for your help. Here, take this Holy Tible as a reward for your bravery!',
+  missingItem: 'You claim yes but I see no elvenhair rope. Return when you have it!',
+  keepSearching: 'Then keep searching for my rope and return when you find it.',
+  answerYesNo: 'Answer yes or no: have you found my elvenhair rope?',
+  alreadyCompleted: 'You already helped me find my elvenhair rope. Thank you again!',
+  alreadyActive: 'You\'re already helping me find my elvenhair rope. Bring it back when you find it!',
+  objectiveLine1: 'Find Al Dee\'s elvenhair rope that was taken by elves.',
+  objectiveLine2: 'Return the elvenhair rope to Al Dee.',
+  hint: 'Search areas where elves are known to roam.',
   rewardCoins: 0
 };
 
@@ -315,10 +348,84 @@ const KING_TIBIANUS_TAB_ID = 'quests-mod-king-tibianus-tab';
 const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
 // =======================
-// 2. State & Observers
+// 2. NPC Conversation Cooldown Manager
+// =======================
+
+/**
+ * Creates a reusable cooldown manager for NPC conversations.
+ * Prevents multiple rapid messages from causing multiple responses.
+ * @param {number} cooldownMs - Cooldown delay in milliseconds (default: 1000)
+ * @returns {Object} Cooldown manager with methods to handle message responses
+ */
+function createNPCCooldownManager(cooldownMs = 1000) {
+  let pendingResponseTimeout = null;
+  let latestMessage = null;
+
+  return {
+    /**
+     * Clears any pending response timeout (call when a new message arrives)
+     */
+    clearPendingResponse() {
+      if (pendingResponseTimeout) {
+        clearTimeout(pendingResponseTimeout);
+        pendingResponseTimeout = null;
+      }
+    },
+
+    /**
+     * Queues an NPC response with cooldown protection.
+     * Only responds if this is still the latest message after the cooldown period.
+     * @param {string} messageText - The original player message text
+     * @param {string} responseText - The NPC's response text
+     * @param {Function} addMessageCallback - Function to add message to conversation (npcName, text, isNPC)
+     * @param {string} npcName - Name of the NPC
+     * @param {Function} [onResponseCallback] - Optional callback to execute after response is shown
+     */
+    queueResponse(messageText, responseText, addMessageCallback, npcName, onResponseCallback = null) {
+      // Clear any pending response
+      this.clearPendingResponse();
+
+      // Store the latest message
+      latestMessage = {
+        text: messageText,
+        response: responseText
+      };
+
+      // Set timeout for response
+      pendingResponseTimeout = setTimeout(() => {
+        // Only respond if this is still the latest message
+        if (latestMessage && latestMessage.text === messageText) {
+          addMessageCallback(npcName, latestMessage.response, true);
+          
+          // Execute optional callback (e.g., for closing modal on "bye")
+          if (onResponseCallback) {
+            onResponseCallback();
+          }
+          
+          latestMessage = null;
+        }
+        pendingResponseTimeout = null;
+      }, cooldownMs);
+    },
+
+    /**
+     * Resets the cooldown manager (useful when closing modal)
+     */
+    reset() {
+      this.clearPendingResponse();
+      latestMessage = null;
+    }
+  };
+}
+
+// =======================
+// 3. State & Observers
 // =======================
 
 (function() {
+  // =======================
+  // General/UI State
+  // =======================
   let inventoryObserver = null;
   let buttonCheckInterval = null;
   let lastButtonCheck = 0;
@@ -331,46 +438,55 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   let dialogTimeout = null;
   const buttonEventListeners = new Map(); // Track event listeners for cleanup
   
-  // Quest items drop system state
+  // =======================
+  // Quest Items System State
+  // =======================
   let questItemsBoardSubscription = null;
   let lastProcessedQuestItemsSeed = null;
+  let cachedQuestItems = null; // Cache for loaded quest items
   
-  // Copper Key system state
+  // =======================
+  // Copper Key System State
+  // =======================
   let copperKeyBoardSubscription = null;
   let lastProcessedCopperKeySeed = null;
   let trackedBoardConfig = null; // Track boardConfig before battle for verification
   let equipmentSlotObserver = null; // Observer for equipment slot display
   
-  // Quest items cache
-  let cachedQuestItems = null; // Cache for loaded quest items
-  
-  // Quest log monitoring state
-  let questLogObserver = null;
-  let questLogMonitorInterval = null;
-  let questLogObserverTimeout = null;
-  let kingModeActive = false;
-  let lastQuestLogContainer = null;
-  let missionsToggleButton = null;
-
-  // King Tibianus chat state
+  // =======================
+  // King Tibianus System State
+  // =======================
   const kingChatState = {
     progressCopper: { accepted: false, completed: false },
     progressDragon: { accepted: false, completed: false },
     progressLetter: { accepted: false, completed: false },
     progressAlDeeFishing: { accepted: false, completed: false },
+    progressAlDeeGoldenRope: { accepted: false, completed: false },
     missionOffered: false,
     offeredMission: null,
     awaitingKeyConfirm: false,
     starterCoinThanked: false
   };
-
-  // Tile 79 right-click system state
-  let tile79RightClickEnabled = false;
-  let tile79ContextMenu = null;
-  let tile79BoardSubscription = null;
-  let tile79PlayerSubscription = null;
-
-  // Fishing system state - consolidated for better organization
+  
+  // =======================
+  // Mining/Digging System State
+  // =======================
+  const miningState = {
+    enabled: false,
+    manuallyDisabled: false, // Track if user manually disabled mining (prevents automatic re-enabling)
+    contextMenu: null,
+    subscriptions: {
+      board: null,
+      player: null
+    },
+    tiles: new Set(), // Track mining tiles that are currently enabled
+    clickedTile: null, // Store the tile that was right-clicked for animation positioning
+    currentRoomId: null // Track current room to avoid unnecessary rescanning
+  };
+  
+  // =======================
+  // Water Fishing System State
+  // =======================
   const fishingState = {
     enabled: false,
     manuallyDisabled: false, // Track if user manually disabled fishing (prevents automatic re-enabling)
@@ -389,14 +505,772 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     ironOreQuestCompleted: false,
     ironOreQuestExpired: false // True when timer expired but reward not yet claimed
   };
+  
+  // =======================
+  // Tile 79 System State
+  // =======================
+  let tile79RightClickEnabled = false;
+  let tile79ContextMenu = null;
+  let tile79BoardSubscription = null;
+  let tile79PlayerSubscription = null;
+  
+  // =======================
+  // Quest Log System State
+  // =======================
+  let questLogObserver = null;
+  let questLogMonitorInterval = null;
+  let questLogObserverTimeout = null;
+  let kingModeActive = false;
+  let lastQuestLogContainer = null;
+  let missionsToggleButton = null;
+  
+  // =======================
+  // Quest Overlay Hider System State
+  // =======================
+  let questOverlayHider = null;
+  let abDendrielMutationObserver = null; // MutationObserver for continuous cleanup in Ab'Dendriel
+  let gameTimerSubscription = null; // Subscription for game timer to detect battle completion in sandbox
+  let playerUsedHoleToAbDendriel = false; // Track if player used hole to enter Ab'Dendriel
+  let villainSetupDone = false; // Track if villain setup has been done for current Ab'Dendriel session
+  let overlayHidingDone = false; // Track if overlay hiding has been done for current Ab'Dendriel session
+  let currentlyInAbDendriel = false; // Track if we're currently in Ab'Dendriel area
+  let isAddingVillains = false; // Flag to prevent rapid re-additions of Mornenion/Elves
+  let lastVillainAddTime = 0; // Timestamp of last villain addition attempt
+  let justRemovedVillains = false; // Flag to skip Mornenion check immediately after removal
+  
+  // =======================
+  // Mornenion System State
+  // =======================
+  let playerUsedHoleToMornenion = false; // Track if player used hole to enter Mornenion
+  let mornenionBattle = null; // CustomBattle instance for Mornenion
 
-  // Legacy aliases for backward compatibility
-  const waterFishingEnabled = fishingState.enabled;
-  const waterFishingContextMenu = fishingState.contextMenu;
-  const waterFishingBoardSubscription = fishingState.subscriptions.board;
-  const waterFishingPlayerSubscription = fishingState.subscriptions.player;
-  const waterTiles = fishingState.tiles;
-  const clickedWaterTile = fishingState.clickedTile;
+
+  // Initialize Mornenion CustomBattle configuration
+  // This is called when the quest triggers (player uses hole to enter Mornenion area)
+  function initializeMornenionBattle() {
+    if (!window.CustomBattles) {
+      console.warn('[Quests Mod][Mornenion] CustomBattles system not available when quest triggered, waiting...');
+      // Check if script tag exists (means script is loading)
+      const scriptCheck = document.querySelector('script[src*="custom-battles.js"]');
+      if (!scriptCheck) {
+        console.error('[Quests Mod][Mornenion] custom-battles.js script tag NOT found - script may not be injected');
+        return null;
+      }
+      
+      // Script is loading but CustomBattles not ready yet - wait for it
+      // This can happen if the quest triggers very early, before the script finishes loading
+      let retries = 0;
+      const maxRetries = 40; // 40 * 50ms = 2 seconds
+      
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          retries++;
+          if (window.CustomBattles) {
+            clearInterval(checkInterval);
+            console.log('[Quests Mod][Mornenion] CustomBattles became available after', retries * 50, 'ms - creating battle instance');
+            resolve(createMornenionBattleInstance());
+          } else if (retries >= maxRetries) {
+            clearInterval(checkInterval);
+            console.error('[Quests Mod][Mornenion] CustomBattles not available after', maxRetries * 50, 'ms - giving up');
+            resolve(null);
+          }
+        }, 50);
+      });
+    }
+    
+    // CustomBattles is available - create instance synchronously
+    return createMornenionBattleInstance();
+  }
+  
+  // Create the actual Mornenion battle instance
+  function createMornenionBattleInstance() {
+    if (!window.CustomBattles) {
+      console.error('[Quests Mod][Mornenion] CustomBattles still not available');
+      return null;
+    }
+    
+
+    // Verify Elf Scout ID exists
+    let elfScoutGameId = 40;
+    try {
+      const monster = globalThis.state.utils.getMonster(elfScoutGameId);
+      if (!monster || !monster.metadata) {
+        console.log('[Quests Mod][Mornenion] Elf Scout ID 40 not found, using fallback');
+        elfScoutGameId = 4; // Orc Spearman fallback
+      }
+    } catch (e) {
+      console.log('[Quests Mod][Mornenion] Error with Elf Scout ID 40, using fallback');
+      elfScoutGameId = 4;
+    }
+
+    const mornenionConfig = {
+      name: 'Mornenion',
+      roomId: 'abwasp',
+      floor: 15, // Set floor to 15 for Ab'Dendriel Hive
+      villains: [
+        {
+          nickname: 'Mornenion',
+          keyPrefix: 'mornenion-tile-19-',
+          tileIndex: 19,
+          gameId: elfScoutGameId,
+          level: 100,
+          tier: 0,
+          direction: 'south',
+          genes: {
+            hp: 100,
+            ad: 50,
+            ap: 20,
+            armor: 50,
+            magicResist: 50
+          }
+        },
+        {
+          nickname: 'Elf',
+          keyPrefix: 'elf-tile-2-',
+          tileIndex: 2,
+          gameId: 39,
+          level: 1,
+          tier: 0,
+          direction: 'south',
+          genes: {
+            hp: 1,
+            ad: 1,
+            ap: 1,
+            armor: 1,
+            magicResist: 1
+          }
+        },
+        {
+          nickname: 'Elf',
+          keyPrefix: 'elf-tile-11-',
+          tileIndex: 11,
+          gameId: 39,
+          level: 1,
+          tier: 0,
+          direction: 'south',
+          genes: {
+            hp: 1,
+            ad: 1,
+            ap: 1,
+            armor: 1,
+            magicResist: 1
+          }
+        },
+        {
+          nickname: 'Elf',
+          keyPrefix: 'elf-tile-137-',
+          tileIndex: 137,
+          gameId: 39,
+          level: 1,
+          tier: 0,
+          direction: 'south',
+          genes: {
+            hp: 1,
+            ad: 1,
+            ap: 1,
+            armor: 1,
+            magicResist: 1
+          }
+        },
+        {
+          nickname: 'Elf',
+          keyPrefix: 'elf-tile-146-',
+          tileIndex: 146,
+          gameId: 39,
+          level: 1,
+          tier: 0,
+          direction: 'south',
+          genes: {
+            hp: 1,
+            ad: 1,
+            ap: 1,
+            armor: 1,
+            magicResist: 1
+          }
+        }
+      ],
+      allyLimit: 5,
+      tileRestrictions: {
+        allowedTiles: [67, 81, 97],
+        message: 'Ally creatures can only be placed on tiles 67, 81, and 97 in Mornenion!'
+      },
+      hideVillainSprites: true,
+      activationCheck: (isSandbox, inBattleArea) => {
+        return isSandbox && inBattleArea && playerUsedHoleToMornenion;
+      },
+      victoryDefeat: {
+        onVictory: async (gameData) => {
+          console.log('[Quests Mod][Mornenion] Mornenion victory! Adding Elvenhair Rope to inventory');
+          await addQuestItem('Elvenhair Rope', 1).catch(error => {
+            console.error('[Quests Mod][Mornenion] Error adding Elvenhair Rope:', error);
+          });
+          
+          // Set Mornenion defeated flag
+          try {
+            const playerName = getCurrentPlayerName();
+            if (playerName) {
+              console.log('[Quests Mod][Mornenion] Mornenion victory detected! Setting defeated flag...');
+              const existingProgress = await getKingTibianusProgress(playerName);
+              const mergedProgress = {
+                ...existingProgress,
+                mornenion: {
+                  defeated: true
+                }
+              };
+              await saveKingTibianusProgress(playerName, mergedProgress);
+              console.log('[Quests Mod][Mornenion] Mornenion defeated flag saved to Firebase');
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Mornenion] Error setting Mornenion defeated flag:', error);
+          }
+        },
+        onDefeat: (gameData) => {
+          // Nothing special on defeat
+        },
+        onClose: (isVictory, gameData) => {
+          // Cleanup all Mornenion quest state
+          cleanupMornenionQuest();
+          // Navigate to Hedge Maze after closing modal
+          setTimeout(() => {
+            navigateToHedgeMaze();
+          }, 100);
+        },
+        victoryTitle: 'Victory!',
+        defeatTitle: 'Defeat',
+        victoryMessage: 'Mornenion was slain. You found Elvenhair Rope.',
+        defeatMessage: 'Mornenions powers were too strong for you.',
+        showItems: false,
+        items: [{ name: 'Elvenhair Rope', amount: 1 }]
+      }
+    };
+
+    return window.CustomBattles.create(mornenionConfig);
+  }
+
+  // =======================
+  // Creature Placement Tracker
+  // =======================
+  let previousBoardConfig = null;
+  let creaturePlacementSubscription = null;
+
+
+  // =======================
+  // Digging system observer setup
+  // =======================
+
+  // Clean up mining subscriptions
+  function cleanupMiningObserver() {
+    if (miningState.subscriptions.board) {
+      miningState.subscriptions.board.unsubscribe();
+      miningState.subscriptions.board = null;
+    }
+    if (miningState.subscriptions.player) {
+      miningState.subscriptions.player.unsubscribe();
+      miningState.subscriptions.player = null;
+    }
+  }
+
+  // Set up event-driven subscriptions for digging functionality (only when Light Shovel is owned)
+  function setupMiningObserver() {
+    // Only set up if Light Shovel is owned
+    if (!hasLightShovelInInventory()) {
+      return;
+    }
+
+    // Clean up any existing subscriptions first
+    cleanupMiningObserver();
+
+    // Subscribe to board state changes to detect map changes and new tiles/sprites being loaded
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      miningState.subscriptions.board = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        const newRoomId = getCurrentRoomId(boardContext);
+
+        // Only rescan if the room has actually changed
+        if (miningState.currentRoomId !== newRoomId) {
+          // Update current room ID
+          miningState.currentRoomId = newRoomId;
+
+          // Rescan for mining tiles if mining is enabled
+          if (miningState.enabled) {
+            setTimeout(() => updateMiningState(), MINING_CONFIG.ANIMATION_DURATION);
+          }
+        }
+      });
+    }
+
+    // Subscribe to player state changes to check shovel ownership
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
+      miningState.subscriptions.player = globalThis.state.player.subscribe(() => {
+        // Check if Light Shovel is still owned, cleanup if not
+        if (!hasLightShovelInInventory()) {
+          cleanupMiningObserver();
+          updateMiningState();
+          return;
+        }
+        updateMiningState();
+      });
+    }
+    
+    // Initial check for Mornenion defeat status
+    updateMiningState();
+  }
+
+  // =======================
+  // Digging system functions
+  // =======================
+
+  // Helper function to find digging tiles (tile 82 on Hedge Maze)
+  function findMiningTiles() {
+    // Only enable mining on Ab'Dendriel Hive
+    const roomNames = globalThis.state?.utils?.ROOM_NAME;
+    const currentRoomId = getCurrentRoomId();
+    const currentMapName = roomNames && currentRoomId ? roomNames[currentRoomId] : null;
+
+    if (currentMapName !== MINING_CONFIG.TARGET_MAP) {
+      return [];
+    }
+
+    // Find tile 82 specifically
+    const targetTile = document.getElementById(`tile-index-${MINING_CONFIG.TARGET_TILE_ID}`);
+    if (!targetTile) {
+      return [];
+    }
+
+    // Check if the tile contains the target sprite (id-1822) - not the transformed one (id-385)
+    const targetSprite = targetTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
+    if (!targetSprite) {
+      return [];
+    }
+
+    return [targetTile];
+  }
+
+  // Enable right-clicking on digging tiles
+  function enableMiningTileRightClick() {
+    const miningTileElements = findMiningTiles();
+    miningTileElements.forEach(tile => {
+      if (!miningState.tiles.has(tile)) {
+        tile.style.pointerEvents = 'auto';
+        miningState.tiles.add(tile);
+      }
+    });
+  }
+
+  // Disable right-clicking on all digging tiles
+  function disableMiningTileRightClick() {
+    setTilePointerEvents(miningState.tiles, false);
+    miningState.tiles.clear();
+  }
+
+  // Update digging functionality based on state
+  async function updateMiningState(manualToggle = false) {
+    try {
+      // Update current room ID for room change detection
+      miningState.currentRoomId = getCurrentRoomId();
+
+      // Check if Light Shovel is owned
+      const hasLightShovel = hasLightShovelInInventory();
+
+      // Set up or clean up subscriptions based on Light Shovel ownership
+      if (hasLightShovel && !miningState.subscriptions.board) {
+        setupMiningObserver();
+      } else if (!hasLightShovel && miningState.subscriptions.board) {
+        cleanupMiningObserver();
+      }
+
+      // Digging is only available when player has Light Shovel
+      // The Light Shovel is obtained from completing Al Dee's fishing mission
+      const isMissionActive = hasLightShovel;
+
+      // Digging state is controlled manually by the toggle button
+      if (miningState.enabled && hasLightShovel && isMissionActive) {
+        // Enable digging - add document listener and enable pointer events
+        document.addEventListener('contextmenu', handleMiningRightClickDocument, true); // Use capture phase on document
+        enableMiningTileRightClick();
+        console.log('[Quests Mod][Digging] Mining enabled - document listener added and pointer events enabled');
+      } else {
+        // Disable digging - remove document listener and restore tile pointer events
+        document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
+        disableMiningTileRightClick();
+
+        // Close any open context menu
+        if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+          miningState.contextMenu.closeMenu();
+        }
+
+        console.log('[Quests Mod][Digging] Mining disabled - document listener removed and pointer events disabled');
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Digging] Error in updateMiningState:', error);
+    }
+  }
+
+  // Handle right-click on digging tiles
+  function handleMiningRightClick(event) {
+    console.log('[Quests Mod][Digging] Right-click detected - showing Use Shovel menu!', event);
+
+    // Be very aggressive about preventing the browser context menu
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    // Create our custom context menu
+    createMiningContextMenu(event.clientX, event.clientY);
+
+    return false;
+  }
+
+  // Handle right-click events on document and check if they originated from digging tiles
+  function handleMiningRightClickDocument(event) {
+    // Check if the event target is inside any mining tile
+    for (const miningTile of miningState.tiles) {
+      if (miningTile.contains(event.target)) {
+        // Store the clicked tile for animation positioning
+        miningState.clickedTile = miningTile;
+
+        // Be very aggressive about preventing the browser context menu
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        event.stopPropagation();
+
+        // Create our custom context menu
+        createMiningContextMenu(event.clientX, event.clientY);
+
+        return false;
+      }
+    }
+  }
+
+  // Create digging context menu
+  function createMiningContextMenu(x, y) {
+
+    // Close any existing context menu
+    if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+      miningState.contextMenu.closeMenu();
+    }
+
+    // Create overlay to close menu on outside click
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9998';
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+
+    // Create menu container
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = '9999';
+    menu.style.minWidth = '120px';
+    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '8px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+
+    // Button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.justifyContent = 'center';
+
+    // "Use Shovel" button
+    const useShovelButton = document.createElement('button');
+    useShovelButton.className = 'pixel-font-14';
+    useShovelButton.textContent = 'Use Shovel';
+    useShovelButton.style.width = '140px';
+    useShovelButton.style.height = '28px';
+    useShovelButton.style.fontSize = '12px';
+    useShovelButton.style.backgroundColor = '#4a3c28'; // Brown-ish color for digging
+    useShovelButton.style.color = '#D4AF37';
+    useShovelButton.style.border = '1px solid #D4AF37';
+    useShovelButton.style.borderRadius = '4px';
+    useShovelButton.style.cursor = 'pointer';
+    useShovelButton.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
+    useShovelButton.style.fontWeight = 'bold';
+
+    // Note: We don't disable the button here - we check when the button is clicked
+    // and when accessing the hole, to allow normal digging but prevent Mornenion access
+
+    // Add hover effects (only if not disabled)
+    useShovelButton.addEventListener('mouseenter', () => {
+      if (!useShovelButton.disabled) {
+        useShovelButton.style.backgroundColor = '#2a1c08';
+        useShovelButton.style.borderColor = '#F4C430';
+      }
+    });
+    useShovelButton.addEventListener('mouseleave', () => {
+      if (!useShovelButton.disabled) {
+        useShovelButton.style.backgroundColor = '#4a3c28';
+        useShovelButton.style.borderColor = '#D4AF37';
+      }
+    });
+
+    // Handle click - transform the sprite
+    useShovelButton.addEventListener('click', async () => {
+      // Note: We allow the shovel to be used normally, but check when accessing the hole
+
+      // Get the digging tile position for the animation
+      let animationX, animationY;
+      if (miningState.clickedTile) {
+        const tileRect = miningState.clickedTile.getBoundingClientRect();
+        animationX = tileRect.left + tileRect.width / 2;
+        animationY = tileRect.top + tileRect.height / 2;
+      } else {
+        // Fallback to menu position if tile not found
+        const rect = menu.getBoundingClientRect();
+        animationX = rect.left + rect.width / 2;
+        animationY = rect.top + rect.height / 2;
+      }
+
+      // Create the circular digging animation
+      createMiningAnimation(animationX, animationY);
+
+      // Transform the sprite from id-355 to id-385
+      if (miningState.clickedTile) {
+        const oldSprite = miningState.clickedTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
+        if (oldSprite) {
+          // Change the sprite ID by updating the class
+          oldSprite.classList.remove(`id-${MINING_CONFIG.SPRITE_TRANSFORM.from}`);
+          oldSprite.classList.add(`id-${MINING_CONFIG.SPRITE_TRANSFORM.to}`);
+
+          // Update the sprite image attributes to match the new sprite
+          const imgElement = oldSprite.querySelector('img');
+          if (imgElement) {
+            imgElement.alt = MINING_CONFIG.SPRITE_TRANSFORM.to;
+            imgElement.setAttribute('data-cropped', 'false');
+            imgElement.style.setProperty('--cropX', '0');
+            imgElement.style.setProperty('--cropY', '0');
+          }
+
+
+          // Add right-click navigation to Ab'Dendriel Hive for the transformed sprite
+          const transformedSprite = miningState.clickedTile.querySelector(`.sprite.item.relative.id-${MINING_CONFIG.SPRITE_TRANSFORM.to}`);
+          if (transformedSprite) {
+            transformedSprite.addEventListener('contextmenu', async (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+
+              // Check if golden rope mission is accepted - if not, prevent navigation
+              const playerName = getCurrentPlayerName();
+              if (playerName) {
+                const progress = await getKingTibianusProgress(playerName);
+                const goldenRopeAccepted = progress?.alDeeGoldenRope?.accepted;
+                if (!goldenRopeAccepted) {
+                  console.log('[Quests Mod][Digging] Golden rope mission not accepted - hole access disabled');
+                  showToast({ message: 'You feel frightened and unprepared to go down the hole.', type: 'error' });
+                  return;
+                }
+              }
+
+              // Check if Mornenion has been defeated - if so, prevent navigation
+              const mornenionDefeated = await isMornenionDefeated();
+              if (mornenionDefeated) {
+                showToast({ message: MORNENION_DEFEATED_MESSAGE, type: 'error' });
+                return;
+              }
+
+              // Find Ab'Dendriel Hive room ID
+              const roomNames = globalThis.state?.utils?.ROOM_NAME;
+              if (roomNames) {
+                for (const [roomId, name] of Object.entries(roomNames)) {
+                  if (name === "Ab'Dendriel Hive") {
+                    // Set flag to indicate player used hole to enter Ab'Dendriel Hive BEFORE navigation
+                    playerUsedHoleToAbDendriel = true;
+                    // Also set Mornenion flag since abwasp is repurposed as Mornenion quest area
+                    playerUsedHoleToMornenion = true;
+                    
+                    // Clean up any existing battle instance to ensure fresh state
+                    if (mornenionBattle) {
+                      console.log('[Quests Mod][Mining] Cleaning up existing Mornenion battle before creating new instance');
+                      mornenionBattle.cleanup(restoreBoardSetup, showQuestOverlays);
+                      mornenionBattle = null;
+                    }
+                    
+                    // Initialize Mornenion battle (always create fresh instance)
+                    const initResult = initializeMornenionBattle();
+                    if (initResult && initResult.then) {
+                      // Async initialization - CustomBattles not ready yet, wait for it
+                      initResult.then((battle) => {
+                        if (battle) {
+                          mornenionBattle = battle;
+                          mornenionBattle.setup(
+                            () => playerUsedHoleToMornenion,
+                            (toastData) => {
+                              showToast({ 
+                                message: toastData.message, 
+                                duration: toastData.duration || 3000, 
+                                logPrefix: '[Quests Mod][Mornenion]' 
+                              });
+                            }
+                          );
+                          setupMornenionTileRestrictions();
+                          console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
+                        } else {
+                          console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle after waiting');
+                        }
+                      }).catch((error) => {
+                        console.error('[Quests Mod][Mining] Error initializing Mornenion battle:', error);
+                      });
+                    } else if (initResult) {
+                      // Synchronous initialization - CustomBattles was ready immediately
+                      mornenionBattle = initResult;
+                      mornenionBattle.setup(
+                        () => playerUsedHoleToMornenion,
+                        (toastData) => {
+                          showToast({ 
+                            message: toastData.message, 
+                            duration: toastData.duration || 3000, 
+                            logPrefix: '[Quests Mod][Mornenion]' 
+                          });
+                        }
+                      );
+                      setupMornenionTileRestrictions();
+                      console.log('[Quests Mod][Mining] Mornenion battle initialized successfully');
+                    } else {
+                      console.error('[Quests Mod][Mining] Failed to initialize Mornenion battle - CustomBattles not available');
+                    }
+
+                    globalThis.state.board.send({
+                      type: 'selectRoomById',
+                      roomId: roomId
+                    });
+
+                    // Show navigation message
+                    if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
+                      api.ui.components.showToast({
+                        message: 'Traveling to Ab\'Dendriel Hive...',
+                        type: 'info',
+                        duration: TOAST_DURATION_DEFAULT
+                      });
+                    }
+                    break;
+                  }
+                }
+              }
+
+              return false;
+            });
+          }
+
+          // Remove this tile from the mining tiles set so it can't be clicked again
+          miningState.tiles.delete(miningState.clickedTile);
+        }
+      }
+
+      // Close the menu
+      if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+        miningState.contextMenu.closeMenu();
+      }
+
+      // Show success message
+      if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
+        api.ui.components.showToast({
+          message: 'You mined some ore!',
+          type: 'success',
+          duration: TOAST_DURATION_DEFAULT
+        });
+      }
+    });
+
+    // Add button to container
+    buttonContainer.appendChild(useShovelButton);
+    menu.appendChild(buttonContainer);
+
+    // ESC key handler
+    const escHandler = (event) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    // Close menu function
+    const closeMenu = () => {
+      console.log('[Quests Mod][Digging] Closing mining context menu');
+      
+      // Remove event listeners
+      overlay.removeEventListener('mousedown', closeMenu);
+      overlay.removeEventListener('click', closeMenu);
+      document.removeEventListener('keydown', escHandler);
+      
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      if (menu.parentNode) {
+        menu.parentNode.removeChild(menu);
+      }
+
+      // Clear reference
+      miningState.contextMenu = null;
+    };
+
+    // Add event listeners
+    overlay.addEventListener('mousedown', closeMenu);
+    overlay.addEventListener('click', closeMenu);
+    document.addEventListener('keydown', escHandler);
+
+    // Add to DOM
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+
+    // Store reference
+    miningState.contextMenu = { overlay, menu, closeMenu };
+
+    return miningState.contextMenu;
+  }
+
+  // Create circular digging animation at the specified coordinates
+  function createMiningAnimation(x, y) {
+    const animationContainer = document.createElement('div');
+    animationContainer.style.position = 'fixed';
+    animationContainer.style.left = `${x - MINING_CONFIG.ANIMATION_SIZE / 2}px`;
+    animationContainer.style.top = `${y - MINING_CONFIG.ANIMATION_SIZE / 2}px`;
+    animationContainer.style.width = `${MINING_CONFIG.ANIMATION_SIZE}px`;
+    animationContainer.style.height = `${MINING_CONFIG.ANIMATION_SIZE}px`;
+    animationContainer.style.pointerEvents = 'none';
+    animationContainer.style.zIndex = '10000';
+    animationContainer.style.background = 'radial-gradient(circle, rgba(139,69,19,0.8) 0%, rgba(160,82,45,0.6) 50%, transparent 70%)';
+    animationContainer.style.borderRadius = '50%';
+    animationContainer.style.animation = `diggingPulse ${MINING_CONFIG.ANIMATION_DURATION}ms ease-out forwards`;
+
+    // Add keyframes for the animation
+    if (!document.getElementById('digging-animation-styles')) {
+      const style = document.createElement('style');
+      style.id = 'digging-animation-styles';
+      style.textContent = `
+        @keyframes diggingPulse {
+          0% {
+            transform: scale(0);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.2);
+            opacity: 0.8;
+          }
+          100% {
+            transform: scale(2);
+            opacity: 0;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(animationContainer);
+
+    // Remove animation after it completes
+    setTimeout(() => {
+      if (animationContainer.parentNode) {
+        animationContainer.parentNode.removeChild(animationContainer);
+      }
+    }, MINING_CONFIG.ANIMATION_DURATION);
+  }
 
   // =======================
   // 3. Helper Functions
@@ -637,40 +1511,23 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   // Helper function to find all water tiles on the current map
   function findWaterTiles() {
-    console.log('[Quests Mod][Water Fishing] findWaterTiles called - scanning for sprites');
-
     // Generate selector from configuration
     const waterSelector = FISHING_CONFIG.SPRITE_IDS
       .map(id => `.sprite.item.relative.id-${id}`)
       .join(', ');
 
-    console.log('[Quests Mod][Water Fishing] Using selector:', waterSelector);
-
     // Find all water sprites using configuration
     const allWaterSprites = document.querySelectorAll(waterSelector);
     const waterTileContainers = [];
-
-    console.log('[Quests Mod][Water Fishing] Found water sprite elements:', allWaterSprites.length);
-    console.log('[Quests Mod][Water Fishing] Total sprites on page:', document.querySelectorAll('.sprite.item.relative').length);
-
-    // Debug all water sprites
-    console.log('[Quests Mod][Water Fishing] Water sprites details:');
-    allWaterSprites.forEach((sprite, index) => {
-      const tileId = sprite.closest('[id^="tile-index-"]')?.id;
-      console.log(`  [${index}] classes: "${sprite.className}", parent tile: "${tileId}"`);
-    });
 
     // Process all water sprites in a single loop
     for (const sprite of allWaterSprites) {
       let tileContainer = sprite.closest('[id^="tile-index-"]');
       if (tileContainer && !waterTileContainers.includes(tileContainer)) {
         waterTileContainers.push(tileContainer);
-        console.log('[Quests Mod][Water Fishing] Added water tile:', tileContainer.id, `(sprite: ${sprite.className.split(' ').pop()})`);
       }
     }
 
-    console.log('[Quests Mod][Water Fishing] Found water tiles:', waterTileContainers.length);
-    console.log('[Quests Mod][Water Fishing] Tile containers:', waterTileContainers.map(t => t.id));
     return waterTileContainers;
   }
 
@@ -683,7 +1540,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   function setTilePointerEvents(tiles, enabled) {
     tiles.forEach(tile => {
       tile.style.pointerEvents = enabled ? 'auto' : '';
-      console.log(`[Quests Mod][Water Fishing] ${enabled ? 'Enabled' : 'Disabled'} fishing on tile:`, tile.id);
     });
   }
 
@@ -694,7 +1550,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       if (!fishingState.tiles.has(tile)) {
         tile.style.pointerEvents = 'auto';
         fishingState.tiles.add(tile);
-        console.log('[Quests Mod][Water Fishing] Enabled right-click on water tile:', tile.id);
       }
     });
   }
@@ -1092,15 +1947,37 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       productDefinitions.push(magnetDef);
     }
 
-    // Add Dwarven Pickaxe (reward for returning Small Axe to Al Dee)
-    const dwarvenPickaxeDef = {
-      name: 'Dwarven Pickaxe',
-      icon: 'Dwarven_Pickaxe.gif',
-      description: 'It is a masterpiece of dwarvish smithery and made of especially hard steel.',
+    // Add Light Shovel (reward for returning Small Axe to Al Dee)
+    const lightShovelDef = {
+      name: 'Light Shovel',
+      icon: 'Light_Shovel.gif',
+      description: 'Lighter than a shovel.',
       rarity: 4
     };
-    if (!productDefinitions.find(p => p.name === dwarvenPickaxeDef.name)) {
-      productDefinitions.push(dwarvenPickaxeDef);
+
+    // Add Elvenhair Rope (quest item for Al Dee's golden rope mission)
+    const elvenhairRopeDef = {
+      name: 'Elvenhair Rope',
+      icon: 'Elvenhair_Rope.gif',
+      description: 'A magical rope made from elven hair, said to lead to great treasures.',
+      rarity: 5
+    };
+    if (!productDefinitions.find(p => p.name === lightShovelDef.name)) {
+      productDefinitions.push(lightShovelDef);
+    }
+    if (!productDefinitions.find(p => p.name === elvenhairRopeDef.name)) {
+      productDefinitions.push(elvenhairRopeDef);
+    }
+
+    // Add The Holy Tible (reward for completing Al Dee's golden rope mission)
+    const holyTibleDef = {
+      name: 'The Holy Tible',
+      icon: 'The_Holy_Tible.png',
+      description: 'A sacred tome containing ancient wisdom and divine knowledge.',
+      rarity: 5
+    };
+    if (!productDefinitions.find(p => p.name === holyTibleDef.name)) {
+      productDefinitions.push(holyTibleDef);
     }
 
     // Add global Rookgaard drops to product definitions
@@ -1379,23 +2256,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
-  // Generic Firebase fetch helper with error handling
-  async function fetchFirebaseData(url, errorContext, defaultReturn = null) {
-    try {
-      const response = await fetch(`${url}.json`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          return defaultReturn;
-        }
-        throw new Error(`Failed to ${errorContext}: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error(`[Quests Mod] Error ${errorContext}:`, error);
-      return defaultReturn;
-    }
-  }
-
   // Check if player has received Copper Key
   async function hasReceivedCopperKey(playerName) {
     if (!playerName) {
@@ -1403,7 +2263,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
     
     const hashedPlayer = await hashUsername(playerName);
-    const data = await fetchFirebaseData(
+    const data = await FirebaseService.get(
       `${getCopperKeyFirebasePath()}/${hashedPlayer}`,
       'check Copper Key status',
       null
@@ -1425,9 +2285,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         timestamp: Date.now()
       };
 
-      await firebaseRequest(
+      await FirebaseService.put(
         `${getCopperKeyFirebasePath()}/${hashedPlayer}`,
-        'PUT',
         data,
         'mark Copper Key as received'
       );
@@ -1446,7 +2305,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
 
     const hashedPlayer = await hashUsername(playerName);
-    const data = await fetchFirebaseData(
+    const data = await FirebaseService.get(
       `${getLetterFromAlDeeFirebasePath()}/${hashedPlayer}`,
       'check Letter from Al Dee status',
       null
@@ -1468,9 +2327,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         timestamp: Date.now()
       };
 
-      await firebaseRequest(
+      await FirebaseService.put(
         `${getLetterFromAlDeeFirebasePath()}/${hashedPlayer}`,
-        'PUT',
         data,
         'mark Letter from Al Dee as received'
       );
@@ -1488,7 +2346,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
 
     const hashedPlayer = await hashUsername(playerName);
-    const data = await fetchFirebaseData(
+    const data = await FirebaseService.get(
       `${getIronOreFirebasePath()}/${hashedPlayer}`,
       'check Iron Ore status',
       null
@@ -1510,9 +2368,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         timestamp: Date.now()
       };
 
-      await firebaseRequest(
+      await FirebaseService.put(
         `${getIronOreFirebasePath()}/${hashedPlayer}`,
-        'PUT',
         data,
         'mark Iron Ore received'
       );
@@ -1657,7 +2514,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   // Dev helper to grant/remove quest items for testing (exposed to console)
   // Use positive numbers to grant items, negative numbers to remove items
   function registerDevGrantHelper() {
-    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0 } = {}) {
+    globalThis.questsDevGrant = async function ({ leather = 0, scale = 0, letter = 0, ironOre = 0, smallAxe = 0, copperKey = 0, stampedLetter = 0, elvenhairRope = 0, holyTible = 0 } = {}) {
       try {
         const actions = [];
 
@@ -1683,9 +2540,11 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         await processItem('Small Axe', smallAxe, 'Small Axe');
         await processItem('Copper Key', copperKey, 'Copper Key');
         await processItem('Stamped Letter', stampedLetter, 'Stamped Letter');
+        await processItem('Elvenhair Rope', elvenhairRope, 'Elvenhair Rope');
+        await processItem('The Holy Tible', holyTible, 'The Holy Tible');
 
         console.log('[Quests Mod][Dev] Quest items modified:', actions.join(', '));
-        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter });
+        console.log('[Quests Mod][Dev] Parameters used:', { leather, scale, letter, ironOre, smallAxe, copperKey, stampedLetter, elvenhairRope, holyTible });
       } catch (err) {
         console.error('[Quests Mod][Dev] Operation failed:', err);
       }
@@ -1693,30 +2552,161 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   }
 
   // =======================
-  // Firebase Request Helpers
+  // Firebase Service
   // =======================
+  
+  const FirebaseService = {
+    /**
+     * Handle Firebase response with standardized error handling
+     * @param {Response} response - Fetch response object
+     * @param {string} errorContext - Context for error messages
+     * @param {*} defaultReturn - Default value to return on 404 or error
+     * @returns {Promise<*>} Parsed JSON response or defaultReturn
+     */
+    async handleResponse(response, errorContext, defaultReturn = null) {
+      if (!response.ok) {
+        if (response.status === 404) {
+          return defaultReturn;
+        }
+        throw new Error(`Failed to ${errorContext}: ${response.status}`);
+      }
+      return await response.json();
+    },
 
-  async function handleFirebaseResponse(response, errorContext, defaultReturn = null) {
-    if (!response.ok) {
-      if (response.status === 404) {
+    /**
+     * Make a GET request to Firebase
+     * @param {string} path - Firebase path (without .json extension)
+     * @param {string} errorContext - Context for error messages
+     * @param {*} defaultReturn - Default value to return on 404 or error
+     * @returns {Promise<*>} Parsed JSON response or defaultReturn
+     */
+    async get(path, errorContext, defaultReturn = null) {
+      try {
+        const response = await fetch(`${path}.json`);
+        return await this.handleResponse(response, errorContext, defaultReturn);
+      } catch (error) {
+        console.error(`[Quests Mod] Error ${errorContext}:`, error);
         return defaultReturn;
       }
-      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+    },
+
+    /**
+     * Make a PUT request to Firebase
+     * @param {string} path - Firebase path (without .json extension)
+     * @param {*} data - Data to send
+     * @param {string} errorContext - Context for error messages
+     * @returns {Promise<*>} Parsed JSON response
+     */
+    async put(path, data, errorContext) {
+      const options = {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      };
+      const response = await fetch(`${path}.json`, options);
+      return await this.handleResponse(response, errorContext);
+    },
+
+    /**
+     * Make a DELETE request to Firebase
+     * @param {string} path - Firebase path (without .json extension)
+     * @param {string} errorContext - Context for error messages
+     * @returns {Promise<*>} Parsed JSON response
+     */
+    async delete(path, errorContext) {
+      const options = {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      };
+      const response = await fetch(`${path}.json`, options);
+      return await this.handleResponse(response, errorContext);
     }
-    return await response.json();
+  };
+
+  // =======================
+  // Mission Registry
+  // =======================
+  // Centralized mapping of mission IDs to state properties and Firebase keys
+  // 
+  // HOW TO ADD A NEW MISSION:
+  // 1. Define the mission constant at the top of the file (e.g., const NEW_MISSION = {...})
+  // 2. Add to kingChatState object: progressNewMission: { accepted: false, completed: false }
+  // 3. Add to MISSIONS array in showKingTibianusModal() function
+  // 4. Add entries to these two maps below:
+  //    - MISSION_STATE_MAP: maps mission.id to kingChatState property name
+  //    - MISSION_FIREBASE_KEY_MAP: maps mission.id to Firebase property name
+  //
+  // That's it! The registry automatically handles:
+  // - MissionManager.getProgress() and setProgress()
+  // - getKingTibianusProgress() loading
+  // - saveKingTibianusProgress() saving
+  // - loadMissionProgressOnInit() initialization
+  //
+  // Example for a new mission with id 'new_mission':
+  //   MISSION_STATE_MAP: { 'new_mission': 'progressNewMission' }
+  //   MISSION_FIREBASE_KEY_MAP: { 'new_mission': 'newMission' }
+  //
+  const MISSION_STATE_MAP = {
+    [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
+    [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
+    [KING_LETTER_MISSION.id]: 'progressLetter',
+    [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
+    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
+  };
+
+  const MISSION_FIREBASE_KEY_MAP = {
+    [KING_COPPER_KEY_MISSION.id]: 'copper',
+    [KING_RED_DRAGON_MISSION.id]: 'dragon',
+    [KING_LETTER_MISSION.id]: 'letter',
+    [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
+    [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
+  };
+
+  // Helper: Get all mission progress from kingChatState using registry
+  // This ensures all registered missions are included when saving
+  // Future-proof: automatically includes any new missions added to registry
+  function getAllMissionProgress() {
+    const result = {};
+    for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+      const stateKey = MISSION_STATE_MAP[missionId];
+      if (stateKey) {
+        // Always include the mission, even if it's default values
+        // This ensures new missions are saved even if not yet initialized
+        result[firebaseKey] = kingChatState[stateKey] || { accepted: false, completed: false };
+      } else {
+        // Registry inconsistency detected - log warning in development
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`[Quests Mod] Registry inconsistency: mission ${missionId} has Firebase key ${firebaseKey} but no state key mapping`);
+        }
+      }
+    }
+    return result;
   }
 
-  async function firebaseRequest(endpoint, method, data = null, errorContext, defaultReturn = null) {
-    const options = {
-      method,
-      headers: { 'Content-Type': 'application/json' }
-    };
-    if (data !== null) {
-      options.body = JSON.stringify(data);
+  // Validation: Ensure registry consistency at initialization
+  // This helps catch configuration errors early
+  (function validateMissionRegistry() {
+    const stateKeys = Object.values(MISSION_STATE_MAP);
+    const firebaseKeys = Object.values(MISSION_FIREBASE_KEY_MAP);
+    const missionIds = Object.keys(MISSION_STATE_MAP);
+    
+    // Check that all mission IDs have both state and Firebase mappings
+    for (const missionId of missionIds) {
+      if (!MISSION_STATE_MAP[missionId]) {
+        console.error(`[Quests Mod] Registry error: Mission ${missionId} missing state key mapping`);
+      }
+      if (!MISSION_FIREBASE_KEY_MAP[missionId]) {
+        console.error(`[Quests Mod] Registry error: Mission ${missionId} missing Firebase key mapping`);
+      }
     }
-    const response = await fetch(`${endpoint}.json`, options);
-    return await handleFirebaseResponse(response, errorContext, defaultReturn);
-  }
+    
+    // Check that state keys exist in kingChatState (warn only, as they may be added later)
+    for (const stateKey of stateKeys) {
+      if (!kingChatState.hasOwnProperty(stateKey)) {
+        console.warn(`[Quests Mod] Registry warning: State key '${stateKey}' not found in kingChatState. Ensure it's added to kingChatState object.`);
+      }
+    }
+  })();
 
   // King Tibianus quest progress helpers
   function getKingTibianusProgressPath() {
@@ -1728,7 +2718,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       return { accepted: false, completed: false, __isEmpty: true };
     }
     const hashedPlayer = await hashUsername(playerName);
-    const data = await fetchFirebaseData(
+    const data = await FirebaseService.get(
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
       'fetch King Tibianus progress',
       null
@@ -1736,32 +2726,44 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     if (!data || Object.keys(data).length === 0) {
       return { accepted: false, completed: false, __isEmpty: true };
     }
-    // New shape preferred: nested copper/dragon/letter/alDeeFishing/ironOre
-    if (data.copper || data.dragon || data.letter || data.alDeeFishing || data.ironOre) {
-      return {
-        copper: {
-          accepted: !!(data.copper && data.copper.accepted),
-          completed: !!(data.copper && data.copper.completed)
-        },
-        dragon: {
-          accepted: !!(data.dragon && data.dragon.accepted),
-          completed: !!(data.dragon && data.dragon.completed)
-        },
-        letter: {
-          accepted: !!(data.letter && data.letter.accepted),
-          completed: !!(data.letter && data.letter.completed)
-        },
-        alDeeFishing: {
-          accepted: !!(data.alDeeFishing && data.alDeeFishing.accepted),
-          completed: !!(data.alDeeFishing && data.alDeeFishing.completed)
-        },
-        ironOre: {
-          active: !!(data.ironOre && data.ironOre.active),
-          startTime: data.ironOre && data.ironOre.startTime ? data.ironOre.startTime : null,
-          completed: !!(data.ironOre && data.ironOre.completed)
-        },
-        __isEmpty: false
+    // New shape preferred: nested format with all missions from registry
+    // Check if any registered mission field exists in data
+    const hasAnyMissionField = Object.values(MISSION_FIREBASE_KEY_MAP).some(key => data[key]) || data.ironOre || data.mornenion;
+    
+    if (hasAnyMissionField) {
+      const result = {};
+      
+      // Build mission progress from registry
+      for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+        result[firebaseKey] = data[firebaseKey] ? {
+          accepted: !!data[firebaseKey].accepted,
+          completed: !!data[firebaseKey].completed
+        } : {
+          accepted: false,
+          completed: false
+        };
+      }
+      
+      // Add ironOre (special case - not a regular mission)
+      result.ironOre = data.ironOre ? {
+        active: !!data.ironOre.active,
+        startTime: data.ironOre.startTime || null,
+        completed: !!data.ironOre.completed
+      } : {
+        active: false,
+        startTime: null,
+        completed: false
       };
+      
+      // Add mornenion (special case - not a regular mission)
+      result.mornenion = data.mornenion ? {
+        defeated: !!data.mornenion.defeated
+      } : {
+        defeated: false
+      };
+      
+      result.__isEmpty = false;
+      return result;
     }
     // Backward compatibility: flat accepted/completed
     const emptyFlat = (data.accepted === undefined && data.completed === undefined);
@@ -1775,37 +2777,55 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function saveKingTibianusProgress(playerName, progress) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    const normalized = (progress && (progress.copper || progress.dragon || progress.letter || progress.alDeeFishing || progress.ironOre))
-      ? {
-          copper: {
-            accepted: !!(progress.copper && progress.copper.accepted),
-            completed: !!(progress.copper && progress.copper.completed)
-          },
-          dragon: {
-            accepted: !!(progress.dragon && progress.dragon.accepted),
-            completed: !!(progress.dragon && progress.dragon.completed)
-          },
-          letter: {
-            accepted: !!(progress.letter && progress.letter.accepted),
-            completed: !!(progress.letter && progress.letter.completed)
-          },
-          alDeeFishing: {
-            accepted: !!(progress.alDeeFishing && progress.alDeeFishing.accepted),
-            completed: !!(progress.alDeeFishing && progress.alDeeFishing.completed)
-          },
-          ironOre: {
-            active: !!(progress.ironOre && progress.ironOre.active),
-            startTime: progress.ironOre && progress.ironOre.startTime ? progress.ironOre.startTime : null,
-            completed: !!(progress.ironOre && progress.ironOre.completed)
+    
+    // Check if progress has any registered mission fields, ironOre, or mornenion
+    const hasNestedFormat = progress && (
+      Object.values(MISSION_FIREBASE_KEY_MAP).some(key => progress[key]) || 
+      progress.ironOre ||
+      progress.mornenion
+    );
+    
+    const normalized = hasNestedFormat
+      ? (() => {
+          const result = {};
+          
+          // Build normalized mission progress from registry
+          for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+            result[firebaseKey] = progress[firebaseKey] ? {
+              accepted: !!progress[firebaseKey].accepted,
+              completed: !!progress[firebaseKey].completed
+            } : {
+              accepted: false,
+              completed: false
+            };
           }
-        }
+          
+          // Add ironOre (special case - not a regular mission)
+          result.ironOre = progress.ironOre ? {
+            active: !!progress.ironOre.active,
+            startTime: progress.ironOre.startTime || null,
+            completed: !!progress.ironOre.completed
+          } : {
+            active: false,
+            startTime: null,
+            completed: false
+          };
+          
+          // Add mornenion (special case - not a regular mission)
+          result.mornenion = progress.mornenion ? {
+            defeated: !!progress.mornenion.defeated
+          } : {
+            defeated: false
+          };
+          
+          return result;
+        })()
       : {
-          accepted: !!progress.accepted,
-          completed: !!progress.completed
+          accepted: !!progress?.accepted,
+          completed: !!progress?.completed
         };
-    await firebaseRequest(
+    await FirebaseService.put(
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
-      'PUT',
       normalized,
       'save King Tibianus progress'
     );
@@ -1815,10 +2835,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function deleteKingTibianusProgress(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    await firebaseRequest(
+    await FirebaseService.delete(
       `${getKingTibianusProgressPath()}/${hashedPlayer}`,
-      'DELETE',
-      null,
       'delete King Tibianus progress'
     );
     console.log('[Quests Mod][King Tibianus] Progress deleted for player:', playerName);
@@ -1827,10 +2845,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function deleteQuestItems(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    await firebaseRequest(
+    await FirebaseService.delete(
       `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-      'DELETE',
-      null,
       'delete quest items'
     );
     console.log('[Quests Mod][Quest Items] All quest items deleted for player:', playerName);
@@ -1839,10 +2855,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function deleteAlDeeShopPurchases(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    await firebaseRequest(
+    await FirebaseService.delete(
       `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
-      'DELETE',
-      null,
       'delete Al Dee shop purchases'
     );
     console.log('[Quests Mod][Al Dee Shop] All shop purchases deleted for player:', playerName);
@@ -1851,10 +2865,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function deleteCopperKeyReceived(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    await firebaseRequest(
+    await FirebaseService.delete(
       `${getCopperKeyFirebasePath()}/${hashedPlayer}`,
-      'DELETE',
-      null,
       'delete Copper Key received status'
     );
     console.log('[Quests Mod][Copper Key] Copper Key received status deleted for player:', playerName);
@@ -1863,10 +2875,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   async function deleteLetterFromAlDeeReceived(playerName) {
     if (!playerName) return;
     const hashedPlayer = await hashUsername(playerName);
-    await firebaseRequest(
+    await FirebaseService.delete(
       `${getLetterFromAlDeeFirebasePath()}/${hashedPlayer}`,
-      'DELETE',
-      null,
       'delete Letter from Al Dee received status'
     );
     console.log('[Quests Mod][Letter from Al Dee] Letter from Al Dee received status deleted for player:', playerName);
@@ -1876,11 +2886,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     if (!playerName) return {};
     const hashedPlayer = await hashUsername(playerName);
     try {
-      const response = await firebaseRequest(
+      const response = await FirebaseService.get(
         `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
-        'GET',
-        null,
-        'get Al Dee shop purchases'
+        'get Al Dee shop purchases',
+        {}
       );
       return response || {};
     } catch (error) {
@@ -1985,7 +2994,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
     
     const hashedPlayer = await hashUsername(currentPlayer);
-    const data = await fetchFirebaseData(
+    const data = await FirebaseService.get(
       `${getQuestItemsApiUrl()}/${hashedPlayer}`,
       'fetch quest items',
       null
@@ -2124,6 +3133,39 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
+  async function isMornenionDefeated() {
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) return false;
+      
+      const progress = await getKingTibianusProgress(playerName);
+      if (!progress) return false;
+      
+      // First check: If golden rope mission is completed, Mornenion was defeated
+      if (progress.alDeeGoldenRope && progress.alDeeGoldenRope.completed) {
+        console.log('[Quests Mod][Mornenion] Golden rope mission completed - Mornenion was defeated');
+        return true;
+      }
+      
+      // Second check: If Elvenhair Rope is in inventory, Mornenion was defeated
+      const questItems = await getQuestItems(false); // Force fresh fetch
+      if (questItems && questItems['Elvenhair Rope'] && questItems['Elvenhair Rope'] > 0) {
+        console.log('[Quests Mod][Mornenion] Elvenhair Rope found in inventory - Mornenion was defeated');
+        return true;
+      }
+
+      // Third check: Firebase flag
+      if (progress.mornenion && progress.mornenion.defeated) {
+        console.log('[Quests Mod][Mornenion] Mornenion defeated flag found in Firebase');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn('[Quests Mod][Mornenion] Error checking Mornenion defeat status:', error);
+      return false;
+    }
+  }
+
   async function addQuestItem(productName, amount) {
     console.log('[Quests Mod][Quest Items] addQuestItem called:', productName, amount);
     try {
@@ -2151,7 +3193,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         'Stamped Letter',
         'Small Axe',
         'Magnet',
-        'Dwarven Pickaxe'
+        'Light Shovel',
+        'Elvenhair Rope',
+        'The Holy Tible'
       ].includes(productName);
 
       const newCount = isRedDragonMaterial ? Math.min(30, currentCount + amount) :
@@ -2169,9 +3213,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       
       console.log('[Quests Mod][Quest Items] Saving to Firebase', { hashedPlayer, productName, amount, newCount });
       console.log('[Quests Mod][Quest Items] About to make Firebase request...');
-      const firebaseResult = await firebaseRequest(
+      const firebaseResult = await FirebaseService.put(
         `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-        'PUT',
         { encrypted },
         'save quest items'
       );
@@ -2216,9 +3259,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       const hashedPlayer = await hashUsername(currentPlayer);
 
       console.log('[Quests Mod][Quest Items] Consuming from Firebase', { hashedPlayer, productName, amount, newCount });
-      await firebaseRequest(
+      await FirebaseService.put(
         `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-        'PUT',
         { encrypted },
         'save quest items'
       );
@@ -2573,8 +3615,30 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }
   }
 
-  // Setup Copper Key verification system
+  // Clean up Copper Key subscriptions
+  function cleanupCopperKeySystem() {
+    if (copperKeyBoardSubscription) {
+      copperKeyBoardSubscription.unsubscribe();
+      copperKeyBoardSubscription = null;
+    }
+    if (equipmentSlotObserver) {
+      equipmentSlotObserver.unsubscribe();
+      equipmentSlotObserver = null;
+    }
+  }
+
+  // Setup Copper Key verification system (only when mission is active)
   function setupCopperKeySystem() {
+    // Only set up if Copper Key mission is active or completed
+    const copperMissionProgress = kingChatState.progressCopper || { accepted: false, completed: false };
+    if (!copperMissionProgress.accepted && !copperMissionProgress.completed) {
+      // Mission not active - cleanup if subscriptions exist
+      if (copperKeyBoardSubscription) {
+        cleanupCopperKeySystem();
+      }
+      return;
+    }
+
     if (copperKeyBoardSubscription) {
       return; // Already set up
     }
@@ -2584,6 +3648,12 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       
       // Single subscription for both tracking and verification
       copperKeyBoardSubscription = globalThis.state.board.subscribe(async ({ context }) => {
+        // Check if mission is still active, cleanup if not
+        const copperMissionProgress = kingChatState.progressCopper || { accepted: false, completed: false };
+        if (!copperMissionProgress.accepted && !copperMissionProgress.completed) {
+          cleanupCopperKeySystem();
+          return;
+        }
         // Track boardConfig before battle starts
         if (context.boardConfig && !context.serverResults) {
           await trackBoardConfigForCopperKey();
@@ -2697,114 +3767,166 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   }
 
   // =======================
-  // Notification System
+  // Notification Service
+  // =======================
+  
+  const NotificationService = {
+    /**
+     * Get or create toast container
+     * @returns {HTMLElement} Toast container element
+     */
+    getContainer() {
+      let mainContainer = document.getElementById('quest-items-toast-container');
+      if (!mainContainer) {
+        mainContainer = document.createElement('div');
+        mainContainer.id = 'quest-items-toast-container';
+        mainContainer.style.cssText = `
+          position: fixed;
+          z-index: 9999;
+          inset: 16px 16px 64px;
+          pointer-events: none;
+        `;
+        document.body.appendChild(mainContainer);
+      }
+      return mainContainer;
+    },
+
+    /**
+     * Update toast positions after removal
+     * @param {HTMLElement} container - Toast container
+     */
+    updatePositions(container) {
+      const toasts = container.querySelectorAll('.toast-item');
+      toasts.forEach((toast, index) => {
+        const offset = index * 46;
+        toast.style.transform = `translateY(-${offset}px)`;
+      });
+    },
+
+    /**
+     * Show a generic toast notification
+     * @param {Object} options - Toast options
+     * @param {string} [options.productName] - Product name for icon
+     * @param {string} options.message - Message to display
+     * @param {number} [options.duration=5000] - Duration in milliseconds
+     * @param {string} [options.logPrefix='[Quests Mod]'] - Log prefix
+     */
+    show({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
+      try {
+        const mainContainer = this.getContainer();
+        const existingToasts = mainContainer.querySelectorAll('.toast-item');
+        const stackOffset = existingToasts.length * 46;
+
+        const flexContainer = document.createElement('div');
+        flexContainer.className = 'toast-item';
+        flexContainer.style.cssText = `
+          left: 0px;
+          right: 0px;
+          display: flex;
+          position: absolute;
+          transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
+          transform: translateY(-${stackOffset}px);
+          bottom: 0px;
+          justify-content: flex-end;
+        `;
+
+        const toast = document.createElement('button');
+        toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
+
+        const widgetTop = document.createElement('div');
+        widgetTop.className = 'widget-top h-2.5';
+
+        const widgetBottom = document.createElement('div');
+        widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
+
+        // Add product icon if productName provided
+        if (productName) {
+          const productDef = buildProductDefinitions().find(p => p.name === productName);
+          if (productDef) {
+            const iconImg = createProductIcon(productDef, 16);
+            widgetBottom.appendChild(iconImg);
+          }
+        }
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'text-left';
+        messageDiv.textContent = message;
+        widgetBottom.appendChild(messageDiv);
+
+        toast.appendChild(widgetTop);
+        toast.appendChild(widgetBottom);
+        flexContainer.appendChild(toast);
+        mainContainer.appendChild(flexContainer);
+
+        console.log(`${logPrefix} Toast shown: ${message}`);
+
+        // Add click event listener for dismissal
+        toast.addEventListener('click', () => {
+          if (flexContainer && flexContainer.parentNode) {
+            flexContainer.parentNode.removeChild(flexContainer);
+            this.updatePositions(mainContainer);
+          }
+        });
+
+        // Auto-remove after duration
+        setTimeout(() => {
+          if (flexContainer && flexContainer.parentNode) {
+            flexContainer.parentNode.removeChild(flexContainer);
+            this.updatePositions(mainContainer);
+          }
+        }, duration);
+
+      } catch (error) {
+        console.error(`${logPrefix} Error showing toast:`, error);
+      }
+    },
+
+    /**
+     * Show quest item notification
+     * @param {string} productName - Product name
+     * @param {number} amount - Amount obtained
+     */
+    showQuestItem(productName, amount) {
+      this.show({
+        productName,
+        message: tReplace('mods.quests.productObtained', { productName, amount }),
+        duration: TOAST_DURATION_DEFAULT
+      });
+    },
+
+    /**
+     * Show mission completion notification
+     * @param {Object} mission - Mission object
+     */
+    showMissionComplete(mission) {
+      this.show({
+        message: `Mission completed: ${mission.title}`,
+        duration: TOAST_DURATION_IMPORTANT
+      });
+    }
+  };
+
+  // =======================
+  // Notification System (Legacy Functions)
   // =======================
 
   // Helper to get or create toast container
   function getToastContainer() {
-    let mainContainer = document.getElementById('quest-items-toast-container');
-    if (!mainContainer) {
-      mainContainer = document.createElement('div');
-      mainContainer.id = 'quest-items-toast-container';
-      mainContainer.style.cssText = `
-        position: fixed;
-        z-index: 9999;
-        inset: 16px 16px 64px;
-        pointer-events: none;
-      `;
-      document.body.appendChild(mainContainer);
-    }
-    return mainContainer;
+    return NotificationService.getContainer();
   }
 
   // Helper to update toast positions after removal
   function updateToastPositions(container) {
-    const toasts = container.querySelectorAll('.toast-item');
-    toasts.forEach((toast, index) => {
-      const offset = index * 46;
-      toast.style.transform = `translateY(-${offset}px)`;
-    });
+    NotificationService.updatePositions(container);
   }
-
-  // Toast timer management helpers - removed, using simple setTimeout instead
 
   // Generic toast notification function
   function showToast({ productName, message, duration = TOAST_DURATION_DEFAULT, logPrefix = '[Quests Mod]' }) {
-    try {
-      const mainContainer = getToastContainer();
-      const existingToasts = mainContainer.querySelectorAll('.toast-item');
-      const stackOffset = existingToasts.length * 46;
-
-      const flexContainer = document.createElement('div');
-      flexContainer.className = 'toast-item';
-      flexContainer.style.cssText = `
-        left: 0px;
-        right: 0px;
-        display: flex;
-        position: absolute;
-        transition: 230ms cubic-bezier(0.21, 1.02, 0.73, 1);
-        transform: translateY(-${stackOffset}px);
-        bottom: 0px;
-        justify-content: flex-end;
-      `;
-
-      const toast = document.createElement('button');
-      toast.className = 'non-dismissable-dialogs shadow-lg animate-in fade-in zoom-in-95 slide-in-from-top lg:slide-in-from-bottom';
-
-      const widgetTop = document.createElement('div');
-      widgetTop.className = 'widget-top h-2.5';
-
-      const widgetBottom = document.createElement('div');
-      widgetBottom.className = 'widget-bottom pixel-font-16 flex items-center gap-2 px-2 py-1 text-whiteHighlight';
-
-      // Add product icon if productName provided
-      if (productName) {
-        const productDef = buildProductDefinitions().find(p => p.name === productName);
-        if (productDef) {
-          const iconImg = createProductIcon(productDef, 16);
-          widgetBottom.appendChild(iconImg);
-        }
-      }
-
-      const messageDiv = document.createElement('div');
-      messageDiv.className = 'text-left';
-      messageDiv.textContent = message;
-      widgetBottom.appendChild(messageDiv);
-
-      toast.appendChild(widgetTop);
-      toast.appendChild(widgetBottom);
-      flexContainer.appendChild(toast);
-      mainContainer.appendChild(flexContainer);
-
-      console.log(`${logPrefix} Toast shown: ${message}`);
-
-      // Add click event listener for dismissal
-      toast.addEventListener('click', () => {
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateToastPositions(mainContainer);
-        }
-      });
-
-      // Auto-remove after duration
-      setTimeout(() => {
-        if (flexContainer && flexContainer.parentNode) {
-          flexContainer.parentNode.removeChild(flexContainer);
-          updateToastPositions(mainContainer);
-        }
-      }, duration);
-
-    } catch (error) {
-      console.error(`${logPrefix} Error showing toast:`, error);
-    }
+    NotificationService.show({ productName, message, duration, logPrefix });
   }
 
   function showQuestItemNotification(productName, amount) {
-    showToast({
-      productName,
-      message: tReplace('mods.quests.productObtained', { productName, amount }),
-      duration: TOAST_DURATION_DEFAULT
-    });
+    NotificationService.showQuestItem(productName, amount);
   }
 
   function showCopperKeyFoundToast() {
@@ -2900,6 +4022,521 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     modalTimeout = null;
     dialogTimeout = null;
   }
+
+  // =======================
+  // Event Manager
+  // =======================
+  
+  const EventManager = {
+    // Track all event listeners for cleanup
+    _listeners: new Map(), // Map<element, Map<event, Set<handler>>>
+
+    /**
+     * Add event listener with tracking
+     * @param {HTMLElement|Document|Window} element - Element to attach listener to
+     * @param {string} event - Event name
+     * @param {Function} handler - Event handler function
+     * @param {Object|boolean} [options] - Event options (useCapture, etc.)
+     * @returns {Function} Cleanup function to remove listener
+     */
+    addEventListener(element, event, handler, options = false) {
+      if (!element || !event || !handler) {
+        console.warn('[Quests Mod][EventManager] Invalid parameters for addEventListener');
+        return () => {};
+      }
+
+      // Initialize tracking structure
+      if (!this._listeners.has(element)) {
+        this._listeners.set(element, new Map());
+      }
+      const elementListeners = this._listeners.get(element);
+      
+      if (!elementListeners.has(event)) {
+        elementListeners.set(event, new Set());
+      }
+      const eventHandlers = elementListeners.get(event);
+
+      // Add handler if not already tracked
+      if (!eventHandlers.has(handler)) {
+        element.addEventListener(event, handler, options);
+        eventHandlers.add(handler);
+      }
+
+      // Return cleanup function
+      return () => this.removeEventListener(element, event, handler);
+    },
+
+    /**
+     * Remove tracked event listener
+     * @param {HTMLElement|Document|Window} element - Element to remove listener from
+     * @param {string} event - Event name
+     * @param {Function} handler - Event handler function
+     */
+    removeEventListener(element, event, handler) {
+      if (!element || !event || !handler) return;
+
+      const elementListeners = this._listeners.get(element);
+      if (!elementListeners) return;
+
+      const eventHandlers = elementListeners.get(event);
+      if (!eventHandlers || !eventHandlers.has(handler)) return;
+
+      try {
+        element.removeEventListener(event, handler);
+        eventHandlers.delete(handler);
+
+        // Clean up empty sets/maps
+        if (eventHandlers.size === 0) {
+          elementListeners.delete(event);
+        }
+        if (elementListeners.size === 0) {
+          this._listeners.delete(element);
+        }
+      } catch (e) {
+        console.warn('[Quests Mod][EventManager] Error removing event listener:', e);
+      }
+    },
+
+    /**
+     * Remove all tracked listeners
+     */
+    cleanupAll() {
+      for (const [element, elementListeners] of this._listeners.entries()) {
+        for (const [event, eventHandlers] of elementListeners.entries()) {
+          for (const handler of eventHandlers) {
+            try {
+              element.removeEventListener(event, handler);
+            } catch (e) {
+              console.warn('[Quests Mod][EventManager] Error cleaning up listener:', e);
+            }
+          }
+        }
+      }
+      this._listeners.clear();
+    }
+  };
+
+  // =======================
+  // Error Handler
+  // =======================
+  
+  const ErrorHandler = {
+    /**
+     * Handle error with standardized logging and optional user message
+     * @param {Error} error - Error object
+     * @param {string} context - Context where error occurred
+     * @param {string} [userMessage] - Optional user-friendly message
+     */
+    handleError(error, context, userMessage = null) {
+      this.logError(error, context);
+      
+      if (userMessage && typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.createModal) {
+        try {
+          api.ui.components.createModal({
+            title: 'Error',
+            content: `<p>${userMessage}</p>`,
+            buttons: [{ text: 'OK', primary: true }]
+          });
+        } catch (modalError) {
+          console.error('[Quests Mod][ErrorHandler] Error showing error modal:', modalError);
+        }
+      }
+    },
+
+    /**
+     * Log error with consistent format
+     * @param {Error} error - Error object
+     * @param {string} context - Context where error occurred
+     */
+    logError(error, context) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      console.error(`[Quests Mod] Error in ${context}:`, errorMessage);
+      if (errorStack) {
+        console.error('[Quests Mod] Stack trace:', errorStack);
+      }
+    }
+  };
+
+  // =======================
+  // Context Menu Helper
+  // =======================
+  
+  /**
+   * Create a generic game-styled context menu
+   * @param {Object} options - Context menu options
+   * @param {number} options.x - X position
+   * @param {number} options.y - Y position
+   * @param {Array<Object>} options.buttons - Array of button configs: {text, onClick, style?, hoverStyle?}
+   * @param {Function} [options.onClose] - Callback when menu closes
+   * @param {string} [options.logPrefix='[Quests Mod]'] - Log prefix
+   * @returns {Object} Menu object with {overlay, menu, closeMenu}
+   */
+  function createContextMenu({ x, y, buttons, onClose = null, logPrefix = '[Quests Mod]' }) {
+    // Create overlay to close menu on outside click
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9998';
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+
+    // Create menu container
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = '9999';
+    menu.style.minWidth = '120px';
+    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '8px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+
+    // Button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.flexDirection = 'column';
+    buttonContainer.style.gap = '4px';
+
+    // Create buttons
+    buttons.forEach((buttonConfig) => {
+      const button = document.createElement('button');
+      button.className = 'pixel-font-14';
+      button.textContent = buttonConfig.text;
+      button.style.width = buttonConfig.width || '140px';
+      button.style.height = buttonConfig.height || '28px';
+      button.style.fontSize = buttonConfig.fontSize || '12px';
+      button.style.backgroundColor = buttonConfig.backgroundColor || '#2a4a7a';
+      button.style.color = buttonConfig.color || '#4FC3F7';
+      button.style.border = buttonConfig.border || '1px solid #4FC3F7';
+      button.style.borderRadius = '4px';
+      button.style.cursor = 'pointer';
+      button.style.textShadow = '1px 1px 0px rgba(0,0,0,0.8)';
+      button.style.fontWeight = 'bold';
+
+      // Add hover effects
+      const hoverBg = buttonConfig.hoverBackgroundColor || '#1a2a4a';
+      const hoverBorder = buttonConfig.hoverBorderColor || '#81D4FA';
+      const defaultBg = button.style.backgroundColor;
+      const defaultBorder = button.style.borderColor;
+
+      button.addEventListener('mouseenter', () => {
+        button.style.backgroundColor = hoverBg;
+        button.style.borderColor = hoverBorder;
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.backgroundColor = defaultBg;
+        button.style.borderColor = defaultBorder;
+      });
+
+      // Add click handler
+      button.addEventListener('click', () => {
+        if (buttonConfig.onClick) {
+          buttonConfig.onClick();
+        }
+      });
+
+      buttonContainer.appendChild(button);
+    });
+
+    menu.appendChild(buttonContainer);
+
+    // Close menu function
+    const closeMenu = () => {
+      if (overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      if (menu.parentNode) {
+        menu.parentNode.removeChild(menu);
+      }
+      if (onClose) {
+        onClose();
+      }
+    };
+
+    // Add event listeners
+    overlay.addEventListener('mousedown', closeMenu);
+    overlay.addEventListener('click', closeMenu);
+    
+    // ESC key handler (consistent with other mods)
+    const escHandler = (e) => {
+      if (e.key === 'Escape') {
+        closeMenu();
+      }
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // Store cleanup function for ESC handler
+    const cleanupEsc = () => {
+      document.removeEventListener('keydown', escHandler);
+    };
+
+    // Add to DOM
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+
+    // Return menu object with cleanup
+    return {
+      overlay,
+      menu,
+      closeMenu: () => {
+        closeMenu();
+        cleanupEsc();
+      }
+    };
+  }
+
+  // =======================
+  // Mission Manager
+  // =======================
+  
+  const MissionManager = {
+    /**
+     * Get mission progress
+     * @param {Object} mission - Mission object with id property
+     * @returns {Object} Progress object {accepted: boolean, completed: boolean}
+     */
+    getProgress(mission) {
+      if (!mission) return { accepted: false, completed: false };
+      const stateKey = MISSION_STATE_MAP[mission.id];
+      if (stateKey) {
+        // Return from state if exists, otherwise return default (future-proof)
+        return kingChatState[stateKey] || { accepted: false, completed: false };
+      }
+      // Mission not in registry - return default
+      return { accepted: false, completed: false };
+    },
+
+    /**
+     * Set mission progress
+     * @param {Object} mission - Mission object with id property
+     * @param {Object} progress - Progress object {accepted: boolean, completed: boolean}
+     */
+    setProgress(mission, progress) {
+      if (!mission) return;
+      const stateKey = MISSION_STATE_MAP[mission.id];
+      if (stateKey) {
+        kingChatState[stateKey] = progress;
+      }
+    },
+
+    /**
+     * Check if mission is active (accepted but not completed)
+     * @param {Object} mission - Mission object
+     * @returns {boolean}
+     */
+    isActive(mission) {
+      const progress = this.getProgress(mission);
+      return progress.accepted && !progress.completed;
+    },
+
+    /**
+     * Check if mission is completed
+     * @param {Object} mission - Mission object
+     * @returns {boolean}
+     */
+    isCompleted(mission) {
+      const progress = this.getProgress(mission);
+      return progress.completed;
+    },
+
+    /**
+     * Get current (next available) mission from a list
+     * @param {Array<Object>} missions - Array of mission objects
+     * @returns {Object|null} First incomplete mission or null
+     */
+    getCurrentMission(missions) {
+      for (const mission of missions) {
+        if (!this.isCompleted(mission)) {
+          return mission;
+        }
+      }
+      return null;
+    }
+  };
+
+  // Legacy function wrappers for backward compatibility
+  function getMissionProgress(mission) {
+    return MissionManager.getProgress(mission);
+  }
+
+  function setMissionProgress(mission, progress) {
+    MissionManager.setProgress(mission, progress);
+  }
+
+  // =======================
+  // Modal Helpers
+  // =======================
+  
+  const ModalHelpers = {
+    /**
+     * Create a modal row container
+     * @param {string} [justifyContent='flex-start'] - CSS justify-content value
+     * @param {string} [gap='8px'] - Gap between items
+     * @returns {HTMLElement} Row container element
+     */
+    createRow(justifyContent = 'flex-start', gap = '8px') {
+      const row = document.createElement('div');
+      row.style.cssText = `display: flex; flex-direction: row; justify-content: ${justifyContent}; gap: ${gap}; align-items: center; width: 100%;`;
+      return row;
+    },
+
+    /**
+     * Create a modal column container
+     * @param {string} [alignItems='flex-start'] - CSS align-items value
+     * @param {string} [gap='8px'] - Gap between items
+     * @returns {HTMLElement} Column container element
+     */
+    createColumn(alignItems = 'flex-start', gap = '8px') {
+      const column = document.createElement('div');
+      column.style.cssText = `display: flex; flex-direction: column; align-items: ${alignItems}; gap: ${gap}; width: 100%;`;
+      return column;
+    },
+
+    /**
+     * Create a framed box element (common game UI pattern)
+     * @param {Object} [options] - Options object
+     * @param {string} [options.background] - Background image URL
+     * @param {string} [options.borderImage] - Border image URL
+     * @param {string} [options.padding] - Padding value
+     * @param {string} [options.minHeight] - Minimum height
+     * @returns {HTMLElement} Framed box element
+     */
+    createFramedBox({ 
+      background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat",
+      borderImage = "url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch",
+      padding = '2px 4px',
+      minHeight = '80px'
+    } = {}) {
+      const frame = document.createElement('div');
+      frame.style.cssText = `
+        min-height: ${minHeight};
+        padding: ${padding};
+        width: 100%;
+        box-sizing: border-box;
+        background: ${background};
+        border: 4px solid transparent;
+        border-image: ${borderImage};
+      `;
+      return frame;
+    },
+
+    /**
+     * Create a chat input textarea with auto-resize
+     * @param {Function} onSend - Callback when message is sent
+     * @param {Function} [onKeyDown] - Optional keydown handler
+     * @returns {Object} Object with {textarea, sendButton, container}
+     */
+    createChatInput(onSend, onKeyDown = null) {
+      const container = this.createRow('flex-start', '4px');
+      
+      const textarea = document.createElement('textarea');
+      textarea.placeholder = 'Type your message...';
+      textarea.style.cssText = `
+        flex: 1;
+        min-height: 27px;
+        max-height: 100px;
+        resize: none;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-family: inherit;
+        background: url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat;
+        border: 2px solid transparent;
+        border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+        color: rgb(230, 215, 176);
+        overflow-y: auto;
+      `;
+      
+      // Auto-resize textarea
+      textarea.addEventListener('input', () => {
+        textarea.style.height = '27px';
+        textarea.style.height = `${Math.min(textarea.scrollHeight, 100)}px`;
+      });
+      
+      // Handle Enter key (send) and Shift+Enter (new line)
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (onSend) {
+            onSend();
+          }
+        }
+        if (onKeyDown) {
+          onKeyDown(e);
+        }
+      });
+      
+      const sendButton = document.createElement('button');
+      sendButton.textContent = 'Send';
+      sendButton.className = 'pixel-font-14';
+      sendButton.style.cssText = `
+        padding: 4px 12px;
+        height: 27px;
+        font-size: 12px;
+        background: url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat;
+        border: 2px solid transparent;
+        border-image: url('https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png') 6 fill stretch;
+        color: rgb(230, 215, 176);
+        cursor: pointer;
+      `;
+      
+      sendButton.addEventListener('click', () => {
+        if (onSend) {
+          onSend();
+        }
+      });
+      
+      container.appendChild(textarea);
+      container.appendChild(sendButton);
+      
+      return { textarea, sendButton, container };
+    },
+
+    /**
+     * Close a modal dialog by finding and clicking the close button
+     * @param {number} [delay=0] - Delay before closing (ms)
+     */
+    closeModal(delay = 0) {
+      setTimeout(() => {
+        const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+        if (dialog) {
+          const buttons = dialog.querySelectorAll('button');
+          let closeButton = null;
+          for (const btn of buttons) {
+            if (btn.textContent && btn.textContent.trim().toLowerCase() === 'close') {
+              closeButton = btn;
+              break;
+            }
+          }
+          
+          if (closeButton) {
+            closeButton.click();
+          } else {
+            // Fallback: dispatch ESC key events
+            for (let i = 0; i < 3; i++) {
+              setTimeout(() => {
+                document.dispatchEvent(new KeyboardEvent('keydown', { 
+                  key: 'Escape', 
+                  keyCode: 27, 
+                  which: 27, 
+                  bubbles: true,
+                  cancelable: true
+                }));
+              }, i * 50);
+            }
+          }
+        }
+      }, delay);
+    }
+  };
 
   // Helper to remove event listener from button
   function removeButtonEventListener(button) {
@@ -3235,7 +4872,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
             // Recreate the modal layout
             const mainContainer = document.createElement('div');
-            mainContainer.style.cssText = 'width: 100%; height: 100%; max-width: 500px; min-height: 180px; max-height: 180px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; gap: 8px; color: rgb(230, 215, 176);';
+            mainContainer.style.cssText = 'width: 100%; height: 100%; max-width: 500px; min-height: 190px; max-height: 190px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; gap: 8px; color: rgb(230, 215, 176);';
 
             // Left column: Products list
             const productsListContainer = document.createElement('div');
@@ -3330,7 +4967,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
             // Description box
             const descriptionBox = document.createElement('div');
-            descriptionBox.style.cssText = 'min-height: 72px; padding: 2px 4px; width: 100%; box-sizing: border-box; background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border-width: 4px; border-style: solid; border-color: transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill / 1 / 0 stretch;';
+            descriptionBox.style.cssText = 'min-height: 80px; padding: 2px 4px; width: 100%; box-sizing: border-box; background: url("https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png") repeat; border-width: 4px; border-style: solid; border-color: transparent; border-image: url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill / 1 / 0 stretch;';
 
             detailsWrapper.appendChild(selectedItemDisplay);
             detailsWrapper.appendChild(descriptionBox);
@@ -3478,7 +5115,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           // Empty description frame (same structure as selected product)
           const descFrame = document.createElement('div');
           descFrame.style.cssText = `
-            min-height: 72px;
+            min-height: 80px;
             padding: 2px 4px;
             width: 100%;
             box-sizing: border-box;
@@ -3579,7 +5216,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           // Description in frame
           const descFrame = document.createElement('div');
           descFrame.style.cssText = `
-            min-height: 72px;
+            min-height: 80px;
             padding: 2px 4px;
             width: 100%;
             box-sizing: border-box;
@@ -3592,23 +5229,26 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           descDiv.style.cssText = 'font-size: 11px; color: rgb(150, 150, 150); font-style: italic; text-align: center;';
           descFrame.appendChild(descDiv);
 
-          // Add toggle button for Fishing Rod inside the description frame
-          if (productDef.name === 'Fishing Rod') {
+          // Add toggle button for Fishing Rod or Light Shovel inside the description frame
+          if (productDef.name === 'Fishing Rod' || productDef.name === 'Light Shovel') {
             // Create the toggle button
             const toggleButton = document.createElement('button');
             toggleButton.type = 'button';
             toggleButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-3 py-1 pixel-font-12';
             toggleButton.style.cssText = 'cursor: pointer; white-space: nowrap; box-sizing: border-box; height: 28px; font-size: 12px; margin-top: 8px; display: block; margin-left: auto; margin-right: auto;';
 
-            // Function to update button appearance based on fishing state
+            // Function to update button appearance based on state
             const updateButtonState = () => {
-              if (fishingState.enabled) {
-                toggleButton.textContent = 'Fishing Enabled';
+              const isEnabled = productDef.name === 'Fishing Rod' ? fishingState.enabled : miningState.enabled;
+              const itemName = productDef.name === 'Fishing Rod' ? 'Fishing' : 'Shovel';
+
+              if (isEnabled) {
+                toggleButton.textContent = `${itemName} Enabled`;
                 toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png")', 'important');
                 toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
                 toggleButton.style.setProperty('border-color', '#4CAF50', 'important'); // Green border
               } else {
-                toggleButton.textContent = 'Fishing Disabled';
+                toggleButton.textContent = `Enable ${itemName}`;
                 toggleButton.style.setProperty('background-image', 'url("https://bestiaryarena.com/_next/static/media/background-red.21d3f4bd.png")', 'important');
                 toggleButton.style.setProperty('background-repeat', 'repeat', 'important');
                 toggleButton.style.setProperty('border-color', '#f44336', 'important'); // Red border
@@ -3618,19 +5258,31 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             // Initialize button state
             updateButtonState();
 
-            // Add click handler to toggle fishing
+            // Add click handler to toggle
             toggleButton.addEventListener('click', () => {
-              fishingState.enabled = !fishingState.enabled;
-              // Track manual preference - if user disables, remember it
-              fishingState.manuallyDisabled = !fishingState.enabled;
-              updateButtonState();
+              if (productDef.name === 'Fishing Rod') {
+                fishingState.enabled = !fishingState.enabled;
+                fishingState.manuallyDisabled = !fishingState.enabled;
+                updateButtonState();
 
-              // Update fishing functionality based on new state (manual toggle)
-              updateWaterFishingState(true);
+                // Update fishing functionality based on new state (manual toggle)
+                updateWaterFishingState(true);
 
-              // Show toast notification
-              const toastMessage = fishingState.enabled ? 'Fishing enabled!' : 'Fishing disabled!';
-              const toastType = fishingState.enabled ? 'success' : 'info';
+                // Show toast notification
+                const toastMessage = fishingState.enabled ? 'Fishing enabled!' : 'Fishing disabled!';
+                const toastType = fishingState.enabled ? 'success' : 'info';
+              } else if (productDef.name === 'Light Shovel') {
+                miningState.enabled = !miningState.enabled;
+                miningState.manuallyDisabled = !miningState.enabled;
+                updateButtonState();
+
+                // Update mining functionality based on new state (manual toggle)
+                updateMiningState(true);
+
+                // Show toast notification
+                const toastMessage = miningState.enabled ? 'Shovel enabled!' : 'Shovel disabled!';
+                const toastType = miningState.enabled ? 'success' : 'info';
+              }
 
               if (typeof api !== 'undefined' && api.ui && api.ui.components && api.ui.components.showToast) {
                 api.ui.components.showToast({
@@ -3641,6 +5293,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               }
             });
 
+            // Add the button to the description frame
             descFrame.appendChild(toggleButton);
           }
 
@@ -4106,8 +5759,27 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       }
 
       // kingChatState is now defined globally
-      // King Tibianus missions and Al Dee fishing mission
-      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION];
+      // King Tibianus missions and Al Dee missions
+      const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
+
+      // Mission Registry: Maps mission IDs to their state property names in kingChatState
+      // This centralizes mission-to-state mapping for easier maintenance
+      const MISSION_STATE_MAP = {
+        [KING_COPPER_KEY_MISSION.id]: 'progressCopper',
+        [KING_RED_DRAGON_MISSION.id]: 'progressDragon',
+        [KING_LETTER_MISSION.id]: 'progressLetter',
+        [AL_DEE_FISHING_MISSION.id]: 'progressAlDeeFishing',
+        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'progressAlDeeGoldenRope'
+      };
+
+      // Mission Firebase Key Map: Maps mission IDs to their Firebase property names
+      const MISSION_FIREBASE_KEY_MAP = {
+        [KING_COPPER_KEY_MISSION.id]: 'copper',
+        [KING_RED_DRAGON_MISSION.id]: 'dragon',
+        [KING_LETTER_MISSION.id]: 'letter',
+        [AL_DEE_FISHING_MISSION.id]: 'alDeeFishing',
+        [AL_DEE_GOLDEN_ROPE_MISSION.id]: 'alDeeGoldenRope'
+      };
 
       // Random responses when Tibianus doesn't understand the player's input
       const CONFUSION_RESPONSES = [
@@ -4152,6 +5824,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       let customSeparator = null;
       let modalRef = null;
 
+      // Create cooldown manager for Tibianus conversation
+      const tibianusCooldown = createNPCCooldownManager(1000);
+
       function buildStrings(mission) {
         // Handle case where all missions are completed (mission is null)
         if (!mission) {
@@ -4182,35 +5857,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       }
       let kingStrings = buildStrings(activeMission);
 
-      function closeDialogWithFallback(delayMs = 0, escRepeats = 3, escSpacingMs = 50) {
-        setTimeout(() => {
-          const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-          if (dialog) {
-            const buttons = dialog.querySelectorAll('button');
-            let closeButton = null;
-            for (const btn of buttons) {
-              if (btn.textContent && btn.textContent.trim().toLowerCase() === 'close') {
-                closeButton = btn;
-                break;
-              }
-            }
-            if (closeButton) {
-              closeButton.click();
-              return;
-            }
-          }
-          for (let i = 0; i < escRepeats; i++) {
-            setTimeout(() => {
-              document.dispatchEvent(new KeyboardEvent('keydown', { 
-                key: 'Escape', 
-                keyCode: 27, 
-                which: 27, 
-                bubbles: true,
-                cancelable: true
-              }));
-            }, i * escSpacingMs);
-          }
-        }, delayMs);
+      function closeDialogWithFallback(delayMs = 0) {
+        ModalHelpers.closeModal(delayMs);
       }
 
       function removeDefaultModalFooter(dialog) {
@@ -4464,7 +6112,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           if (selectedMission.id === KING_RED_DRAGON_MISSION.id) {
             line2.textContent = 'Reward: Dragon Claw.';
           } else if (selectedMission.id === AL_DEE_FISHING_MISSION.id) {
-            line2.textContent = 'Reward: Dwarven Pickaxe.';
+            line2.textContent = 'Reward: Light Shovel.';
+          } else if (selectedMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+            line2.textContent = 'Reward: The Holy Tible.';
           } else {
             line2.textContent = `Reward: ${selectedMission.rewardCoins} guild coins.`;
           }
@@ -4518,37 +6168,45 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               completed: progress.completed
             };
           }
-          // New shape {copper:{}, dragon:{}}
-          if (progress && progress.copper) {
-            kingChatState.progressCopper = {
-              accepted: !!progress.copper.accepted,
-              completed: !!progress.copper.completed
-            };
+          // New shape: Load all missions from registry dynamically
+          if (progress) {
+            for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+              const stateKey = MISSION_STATE_MAP[missionId];
+              if (stateKey && progress[firebaseKey]) {
+                kingChatState[stateKey] = {
+                  accepted: !!progress[firebaseKey].accepted,
+                  completed: !!progress[firebaseKey].completed
+                };
+              }
+            }
           }
-          if (progress && progress.dragon) {
-            kingChatState.progressDragon = {
-              accepted: !!progress.dragon.accepted,
-              completed: !!progress.dragon.completed
-            };
+          
+          // Auto-accept Al Dee golden rope mission if player has Elvenhair Rope but mission not accepted
+          try {
+            const goldenRopeProgress = kingChatState.progressAlDeeGoldenRope;
+            if (!goldenRopeProgress.accepted && !goldenRopeProgress.completed) {
+              const questItems = await getQuestItems(false);
+              if (questItems && questItems['Elvenhair Rope'] && questItems['Elvenhair Rope'] > 0) {
+                console.log('[Quests Mod][King Tibianus] Auto-accepting Al Dee golden rope mission - player has Elvenhair Rope');
+                kingChatState.progressAlDeeGoldenRope.accepted = true;
+                // Save to Firebase
+                const playerName = getCurrentPlayerName();
+                if (playerName) {
+                  const currentProgress = await getKingTibianusProgress(playerName);
+                  await saveKingTibianusProgress(playerName, {
+                    ...currentProgress,
+                    alDeeGoldenRope: {
+                      accepted: true,
+                      completed: false
+                    }
+                  });
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('[Quests Mod][King Tibianus] Error auto-accepting golden rope mission:', error);
           }
-          if (progress && progress.letter) {
-            kingChatState.progressLetter = {
-              accepted: !!progress.letter.accepted,
-              completed: !!progress.letter.completed
-            };
-          }
-          if (progress && progress.alDeeFishing) {
-            kingChatState.progressAlDeeFishing = {
-              accepted: !!progress.alDeeFishing.accepted,
-              completed: !!progress.alDeeFishing.completed
-            };
-          }
-          if (progress && progress.alDeeFishing) {
-            kingChatState.progressAlDeeFishing = {
-              accepted: !!progress.alDeeFishing.accepted,
-              completed: !!progress.alDeeFishing.completed
-            };
-          }
+          
           // Grey out missions/log until starter coin is handed in
           try {
             const tokenHeld = await hasSilverToken();
@@ -4593,12 +6251,17 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           activeMission = currentMission();
           selectedMissionId = null;
           kingStrings = buildStrings(activeMission);
-          await saveKingTibianusProgress(playerName, {
-            copper: kingChatState.progressCopper,
-            dragon: kingChatState.progressDragon,
-            letter: kingChatState.progressLetter,
-            alDeeFishing: kingChatState.progressAlDeeFishing
-          });
+          // Use registry to get all mission progress (future-proof)
+          const allProgress = getAllMissionProgress();
+          // Include ironOre if it exists in fishingState
+          if (fishingState.ironOreQuestActive !== undefined || fishingState.ironOreQuestCompleted) {
+            allProgress.ironOre = {
+              active: fishingState.ironOreQuestActive || false,
+              startTime: fishingState.ironOreQuestStartTime || null,
+              completed: fishingState.ironOreQuestCompleted || false
+            };
+          }
+          await saveKingTibianusProgress(playerName, allProgress);
 
           // Add map to inventory when copper key mission is accepted
           if (mission.id === KING_COPPER_KEY_MISSION.id) {
@@ -4694,12 +6357,17 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           activeMission = currentMission();
           selectedMissionId = null;
           kingStrings = buildStrings(activeMission);
-          await saveKingTibianusProgress(playerName, {
-            copper: kingChatState.progressCopper,
-            dragon: kingChatState.progressDragon,
-            letter: kingChatState.progressLetter,
-            alDeeFishing: kingChatState.progressAlDeeFishing
-          });
+          // Use registry to get all mission progress (future-proof)
+          const allProgress = getAllMissionProgress();
+          // Include ironOre if it exists in fishingState
+          if (fishingState.ironOreQuestActive !== undefined || fishingState.ironOreQuestCompleted) {
+            allProgress.ironOre = {
+              active: fishingState.ironOreQuestActive || false,
+              startTime: fishingState.ironOreQuestStartTime || null,
+              completed: fishingState.ironOreQuestCompleted || false
+            };
+          }
+          await saveKingTibianusProgress(playerName, allProgress);
           if (shouldAwardDragonClaw) {
             try {
               await addQuestItem('Dragon Claw', 1);
@@ -4864,6 +6532,105 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         return null;
       }
 
+      // Helper: Clear textarea input
+      function clearTextarea() {
+        textarea.value = '';
+        textarea.style.height = '27px';
+      }
+
+      // Helper: Determine target mission based on message content
+      function determineTargetMission(lowerText, activeMission) {
+        const mentionsKey = lowerText.includes('key') || lowerText.includes('copper key');
+        const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
+        const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
+
+        if (areAllMissionsCompleted()) {
+          return activeMission;
+        }
+
+        if (mentionsLetter) {
+          return MISSIONS.find(m => m.id === KING_LETTER_MISSION.id) || activeMission;
+        } else if (mentionsKey) {
+          return MISSIONS.find(m => m.id === KING_COPPER_KEY_MISSION.id) || activeMission;
+        } else if (mentionsDragon) {
+          return MISSIONS.find(m => m.id === KING_RED_DRAGON_MISSION.id) || activeMission;
+        }
+        return activeMission;
+      }
+
+      // Helper: Handle key confirmation response (yes/no after "Have you found my key?")
+      async function handleKeyConfirmation(lowerText, activeMission, kingStrings) {
+        if (!kingChatState.awaitingKeyConfirm || !activeMission) {
+          return false;
+        }
+
+        const currentProgress = getMissionProgress(activeMission);
+        if (!currentProgress.accepted || currentProgress.completed) {
+          return false;
+        }
+
+        if (lowerText.includes('yes')) {
+          let hasItems = false;
+          if (activeMission.id === KING_COPPER_KEY_MISSION.id) {
+            hasItems = await hasCopperKeyInInventory();
+          } else if (activeMission.id === KING_RED_DRAGON_MISSION.id) {
+            hasItems = await hasRedDragonMaterials();
+          } else if (activeMission.id === KING_LETTER_MISSION.id) {
+            // TODO: Implement proper letter delivery tracking
+            hasItems = false;
+          }
+
+          if (hasItems) {
+            queueKingReply(kingStrings.keyComplete, { onDone: async () => {
+              if (activeMission.rewardCoins > 0) {
+                await awardGuildCoins(activeMission.rewardCoins);
+                await updateGuildCoinDisplay();
+              }
+              await completeKingTibianusQuest();
+            } });
+          } else {
+            queueKingReply(kingStrings.keyScoldNoKey, { closeAfterMs: 2000 });
+          }
+          kingChatState.awaitingKeyConfirm = false;
+          clearTextarea();
+          return true;
+        }
+
+        if (lowerText.includes('no')) {
+          queueKingReply(kingStrings.keyKeepSearching);
+          kingChatState.awaitingKeyConfirm = false;
+          clearTextarea();
+          return true;
+        }
+
+        queueKingReply(kingStrings.keyAnswerYesNo);
+        clearTextarea();
+        return true;
+      }
+
+      // Helper: Handle mission acceptance
+      function handleMissionAcceptance(lowerText) {
+        if (!kingChatState.missionOffered || !kingChatState.offeredMission || !lowerText.includes('yes')) {
+          return false;
+        }
+
+        const offeredProgress = getMissionProgress(kingChatState.offeredMission);
+        if (offeredProgress.accepted || offeredProgress.completed) {
+          return false;
+        }
+
+        kingChatState.missionOffered = false;
+        const offeredMissionToStart = kingChatState.offeredMission;
+        const offeredStrings = buildStrings(offeredMissionToStart);
+        queueKingReply(offeredStrings.thankYou, { onDone: async () => {
+          await startKingTibianusQuestForMission(offeredMissionToStart);
+          kingChatState.offeredMission = null;
+        } });
+        tibianusCooldown.reset();
+        clearTextarea();
+        return true;
+      }
+
       // Send message function
       async function sendMessageToKing() {
         const text = textarea.value.trim();
@@ -4879,18 +6646,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         addMessageToConversation(playerName, text, false);
         
         // Clear any pending response timeout
-        if (pendingResponseTimeout) {
-          clearTimeout(pendingResponseTimeout);
-          pendingResponseTimeout = null;
-        }
+        tibianusCooldown.clearPendingResponse();
         
         // If the king has not received the starter coin yet, only accept valid hail phrases
         const tokenHeld = await hasSilverToken();
         if (tokenHeld && !kingChatState.starterCoinThanked) {
           if (!isValidHailPhrase(lowerText)) {
-            // Do not respond; awaiting correct hail to hand over coin
-            textarea.value = '';
-            textarea.style.height = '27px';
+            clearTextarea();
             return;
           }
         }
@@ -4900,86 +6662,24 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         kingStrings = buildStrings(activeMission);
         const currentProgress = getMissionProgress(activeMission);
 
+        // Check for mission-related keywords
         const mentionsKey = lowerText.includes('key') || lowerText.includes('copper key');
         const mentionsDragon = lowerText.includes('dragon') || lowerText.includes('scale') || lowerText.includes('leather');
         const mentionsLetter = lowerText.includes('letter') || lowerText.includes('scroll');
 
         // Determine target mission based on what player mentioned
-        let targetMission = activeMission;
-        if (mentionsLetter && !areAllMissionsCompleted()) {
-          targetMission = MISSIONS.find(m => m.id === KING_LETTER_MISSION.id) || activeMission;
-        } else if (mentionsKey && !areAllMissionsCompleted()) {
-          targetMission = MISSIONS.find(m => m.id === KING_COPPER_KEY_MISSION.id) || activeMission;
-        } else if (mentionsDragon && !areAllMissionsCompleted()) {
-          targetMission = MISSIONS.find(m => m.id === KING_RED_DRAGON_MISSION.id) || activeMission;
-        }
-
-        // Use target mission's strings and progress for responses
+        const targetMission = determineTargetMission(lowerText, activeMission);
         const targetStrings = buildStrings(targetMission);
         const targetProgress = getMissionProgress(targetMission);
 
         // Handle pending key confirmation (yes/no after "Have you found my key?")
-        if (kingChatState.awaitingKeyConfirm && currentProgress.accepted && !currentProgress.completed && activeMission) {
-          if (lowerText.includes('yes')) {
-            let hasItems = false;
-            if (activeMission.id === KING_COPPER_KEY_MISSION.id) {
-              hasItems = await hasCopperKeyInInventory();
-            } else if (activeMission.id === KING_RED_DRAGON_MISSION.id) {
-              hasItems = await hasRedDragonMaterials();
-            } else if (activeMission.id === KING_LETTER_MISSION.id) {
-              // For letter mission, check if letter has been delivered to Al Dee
-              // TODO: Implement proper letter delivery tracking
-              hasItems = false; // Placeholder - letter delivery not yet implemented
-            } else {
-              hasItems = false;
-            }
-            if (hasItems) {
-              queueKingReply(kingStrings.keyComplete, { onDone: async () => {
-                if (activeMission.rewardCoins > 0) {
-                  await awardGuildCoins(activeMission.rewardCoins);
-                  await updateGuildCoinDisplay();
-                }
-                await completeKingTibianusQuest();
-              } });
-            } else {
-              queueKingReply(kingStrings.keyScoldNoKey, { closeAfterMs: 2000 });
-            }
-            kingChatState.awaitingKeyConfirm = false;
-            textarea.value = '';
-            textarea.style.height = '27px';
-            return;
-          }
-          if (lowerText.includes('no')) {
-            queueKingReply(kingStrings.keyKeepSearching);
-            kingChatState.awaitingKeyConfirm = false;
-            textarea.value = '';
-            textarea.style.height = '27px';
-            return;
-          }
-          queueKingReply(kingStrings.keyAnswerYesNo);
-          textarea.value = '';
-          textarea.style.height = '27px';
+        if (await handleKeyConfirmation(lowerText, activeMission, kingStrings)) {
           return;
         }
 
         // Mission acceptance handler
-        if (kingChatState.missionOffered && kingChatState.offeredMission && lowerText.includes('yes')) {
-          const offeredProgress = getMissionProgress(kingChatState.offeredMission);
-          if (!offeredProgress.accepted && !offeredProgress.completed) {
-            kingChatState.missionOffered = false;
-            const offeredMissionToStart = kingChatState.offeredMission;
-            const offeredStrings = buildStrings(offeredMissionToStart);
-            queueKingReply(offeredStrings.thankYou, { onDone: async () => {
-              // Start the offered mission
-              await startKingTibianusQuestForMission(offeredMissionToStart);
-              kingChatState.offeredMission = null;
-            } });
-            latestMessage = null;
-            pendingResponseTimeout = null;
-            textarea.value = '';
-            textarea.style.height = '27px';
-            return;
-          }
+        if (handleMissionAcceptance(lowerText)) {
+          return;
         }
 
         let kingResponse = '';
@@ -5006,8 +6706,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             kingChatState.awaitingKeyConfirm = true;
             kingChatState.offeredMission = targetMission;
             queueKingReply(targetStrings.keyQuestion);
-            textarea.value = '';
-            textarea.style.height = '27px';
+            clearTextarea();
             return;
           } else {
             kingResponse = targetStrings.missionPrompt;
@@ -5051,77 +6750,18 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           kingChatState.offeredMission = null;
         }
         
-        // Store the latest message
-        latestMessage = {
-          text: text,
-          playerName: playerName,
-          response: kingResponse
-        };
-        
-        // Set new timeout for response (1 second delay)
-        pendingResponseTimeout = setTimeout(() => {
-          // Only respond if this is still the latest message
-          if (latestMessage && latestMessage.text === text) {
-            addMessageToConversation('King Tibianus', latestMessage.response, true);
-            
-            // Check if message contains "bye" (keyword matching like response system)
-            const isBye = text.toLowerCase().includes('bye');
-            if (isBye) {
-              setTimeout(() => {
-                // Close modal by finding the dialog and closing it
-                const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-                if (dialog) {
-                  // Try to find and click the close button (primary button with "Close" text)
-                  const buttons = dialog.querySelectorAll('button');
-                  let closeButton = null;
-                  for (const btn of buttons) {
-                    if (btn.textContent && btn.textContent.trim().toLowerCase() === 'close') {
-                      closeButton = btn;
-                      break;
-                    }
-                  }
-                  
-                  if (closeButton) {
-                    closeButton.click();
-                  } else {
-                    // Fallback: dispatch ESC key events
-                    for (let i = 0; i < 3; i++) {
-                      setTimeout(() => {
-                        document.dispatchEvent(new KeyboardEvent('keydown', { 
-                          key: 'Escape', 
-                          keyCode: 27, 
-                          which: 27, 
-                          bubbles: true,
-                          cancelable: true
-                        }));
-                      }, i * 50);
-                    }
-                  }
-                } else {
-                  // If dialog not found, try ESC events anyway
-                  for (let i = 0; i < 3; i++) {
-                    setTimeout(() => {
-                      document.dispatchEvent(new KeyboardEvent('keydown', { 
-                        key: 'Escape', 
-                        keyCode: 27, 
-                        which: 27, 
-                        bubbles: true,
-                        cancelable: true
-                      }));
-                    }, i * 50);
-                  }
-                }
-              }, 1000); // Wait 1 extra second after response
-            }
-            
-            latestMessage = null;
-          }
-          pendingResponseTimeout = null;
-        }, 1000);
+        // Queue response with cooldown
+        const isBye = text.toLowerCase().includes('bye');
+        tibianusCooldown.queueResponse(
+          text,
+          kingResponse,
+          addMessageToConversation,
+          'King Tibianus',
+          isBye ? () => ModalHelpers.closeModal(1000) : null
+        );
         
         // Clear input
-        textarea.value = '';
-        textarea.style.height = '27px';
+        clearTextarea();
         
       }
       
@@ -5219,6 +6859,51 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     }, 50);
   }
 
+  // Shared inventory check functions for both King Tibianus and Al Dee handlers
+  async function hasLightShovelInInventory() {
+    try {
+      const items = await getQuestItems(false);
+      return (items && items['Light Shovel'] > 0);
+    } catch (error) {
+      console.error('[Quests Mod] Error checking Light Shovel in inventory:', error);
+      return false;
+    }
+  }
+
+  async function hasElvenhairRopeInInventory() {
+    try {
+      const items = await getQuestItems(false);
+      return (items && items['Elvenhair Rope'] > 0);
+    } catch (error) {
+      console.error('[Quests Mod] Error checking Elvenhair Rope in inventory:', error);
+      return false;
+    }
+  }
+
+  // Migration function to convert old Dwarven Pickaxe to Light Shovel
+  async function migrateDwarvenPickaxeToLightShovel() {
+    try {
+      console.log('[Quests Mod] Checking for Dwarven Pickaxe migration...');
+      const items = await getQuestItems(false);
+
+      if (items && items['Dwarven Pickaxe'] > 0) {
+        console.log('[Quests Mod] Found Dwarven Pickaxe, migrating to Light Shovel...');
+
+        // Consume the old Dwarven Pickaxe
+        await consumeQuestItem('Dwarven Pickaxe', items['Dwarven Pickaxe']);
+
+        // Add the new Light Shovel
+        await addQuestItem('Light Shovel', items['Dwarven Pickaxe']);
+
+        console.log('[Quests Mod] Successfully migrated', items['Dwarven Pickaxe'], 'Dwarven Pickaxe to Light Shovel');
+      } else {
+        console.log('[Quests Mod] No Dwarven Pickaxe found, no migration needed');
+      }
+    } catch (error) {
+      console.error('[Quests Mod] Error during Dwarven Pickaxe migration:', error);
+    }
+  }
+
   // Al Dee Modal (similar to King Tibianus modal)
   function showAlDeeModal() {
     // Clear any pending modal timeouts
@@ -5286,6 +6971,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         offeringFishingMission: false,
         awaitingAxeConfirm: false
       };
+
+      // Create cooldown manager for Al Dee conversation
+      const alDeeCooldown = createNPCCooldownManager(1000);
 
       // Function to add message to conversation
       function addMessageToConversation(sender, text, isAlDee = false) {
@@ -5572,6 +7260,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         // Add player message to conversation
         addMessageToConversation(playerName, text, false);
 
+        // Clear any pending response timeout
+        alDeeCooldown.clearPendingResponse();
+
         // Clear input
         textarea.value = '';
 
@@ -5624,10 +7315,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               // Mark mission as completed
               missionCompleted = true;
 
-              // Queue special mission completion response
-              setTimeout(() => {
-                addMessageToConversation('Al Dee', 'Ah, finally! The king\'s stamped letter. Thank you for delivering it, ' + playerName + '. Here\'s 50 guild coins as a reward for your service.', true);
-              }, 1000);
+              // Queue response with cooldown
+              alDeeCooldown.queueResponse(
+                text,
+                'Ah, finally! The king\'s stamped letter. Thank you for delivering it, ' + playerName + '. Here\'s 50 guild coins as a reward for your service.',
+                addMessageToConversation,
+                'Al Dee'
+              );
 
               return; // Exit early, don't show regular transcript response
             }
@@ -5649,13 +7343,13 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               showSmallAxeReturnedToast();
               console.log('[Quests Mod][Al Dee] Small Axe returned, consuming from inventory');
 
-              // Award Dwarven Pickaxe
+              // Award Light Shovel
               try {
-                await addQuestItem('Dwarven Pickaxe', 1);
-                showQuestItemNotification('Dwarven Pickaxe', 1);
-                console.log('[Quests Mod][Al Dee] Awarded Dwarven Pickaxe for axe return');
+                await addQuestItem('Light Shovel', 1);
+                showQuestItemNotification('Light Shovel', 1);
+                console.log('[Quests Mod][Al Dee] Awarded Light Shovel for axe return');
               } catch (error) {
-                console.error('[Quests Mod][Al Dee] Error awarding Dwarven Pickaxe:', error);
+                console.error('[Quests Mod][Al Dee] Error awarding Light Shovel:', error);
               }
 
               // Mark mission as completed
@@ -5664,11 +7358,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
               // Save progress to Firebase
               if (playerName) {
+                // Fetch existing progress to preserve mornenion field
+                const existingProgress = await getKingTibianusProgress(playerName);
                 await saveKingTibianusProgress(playerName, {
                   copper: kingChatState.progressCopper,
                   dragon: kingChatState.progressDragon,
                   letter: kingChatState.progressLetter,
-                  alDeeFishing: kingChatState.progressAlDeeFishing
+                  alDeeFishing: kingChatState.progressAlDeeFishing,
+                  mornenion: existingProgress.mornenion || { defeated: false } // Preserve Mornenion defeat status
                 });
                 console.log('[Quests Mod][Al Dee] Fishing mission progress saved to Firebase');
               }
@@ -5676,17 +7373,24 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               // Update guild coin display
               updateGuildCoinDisplay();
 
-              // Queue special mission completion response
-              setTimeout(() => {
-                addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.complete.replace('Player', playerName), true);
-              }, 1000);
+              // Queue response with cooldown
+              alDeeCooldown.queueResponse(
+                text,
+                AL_DEE_FISHING_MISSION.complete.replace('Player', playerName),
+                addMessageToConversation,
+                'Al Dee'
+              );
 
               return; // Exit early, don't show regular transcript response
             } else if (alDeeChatState.awaitingAxeConfirm) {
               // Player said yes but has no Small Axe
-              setTimeout(() => {
-                addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.missingItem, true);
-              }, 1000);
+              alDeeCooldown.queueResponse(
+                text,
+                AL_DEE_FISHING_MISSION.missingItem,
+                addMessageToConversation,
+                'Al Dee'
+              );
+
               alDeeChatState.awaitingAxeConfirm = false;
               return;
             }
@@ -5695,13 +7399,119 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           }
         }
 
+        // Handle golden rope mission completion
+          // Check for "yes" when awaiting rope confirmation (must be checked before other "yes" handlers)
+          if (lowerText.includes('yes') && alDeeChatState.awaitingRopeConfirm) {
+            try {
+              // Player claims to have the elvenhair rope
+              const currentProducts = await getQuestItems();
+              const hasRope = (currentProducts['Elvenhair Rope'] || 0) > 0;
+
+              if (hasRope) {
+                // Verify that Mornenion was defeated before allowing completion
+                const mornenionDefeated = await isMornenionDefeated();
+                if (!mornenionDefeated) {
+                  console.log('[Quests Mod][Al Dee] Player has rope but Mornenion not defeated');
+                  alDeeCooldown.queueResponse(
+                    text,
+                    'You have the rope, but you must first defeat Mornenion in the depths below!',
+                    addMessageToConversation,
+                    'Al Dee'
+                  );
+                  alDeeChatState.awaitingRopeConfirm = false;
+                  return;
+                }
+
+                console.log('[Quests Mod][Al Dee] Elvenhair rope returned, consuming from inventory');
+
+                // Consume elvenhair rope from inventory
+                try {
+                  await consumeQuestItem('Elvenhair Rope', 1);
+                  console.log('[Quests Mod][Al Dee] Elvenhair rope consumed from inventory');
+                } catch (error) {
+                  console.error('[Quests Mod][Al Dee] Error consuming elvenhair rope:', error);
+                }
+
+                // Award The Holy Tible as reward
+                try {
+                  await addQuestItem('The Holy Tible', 1);
+                  showQuestItemNotification('The Holy Tible', 1);
+                  console.log('[Quests Mod][Al Dee] Awarded The Holy Tible for golden rope mission completion');
+                } catch (error) {
+                  console.error('[Quests Mod][Al Dee] Error awarding The Holy Tible:', error);
+                }
+
+                // Mark mission as completed
+                setMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION, { accepted: true, completed: true });
+                console.log('[Quests Mod][Al Dee] Golden rope mission completed');
+
+                // Save progress to Firebase using registry (future-proof)
+                if (playerName) {
+                  // Fetch existing progress to preserve mornenion field
+                  const existingProgress = await getKingTibianusProgress(playerName);
+                  const allProgress = getAllMissionProgress();
+                  
+                  // Include ironOre if it exists in fishingState
+                  if (fishingState.ironOreQuestActive !== undefined || fishingState.ironOreQuestCompleted) {
+                    allProgress.ironOre = {
+                      active: fishingState.ironOreQuestActive || false,
+                      startTime: fishingState.ironOreQuestStartTime || null,
+                      completed: fishingState.ironOreQuestCompleted || false
+                    };
+                  }
+                  
+                  // Set Mornenion as defeated when golden rope mission is completed
+                  // (completing this mission means Mornenion was defeated to obtain the rope)
+                  allProgress.mornenion = { defeated: true };
+                  console.log('[Quests Mod][Al Dee] Mornenion marked as defeated - golden rope mission completed');
+                  
+                  await saveKingTibianusProgress(playerName, allProgress);
+                  console.log('[Quests Mod][Al Dee] Golden rope mission progress saved to Firebase');
+                }
+
+                // Update guild coin display
+                updateGuildCoinDisplay();
+
+                // Queue response with cooldown
+                alDeeCooldown.queueResponse(
+                  text,
+                  AL_DEE_GOLDEN_ROPE_MISSION.complete.replace('Player', playerName),
+                  addMessageToConversation,
+                  'Al Dee'
+                );
+
+                alDeeChatState.awaitingRopeConfirm = false;
+                return; // Exit early, don't show regular transcript response
+              } else {
+                // Player said yes but has no elvenhair rope
+                alDeeCooldown.queueResponse(
+                  text,
+                  AL_DEE_GOLDEN_ROPE_MISSION.missingItem,
+                  addMessageToConversation,
+                  'Al Dee'
+                );
+
+                alDeeChatState.awaitingRopeConfirm = false;
+                return;
+              }
+            } catch (error) {
+              console.error('[Quests Mod][Al Dee] Error handling golden rope mission:', error);
+            }
+          }
+
         // Check for mission acceptance
         if (lowerText.includes('yes') && alDeeChatState.offeringFishingMission) {
           // Start the fishing mission
           setMissionProgress(AL_DEE_FISHING_MISSION, { accepted: true, completed: false });
-          setTimeout(() => {
-            addMessageToConversation('Al Dee', AL_DEE_FISHING_MISSION.accept, true);
-          }, 1000);
+          
+          // Queue response with cooldown
+          alDeeCooldown.queueResponse(
+            text,
+            AL_DEE_FISHING_MISSION.accept,
+            addMessageToConversation,
+            'Al Dee'
+          );
+
           alDeeChatState.offeringFishingMission = false;
 
           // Save progress
@@ -5710,7 +7520,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
               copper: kingChatState.progressCopper,
               dragon: kingChatState.progressDragon,
               letter: kingChatState.progressLetter,
-              alDeeFishing: kingChatState.progressAlDeeFishing
+              alDeeFishing: kingChatState.progressAlDeeFishing,
+              alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
             });
             console.log('[Quests Mod][Al Dee] Fishing mission accepted, progress saved to Firebase');
           }
@@ -5718,15 +7529,131 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           return;
         }
 
+        // Check for golden rope mission acceptance
+        if (lowerText.includes('yes') && alDeeChatState.offeringRopeMission) {
+          // Start the golden rope mission
+          setMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION, { accepted: true, completed: false });
+          
+          // Queue response with cooldown
+          alDeeCooldown.queueResponse(
+            text,
+            AL_DEE_GOLDEN_ROPE_MISSION.accept,
+            addMessageToConversation,
+            'Al Dee'
+          );
+
+          alDeeChatState.offeringRopeMission = false;
+
+          // Save progress - fetch current progress first to preserve all fields, then merge
+          if (playerName) {
+            try {
+              const currentProgress = await getKingTibianusProgress(playerName);
+              await saveKingTibianusProgress(playerName, {
+                copper: kingChatState.progressCopper,
+                dragon: kingChatState.progressDragon,
+                letter: kingChatState.progressLetter,
+                alDeeFishing: kingChatState.progressAlDeeFishing,
+                alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope, // This should now have accepted: true
+                mornenion: currentProgress.mornenion || { defeated: false } // Preserve Mornenion defeat status
+              });
+              console.log('[Quests Mod][Al Dee] Golden rope mission accepted, progress saved to Firebase', {
+                saved: {
+                  alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
+                },
+                currentProgress: currentProgress
+              });
+            } catch (error) {
+              console.error('[Quests Mod][Al Dee] Error saving golden rope mission progress:', error);
+            }
+          }
+
+          return;
+        }
+
+        // Check for golden rope mission keywords (rope/elvenhair rope)
+        // If mission is active, player has rope, and Mornenion is defeated, ask if they want to return it
+        if ((lowerText.includes('elvenhair rope') || lowerText.includes('rope')) && 
+            !lowerText.includes('yes') && !alDeeChatState.awaitingRopeConfirm) {
+          try {
+            const missionProgress = getMissionProgress(AL_DEE_GOLDEN_ROPE_MISSION);
+            // Only handle if mission is accepted but not completed
+            if (missionProgress.accepted && !missionProgress.completed) {
+              const currentProducts = await getQuestItems();
+              const hasRope = (currentProducts['Elvenhair Rope'] || 0) > 0;
+              
+              if (hasRope) {
+                const mornenionDefeated = await isMornenionDefeated();
+                // If player has the rope, they must have defeated Mornenion (rope is only obtained from victory)
+                // So we can proceed to ask if they want to return it
+                // However, we still verify the flag is set for proper quest tracking
+                if (mornenionDefeated) {
+                  // Ask if they want to return the rope
+                  alDeeChatState.awaitingRopeConfirm = true;
+                  alDeeCooldown.queueResponse(
+                    text,
+                    AL_DEE_GOLDEN_ROPE_MISSION.askForItem.replace('Player', playerName),
+                    addMessageToConversation,
+                    'Al Dee'
+                  );
+                  return; // Exit early, don't show regular transcript response
+                } else {
+                  // Player has rope but flag not set - this shouldn't happen normally
+                  // But if it does (e.g., dev command), set the flag and proceed
+                  console.warn('[Quests Mod][Al Dee] Player has rope but Mornenion flag not set - setting flag and proceeding');
+                  const playerNameForFlag = getCurrentPlayerName();
+                  if (playerNameForFlag) {
+                    try {
+                      const existingProgress = await getKingTibianusProgress(playerNameForFlag);
+                      const mergedProgress = {
+                        ...existingProgress,
+                        mornenion: {
+                          defeated: true
+                        }
+                      };
+                      await saveKingTibianusProgress(playerNameForFlag, mergedProgress);
+                      console.log('[Quests Mod][Al Dee] Mornenion defeated flag set retroactively');
+                    } catch (error) {
+                      console.error('[Quests Mod][Al Dee] Error setting Mornenion flag:', error);
+                    }
+                  }
+                  // Now ask if they want to return the rope
+                  alDeeChatState.awaitingRopeConfirm = true;
+                  alDeeCooldown.queueResponse(
+                    text,
+                    AL_DEE_GOLDEN_ROPE_MISSION.askForItem.replace('Player', playerName),
+                    addMessageToConversation,
+                    'Al Dee'
+                  );
+                  return; // Exit early, don't show regular transcript response
+                }
+              }
+            }
+          } catch (error) {
+            console.error('[Quests Mod][Al Dee] Error handling rope keyword:', error);
+          }
+        }
+
         // Check for mission offer trigger
         if (lowerText.includes('mission') || lowerText.includes('missions') ||
             lowerText.includes('task') || lowerText.includes('quest') || lowerText.includes('help')) {
           // Al Dee's missions only (can be expanded in the future)
-          const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION];
+          const AL_DEE_MISSIONS = [AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
 
-          function currentAlDeeMission() {
+          async function currentAlDeeMission() {
             // Return the first incomplete mission, or null if all are completed
             for (const mission of AL_DEE_MISSIONS) {
+              // Check prerequisites for golden rope mission
+              if (mission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+                // Must have completed fishing mission AND have Light Shovel
+                if (!kingChatState.progressAlDeeFishing.completed) {
+                  continue; // Skip this mission if fishing mission not completed
+                }
+                const hasShovel = await hasLightShovelInInventory();
+                if (!hasShovel) {
+                  continue; // Skip this mission if no Light Shovel
+                }
+              }
+
               if (!getMissionProgress(mission).completed) {
                 return mission;
               }
@@ -5764,29 +7691,39 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             };
           }
 
-          const activeMission = currentAlDeeMission();
+          const activeMission = await currentAlDeeMission();
           const strings = buildAlDeeStrings(activeMission);
 
+          let responseText = '';
           if (!activeMission) {
             // All Al Dee missions completed
-            setTimeout(() => {
-              addMessageToConversation('Al Dee', strings.missionPrompt, true);
-            }, 1000);
+            responseText = strings.missionPrompt;
           } else {
             const missionProgress = getMissionProgress(activeMission);
 
             if (missionProgress.accepted) {
-              setTimeout(() => {
-                addMessageToConversation('Al Dee', strings.missionActive, true);
-              }, 1000);
+              responseText = strings.missionActive;
             } else {
-              // Offer the mission with a 1 second delay
-              setTimeout(() => {
-                addMessageToConversation('Al Dee', strings.missionPrompt, true);
-              }, 1000);
-              alDeeChatState.offeringFishingMission = true;
+              // Offer the mission
+              responseText = strings.missionPrompt;
+
+              // Set appropriate offering flag based on mission
+              if (activeMission.id === AL_DEE_FISHING_MISSION.id) {
+                alDeeChatState.offeringFishingMission = true;
+              } else if (activeMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+                alDeeChatState.offeringRopeMission = true;
+              }
             }
           }
+
+          // Queue response with cooldown
+          alDeeCooldown.queueResponse(
+            text,
+            responseText,
+            addMessageToConversation,
+            'Al Dee'
+          );
+
           return;
         }
 
@@ -5799,26 +7736,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
         // Check if this is a bye message to close the modal
         const isBye = lowerText.includes('bye');
-        if (isBye) {
-          // Close modal after a short delay
-          setTimeout(() => {
-            if (modalRef?.close) {
-              modalRef.close();
-            } else {
-              const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
-              if (dialog && dialog.parentNode) {
-                dialog.parentNode.removeChild(dialog);
-              } else {
-                closeDialogWithFallback(0);
-              }
-            }
-          }, 2000);
-        }
-
-        // Queue Al Dee's response with a delay
-        setTimeout(() => {
-          addMessageToConversation('Al Dee', alDeeResponse, true);
-        }, 1000);
+        
+        // Queue response with cooldown
+        alDeeCooldown.queueResponse(
+          text,
+          alDeeResponse,
+          addMessageToConversation,
+          'Al Dee',
+          isBye ? () => ModalHelpers.closeModal(1000) : null
+        );
       }
 
       sendButton.addEventListener('click', sendMessageToAlDee);
@@ -5835,6 +7761,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       let customFooter = null;
       let customSeparator = null;
       let guildCoinAmountSpan = null;
+
+      function closeDialogWithFallback(delayMs = 0) {
+        ModalHelpers.closeModal(delayMs);
+      }
 
       function removeDefaultModalFooter(dialog) {
         try {
@@ -6497,22 +8427,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     console.log('[Quests Mod] Quest log monitoring stopped');
   }
 
-  // Helper functions for mission progress
+  // Helper functions for mission progress (wrappers around MissionManager)
+  // Note: MissionManager is defined earlier in the file - these functions delegate to it
+  // Keeping function declarations here for backward compatibility and closure access
   function getMissionProgress(mission) {
-    if (!mission) return { accepted: false, completed: false };
-    if (mission.id === KING_COPPER_KEY_MISSION.id) return kingChatState.progressCopper;
-    if (mission.id === KING_RED_DRAGON_MISSION.id) return kingChatState.progressDragon;
-    if (mission.id === KING_LETTER_MISSION.id) return kingChatState.progressLetter;
-    if (mission.id === AL_DEE_FISHING_MISSION.id) return kingChatState.progressAlDeeFishing;
-    return { accepted: false, completed: false };
+    return MissionManager.getProgress(mission);
   }
 
   function setMissionProgress(mission, progress) {
-    if (!mission) return;
-    if (mission.id === KING_COPPER_KEY_MISSION.id) kingChatState.progressCopper = progress;
-    if (mission.id === KING_RED_DRAGON_MISSION.id) kingChatState.progressDragon = progress;
-    if (mission.id === KING_LETTER_MISSION.id) kingChatState.progressLetter = progress;
-    if (mission.id === AL_DEE_FISHING_MISSION.id) kingChatState.progressAlDeeFishing = progress;
+    MissionManager.setProgress(mission, progress);
   }
 
   // =======================
@@ -6608,7 +8531,8 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         'king_copper_key': 'progressCopper',
         'king_red_dragon': 'progressDragon',
         'king_letter_al_dee': 'progressLetter',
-        'al_dee_fishing_gold': 'progressAlDeeFishing'
+        'al_dee_fishing_gold': 'progressAlDeeFishing',
+        'al_dee_golden_rope': 'progressAlDeeGoldenRope'
       };
 
       const stateKey = missionMap[missionId];
@@ -6626,11 +8550,27 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
         copper: kingChatState.progressCopper,
         dragon: kingChatState.progressDragon,
         letter: kingChatState.progressLetter,
-        alDeeFishing: kingChatState.progressAlDeeFishing
+        alDeeFishing: kingChatState.progressAlDeeFishing,
+        alDeeGoldenRope: kingChatState.progressAlDeeGoldenRope
       };
 
       await saveKingTibianusProgress(playerName, progress);
       console.log('[Quests Mod][Dev] Quest reset saved to Firebase for', missionId);
+
+      // If resetting golden rope quest and it's not accepted/completed, remove Elvenhair Rope from inventory
+      if (missionId === 'al_dee_golden_rope') {
+        const goldenRopeProgress = kingChatState.progressAlDeeGoldenRope;
+        if (!goldenRopeProgress.accepted && !goldenRopeProgress.completed) {
+          // Get current quest items to check if player has Elvenhair Rope
+          const questItems = await getQuestItems(false);
+          const elvenhairRopeCount = questItems['Elvenhair Rope'] || 0;
+          if (elvenhairRopeCount > 0) {
+            // Remove all Elvenhair Rope from inventory
+            await consumeQuestItem('Elvenhair Rope', elvenhairRopeCount);
+            console.log('[Quests Mod][Dev] Removed Elvenhair Rope from inventory (count:', elvenhairRopeCount, ')');
+          }
+        }
+      }
 
       // Force update UI state
       updateTile79RightClickState();
@@ -6661,6 +8601,7 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       kingChatState.progressDragon = { accepted: false, completed: false };
       kingChatState.progressLetter = { accepted: false, completed: false };
       kingChatState.progressAlDeeFishing = { accepted: false, completed: false };
+      kingChatState.progressAlDeeGoldenRope = { accepted: false, completed: false };
       console.log('[Quests Mod][Dev] Local quest state reset');
 
       // Delete quest progress from Firebase
@@ -6706,7 +8647,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     // Subscribe to board state changes to detect room changes
     if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
       tile79BoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
-        console.log('[Quests Mod][Tile 79] Board state changed, checking conditions');
         updateTile79RightClickState(boardContext);
       });
       console.log('[Quests Mod][Tile 79] Board subscription set up');
@@ -6715,7 +8655,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     // Subscribe to player state changes to detect inventory changes (Stamped Letter)
     if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
       tile79PlayerSubscription = globalThis.state.player.subscribe((playerState) => {
-        console.log('[Quests Mod][Tile 79] Player state changed, checking conditions');
         updateTile79RightClickState();
       });
       console.log('[Quests Mod][Tile 79] Player subscription set up');
@@ -6723,12 +8662,999 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
     // Initial check when subscriptions are set up
     setTimeout(() => {
-      console.log('[Quests Mod][Tile 79] Initial state check');
       updateTile79RightClickState();
     }, 500);
 
     console.log('[Quests Mod][Tile 79] Event-driven subscriptions set up');
     console.log('[Quests Mod][Tile 79] Will respond to: room changes (board state) and inventory changes (player state)');
+  }
+
+  // Start MutationObserver for continuous cleanup in Ab'Dendriel area
+  function startAbDendrielMutationObserver() {
+    // Clean up existing observer first to ensure fresh state
+    if (abDendrielMutationObserver) {
+      stopAbDendrielMutationObserver();
+    }
+
+    abDendrielMutationObserver = new MutationObserver((mutations) => {
+      let needsCleanup = false;
+
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // Check for quest overlays
+            if (node.textContent && node.textContent.includes('Ab\'Dendriel') && node.textContent.includes('Monsters')) {
+              needsCleanup = true;
+            }
+            // Check for game mode selector buttons
+            if (node.querySelector && node.querySelector('img[alt="Sandbox"], img[alt="Manual"], img[alt="Autoplay"]')) {
+              needsCleanup = true;
+            }
+            // Check within added element for these elements
+            const questOverlays = node.querySelectorAll ? node.querySelectorAll('*') : [];
+            questOverlays.forEach(el => {
+              if (el.textContent && el.textContent.includes('Ab\'Dendriel') && el.textContent.includes('Monsters')) {
+                needsCleanup = true;
+              }
+            });
+          }
+        });
+      });
+
+      if (needsCleanup) {
+        console.log('[Quests Mod][Overlay Hider] MutationObserver detected new elements - cleaning up');
+        hideQuestOverlays();
+        hideHeroEditorButton();
+
+        // Re-hide game mode selector buttons
+        const modeButtons = document.querySelectorAll('button img[alt="Sandbox"], button img[alt="Manual"], button img[alt="Autoplay"]');
+        modeButtons.forEach(button => {
+          const btn = button.closest('button');
+          if (btn) {
+            btn.style.display = 'none';
+          }
+        });
+      }
+    });
+
+    abDendrielMutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    console.log('[Quests Mod][Overlay Hider] MutationObserver started for Ab\'Dendriel area');
+  }
+
+  // Start game timer subscription for sandbox mode battle detection
+  function startGameTimerSubscription() {
+    // Clean up existing subscription first to ensure fresh state
+    if (gameTimerSubscription) {
+      stopGameTimerSubscription();
+    }
+
+    gameTimerSubscription = globalThis.state.gameTimer.subscribe((timerState) => {
+      const { state } = timerState.context;
+
+      // Check if battle just completed (state changed from 'initial' to victory/defeat)
+      if (state !== 'initial') {
+        // Only perform villain cleanup if we're in Ab'Dendriel area
+        const boardContext = globalThis.state.board.getSnapshot().context;
+        const currentRoomId = getCurrentRoomId(boardContext);
+        const roomNames = globalThis.state?.utils?.ROOM_NAME;
+        const currentRoomName = roomNames?.[currentRoomId];
+
+        if (!(currentRoomName && currentRoomName.toLowerCase().includes('ab\'dendriel') && playerUsedHoleToAbDendriel)) {
+          // Not in Ab'Dendriel area or didn't use the hole - skip villain cleanup
+          return;
+        }
+
+        console.log('[Quests Mod][Overlay Hider] Battle completed in Ab\'Dendriel area - ensuring proper board state');
+
+        // Ensure Mornenion is still on the board and original villains are removed after battle
+        const boardConfig = boardContext.boardConfig || [];
+
+        // Skip cleanup if board is empty (fresh entry state)
+        if (boardConfig.length === 0) {
+          console.log('[Quests Mod][Overlay Hider] Board is empty after battle - skipping cleanup (fresh entry)');
+          return;
+        }
+
+        let needsUpdate = false;
+        const updatedConfig = [...boardConfig];
+
+        // Check if Mornenion exists
+        const mornenionExists = updatedConfig.some(entity =>
+          entity.key && entity.key.startsWith('mornenion-tile-19-')
+        );
+
+        // Only add if missing and not currently adding (prevent rapid re-additions)
+        // Also check if player actually used hole to Mornenion (battle should be initialized)
+        const now = Date.now();
+        const timeSinceLastAdd = now - lastVillainAddTime;
+        if (!mornenionExists && !isAddingVillains && timeSinceLastAdd > 500 && playerUsedHoleToMornenion && mornenionBattle) {
+          console.log('[Quests Mod][Overlay Hider] Mornenion missing after battle - re-adding');
+          isAddingVillains = true;
+          lastVillainAddTime = now;
+          
+          // Add Mornenion back by calling the function that handles this
+          setTimeout(() => {
+            addSpecificVillains();
+            // Reset flag after a delay
+            setTimeout(() => {
+              isAddingVillains = false;
+            }, 300);
+          }, 100);
+          return; // Skip the rest of this cycle since board state changed
+        } else if (!mornenionExists && (isAddingVillains || timeSinceLastAdd <= 500)) {
+          // Silently skip if already adding or too soon
+          return;
+        }
+
+        // Only filter if we detect original villains that shouldn't be there
+        const hasOriginalVillains = updatedConfig.some(entity => 
+          entity.type === 'file' && entity.villain === true &&
+          !(entity.key && (entity.key.startsWith('mornenion-tile-19-') || entity.key.startsWith('lavahole-tile-')))
+        );
+
+        if (hasOriginalVillains) {
+          console.log('[Quests Mod][Overlay Hider] Detected original villains after battle - filtering them out');
+          
+          // Remove any original villains that reappeared (like the Wasp)
+          const filteredConfig = updatedConfig.filter(entity => {
+            // Keep Mornenion and Lavaholes
+            if (entity.key && (entity.key.startsWith('mornenion-tile-19-') || entity.key.startsWith('lavahole-tile-'))) {
+              return true;
+            }
+            // Keep custom entities that are allies (our Lavaholes)
+            if (entity.type === 'custom' && entity.villain === false && entity.gameId === 70) {
+              return true;
+            }
+            // Remove original file-based entities that are villains (like the Wasp)
+            if (entity.type === 'file' && entity.villain === true) {
+              console.log('[Quests Mod][Overlay Hider] Removing reappeared villain after battle:', entity.key);
+              needsUpdate = true;
+              return false;
+            }
+            // Keep everything else (allies, etc.)
+            return true;
+          });
+
+          if (needsUpdate) {
+            globalThis.state.board.send({
+              type: 'setState',
+              fn: (prev) => ({
+                ...prev,
+                boardConfig: filteredConfig
+              })
+            });
+          }
+        }
+      }
+    });
+
+    console.log('[Quests Mod][Overlay Hider] GameTimer subscription started');
+  }
+
+  // Stop game timer subscription
+  function stopGameTimerSubscription() {
+    if (gameTimerSubscription) {
+      console.log('[Quests Mod][Overlay Hider] Stopping GameTimer subscription');
+      gameTimerSubscription.unsubscribe();
+      gameTimerSubscription = null;
+    }
+  }
+
+  // Stop MutationObserver when leaving Ab'Dendriel area
+  function stopAbDendrielMutationObserver() {
+    if (abDendrielMutationObserver) {
+      console.log('[Quests Mod][Overlay Hider] Stopping MutationObserver');
+      abDendrielMutationObserver.disconnect();
+      abDendrielMutationObserver = null;
+    }
+  }
+
+  // Set up quest overlay hider to hide quest overlays in specific areas
+  function setupQuestOverlayHider() {
+    if (questOverlayHider) return;
+
+    // Subscribe to board state changes to detect room/map changes
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      questOverlayHider = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        try {
+          const currentRoomId = getCurrentRoomId(boardContext);
+          const roomNames = globalThis.state?.utils?.ROOM_NAME;
+          const currentRoomName = roomNames?.[currentRoomId];
+
+          // Get current board config
+          const boardConfig = boardContext.boardConfig || [];
+
+          // Check if battle has started (serverResults present) and we're in Ab'Dendriel area - re-cleanup
+          if (boardContext.serverResults && playerUsedHoleToAbDendriel && currentRoomName && currentRoomName.toLowerCase().includes('ab\'dendriel')) {
+            console.log('[Quests Mod][Overlay Hider] Battle started in Ab\'Dendriel area - re-hiding overlays and cleaning up');
+            hideQuestOverlays();
+            removeVillainsFromBoard();
+            // Hide Hero Editor button
+            hideHeroEditorButton();
+
+            // Re-hide game mode selector buttons
+            const modeButtons = document.querySelectorAll('button img[alt="Sandbox"], button img[alt="Manual"], button img[alt="Autoplay"]');
+            modeButtons.forEach(button => {
+              const btn = button.closest('button');
+              if (btn) {
+                btn.style.display = 'none';
+              }
+            });
+            console.log('[Quests Mod][Overlay Hider] Re-hidden game mode selector buttons after battle start');
+          }
+
+          // Check if we're leaving Ab'Dendriel area
+          if (currentRoomName && !currentRoomName.toLowerCase().includes('ab\'dendriel') && currentlyInAbDendriel) {
+            console.log('[Quests Mod][Overlay Hider] Leaving Ab\'Dendriel area - resetting state');
+            currentlyInAbDendriel = false;
+            stopAbDendrielMutationObserver();
+            stopGameTimerSubscription();
+            overlayHidingDone = false;
+            villainSetupDone = false;
+          }
+
+          // Check if we're in Ab'Dendriel Hive or related areas
+          if (currentRoomName && currentRoomName.toLowerCase().includes('ab\'dendriel') && playerUsedHoleToAbDendriel) {
+            // Initialize Mornenion battle if not already initialized (called when quest triggers)
+            // Note: Battle is usually initialized in mining handler before navigation, but this is a fallback
+            if (!mornenionBattle && playerUsedHoleToMornenion) {
+              console.log('[Quests Mod][Overlay Hider] Initializing Mornenion battle (fallback - should already be initialized)');
+              const initResult = initializeMornenionBattle();
+              if (initResult && initResult.then) {
+                // Async initialization - CustomBattles not ready yet, wait for it
+                initResult.then((battle) => {
+                  if (battle) {
+                    mornenionBattle = battle;
+                    mornenionBattle.setup(
+                      () => playerUsedHoleToMornenion,
+                      (toastData) => {
+                        showToast({ 
+                          message: toastData.message, 
+                          duration: toastData.duration || 3000, 
+                          logPrefix: '[Quests Mod][Mornenion]' 
+                        });
+                      }
+                    );
+                    setupMornenionTileRestrictions();
+                    console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
+                  } else {
+                    console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle after waiting');
+                  }
+                }).catch((error) => {
+                  console.error('[Quests Mod][Overlay Hider] Error initializing Mornenion battle:', error);
+                });
+              } else if (initResult) {
+                // Synchronous initialization - CustomBattles was ready immediately
+                mornenionBattle = initResult;
+                mornenionBattle.setup(
+                  () => playerUsedHoleToMornenion,
+                  (toastData) => {
+                    showToast({ 
+                      message: toastData.message, 
+                      duration: toastData.duration || 3000, 
+                      logPrefix: '[Quests Mod][Mornenion]' 
+                    });
+                  }
+                );
+                setupMornenionTileRestrictions();
+                console.log('[Quests Mod][Overlay Hider] Mornenion battle initialized successfully');
+              } else {
+                console.error('[Quests Mod][Overlay Hider] Failed to initialize Mornenion battle - CustomBattles not available');
+              }
+            }
+            
+            // We're entering/staying in Ab'Dendriel area
+            // Reset flags when transitioning into the area (entering for the first time)
+            if (!currentlyInAbDendriel) {
+              console.log('[Quests Mod][Overlay Hider] Entering Ab\'Dendriel area via hole - resetting flags and setting up special mode');
+              currentlyInAbDendriel = true;
+              // Reset flags to ensure fresh initialization
+              overlayHidingDone = false;
+              villainSetupDone = false;
+              isAddingVillains = false;
+              lastVillainAddTime = 0;
+              justRemovedVillains = false;
+              
+              // Start MutationObserver for continuous cleanup (only once when entering)
+              startAbDendrielMutationObserver();
+              // Start game timer subscription for sandbox battle detection (only once when entering)
+              startGameTimerSubscription();
+              // Hide Hero Editor button when entering hole area (only once when entering)
+              hideHeroEditorButton();
+            }
+
+            // Only log and perform setup once per session
+            if (!overlayHidingDone || !villainSetupDone) {
+              console.log('[Quests Mod][Overlay Hider] In Ab\'Dendriel area via hole - hiding overlays and removing villains');
+            }
+            // Look for and hide quest overlay elements (only once per session)
+            if (!overlayHidingDone) {
+              hideQuestOverlays();
+              overlayHidingDone = true;
+            }
+            // Remove all villains from the board (only once per session)
+            if (!villainSetupDone) {
+              removeVillainsFromBoard();
+              villainSetupDone = true;
+              // Set flag to skip Mornenion check immediately after removal
+              justRemovedVillains = true;
+              // Add villains immediately after removal (don't wait for subscription check)
+              isAddingVillains = true;
+              lastVillainAddTime = Date.now();
+              setTimeout(() => {
+                addSpecificVillains();
+                // Reset flags after a delay to allow board state to fully update
+                setTimeout(() => {
+                  isAddingVillains = false;
+                  justRemovedVillains = false;
+                }, 500); // Longer delay to prevent refresh loop
+              }, 50); // Very short delay to allow board state to settle
+            }
+
+            // Ensure Mornenion stays on the board and original villains stay removed throughout the session
+            // Skip check immediately after removing villains to prevent refresh loop
+            if (!justRemovedVillains && !isAddingVillains) {
+              // Check if Mornenion and Elves already exist BEFORE attempting to add
+              const mornenionExists = boardConfig.some(entity =>
+                entity.key && entity.key.startsWith('mornenion-tile-19-')
+              );
+              
+              const elvesExist = [2, 11, 137, 146].every(tileIndex =>
+                boardConfig.some(entity =>
+                  entity.key && entity.key.startsWith(`elf-tile-${tileIndex}-`)
+                )
+              );
+              
+              // If all creatures are already correctly placed, skip entirely
+              if (mornenionExists && elvesExist) {
+                // Creatures are already present, no need to do anything
+                return;
+              }
+              
+              // Only check if we're not currently adding villains and enough time has passed since last attempt
+              const now = Date.now();
+              const timeSinceLastAdd = now - lastVillainAddTime;
+              
+              // Consistent debounce delay for all entries
+              const minDelay = 300;
+              
+              // Only add if Mornenion is missing AND enough time has passed since last attempt
+              if (!mornenionExists && timeSinceLastAdd > minDelay) {
+                isAddingVillains = true;
+                lastVillainAddTime = now;
+                
+                // Use setTimeout to allow board state to settle before checking again
+                setTimeout(() => {
+                  addSpecificVillains();
+                  // Reset flag after a longer delay to allow board state to fully update
+                  setTimeout(() => {
+                    isAddingVillains = false;
+                  }, 500);
+                }, 100);
+              }
+              // Silently skip if too soon since last attempt or if already adding
+            }
+
+            // Only filter if board is not empty and we detect original villains that shouldn't be there
+            if (boardConfig.length > 0) {
+              // Check if there are any original file-based villains that need to be removed
+              const hasOriginalVillains = boardConfig.some(entity => 
+                entity.type === 'file' && entity.villain === true &&
+                !(entity.key && (entity.key.startsWith('mornenion-tile-19-') || entity.key.startsWith('lavahole-tile-')))
+              );
+
+              // Only filter if we detect original villains that shouldn't be there
+              if (hasOriginalVillains) {
+                // Remove any original villains that shouldn't be there (like the Wasp)
+                const filteredConfig = boardConfig.filter(entity => {
+                  // Keep Mornenion and Lavaholes
+                  if (entity.key && (entity.key.startsWith('mornenion-tile-19-') || entity.key.startsWith('lavahole-tile-'))) {
+                    return true;
+                  }
+                  // Keep custom entities that are allies (our Lavaholes)
+                  if (entity.type === 'custom' && entity.villain === false && entity.gameId === 70) {
+                    return true;
+                  }
+                  // Remove original file-based entities that are villains (like the Wasp)
+                  if (entity.type === 'file' && entity.villain === true) {
+                    return false;
+                  }
+                  // Keep everything else (allies, etc.)
+                  return true;
+                });
+
+                // Update board config if we filtered anything out
+                if (filteredConfig.length !== boardConfig.length) {
+                  globalThis.state.board.send({
+                    type: 'setState',
+                    fn: (prev) => ({
+                      ...prev,
+                      boardConfig: filteredConfig
+                    })
+                  });
+                }
+              }
+            }
+          } else if (currentRoomName && currentRoomName.toLowerCase().includes('ab\'dendriel') && !playerUsedHoleToAbDendriel) {
+            console.log('[Quests Mod][Overlay Hider] In Ab\'Dendriel area manually - NOT applying special mode');
+            // Don't hide overlays or remove villains for manual navigation
+          } else {
+            // We're leaving Ab'Dendriel area (or were never in it)
+            if (currentlyInAbDendriel) {
+              console.log('[Quests Mod][Overlay Hider] Leaving Ab\'Dendriel area, restoring original board setup');
+              // Stop MutationObserver when leaving
+              stopAbDendrielMutationObserver();
+              // Stop game timer subscription when leaving
+              stopGameTimerSubscription();
+              // Show Hero Editor button when leaving hole area
+              showHeroEditorButton();
+              // Cleanup all Mornenion quest state (includes restoreBoardSetup and showQuestOverlays)
+              cleanupMornenionQuest();
+              // Reset the flags when leaving
+              playerUsedHoleToAbDendriel = false;
+              villainSetupDone = false;
+              overlayHidingDone = false;
+              currentlyInAbDendriel = false;
+              // Reset villain addition flag
+              isAddingVillains = false;
+              lastVillainAddTime = 0;
+              // Reset just removed flag
+              justRemovedVillains = false;
+            }
+            // If we were never in Ab'Dendriel, do nothing
+          }
+        } catch (error) {
+          console.error('[Quests Mod][Overlay Hider] Error checking room:', error);
+        }
+      });
+      console.log('[Quests Mod][Overlay Hider] Quest overlay hider set up');
+    }
+  }
+
+  function hideQuestOverlays() {
+    // Look for elements with the classes from the HTML example
+    const overlays = document.querySelectorAll('.pointer-events-none.absolute.right-0.top-0.z-1');
+    overlays.forEach((overlay) => {
+      if (overlay.textContent.includes('Ab\'Dendriel') || overlay.textContent.includes('Monsters')) {
+        overlay.style.display = 'none';
+      }
+    });
+
+    // Alternative: look for elements containing the specific text
+    const allElements = document.querySelectorAll('*');
+    allElements.forEach(element => {
+      if (element.textContent &&
+          element.textContent.includes('Ab\'Dendriel') &&
+          element.textContent.includes('Monsters') &&
+          element.classList.contains('absolute')) {
+        element.style.display = 'none';
+      }
+    });
+
+    // Hide the floor selector UI (the vertical floor slider)
+    const floorContainers = document.querySelectorAll('.absolute.right-0.z-3');
+    floorContainers.forEach((container) => {
+      const hasFloorImages = container.querySelector('img[alt="Floor"]');
+      const hasRangeInput = container.querySelector('input[type="range"]');
+      const hasDataFloor = container.querySelector('[data-floor]');
+
+      if (hasFloorImages || hasRangeInput || hasDataFloor) {
+        container.style.display = 'none';
+      }
+    });
+
+    // Also try the specific data attribute approach as fallback
+    const dataFloorSelectors = document.querySelectorAll('[data-floor]');
+    dataFloorSelectors.forEach((selector) => {
+      const parentContainer = selector.closest('.absolute.right-0.z-3');
+      if (parentContainer && parentContainer.style.display !== 'none') {
+        parentContainer.style.display = 'none';
+      }
+    });
+
+    // Add a delayed check in case the floor selector appears after initial hiding
+    setTimeout(() => {
+      const delayedFloorContainers = document.querySelectorAll('.absolute.right-0.z-3');
+      delayedFloorContainers.forEach((container) => {
+        if (container.style.display !== 'none') {
+          const hasFloorImages = container.querySelector('img[alt="Floor"]');
+          const hasRangeInput = container.querySelector('input[type="range"]');
+
+          if (hasFloorImages || hasRangeInput) {
+            container.style.display = 'none';
+          }
+        }
+      });
+    }, 500); // Check again after 500ms
+
+    // Set game mode to sandbox using the Game State API
+    setTimeout(() => {
+      try {
+        globalThis.state.board.send({ type: "setPlayMode", mode: "sandbox" });
+        // Hide the mode selector buttons in the UI to prevent user changes during quest events
+        const modeButtons = document.querySelectorAll('button img[alt="Sandbox"], button img[alt="Manual"], button img[alt="Autoplay"]');
+        modeButtons.forEach(button => {
+          const btn = button.closest('button');
+          if (btn) {
+            btn.style.display = 'none';
+          }
+        });
+      } catch (error) {
+        console.error('[Quests Mod][Game Mode] Failed to set sandbox mode:', error);
+      }
+    }, 1000); // Wait 1 second for state to be ready
+  }
+
+  function showQuestOverlays() {
+    // Restore visibility when leaving the area (if you want this behavior)
+    const overlays = document.querySelectorAll('.pointer-events-none.absolute.right-0.top-0.z-1');
+    overlays.forEach(overlay => {
+      overlay.style.display = '';
+    });
+
+    // Restore floor selector visibility
+    const floorSelectorContainers = document.querySelectorAll('.absolute.right-0.z-3');
+    floorSelectorContainers.forEach(container => {
+      container.style.display = '';
+    });
+
+    // No need to restore Elf Scout name since we don't modify global metadata anymore
+    console.log('[Quests Mod][Villain Adder] Elf Scout global name unchanged (Mornenion was only a villain nickname)');
+
+    // Restore game mode selector when leaving Ab'Dendriel Hive
+    try {
+      // Show all mode selector buttons
+      const modeButtons = document.querySelectorAll('button img[alt="Sandbox"], button img[alt="Manual"], button img[alt="Autoplay"]');
+      modeButtons.forEach(button => {
+        const btn = button.closest('button');
+        if (btn) {
+          btn.style.display = '';
+        }
+      });
+      console.log('[Quests Mod][Game Mode] Restored game mode selector when leaving Ab\'Dendriel Hive');
+    } catch (e) {
+      console.warn('[Quests Mod][Game Mode] Error restoring game mode selector:', e);
+    }
+  }
+
+  // Hide Hero Editor button when entering hole area
+  function hideHeroEditorButton() {
+    try {
+      // Try to use exposed function from Hero Editor mod if available
+      if (window.heroEditor && typeof window.heroEditor.hideButton === 'function') {
+        window.heroEditor.hideButton();
+        console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button via mod API');
+        return;
+      }
+      
+      // Fallback: DOM manipulation
+      const button = document.getElementById('hero-editor-button');
+      if (button) {
+        button.style.display = 'none';
+        console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button via DOM');
+        return;
+      }
+      
+      // Last resort: try to find by icon
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (btn.textContent && btn.textContent.includes('✏️')) {
+          btn.style.display = 'none';
+          console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button (found by icon)');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Hero Editor] Error hiding Hero Editor button:', error);
+    }
+  }
+
+  // Show Hero Editor button when leaving hole area
+  function showHeroEditorButton() {
+    try {
+      // Try to use exposed function from Hero Editor mod if available
+      if (window.heroEditor && typeof window.heroEditor.showButton === 'function') {
+        window.heroEditor.showButton();
+        console.log('[Quests Mod][Hero Editor] Shown Hero Editor button via mod API');
+        return;
+      }
+      
+      // Fallback: DOM manipulation
+      const button = document.getElementById('hero-editor-button');
+      if (button) {
+        button.style.display = '';
+        console.log('[Quests Mod][Hero Editor] Shown Hero Editor button via DOM');
+        return;
+      }
+      
+      // Last resort: try to find by icon
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        if (btn.textContent && btn.textContent.includes('✏️')) {
+          btn.style.display = '';
+          console.log('[Quests Mod][Hero Editor] Shown Hero Editor button (found by icon)');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('[Quests Mod][Hero Editor] Error showing Hero Editor button:', error);
+    }
+  }
+
+  // Restore the original board setup by removing custom villains (delegates to CustomBattle)
+  function restoreBoardSetup() {
+    if (mornenionBattle) {
+      mornenionBattle.restoreBoardSetup();
+    } else {
+      console.warn('[Quests Mod][Villain Remover] Mornenion battle not initialized');
+    }
+  }
+
+  // Remove villains from the board (delegates to CustomBattle)
+  function removeVillainsFromBoard() {
+    if (mornenionBattle) {
+      mornenionBattle.removeOriginalVillains();
+    } else {
+      console.warn('[Quests Mod][Villain Remover] Mornenion battle not initialized');
+    }
+  }
+
+  // Mornenion area detection
+  function isInMornenionArea() {
+    if (mornenionBattle) {
+      return mornenionBattle.isInBattleArea();
+    }
+    // Fallback if CustomBattle not initialized
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot?.()?.context;
+      if (!boardContext?.selectedMap) return false;
+      const currentRoomId = boardContext.selectedMap.roomId || boardContext.selectedMap.selectedRoom?.id;
+      return currentRoomId === 'abwasp';
+    } catch (error) {
+      console.error('[Quests Mod][Mornenion] Error checking Mornenion area:', error);
+      return false;
+    }
+  }
+
+  // Function to count ally creatures on board
+  function countAllyCreatures() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      const boardConfig = boardContext?.boardConfig || [];
+      
+      const isAlly = (piece) => 
+        piece?.type === 'player' || 
+        (piece?.type === 'custom' && piece?.villain === false);
+      
+      return boardConfig.filter(isAlly).length;
+    } catch (error) {
+      console.error('[Quests Mod][Mornenion] Error counting allies:', error);
+      return 0;
+    }
+  }
+
+  // Function to check if restrictions should be active
+  function shouldMornenionAllyLimitBeActive() {
+    if (mornenionBattle) {
+      return mornenionBattle.shouldRestrictionsBeActive(() => playerUsedHoleToMornenion);
+    }
+    // Fallback
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      const isSandbox = boardContext?.mode === 'sandbox';
+      const inMornenionArea = isInMornenionArea();
+      return isSandbox && inMornenionArea && playerUsedHoleToMornenion;
+    } catch (error) {
+      console.error('[Quests Mod][Mornenion] Error checking limit activation:', error);
+      return false;
+    }
+  }
+
+  // Function to enforce ally creature limit (delegates to CustomBattle)
+  function enforceMornenionAllyLimit() {
+    if (mornenionBattle) {
+      mornenionBattle.enforceAllyLimit(
+        () => playerUsedHoleToMornenion,
+        (toastData) => {
+          // Use existing showToast (ignores 'type' parameter)
+          showToast({ 
+            message: toastData.message, 
+            duration: toastData.duration || 3000, 
+            logPrefix: '[Quests Mod][Mornenion]' 
+          });
+        }
+      );
+    }
+  }
+
+  // Setup ally limit monitoring (delegates to CustomBattle)
+  function setupMornenionAllyLimit() {
+    if (mornenionBattle) {
+      mornenionBattle.setupAllyLimit(
+        () => playerUsedHoleToMornenion,
+        (toastData) => {
+          // Use existing showToast (ignores 'type' parameter)
+          showToast({ 
+            message: toastData.message, 
+            duration: toastData.duration || 3000, 
+            logPrefix: '[Quests Mod][Mornenion]' 
+          });
+        }
+      );
+    }
+  }
+
+  // Function to get creature type name
+  function getCreatureTypeName(piece) {
+    try {
+      if (piece?.gameId && globalThis.state?.utils?.getMonster) {
+        const monster = globalThis.state.utils.getMonster(piece.gameId);
+        return monster?.metadata?.name || `Monster ID ${piece.gameId}`;
+      }
+      return piece?.nickname || `Unknown (ID: ${piece?.gameId || 'N/A'})`;
+    } catch (error) {
+      return piece?.nickname || `Unknown (ID: ${piece?.gameId || 'N/A'})`;
+    }
+  }
+
+  // Function to check if we should track placements (Mornenion area + sandbox mode + entered via hole)
+  function shouldTrackPlacements() {
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      const isSandbox = boardContext?.mode === 'sandbox';
+      const inMornenionArea = isInMornenionArea();
+      const enteredViaHole = playerUsedHoleToMornenion;
+      // Only track if entered via hole, not manual navigation
+      const shouldTrack = isSandbox && inMornenionArea && enteredViaHole;
+      
+      // Debug logging (only log when conditions change)
+      if (shouldTrack && !window._mornenionTrackingWasActive) {
+        console.log('[Quests Mod][Creature Placement] Tracking activated:', {
+          isSandbox,
+          inMornenionArea,
+          enteredViaHole,
+          roomId: boardContext?.selectedMap?.roomId
+        });
+        window._mornenionTrackingWasActive = true;
+      } else if (!shouldTrack && window._mornenionTrackingWasActive) {
+        console.log('[Quests Mod][Creature Placement] Tracking deactivated');
+        window._mornenionTrackingWasActive = false;
+      }
+      
+      return shouldTrack;
+    } catch (error) {
+      console.error('[Quests Mod][Creature Placement] Error checking tracking activation:', error);
+      return false;
+    }
+  }
+
+  // Function to track creature placements (only when in Mornenion quest context)
+  function trackCreaturePlacements() {
+    if (creaturePlacementSubscription) {
+      creaturePlacementSubscription.unsubscribe();
+    }
+
+    // Initialize previous board config
+    try {
+      const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+      previousBoardConfig = boardContext?.boardConfig || [];
+    } catch (error) {
+      previousBoardConfig = [];
+    }
+
+    creaturePlacementSubscription = globalThis.state.board.subscribe((state) => {
+      try {
+        const currentBoardConfig = state.context?.boardConfig || [];
+        const shouldTrack = shouldTrackPlacements();
+        
+        // Debug: Log when board state changes and we're in abwasp
+        const roomId = state.context?.selectedMap?.roomId || state.context?.selectedMap?.selectedRoom?.id;
+        if (roomId === 'abwasp') {
+          const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+          const isSandbox = boardContext?.mode === 'sandbox';
+          const inMornenionArea = isInMornenionArea();
+          const enteredViaHole = playerUsedHoleToMornenion;
+          
+          // Log when conditions change or when board config changes (creature placed)
+          const configChanged = JSON.stringify(previousBoardConfig) !== JSON.stringify(currentBoardConfig);
+          const stateKey = `${isSandbox}-${inMornenionArea}-${enteredViaHole}-${shouldTrack}`;
+          
+          if (configChanged || !window._lastPlacementCheck || window._lastPlacementCheck !== stateKey) {
+            window._lastPlacementCheck = stateKey;
+          }
+        }
+        
+        // Only track when in Mornenion area + sandbox mode
+        if (!shouldTrack) {
+          // Reset previous config when not in Mornenion context to avoid false positives
+          previousBoardConfig = currentBoardConfig;
+          return;
+        }
+
+        // Skip if no previous config (initial load)
+        if (!previousBoardConfig || previousBoardConfig.length === 0) {
+          previousBoardConfig = currentBoardConfig;
+          return;
+        }
+
+        // Create maps of previous pieces by key for quick lookup
+        const previousPiecesMap = new Map();
+        previousBoardConfig.forEach(piece => {
+          if (piece?.key) {
+            previousPiecesMap.set(piece.key, piece);
+          }
+        });
+
+        // Find newly placed creatures (exclude system-added villains like Mornenion and Lavaholes)
+        const newPieces = currentBoardConfig.filter(piece => {
+          if (!piece?.key) return false;
+          // Skip if this piece was already in previous config
+          if (previousPiecesMap.has(piece.key)) return false;
+          // Skip system-added villains (Mornenion and Lavaholes)
+          if (piece?.key?.startsWith('mornenion-tile-') || piece?.key?.startsWith('lavahole-tile-')) {
+            return false;
+          }
+          return true;
+        });
+
+        // Log each newly placed creature
+        if (newPieces.length > 0) {
+          newPieces.forEach(piece => {
+            const creatureName = getCreatureTypeName(piece);
+            const creatureType = piece?.villain ? 'Enemy' : 'Ally';
+            const tileIndex = piece?.tileIndex ?? 'Unknown';
+            const level = piece?.level ?? 'N/A';
+            const tier = piece?.tier ?? 'N/A';
+            
+            console.log(`[Quests Mod][Creature Placement] ${creatureType} placed: ${creatureName} on tile ${tileIndex} (Level: ${level}, Tier: ${tier})`, piece);
+          });
+        }
+
+        // Update previous config for next comparison
+        previousBoardConfig = currentBoardConfig;
+      } catch (error) {
+        console.error('[Quests Mod][Creature Placement] Error tracking placements:', error);
+      }
+    });
+
+    console.log('[Quests Mod][Creature Placement] Placement tracking set up (Mornenion area + sandbox mode)');
+  }
+
+
+  // Cleanup all Mornenion quest state
+  function cleanupMornenionQuest() {
+    try {
+      console.log('[Quests Mod][Mornenion] Cleaning up Mornenion quest state');
+      
+      // Reset Mornenion flags
+      playerUsedHoleToMornenion = false;
+      
+      // Cleanup CustomBattle instance
+      if (mornenionBattle) {
+        mornenionBattle.cleanup(
+          restoreBoardSetup,
+          showQuestOverlays
+        );
+        mornenionBattle = null;
+      }
+      
+      // Cleanup observers/subscriptions
+      stopAbDendrielMutationObserver();
+      stopGameTimerSubscription();
+      
+      // Reset state flags for fresh entry next time
+      currentlyInAbDendriel = false;
+      overlayHidingDone = false;
+      villainSetupDone = false;
+      isAddingVillains = false;
+      lastVillainAddTime = 0;
+      justRemovedVillains = false;
+      
+      console.log('[Quests Mod][Mornenion] Mornenion quest cleanup completed');
+    } catch (error) {
+      console.error('[Quests Mod][Mornenion] Error cleaning up Mornenion quest:', error);
+    }
+  }
+
+  // Navigate to Hedge Maze
+  function navigateToHedgeMaze() {
+    try {
+      console.log('[Quests Mod][Victory/Defeat] Navigating to Hedge Maze');
+      globalThis.state.board.send({
+        type: 'selectRoomById',
+        roomId: 'abmaze'
+      });
+    } catch (error) {
+      console.error('[Quests Mod][Victory/Defeat] Error navigating to Hedge Maze:', error);
+    }
+  }
+
+
+  // Setup Mornenion tile restrictions (delegates to CustomBattle)
+  function setupMornenionTileRestrictions() {
+    if (mornenionBattle) {
+      mornenionBattle.setupTileRestrictions(
+        () => playerUsedHoleToMornenion,
+        (toastData) => {
+          // Use existing showToast (ignores 'type' parameter)
+          showToast({ 
+            message: toastData.message, 
+            duration: toastData.duration || 3000, 
+            logPrefix: '[Quests Mod][Mornenion]' 
+          });
+        }
+      );
+      // Also set up ally limit monitoring
+      setupMornenionAllyLimit();
+    } else {
+      console.warn('[Quests Mod][Mornenion] Mornenion battle not initialized');
+    }
+  }
+
+  // Prevent villain movement (delegates to CustomBattle)
+  function preventVillainMovement() {
+    if (mornenionBattle) {
+      mornenionBattle.preventVillainMovement();
+    }
+  }
+
+  // Add specific villains to the board (delegates to CustomBattle)
+  function addSpecificVillains() {
+    if (mornenionBattle) {
+      mornenionBattle.addVillains();
+    } else {
+      console.warn('[Quests Mod][Villain Adder] Mornenion battle not initialized');
+    }
+  }
+
+  // Restore the original board setup
+  function restoreBoardSetup() {
+    try {
+      console.log('[Quests Mod][Villain Remover] Restoring original board setup');
+
+      const currentRoomId = getCurrentRoomId();
+
+      if (!currentRoomId) {
+        console.log('[Quests Mod][Villain Remover] No current room ID found');
+        return;
+      }
+
+      // Get the original board setup for this room
+      const originalSetup = globalThis.state.utils.getBoardMonstersFromRoomId(currentRoomId);
+
+      if (!originalSetup || !Array.isArray(originalSetup)) {
+        console.log('[Quests Mod][Villain Remover] No original setup found for room:', currentRoomId);
+        return;
+      }
+
+      // Send the original setup back to the board
+      globalThis.state.board.send({
+        type: 'autoSetupBoard',
+        setup: originalSetup
+      });
+
+      console.log('[Quests Mod][Villain Remover] Original board setup restored');
+    } catch (error) {
+      console.error('[Quests Mod][Villain Remover] Error restoring board setup:', error);
+    }
+  }
+
+  function cleanupQuestOverlayHider() {
+    if (questOverlayHider) {
+      try {
+        questOverlayHider.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Overlay Hider] Error unsubscribing:', e);
+      }
+      questOverlayHider = null;
+    }
+
+    // Restore any hidden overlays
+    showQuestOverlays();
   }
 
   // Helper function to get current room ID from board context or global state
@@ -6737,8 +9663,28 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     return context?.selectedMap?.selectedRoom?.id || globalThis.state?.selectedMap?.selectedRoom?.id;
   }
 
-  // Set up event-driven subscriptions for fishing functionality
+  // Clean up water fishing subscriptions
+  function cleanupWaterFishingObserver() {
+    if (fishingState.subscriptions.board) {
+      fishingState.subscriptions.board.unsubscribe();
+      fishingState.subscriptions.board = null;
+    }
+    if (fishingState.subscriptions.player) {
+      fishingState.subscriptions.player.unsubscribe();
+      fishingState.subscriptions.player = null;
+    }
+  }
+
+  // Set up event-driven subscriptions for fishing functionality (only when Fishing Rod is owned)
   function setupWaterFishingObserver() {
+    // Only set up if Fishing Rod is owned
+    if (!shouldEnableWaterFishing()) {
+      return;
+    }
+
+    // Clean up any existing subscriptions first
+    cleanupWaterFishingObserver();
+
     // Subscribe to board state changes to detect map changes and new tiles/sprites being loaded
     if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
       fishingState.subscriptions.board = globalThis.state.board.subscribe(({ context: boardContext }) => {
@@ -6746,71 +9692,140 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
         // Only rescan if the room has actually changed
         if (fishingState.currentRoomId !== newRoomId) {
-          console.log('[Quests Mod][Water Fishing] Room changed from', fishingState.currentRoomId, 'to', newRoomId, '- cleaning up and rescanning for water tiles');
-
           // Update current room ID
           fishingState.currentRoomId = newRoomId;
 
           // Reset Al Dee mission fishing attempts counter when changing rooms
           fishingState.alDeeMissionAttempts = 0;
-          console.log('[Quests Mod][Water Fishing] Reset Al Dee mission fishing attempts counter due to room change');
 
           // Clean up existing water tiles on map change
           if (fishingState.enabled) {
             disableWaterTileRightClick();
             fishingState.tiles.clear();
             fishingState.enabled = false; // Reset enabled flag so it can be re-enabled
-            console.log('[Quests Mod][Water Fishing] Cleaned up existing water tiles and reset enabled flag');
           }
 
           // Wait for new map sprites to load, then scan for water tiles
           setTimeout(() => {
-            console.log('[Quests Mod][Water Fishing] Scanning for water tiles after map change delay - executing callback');
-            console.log('[Quests Mod][Water Fishing] Current DOM state - total sprites found:', document.querySelectorAll('.sprite.item.relative').length);
             updateWaterFishingState();
-            console.log('[Quests Mod][Water Fishing] Callback execution completed');
           }, FISHING_CONFIG.MAP_SWITCH_DELAY);
-        } else {
-          console.log('[Quests Mod][Water Fishing] Board state changed but room is still', newRoomId, '- skipping rescan');
         }
       });
-      console.log('[Quests Mod][Water Fishing] Board subscription set up');
     }
 
     // Subscribe to player state changes to detect Fishing Rod acquisition/loss
     if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
       fishingState.subscriptions.player = globalThis.state.player.subscribe((playerState) => {
-        console.log('[Quests Mod][Water Fishing] Player state changed, checking Fishing Rod');
+        // Check if Fishing Rod is still owned, cleanup if not
+        if (!shouldEnableWaterFishing()) {
+          cleanupWaterFishingObserver();
+          updateWaterFishingState();
+          return;
+        }
         updateWaterFishingState();
       });
-      console.log('[Quests Mod][Water Fishing] Player subscription set up');
     }
 
     // Initial check when subscriptions are set up
     setTimeout(() => {
-      console.log('[Quests Mod][Water Fishing] Initial state check');
       // Initialize current room ID
       fishingState.currentRoomId = getCurrentRoomId();
-      console.log('[Quests Mod][Water Fishing] Initial room ID set to:', fishingState.currentRoomId);
       updateWaterFishingState();
     }, 500);
+  }
 
-    console.log('[Quests Mod][Water Fishing] Event-driven subscriptions set up');
-    console.log('[Quests Mod][Water Fishing] Will respond to: board changes and inventory changes (player state)');
+  // Clean up Tile 79 subscriptions
+  function cleanupTile79Observer() {
+    if (tile79BoardSubscription) {
+      tile79BoardSubscription.unsubscribe();
+      tile79BoardSubscription = null;
+    }
+    if (tile79PlayerSubscription) {
+      tile79PlayerSubscription.unsubscribe();
+      tile79PlayerSubscription = null;
+    }
+  }
+
+  // Check if Tile 79 mission is active (regardless of location)
+  function isTile79MissionActive() {
+    try {
+      // Check if KING_LETTER_MISSION is active or completed (source of truth: Firebase-loaded kingChatState)
+      const letterMissionProgress = kingChatState.progressLetter || { accepted: false, completed: false };
+      return letterMissionProgress.accepted || letterMissionProgress.completed;
+    } catch (error) {
+      console.error('[Quests Mod][Tile 79] Error checking mission status:', error);
+      return false;
+    }
+  }
+
+  // Set up Tile 79 subscriptions (only when mission is active)
+  function setupTile79Observer() {
+    // Only set up if mission is accessible (regardless of location)
+    if (!isTile79MissionActive()) {
+      return;
+    }
+
+    // Clean up any existing subscriptions first
+    cleanupTile79Observer();
+
+    // Subscribe to board state changes
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.board && globalThis.state.board.subscribe) {
+      tile79BoardSubscription = globalThis.state.board.subscribe(({ context: boardContext }) => {
+        // Check if mission is still active, cleanup if not
+        if (!isTile79MissionActive()) {
+          cleanupTile79Observer();
+          updateTile79RightClickState(boardContext);
+          return;
+        }
+        updateTile79RightClickState(boardContext);
+      });
+    }
+
+    // Subscribe to player state changes (for quest items changes)
+    if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.player && globalThis.state.player.subscribe) {
+      tile79PlayerSubscription = globalThis.state.player.subscribe(() => {
+        // Check if mission is still active, cleanup if not
+        if (!isTile79MissionActive()) {
+          cleanupTile79Observer();
+          updateTile79RightClickState();
+          return;
+        }
+        updateTile79RightClickState();
+      });
+    }
+
+    // Initial state check
+    updateTile79RightClickState();
   }
 
   // Update Tile 79 right-click state based on current conditions
   function updateTile79RightClickState(boardContext = null) {
-    console.log('[Quests Mod][Tile 79] updateTile79RightClickState called');
     try {
+      // Set up or clean up subscriptions based on mission status (regardless of location)
+      const missionActive = isTile79MissionActive();
+      if (missionActive && !tile79BoardSubscription) {
+        setupTile79Observer();
+      } else if (!missionActive && tile79BoardSubscription) {
+        cleanupTile79Observer();
+      }
+
+      // Only proceed if mission is active (subscriptions handle this, but double-check here)
+      if (!missionActive) {
+        // Mission not active - disable if currently enabled
+        if (tile79RightClickEnabled) {
+          document.removeEventListener('contextmenu', handleTile79RightClickDocument, true);
+          const tile79Element = getTileElement(79);
+          if (tile79Element) {
+            tile79Element.style.pointerEvents = '';
+          }
+          tile79RightClickEnabled = false;
+        }
+        return; // Don't proceed if mission is not active
+      }
+
+      // Check if we're in Sewers and have correct mission progress
       const shouldBeEnabled = shouldEnableTile79RightClick(boardContext);
       const tile79Element = getTileElement(79);
-
-      console.log('[Quests Mod][Tile 79] Checking conditions:', {
-        shouldBeEnabled,
-        tile79ElementExists: !!tile79Element,
-        tile79RightClickEnabled
-      });
 
       if (shouldBeEnabled && tile79Element && !tile79RightClickEnabled) {
         // Enable right-click - add to document with capture to intercept events before they reach the tile
@@ -6821,6 +9836,9 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
         tile79RightClickEnabled = true;
         console.log('[Quests Mod][Tile 79] Right-click enabled - document listener added and pointer events enabled');
+      } else if (shouldBeEnabled && !tile79Element) {
+        // In Sewers with correct mission but tile not found yet, retry after a short delay
+        setTimeout(() => updateTile79RightClickState(boardContext), 200);
       } else if (!shouldBeEnabled && tile79RightClickEnabled) {
         // Disable right-click - remove document listener and restore tile pointer events
         document.removeEventListener('contextmenu', handleTile79RightClickDocument, true);
@@ -6894,8 +9912,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     // Check if the event target is inside any water tile
     for (const waterTile of fishingState.tiles) {
       if (waterTile.contains(event.target)) {
-        console.log('[Quests Mod][Water Fishing] Right-click detected on water tile via document listener!', event);
-
         // Store the clicked tile for animation positioning
         fishingState.clickedTile = waterTile;
 
@@ -6914,8 +9930,15 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   // Update water fishing state based on current conditions
   function updateWaterFishingState(manualToggle = false) {
-    console.log('[Quests Mod][Water Fishing] updateWaterFishingState called', manualToggle ? '(manual)' : '(auto)');
     try {
+      // Set up or clean up subscriptions based on Fishing Rod ownership
+      const hasFishingRod = shouldEnableWaterFishing();
+      if (hasFishingRod && !fishingState.subscriptions.board) {
+        setupWaterFishingObserver();
+      } else if (!hasFishingRod && fishingState.subscriptions.board) {
+        cleanupWaterFishingObserver();
+      }
+
       // If this is a manual toggle, apply the current fishingState.enabled directly
       if (manualToggle) {
         if (fishingState.enabled) {
@@ -6939,12 +9962,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
       // Automatic logic (original behavior) - but respect manual preferences
       const shouldBeEnabled = shouldEnableWaterFishing();
-
-      console.log('[Quests Mod][Water Fishing] Checking conditions:', {
-        shouldBeEnabled,
-        waterFishingEnabled,
-        manuallyDisabled: fishingState.manuallyDisabled
-      });
 
       // Don't automatically enable if user manually disabled it
       const canEnable = shouldBeEnabled && !fishingState.manuallyDisabled;
@@ -6987,22 +10004,11 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       const roomNames = globalThis.state?.utils?.ROOM_NAME;
       const isInSewers = roomNames && currentRoomId && roomNames[currentRoomId] === 'Sewers';
 
-      console.log('[Quests Mod][Tile 79] Room check:', {
-        currentRoomId,
-        roomName: roomNames?.[currentRoomId],
-        isInSewers
-      });
-
       if (!isInSewers) return false;
 
       // Check if KING_LETTER_MISSION is active or completed (source of truth: Firebase-loaded kingChatState)
-      const letterMissionProgress = getMissionProgress(KING_LETTER_MISSION);
+      const letterMissionProgress = kingChatState.progressLetter || { accepted: false, completed: false };
       const isMissionAccessible = letterMissionProgress.accepted || letterMissionProgress.completed;
-
-      console.log('[Quests Mod][Tile 79] Mission check:', {
-        state: letterMissionProgress,
-        accessible: isMissionAccessible
-      });
 
       if (!isMissionAccessible) {
         return false;
@@ -7010,18 +10016,12 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
       // For completed missions, always allow access. For active missions, require stamped letter.
       if (letterMissionProgress.completed) {
-        console.log('[Quests Mod][Tile 79] Mission completed - allowing permanent access');
         return true;
       }
 
       // Check if user has Stamped Letter in quest items (not regular player inventory)
       const currentProducts = cachedQuestItems || {};
       const hasStampedLetter = (currentProducts['Stamped Letter'] || 0) > 0;
-
-      console.log('[Quests Mod][Tile 79] Quest items check:', {
-        questItems: currentProducts,
-        hasStampedLetter
-      });
 
       return hasStampedLetter;
     } catch (error) {
@@ -7036,11 +10036,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       // Check if user has Fishing Rod in quest items
       const currentProducts = cachedQuestItems || {};
       const hasFishingRod = (currentProducts['Fishing Rod'] || 0) > 0;
-
-      console.log('[Quests Mod][Water Fishing] Quest items check:', {
-        questItems: currentProducts,
-        hasFishingRod
-      });
 
       return hasFishingRod;
     } catch (error) {
@@ -7187,11 +10182,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   // Create water fishing context menu at specified coordinates
   function createWaterFishingContextMenu(x, y) {
-    console.log('[Quests Mod][Water Fishing] Creating context menu at', x, y);
 
     // Close any existing context menu
-    if (waterFishingContextMenu && waterFishingContextMenu.closeMenu) {
-      waterFishingContextMenu.closeMenu();
+    if (fishingState.contextMenu && fishingState.contextMenu.closeMenu) {
+      fishingState.contextMenu.closeMenu();
     }
 
     // Create overlay to close menu on outside click
@@ -7252,8 +10246,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
     // Handle click - for now just show a message, can be expanded later
     useFishingRodButton.addEventListener('click', async () => {
-      console.log('[Quests Mod][Water Fishing] Fishing rod used!');
-
       // Get the water tile position for the animation (instead of menu position)
       let animationX, animationY;
       if (fishingState.clickedTile) {
@@ -7273,7 +10265,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       // Emit fishing action event for Guilds mod skill tracking
       const playerName = getCurrentPlayerName();
       if (playerName && window.ModCoordination) {
-        console.log('[Quests Mod][Water Fishing] Emitting fishing action for skill tracking');
         window.ModCoordination.emit('fishingAction', { playerName });
       }
 
@@ -7289,8 +10280,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
       // Special handling for Al Dee Fishing Mission in Goblin Bridge
       if (isOnAlDeeMission && isInGoblinBridge) {
         fishingState.alDeeMissionAttempts++;
-        console.log(`[Quests Mod][Water Fishing] Al Dee mission fishing attempt #${fishingState.alDeeMissionAttempts} in Goblin Bridge`);
-
         if (fishingState.alDeeMissionAttempts > 3) {
           toastMessage = 'Seems as a magnet will help here.';
         }
@@ -7311,13 +10300,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           await addQuestItem('Small Axe', 1);
 
           toastMessage = 'You found a Small Axe with your Magnet!';
-          console.log('[Quests Mod][Water Fishing] Small Axe obtained using Magnet in Goblin Bridge');
         } else if (isInGoblinBridge && !hasMagnet) {
           toastMessage = 'You found nothing. Maybe a magnet would help?';
-          console.log('[Quests Mod][Water Fishing] No Magnet available for fishing in Goblin Bridge');
         } else {
           toastMessage = 'You found nothing.';
-          console.log('[Quests Mod][Water Fishing] Fishing in non-Goblin Bridge water');
         }
       } catch (error) {
         console.error('[Quests Mod][Water Fishing] Error during fishing:', error);
@@ -7376,8 +10362,6 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     // Add to DOM
     document.body.appendChild(overlay);
     document.body.appendChild(menu);
-
-    console.log('[Quests Mod][Water Fishing] Use Fishing Rod context menu created and added to DOM');
 
     // Store reference
     fishingState.contextMenu = { overlay, menu, closeMenu };
@@ -7564,12 +10548,84 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     // Cleanup water fishing system
     cleanupWaterFishingSystem();
 
+    // Cleanup mining/digging system
+    cleanupMiningSystem();
+
+    // Cleanup Mornenion ally limit subscription
+    if (mornenionAllyLimitSubscription) {
+      try {
+        mornenionAllyLimitSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Mornenion] Error unsubscribing ally limit:', e);
+      }
+      mornenionAllyLimitSubscription = null;
+    }
+
+    // Cleanup creature placement tracking
+    if (creaturePlacementSubscription) {
+      try {
+        creaturePlacementSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Creature Placement] Error unsubscribing:', e);
+      }
+      creaturePlacementSubscription = null;
+    }
+    previousBoardConfig = null;
+
+    // Cleanup stop button disabler
+    if (stopButtonObserver) {
+      try {
+        stopButtonObserver.disconnect();
+      } catch (e) {
+        console.warn('[Quests Mod][Stop Button] Error disconnecting observer:', e);
+      }
+      stopButtonObserver = null;
+    }
+    if (startButtonClickHandler) {
+      try {
+        document.removeEventListener('click', startButtonClickHandler, true);
+      } catch (e) {
+        console.warn('[Quests Mod][Stop Button] Error removing click handler:', e);
+      }
+      startButtonClickHandler = null;
+    }
+    stopButtonDisabled = false;
+
+    // Cleanup victory/defeat detection
+    if (victoryDefeatSubscription) {
+      try {
+        victoryDefeatSubscription.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Victory/Defeat] Error unsubscribing:', e);
+      }
+      victoryDefeatSubscription = null;
+    }
+    if (victoryDefeatModal) {
+      try {
+        if (typeof victoryDefeatModal.close === 'function') {
+          victoryDefeatModal.close();
+        } else if (victoryDefeatModal.element && typeof victoryDefeatModal.element.remove === 'function') {
+          victoryDefeatModal.element.remove();
+        }
+      } catch (e) {
+        console.warn('[Quests Mod][Victory/Defeat] Error closing modal:', e);
+      }
+      victoryDefeatModal = null;
+    }
+    lastGameState = 'initial';
+
     // Cleanup Iron Ore quest timer
     if (ironOreQuestTimer) {
       clearInterval(ironOreQuestTimer);
       ironOreQuestTimer = null;
       console.log('[Quests Mod][Iron Ore Quest] Timer stopped');
     }
+
+    // Cleanup quest overlay hider
+    cleanupQuestOverlayHider();
+
+    // Cleanup all tracked event listeners
+    EventManager.cleanupAll();
   }
 
   function cleanupTile79System() {
@@ -7616,10 +10672,10 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   function cleanupWaterFishingSystem() {
     // Remove event listener from document and restore tile pointer events
-    if (waterFishingEnabled) {
+    if (fishingState.enabled) {
       document.removeEventListener('contextmenu', handleWaterFishingRightClickDocument, true);
       disableWaterTileRightClick();
-      waterFishingEnabled = false;
+      fishingState.enabled = false;
     }
 
     // Close any open context menu
@@ -7650,6 +10706,47 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
     console.log('[Quests Mod][Water Fishing] System cleaned up');
   }
 
+  function cleanupMiningSystem() {
+    // Remove event listener from document and restore tile pointer events
+    if (miningState.enabled) {
+      document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
+      disableMiningTileRightClick();
+      miningState.enabled = false;
+    }
+
+    // Close any open context menu
+    if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+      miningState.contextMenu.closeMenu();
+    }
+
+    // Unsubscribe from board state
+    if (miningState.subscriptions.board) {
+      try {
+        miningState.subscriptions.board.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Digging] Error unsubscribing from board:', e);
+      }
+      miningState.subscriptions.board = null;
+    }
+
+    // Unsubscribe from player state
+    if (miningState.subscriptions.player) {
+      try {
+        miningState.subscriptions.player.unsubscribe();
+      } catch (e) {
+        console.warn('[Quests Mod][Digging] Error unsubscribing from player:', e);
+      }
+      miningState.subscriptions.player = null;
+    }
+
+    // Clear tiles set
+    miningState.tiles.clear();
+    miningState.clickedTile = null;
+    miningState.currentRoomId = null;
+
+    console.log('[Quests Mod][Digging] System cleaned up');
+  }
+
   // Initialize
   observeInventory();
   setupQuestItemsDropSystem();
@@ -7661,6 +10758,59 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
 
   // Load mission progress from Firebase on initialization
   loadMissionProgressOnInit();
+
+  // Cleanup function to remove items that shouldn't exist if missions aren't completed
+  async function cleanupInvalidQuestItems(progress) {
+    try {
+      const questItems = await getQuestItems(false);
+      if (!questItems || Object.keys(questItems).length === 0) {
+        return;
+      }
+
+      // Map items to their required mission completion status
+      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed' } }
+      const itemMissionMap = {
+        'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted' },
+        'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted' },
+        'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted' },
+        'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
+        'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
+        'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' }
+      };
+
+      for (const [itemName, { missionId, requiredStatus }] of Object.entries(itemMissionMap)) {
+        const itemCount = questItems[itemName] || 0;
+        if (itemCount > 0) {
+          // Get mission progress from registry
+          const firebaseKey = MISSION_FIREBASE_KEY_MAP[missionId];
+          if (!firebaseKey) {
+            console.warn(`[Quests Mod] No Firebase key found for mission ${missionId}`);
+            continue;
+          }
+
+          const missionProgress = progress?.[firebaseKey];
+          if (!missionProgress) {
+            // Mission not started - remove item
+            console.log(`[Quests Mod] Removing ${itemName} (mission not started)`);
+            await consumeQuestItem(itemName, itemCount);
+            continue;
+          }
+
+          const hasRequiredStatus = requiredStatus === 'accepted' 
+            ? missionProgress.accepted 
+            : missionProgress.completed;
+
+          if (!hasRequiredStatus) {
+            // Mission doesn't have required status - remove item
+            console.log(`[Quests Mod] Removing ${itemName} (mission ${requiredStatus} status not met)`);
+            await consumeQuestItem(itemName, itemCount);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Quests Mod] Error cleaning up invalid quest items:', error);
+    }
+  }
 
   async function loadMissionProgressOnInit() {
     try {
@@ -7681,30 +10831,20 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
             completed: progress.completed
           };
         }
-        // New shape {copper:{}, dragon:{}, letter:{}}
-        if (progress.copper) {
-          kingChatState.progressCopper = {
-            accepted: !!progress.copper.accepted,
-            completed: !!progress.copper.completed
-          };
-        }
-        if (progress.dragon) {
-          kingChatState.progressDragon = {
-            accepted: !!progress.dragon.accepted,
-            completed: !!progress.dragon.completed
-          };
-        }
-        if (progress.letter) {
-          kingChatState.progressLetter = {
-            accepted: !!progress.letter.accepted,
-            completed: !!progress.letter.completed
-          };
-        }
-        if (progress.alDeeFishing) {
-          kingChatState.progressAlDeeFishing = {
-            accepted: !!progress.alDeeFishing.accepted,
-            completed: !!progress.alDeeFishing.completed
-          };
+        
+        // New shape: Load all missions from registry dynamically
+        for (const [missionId, firebaseKey] of Object.entries(MISSION_FIREBASE_KEY_MAP)) {
+          const stateKey = MISSION_STATE_MAP[missionId];
+          if (stateKey) {
+            // Always initialize state, even if Firebase data is missing
+            kingChatState[stateKey] = progress[firebaseKey] ? {
+              accepted: !!progress[firebaseKey].accepted,
+              completed: !!progress[firebaseKey].completed
+            } : {
+              accepted: false,
+              completed: false
+            };
+          }
         }
         if (progress.ironOre) {
           fishingState.ironOreQuestActive = !!progress.ironOre.active;
@@ -7734,15 +10874,14 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           const currentPlayer = getCurrentPlayerName();
           if (currentPlayer) {
             try {
-              const currentProgress = await getKingTibianusProgress(currentPlayer);
-              await saveKingTibianusProgress(currentPlayer, {
-                ...currentProgress,
-                ironOre: {
-                  active: false,
-                  startTime: null,
-                  completed: true
-                }
-              });
+              // Use registry to get all mission progress (future-proof)
+              const allProgress = getAllMissionProgress();
+              allProgress.ironOre = {
+                active: false,
+                startTime: null,
+                completed: true
+              };
+              await saveKingTibianusProgress(currentPlayer, allProgress);
               console.log('[Quests Mod] Iron Ore quest marked as completed and saved to Firebase');
             } catch (err) {
               console.error('[Quests Mod] Error marking Iron Ore quest as completed:', err);
@@ -7763,17 +10902,19 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
           }
         }
 
-        console.log('[Quests Mod] Mission progress loaded from Firebase:', {
-          copper: kingChatState.progressCopper,
-          dragon: kingChatState.progressDragon,
-          letter: kingChatState.progressLetter,
-          alDeeFishing: kingChatState.progressAlDeeFishing,
-          ironOre: progress.ironOre ? {
+        // Clean up quest items that shouldn't exist if missions aren't completed
+        await cleanupInvalidQuestItems(progress);
+
+        // Log all mission progress using registry (future-proof)
+        const loggedProgress = getAllMissionProgress();
+        if (progress.ironOre) {
+          loggedProgress.ironOre = {
             active: fishingState.ironOreQuestActive,
             expired: fishingState.ironOreQuestExpired,
             completed: fishingState.ironOreQuestCompleted
-          } : null
-        });
+          };
+        }
+        console.log('[Quests Mod] Mission progress loaded from Firebase:', loggedProgress);
       } else {
         console.log('[Quests Mod] No mission progress found in Firebase');
       }
@@ -7835,26 +10976,51 @@ const KING_MISSIONS_BUTTON_ID = 'quests-mod-missions-btn';
   }
 
   // Load mission progress from Firebase on initialization and then setup systems
-  loadMissionProgressOnInit().then(() => {
+  loadMissionProgressOnInit().then(async () => {
+    // Migrate any existing Dwarven Pickaxe items to Light Shovel
+    await migrateDwarvenPickaxeToLightShovel();
     // Always start with fishing disabled after reload
     fishingState.enabled = false;
     fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
     updateWaterFishingState(true);
 
-    // Set up Tile 79 right-click system after mission progress is loaded
-    setupTile79Observer();
-    // Set up water fishing system
-    setupWaterFishingObserver();
-  }).catch(error => {
+    // Set up quest overlay hider (always active)
+    setupQuestOverlayHider();
+    // Set up systems conditionally (only when items/missions are active)
+    // These will set up subscriptions when items/missions are detected
+    updateTile79RightClickState();
+    updateWaterFishingState();
+    updateMiningState();
+    // Set up Copper Key system conditionally (only when mission is active)
+    setupCopperKeySystem();
+    // Note: Mornenion tile restrictions are set up when battle is initialized (after entering hole)
+    // Set up creature placement tracking
+    trackCreaturePlacements();
+    // Note: Stop button disabler and victory/defeat detection are now handled by CustomBattle system
+  }).catch(async error => {
     console.error('[Quests Mod] Failed to load mission progress, setting up systems anyway:', error);
 
+    // Migrate any existing Dwarven Pickaxe items to Light Shovel (even if mission progress failed to load)
+    await migrateDwarvenPickaxeToLightShovel();
+
     // Always start with fishing disabled after reload
     fishingState.enabled = false;
     fishingState.manuallyDisabled = true; // Start disabled and prevent automatic re-enabling
     updateWaterFishingState(true);
 
-    setupTile79Observer();
-    setupWaterFishingObserver();
+    // Set up quest overlay hider (always active)
+    setupQuestOverlayHider();
+    // Set up systems conditionally (only when items/missions are active)
+    // These will set up subscriptions when items/missions are detected
+    updateTile79RightClickState();
+    updateWaterFishingState();
+    updateMiningState();
+    // Set up Copper Key system conditionally (only when mission is active)
+    setupCopperKeySystem();
+    // Note: Mornenion tile restrictions are set up when battle is initialized (after entering hole)
+    // Set up creature placement tracking
+    trackCreaturePlacements();
+    // Note: Stop button disabler and victory/defeat detection are now handled by CustomBattle system
   });
 
   // Start Iron Ore quest timer

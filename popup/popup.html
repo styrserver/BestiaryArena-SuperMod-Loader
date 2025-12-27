@@ -9,6 +9,14 @@
 <body>
   <header>
     <h1>BestiaryArena SuperMod Loader</h1>
+    <div class="language-toggle">
+      <button id="lang-en" class="lang-btn active" title="English">
+        🇺🇸
+      </button>
+      <button id="lang-pt" class="lang-btn" title="Português">
+        🇧🇷
+      </button>
+    </div>
   </header>
   
   <!-- Patch Notes Section -->
@@ -24,14 +32,14 @@
     <!-- Search and Filter Bar -->
     <div class="store-controls">
       <div class="search-container">
-        <input type="text" id="mod-search" class="search-input" placeholder="Search mods...">
+        <input type="text" id="mod-search" class="search-input" data-localize-placeholder="popup.searchPlaceholder">
       </div>
       <div class="category-filters">
-        <button class="category-filter active" data-category="all">All</button>
-        <button class="category-filter" data-category="official">Original Mods</button>
-        <button class="category-filter" data-category="super">SuperMods</button>
-        <button class="category-filter" data-category="ot">OT Mods</button>
-        <button class="category-filter" data-category="custom">Custom Mods</button>
+        <button class="category-filter active" data-category="all" data-localize="popup.categoryAll">All</button>
+        <button class="category-filter" data-category="official" data-localize="popup.categoryOfficial">Original Mods</button>
+        <button class="category-filter" data-category="super" data-localize="popup.categorySuper">SuperMods</button>
+        <button class="category-filter" data-category="ot" data-localize="popup.categoryOt">OT Mods</button>
+        <button class="category-filter" data-category="custom" data-localize="popup.categoryCustom">Custom Mods</button>
       </div>
     </div>
 
@@ -39,37 +47,37 @@
     <section id="mods-store">
       <div id="mods-grid" class="mods-grid"></div>
       <div id="empty-state" class="empty-state" style="display: none;">
-        <p>No mods found matching your search.</p>
+        <p data-localize="popup.noModsFound">No mods found matching your search.</p>
       </div>
     </section>
 
     <!-- Collapsible Add Script Section -->
     <details class="collapsible-section">
       <summary class="collapsible-header">
-        <span>Add Script</span>
+        <span data-localize="popup.addScript">Add Script</span>
         <span class="collapse-icon">▼</span>
       </summary>
       <div class="collapsible-content">
         <form id="hash-form">
           <div class="form-group">
-            <label for="hash-input">Gist hash or Gist URL</label>
-            <input type="text" id="hash-input" placeholder="Enter Gist hash or Gist URL" required>
+            <label for="hash-input" data-localize="popup.gistHashLabel">Gist hash or Gist URL</label>
+            <input type="text" id="hash-input" data-localize-placeholder="popup.gistHashPlaceholder" required>
           </div>
-          <div class="form-hint">
+          <div class="form-hint" data-localize="popup.gistHashHelp">
             Supports: GitHub Gist hash (e.g. <code>abcdef1234567890</code>) or Gist URL (e.g. <code>https://gist.github.com/user/abcdef1234567890</code>)
           </div>
           <div class="form-group">
-            <label for="name-input">Script Name (optional)</label>
-            <input type="text" id="name-input" placeholder="Name for identification">
+            <label for="name-input" data-localize="popup.scriptNameLabel">Script Name (optional)</label>
+            <input type="text" id="name-input" data-localize-placeholder="popup.scriptNamePlaceholder">
           </div>
-          <button type="submit" class="primary-button">Add</button>
+          <button type="submit" class="primary-button" data-localize="popup.addButton">Add</button>
         </form>
       </div>
     </details>
 
     <!-- External Link -->
     <div class="external-link">
-      <a href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank">
+      <a href="https://bestiaryarena.wiki.gg/wiki/Scripts" target="_blank" data-localize="popup.findMoreMods">
         Find more user-generated mods here! →
       </a>
     </div>
@@ -77,41 +85,41 @@
     <!-- Collapsible Extras Section -->
     <details class="collapsible-section">
       <summary class="collapsible-header">
-        <span>Extras</span>
+        <span data-localize="popup.extras">Extras</span>
         <span class="collapse-icon">▼</span>
       </summary>
       <div class="collapsible-content">
         <!-- Debug Mode -->
         <div class="setting-item">
           <div class="setting-header">
-            <label for="debug-toggle">Debug Mode</label>
+            <label for="debug-toggle" data-localize="popup.debugMode">Debug Mode</label>
             <div class="setting-control">
-              <span id="debug-status">OFF</span>
+              <span id="debug-status" data-localize="popup.off">OFF</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="debug-toggle">
                 <span class="slider"></span>
               </label>
             </div>
           </div>
-          <p class="setting-description">
+          <p class="setting-description" data-localize="popup.debugModeDescription">
             Enable to show console logs from all mods. Disable for a cleaner console. Changes require page refresh.
           </p>
-          <p id="storage-usage" class="storage-usage">Storage: calculating...</p>
+          <p id="storage-usage" class="storage-usage" data-localize="popup.storageCalculating">Storage: calculating...</p>
         </div>
 
         <!-- Outfiter -->
         <div class="setting-item">
           <div class="setting-header">
-            <label for="outfiter-toggle">🎭 Outfiter</label>
+            <label for="outfiter-toggle" data-localize="popup.outfiter">🎭 Outfiter</label>
             <div class="setting-control">
-              <span id="outfiter-status">OFF</span>
+              <span id="outfiter-status" data-localize="popup.off">OFF</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="outfiter-toggle">
                 <span class="slider"></span>
               </label>
             </div>
           </div>
-          <p class="setting-description">
+          <p class="setting-description" data-localize="popup.outfiterDescription">
             Locally unlocks all outfits in the outfit selector. Changes require page refresh.
           </p>
         </div>
@@ -119,12 +127,12 @@
         <!-- Welcome Page -->
         <div class="setting-item">
           <div class="setting-header">
-            <label>Welcome Page</label>
-            <button id="enable-welcome-btn" class="welcome-btn">
+            <label data-localize="popup.welcomePage">Welcome Page</label>
+            <button id="enable-welcome-btn" class="welcome-btn" data-localize="popup.enableWelcomePage">
               Enable Welcome Page
             </button>
           </div>
-          <p class="setting-description">
+          <p class="setting-description" data-localize="popup.welcomePageDescription">
             Enable the welcome page to show on next page load.
           </p>
         </div>
@@ -132,12 +140,12 @@
         <!-- Patch Notes -->
         <div class="setting-item">
           <div class="setting-header">
-            <label>Patch Notes</label>
-            <button id="show-patch-notes-btn" class="welcome-btn">
+            <label data-localize="popup.patchNotes">Patch Notes</label>
+            <button id="show-patch-notes-btn" class="welcome-btn" data-localize="popup.viewPatchNotes">
               View Patch Notes
             </button>
           </div>
-          <p class="setting-description">
+          <p class="setting-description" data-localize="popup.patchNotesDescription">
             View the latest changes and updates to the mod loader.
           </p>
         </div>

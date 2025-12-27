@@ -4,12 +4,19 @@ console.log('Setup Manager Mod initializing...');
 // Configuration with defaults
 const defaultConfig = {
   savedSetups: {},  // This will store all saved team setups by map ID
-  setupNameMaxLength: 20, // Maximum character length for setup names
+  setupNameMaxLength: 100, // Maximum character length for setup names
   maxSetupsPerMap: 10, // Maximum number of setups per map
 };
 
 // Initialize with saved config or defaults
 const config = Object.assign({}, defaultConfig, context.config);
+
+// Ensure setupNameMaxLength is at least 100 (in case old config had lower value)
+if (config.setupNameMaxLength < 100) {
+  config.setupNameMaxLength = 100;
+  // Update the saved config so the change persists
+  api.service.updateScriptConfig(context.hash, config);
+}
 
 // Constants
 const MOD_ID = 'setup-manager';
@@ -523,20 +530,33 @@ function createDeleteButton(onClick) {
 function createSetupCard(mapId, setupName, setupData) {
   const card = document.createElement('div');
   card.className = 'frame-pressed-1 surface-dark p-2 mb-3';
+  card.style.maxWidth = '450px';
+  card.style.width = '100%';
+  card.style.boxSizing = 'border-box';
+  card.style.overflow = 'hidden';
   
   // Header section with name and actions
   const headerDiv = document.createElement('div');
-  headerDiv.className = 'flex justify-between items-center mb-2';
+  headerDiv.className = 'flex justify-between items-start mb-2';
+  headerDiv.style.minWidth = '0'; // Allow flex items to shrink below their content size
   
   // Setup name
   const nameSpan = document.createElement('span');
   nameSpan.className = 'pixel-font-16 text-whiteRegular';
   nameSpan.textContent = setupName;
+  nameSpan.style.maxWidth = '100%';
+  nameSpan.style.wordWrap = 'break-word';
+  nameSpan.style.wordBreak = 'break-word';
+  nameSpan.style.overflowWrap = 'break-word';
+  nameSpan.style.flex = '1 1 0';
+  nameSpan.style.minWidth = '0';
+  nameSpan.style.marginRight = '8px';
   headerDiv.appendChild(nameSpan);
   
   // Actions container
   const actionsDiv = document.createElement('div');
   actionsDiv.className = 'flex gap-1';
+  actionsDiv.style.flexShrink = '0';
   
   // Load button
   const loadButton = createActionButton(
@@ -561,7 +581,8 @@ function createSetupCard(mapId, setupName, setupData) {
   
   // Team content section
   const teamContent = document.createElement('div');
-  teamContent.className = 'flex flex-wrap gap-1';
+  teamContent.className = 'flex flex-wrap';
+  teamContent.style.gap = '12px';
   
   // For "Original" setup, get monsters from the player's saved setup
   if (setupName === 'Original') {
@@ -573,9 +594,9 @@ function createSetupCard(mapId, setupName, setupData) {
         if (piece && piece.monsterId) {
           const monsterInfo = getMonsterInfo(piece.monsterId);
           if (monsterInfo) {
-            const monsterPortrait = createMonsterPortrait(monsterInfo);
-            if (monsterPortrait) {
-              teamContent.appendChild(monsterPortrait);
+            const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
+            if (pair && pair.children.length > 0) {
+              teamContent.appendChild(pair);
             }
           }
         }
@@ -593,9 +614,9 @@ function createSetupCard(mapId, setupName, setupData) {
       if (piece && piece.monsterId) {
         const monsterInfo = getMonsterInfo(piece.monsterId);
         if (monsterInfo) {
-          const monsterPortrait = createMonsterPortrait(monsterInfo);
-          if (monsterPortrait) {
-            teamContent.appendChild(monsterPortrait);
+          const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
+          if (pair && pair.children.length > 0) {
+            teamContent.appendChild(pair);
           }
         }
       }
@@ -699,7 +720,7 @@ function showSetupManagerModal() {
     // Create the modal
     activeModal = api.ui.components.createModal({
       title: `${t('mods.setupManager.setupManager')} - ${mapName}`,
-      width: 360,
+      width: 500,
       content: content,
       buttons: [
         {
@@ -709,6 +730,24 @@ function showSetupManagerModal() {
         }
       ]
     });
+    
+    // Override modal width styles to ensure 500px width
+    setTimeout(() => {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (dialog) {
+        dialog.style.width = '500px';
+        dialog.style.minWidth = '500px';
+        dialog.style.maxWidth = '500px';
+        dialog.classList.remove('max-w-[300px]');
+        
+        // Center the scroll viewport horizontally
+        const viewport = dialog.querySelector('div[data-radix-scroll-area-viewport]');
+        if (viewport) {
+          viewport.style.marginLeft = 'auto';
+          viewport.style.marginRight = 'auto';
+        }
+      }
+    }, 0);
   } catch (error) {
     console.error('Error showing setup manager modal:', error);
     showNotification(t('common.error'), 'error');
@@ -780,16 +819,17 @@ function showSaveSetupModal(mapId) {
     
     // Team preview container
     const previewContainer = document.createElement('div');
-    previewContainer.className = 'flex flex-wrap gap-2 mb-4';
+    previewContainer.className = 'flex flex-wrap mb-4';
+    previewContainer.style.gap = '12px';
     
-    // Add monster portraits to preview
+    // Add monster and equipment portraits to preview
     currentSetup.forEach(piece => {
       if (piece && piece.monsterId) {
         const monsterInfo = getMonsterInfo(piece.monsterId);
         if (monsterInfo) {
-          const portrait = createMonsterPortrait(monsterInfo);
-          if (portrait) {
-            previewContainer.appendChild(portrait);
+          const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
+          if (pair && pair.children.length > 0) {
+            previewContainer.appendChild(pair);
           }
         }
       }
@@ -881,10 +921,16 @@ function showDeleteConfirmation(mapId, setupName) {
     
     const setupPreview = document.createElement('div');
     setupPreview.className = 'frame-pressed-1 surface-dark p-2 mb-4';
+    setupPreview.style.maxWidth = '100%';
+    setupPreview.style.overflowWrap = 'break-word';
     
     const setupNameEl = document.createElement('h3');
     setupNameEl.className = 'text-whiteRegular mb-2';
     setupNameEl.textContent = setupName;
+    setupNameEl.style.wordWrap = 'break-word';
+    setupNameEl.style.wordBreak = 'break-word';
+    setupNameEl.style.overflowWrap = 'break-word';
+    setupNameEl.style.maxWidth = '100%';
     setupPreview.appendChild(setupNameEl);
     
     content.appendChild(setupPreview);
@@ -1042,10 +1088,77 @@ function createMonsterPortrait(monsterInfo) {
       tier: monsterInfo.tier || 1
     });
     
-    // Add tooltip with stats if available
+    // Ensure rarity border is set correctly
+    const rarity = Math.min(5, Math.max(1, monsterInfo.tier || 1));
+    
+    // Remove any inline border styles from the portrait - rarity element provides the border
+    if (portrait.style && portrait.style.border) {
+      portrait.style.border = 'none';
+    }
+    
+    // Try to find rarity element at different levels of nesting
+    let rarityElement = portrait.querySelector('.has-rarity');
+    if (!rarityElement) {
+      // Try finding in button or slot elements
+      const button = portrait.querySelector('button');
+      if (button) {
+        rarityElement = button.querySelector('.has-rarity');
+      }
+    }
+    if (!rarityElement) {
+      // Try finding in container-slot
+      const slot = portrait.querySelector('.container-slot');
+      if (slot) {
+        rarityElement = slot.querySelector('.has-rarity');
+      }
+    }
+    
+    // If rarity element exists, update it
+    if (rarityElement) {
+      rarityElement.setAttribute('data-rarity', rarity);
+      
+      // Remove inline border from container - rarity element provides the border
+      const container = rarityElement.parentElement;
+      if (container && container.style && container.style.border) {
+        container.style.border = 'none';
+      }
+    } else {
+      // If rarity element doesn't exist, add it to the portrait
+      // Find the main container div that has position: relative
+      const container = portrait.querySelector('div[style*="position: relative"]') || 
+                        portrait.querySelector('.container-slot') || 
+                        (portrait.style && portrait.style.position === 'relative' ? portrait : null);
+      
+      if (container) {
+        // Ensure container has position: relative for absolute positioning
+        if (!container.style.position || container.style.position !== 'relative') {
+          container.style.position = 'relative';
+        }
+        
+        // Remove inline border style - the rarity element will provide the border
+        if (container.style.border) {
+          container.style.border = 'none';
+        }
+        
+        // Create rarity element
+        const rarityBg = document.createElement('div');
+        rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+        rarityBg.setAttribute('data-rarity', rarity);
+        rarityBg.style.cssText = 'position: absolute; inset: 0; z-index: 1; opacity: 0.8; pointer-events: none;';
+        
+        // Insert it as the first child so it's behind the image
+        if (container.firstChild) {
+          container.insertBefore(rarityBg, container.firstChild);
+        } else {
+          container.appendChild(rarityBg);
+        }
+      }
+    }
+    
+    // Add tooltip with individual stats if available
     if (monsterInfo.stats) {
-      const statsSum = Object.values(monsterInfo.stats).reduce((sum, stat) => sum + stat, 0);
-      portrait.title = `Level: ${monsterInfo.level}, Stats: ${statsSum}`;
+      const { hp = 0, ad = 0, ap = 0, armor = 0, magicResist = 0 } = monsterInfo.stats;
+      portrait.title = `Level: ${monsterInfo.level || 1}\nAD: ${ad}, AP: ${ap}, HP: ${hp}, ARM: ${armor}, MR: ${magicResist}`;
     }
     
     return portrait;
@@ -1053,6 +1166,108 @@ function createMonsterPortrait(monsterInfo) {
     console.error('Error creating monster portrait:', error);
     return null;
   }
+}
+
+// Helper function to create equipment portrait
+function createEquipmentPortrait(equipId) {
+  if (!equipId) {
+    return null;
+  }
+  
+  try {
+    // Get equipment data from player context (equipId is database ID in board configs)
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const { equips } = playerContext;
+    
+    // Create lookup map from database ID to gameId (same as Item_tier_list.js)
+    const equipLookup = new Map(equips.map(m => [m.id, m.gameId]));
+    
+    // Convert database ID to gameId
+    const gameId = equipLookup.get(equipId);
+    if (!gameId) {
+      return null;
+    }
+    
+    // Get equipment metadata using gameId
+    let spriteId = null;
+    let stat = null;
+    let tier = null;
+    
+    try {
+      const equipData = globalThis.state.utils.getEquipment(gameId);
+      if (equipData && equipData.metadata) {
+        spriteId = equipData.metadata.spriteId;
+      }
+    } catch (e) {
+      console.warn('Error getting equipment data:', e);
+      return null;
+    }
+    
+    if (!spriteId) {
+      return null;
+    }
+    
+    // Get stat and tier from the equipment item
+    const equip = equips.find(e => e.id === equipId);
+    if (equip) {
+      stat = equip.stat;
+      tier = equip.tier;
+    }
+    
+    // Create equipment portrait using spriteId (same as Item_tier_list.js)
+    if (typeof api?.ui?.components?.createItemPortrait === 'function') {
+      const itemPortrait = api.ui.components.createItemPortrait({
+        itemId: spriteId,
+        stat: stat,
+        tier: tier
+      });
+      
+      // Extract the inner div from the button wrapper
+      if (itemPortrait && itemPortrait.tagName === 'BUTTON') {
+        // Look for .equipment-portrait div (direct child or nested)
+        const innerDiv = itemPortrait.querySelector('.equipment-portrait');
+        if (innerDiv) {
+          // Clone the inner div to avoid removing it from the button
+          return innerDiv.cloneNode(true);
+        }
+        // Fallback: get the first direct child div
+        const firstDiv = Array.from(itemPortrait.children).find(child => child.tagName === 'DIV');
+        if (firstDiv) {
+          return firstDiv.cloneNode(true);
+        }
+      }
+      
+      return itemPortrait;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error creating equipment portrait:', error);
+    return null;
+  }
+}
+
+// Helper function to create a creature+equipment pair container
+function createCreatureEquipmentPair(monsterInfo, equipId) {
+  const container = document.createElement('div');
+  container.style.display = 'flex';
+  container.style.flexDirection = 'row';
+  container.style.gap = '2px';
+  container.style.alignItems = 'center';
+  
+  // Create monster portrait
+  const monsterPortrait = createMonsterPortrait(monsterInfo);
+  if (monsterPortrait) {
+    container.appendChild(monsterPortrait);
+  }
+  
+  // Create equipment portrait
+  const equipmentPortrait = createEquipmentPortrait(equipId);
+  if (equipmentPortrait) {
+    container.appendChild(equipmentPortrait);
+  }
+  
+  return container;
 }
 
 // Function to force close all open modals

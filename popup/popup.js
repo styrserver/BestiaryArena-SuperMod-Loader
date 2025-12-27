@@ -431,12 +431,23 @@ async function applyTranslations() {
 }
 
 // Helper function to get translation (for use in other functions)
-async function getTranslation(path, fallback = '') {
-  if (!translations) {
-    translations = await window.LocalizationUtils.loadTranslations();
+function getTranslationSync(path, fallback = '') {
+  if (!currentTranslations) {
+    return fallback;
   }
-  const translation = await window.LocalizationUtils.getTranslation(path);
-  return translation || fallback;
+
+  const keys = path.split('.');
+  let result = currentTranslations;
+
+  for (const key of keys) {
+    if (result && typeof result === 'object' && key in result) {
+      result = result[key];
+    } else {
+      return fallback;
+    }
+  }
+
+  return result || fallback;
 }
 
 async function getManualMods() {
@@ -563,21 +574,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // === VERSION DISPLAY ===
   async function updateVersionDisplay() {
+    const versionElement = document.getElementById('version-display');
+    if (!versionElement) return null;
+
+    // Set loading text first
+    const loadingText = getTranslationSync('popup.versionLoading', 'Version loading...');
+    versionElement.textContent = loadingText;
+
     try {
       const manifest = await window.browserAPI.runtime.getManifest();
-      const versionElement = document.getElementById('version-display');
-      if (versionElement) {
-        const versionText = await getTranslation('popup.version', 'Version');
-        versionElement.textContent = `${versionText} ${manifest.version}`;
-      }
+      const versionText = getTranslationSync('popup.version', 'Version');
+      versionElement.textContent = `${versionText} ${manifest.version}`;
       return manifest.version;
     } catch (error) {
       console.error('Failed to load manifest version:', error);
-      const versionElement = document.getElementById('version-display');
-      if (versionElement) {
-        const versionText = await getTranslation('popup.version', 'Version');
-        versionElement.textContent = `${versionText} unknown`;
-      }
+      const versionText = getTranslationSync('popup.version', 'Version');
+      versionElement.textContent = `${versionText} unknown`;
       return null;
     }
   }
@@ -1473,3 +1485,103 @@ function showModSourceWarningIfNeeded(source) {
     });
   }
 }
+
+// Language switching functionality
+const LANGUAGE_STORAGE_KEY = 'popup-language';
+let currentTranslations = null;
+
+function initializeLanguageToggle() {
+  const langEnBtn = document.getElementById('lang-en');
+  const langPtBtn = document.getElementById('lang-pt');
+
+  if (!langEnBtn || !langPtBtn) return;
+
+  // Get stored language or default to browser language
+  const storedLang = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  const currentLang = storedLang || (navigator.language.toLowerCase().startsWith('pt') ? 'pt-BR' : 'en-US');
+
+  // Update button states
+  updateLanguageButtons(currentLang);
+
+  // Add event listeners
+  langEnBtn.addEventListener('click', () => switchLanguage('en-US'));
+  langPtBtn.addEventListener('click', () => switchLanguage('pt-BR'));
+}
+
+function updateLanguageButtons(activeLang) {
+  const langEnBtn = document.getElementById('lang-en');
+  const langPtBtn = document.getElementById('lang-pt');
+
+  if (!langEnBtn || !langPtBtn) return;
+
+  // Remove active class from both buttons
+  langEnBtn.classList.remove('active');
+  langPtBtn.classList.remove('active');
+
+  // Add active class to the current language button
+  if (activeLang === 'en-US') {
+    langEnBtn.classList.add('active');
+  } else if (activeLang === 'pt-BR') {
+    langPtBtn.classList.add('active');
+  }
+}
+
+async function switchLanguage(locale) {
+  // Store the selected language
+  localStorage.setItem(LANGUAGE_STORAGE_KEY, locale);
+
+  // Update button states
+  updateLanguageButtons(locale);
+
+  // Clear the global translation cache to force reload with new language
+  if (window.LocalizationUtils) {
+    window.LocalizationUtils.translationsCache = null;
+    window.LocalizationUtils.translationsLocale = null;
+  }
+
+  // Load translations for the new language using global system
+  currentTranslations = await window.LocalizationUtils.loadTranslations();
+
+  // Update version display with new language
+  await updateVersionDisplay();
+
+  // Reapply other localizations
+  applyLocalization();
+}
+
+
+// Apply localization to elements with data attributes
+function applyLocalization() {
+  // Apply text localization
+  const localizeElements = document.querySelectorAll('[data-localize]');
+  for (const element of localizeElements) {
+    const key = element.getAttribute('data-localize');
+    const translation = getTranslationSync(key);
+    if (translation) {
+      element.textContent = translation;
+    }
+  }
+
+  // Apply placeholder localization
+  const placeholderElements = document.querySelectorAll('[data-localize-placeholder]');
+  for (const element of placeholderElements) {
+    const key = element.getAttribute('data-localize-placeholder');
+    const translation = getTranslationSync(key);
+    if (translation) {
+      element.placeholder = translation;
+    }
+  }
+}
+
+// Initialize language toggle when DOM is ready
+document.addEventListener('DOMContentLoaded', async () => {
+  initializeLanguageToggle();
+  // Load initial translations using global system
+  currentTranslations = await window.LocalizationUtils.loadTranslations();
+
+  // Update version display (will set loading text then actual version)
+  await updateVersionDisplay();
+
+  // Apply other localizations
+  applyLocalization();
+});

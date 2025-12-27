@@ -863,7 +863,7 @@ const getApiUrl = (endpoint) => {
 
 const getGuildsApiUrl = () => getApiUrl('list');
 const getGuildMembersApiUrl = (guildId) => getApiUrl(`members/${guildId}`);
-const getGuildChatApiUrl = (guildId) => getApiUrl(`chat/${guildId}`);
+// getGuildChatApiUrl is declared as a function later in the file (line 3512)
 const getGuildInvitesApiUrl = (guildId) => getApiUrl(`invites/${guildId}`);
 const getPlayerGuildApiUrl = () => getApiUrl('players');
 const getGuildCoinsApiUrl = () => getApiUrl('coins');
@@ -3508,6 +3508,12 @@ function canPerformAction(currentRole, targetRole, action) {
 // Guild Chat
 // =======================
 
+// Get guild chat API URL
+function getGuildChatApiUrl(guildId) {
+  const firebaseUrl = GUILD_CONFIG.firebaseUrl;
+  return `${firebaseUrl}/guilds/chat/${guildId}`;
+}
+
 async function sendGuildMessage(guildId, text) {
   try {
     const currentPlayer = validateCurrentPlayer();
@@ -3548,6 +3554,31 @@ async function sendGuildMessage(guildId, text) {
 
 async function sendGuildSystemMessage(guildId, messageText) {
   try {
+    // Validate guildId
+    if (!guildId) {
+      console.error('[Guilds] Cannot send system message: guildId is required');
+      return;
+    }
+
+    // Get the guild chat API URL
+    const apiUrl = getGuildChatApiUrl(guildId);
+    
+    // Validate that the URL is correct (guild chat endpoint, not all-chat)
+    if (!apiUrl || typeof apiUrl !== 'string') {
+      console.error('[Guilds] Invalid guild chat API URL:', apiUrl);
+      return;
+    }
+    
+    if (!apiUrl.includes('/guilds/chat/')) {
+      console.error('[Guilds] System message endpoint validation failed: URL does not contain /guilds/chat/', apiUrl);
+      return;
+    }
+    
+    if (apiUrl.includes('/all-chat')) {
+      console.error('[Guilds] System message endpoint validation failed: URL contains /all-chat (should be guild chat)', apiUrl);
+      return;
+    }
+
     const encryptedText = await encryptGuildMessage(messageText, guildId);
     
     const messageData = {
@@ -3559,7 +3590,21 @@ async function sendGuildSystemMessage(guildId, messageText) {
     };
 
     const messageId = Date.now().toString();
-    const response = await fetch(`${getGuildChatApiUrl(guildId)}/${messageId}.json`, {
+    const fullUrl = `${apiUrl}/${messageId}.json`;
+    
+    // CRITICAL: Verify we're not accidentally writing to /all-chat
+    if (fullUrl.includes('/all-chat')) {
+      console.error('[Guilds] CRITICAL: Attempted to write system message to /all-chat!', fullUrl);
+      return; // Don't write to wrong location
+    }
+    
+    // Verify URL contains /guilds/chat/ (double-check)
+    if (!fullUrl.includes('/guilds/chat/')) {
+      console.error('[Guilds] CRITICAL: System message URL does not contain /guilds/chat/!', fullUrl);
+      return;
+    }
+    
+    const response = await fetch(fullUrl, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(messageData)

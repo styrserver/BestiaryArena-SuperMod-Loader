@@ -47,7 +47,7 @@ const MODAL_OPEN_DELAY = 1000;
 // User-configurable delays
 const DEFAULT_START_DELAY = 3;         // 3 seconds default (user-configurable 1-10)
 const MAX_START_DELAY = 10;            // 10 seconds maximum
-const STAMINA_MONITOR_INTERVAL = 30000;
+const STAMINA_MONITOR_INTERVAL = 5000;
 const RAID_STATUS_UPDATE_INTERVAL = 600000; // 10 minutes
 const RAID_END_CHECK_INTERVAL = 30000;
 
@@ -660,7 +660,7 @@ function startStaminaTooltipMonitoring(onRecovered, requiredStamina = null) {
             const timeRemaining = Math.max(0, requiredStamina - currentStamina);
             console.log(`[Raid Hunter] Waiting for stamina (${currentStamina}/${requiredStamina}) - ~${timeRemaining} min remaining`);
         }
-    }, 15000); // Check every 15 seconds (stamina regenerates 1 per minute)
+    }, STAMINA_MONITOR_INTERVAL); // Check every 5 seconds (stamina regenerates 1 per minute)
     
     // Store interval for cleanup
     window.raidHunterStaminaInterval = staminaCheckInterval;
@@ -913,7 +913,7 @@ function createStaminaMonitoringCallback(logPrefix, successMessage) {
                         clearInterval(depletionCheckInterval);
                         handleStaminaDepletion();
                     }
-                }, 5000); // Check every 5 seconds
+                }, STAMINA_MONITOR_INTERVAL); // Check every 5 seconds
 
                 // Store for cleanup
                 window.raidHunterDepletionInterval = depletionCheckInterval;
@@ -4339,7 +4339,7 @@ function ensureAutoplayMode() {
             console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for ${priorityLabel} priority raid`);
             window.AutoplayManager.currentOwner = 'Raid Hunter';
         } 
-        // Low priority raids take control from Better Boosted Maps and others (but not Better Tasker)
+        // Low priority raids take control from Stamina Optimizer, Better Boosted Maps, and others (but not Better Tasker)
         else if (isLowPriorityRaid && currentOwner !== 'Better Tasker') {
             console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for low priority raid`);
             window.AutoplayManager.currentOwner = 'Raid Hunter';
@@ -4352,12 +4352,26 @@ function ensureAutoplayMode() {
     }
     
     
+    // Special handling for LOW priority raids taking control from Stamina Optimizer
+    if (isLowPriorityRaid && currentOwner === 'Stamina Optimizer') {
+        // Use ModCoordination to force take control from Stamina Optimizer for raid processing
+        if (window.ModCoordination) {
+            const controlGranted = window.ModCoordination.requestControl('autoplay', 'Raid Hunter', { force: true });
+            if (controlGranted) {
+                console.log('[Raid Hunter] Force took autoplay control from Stamina Optimizer for LOW priority raid');
+            } else {
+                console.log('[Raid Hunter] Failed to take autoplay control from Stamina Optimizer');
+                return false;
+            }
+        }
+    }
+
     return withControl(window.AutoplayManager, 'Raid Hunter', () => {
         const boardContext = globalThis.state.board.getSnapshot().context;
         const currentMode = boardContext.mode;
-        
+
         if (currentMode !== 'autoplay') {
-            const priorityLabel = getPriorityLabel(isHighPriorityRaid ? RAID_PRIORITY.HIGH : RAID_PRIORITY.MEDIUM);
+            const priorityLabel = getPriorityLabel(isHighPriorityRaid ? RAID_PRIORITY.HIGH : isMediumPriorityRaid ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.LOW);
             globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
             console.log(`[Raid Hunter] Switched to autoplay mode (${priorityLabel} priority raid)`);
             return true;
