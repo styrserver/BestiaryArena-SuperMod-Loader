@@ -563,7 +563,7 @@ const EVENT_TO_ROOM_MAPPING = {
     'Ruprecht\'s Hut': 'fxmas',
     'Jolly Axeman Tavern': 'kxmas',
     'Dog Raceway': 'vxmas',
-    'White Wave Cellar': 'cxmas'
+    'White Wave Cellar': 'crxmas'
 };
 
 // Temporary event raids that should show the "Event" badge in UI
