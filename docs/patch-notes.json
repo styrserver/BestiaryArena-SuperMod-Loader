@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.2.11",
+      "changes": [
+        { "type": "fixed", "mod": "Better Highscores", "text": "Smoother updates." },
+        { "type": "fixed", "mod": "Raid Hunter", "text": "Coordination improvements." },
+        { "type": "fixed", "mod": "Setup Manager", "text": "Minor improvements." }
+      ]
+    },
+    {
       "version": "3.2.10",
       "changes": [
         { "type": "changed", "mod": "Setup Manager", "text": "General improvements." },
