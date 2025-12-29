@@ -716,6 +716,9 @@ let equipmentGameIdsToNames = new Map();
 let turboActive = false;
 let speedupSubscription = null;
 
+// Variable to track if Turbo Mode mod was active before analysis
+let turboWasActiveBeforeAnalysis = false;
+
 // Function to force a specific seed - use API version if available
 let forceSeed = (seed) => {
   if (window.BestiaryModAPI && window.BestiaryModAPI.utility) {
@@ -1279,6 +1282,22 @@ function restoreBoardState() {
           roomId: currentRoomId,
         });
         console.log('[Board Analyzer] Restored original map:', currentRoomId);
+        
+        // Restore the original floor if it was captured
+        if (typeof currentFloor !== 'undefined' && currentFloor !== null) {
+          try {
+            globalThis.state.board.send({
+              type: 'setState',
+              fn: (prev) => ({
+                ...prev,
+                floor: currentFloor
+              }),
+            });
+            console.log('[Board Analyzer] Restored original floor:', currentFloor);
+          } catch (error) {
+            console.warn('[Board Analyzer] Error restoring floor:', error);
+          }
+        }
         
         // Also restore the original board configuration if we have it
         if (boardSetup && boardSetup.length > 0) {
@@ -2301,9 +2320,53 @@ function cleanupAnalysisResources(thisAnalysisId) {
     console.log('[Board Analyzer] Turbo Mode button re-enabled');
   }
   
-  // Also restore Turbo Mode button text and style if it was modified
-  if (window.turboButton && window.__turboState) {
-    // Only restore if turbo is actually inactive (not re-enabled by user)
+  // Restore Turbo Mode if it was active before analysis
+  if (turboWasActiveBeforeAnalysis && window.__turboState) {
+    console.log('[Board Analyzer] Restoring Turbo Mode as it was active before analysis...');
+    
+    // Try to enable Turbo Mode using the exported function if available
+    if (window.__turboState.enable && typeof window.__turboState.enable === 'function') {
+      window.__turboState.enable();
+      console.log('[Board Analyzer] Turbo Mode re-enabled using enable function');
+    } else {
+      // Fallback: manually enable turbo with full setup
+      console.warn('[Board Analyzer] Turbo enable function not found, using fallback');
+      window.__turboState.active = true;
+      
+      // Apply the speed by setting up a new speedup subscription
+      const speedupFactor = window.__turboState.speedupFactor || 5;
+      const interval = Math.max(DEFAULT_TICK_INTERVAL_MS / speedupFactor, 16);
+      
+      // Set up speedup subscription if not already present
+      if (!window.__turboState.speedupSubscription) {
+        console.log(`[Board Analyzer] Setting up speedup subscription with ${interval}ms interval`);
+        window.__turboState.speedupSubscription = globalThis.state.board.on('newGame', (event) => {
+          if (event.world && event.world.tickEngine) {
+            event.world.tickEngine.setTickInterval(interval);
+          }
+        });
+        
+        // Apply to current game if exists
+        if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
+          const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
+          tickEngine.setTickInterval(interval);
+        }
+      }
+      
+      // Update the Turbo Mode button to show as active (matching Turbo Mode.js styling)
+      if (window.turboButton) {
+        window.turboButton.textContent = 'Disable Turbo';
+        window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+        window.turboButton.style.backgroundSize = "auto";
+      }
+      
+      console.log('[Board Analyzer] Turbo Mode re-enabled manually with full setup');
+    }
+    
+    // Reset the tracking variable
+    turboWasActiveBeforeAnalysis = false;
+  } else if (window.turboButton && window.__turboState) {
+    // Only restore inactive style if turbo was not active before and is still inactive
     if (!window.__turboState.active) {
       window.turboButton.textContent = 'Enable Turbo';
       window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-regular.b0337118.png') repeat";
@@ -3360,9 +3423,15 @@ async function runAnalysis() {
     return;
   }
   
+  // Reset turbo tracking flag at the start of each analysis
+  turboWasActiveBeforeAnalysis = false;
+  
   // Check if Turbo Mode mod is enabled and disable it before analysis
   if (window.__turboState && window.__turboState.active) {
     console.log('Turbo Mode mod is currently enabled, disabling it before analysis...');
+    
+    // Save the state so we can restore it later
+    turboWasActiveBeforeAnalysis = true;
     
     // Try to disable Turbo Mode using the exported function if available
     if (window.__turboState.disable && typeof window.__turboState.disable === 'function') {
@@ -3519,6 +3588,47 @@ async function runAnalysis() {
     restoreBoardState();
     runningModal = null;
     activeRunningModal = null;
+    
+    // Restore Turbo Mode if it was active before analysis (error path)
+    if (turboWasActiveBeforeAnalysis && window.__turboState) {
+      console.log('[Board Analyzer] Restoring Turbo Mode after error...');
+      
+      if (window.__turboState.enable && typeof window.__turboState.enable === 'function') {
+        window.__turboState.enable();
+      } else {
+        // Fallback: manually enable turbo with full setup
+        console.warn('[Board Analyzer] Turbo enable function not found in error handler, using fallback');
+        window.__turboState.active = true;
+        
+        // Apply the speed by setting up a new speedup subscription
+        const speedupFactor = window.__turboState.speedupFactor || 5;
+        const interval = Math.max(DEFAULT_TICK_INTERVAL_MS / speedupFactor, 16);
+        
+        // Set up speedup subscription if not already present
+        if (!window.__turboState.speedupSubscription) {
+          console.log(`[Board Analyzer] Setting up speedup subscription with ${interval}ms interval`);
+          window.__turboState.speedupSubscription = globalThis.state.board.on('newGame', (event) => {
+            if (event.world && event.world.tickEngine) {
+              event.world.tickEngine.setTickInterval(interval);
+            }
+          });
+          
+          // Apply to current game if exists
+          if (globalThis.state?.board?.getSnapshot()?.context?.world?.tickEngine) {
+            const tickEngine = globalThis.state.board.getSnapshot().context.world.tickEngine;
+            tickEngine.setTickInterval(interval);
+          }
+        }
+        
+        if (window.turboButton) {
+          window.turboButton.textContent = 'Disable Turbo';
+          window.turboButton.style.background = "url('https://bestiaryarena.com/_next/static/media/background-green.be515334.png') repeat";
+          window.turboButton.style.backgroundSize = "auto";
+        }
+      }
+      
+      turboWasActiveBeforeAnalysis = false;
+    }
     
     console.log('[Board Analyzer] Error cleanup completed - all modals closed');
   }

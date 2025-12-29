@@ -17,7 +17,9 @@ if (!window.__turboState) {
     lastKnownTick: -1,
     timerSubscribed: false,
     gameControlsObserver: null,
-    speedupSubscription: null
+    speedupSubscription: null,
+    enable: null,  // Will be set after functions are defined
+    disable: null  // Will be set after functions are defined
   };
 }
 
@@ -587,6 +589,10 @@ if (turboState.active) {
 setTimeout(watchForGameControls, 1000);
 
   console.log('Turbo Mod initialization complete');
+
+// Expose enable/disable functions in turboState for other mods to use
+window.__turboState.enable = enableTurbo;
+window.__turboState.disable = disableTurbo;
 
 // Export control functions
 exports = {

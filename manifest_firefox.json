@@ -88,8 +88,7 @@
     "database/equipment-database.js",
     "database/creature-database.js",
     "database/inventory-database.js",
-    "database/maps-database.js",
-    "database/Welcome.js"
+    "database/maps-database.js"
   ],
   "browser_specific_settings": {
     "gecko": {

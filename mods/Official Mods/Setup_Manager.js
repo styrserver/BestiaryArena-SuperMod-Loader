@@ -4,7 +4,7 @@ console.log('Setup Manager Mod initializing...');
 // Configuration with defaults
 const defaultConfig = {
   savedSetups: {},  // This will store all saved team setups by map ID
-  setupNameMaxLength: 20, // Maximum character length for setup names
+  setupNameMaxLength: 100, // Maximum character length for setup names
   maxSetupsPerMap: 10, // Maximum number of setups per map
 };
 
@@ -20,6 +20,11 @@ const DEFAULT_TEAM_NAMES = ['Farm', 'S+', 'Speedrun'];
 // Ensure the savedSetups object has structure we expect
 if (!config.savedSetups) {
   config.savedSetups = {};
+}
+
+// Ensure setupNameMaxLength uses at least the new default value
+if (!config.setupNameMaxLength || config.setupNameMaxLength < defaultConfig.setupNameMaxLength) {
+  config.setupNameMaxLength = defaultConfig.setupNameMaxLength;
 }
 
 // We'll hold references to active UI components here for cleanup
@@ -141,13 +146,47 @@ function getCurrentTeamSetup() {
     
     const setup = [];
     
+    // Get player equipment for looking up equipment metadata
+    const playerSnapshot = globalThis.state.player.getSnapshot();
+    
+    // Equipment is stored in 'equips', not 'equipment'!
+    const playerEquipment = playerSnapshot?.context?.equips || [];
+    
     // Only consider player pieces (not custom or enemy pieces)
     boardSnapshot.context.boardConfig.filter(piece => piece.type === 'player').forEach(piece => {
-      setup.push({
+      const setupPiece = {
         monsterId: piece.databaseId,
         equipId: piece.equipId,
         tileIndex: piece.tileIndex
-      });
+      };
+      
+      // Try to save equipment metadata for future reference
+      if (piece.equipId) {
+        try {
+          const equipmentInstance = playerEquipment.find(eq => eq.id === piece.equipId);
+          
+            if (equipmentInstance) {
+            const equipmentData = globalThis.state?.utils?.getEquipment?.(equipmentInstance.gameId);
+            
+            if (equipmentData && equipmentData.metadata) {
+              // Save equipment metadata so we can display it even if player no longer owns it
+              setupPiece.equipmentMetadata = {
+                gameId: equipmentInstance.gameId,
+                name: equipmentData.metadata.name,
+                sprite: equipmentData.metadata.sprite || equipmentInstance.gameId,
+                stat: equipmentInstance.stat, // Stat is on the instance, not equipmentData
+                tier: equipmentInstance.tier || equipmentData.tier
+              };
+            }
+          } else {
+            console.warn('[Setup Manager] Equipment not found for equipId:', piece.equipId);
+          }
+        } catch (error) {
+          console.error('[Setup Manager] Error saving equipment metadata:', error);
+        }
+      }
+      
+      setup.push(setupPiece);
     });
     
     return setup;
@@ -161,7 +200,6 @@ function getCurrentTeamSetup() {
 function saveConfigToStorage() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config.savedSetups));
-    console.log('Saved setups to localStorage:', config.savedSetups);
     
     // Also save via the mod config API
     api.service.updateScriptConfig(context.hash, config);
@@ -177,7 +215,6 @@ function loadConfigFromStorage() {
     if (savedData) {
       const parsedData = JSON.parse(savedData);
       config.savedSetups = parsedData;
-      console.log('Loaded setups from localStorage:', config.savedSetups);
       
       // Also update the mod config
       api.service.updateScriptConfig(context.hash, config);
@@ -288,8 +325,6 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
         const playerContext = globalThis.state.player.getSnapshot().context;
         const originalSetup = playerContext.boardConfigs[mapId];
         
-        console.log('Loading original setup for map:', mapId, originalSetup);
-        
         // Apply the setup with the player's saved configuration
         if (originalSetup && Array.isArray(originalSetup) && originalSetup.length > 0) {
           globalThis.state.board.send({
@@ -318,8 +353,6 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
     
     // Ensure the setup is in the correct format - must be an array
     const setupArray = Array.isArray(savedSetup.setup) ? savedSetup.setup : [savedSetup.setup];
-    
-    console.log('Loading team setup:', setupArray);
     
     // Apply the setup
     globalThis.state.board.send({
@@ -573,7 +606,7 @@ function createSetupCard(mapId, setupName, setupData) {
         if (piece && piece.monsterId) {
           const monsterInfo = getMonsterInfo(piece.monsterId);
           if (monsterInfo) {
-            const monsterPortrait = createMonsterPortrait(monsterInfo);
+            const monsterPortrait = createMonsterPortrait(monsterInfo, piece.equipId, piece.equipmentMetadata);
             if (monsterPortrait) {
               teamContent.appendChild(monsterPortrait);
             }
@@ -593,7 +626,7 @@ function createSetupCard(mapId, setupName, setupData) {
       if (piece && piece.monsterId) {
         const monsterInfo = getMonsterInfo(piece.monsterId);
         if (monsterInfo) {
-          const monsterPortrait = createMonsterPortrait(monsterInfo);
+          const monsterPortrait = createMonsterPortrait(monsterInfo, piece.equipId, piece.equipmentMetadata);
           if (monsterPortrait) {
             teamContent.appendChild(monsterPortrait);
           }
@@ -787,7 +820,7 @@ function showSaveSetupModal(mapId) {
       if (piece && piece.monsterId) {
         const monsterInfo = getMonsterInfo(piece.monsterId);
         if (monsterInfo) {
-          const portrait = createMonsterPortrait(monsterInfo);
+          const portrait = createMonsterPortrait(monsterInfo, piece.equipId, piece.equipmentMetadata);
           if (portrait) {
             previewContainer.appendChild(portrait);
           }
@@ -952,8 +985,6 @@ function createSetupManagerButton() {
 
 // Update the init function to load configurations from localStorage
 function init() {
-  console.log('Setup Manager initializing...');
-  
   // Create notification container
   createNotificationContainer();
   
@@ -975,8 +1006,6 @@ function init() {
   
   // Create the setup manager button
   createSetupManagerButton();
-  
-  console.log('Setup Manager initialized');
 }
 
 // Wait for the game to be ready before initializing
@@ -1029,12 +1058,19 @@ context.exports = {
 };
 
 // Helper function to create monster portraits with correct tier coloring
-function createMonsterPortrait(monsterInfo) {
+function createMonsterPortrait(monsterInfo, equipId = null, equipmentMetadata = null) {
   if (!monsterInfo || !monsterInfo.gameId) {
     return null;
   }
   
   try {
+    // Create a container for the portrait and equipment
+    const container = document.createElement('div');
+    container.style.cssText = `
+      position: relative;
+      display: inline-block;
+    `;
+    
     // Create monster portrait with calculated tier colors
     const portrait = api.ui.components.createMonsterPortrait({
       monsterId: monsterInfo.gameId,
@@ -1042,13 +1078,75 @@ function createMonsterPortrait(monsterInfo) {
       tier: monsterInfo.tier || 1
     });
     
-    // Add tooltip with stats if available
-    if (monsterInfo.stats) {
-      const statsSum = Object.values(monsterInfo.stats).reduce((sum, stat) => sum + stat, 0);
-      portrait.title = `Level: ${monsterInfo.level}, Stats: ${statsSum}`;
+    container.appendChild(portrait);
+    
+    // Build comprehensive tooltip with equipment info if available
+    try {
+      let equipName = null;
+      let equipStatType = null;
+      let equipTier = null;
+      
+      // First, try to use saved equipment metadata (works even if player no longer owns the item)
+      if (equipmentMetadata) {
+        equipName = equipmentMetadata.name;
+        equipStatType = equipmentMetadata.stat;
+        equipTier = equipmentMetadata.tier;
+      } 
+      // Fallback: try to look up equipment in player's current inventory
+      else if (equipId) {
+        const playerSnapshot = globalThis.state.player.getSnapshot();
+        const playerEquipment = playerSnapshot?.context?.equips;
+        
+        if (playerEquipment && Array.isArray(playerEquipment)) {
+          const equipmentInstance = playerEquipment.find(eq => eq.id === equipId);
+          
+          if (equipmentInstance) {
+            const equipmentData = globalThis.state?.utils?.getEquipment?.(equipmentInstance.gameId);
+            
+            if (equipmentData && equipmentData.metadata) {
+              equipName = equipmentData.metadata.name;
+              equipStatType = equipmentInstance.stat;
+              equipTier = equipmentInstance.tier || equipmentData.tier;
+            }
+          }
+        }
+      }
+      
+      // Build tooltip
+      let tooltipParts = [];
+      
+      // Add monster info
+      if (monsterInfo.stats) {
+        const statsSum = Object.values(monsterInfo.stats).reduce((sum, stat) => sum + stat, 0);
+        tooltipParts.push(`Level: ${monsterInfo.level}`);
+        tooltipParts.push(`Stats: ${statsSum}`);
+      }
+      
+      // Add equipment info
+      if (equipName) {
+        tooltipParts.push(`\nEquipment: ${equipName}`);
+        if (equipTier) {
+          tooltipParts.push(`Tier: ${equipTier}`);
+        }
+        if (equipStatType) {
+          tooltipParts.push(`Stat: ${equipStatType.toUpperCase()}`);
+        }
+      }
+      
+      // Set the tooltip on the container
+      if (tooltipParts.length > 0) {
+        container.title = tooltipParts.join('\n');
+      }
+    } catch (error) {
+      console.error('[Setup Manager] Error creating tooltip:', error);
+      // Fallback tooltip with just monster info
+      if (monsterInfo.stats) {
+        const statsSum = Object.values(monsterInfo.stats).reduce((sum, stat) => sum + stat, 0);
+        container.title = `Level: ${monsterInfo.level}\nStats: ${statsSum}`;
+      }
     }
     
-    return portrait;
+    return container;
   } catch (error) {
     console.error('Error creating monster portrait:', error);
     return null;
@@ -1057,8 +1155,6 @@ function createMonsterPortrait(monsterInfo) {
 
 // Function to force close all open modals
 function forceCloseAllModals() {
-      console.log("Force closing all modals...");
-  
   // Try to close the tracked activeModal first with the API
   if (activeModal && typeof activeModal.close === 'function') {
     try {
@@ -1072,8 +1168,6 @@ function forceCloseAllModals() {
   // Find all open dialog elements
   const allDialogs = document.querySelectorAll('div[role="dialog"][data-state="open"]');
   allDialogs.forEach(dialog => {
-          console.log("Found open modal to close:", dialog);
-    
     // Change state to closed
     dialog.setAttribute('data-state', 'closed');
     
@@ -1081,7 +1175,6 @@ function forceCloseAllModals() {
     setTimeout(() => {
       if (dialog.parentNode) {
         dialog.parentNode.removeChild(dialog);
-        console.log("Modal removed successfully");
       }
     }, 50);
   });
@@ -1090,7 +1183,6 @@ function forceCloseAllModals() {
   document.querySelectorAll('.modal-overlay, .fixed.inset-0').forEach(overlay => {
     if (overlay && overlay.parentNode) {
       overlay.parentNode.removeChild(overlay);
-              console.log("Modal overlay removed");
     }
   });
   

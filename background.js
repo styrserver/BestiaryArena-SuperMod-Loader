@@ -51,7 +51,6 @@ async function loadDefaultEnabledMods() {
     // Chrome fallback: Use hardcoded list since Chrome service workers can't use dynamic import
     console.log('[Background] Using hardcoded default enabled mods (Chrome limitation)');
     return [
-      'database/Welcome.js',
       'database/inventory-database.js',
       'database/creature-database.js',
       'database/equipment-database.js',
@@ -76,7 +75,6 @@ async function loadDefaultEnabledMods() {
     console.error('[Background] Error loading default enabled mods from registry:', error);
     // Return hardcoded fallback
     return [
-      'database/Welcome.js',
       'database/inventory-database.js',
       'database/creature-database.js',
       'database/equipment-database.js',
@@ -624,7 +622,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.error('Background: Error loading default enabled mods:', error);
         // This should not happen since loadDefaultEnabledMods has its own fallback
         // But just in case, use a minimal fallback
-        const minimalFallback = ['database/Welcome.js'];
+        const minimalFallback = [];
         
         // Process with minimal fallback
         localMods = newMods.map(mod => ({
@@ -1011,7 +1009,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // NOTE: Keep these in sync with content/mod-registry.js
         console.log('[Background] Chrome detected or Firefox import failed, using hardcoded counts');
         const modCounts = {
-          database: 6,
+          database: 5,
           official: 11,
           super: 20
         };
@@ -1022,7 +1020,7 @@ browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Ultimate fallback
         sendResponse({ 
           success: true, 
-          counts: { database: 6, official: 11, super: 20 } 
+          counts: { database: 5, official: 11, super: 20 } 
         });
       }
     })();

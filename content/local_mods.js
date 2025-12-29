@@ -247,7 +247,6 @@ async function listAllModFiles() {
 
 // List of mods to enable by default - can be overridden by registry
 let defaultEnabledMods = [
-  'database/Welcome.js',
   'database/inventory-database.js',
   'database/creature-database.js',
   'database/equipment-database.js',

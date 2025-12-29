@@ -1028,13 +1028,9 @@ const superModNames = [
 const hiddenMods = [
   'inventory-database.js',
   'creature-database.js',
-  'Welcome.js',
   'equipment-database.js',
   'maps-database.js',
-  'playereq-database.js',
-  'Mod Settings.js',
-  'RunTracker.js',
-  'Outfiter.js'
+  'playereq-database.js'
 ];
 
 function normalizeModName(name) {
