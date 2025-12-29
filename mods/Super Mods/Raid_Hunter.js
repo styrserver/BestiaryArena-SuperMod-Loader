@@ -188,9 +188,12 @@ function isBoostedMapsActive() {
         if (window.boostedMapsState && window.boostedMapsState.isEnabled) {
             return window.boostedMapsState.isCurrentlyFarming === true;
         }
-        // Method 2: Check AutoplayManager owner
-        if (window.AutoplayManager && window.AutoplayManager.getCurrentOwner() === 'Better Boosted Maps') {
-            return true;
+        // Method 2: Check AutoplayManager owner (including Stamina Optimizer)
+        if (window.AutoplayManager) {
+            const currentOwner = window.AutoplayManager.getCurrentOwner();
+            if (currentOwner === 'Better Boosted Maps' || currentOwner === 'Stamina Optimizer') {
+                return true;
+            }
         }
         return false;
     } catch (error) {
@@ -534,7 +537,8 @@ const EVENT_TEXTS = [
     'An Arcanist Ritual',
     'Ruprecht\'s Hut',
     'Jolly Axeman Tavern',
-    'Dog Raceway'
+    'Dog Raceway',
+    'White Wave Cellar'
 ];
 
 // Event to room ID mapping (FALLBACK ONLY - game state API is used first)
@@ -558,14 +562,16 @@ const EVENT_TO_ROOM_MAPPING = {
     'An Arcanist Ritual': 'vdhar',
     'Ruprecht\'s Hut': 'fxmas',
     'Jolly Axeman Tavern': 'kxmas',
-    'Dog Raceway': 'vxmas'
+    'Dog Raceway': 'vxmas',
+    'White Wave Cellar': 'cxmas'
 };
 
 // Temporary event raids that should show the "Event" badge in UI
 const TEMPORARY_EVENT_RAIDS = [
     'Ruprecht\'s Hut',
     'Jolly Axeman Tavern',
-    'Dog Raceway'
+    'Dog Raceway',
+    'White Wave Cellar'
 ];
 
 // ============================================================================
@@ -4206,13 +4212,18 @@ function ensureAutoplayMode() {
     }
     
     if (currentOwner && currentOwner !== 'Raid Hunter') {
-        // HIGH and MEDIUM priority raids take control from anyone
+        // HIGH and MEDIUM priority raids take control from anyone (including Stamina Optimizer)
         if (isHighPriorityRaid || isMediumPriorityRaid) {
             const priorityLabel = isHighPriorityRaid ? 'HIGH' : 'MEDIUM';
             console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for ${priorityLabel} priority raid`);
             window.AutoplayManager.currentOwner = 'Raid Hunter';
+            
+            // If taking control from Stamina Optimizer, log it clearly
+            if (currentOwner === 'Stamina Optimizer') {
+                console.log(`[Raid Hunter] 🚨 Interrupting Stamina Optimizer for ${priorityLabel} priority raid`);
+            }
         } 
-        // Low priority raids take control from Better Boosted Maps and others (but not Better Tasker)
+        // Low priority raids take control from Better Boosted Maps, Stamina Optimizer and others (but not Better Tasker)
         else if (isLowPriorityRaid && currentOwner !== 'Better Tasker') {
             console.log(`[Raid Hunter] Taking autoplay control from ${currentOwner} for low priority raid`);
             window.AutoplayManager.currentOwner = 'Raid Hunter';
@@ -4397,6 +4408,7 @@ function setupRaidMonitoring() {
 
     if (globalThis.state && globalThis.state.raids) {
         raidUnsubscribe = globalThis.state.raids.on("newRaid", (e) => {
+            console.log('[Raid Hunter] 🆕 New raid event detected:', e.raid);
             resetRaidCountdown();
             handleNewRaid(e.raid);
         });
@@ -4406,6 +4418,8 @@ function setupRaidMonitoring() {
         
         // Start periodic raid end checking
         startRaidEndChecking();
+        
+        console.log('[Raid Hunter] ✅ Raid event listener set up successfully');
     }
     
     // Fight toast monitoring is set up in init() and runs independently
@@ -4420,58 +4434,117 @@ function setupFightToastMonitoring() {
 
 // Handles new raid detection.
 async function handleNewRaid(raid) {
+    console.log('[Raid Hunter] 📥 handleNewRaid called for raid:', raid);
+    
     // Check if automation is enabled
     if (!isAutomationActive()) {
-        console.log('[Raid Hunter] New raid detected but automation is disabled');
+        console.log('[Raid Hunter] ⏸️ New raid detected but automation is disabled');
         return;
     }
     
+    // Rate limit modal closing, but NOT raid processing
+    // This prevents spam but ensures we don't miss important raids
     const currentTime = Date.now();
-    if (currentTime - lastRaidTime < 30000) {
-        return;
-    }
+    const timeSinceLastRaid = currentTime - lastRaidTime;
+    const shouldCloseModals = timeSinceLastRaid >= 5000; // 5 seconds
     
-    lastRaidTime = currentTime;
+    console.log(`[Raid Hunter] Time since last raid: ${timeSinceLastRaid}ms, will close modals: ${shouldCloseModals}`);
+    
+    if (shouldCloseModals) {
+        lastRaidTime = currentTime;
+    }
     
     try {
         const settings = loadSettings();
         const enabledMaps = settings.enabledRaidMaps || []; // Default to none if not set
         
-        while (true) {
-            const closeButton = findButtonByText('Close');
-            if (closeButton) {
-                closeButton.click();
-                await new Promise(resolve => setTimeout(resolve, BESTIARY_RETRY_DELAY));
-            } else {
-                break;
+        // Only close modals if enough time has passed (rate limiting)
+        if (shouldCloseModals) {
+            let modalsClosed = 0;
+            while (true) {
+                const closeButton = findButtonByText('Close');
+                if (closeButton) {
+                    closeButton.click();
+                    modalsClosed++;
+                    await new Promise(resolve => setTimeout(resolve, BESTIARY_RETRY_DELAY));
+                } else {
+                    break;
+                }
+            }
+            if (modalsClosed > 0) {
+                console.log(`[Raid Hunter] Closed ${modalsClosed} modal(s)`);
             }
         }
         
         // Update raid queue and process next raid
+        console.log('[Raid Hunter] Updating raid state and queue...');
         updateRaidState();
+        
         if (raidQueue.length > 0) {
-            console.log(`[Raid Hunter] New raids detected - processing next raid (raid priority)`);
+            // Sort queue to get highest priority raid
+            sortRaidQueue();
+            const nextRaid = raidQueue[0];
+            const queueInfo = raidQueue.map(r => `${r.name} (${getPriorityLabel(r.priority)})`).join(', ');
+            console.log(`[Raid Hunter] ✅ ${raidQueue.length} raid(s) in queue: ${queueInfo}`);
             
-            // Apply raid start delay if configured
+            // CRITICAL: For HIGH/MEDIUM priority raids, skip delay and interrupt immediately
+            if (nextRaid.priority === RAID_PRIORITY.HIGH || nextRaid.priority === RAID_PRIORITY.MEDIUM) {
+                const priorityLabel = getPriorityLabel(nextRaid.priority);
+                console.log(`[Raid Hunter] 🚨 ${priorityLabel} priority raid detected: ${nextRaid.name} - processing IMMEDIATELY`);
+                
+                // If currently raiding a lower priority raid, interrupt it
+                if (isCurrentlyRaiding && currentRaidInfo && nextRaid.priority < currentRaidInfo.priority) {
+                    console.log(`[Raid Hunter] Interrupting current raid ${currentRaidInfo.name} for ${priorityLabel} priority raid`);
+                    interruptCurrentRaid(() => {
+                        processNextRaid(true); // Allow interrupt
+                    });
+                    return;
+                }
+                
+                // If Stamina Optimizer or Better Boosted Maps has control, take it
+                const currentOwner = window.AutoplayManager?.getCurrentOwner?.();
+                if (currentOwner === 'Stamina Optimizer' || currentOwner === 'Better Boosted Maps') {
+                    console.log(`[Raid Hunter] Taking control from ${currentOwner} for ${priorityLabel} priority raid`);
+                    // The ensureAutoplayMode() function will handle taking control
+                }
+                
+                // Process immediately without delay
+                processNextRaid(true); // Allow interrupt
+                return;
+            }
+            
+            // For LOW priority raids, apply delay and normal processing
             const raidStartDelay = settings.raidDelay || DEFAULT_RAID_START_DELAY;
             
+            // Check if raid can proceed based on priority (LOW priority yields to Better Tasker)
+            if (!canProcessRaidWithPriority(nextRaid.priority, 'new raid processing')) {
+                const priorityLabel = getPriorityLabel(nextRaid.priority);
+                console.log(`[Raid Hunter] ${priorityLabel} priority raid waiting for higher priority activities...`);
+                return;
+            }
+            
             if (raidStartDelay > 0) {
-                console.log(`[Raid Hunter] Applying raid start delay: ${raidStartDelay} seconds`);
+                console.log(`[Raid Hunter] ⏱️ Applying raid start delay: ${raidStartDelay} seconds`);
                 
                 setTimeout(() => {
-                    // Check if raid processing can proceed
-                    if (canProcessRaid('new raid delay') && raidQueue.length > 0) {
-                        console.log('[Raid Hunter] Raid start delay completed - processing raid (raid priority)');
+                    // Re-check if raid can proceed after delay
+                    if (canProcessRaidWithPriority(nextRaid.priority, 'new raid delay') && raidQueue.length > 0) {
+                        console.log('[Raid Hunter] ✅ Raid start delay completed - processing raid');
                         processNextRaid();
+                    } else {
+                        console.log('[Raid Hunter] ❌ Cannot process raid after delay (blocked or queue empty)');
                     }
                 }, raidStartDelay * 1000);
             } else {
                 // No delay, process immediately
+                console.log('[Raid Hunter] ⚡ No delay configured - processing immediately');
                 processNextRaid();
             }
+        } else {
+            console.log('[Raid Hunter] ℹ️ No raids added to queue (likely not enabled or already in queue)');
         }
     } catch (error) {
-        console.error("[Raid Hunter] Error handling raid:", error);
+        console.error("[Raid Hunter] ❌ Error handling raid:", error);
     }
 }
 
@@ -5048,7 +5121,8 @@ function createRaidMapSelection() {
         'Carlin': [
             'Buzzing Madness',
             'Monastery Catacombs',
-            'Ghostlands Boneyard'
+            'Ghostlands Boneyard',
+            'White Wave Cellar'
         ],
         'Folda': [
             'Permafrosted Hole',

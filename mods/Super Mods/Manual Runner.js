@@ -2475,8 +2475,8 @@ function showRunningAnalysisModal(
   currentFloor = null,
   maxFloor = null
 ) {
-  // First, force close any existing modals (like Board Analyzer does)
-  forceCloseAllModals();
+  // Only close existing running modals, not all modals
+  modalManager.closeByType(MODAL_TYPES.RUNNING);
   
   const content = document.createElement('div');
   content.style.cssText = 'text-align: center;';
@@ -2543,7 +2543,7 @@ function showRunningAnalysisModal(
   wrapper.setAttribute('aria-label', t('mods.manualRunner.runningHeader'));
   // Position only; visual theme comes from CSS to match Hunt Analyzer
   wrapper.className = 'manual-runner-modal';
-  wrapper.style.cssText = ['position: absolute','left: 12px','bottom: 12px'].join(';');
+  wrapper.style.cssText = ['position: fixed','left: 12px','bottom: 12px','z-index: 2147483647'].join(';');
 
   const header = document.createElement('div');
   header.textContent = t('mods.manualRunner.runningHeader');
@@ -2580,6 +2580,13 @@ function showRunningAnalysisModal(
   // Attach to <main> when available to keep it within game area; fallback to body
   const mountPoint = document.querySelector('main') || document.body;
   mountPoint.appendChild(wrapper);
+  
+  console.log('[Manual Runner] Running modal created and attached to DOM:', {
+    wrapperId: wrapper.id,
+    mountPoint: mountPoint.tagName,
+    visible: wrapper.style.display !== 'none',
+    position: wrapper.style.position
+  });
 
   // Provide a modal-like object compatible with our ModalManager
   const modalObject = {
@@ -2587,6 +2594,7 @@ function showRunningAnalysisModal(
     element: wrapper,
     close: () => {
       if (wrapper && wrapper.parentNode) {
+        console.log('[Manual Runner] Closing running modal');
         wrapper.parentNode.removeChild(wrapper);
       }
     }
@@ -3160,7 +3168,8 @@ async function runAnalysis() {
     } catch (_) {}
     // Compute target S+ rank points based on current setup and stop condition
     let targetRankPoints = null;
-    if (config.stopCondition !== 'any') {
+    if (config.stopCondition === 'max') {
+      // Only calculate rank points target for 'max' mode
       const maxTeamSize = getMaxTeamSize(null);
       const playerTeamSize = getPlayerTeamSize();
       targetRankPoints = Math.max(0, (2 * maxTeamSize) - playerTeamSize);
@@ -3339,6 +3348,12 @@ function init() {
       return false;
     }
   };
+  
+  // Also set legacy coordination flag for compatibility
+  if (!window.__modCoordination) {
+    window.__modCoordination = {};
+  }
+  window.__modCoordination.manualRunnerRunning = false;
   
   console.log('[Manual Runner] State exposed for mod coordination');
 }

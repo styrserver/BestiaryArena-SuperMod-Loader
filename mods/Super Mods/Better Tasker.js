@@ -1495,29 +1495,81 @@ function isBoardAnalyzerActive() {
     }
 }
 
+// ============================================================================
+// 4.2. MANUAL RUNNER COORDINATION
+// ============================================================================
+
+// Check if Manual Runner is currently active
+function isManualRunnerActive() {
+    try {
+        // Check window.manualRunnerState (primary detection)
+        if (!window.manualRunnerState) {
+            return false;
+        }
+        
+        const state = window.manualRunnerState;
+        
+        // Check if Manual Runner is currently running or stopping
+        if (state.isRunning && state.isRunning()) {
+            return true;
+        }
+        
+        if (state.isStopping && state.isStopping()) {
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Better Tasker] Error checking Manual Runner state:', error);
+        return false;
+    }
+}
+
+// Stop Manual Runner when Better Tasker needs to start
+function stopManualRunnerForTask() {
+    try {
+        if (!window.manualRunnerState) {
+            return false;
+        }
+        
+        const state = window.manualRunnerState;
+        
+        if (state.canInterrupt && state.canInterrupt() && state.forceStop) {
+            console.log('[Better Tasker] 🛑 Stopping Manual Runner to start task automation');
+            return state.forceStop();
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Better Tasker] Error stopping Manual Runner:', error);
+        return false;
+    }
+}
+
 // Handle Board Analyzer coordination - pause Better Tasker when Board Analyzer runs
 function handleBoardAnalyzerCoordination() {
     try {
         if (!window.__modCoordination) return;
         
         const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
-        const manualRunnerRunning = window.__modCoordination.manualRunnerRunning === true;
+        // Don't check manualRunnerRunning here - we handle it differently now
+        // Manual Runner is stopped on-demand when tasks appear, not preemptively
         
-        if ((boardAnalyzerRunning || manualRunnerRunning) && !isBoardAnalyzerRunning) {
+        if (boardAnalyzerRunning && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Better Tasker automation
-            console.log('[Better Tasker] Coordination active (Board Analyzer or Manual Runner) - pausing task automation');
+            console.log('[Better Tasker] Board Analyzer active - pausing task automation');
             isBoardAnalyzerRunning = true;
             
             if (taskerState === TASKER_STATES.ENABLED) {
                 stopAutomation();
             }
-        } else if (!boardAnalyzerRunning && !manualRunnerRunning && isBoardAnalyzerRunning) {
+        } else if (!boardAnalyzerRunning && isBoardAnalyzerRunning) {
             // Board Analyzer finished - resume Better Tasker automation if enabled
-            console.log('[Better Tasker] Coordination cleared - checking if automation should resume');
+            console.log('[Better Tasker] Board Analyzer cleared - checking if automation should resume');
             isBoardAnalyzerRunning = false;
             
             if (taskerState === TASKER_STATES.ENABLED && !isRaidHunterRaiding()) {
-                console.log('[Better Tasker] Resuming task automation');
+                console.log('[Better Tasker] Resuming task automation after Board Analyzer');
                 startAutomation();
             }
         }
@@ -6774,6 +6826,17 @@ async function openQuestLogAndAcceptTask() {
         if (taskOperationInProgress) {
             console.log('[Better Tasker] Task operation already in progress, skipping duplicate call');
             return;
+        }
+        
+        // Stop Manual Runner if it's active (only when we're actually accepting a task)
+        if (isManualRunnerActive()) {
+            console.log('[Better Tasker] Manual Runner is active - stopping it to accept new task');
+            const stopped = stopManualRunnerForTask();
+            if (stopped) {
+                console.log('[Better Tasker] Manual Runner stopped successfully, proceeding with task acceptance');
+                // Give it a moment to clean up
+                await sleep(500);
+            }
         }
         
         console.log('[Better Tasker] Current raid state:', {
