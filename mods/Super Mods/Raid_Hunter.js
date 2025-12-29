@@ -4018,18 +4018,37 @@ async function handleEventOrRaid(roomId) {
         return;
     }
 
-    // Find and click Start button
+    // Find and click Start button with retry logic (especially needed after interrupts)
     console.log('[Raid Hunter] Looking for Start button...');
     const startButton = findButtonByText('Start');
     if (!startButton) {
-        console.log('[Raid Hunter] Start button not found');
-        handleRaidFailure('Start button not found');
-        return;
+        console.log('[Raid Hunter] Start button not found - retrying with delay (page may still be loading after interrupt)...');
+        
+        // Retry logic for Start button (especially needed after interrupts)
+        const tryFindStartButton = async (retries = 5, delay = 500) => {
+            const button = findButtonByText('Start');
+            if (button) {
+                console.log('[Raid Hunter] Start button found on retry - clicking...');
+                button.click();
+                return;
+            } else if (retries > 0) {
+                console.log(`[Raid Hunter] Start button not found - retrying in ${delay}ms (${retries} retries left)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return tryFindStartButton(retries - 1, delay);
+            } else {
+                console.log('[Raid Hunter] Start button not found after all retries');
+                handleRaidFailure('Start button not found');
+                return;
+            }
+        };
+        
+        await tryFindStartButton();
+        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
+    } else {
+        console.log('[Raid Hunter] Clicking Start button...');
+        startButton.click();
+        await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     }
-    
-    console.log('[Raid Hunter] Clicking Start button...');
-    startButton.click();
-    await new Promise(resolve => setTimeout(resolve, AUTOMATION_CHECK_DELAY));
     
     // Final check after clicking Start button
     if (!isAutomationActive()) {

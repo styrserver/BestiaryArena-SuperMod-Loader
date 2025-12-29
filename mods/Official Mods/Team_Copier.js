@@ -826,11 +826,49 @@ function init() {
 // Initialize the mod
 init();
 
+// Hide Team Copier button
+function hideButton() {
+  try {
+    // Try to find by ID
+    const button = document.getElementById('team-copier-button');
+    if (button) {
+      button.style.display = 'none';
+      console.log('[Team Copier] Button hidden');
+    }
+  } catch (error) {
+    console.error('[Team Copier] Error hiding button:', error);
+  }
+}
+
+// Show Team Copier button
+function showButton() {
+  try {
+    // Try to find by ID
+    const button = document.getElementById('team-copier-button');
+    if (button) {
+      button.style.display = '';
+      console.log('[Team Copier] Button shown');
+    }
+  } catch (error) {
+    console.error('[Team Copier] Error showing button:', error);
+  }
+}
+
 // Export functionality
 context.exports = {
   copyTeamSetup: copyTeamSetup,
-  showModal: showTeamCopierModal
+  showModal: showTeamCopierModal,
+  hideButton: hideButton,
+  showButton: showButton
 };
+
+// Expose to window for inter-mod communication
+if (typeof window !== 'undefined') {
+  window.teamCopier = {
+    hideButton: hideButton,
+    showButton: showButton
+  };
+}
 
 // Check if there's shared team data to apply
 function checkForSharedTeamData() {

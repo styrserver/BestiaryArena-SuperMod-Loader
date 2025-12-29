@@ -104,6 +104,62 @@ function getMonsterInfo(monsterId) {
   }
 }
 
+// Get monster info from custom piece or check if it exists in player collection
+function getMonsterInfoFromCustom(customPiece) {
+  if (!customPiece || !customPiece.gameId) {
+    return null;
+  }
+  
+  try {
+    const playerSnapshot = globalThis.state.player.getSnapshot();
+    const monsters = playerSnapshot?.context?.monsters || [];
+    
+    // Get saved stats from custom piece
+    const genes = customPiece.genes || {};
+    const savedStats = extractStatsFromMonster(genes);
+    
+    // Find all monsters in collection with matching gameId
+    const matchingMonsters = monsters.filter(m => m.gameId === customPiece.gameId);
+    
+    // Check if stats match any original monster in collection
+    let isModified = true;
+    if (matchingMonsters.length > 0) {
+      // Compare saved stats with original monster stats
+      for (const monster of matchingMonsters) {
+        const originalStats = extractStatsFromMonster(monster);
+        
+        // Check if all stats match
+        if (savedStats.hp === originalStats.hp &&
+            savedStats.ad === originalStats.ad &&
+            savedStats.ap === originalStats.ap &&
+            savedStats.armor === originalStats.armor &&
+            savedStats.magicResist === originalStats.magicResist) {
+          isModified = false;
+          break; // Found a match, not modified
+        }
+      }
+    } else {
+      // GameId doesn't exist in collection at all
+      isModified = true;
+    }
+    
+    // Calculate tier from genes using shared function
+    const tier = calculateTierFromStats(savedStats);
+    
+    return {
+      gameId: customPiece.gameId,
+      tier: tier,
+      level: customPiece.level || 1,
+      stats: savedStats,
+      isCustom: true,
+      existsInCollection: !isModified // True if stats match original, false if modified
+    };
+  } catch (error) {
+    console.error('Error getting monster info from custom piece:', error);
+    return null;
+  }
+}
+
 // ========== Core Functionality ==========
 
 // Get the current map ID
@@ -138,6 +194,57 @@ function getCurrentMapName() {
   }
 }
 
+// Get current number of creatures placed on the board
+function getCurrentCreatureCount() {
+  try {
+    const boardSnapshot = globalThis.state.board.getSnapshot();
+    const boardConfig = boardSnapshot?.context?.boardConfig || [];
+    
+    // Count only player and custom pieces (not villains)
+    return boardConfig.filter(piece => 
+      piece && (piece.type === 'player' || piece.type === 'custom') && !piece.villain
+    ).length;
+  } catch (error) {
+    console.error('Error getting current creature count:', error);
+    return 0;
+  }
+}
+
+// Get maximum team size for current map
+function getMaxTeamSize(mapId) {
+  try {
+    if (!mapId || !globalThis.state?.utils?.ROOMS) {
+      return 5; // Default fallback
+    }
+    
+    const rooms = globalThis.state.utils.ROOMS;
+    
+    // Try to find room by id (could be string or number)
+    let roomData = rooms.find(room => 
+      room.id === mapId || 
+      room.id === String(mapId) || 
+      String(room.id) === mapId
+    );
+    
+    // If not found, try to find by file name or other identifier
+    if (!roomData && typeof mapId === 'string') {
+      roomData = rooms.find(room => 
+        room.file?.name === mapId || 
+        room.file?.id === mapId
+      );
+    }
+    
+    if (roomData && typeof roomData.maxTeamSize === 'number') {
+      return roomData.maxTeamSize;
+    }
+  } catch (error) {
+    console.warn('Error getting max team size:', error);
+  }
+  
+  // Default fallback (most common is 5)
+  return 5;
+}
+
 // Get all player pieces on the board in the format needed for autoSetupBoard
 function getCurrentTeamSetup() {
   try {
@@ -148,13 +255,29 @@ function getCurrentTeamSetup() {
     
     const setup = [];
     
-    // Only consider player pieces (not custom or enemy pieces)
-    boardSnapshot.context.boardConfig.filter(piece => piece.type === 'player').forEach(piece => {
-      setup.push({
-        monsterId: piece.databaseId,
-        equipId: piece.equipId,
-        tileIndex: piece.tileIndex
-      });
+    // Save both player and custom pieces
+    boardSnapshot.context.boardConfig.filter(piece => 
+      piece.type === 'player' || piece.type === 'custom'
+    ).forEach(piece => {
+      if (piece.type === 'player') {
+        // Player piece - save databaseId
+        setup.push({
+          type: 'player',
+          monsterId: piece.databaseId,
+          equipId: piece.equipId,
+          tileIndex: piece.tileIndex
+        });
+      } else if (piece.type === 'custom') {
+        // Custom piece - save full custom data
+        setup.push({
+          type: 'custom',
+          gameId: piece.gameId,
+          level: piece.level || 1,
+          genes: piece.genes ? { ...piece.genes } : null,
+          equip: piece.equip ? { ...piece.equip } : null,
+          tileIndex: piece.tileIndex
+        });
+      }
     });
     
     return setup;
@@ -217,11 +340,12 @@ function saveTeamSetup(mapId, name, setup) {
   // Check if a setup with this name already exists for this map
   const existingSetupIndex = config.savedSetups[mapId].findIndex(s => s.name === name);
   if (existingSetupIndex >= 0) {
-    // Update the existing setup
-    config.savedSetups[mapId][existingSetupIndex] = { name, setup };
+    // Update the existing setup (preserve notes if they exist)
+    const existingNotes = config.savedSetups[mapId][existingSetupIndex].notes || '';
+    config.savedSetups[mapId][existingSetupIndex] = { name, setup, notes: existingNotes };
   } else {
     // Add a new setup
-    config.savedSetups[mapId].push({ name, setup });
+    config.savedSetups[mapId].push({ name, setup, notes: '' });
   }
   
   // Save the updated config
@@ -328,11 +452,101 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
     
     console.log('Loading team setup:', setupArray);
     
-    // Apply the setup
-    globalThis.state.board.send({
-      type: "autoSetupBoard",
-      setup: setupArray
-    });
+    // Check if we have any custom pieces
+    const hasCustomPieces = setupArray.some(p => p.type === 'custom');
+    
+    if (hasCustomPieces) {
+      // Mix of player and custom pieces - use setState to apply boardConfig
+      const boardSnapshot = globalThis.state.board.getSnapshot();
+      const mapIdFromBoard = boardSnapshot?.context?.selectedMap?.selectedRoom?.id;
+      
+      if (!mapIdFromBoard) {
+        console.error('Could not determine map ID for loading custom pieces');
+        return false;
+      }
+      
+      const enemyTeamConfig = globalThis.state.utils.getBoardMonstersFromRoomId(mapIdFromBoard);
+      
+      const playerTeamConfig = setupArray.map((piece, index) => {
+        if (piece.type === 'custom') {
+          // Custom piece - use as-is
+          return {
+            type: 'custom',
+            gameId: piece.gameId,
+            level: piece.level || 1,
+            genes: piece.genes || {},
+            equip: piece.equip || null,
+            tileIndex: piece.tileIndex,
+            tier: 4,
+            villain: false,
+            key: `saved-custom-${index}-${Date.now()}`,
+            direction: 'south'
+          };
+        } else {
+          // Player piece - convert to custom format using current collection data
+          const monsterInfo = getMonsterInfo(piece.monsterId);
+          if (!monsterInfo) {
+            console.warn(`Monster with ID ${piece.monsterId} not found in collection`);
+            return null;
+          }
+          
+          // Get equipment info if equipId exists
+          let equipData = null;
+          if (piece.equipId) {
+            try {
+              const playerContext = globalThis.state.player.getSnapshot().context;
+              const equips = playerContext.equips || [];
+              const equip = equips.find(e => e.id === piece.equipId);
+              if (equip) {
+                equipData = {
+                  gameId: equip.gameId,
+                  stat: equip.stat,
+                  tier: equip.tier
+                };
+              }
+            } catch (error) {
+              console.warn('Error getting equipment data:', error);
+            }
+          }
+          
+          // Convert player piece to custom format using current stats from collection
+          return {
+            type: 'custom',
+            gameId: monsterInfo.gameId,
+            level: monsterInfo.level || 1,
+            genes: {
+              hp: monsterInfo.stats.hp || 0,
+              ad: monsterInfo.stats.ad || 0,
+              ap: monsterInfo.stats.ap || 0,
+              armor: monsterInfo.stats.armor || 0,
+              magicResist: monsterInfo.stats.magicResist || 0
+            },
+            equip: equipData,
+            tileIndex: piece.tileIndex,
+            tier: monsterInfo.tier || 1,
+            villain: false,
+            key: `saved-player-${index}-${Date.now()}`,
+            direction: 'south'
+          };
+        }
+      }).filter(Boolean);
+      
+      const boardConfig = [...enemyTeamConfig, ...playerTeamConfig];
+      
+      globalThis.state.board.send({
+        type: 'setState',
+        fn: (prev) => ({
+          ...prev,
+          boardConfig: boardConfig
+        })
+      });
+    } else {
+      // All player pieces - use autoSetupBoard (backward compatible)
+      globalThis.state.board.send({
+        type: "autoSetupBoard",
+        setup: setupArray
+      });
+    }
     
     return true;
   } catch (error) {
@@ -526,6 +740,28 @@ function createDeleteButton(onClick) {
   return button;
 }
 
+// Create a notes button (yellow)
+function createNotesButton(onClick) {
+  const button = document.createElement('button');
+  button.className = 'frame-1-yellow active:frame-pressed-1-yellow surface-yellow pixel-font-14 text-whiteRegular';
+  button.style.cssText = `
+    padding: 4px 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  `;
+  
+  const textSpan = document.createElement('span');
+  textSpan.textContent = 'Notes';
+  button.appendChild(textSpan);
+  
+  button.addEventListener('click', onClick);
+  
+  return button;
+}
+
 // Create a setup card for a team
 function createSetupCard(mapId, setupName, setupData) {
   const card = document.createElement('div');
@@ -534,11 +770,17 @@ function createSetupCard(mapId, setupName, setupData) {
   card.style.width = '100%';
   card.style.boxSizing = 'border-box';
   card.style.overflow = 'hidden';
+  card.style.display = 'flex';
+  card.style.gap = '8px';
   
-  // Header section with name and actions
-  const headerDiv = document.createElement('div');
-  headerDiv.className = 'flex justify-between items-start mb-2';
-  headerDiv.style.minWidth = '0'; // Allow flex items to shrink below their content size
+  // Left section (75%): Setup name and creatures
+  const leftSection = document.createElement('div');
+  leftSection.style.width = '75%';
+  leftSection.style.flex = '0 0 75%';
+  leftSection.style.minWidth = '0';
+  leftSection.style.display = 'flex';
+  leftSection.style.flexDirection = 'column';
+  leftSection.style.gap = '8px';
   
   // Setup name
   const nameSpan = document.createElement('span');
@@ -548,36 +790,7 @@ function createSetupCard(mapId, setupName, setupData) {
   nameSpan.style.wordWrap = 'break-word';
   nameSpan.style.wordBreak = 'break-word';
   nameSpan.style.overflowWrap = 'break-word';
-  nameSpan.style.flex = '1 1 0';
-  nameSpan.style.minWidth = '0';
-  nameSpan.style.marginRight = '8px';
-  headerDiv.appendChild(nameSpan);
-  
-  // Actions container
-  const actionsDiv = document.createElement('div');
-  actionsDiv.className = 'flex gap-1';
-  actionsDiv.style.flexShrink = '0';
-  
-  // Load button
-  const loadButton = createActionButton(
-    t('mods.setupManager.loadTeam'), 
-    () => loadTeamAndNotify(mapId, setupName), 
-    true,
-    null,
-    true
-  );
-  actionsDiv.appendChild(loadButton);
-  
-  // Delete button (only for non-original setups)
-  if (setupName !== 'Original') {
-    const deleteButton = createDeleteButton(() => {
-      showDeleteConfirmation(mapId, setupName);
-    });
-    actionsDiv.appendChild(deleteButton);
-  }
-  
-  headerDiv.appendChild(actionsDiv);
-  card.appendChild(headerDiv);
+  leftSection.appendChild(nameSpan);
   
   // Team content section
   const teamContent = document.createElement('div');
@@ -611,13 +824,38 @@ function createSetupCard(mapId, setupName, setupData) {
   // For saved setups, use the setup data
   else if (setupData && setupData.setup && Array.isArray(setupData.setup)) {
     setupData.setup.forEach(piece => {
-      if (piece && piece.monsterId) {
-        const monsterInfo = getMonsterInfo(piece.monsterId);
+      let monsterInfo = null;
+      let equipId = null;
+      let isCustom = false;
+      let existsInCollection = true;
+      let customEquip = null;
+      
+      if (piece.type === 'custom') {
+        // Handle custom piece
+        monsterInfo = getMonsterInfoFromCustom(piece);
         if (monsterInfo) {
-          const pair = createCreatureEquipmentPair(monsterInfo, piece.equipId);
-          if (pair && pair.children.length > 0) {
-            teamContent.appendChild(pair);
-          }
+          isCustom = true;
+          existsInCollection = monsterInfo.existsInCollection;
+          customEquip = piece.equip || null;
+        }
+      } else {
+        // Handle player piece (backward compatibility)
+        if (piece.monsterId) {
+          monsterInfo = getMonsterInfo(piece.monsterId);
+          equipId = piece.equipId;
+        }
+      }
+      
+      if (monsterInfo) {
+        const pair = createCreatureEquipmentPair(
+          monsterInfo, 
+          equipId, 
+          isCustom, 
+          existsInCollection,
+          customEquip
+        );
+        if (pair && pair.children.length > 0) {
+          teamContent.appendChild(pair);
         }
       }
     });
@@ -637,7 +875,92 @@ function createSetupCard(mapId, setupName, setupData) {
     teamContent.appendChild(emptyText);
   }
   
-  card.appendChild(teamContent);
+  leftSection.appendChild(teamContent);
+  
+  // Right section (25%): Actions (Load Team and Delete buttons)
+  const rightSection = document.createElement('div');
+  rightSection.style.width = '25%';
+  rightSection.style.flex = '0 0 25%';
+  rightSection.style.display = 'flex';
+  rightSection.style.flexDirection = 'column';
+  rightSection.style.gap = '8px';
+  rightSection.style.alignItems = 'flex-end';
+  rightSection.style.justifyContent = 'flex-start';
+  
+  // Actions container
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'flex gap-1';
+  actionsDiv.style.flexDirection = 'column';
+  actionsDiv.style.width = '100%';
+  actionsDiv.style.alignItems = 'stretch';
+  
+  // Creature count indicator - count creatures in this setup
+  let setupCreatureCount = 0;
+  if (setupName === 'Original') {
+    // For "Original" setup, count from player's saved setup
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const boardSetup = playerContext.boardConfigs[mapId];
+    if (boardSetup && Array.isArray(boardSetup)) {
+      setupCreatureCount = boardSetup.filter(piece => piece && piece.monsterId).length;
+    }
+  } else if (setupData && setupData.setup && Array.isArray(setupData.setup)) {
+    // For saved setups, count all pieces (player and custom)
+    setupCreatureCount = setupData.setup.length;
+  }
+  
+  const maxCount = getMaxTeamSize(mapId);
+  const countIndicator = document.createElement('div');
+  countIndicator.className = 'pixel-font-14 text-whiteRegular';
+  countIndicator.textContent = `${setupCreatureCount}/${maxCount} creatures`;
+  
+  // Color code: green if equals max, red otherwise
+  const isMaxCreatures = setupCreatureCount === maxCount;
+  const indicatorColor = isMaxCreatures ? '#4caf50' : '#ff4444'; // green or red
+  
+  countIndicator.style.cssText = `
+    text-align: center;
+    margin-bottom: 4px;
+    opacity: 0.9;
+    color: ${indicatorColor};
+  `;
+  actionsDiv.appendChild(countIndicator);
+  
+  // Load button
+  const loadButton = createActionButton(
+    t('mods.setupManager.loadTeam'), 
+    () => loadTeamAndNotify(mapId, setupName), 
+    true,
+    null,
+    true
+  );
+  loadButton.style.width = '100%';
+  loadButton.style.marginRight = '0';
+  actionsDiv.appendChild(loadButton);
+  
+  // Notes button (only for non-original setups)
+  if (setupName !== 'Original') {
+    const notesButton = createNotesButton(() => {
+      showNotesModal(mapId, setupName, setupData);
+    });
+    notesButton.style.width = '100%';
+    actionsDiv.appendChild(notesButton);
+  }
+  
+  // Delete button (only for non-original setups)
+  if (setupName !== 'Original') {
+    const deleteButton = createDeleteButton(() => {
+      showDeleteConfirmation(mapId, setupName);
+    });
+    deleteButton.style.width = '100%';
+    actionsDiv.appendChild(deleteButton);
+  }
+  
+  rightSection.appendChild(actionsDiv);
+  
+  // Append both sections to card
+  card.appendChild(leftSection);
+  card.appendChild(rightSection);
+  
   return card;
 }
 
@@ -891,6 +1214,137 @@ function showSaveSetupModal(mapId) {
   }
 }
 
+// Show notes modal for editing setup notes
+function showNotesModal(mapId, setupName, setupData) {
+  try {
+    if (!mapId || !setupName) {
+      console.error('Invalid parameters for notes modal');
+      return;
+    }
+    
+    // Check if autosetup is enabled
+    const playerContext = globalThis.state.player.getSnapshot().context;
+    const playerFlags = playerContext.flags;
+    
+    // Create Flags object to check autosetup mode
+    const flags = new globalThis.state.utils.Flags(playerFlags);
+    if (!flags.isSet("autosetup")) {
+      api.ui.components.createModal({
+        title: t('mods.setupManager.autosetupRequired'),
+        content: t('mods.setupManager.autosetupMessage'),
+        buttons: [{ text: 'OK', primary: true }]
+      });
+      return;
+    }
+    
+    // Force close all open modals first
+    forceCloseAllModals();
+    
+    // Get current notes from setup data
+    const currentNotes = (setupData && setupData.notes) ? setupData.notes : '';
+    
+    // Create modal content
+    const content = document.createElement('div');
+    
+    // Create a container matching the scroll container style (height: 400px)
+    const textareaContainer = document.createElement('div');
+    textareaContainer.className = 'relative overflow-hidden frame-pressed-1 surface-dark';
+    textareaContainer.style.cssText = 'position: relative; height: 400px;';
+    
+    // Notes textarea
+    const textarea = document.createElement('textarea');
+    textarea.id = 'setup-notes-textarea';
+    textarea.className = 'frame-pressed-1 surface-dark w-full p-2 text-whiteRegular';
+    textarea.style.cssText = `
+      width: 100%;
+      height: 100%;
+      resize: none;
+      font-family: inherit;
+      box-sizing: border-box;
+      border: none;
+      background: transparent;
+    `;
+    textarea.value = currentNotes;
+    textarea.placeholder = 'Add notes about this setup...';
+    textareaContainer.appendChild(textarea);
+    
+    content.appendChild(textareaContainer);
+    
+    // Create modal (matching setup manager modal structure)
+    activeModal = api.ui.components.createModal({
+      title: `Setup Notes - ${setupName}`,
+      width: 500,
+      content: content,
+      buttons: [
+        {
+          text: 'Save',
+          primary: true,
+          onClick: () => {
+            const newNotes = textarea.value.trim();
+            
+            // Update the setup with new notes
+            if (!config.savedSetups[mapId]) {
+              config.savedSetups[mapId] = [];
+            }
+            
+            const setupIndex = config.savedSetups[mapId].findIndex(s => s.name === setupName);
+            if (setupIndex >= 0) {
+              // Update existing setup notes
+              if (!config.savedSetups[mapId][setupIndex].notes) {
+                config.savedSetups[mapId][setupIndex].notes = '';
+              }
+              config.savedSetups[mapId][setupIndex].notes = newNotes;
+            } else {
+              // Setup not found, create it with notes
+              const currentSetup = getCurrentTeamSetup();
+              if (currentSetup && currentSetup.length > 0) {
+                config.savedSetups[mapId].push({ 
+                  name: setupName, 
+                  setup: currentSetup, 
+                  notes: newNotes 
+                });
+              }
+            }
+            
+            // Save the updated config
+            saveConfigToStorage();
+            
+            showNotification('Notes saved', 'success');
+            
+            // Reopen the setup manager to refresh the display
+            setTimeout(() => {
+              showSetupManagerModal();
+            }, 300);
+          }
+        },
+        {
+          text: t('common.cancel'),
+          primary: false,
+          closeOnClick: true
+        }
+      ]
+    });
+    
+    // Override modal width styles to ensure 500px width (matching setup manager)
+    setTimeout(() => {
+      const dialog = document.querySelector('div[role="dialog"][data-state="open"]');
+      if (dialog) {
+        dialog.style.width = '500px';
+        dialog.style.minWidth = '500px';
+        dialog.style.maxWidth = '500px';
+        dialog.classList.remove('max-w-[300px]');
+      }
+      
+      // Focus the textarea
+      textarea.focus();
+    }, 0);
+    
+  } catch (error) {
+    console.error('Error showing notes modal:', error);
+    showNotification(t('common.error'), 'error');
+  }
+}
+
 // Show confirmation before deleting a setup
 function showDeleteConfirmation(mapId, setupName) {
   try {
@@ -1074,8 +1528,245 @@ context.exports = {
   cleanup: cleanup
 };
 
+// Add warning symbol to monster portrait (similar to Better Forge)
+function addWarningSymbolToPortrait(portrait) {
+  try {
+    // Check if warning symbol already exists
+    if (portrait.querySelector('.warning-symbol')) {
+      return;
+    }
+    
+    // Find the main container (button or container-slot)
+    const container = portrait.querySelector('button') || 
+                      portrait.querySelector('.container-slot') || 
+                      portrait;
+    
+    // Ensure container has relative positioning for absolute positioning of warning
+    if (container.style) {
+      if (!container.style.position || container.style.position === 'static') {
+        container.style.position = 'relative';
+      }
+    }
+    
+    // Create warning symbol element
+    const warningSymbol = document.createElement('div');
+    warningSymbol.className = 'warning-symbol';
+    warningSymbol.textContent = '⚠️';
+    warningSymbol.title = 'This monster has been modified and does not exist in your collection';
+    warningSymbol.style.cssText = `
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      font-size: 12px;
+      color: #ff4444;
+      text-shadow: -1px -1px 0 #ff0000, 1px -1px 0 #ff0000, -1px 1px 0 #ff0000, 1px 1px 0 #ff0000;
+      z-index: 10;
+      pointer-events: none;
+      line-height: 1;
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    
+    // Add warning symbol to container
+    container.appendChild(warningSymbol);
+  } catch (error) {
+    console.error('Error adding warning symbol to portrait:', error);
+  }
+}
+
+// Create a stat row with progress bar
+function createStatRow(label, value, maxValue, barColor = 'rgb(96, 192, 96)') {
+  const statRow = document.createElement('div');
+  statRow.setAttribute('data-transparent', 'false');
+  statRow.className = 'pixel-font-16 whitespace-nowrap text-whiteRegular';
+  
+  // Top row with label and value
+  const topRow = document.createElement('div');
+  topRow.className = 'flex justify-between';
+  
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  topRow.appendChild(labelSpan);
+  
+  const valueSpan = document.createElement('span');
+  valueSpan.className = 'text-right text-whiteExp';
+  valueSpan.style.width = '3ch';
+  valueSpan.textContent = value.toString();
+  topRow.appendChild(valueSpan);
+  
+  statRow.appendChild(topRow);
+  
+  // Bar row with progress bar
+  const barRow = document.createElement('div');
+  barRow.className = 'relative';
+  
+  const barOuter = document.createElement('div');
+  barOuter.className = 'frame-pressed-1 relative h-1 w-full overflow-hidden border border-solid border-black bg-black gene-stats-bar-filled';
+  barOuter.style.animationDelay = '700ms';
+  
+  const barFillWrap = document.createElement('div');
+  barFillWrap.className = 'absolute left-0 top-0 flex h-full w-full';
+  
+  const barFill = document.createElement('div');
+  barFill.className = 'h-full shrink-0';
+  // Calculate percentage based on max value
+  const percentage = Math.min(100, Math.max(0, (value / maxValue) * 100));
+  barFill.style.width = percentage + '%';
+  barFill.style.background = barColor;
+  
+  barFillWrap.appendChild(barFill);
+  barOuter.appendChild(barFillWrap);
+  
+  // Spill particles
+  const barRight = document.createElement('div');
+  barRight.className = 'absolute left-full top-1/2 z-[201] -translate-y-1/2';
+  barRight.style.display = 'block';
+  
+  const skillBar = document.createElement('div');
+  skillBar.className = 'relative text-skillBar';
+  
+  const spill1 = document.createElement('div');
+  spill1.className = 'spill-particles absolute left-full h-px w-0.5 bg-current';
+  
+  const spill2 = document.createElement('div');
+  spill2.className = 'spill-particles-2 absolute left-full h-px w-0.5 bg-current';
+  
+  skillBar.appendChild(spill1);
+  skillBar.appendChild(spill2);
+  barRight.appendChild(skillBar);
+  
+  barRow.appendChild(barOuter);
+  barRow.appendChild(barRight);
+  
+  statRow.appendChild(barRow);
+  
+  return statRow;
+}
+
+// Add custom HTML tooltip with progress bars to portrait
+function addCustomTooltipToPortrait(portrait, level, hp, ad, ap, armor, magicResist, isModified) {
+  try {
+    // Create tooltip element
+    const tooltip = document.createElement('div');
+    tooltip.className = 'setup-manager-monster-tooltip';
+    tooltip.style.cssText = `
+      position: fixed;
+      display: none;
+      z-index: 10000;
+      pointer-events: none;
+    `;
+    
+    // Create tooltip content container
+    const tooltipContent = document.createElement('div');
+    tooltipContent.className = 'frame-pressed-1 surface-dark flex shrink-0 flex-col gap-1.5 px-2 py-1 pb-2';
+    
+    // Stat max values (genes max at 20)
+    const statMaxValues = {
+      hp: 20,
+      ad: 20,
+      ap: 20,
+      armor: 20,
+      magicResist: 20
+    };
+    
+    // Stat colors (all green)
+    const statColors = {
+      hp: 'rgb(96, 192, 96)',
+      ad: 'rgb(96, 192, 96)',
+      ap: 'rgb(96, 192, 96)',
+      armor: 'rgb(96, 192, 96)',
+      magicResist: 'rgb(96, 192, 96)'
+    };
+    
+    // Add stat rows
+    tooltipContent.appendChild(createStatRow('Hitpoints', hp, statMaxValues.hp, statColors.hp));
+    tooltipContent.appendChild(createStatRow('Attack', ad, statMaxValues.ad, statColors.ad));
+    tooltipContent.appendChild(createStatRow('Ability Power', ap, statMaxValues.ap, statColors.ap));
+    tooltipContent.appendChild(createStatRow('Armor', armor, statMaxValues.armor, statColors.armor));
+    tooltipContent.appendChild(createStatRow('Magic Resist', magicResist, statMaxValues.magicResist, statColors.magicResist));
+    
+    // Add modified indicator if needed
+    if (isModified) {
+      const modifiedRow = document.createElement('div');
+      modifiedRow.className = 'pixel-font-16 text-whiteRegular';
+      modifiedRow.style.cssText = 'color: #ff4444; font-style: italic; margin-top: 4px;';
+      modifiedRow.textContent = '(modified)';
+      tooltipContent.appendChild(modifiedRow);
+    }
+    
+    tooltip.appendChild(tooltipContent);
+    document.body.appendChild(tooltip);
+    
+    // Show/hide tooltip on hover
+    let tooltipTimeout;
+    const showTooltip = (e) => {
+      if (tooltipTimeout) clearTimeout(tooltipTimeout);
+      tooltipTimeout = setTimeout(() => {
+        tooltip.style.display = 'block';
+        updateTooltipPosition(tooltip, e, portrait);
+      }, 300);
+    };
+    
+    const hideTooltip = () => {
+      if (tooltipTimeout) clearTimeout(tooltipTimeout);
+      tooltip.style.display = 'none';
+    };
+    
+    const updateTooltipPosition = (tooltipEl, event, portraitEl) => {
+      if (!event) return;
+      
+      const rect = portraitEl.getBoundingClientRect();
+      const tooltipRect = tooltipEl.getBoundingClientRect();
+      
+      let left = rect.right + 10;
+      let top = rect.top;
+      
+      // Adjust if tooltip goes off screen
+      if (left + tooltipRect.width > window.innerWidth) {
+        left = rect.left - tooltipRect.width - 10;
+      }
+      if (top + tooltipRect.height > window.innerHeight) {
+        top = window.innerHeight - tooltipRect.height - 10;
+      }
+      if (top < 0) {
+        top = 10;
+      }
+      
+      tooltipEl.style.left = left + 'px';
+      tooltipEl.style.top = top + 'px';
+    };
+    
+    // Attach event listeners to portrait
+    portrait.addEventListener('mouseenter', showTooltip);
+    portrait.addEventListener('mouseleave', hideTooltip);
+    portrait.addEventListener('mousemove', (e) => {
+      if (tooltip.style.display === 'block') {
+        updateTooltipPosition(tooltip, e, portrait);
+      }
+    });
+    
+    // Store tooltip reference for cleanup
+    portrait._setupManagerTooltip = tooltip;
+    
+  } catch (error) {
+    console.error('Error adding custom tooltip to portrait:', error);
+    // Fallback to simple title tooltip
+    const { hp = 0, ad = 0, ap = 0, armor = 0, magicResist = 0 } = { hp, ad, ap, armor, magicResist };
+    let tooltipText = `Level: ${level}\nAD: ${ad}, AP: ${ap}, HP: ${hp}, ARM: ${armor}, MR: ${magicResist}`;
+    if (isModified) {
+      tooltipText += '\n(modified)';
+    }
+    portrait.title = tooltipText;
+  }
+}
+
 // Helper function to create monster portraits with correct tier coloring
-function createMonsterPortrait(monsterInfo) {
+function createMonsterPortrait(monsterInfo, showWarning = false) {
   if (!monsterInfo || !monsterInfo.gameId) {
     return null;
   }
@@ -1155,10 +1846,15 @@ function createMonsterPortrait(monsterInfo) {
       }
     }
     
-    // Add tooltip with individual stats if available
+    // Add warning symbol if needed
+    if (showWarning) {
+      addWarningSymbolToPortrait(portrait);
+    }
+    
+    // Add custom HTML tooltip with progress bars if stats are available
     if (monsterInfo.stats) {
       const { hp = 0, ad = 0, ap = 0, armor = 0, magicResist = 0 } = monsterInfo.stats;
-      portrait.title = `Level: ${monsterInfo.level || 1}\nAD: ${ad}, AP: ${ap}, HP: ${hp}, ARM: ${armor}, MR: ${magicResist}`;
+      addCustomTooltipToPortrait(portrait, monsterInfo.level || 1, hp, ad, ap, armor, magicResist, showWarning);
     }
     
     return portrait;
@@ -1166,6 +1862,75 @@ function createMonsterPortrait(monsterInfo) {
     console.error('Error creating monster portrait:', error);
     return null;
   }
+}
+
+// Helper function to extract stats object from monster or genes
+function extractStatsFromMonster(monsterOrGenes) {
+  return {
+    hp: monsterOrGenes.hp || 0,
+    ad: monsterOrGenes.ad || 0,
+    ap: monsterOrGenes.ap || 0,
+    armor: monsterOrGenes.armor || 0,
+    magicResist: monsterOrGenes.magicResist || 0
+  };
+}
+
+// Helper function to get equipment spriteId from gameId
+function getEquipmentSpriteId(gameId) {
+  try {
+    const equipData = globalThis.state.utils.getEquipment(gameId);
+    if (equipData && equipData.metadata) {
+      return equipData.metadata.spriteId;
+    }
+  } catch (e) {
+    console.warn('Error getting equipment data:', e);
+  }
+  return null;
+}
+
+// Helper function to extract inner div from item portrait button
+function extractPortraitFromButton(itemPortrait) {
+  if (!itemPortrait || itemPortrait.tagName !== 'BUTTON') {
+    return itemPortrait;
+  }
+  
+  // Look for .equipment-portrait div (direct child or nested)
+  const innerDiv = itemPortrait.querySelector('.equipment-portrait');
+  if (innerDiv) {
+    return innerDiv.cloneNode(true);
+  }
+  
+  // Fallback: get the first direct child div
+  const firstDiv = Array.from(itemPortrait.children).find(child => child.tagName === 'DIV');
+  if (firstDiv) {
+    return firstDiv.cloneNode(true);
+  }
+  
+  return itemPortrait;
+}
+
+// Helper function to create equipment portrait from gameId, stat, and tier
+function createEquipmentPortraitFromData(gameId, stat, tier) {
+  if (!gameId) {
+    return null;
+  }
+  
+  const spriteId = getEquipmentSpriteId(gameId);
+  if (!spriteId) {
+    return null;
+  }
+  
+  if (typeof api?.ui?.components?.createItemPortrait === 'function') {
+    const itemPortrait = api.ui.components.createItemPortrait({
+      itemId: spriteId,
+      stat: stat,
+      tier: tier
+    });
+    
+    return extractPortraitFromButton(itemPortrait);
+  }
+  
+  return null;
 }
 
 // Helper function to create equipment portrait
@@ -1188,84 +1953,82 @@ function createEquipmentPortrait(equipId) {
       return null;
     }
     
-    // Get equipment metadata using gameId
-    let spriteId = null;
-    let stat = null;
-    let tier = null;
-    
-    try {
-      const equipData = globalThis.state.utils.getEquipment(gameId);
-      if (equipData && equipData.metadata) {
-        spriteId = equipData.metadata.spriteId;
-      }
-    } catch (e) {
-      console.warn('Error getting equipment data:', e);
-      return null;
-    }
-    
-    if (!spriteId) {
-      return null;
-    }
-    
     // Get stat and tier from the equipment item
     const equip = equips.find(e => e.id === equipId);
-    if (equip) {
-      stat = equip.stat;
-      tier = equip.tier;
-    }
+    const stat = equip ? equip.stat : null;
+    const tier = equip ? equip.tier : null;
     
-    // Create equipment portrait using spriteId (same as Item_tier_list.js)
-    if (typeof api?.ui?.components?.createItemPortrait === 'function') {
-      const itemPortrait = api.ui.components.createItemPortrait({
-        itemId: spriteId,
-        stat: stat,
-        tier: tier
-      });
-      
-      // Extract the inner div from the button wrapper
-      if (itemPortrait && itemPortrait.tagName === 'BUTTON') {
-        // Look for .equipment-portrait div (direct child or nested)
-        const innerDiv = itemPortrait.querySelector('.equipment-portrait');
-        if (innerDiv) {
-          // Clone the inner div to avoid removing it from the button
-          return innerDiv.cloneNode(true);
-        }
-        // Fallback: get the first direct child div
-        const firstDiv = Array.from(itemPortrait.children).find(child => child.tagName === 'DIV');
-        if (firstDiv) {
-          return firstDiv.cloneNode(true);
-        }
-      }
-      
-      return itemPortrait;
-    }
-    
-    return null;
+    return createEquipmentPortraitFromData(gameId, stat, tier);
   } catch (error) {
     console.error('Error creating equipment portrait:', error);
     return null;
   }
 }
 
+// Helper function to create equipment portrait from custom equip object
+function createEquipmentPortraitFromCustom(equip) {
+  if (!equip || !equip.gameId) {
+    return null;
+  }
+  
+  try {
+    return createEquipmentPortraitFromData(equip.gameId, equip.stat, equip.tier);
+  } catch (error) {
+    console.error('Error creating equipment portrait from custom:', error);
+    return null;
+  }
+}
+
+// Helper function to create an empty equipment frame
+function createEmptyEquipmentFrame() {
+  const portrait = document.createElement('div');
+  portrait.className = 'equipment-portrait surface-darker relative data-[alive=false]:dithered data-[noframes=false]:frame-pressed-1 hover:unset-border-image';
+  portrait.setAttribute('data-noframes', 'false');
+  portrait.setAttribute('data-alive', 'false');
+  portrait.setAttribute('data-highlighted', 'true');
+  portrait.style.cssText = 'width: 32px; height: 32px; max-width: 32px; max-height: 32px;';
+  
+  // Add rarity background (tier 1 for empty)
+  const rarityBg = document.createElement('div');
+  rarityBg.className = 'has-rarity absolute inset-0 z-1 opacity-80';
+  rarityBg.setAttribute('data-rarity', '1');
+  portrait.appendChild(rarityBg);
+  
+  // Empty frame - no sprite, no stat icon
+  // The frame styling is already applied via classes
+  
+  return portrait;
+}
+
 // Helper function to create a creature+equipment pair container
-function createCreatureEquipmentPair(monsterInfo, equipId) {
+function createCreatureEquipmentPair(monsterInfo, equipId, isCustom = false, existsInCollection = true, customEquip = null) {
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'row';
   container.style.gap = '2px';
   container.style.alignItems = 'center';
   
-  // Create monster portrait
-  const monsterPortrait = createMonsterPortrait(monsterInfo);
+  // Create monster portrait with warning if needed
+  const showWarning = isCustom && !existsInCollection;
+  const monsterPortrait = createMonsterPortrait(monsterInfo, showWarning);
   if (monsterPortrait) {
     container.appendChild(monsterPortrait);
   }
   
-  // Create equipment portrait
-  const equipmentPortrait = createEquipmentPortrait(equipId);
-  if (equipmentPortrait) {
-    container.appendChild(equipmentPortrait);
+  // Create equipment portrait (or empty frame if no equipment)
+  let equipmentPortrait = null;
+  if (isCustom && customEquip) {
+    equipmentPortrait = createEquipmentPortraitFromCustom(customEquip);
+  } else if (equipId) {
+    equipmentPortrait = createEquipmentPortrait(equipId);
   }
+  
+  // Always show equipment frame (empty if no equipment)
+  if (!equipmentPortrait) {
+    equipmentPortrait = createEmptyEquipmentFrame();
+  }
+  
+  container.appendChild(equipmentPortrait);
   
   return container;
 }

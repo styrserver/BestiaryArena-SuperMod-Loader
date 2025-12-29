@@ -742,7 +742,20 @@
       }
       
       const userHoldsWorldRecord = data[0].userName === playerName;
-      const userTiesWorldRecord = userValue === worldRecordValue;
+      
+      // For floor, check both floor value and time (ticks)
+      let userTiesWorldRecord = userValue === worldRecordValue;
+      if (config.isFloor && userTiesWorldRecord) {
+        const userFloorTicks = userScores?.bestFloorTicks;
+        const wrFloorTicks = data[0].floorTicks !== null && data[0].floorTicks !== undefined 
+          ? data[0].floorTicks 
+          : data[0].ticks;
+        
+        // Only green if floor equals WR floor AND time is equal or better
+        userTiesWorldRecord = userFloorTicks !== null && userFloorTicks !== undefined && 
+                              wrFloorTicks !== null && wrFloorTicks !== undefined && 
+                              userFloorTicks <= wrFloorTicks;
+      }
       
       // User's best score (display first, only if not world record holder)
       // For floor, always show user value (defaults to 0 if no data)

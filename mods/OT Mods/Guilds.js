@@ -4,7 +4,6 @@
 'use strict';
 
 console.log('[Guilds] initializing...');
-console.log('[Guilds] DEBUG: Guilds.js file loaded and executing');
 
 // =======================
 // Configuration & Constants
@@ -391,6 +390,9 @@ async function processSkillIncreases() {
       return;
     }
 
+    // Load existing progress from Firebase before processing (to sync Map with Firebase and preserve fishing)
+    await skillBattleTracker.loadProgressFromFirebase(playerName);
+
     const skillEquipment = await getSkillAffectingEquipment();
     console.log('[Guilds] Skill affecting equipment found:', skillEquipment.length, 'items');
 
@@ -524,6 +526,9 @@ async function processFishingSkillIncrease(playerName) {
       console.log('[Guilds] No player name provided to processFishingSkillIncrease');
       return;
     }
+
+    // Load existing progress from Firebase before incrementing (same pattern as other skills)
+    await skillBattleTracker.loadProgressFromFirebase(playerName);
 
     // Get current skills
     const currentSkills = await getPlayerSkillsFromFirebase(playerName);
@@ -1076,14 +1081,8 @@ const guildPointsCache = createTTLCache(5 * 60 * 1000);
 
 // Format number with compact notation (k, M)
 function formatNumber(num) {
-  if (typeof num !== 'number') return '0';
-  if (num < 1000) return num.toString();
-  if (num < 1000000) {
-    const k = num / 1000;
-    return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`;
-  }
-  const m = num / 1000000;
-  return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+  if (typeof num !== 'number' || !Number.isFinite(num)) return '0';
+  return num.toLocaleString('en-US');
 }
 
 // Fetch player profile data
@@ -1242,6 +1241,40 @@ async function countMemberWorldRecords(username) {
     return count;
   } catch (error) {
     console.error('[Guilds] Error counting member world records:', error);
+    return 0;
+  }
+}
+
+// Count total world records across all guild members
+async function countGuildWorldRecords(memberUsernames) {
+  try {
+    if (!memberUsernames || memberUsernames.length === 0) {
+      return 0;
+    }
+
+    const leaderboardData = await fetchTRPC('game.getRoomsHighscores');
+    if (!leaderboardData || !leaderboardData.ticks) {
+      return 0;
+    }
+    
+    // Create a set of member usernames for quick lookup (case-insensitive)
+    const memberSet = new Set(memberUsernames.map(name => name.toLowerCase()));
+    let totalCount = 0;
+    
+    // Count all maps where any guild member holds the world record
+    for (const mapCode in leaderboardData.ticks) {
+      const worldRecord = leaderboardData.ticks[mapCode];
+      if (worldRecord && worldRecord.userName) {
+        // Check if any guild member holds this world record
+        if (memberSet.has(worldRecord.userName.toLowerCase())) {
+          totalCount++;
+        }
+      }
+    }
+    
+    return totalCount;
+  } catch (error) {
+    console.error('[Guilds] Error counting guild world records:', error);
     return 0;
   }
 }
@@ -1461,10 +1494,10 @@ async function calculateGuildPoints(guildId) {
     const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
     const floorPoints = calculateFloorPoints(totalFloors);
     
-    // Check if any member holds a world record
+    // Count total world records across all members and calculate bonus (5 points per record)
     const memberUsernames = members.map(m => m.username).filter(Boolean);
-    const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
-    const worldRecordBonus = hasWorldRecord ? POINTS_CONFIG.WORLD_RECORD_BONUS : 0;
+    const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
+    const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
     
     const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
     
@@ -1493,7 +1526,8 @@ async function calculateGuildPointsBreakdown(guildId) {
         equipmentPoints: 0,
         floorPoints: 0,
         worldRecordBonus: 0,
-        hasWorldRecord: false
+        hasWorldRecord: false,
+        totalWorldRecords: 0
       };
     }
 
@@ -1542,10 +1576,11 @@ async function calculateGuildPointsBreakdown(guildId) {
     const timeSumPenalty = calculateTimeSumPenalty(totalTimeSum);
     const floorPoints = calculateFloorPoints(totalFloors);
 
-    // Check if any member holds a world record
+    // Count total world records across all members and calculate bonus (5 points per record)
     const memberUsernames = members.map(m => m.username).filter(Boolean);
-    const hasWorldRecord = memberUsernames.length > 0 ? await checkGuildWorldRecords(memberUsernames) : false;
-    const worldRecordBonus = hasWorldRecord ? POINTS_CONFIG.WORLD_RECORD_BONUS : 0;
+    const totalWorldRecords = memberUsernames.length > 0 ? await countGuildWorldRecords(memberUsernames) : 0;
+    const worldRecordBonus = totalWorldRecords * POINTS_CONFIG.WORLD_RECORD_BONUS;
+    const hasWorldRecord = totalWorldRecords > 0;
 
     const totalPoints = levelPoints + rankPoints - timeSumPenalty + totalEquipmentPoints + floorPoints + worldRecordBonus;
     const finalPoints = Math.max(0, Math.floor(totalPoints));
@@ -1559,6 +1594,7 @@ async function calculateGuildPointsBreakdown(guildId) {
       floorPoints,
       worldRecordBonus,
       hasWorldRecord,
+      totalWorldRecords,
       memberCount: members.length,
       totalLevels,
       totalRankPointsValue: totalRankPoints,
@@ -2585,7 +2621,14 @@ async function updateGuildCoinsDisplay() {
 // Setup guild coins display in modal footer (reusable function)
 async function setupGuildCoinsInFooter(buttonContainer) {
   // Check if coins display already exists in this container
-  if (buttonContainer.querySelector('.guild-coins-display')) {
+  const existingDisplay = buttonContainer.querySelector('.guild-coins-display');
+  const existingAmount = existingDisplay?.querySelector('.guild-coins-amount');
+  
+  if (existingAmount) {
+    // Update existing display with current coin count
+    guildCoinsDisplayElement = existingAmount;
+    const coins = await getGuildCoins();
+    existingAmount.textContent = formatNumber(coins);
     return;
   }
   
@@ -2610,7 +2653,7 @@ async function setupGuildCoinsInFooter(buttonContainer) {
   
   // Load and display current coin count
   const coins = await getGuildCoins();
-  coinAmount.textContent = coins.toLocaleString();
+  coinAmount.textContent = formatNumber(coins);
   
   // Insert coins display first (left side)
   buttonContainer.insertBefore(coinsDisplay, buttonContainer.firstChild);
@@ -6432,8 +6475,9 @@ async function openGuildPanel(viewGuildId = null) {
       addDetail(`  (${formatNumber(pointsData.timeSum)} ticks, every ${POINTS_CONFIG.TIME_SUM_PENALTY_DIVISOR} = -1 pt)`, ``, 'rgba(255, 255, 255, 0.6)');
       
       if (pointsData.hasWorldRecord) {
-        addDetail('World Record Holder', `+${POINTS_CONFIG.WORLD_RECORD_BONUS}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-        addDetail(`  (${pointsData.worldRecordCount || 1} world record${(pointsData.worldRecordCount || 1) !== 1 ? 's' : ''})`, ``, 'rgba(255, 255, 255, 0.6)');
+        const worldRecordBonus = (pointsData.worldRecordCount || 1) * POINTS_CONFIG.WORLD_RECORD_BONUS;
+        addDetail('World Record Holder', `+${worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
+        addDetail(`  (${pointsData.worldRecordCount || 1} world record${(pointsData.worldRecordCount || 1) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
       }
       
       const total = document.createElement('div');
@@ -6917,7 +6961,7 @@ async function openGuildPanel(viewGuildId = null) {
 
     if (breakdown.worldRecordBonus > 0) {
       addDetail('World Record Bonus', `+${breakdown.worldRecordBonus}`, CSS_CONSTANTS.COLORS.ROLE_LEADER);
-      addDetail(`  (${breakdown.memberCount} member${breakdown.memberCount !== 1 ? 's' : ''})`, ``, 'rgba(255, 255, 255, 0.6)');
+      addDetail(`  (${breakdown.totalWorldRecords || 0} world record${(breakdown.totalWorldRecords || 0) !== 1 ? 's' : ''}, every 1 = ${POINTS_CONFIG.WORLD_RECORD_BONUS} pt)`, ``, 'rgba(255, 255, 255, 0.6)');
     }
 
     const total = document.createElement('div');
@@ -6966,6 +7010,105 @@ async function openGuildPanel(viewGuildId = null) {
   pointsSection.appendChild(pointsLabel);
   pointsSection.appendChild(pointsValueContainer);
   adminContainer.appendChild(pointsSection);
+
+  // Show guild info (description and join type) when viewing other guilds as non-member
+  if (viewGuildId && !currentMember) {
+    // Guild Description (read-only for non-members)
+    if (guild.description) {
+      const descSection = document.createElement('div');
+      descSection.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        background: rgba(0, 0, 0, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+        padding: 8px;
+        gap: 6px;
+      `;
+      
+      const descLabel = document.createElement('label');
+      descLabel.textContent = t('mods.guilds.description');
+      descLabel.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      `;
+      
+      const currentDesc = document.createElement('div');
+      currentDesc.textContent = guild.description;
+      currentDesc.style.cssText = `
+        color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+        font-size: 12px;
+        opacity: 0.9;
+        padding: 6px;
+        min-height: 30px;
+        word-wrap: break-word;
+        line-height: 1.4;
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+      `;
+      
+      descSection.appendChild(descLabel);
+      descSection.appendChild(currentDesc);
+      adminContainer.appendChild(descSection);
+    }
+
+    // Join Type (read-only for non-members)
+    const joinTypeSection = document.createElement('div');
+    joinTypeSection.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.3);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 8px;
+      gap: 6px;
+    `;
+    
+    const joinTypeLabel = document.createElement('label');
+    joinTypeLabel.textContent = t('mods.guilds.joinTypeLabel');
+    joinTypeLabel.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    `;
+    
+    const currentJoinType = document.createElement('div');
+    const joinType = guild.joinType || GUILD_JOIN_TYPES.OPEN;
+    const joinTypeText = joinType === GUILD_JOIN_TYPES.OPEN 
+      ? t('mods.guilds.joinTypeOpen') 
+      : t('mods.guilds.joinTypeInviteOnly');
+    
+    const joinTypeBadge = document.createElement('span');
+    joinTypeBadge.textContent = joinType === GUILD_JOIN_TYPES.OPEN ? '🌐' : '🔒';
+    joinTypeBadge.style.cssText = 'font-size: 12px; margin-right: 5px;';
+    
+    const joinTypeTextSpan = document.createElement('span');
+    joinTypeTextSpan.textContent = joinTypeText;
+    
+    currentJoinType.style.cssText = `
+      color: ${CSS_CONSTANTS.COLORS.TEXT_WHITE};
+      font-size: 12px;
+      opacity: 0.9;
+      padding: 6px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+    `;
+    currentJoinType.appendChild(joinTypeBadge);
+    currentJoinType.appendChild(joinTypeTextSpan);
+    
+    joinTypeSection.appendChild(joinTypeLabel);
+    joinTypeSection.appendChild(currentJoinType);
+    adminContainer.appendChild(joinTypeSection);
+  }
 
   // Change Description (Leader only)
   if (isLeader) {

@@ -5934,7 +5934,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             return;
           }
           const amount = await coinsGetter();
-          guildCoinAmountSpan.textContent = Number.isFinite(amount) ? amount : '?';
+          guildCoinAmountSpan.textContent = Number.isFinite(amount) ? amount.toLocaleString('en-US') : '?';
         } catch (error) {
           console.error('[Quests Mod][King Tibianus] Error updating guild coins display:', error);
           guildCoinAmountSpan.textContent = '?';
@@ -7859,7 +7859,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
             return;
           }
           const amount = await coinsGetter();
-          guildCoinAmountSpan.textContent = Number.isFinite(amount) ? amount : '?';
+          guildCoinAmountSpan.textContent = Number.isFinite(amount) ? amount.toLocaleString('en-US') : '?';
         } catch (error) {
           console.error('[Quests Mod][Al Dee] Error updating guild coins display:', error);
           guildCoinAmountSpan.textContent = '?';
@@ -8034,7 +8034,24 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     const footer = findQuestLogFooter();
     if (!footer) return;
 
+    // Check if title says "Quest Log"
+    const dialog = footer.closest('div[role="dialog"]');
+    const titleElement = dialog?.querySelector('.widget-top-text, .widget-top');
+    const hasQuestLogTitle = titleElement?.textContent?.trim().includes('Quest Log');
+
     let missionsButton = document.getElementById(KING_MISSIONS_BUTTON_ID);
+    
+    // Remove button if it exists but title doesn't match
+    if (missionsButton && !hasQuestLogTitle) {
+      missionsButton.remove();
+      missionsToggleButton = null;
+      return;
+    }
+
+    // Only add button if title says "Quest Log"
+    if (!hasQuestLogTitle) {
+      return;
+    }
     if (!missionsButton) {
       missionsButton = document.createElement('button');
       missionsButton.id = KING_MISSIONS_BUTTON_ID;
@@ -9221,31 +9238,45 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
   }
 
-  // Hide Hero Editor button when entering hole area
+  // Hide Hero Editor and Team Copier buttons when entering hole area
   function hideHeroEditorButton() {
     try {
       // Try to use exposed function from Hero Editor mod if available
       if (window.heroEditor && typeof window.heroEditor.hideButton === 'function') {
         window.heroEditor.hideButton();
         console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button via mod API');
-        return;
+      } else {
+        // Fallback: DOM manipulation for Hero Editor
+        const heroButton = document.getElementById('hero-editor-button');
+        if (heroButton) {
+          heroButton.style.display = 'none';
+          console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button via DOM');
+        }
       }
-      
-      // Fallback: DOM manipulation
-      const button = document.getElementById('hero-editor-button');
-      if (button) {
-        button.style.display = 'none';
-        console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button via DOM');
-        return;
+
+      // Try to use exposed function from Team Copier mod if available
+      if (window.teamCopier && typeof window.teamCopier.hideButton === 'function') {
+        window.teamCopier.hideButton();
+        console.log('[Quests Mod][Team Copier] Hidden Team Copier button via mod API');
+      } else {
+        // Fallback: DOM manipulation for Team Copier
+        const teamButton = document.getElementById('team-copier-button');
+        if (teamButton) {
+          teamButton.style.display = 'none';
+          console.log('[Quests Mod][Team Copier] Hidden Team Copier button via DOM');
+        }
       }
-      
+
       // Last resort: try to find by icon
       const buttons = document.querySelectorAll('button');
       for (const btn of buttons) {
         if (btn.textContent && btn.textContent.includes('✏️')) {
           btn.style.display = 'none';
           console.log('[Quests Mod][Hero Editor] Hidden Hero Editor button (found by icon)');
-          return;
+        }
+        if (btn.textContent && btn.textContent.includes('📋')) {
+          btn.style.display = 'none';
+          console.log('[Quests Mod][Team Copier] Hidden Team Copier button (found by icon)');
         }
       }
     } catch (error) {
@@ -9253,31 +9284,45 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     }
   }
 
-  // Show Hero Editor button when leaving hole area
+  // Show Hero Editor and Team Copier buttons when leaving hole area
   function showHeroEditorButton() {
     try {
       // Try to use exposed function from Hero Editor mod if available
       if (window.heroEditor && typeof window.heroEditor.showButton === 'function') {
         window.heroEditor.showButton();
         console.log('[Quests Mod][Hero Editor] Shown Hero Editor button via mod API');
-        return;
+      } else {
+        // Fallback: DOM manipulation for Hero Editor
+        const heroButton = document.getElementById('hero-editor-button');
+        if (heroButton) {
+          heroButton.style.display = '';
+          console.log('[Quests Mod][Hero Editor] Shown Hero Editor button via DOM');
+        }
       }
-      
-      // Fallback: DOM manipulation
-      const button = document.getElementById('hero-editor-button');
-      if (button) {
-        button.style.display = '';
-        console.log('[Quests Mod][Hero Editor] Shown Hero Editor button via DOM');
-        return;
+
+      // Try to use exposed function from Team Copier mod if available
+      if (window.teamCopier && typeof window.teamCopier.showButton === 'function') {
+        window.teamCopier.showButton();
+        console.log('[Quests Mod][Team Copier] Shown Team Copier button via mod API');
+      } else {
+        // Fallback: DOM manipulation for Team Copier
+        const teamButton = document.getElementById('team-copier-button');
+        if (teamButton) {
+          teamButton.style.display = '';
+          console.log('[Quests Mod][Team Copier] Shown Team Copier button via DOM');
+        }
       }
-      
+
       // Last resort: try to find by icon
       const buttons = document.querySelectorAll('button');
       for (const btn of buttons) {
         if (btn.textContent && btn.textContent.includes('✏️')) {
           btn.style.display = '';
           console.log('[Quests Mod][Hero Editor] Shown Hero Editor button (found by icon)');
-          return;
+        }
+        if (btn.textContent && btn.textContent.includes('📋')) {
+          btn.style.display = '';
+          console.log('[Quests Mod][Team Copier] Shown Team Copier button (found by icon)');
         }
       }
     } catch (error) {
