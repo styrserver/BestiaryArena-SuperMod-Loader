@@ -4093,13 +4093,44 @@ async function handleEventOrRaid(roomId) {
         const boardContext = globalThis.state.board.getSnapshot().context;
         const isAutoplayMode = boardContext.mode === 'autoplay';
         const isAutoplaySessionRunning = boardContext.isRunning || boardContext.autoplayRunning;
+        const isGameInProgress = boardContext.gameStarted; // Check if battle is ongoing
         
-        if (isAutoplayMode && isAutoplaySessionRunning) {
-            // Autoplay session is actually running - just continue monitoring
-            console.log('[Raid Hunter] Autoplay session running - continuing stamina monitoring');
-            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+        if ((isAutoplayMode && isAutoplaySessionRunning) || isGameInProgress) {
+            // Autoplay session is running OR battle is in progress - check if we need to monitor stamina
+            const staminaCheck = hasInsufficientStamina();
+            if (staminaCheck.insufficient) {
+                // Stamina is actually depleted - restart recovery monitoring
+                console.log('[Raid Hunter] Autoplay running but stamina depleted - restarting stamina recovery monitoring');
+                startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+            } else {
+                // Stamina is sufficient and autoplay is running - monitor for depletion instead
+                console.log('[Raid Hunter] Autoplay running with sufficient stamina - monitoring for depletion');
+                // Clear any existing depletion interval
+                if (window.raidHunterDepletionInterval) {
+                    clearInterval(window.raidHunterDepletionInterval);
+                }
+                // Set up depletion watcher
+                const watchStaminaDepletion = () => {
+                    const depletionCheckInterval = setInterval(() => {
+                        if (!isAutomationActive() || !isCurrentlyRaiding) {
+                            clearInterval(depletionCheckInterval);
+                            window.raidHunterDepletionInterval = null;
+                            return;
+                        }
+                        const currentCheck = hasInsufficientStamina();
+                        if (currentCheck.insufficient) {
+                            console.log('[Raid Hunter] Stamina depleted during autoplay - starting recovery monitoring');
+                            clearInterval(depletionCheckInterval);
+                            window.raidHunterDepletionInterval = null;
+                            startStaminaTooltipMonitoring(continuousStaminaMonitoring);
+                        }
+                    }, STAMINA_MONITOR_INTERVAL);
+                    window.raidHunterDepletionInterval = depletionCheckInterval;
+                };
+                watchStaminaDepletion();
+            }
         } else {
-            // Autoplay session is not running - need to click Start button
+            // Autoplay session is not running and no battle in progress - need to click Start button
             console.log('[Raid Hunter] Autoplay session not running - clicking Start button');
             
             // Wait if page is transitioning (visibility change in progress)
@@ -4188,7 +4219,8 @@ function startRaidSleepTimer(roomId) {
                     `${sleepHours}h ${remainingMinutes}m` : 
                     `${remainingMinutes}m`;
                 
-                console.log(`[Raid Hunter] Starting sleep timer for ${timeString} until raid expires`);
+                const raidName = getEventNameForRoomId(roomId) || 'Unknown Raid';
+                console.log(`[Raid Hunter] Starting sleep timer for ${timeString} until raid expires (${raidName})`);
                 console.log(`[Raid Hunter] Stopping interfering monitoring (keeping autoplay monitoring for map switch detection)`);
                 
                 // Stop interfering monitoring (but keep autoplay state monitoring for map switch detection)
@@ -4385,18 +4417,25 @@ function ensureAutoplayMode() {
         }
     }
 
-    return withControl(window.AutoplayManager, 'Raid Hunter', () => {
-        const boardContext = globalThis.state.board.getSnapshot().context;
-        const currentMode = boardContext.mode;
-
-        if (currentMode !== 'autoplay') {
-            const priorityLabel = getPriorityLabel(isHighPriorityRaid ? RAID_PRIORITY.HIGH : isMediumPriorityRaid ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.LOW);
-            globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
-            console.log(`[Raid Hunter] Switched to autoplay mode (${priorityLabel} priority raid)`);
-            return true;
-        }
+    // Request control and keep it (don't use withControl which releases immediately)
+    // If we already set currentOwner above, requestControl should succeed or already be ours
+    if (!window.AutoplayManager.requestControl('Raid Hunter')) {
+        console.log('[Raid Hunter] Cannot enable autoplay mode - controlled by another mod');
         return false;
-    }, 'switch to autoplay mode for raid');
+    }
+    
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    const currentMode = boardContext.mode;
+
+    if (currentMode !== 'autoplay') {
+        const priorityLabel = getPriorityLabel(isHighPriorityRaid ? RAID_PRIORITY.HIGH : isMediumPriorityRaid ? RAID_PRIORITY.MEDIUM : RAID_PRIORITY.LOW);
+        globalThis.state.board.send({ type: "setPlayMode", mode: "autoplay" });
+        console.log(`[Raid Hunter] Switched to autoplay mode (${priorityLabel} priority raid)`);
+        return true;
+    }
+    
+    // Already in autoplay mode, but we still have control now
+    return true;
 }
 
 // Checks for existing raids.

@@ -362,7 +362,7 @@ function deleteTeamSetup(mapId, setupName) {
   }
   
   // Can't delete the original setup
-  if (setupName === 'Original') {
+  if (setupName === 'Auto-Setup') {
     return false;
   }
   
@@ -412,8 +412,8 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
       return false;
     }
     
-    // If setupName is "Original", use the game's built-in saved setup from player context
-    if (setupName === 'Original') {
+    // If setupName is "Auto-Setup", use the game's built-in saved setup from player context
+    if (setupName === 'Auto-Setup') {
       try {
         // Get the player's saved configuration for this map
         const playerContext = globalThis.state.player.getSnapshot().context;
@@ -555,12 +555,12 @@ function loadTeamSetup(mapId, setupName, keepModalOpen = false) {
   }
 }
 
-// Update loadTeamAndNotify to handle the modal differently for Original team
+// Update loadTeamAndNotify to handle the modal differently for Auto-Setup team
 function loadTeamAndNotify(mapId, setupName) {
-  // Check if this is the Original team
-  const isOriginalTeam = setupName === 'Original';
+  // Check if this is the Auto-Setup team
+  const isOriginalTeam = setupName === 'Auto-Setup';
   
-  // If it's not the Original team, close all modals
+  // If it's not the Auto-Setup team, close all modals
   if (!isOriginalTeam) {
     forceCloseAllModals();
   }
@@ -569,7 +569,7 @@ function loadTeamAndNotify(mapId, setupName) {
   if (loadTeamSetup(mapId, setupName, isOriginalTeam)) {
     showNotification(t('mods.setupManager.teamLoaded'), 'success');
     
-    // For Original team, reshow the modal after a short delay
+    // For Auto-Setup team, reshow the modal after a short delay
     if (isOriginalTeam) {
       setTimeout(() => {
         // Only reopen if we don't have an active modal already
@@ -797,8 +797,8 @@ function createSetupCard(mapId, setupName, setupData) {
   teamContent.className = 'flex flex-wrap';
   teamContent.style.gap = '12px';
   
-  // For "Original" setup, get monsters from the player's saved setup
-  if (setupName === 'Original') {
+  // For "Auto-Setup" setup, get monsters from the player's saved setup
+  if (setupName === 'Auto-Setup') {
     const playerContext = globalThis.state.player.getSnapshot().context;
     const boardSetup = playerContext.boardConfigs[mapId];
     
@@ -896,8 +896,8 @@ function createSetupCard(mapId, setupName, setupData) {
   
   // Creature count indicator - count creatures in this setup
   let setupCreatureCount = 0;
-  if (setupName === 'Original') {
-    // For "Original" setup, count from player's saved setup
+  if (setupName === 'Auto-Setup') {
+    // For "Auto-Setup" setup, count from player's saved setup
     const playerContext = globalThis.state.player.getSnapshot().context;
     const boardSetup = playerContext.boardConfigs[mapId];
     if (boardSetup && Array.isArray(boardSetup)) {
@@ -938,7 +938,7 @@ function createSetupCard(mapId, setupName, setupData) {
   actionsDiv.appendChild(loadButton);
   
   // Notes button (only for non-original setups)
-  if (setupName !== 'Original') {
+  if (setupName !== 'Auto-Setup') {
     const notesButton = createNotesButton(() => {
       showNotesModal(mapId, setupName, setupData);
     });
@@ -947,7 +947,7 @@ function createSetupCard(mapId, setupName, setupData) {
   }
   
   // Delete button (only for non-original setups)
-  if (setupName !== 'Original') {
+  if (setupName !== 'Auto-Setup') {
     const deleteButton = createDeleteButton(() => {
       showDeleteConfirmation(mapId, setupName);
     });
@@ -1006,7 +1006,7 @@ function showSetupManagerModal() {
     const savedSetups = getMapSetups(mapId);
     
     // Add original setup card
-    const originalCard = createSetupCard(mapId, 'Original');
+    const originalCard = createSetupCard(mapId, 'Auto-Setup');
     scrollContainer.addContent(originalCard);
     
     // Add saved setup cards
@@ -1026,6 +1026,7 @@ function showSetupManagerModal() {
       const noSetupsMessage = document.createElement('p');
       noSetupsMessage.className = 'text-whiteRegular italic mt-2';
       noSetupsMessage.textContent = t('mods.setupManager.noTeamsFound');
+      noSetupsMessage.style.textAlign = 'center';
       scrollContainer.addContent(noSetupsMessage);
     }
     

@@ -379,15 +379,21 @@
         try {
           const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, true);
           
-          // Update the existing container if it exists
+          // Try to update in place first (no flickering)
+          if (leaderboardContainer && document.contains(leaderboardContainer)) {
+            const updated = updateLeaderboardData(tickData, rankData, floorData);
+            if (updated) {
+              console.log('[Better Highscores] Leaderboard updated in place with fresh battle data');
+              return;
+            }
+          }
+          
+          // Fallback to full update if in-place update failed
           if (leaderboardContainer) {
             const mapName = getMapName(mapCode);
             const newContainer = createLeaderboardDisplay(tickData, rankData, floorData, mapName);
-            
-            // Replace the old container with the new one
             leaderboardContainer.replaceWith(newContainer);
             leaderboardContainer = newContainer;
-            
             console.log('[Better Highscores] Leaderboard updated with fresh battle data');
           }
         } catch (error) {
@@ -847,6 +853,102 @@
     return section;
   }
 
+  // Function to update existing leaderboard display with new data (no flickering)
+  function updateLeaderboardData(tickData, rankData, floorData) {
+    if (!leaderboardContainer) {
+      return false; // No container to update
+    }
+    
+    const contentDiv = leaderboardContainer._contentDiv || 
+                       leaderboardContainer.querySelector('div[style*="position: relative"]');
+    if (!contentDiv) {
+      return false; // Can't find content container
+    }
+    
+    // Get user data
+    const userScores = getUserBestScores();
+    const playerSnapshot = getPlayerSnapshot();
+    const playerName = playerSnapshot?.context?.name;
+    
+    // Get max values
+    const maxRankPoints = getMaxRankPoints();
+    const maxFloor = getMaxFloor();
+    const currentRankRecord = rankData && rankData.length > 0 ? rankData[0].rank : null;
+    const currentFloorRecord = floorData && floorData.length > 0 ? floorData[0].floor : null;
+    
+    // Get the three sections (tick, rank, floor)
+    const sections = contentDiv.children;
+    if (sections.length < 3) {
+      return false; // Structure doesn't match
+    }
+    
+    // Helper to update a section
+    const updateSection = (section, data, config, maxValue, currentValue, tickDataForFallback) => {
+      // Clear existing content except structure markers
+      while (section.firstChild) {
+        section.removeChild(section.firstChild);
+      }
+      
+      if (data && data.length > 0) {
+        // Recreate section content using existing createLeaderboardSection logic
+        const newSection = createLeaderboardSection(data, config, userScores, playerName, maxValue, currentValue, tickDataForFallback);
+        
+        // Copy children from new section to existing section
+        while (newSection.firstChild) {
+          section.appendChild(newSection.firstChild);
+        }
+        
+        // Preserve section styling
+        Object.assign(section.style, {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '2px',
+          minWidth: 'auto'
+        });
+      }
+    };
+    
+    // Update tick section (index 0)
+    updateSection(sections[0], tickData, {
+      title: 'Ticks',
+      displayName: 'Time',
+      titleColor: UI_CONFIG.COLORS.TICK_TITLE,
+      isRank: false
+    }, null, null);
+    
+    // Update rank section (index 1)
+    updateSection(sections[1], rankData, {
+      title: 'Rank',
+      displayName: 'Rank',
+      titleColor: UI_CONFIG.COLORS.RANK_TITLE,
+      isRank: true,
+      isFloor: false
+    }, maxRankPoints, currentRankRecord);
+    
+    // Preserve border-left styling for rank section
+    Object.assign(sections[1].style, {
+      borderLeft: '1px solid rgba(255, 255, 255, 0.2)',
+      paddingLeft: '6px'
+    });
+    
+    // Update floor section (index 2)
+    updateSection(sections[2], floorData, {
+      title: 'Floor',
+      displayName: 'Floor',
+      titleColor: UI_CONFIG.COLORS.FLOOR_TITLE,
+      isRank: false,
+      isFloor: true
+    }, maxFloor, currentFloorRecord, tickData);
+    
+    // Preserve border-left styling for floor section
+    Object.assign(sections[2].style, {
+      borderLeft: '1px solid rgba(255, 255, 255, 0.2)',
+      paddingLeft: '6px'
+    });
+    
+    return true;
+  }
+
   // Function to create leaderboard display
   function createLeaderboardDisplay(tickData, rankData, floorData, mapName) {
     // Get opacity from config
@@ -1014,13 +1116,34 @@
         return;
       }
       
-      currentMapCode = mapCode;
-      BetterHighscoresState.lastUpdateTime = Date.now();
-      
       const mapName = getMapName(mapCode);
       
       // Fetch leaderboard data
       const { tickData, rankData, floorData } = await fetchLeaderboardData(mapCode, false);
+      
+      // Check if we can update in place (same map, container exists in DOM)
+      const mapChanged = mapCode !== currentMapCode;
+      const canUpdateInPlace = !mapChanged && 
+                                leaderboardContainer && 
+                                document.contains(leaderboardContainer);
+      
+      if (canUpdateInPlace) {
+        // Update existing container in place (no flickering)
+        console.log('[Better Highscores] Updating existing container in place');
+        const updated = updateLeaderboardData(tickData, rankData, floorData);
+        if (updated) {
+          currentMapCode = mapCode;
+          BetterHighscoresState.lastUpdateTime = Date.now();
+          handleSuccess();
+          return;
+        }
+        // If update failed, fall through to recreate
+        console.log('[Better Highscores] In-place update failed, recreating container');
+      }
+      
+      // Map changed or container doesn't exist - recreate container
+      currentMapCode = mapCode;
+      BetterHighscoresState.lastUpdateTime = Date.now();
       
       // Remove existing container and any duplicate containers
       if (leaderboardContainer) {
