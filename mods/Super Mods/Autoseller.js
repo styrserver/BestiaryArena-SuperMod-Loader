@@ -5992,6 +5992,8 @@
     
     function setupGameEndListener() {
         if (globalThis.state?.board?.on) {
+            console.log('[Autoseller] Setting up game end listener');
+            
             // Listen for new game events to access the world object
             // Use separate handler to avoid overwriting emitNewGameHandler1 from setupAutosellerWidgetObserver
             emitNewGameHandler2 = (game) => {
@@ -5999,6 +6001,8 @@
                 if (window.__modCoordination?.boardAnalyzerRunning) {
                     return;
                 }
+                
+                console.log('[Autoseller] New game detected, subscribing to game end event');
                 
                 // Don't clear latestServerResults here - the board subscription (setupAutosellerWidgetObserver)
                 // will automatically update it with the new game's serverResults when available
@@ -6093,6 +6097,18 @@
                 gameEndSubscription = game.world.onGameEnd;
             };
             globalThis.state.board.on('newGame', emitNewGameHandler2);
+            
+            // Check if a game is already running when Autoseller initializes
+            // This handles the case where Autoseller loads after autoplay has already started
+            try {
+                const boardContext = globalThis.state.board.getSnapshot?.()?.context;
+                if (boardContext?.game?.world) {
+                    console.log('[Autoseller] Game already running at initialization, subscribing to current game');
+                    emitNewGameHandler2(boardContext.game);
+                }
+            } catch (error) {
+                console.log('[Autoseller] Could not check for existing game:', error.message);
+            }
             
         } else {
             console.warn(`[${modName}] Board state not available for game end listener`);
@@ -6463,6 +6479,7 @@
     // =======================
     
     function initAutoseller() {
+        console.log('[Autoseller] Initializing mod...');
         addAutosellerNavButton();
         setupAutosellerWidgetObserver();
         setupDragonPlantObserver();
@@ -6479,6 +6496,8 @@
             updateAutosellerNavButtonColor();
         }, 1000);
         timeoutIds.push(timeoutId);
+        
+        console.log('[Autoseller] Mod initialized successfully');
         
         // Removed boardSubscription2 - all processing now happens at game end when inventory is actually updated
         // (see setupGameEndListener for processing logic)

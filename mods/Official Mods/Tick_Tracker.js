@@ -284,6 +284,12 @@ function startTracking() {
   }
   
   try {
+    // Check if game state is ready
+    if (!globalThis.state || !globalThis.state.board || !globalThis.state.board.on) {
+      console.log(LOG_PREFIX, 'Game state not ready for tick tracking');
+      return;
+    }
+    
     // Always ensure we have the newGame listener after reloads
     if (!newGameListenerRegistered) {
       // Listen for new game events to subscribe to onGameEnd

@@ -13,7 +13,8 @@ const defaultConfig = {
   enableTurboAutomatically: true,
   stopOnSPlus: false,
   stopAfterTicks: 0, // 0 means no limit
-  stopWhenTicksReached: 0 // Stop when finding a run with this number of ticks or less
+  stopWhenTicksReached: 0, // Stop when finding a run with this number of ticks or less
+  stopOnAchievement: false // Stop when achievement is completed
 };
 
 // Initialize with saved config or defaults
@@ -1356,6 +1357,51 @@ let currentGameState = null;
 // 4. Game State Management
 // =======================
 
+// Achievement detection function
+function didAchievement(world) {
+  console.log('[Achievement Debug] Checking achievement conditions...');
+  
+  // Track what we find
+  let foundGrynchBarrel = false;
+  let foundGrynchGoblin = false;
+  let grynchBarrelAlive = false;
+  let grynchGoblinHit = false;
+  
+  for (const actor of world.grid.actors) {
+    if (!actor.villain) continue;
+    
+    // Check for grynch barrel
+    if (actor.tags.has("grynchBarrel")) {
+      foundGrynchBarrel = true;
+      grynchBarrelAlive = actor.hp.isAlive;
+      console.log(`[Achievement Debug] Found grynchBarrel - isAlive: ${actor.hp.isAlive}`);
+      if (!actor.hp.isAlive) {
+        console.log('[Achievement Debug] ❌ grynchBarrel is dead! Achievement failed.');
+        return false;
+      }
+    }
+    
+    // Check for grynch goblin gumslinger
+    if (!actor.tags.has("grynchGoblinGumslinger")) continue;
+    
+    foundGrynchGoblin = true;
+    grynchGoblinHit = actor.tags.has("hitByWaterElementalBall");
+    console.log(`[Achievement Debug] Found grynchGoblinGumslinger - hitByWaterElementalBall: ${grynchGoblinHit}`);
+    
+    if (!actor.tags.has("hitByWaterElementalBall")) {
+      console.log('[Achievement Debug] ❌ grynchGoblinGumslinger was NOT hit by water elemental ball! Achievement failed.');
+      return false;
+    }
+  }
+  
+  console.log('[Achievement Debug] Summary:');
+  console.log(`  - Found grynchBarrel: ${foundGrynchBarrel} (alive: ${grynchBarrelAlive})`);
+  console.log(`  - Found grynchGoblinGumslinger: ${foundGrynchGoblin} (hit: ${grynchGoblinHit})`);
+  console.log(`[Achievement Debug] ✅ Achievement conditions met!`);
+  
+  return true;
+}
+
 // Simple board data storage - serialize once, store, reuse
 let currentBoardData = null;
 
@@ -1402,6 +1448,7 @@ class StatisticsCalculator {
     this.ticksArray = [];
     this.runTimes = [];
     this.runTimesSum = 0;
+    this.achievementCount = 0;
   }
   
   addRun(result, runTime) {
@@ -1412,6 +1459,11 @@ class StatisticsCalculator {
     // Include all runs in time statistics (both completed and failed)
     this.ticksArray.push(result.ticks);
     this.ticksSum += result.ticks;
+    
+    // Track achievement completions
+    if (result.achievementCompleted) {
+      this.achievementCount++;
+    }
     
     // Update min/max ticks for completed runs
     if (result.completed) {
@@ -1448,6 +1500,7 @@ class StatisticsCalculator {
   calculateStatistics() {
     const sPlusRate = this.totalRuns > 0 ? (this.sPlusCount / this.totalRuns * 100).toFixed(2) : '0.00';
     const completionRate = this.totalRuns > 0 ? (this.completedRuns / this.totalRuns * 100).toFixed(2) : '0.00';
+    const achievementRate = this.totalRuns > 0 ? (this.achievementCount / this.totalRuns * 100).toFixed(2) : '0.00';
     const averageRunTime = this.runTimes.length > 0 ? this.runTimesSum / this.runTimes.length : 0;
     const averageTicks = this.totalRuns > 0 ? this.ticksSum / this.totalRuns : 0;
     const medianTicks = this.calculateMedian(this.ticksArray);
@@ -1457,8 +1510,10 @@ class StatisticsCalculator {
       completedRuns: this.completedRuns,
       sPlusCount: this.sPlusCount,
       sPlusMaxPointsCount: this.sPlusMaxPointsCount,
+      achievementCount: this.achievementCount,
       sPlusRate,
       completionRate,
+      achievementRate,
       minTicks: isFinite(this.minTicks) ? this.minTicks : 0,
       maxTicks: this.maxTicks,
       minDefeatTicks: isFinite(this.minDefeatTicks) ? this.minDefeatTicks : 0,
@@ -1581,6 +1636,28 @@ const getLastTick = (analysisId = null) => {
       return;
     }
     
+    // Achievement detection will happen when the game naturally ends (in the state check)
+    // We need to capture the world reference while the game is running
+    let capturedWorld = null;
+    let newGameSubscription = null;
+    
+    if (config.stopOnAchievement) {
+      console.log('[Board Analyzer] Achievement detection ENABLED - subscribing to newGame to capture world');
+      
+      // Subscribe to newGame event to capture world immediately when game starts
+      newGameSubscription = globalThis.state.board.on('newGame', (event) => {
+        if (event.world) {
+          capturedWorld = event.world;
+          console.log('[Board Analyzer] ✅ Captured world reference from newGame event');
+          // Unsubscribe after capturing
+          if (newGameSubscription) {
+            newGameSubscription.unsubscribe();
+            newGameSubscription = null;
+          }
+        }
+      });
+    }
+    
     // Use shared game state tracker instead of creating new subscription
     const tracker = getGameStateTracker();
     
@@ -1592,6 +1669,7 @@ const getLastTick = (analysisId = null) => {
         console.log('[Board Analyzer] Analysis instance changed during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
+        if (newGameSubscription) newGameSubscription.unsubscribe();
         resolve({
           ticks: currentTick,
           grade: readableGrade,
@@ -1608,6 +1686,7 @@ const getLastTick = (analysisId = null) => {
         console.log('[Board Analyzer] Analysis state reset during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
+        if (newGameSubscription) newGameSubscription.unsubscribe();
         resolve({
           ticks: currentTick,
           grade: readableGrade,
@@ -1624,6 +1703,7 @@ const getLastTick = (analysisId = null) => {
         console.log('Force stop detected during game - stopping immediately');
         hasResolved = true;
         if (unsubscribe) unsubscribe();
+        if (newGameSubscription) newGameSubscription.unsubscribe();
         resolve({
           ticks: currentTick,
           grade: readableGrade,
@@ -1638,13 +1718,34 @@ const getLastTick = (analysisId = null) => {
       if (state !== 'initial') {
         // Game completed naturally through state change
         if (!hasResolved) {
+          console.log(`[Board Analyzer] Game ended with state: "${state}"`);
           hasResolved = true;
           if (unsubscribe) unsubscribe();
+          if (newGameSubscription) newGameSubscription.unsubscribe();
+          
+          // Check for achievement completion if enabled
+          let achievementCompleted = false;
+          if (config.stopOnAchievement) {
+            console.log(`[Board Analyzer] Achievement detection enabled, state is "${state}", checking achievement...`);
+            try {
+              if (capturedWorld) {
+                console.log('[Board Analyzer] Checking achievement at game end using captured world...');
+                achievementCompleted = didAchievement(capturedWorld);
+                console.log(`[Board Analyzer] Achievement check result: ${achievementCompleted}`);
+              } else {
+                console.warn('[Board Analyzer] No world was captured during game - cannot check achievement');
+              }
+            } catch (e) {
+              console.warn('[Board Analyzer] Error checking achievement:', e);
+            }
+          }
+          
           resolve({
             ticks: currentTick,
             grade: readableGrade,
             rankPoints: rankPoints,
-            completed: state === 'victory'
+            completed: state === 'victory',
+            achievementCompleted: achievementCompleted
           });
         }
       } else if (config.stopOnSPlus && readableGrade === 'S+') {
@@ -1660,6 +1761,7 @@ const getLastTick = (analysisId = null) => {
             })
           });
           if (unsubscribe) unsubscribe();
+          if (newGameSubscription) newGameSubscription.unsubscribe();
           resolve({
             ticks: currentTick,
             grade: readableGrade,
@@ -1680,6 +1782,7 @@ const getLastTick = (analysisId = null) => {
             })
           });
           if (unsubscribe) unsubscribe();
+          if (newGameSubscription) newGameSubscription.unsubscribe();
           resolve({
             ticks: currentTick,
             grade: readableGrade,
@@ -1947,7 +2050,8 @@ function setupAnalysisState() {
   const bestRuns = {
     bestTimeRun: null,
     bestScoreRun: null,
-    targetTicksRun: null
+    targetTicksRun: null,
+    achievementRun: null
   };
   
   // Timing variables
@@ -2180,6 +2284,11 @@ async function processSingleRun(runIndex, thisAnalysisId, statsCalculator, bestR
     const runTime = performance.now() - timing.lastRunStart;
     statsCalculator.addRun(result, runTime);
     
+    // Log if achievement was completed
+    if (result.achievementCompleted) {
+      console.log(`🏆 Run ${runIndex}: Achievement completed! (${result.ticks} ticks, ${result.grade})`);
+    }
+    
     // Process run results and update best runs
     const shouldStop = processRunResults(result, runIndex, statsCalculator, bestRuns);
     
@@ -2242,6 +2351,30 @@ function processRunResults(result, runIndex, statsCalculator, bestRuns) {
       console.log('Achieved S+ grade, stopping analysis early');
       return true; // Signal to stop
     }
+  }
+  
+  // Check if achievement was completed and stopOnAchievement is enabled
+  if (result.achievementCompleted && config.stopOnAchievement) {
+    console.log('🏆 Achievement completed, stopping ALL subsequent runs');
+    
+    // Save the achievement run for replay
+    const boardData = getBoardData(seed);
+    
+    if (boardData) {
+      console.log('🏆 Achievement run: Saving board data for replay');
+      bestRuns.achievementRun = {
+        seed: seed,
+        board: boardData,
+        ticks: ticks,
+        grade: grade,
+        rankPoints: rankPoints
+      };
+      console.log(`🏆 Achievement run captured: ${ticks} ticks with seed ${seed} in run ${runIndex}`);
+    } else {
+      console.warn('Failed to get board data for achievement replay');
+    }
+    
+    return true; // Signal to stop ALL subsequent runs
   }
   
   // Check if should stop for reaching the desired number of ticks or below
@@ -2410,8 +2543,10 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         completedRuns: stats.completedRuns,
         sPlusCount: stats.sPlusCount,
         sPlusMaxPointsCount: stats.sPlusMaxPointsCount,
+        achievementCount: stats.achievementCount,
         sPlusRate: stats.sPlusRate,
         completionRate: stats.completionRate,
+        achievementRate: stats.achievementRate,
         minTicks: stats.minTicks,
         maxTicks: stats.maxTicks,
         minDefeatTicks: stats.minDefeatTicks,
@@ -2424,6 +2559,7 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
         bestTimeResult: bestRuns.bestTimeRun,
         maxPointsResult: bestRuns.bestScoreRun,
         targetTicksResult: bestRuns.targetTicksRun,
+        achievementResult: bestRuns.achievementRun,
         // Timing stats
         totalTimeMs: totalTime,
         totalTimeFormatted: formatMilliseconds(totalTime),
@@ -2657,6 +2793,23 @@ function createConfigPanel(startAnalysisCallback) {
   stopSPlusContainer.appendChild(stopSPlusLabel);
   content.appendChild(stopSPlusContainer);
 
+  // Stop on Achievement checkbox
+  const stopAchievementContainer = document.createElement('div');
+  stopAchievementContainer.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+  
+  const stopAchievementInput = document.createElement('input');
+  stopAchievementInput.type = 'checkbox';
+  stopAchievementInput.id = 'stop-achievement-input';
+  stopAchievementInput.checked = config.stopOnAchievement;
+  
+  const stopAchievementLabel = document.createElement('label');
+  stopAchievementLabel.htmlFor = 'stop-achievement-input';
+  stopAchievementLabel.textContent = t('mods.boardAnalyzer.stopOnAchievementLabel');
+  
+  stopAchievementContainer.appendChild(stopAchievementInput);
+  stopAchievementContainer.appendChild(stopAchievementLabel);
+  content.appendChild(stopAchievementContainer);
+
   // Stop after ticks input
   const stopTicksContainer = document.createElement('div');
   stopTicksContainer.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
@@ -2765,6 +2918,7 @@ function createConfigPanel(startAnalysisCallback) {
     config.hideGameBoard = document.getElementById('hide-input').checked;
     config.enableTurboAutomatically = document.getElementById('turbo-input').checked;
     config.stopOnSPlus = document.getElementById('stop-splus-input').checked;
+    config.stopOnAchievement = document.getElementById('stop-achievement-input').checked;
     config.stopAfterTicks = parseInt(document.getElementById('stop-ticks-input').value, 10);
     config.stopWhenTicksReached = parseInt(document.getElementById('stop-when-ticks-input').value, 10);
     
@@ -2943,6 +3097,18 @@ function showResultsModal(results) {
       content.appendChild(sandboxNote);
     }
     
+    // Show achievement completion notification
+    if (config.stopOnAchievement && results.summary.achievementCount > 0) {
+      const achievementNote = document.createElement('div');
+      if (results.summary.achievementCount === 1) {
+        achievementNote.textContent = '🏆 Achievement completed! Analysis stopped.';
+      } else {
+        achievementNote.textContent = `🏆 ${results.summary.achievementCount} run(s) completed the achievement!`;
+      }
+      achievementNote.style.cssText = 'text-align: center; color: #9b59b6; margin-bottom: 15px; font-weight: bold; padding: 8px; background-color: rgba(155, 89, 182, 0.1); border-radius: 4px;';
+      content.appendChild(achievementNote);
+    }
+    
     // Create result statistics
     const statsContainer = document.createElement('div');
     statsContainer.style.cssText = 'display: grid; grid-template-columns: 130px auto; gap: 10px; margin-bottom: 20px;';
@@ -3019,6 +3185,19 @@ function showResultsModal(results) {
     completionRateValue.textContent = `${results.summary.completionRate}% (${results.summary.completedRuns}/${results.summary.totalRuns})`;
     completionRateValue.style.cssText = 'text-align: right; color: green;';
     
+    // Achievement Rate (only show if stopOnAchievement is enabled)
+    let achievementRateLabel = null;
+    let achievementRateValue = null;
+    if (config.stopOnAchievement && results.summary.achievementCount > 0) {
+      achievementRateLabel = document.createElement('div');
+      achievementRateLabel.textContent = t('mods.boardAnalyzer.achievementRateLabel');
+      achievementRateLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+      
+      achievementRateValue = document.createElement('div');
+      achievementRateValue.textContent = `${results.summary.achievementRate}% (${results.summary.achievementCount}/${results.summary.totalRuns})`;
+      achievementRateValue.style.cssText = 'text-align: right; color: #9b59b6; font-weight: bold;';
+    }
+    
     // Best Time (Min Time) - Dynamic label based on completion status
     const minTimeLabel = document.createElement('div');
     const hasWins = results.summary.completedRuns > 0;
@@ -3083,6 +3262,13 @@ function showResultsModal(results) {
     
     statsContainer.appendChild(completionRateLabel);
     statsContainer.appendChild(completionRateValue);
+    
+    // Add achievement rate if available
+    if (achievementRateLabel && achievementRateValue) {
+      statsContainer.appendChild(achievementRateLabel);
+      statsContainer.appendChild(achievementRateValue);
+    }
+    
     statsContainer.appendChild(minTimeLabel);
     statsContainer.appendChild(minTimeValue);
     statsContainer.appendChild(maxTimeLabel);
@@ -3100,6 +3286,52 @@ function showResultsModal(results) {
     
     // Add the stats container to the content
     content.appendChild(statsContainer);
+    
+    // Check if we have valid replay data for achievement
+    const hasAchievementReplay = results.summary.achievementResult && results.summary.achievementResult.board;
+    
+    // Add achievement replay button if available
+    if (hasAchievementReplay) {
+      const copyAchievementButton = document.createElement('button');
+      copyAchievementButton.textContent = '🏆 ' + t('mods.boardAnalyzer.copyAchievementReplayButton');
+      copyAchievementButton.className = 'focus-style-visible flex items-center justify-center tracking-wide text-whiteRegular disabled:cursor-not-allowed disabled:text-whiteDark/60 disabled:grayscale-50 frame-1 active:frame-pressed-1 surface-regular gap-1 px-2 py-0.5 pb-[3px] pixel-font-14';
+      copyAchievementButton.style.cssText = 'width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 10px; background-color: rgba(155, 89, 182, 0.2);';
+      
+      // Add click handler using EventManager
+      modalEventManager.addListener(copyAchievementButton, 'click', () => {
+        // Get the board data
+        const replayData = results.summary.achievementResult.board;
+        
+        // Verify and fix the replay data format
+        if (!verifyAndFixReplayData(replayData)) {
+          api.ui.components.createModal({
+            title: 'Error',
+            content: 'Failed to create replay data. The board configuration may be incomplete.',
+            buttons: [{ text: 'OK', primary: true }]
+          });
+          return;
+        }
+        
+        // Create the $replay formatted string
+        const replayText = `$replay(${JSON.stringify(replayData)})`;
+        
+        // Log for debugging
+        console.log('🏆 Achievement replay text:', replayText);
+        
+        // Copy to clipboard
+        const success = copyToClipboard(replayText);
+        if (success) {
+          const originalText = copyAchievementButton.textContent;
+          copyAchievementButton.textContent = t('mods.boardAnalyzer.replayCopiedMessage');
+          setTimeout(() => {
+            copyAchievementButton.textContent = originalText;
+          }, 2000);
+        }
+      });
+      
+      // Add the button directly to content
+      content.appendChild(copyAchievementButton);
+    }
     
     // Check if we have valid replay data for target ticks
     const hasTargetTicksReplay = results.summary.targetTicksResult && results.summary.targetTicksResult.board;

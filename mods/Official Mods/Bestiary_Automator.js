@@ -1467,6 +1467,12 @@ const takeRewardsIfAvailable = async () => {
   }
   
   try {
+    // Check if game state is ready
+    if (!globalThis.state || !globalThis.state.player || !globalThis.state.player.getSnapshot) {
+      console.log('[Bestiary Automator] Game state not ready for rewards collection');
+      return;
+    }
+    
     // Check if player has reached the target level for rewards
     const playerContext = globalThis.state.player.getSnapshot().context;
     const currentExp = playerContext.exp;
@@ -1536,6 +1542,12 @@ const takeRewardsIfAvailable = async () => {
 const collectSeashellIfReady = async () => {
   try {
     console.log('[Bestiary Automator] === Starting seashell collection check ===');
+    
+    // Check if game state is ready
+    if (!globalThis.state || !globalThis.state.player || !globalThis.state.player.getSnapshot) {
+      console.log('[Bestiary Automator] Game state not ready for seashell collection');
+      return;
+    }
     
     // Check if seashell is ready
     const playerContext = globalThis.state.player.getSnapshot().context;
@@ -2809,6 +2821,12 @@ const handleFasterAutoplay = async () => {
   }
   
   try {
+    // Check if game state is ready
+    if (!globalThis.state || !globalThis.state.clientConfig || !globalThis.state.clientConfig.trigger) {
+      console.log('[Bestiary Automator] Game state not ready for faster autoplay');
+      return;
+    }
+    
     // Set autoplay delay to 0 for instant execution
     globalThis.state.clientConfig.trigger.setState({
       fn: (prev) => ({

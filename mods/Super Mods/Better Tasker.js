@@ -1246,11 +1246,22 @@ function isRaidHunterRaiding() {
                         if (timeSinceFirstCheck < 10000) { // Wait up to 10 seconds
                             console.log(`[Better Tasker] Still waiting for Raid Hunter to claim control... (${Math.round(timeSinceFirstCheck/1000)}s)`);
                             return true; // Continue yielding until Raid_Hunter processes all high-priority raids
+                        } else if (timeSinceFirstCheck < 60000) { // Maximum wait time: 60 seconds total
+                            // After initial timeout, keep yielding ONLY if Raid Hunter is actively raiding
+                            // This prevents stuck states where raids are available but not being processed
+                            if (isRaidHunterRaiding) {
+                                console.log('[Better Tasker] Raid Hunter timeout but actively raiding - continuing to yield');
+                                return true;
+                            } else {
+                                console.log('[Better Tasker] Raid Hunter timeout and not actively raiding - proceeding with Better Tasker to prevent stuck state');
+                                lastRaidHunterCheckTime = null; // Reset for next time
+                                // Fall through to continue with Better Tasker
+                            }
                         } else {
-                            // Timeout reached - Raid Hunter hasn't claimed control, but still yield for high-priority raids
-                            // Don't proceed - high-priority raids take precedence
-                            console.log('[Better Tasker] Raid Hunter timeout but high-priority raids still available - continuing to yield');
-                            return true;
+                            // Maximum timeout exceeded (60s) - proceed anyway to prevent permanent stuck states
+                            console.warn('[Better Tasker] ⚠️ Maximum wait time exceeded (60s) - proceeding with Better Tasker to prevent stuck state');
+                            lastRaidHunterCheckTime = null; // Reset for next time
+                            // Fall through to continue with Better Tasker
                         }
                     }
                     
@@ -1484,29 +1495,81 @@ function isBoardAnalyzerActive() {
     }
 }
 
+// ============================================================================
+// 4.2. MANUAL RUNNER COORDINATION
+// ============================================================================
+
+// Check if Manual Runner is currently active
+function isManualRunnerActive() {
+    try {
+        // Check window.manualRunnerState (primary detection)
+        if (!window.manualRunnerState) {
+            return false;
+        }
+        
+        const state = window.manualRunnerState;
+        
+        // Check if Manual Runner is currently running or stopping
+        if (state.isRunning && state.isRunning()) {
+            return true;
+        }
+        
+        if (state.isStopping && state.isStopping()) {
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Better Tasker] Error checking Manual Runner state:', error);
+        return false;
+    }
+}
+
+// Stop Manual Runner when Better Tasker needs to start
+function stopManualRunnerForTask() {
+    try {
+        if (!window.manualRunnerState) {
+            return false;
+        }
+        
+        const state = window.manualRunnerState;
+        
+        if (state.canInterrupt && state.canInterrupt() && state.forceStop) {
+            console.log('[Better Tasker] 🛑 Stopping Manual Runner to start task automation');
+            return state.forceStop();
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('[Better Tasker] Error stopping Manual Runner:', error);
+        return false;
+    }
+}
+
 // Handle Board Analyzer coordination - pause Better Tasker when Board Analyzer runs
 function handleBoardAnalyzerCoordination() {
     try {
         if (!window.__modCoordination) return;
         
         const boardAnalyzerRunning = window.__modCoordination.boardAnalyzerRunning;
-        const manualRunnerRunning = window.__modCoordination.manualRunnerRunning === true;
+        // Don't check manualRunnerRunning here - we handle it differently now
+        // Manual Runner is stopped on-demand when tasks appear, not preemptively
         
-        if ((boardAnalyzerRunning || manualRunnerRunning) && !isBoardAnalyzerRunning) {
+        if (boardAnalyzerRunning && !isBoardAnalyzerRunning) {
             // Board Analyzer started - pause Better Tasker automation
-            console.log('[Better Tasker] Coordination active (Board Analyzer or Manual Runner) - pausing task automation');
+            console.log('[Better Tasker] Board Analyzer active - pausing task automation');
             isBoardAnalyzerRunning = true;
             
             if (taskerState === TASKER_STATES.ENABLED) {
                 stopAutomation();
             }
-        } else if (!boardAnalyzerRunning && !manualRunnerRunning && isBoardAnalyzerRunning) {
+        } else if (!boardAnalyzerRunning && isBoardAnalyzerRunning) {
             // Board Analyzer finished - resume Better Tasker automation if enabled
-            console.log('[Better Tasker] Coordination cleared - checking if automation should resume');
+            console.log('[Better Tasker] Board Analyzer cleared - checking if automation should resume');
             isBoardAnalyzerRunning = false;
             
             if (taskerState === TASKER_STATES.ENABLED && !isRaidHunterRaiding()) {
-                console.log('[Better Tasker] Resuming task automation');
+                console.log('[Better Tasker] Resuming task automation after Board Analyzer');
                 startAutomation();
             }
         }
@@ -6763,6 +6826,17 @@ async function openQuestLogAndAcceptTask() {
         if (taskOperationInProgress) {
             console.log('[Better Tasker] Task operation already in progress, skipping duplicate call');
             return;
+        }
+        
+        // Stop Manual Runner if it's active (only when we're actually accepting a task)
+        if (isManualRunnerActive()) {
+            console.log('[Better Tasker] Manual Runner is active - stopping it to accept new task');
+            const stopped = stopManualRunnerForTask();
+            if (stopped) {
+                console.log('[Better Tasker] Manual Runner stopped successfully, proceeding with task acceptance');
+                // Give it a moment to clean up
+                await sleep(500);
+            }
         }
         
         console.log('[Better Tasker] Current raid state:', {
