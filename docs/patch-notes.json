@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.2.12",
+      "changes": [
+        { "type": "fixed", "mod": "Autoseller", "text": "New creatures now default to Keep column instead of Sell/Squeeze." },
+        { "type": "fixed", "mod": "Core", "text": "Added unobtainable creatures (Grynch Clan Mastermind, Beer Barrel) to creature database." }
+      ]
+    },
+    {
       "version": "3.2.11",
       "changes": [
         { "type": "fixed", "mod": "Better Highscores", "text": "Smoother updates." },
