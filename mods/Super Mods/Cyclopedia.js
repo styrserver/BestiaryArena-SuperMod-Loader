@@ -125,7 +125,8 @@ const HARDCODED_MONSTER_STATS = {
   'energy crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 150, magicResist: 30 }, level: 50 },
   'magma crystal': { baseStats: { hp: 350, ad: 0, ap: 0, armor: 350, magicResist: 350 }, level: 50 },
   'regeneration tank': { baseStats: { hp: 8352, ad: 0, ap: 0, armor: 126, magicResist: 696 }, level: 99 },
-  'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 }
+  'monster cauldron': { baseStats: { hp: 1114, ad: 92, ap: 112, armor: 45, magicResist: 42 }, level: 99 },
+  'grynch clan mastermind': { baseStats: { hp: 220, ad: 0, ap: 0, armor: 66, magicResist: 66 }, level: 200 }
 };
 
 // Get creature data from centralized database
@@ -2193,6 +2194,43 @@ function showDeleteConfirmationModal(runType, runData, onConfirm) {
   cancelButton.focus();
 }
 
+// Helper function to check if a map is a raid (comprehensive check like Raid_Hunter)
+function isMapRaid(mapId) {
+  if (!mapId) return false;
+  
+  try {
+    // Method 1: Check ROOMS data directly
+    const roomData = globalThis.state?.utils?.ROOMS?.[mapId];
+    if (roomData?.raid === true) {
+      return true;
+    }
+    
+    // Method 2: Check REGIONS data (finds all raid maps including events)
+    const regions = globalThis.state?.utils?.REGIONS;
+    if (regions && Array.isArray(regions)) {
+      for (const region of regions) {
+        if (region.rooms && Array.isArray(region.rooms)) {
+          const room = region.rooms.find(r => r.id === mapId);
+          if (room && room.raid === true) {
+            return true;
+          }
+        }
+      }
+    }
+    
+    // Method 3: Check currently active raids (fallback for edge cases)
+    const raidState = globalThis.state?.raids?.getSnapshot?.();
+    const activeRaids = raidState?.context?.list || [];
+    if (activeRaids.some(raid => raid.roomId === mapId)) {
+      return true;
+    }
+  } catch (error) {
+    console.warn('[Cyclopedia] Error checking if map is raid:', error);
+  }
+  
+  return false;
+}
+
 function createBox({
   title, items, extraBoxStyles = {}, type = 'creature', selectedCreature, selectedEquipment, selectedInventory,
   setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, clearAllSelections = null, mapIds = null, regionIds = null
@@ -2259,6 +2297,33 @@ function createBox({
       }
       
       const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny);
+      
+      // Add raid icon for maps if it's a raid
+      if (type === 'map') {
+        const mapIndex = items.indexOf(name);
+        const mapId = mapIds?.[mapIndex];
+        if (mapId && isMapRaid(mapId)) {
+          // Find the contentContainer (first child div created by createListItem)
+          const contentContainer = item.firstElementChild;
+          if (contentContainer && contentContainer.tagName === 'DIV') {
+            // Create raid icon
+            const raidIcon = document.createElement('img');
+            raidIcon.src = 'https://bestiaryarena.com/assets/icons/raid.png';
+            raidIcon.alt = 'raid';
+            raidIcon.title = 'Raid map';
+            raidIcon.style.width = '11px';
+            raidIcon.style.height = '11px';
+            raidIcon.style.flexShrink = '0';
+            // Insert before the text span (or any existing icons)
+            const textSpan = contentContainer.querySelector('span');
+            if (textSpan) {
+              contentContainer.insertBefore(raidIcon, textSpan);
+            } else {
+              contentContainer.appendChild(raidIcon);
+            }
+          }
+        }
+      }
       
       const clickHandler = () => {
         if (clearAllSelections) {

@@ -198,12 +198,15 @@
         autosqueezeGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
         autosqueezeMinCount: 1,
         autosqueezeIgnoreList: [],
+        autosqueezeSellList: [],
         autodusterChecked: false, // Default disabled
         autodusterGenesMin: UI_CONSTANTS.SQUEEZE_GENE_MIN,
         autodusterGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
         autodusterIgnoreList: [],
+        autodusterSellList: [],
         // Shared ignore list for both autoplant and autosell
         autoplantIgnoreList: [],
+        autoplantSellList: [],
         // Shared gene thresholds for both autoplant and autosell
         autoplantGenesMin: 80,
         autoplantKeepGenesEnabled: true,
@@ -2905,6 +2908,69 @@
     // =======================
     
     /**
+     * Helper function to load and migrate filter lists (shared between creatures and equipment)
+     * @param {string} settingKey - Settings key for ignore list (e.g., 'autoplantIgnoreList')
+     * @param {Array} allItems - All available items (creatures or equipment)
+     * @returns {Object} { keepList, sellList, sellListKey }
+     */
+    function loadAndMigrateFilterLists(settingKey, allItems) {
+        const sellListKey = settingKey.replace('IgnoreList', 'SellList');
+        
+        // Simple logic:
+        // 1. Fetch all creatures/items (allItems parameter)
+        // 2. Read the ignore list (keep list) from settings
+        // 3. If item is in ignore list -> keep, otherwise -> sell
+        
+        // Check if keys exist in localStorage (not just defaults)
+        let ignoreListExists = false;
+        let sellListExists = false;
+        try {
+            const stored = JSON.parse(localStorage.getItem('autoseller-settings') || '{}');
+            ignoreListExists = settingKey in stored;
+            sellListExists = sellListKey in stored;
+        } catch (e) {
+            // If we can't parse, assume nothing exists
+        }
+        
+        const savedSettings = getSettings();
+        const savedIgnoreList = savedSettings[settingKey];
+        const savedSellList = savedSettings[sellListKey];
+        
+        let keepList = [];
+        let sellList = [];
+        
+        // If ignore list was saved, use it (even if empty - means all items should be sold)
+        if (ignoreListExists && savedIgnoreList && Array.isArray(savedIgnoreList)) {
+            keepList = savedIgnoreList.filter(item => allItems.includes(item));
+            sellList = allItems.filter(item => !keepList.includes(item));
+        } 
+        // Otherwise, if sell list was saved, use it
+        else if (sellListExists && savedSellList && Array.isArray(savedSellList)) {
+            sellList = savedSellList.filter(item => allItems.includes(item));
+            keepList = allItems.filter(item => !sellList.includes(item));
+        } 
+        // No saved lists: all items default to keep
+        else {
+            keepList = [...allItems];
+            sellList = [];
+        }
+        
+        // Add any new items (not in either list) to keep
+        const newItems = allItems.filter(item => 
+            !keepList.includes(item) && !sellList.includes(item)
+        );
+        if (newItems.length > 0) {
+            keepList = [...keepList, ...newItems];
+        }
+        
+        // Ensure both lists are sorted alphabetically
+        keepList.sort();
+        sellList.sort();
+        
+        return { keepList, sellList, sellListKey };
+    }
+    
+    /**
      * Creates creature filter columns (Creatures and Ignore List) - shared between autoplant and autosqueeze
      * @param {Object} options - Configuration options
      * @param {HTMLElement} options.container - Container element to append columns to
@@ -2920,31 +2986,17 @@
         if (!actionTitle) {
             actionTitle = t('mods.autoseller.actionTitleSell');
         }
-        let availableCreatures = [...getAllAutoplantCreatures()];
-        let selectedCreatures = [];
+        // Load and migrate filter lists
+        const allCreatures = [...getAllAutoplantCreatures()];
+        const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allCreatures);
+        let selectedCreatures = [...keepList];
+        let availableCreatures = [...sellList];
         
-        // Load ignore list from settings
-        const savedSettings = getSettings();
-        const savedIgnoreList = savedSettings[settingKey];
-        if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
-            // Use saved settings (backward compatible)
-            selectedCreatures = [...savedIgnoreList];
-            // Keep creatures not in saved settings in sell column (preserve user's choices)
-            availableCreatures = availableCreatures.filter(c => !selectedCreatures.includes(c));
-        } else {
-            // Default to all creatures in Keep column for safety
-            selectedCreatures = [...availableCreatures];
-            availableCreatures = [];
-        }
-        
-        // Ensure both lists are sorted alphabetically
-        availableCreatures.sort();
-        selectedCreatures.sort();
-        
-        // Function to save ignore list to settings
+        // Function to save both lists to settings
         function saveIgnoreList() {
             const settingsUpdate = {};
             settingsUpdate[settingKey] = [...selectedCreatures];
+            settingsUpdate[sellListKey] = [...availableCreatures];
             setSettings(settingsUpdate);
             if (onUpdate) {
                 onUpdate(selectedCreatures);
@@ -3063,31 +3115,17 @@
             return [];
         }
         
-        let availableEquipment = [...generateEquipmentList()];
-        let selectedEquipment = [];
+        // Load and migrate filter lists
+        const allEquipment = [...generateEquipmentList()];
+        const { keepList, sellList, sellListKey } = loadAndMigrateFilterLists(settingKey, allEquipment);
+        let selectedEquipment = [...keepList];
+        let availableEquipment = [...sellList];
         
-        // Load ignore list from settings
-        const savedSettings = getSettings();
-        const savedIgnoreList = savedSettings[settingKey];
-        if (savedIgnoreList && Array.isArray(savedIgnoreList)) {
-            // Use saved settings (backward compatible)
-            selectedEquipment = [...savedIgnoreList];
-            // Keep equipment not in saved settings in sell column (preserve user's choices)
-            availableEquipment = availableEquipment.filter(e => !selectedEquipment.includes(e));
-        } else {
-            // Default to all equipment in Keep column for safety
-            selectedEquipment = [...availableEquipment];
-            availableEquipment = [];
-        }
-        
-        // Ensure both lists are sorted alphabetically
-        availableEquipment.sort();
-        selectedEquipment.sort();
-        
-        // Function to save ignore list to settings
+        // Function to save both lists to settings
         function saveIgnoreList() {
             const settingsUpdate = {};
             settingsUpdate[settingKey] = [...selectedEquipment];
+            settingsUpdate[sellListKey] = [...availableEquipment];
             setSettings(settingsUpdate);
             if (onUpdate) {
                 onUpdate(selectedEquipment);
@@ -6342,7 +6380,7 @@
                 const settings = getSettings();
                 let hasChanges = false;
 
-                // Clean autoplant ignore list
+                // Clean autoplant lists
                 if (settings.autoplantIgnoreList && Array.isArray(settings.autoplantIgnoreList)) {
                     const originalCount = settings.autoplantIgnoreList.length;
                     settings.autoplantIgnoreList = settings.autoplantIgnoreList.filter(creature =>
@@ -6353,8 +6391,18 @@
                         console.log(`[Autoseller] Cleaned autoplant ignore list: ${originalCount} → ${settings.autoplantIgnoreList.length} creatures`);
                     }
                 }
+                if (settings.autoplantSellList && Array.isArray(settings.autoplantSellList)) {
+                    const originalCount = settings.autoplantSellList.length;
+                    settings.autoplantSellList = settings.autoplantSellList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autoplantSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoplant sell list: ${originalCount} → ${settings.autoplantSellList.length} creatures`);
+                    }
+                }
 
-                // Clean autosqueeze ignore list
+                // Clean autosqueeze lists
                 if (settings.autosqueezeIgnoreList && Array.isArray(settings.autosqueezeIgnoreList)) {
                     const originalCount = settings.autosqueezeIgnoreList.length;
                     settings.autosqueezeIgnoreList = settings.autosqueezeIgnoreList.filter(creature =>
@@ -6365,8 +6413,18 @@
                         console.log(`[Autoseller] Cleaned autosqueeze ignore list: ${originalCount} → ${settings.autosqueezeIgnoreList.length} creatures`);
                     }
                 }
+                if (settings.autosqueezeSellList && Array.isArray(settings.autosqueezeSellList)) {
+                    const originalCount = settings.autosqueezeSellList.length;
+                    settings.autosqueezeSellList = settings.autosqueezeSellList.filter(creature =>
+                        availableCreatures.includes(creature)
+                    );
+                    if (settings.autosqueezeSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autosqueeze sell list: ${originalCount} → ${settings.autosqueezeSellList.length} creatures`);
+                    }
+                }
 
-                // Clean autoduster ignore list
+                // Clean autoduster lists
                 if (settings.autodusterIgnoreList && Array.isArray(settings.autodusterIgnoreList)) {
                     const originalCount = settings.autodusterIgnoreList.length;
                     settings.autodusterIgnoreList = settings.autodusterIgnoreList.filter(equipment =>
@@ -6377,17 +6435,30 @@
                         console.log(`[Autoseller] Cleaned autoduster ignore list: ${originalCount} → ${settings.autodusterIgnoreList.length} equipment`);
                     }
                 }
+                if (settings.autodusterSellList && Array.isArray(settings.autodusterSellList)) {
+                    const originalCount = settings.autodusterSellList.length;
+                    settings.autodusterSellList = settings.autodusterSellList.filter(equipment =>
+                        availableEquipment.includes(equipment)
+                    );
+                    if (settings.autodusterSellList.length !== originalCount) {
+                        hasChanges = true;
+                        console.log(`[Autoseller] Cleaned autoduster sell list: ${originalCount} → ${settings.autodusterSellList.length} equipment`);
+                    }
+                }
 
                 // Save cleaned settings if any changes were made
                 if (hasChanges) {
                     const settingsUpdate = {};
                     if (settings.autoplantIgnoreList) settingsUpdate.autoplantIgnoreList = settings.autoplantIgnoreList;
+                    if (settings.autoplantSellList) settingsUpdate.autoplantSellList = settings.autoplantSellList;
                     if (settings.autosqueezeIgnoreList) settingsUpdate.autosqueezeIgnoreList = settings.autosqueezeIgnoreList;
+                    if (settings.autosqueezeSellList) settingsUpdate.autosqueezeSellList = settings.autosqueezeSellList;
                     if (settings.autodusterIgnoreList) settingsUpdate.autodusterIgnoreList = settings.autodusterIgnoreList;
+                    if (settings.autodusterSellList) settingsUpdate.autodusterSellList = settings.autodusterSellList;
                     setSettings(settingsUpdate);
-                    console.log('[Autoseller] Ignore lists cleaned and saved');
+                    console.log('[Autoseller] Lists cleaned and saved');
                 } else {
-                    console.log('[Autoseller] Ignore lists are already clean');
+                    console.log('[Autoseller] Lists are already clean');
                 }
 
             } catch (error) {
