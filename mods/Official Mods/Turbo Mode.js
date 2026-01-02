@@ -255,6 +255,11 @@ function subscribeToGameTimer() {
 
 // Try to create tick display element
 function tryInitTickDisplay() {
+  // Skip if Board Analyzer or Manual Runner is running
+  if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+    return false;
+  }
+  
   const container = document.querySelector('.flex.flex-col.items-end.overflow-hidden');
   if (!container || document.getElementById('mb-game-timer')) return false;
   

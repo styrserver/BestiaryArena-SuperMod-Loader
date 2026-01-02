@@ -5864,6 +5864,11 @@ function createAutoplayAnalyzerPanel() {
             clearInterval(autoSaveIntervalId);
         }
         autoSaveIntervalId = setInterval(() => {
+            // Skip auto-save if Board Analyzer or Manual Runner is running
+            if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+                return;
+            }
+            
             if (HuntAnalyzerState.data.sessions.length > 0) {
                 saveHuntAnalyzerData();
                 console.log('[Hunt Analyzer] Periodic auto-save completed');
@@ -5933,6 +5938,11 @@ function getSmoothedRate(actualRate, elapsedTimeMs) {
 // Updates the display in the Hunt Analyzer Mod panel with the current loot, creature drops,
 // autoplay session count, and live drop rates.
 function updatePanelDisplay() {
+    // Skip update if Board Analyzer or Manual Runner is running
+    if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+        return;
+    }
+    
     const now = Date.now();
     const shouldLog = (now - lastUpdateLogTime) > CONFIG.UPDATE_LOG_THROTTLE;
     

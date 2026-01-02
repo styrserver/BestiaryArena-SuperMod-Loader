@@ -296,6 +296,11 @@ function startTracking() {
       globalThis.state.board.on('newGame', (event) => {
         // Skip if tracking is disabled at the moment
         if (!isTracking) return;
+        
+        // Skip if Board Analyzer or Manual Runner is running
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+          return;
+        }
 
         console.log(LOG_PREFIX, 'New game event detected');
       

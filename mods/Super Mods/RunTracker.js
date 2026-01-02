@@ -1535,6 +1535,11 @@ function setupNetworkListener() {
           
           // Check if this contains server results
           if (data && data.rewardScreen && typeof data.seed !== 'undefined') {
+            // Skip if Board Analyzer or Manual Runner is running
+            if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+              return response;
+            }
+            
             // Create a unique key for this request
             const requestKey = `${data.seed}_${data.rewardScreen.roomId || 'unknown'}`;
             

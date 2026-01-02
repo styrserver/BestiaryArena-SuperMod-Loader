@@ -124,6 +124,11 @@ function monitorGameState() {
       }
       
       if (needsReapply) {
+        // Skip reapplying if Board Analyzer or Manual Runner is running
+        if (window.__modCoordination?.boardAnalyzerRunning || window.__modCoordination?.manualRunnerActive) {
+          return;
+        }
+        
         console.log('DOM changes detected, reapplying performance mode');
         reapplyPerformanceMode();
       }
