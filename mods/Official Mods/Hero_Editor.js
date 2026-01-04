@@ -266,6 +266,13 @@ function showHeroEditorModal() {
     // Get player data for equipment information
     const boardContext = getBoardSnapshot();
     
+    // Capture the current floor difficulty before any changes
+    let currentFloor = null;
+    if (typeof boardContext.floor !== 'undefined') {
+      currentFloor = boardContext.floor;
+      console.log('[Hero Editor] Captured current floor:', currentFloor);
+    }
+    
     // Get serialized board data
     const originalBoardData = getSerializedBoard();
     
@@ -1072,6 +1079,7 @@ function showHeroEditorModal() {
               const testData = {
                 region: updatedBoardData.region,
                 map: updatedBoardData.map,
+                floor: currentFloor !== null ? currentFloor : (updatedBoardData.floor ?? 0),
                 board: updatedBoardData.board.map(piece => {
                   // Ensure level is properly set and force it to be a number
                   if (piece.monster && piece.monster.level) {
@@ -1085,6 +1093,22 @@ function showHeroEditorModal() {
               const success = configureBoard(testData);
               
               if (success) {
+                // Restore the original floor difficulty after applying changes
+                if (typeof currentFloor !== 'undefined' && currentFloor !== null) {
+                  try {
+                    globalThis.state.board.send({
+                      type: 'setState',
+                      fn: (prev) => ({
+                        ...prev,
+                        floor: currentFloor
+                      }),
+                    });
+                    console.log('[Hero Editor] Restored floor difficulty to:', currentFloor);
+                  } catch (error) {
+                    console.warn('[Hero Editor] Error restoring floor difficulty:', error);
+                  }
+                }
+                
                 // Show success message
                 api.ui.components.createModal({
                   title: 'Success',
