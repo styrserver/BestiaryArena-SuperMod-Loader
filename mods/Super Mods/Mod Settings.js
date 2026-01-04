@@ -4975,8 +4975,9 @@ function startAutoplayRefreshMonitor() {
         }
       });
       
-      // Subscribe to board state changes to track activity
-      subscriptions.autoplayRefreshBoardState = globalThis.state.board.subscribe((state) => {
+      // Subscribe to game end events to track meaningful activity
+      subscriptions.autoplayRefreshEndGame = globalThis.state.board.on('endGame', (event) => {
+        console.log('[Mod Settings] Game ended - resetting board activity timer');
         resetBoardActivityTimer();
       });
       
@@ -5094,17 +5095,17 @@ function checkAutoplayRefreshThreshold() {
       // Check session time threshold
       const sessionThresholdReached = sessionMinutes > 0 && sessionMinutes >= config.autoplayRefreshMinutes;
       
-      // Check board inactivity threshold
+      // Check board inactivity threshold (no game activity for configured duration)
       const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
       
       thresholdReached = internalThresholdReached || sessionThresholdReached || inactivityThresholdReached;
       
       if (internalThresholdReached) {
-        reason = 'internal timer';
+        reason = 'internal timer reached threshold';
       } else if (sessionThresholdReached) {
-        reason = 'session time';
-      } else {
-        reason = 'board inactivity';
+        reason = 'session time reached threshold';
+      } else if (inactivityThresholdReached) {
+        reason = `no game activity for ${inactivityMinutes.toFixed(1)} minutes`;
       }
     } else if (timerMode === 'internal') {
       // Use internal timer mode - track time independently
@@ -5121,11 +5122,16 @@ function checkAutoplayRefreshThreshold() {
       // Check internal timer threshold
       const internalThresholdReached = internalMinutes >= config.autoplayRefreshMinutes;
       
-      // Check board inactivity threshold
+      // Check board inactivity threshold (no game activity for configured duration)
       const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
       
       thresholdReached = internalThresholdReached || inactivityThresholdReached;
-      reason = internalThresholdReached ? 'internal timer' : 'board inactivity';
+      
+      if (internalThresholdReached) {
+        reason = 'internal timer reached threshold';
+      } else if (inactivityThresholdReached) {
+        reason = `no game activity for ${inactivityMinutes.toFixed(1)} minutes`;
+      }
     } else {
       // Use autoplay session time mode (original behavior)
       const currentMinutes = getAutoplaySessionTime();
@@ -5136,11 +5142,16 @@ function checkAutoplayRefreshThreshold() {
       // Check session time threshold
       const sessionThresholdReached = currentMinutes > 0 && currentMinutes >= config.autoplayRefreshMinutes;
       
-      // Check board inactivity threshold
+      // Check board inactivity threshold (no game activity for configured duration)
       const inactivityThresholdReached = inactivityMinutes >= config.autoplayRefreshMinutes;
       
       thresholdReached = sessionThresholdReached || inactivityThresholdReached;
-      reason = sessionThresholdReached ? 'session time' : 'board inactivity';
+      
+      if (sessionThresholdReached) {
+        reason = 'session time reached threshold';
+      } else if (inactivityThresholdReached) {
+        reason = `no game activity for ${inactivityMinutes.toFixed(1)} minutes`;
+      }
     }
     
     if (thresholdReached) {
@@ -5177,10 +5188,10 @@ function stopAutoplayRefreshMonitor() {
       console.log('[Mod Settings] Autoplay refresh setPlayMode subscription stopped');
     }
     
-    if (subscriptions.autoplayRefreshBoardState && typeof subscriptions.autoplayRefreshBoardState === 'function') {
-      subscriptions.autoplayRefreshBoardState();
-      subscriptions.autoplayRefreshBoardState = null;
-      console.log('[Mod Settings] Autoplay refresh board state subscription stopped');
+    if (subscriptions.autoplayRefreshEndGame && typeof subscriptions.autoplayRefreshEndGame === 'function') {
+      subscriptions.autoplayRefreshEndGame();
+      subscriptions.autoplayRefreshEndGame = null;
+      console.log('[Mod Settings] Autoplay refresh end game subscription stopped');
     }
     
     // Clear board inactivity timer

@@ -286,7 +286,12 @@ function startTracking() {
   try {
     // Check if game state is ready
     if (!globalThis.state || !globalThis.state.board || !globalThis.state.board.on) {
-      console.log(LOG_PREFIX, 'Game state not ready for tick tracking');
+      console.log(LOG_PREFIX, 'Game state not ready for tick tracking, retrying in 2s...');
+      setTimeout(() => {
+        if (isTracking) {
+          startTracking();
+        }
+      }, 2000);
       return;
     }
     

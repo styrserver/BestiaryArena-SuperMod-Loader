@@ -3305,10 +3305,23 @@
     // Plant Monster Filter Functions
     // =======================
     
-    function setPlantMonsterFilter(sellList) {
+    function setPlantMonsterFilter(sellList, retryCount = 0) {
         if (!globalThis.state?.clientConfig?.trigger?.setState) {
-            console.warn('[Autoseller] clientConfig not available for plantMonsterFilter');
+            if (retryCount < 10) {
+                console.warn(`[Autoseller] clientConfig not available for plantMonsterFilter, retrying in 2s... (attempt ${retryCount + 1}/10)`);
+                const timeoutId = setTimeout(() => {
+                    if (isCleaningUp) return;
+                    setPlantMonsterFilter(sellList, retryCount + 1);
+                }, 2000);
+                timeoutIds.push(timeoutId);
+            } else {
+                console.error(`[${modName}][ERROR] clientConfig not available after 10 retries, giving up on plantMonsterFilter`);
+            }
             return;
+        }
+        
+        if (retryCount > 0) {
+            console.log(`[${modName}] clientConfig now available, setting plant monster filter (retry ${retryCount})`);
         }
         
         const settings = getSettings();
@@ -5530,9 +5543,12 @@
     // =======================
     
     // Event-driven widget management using game state API
-    function setupAutosellerWidgetObserver() {
+    function setupAutosellerWidgetObserver(retryCount = 0) {
         // Listen for autoplay mode changes
         if (globalThis.state && globalThis.state.board) {
+            if (retryCount > 0) {
+                console.log(`[${modName}] Game state now available, setting up widget observer (retry ${retryCount})`);
+            }
             boardSubscription1 = globalThis.state.board.subscribe((state) => {
                 const mode = state.context.mode;
                 
@@ -5594,7 +5610,16 @@
             };
             globalThis.state.board.on('emitEndGame', emitEndGameHandler1);
         } else {
-            console.warn(`[${modName}][WARN] Game state API not available for widget management`);
+            if (retryCount < 10) {
+                console.warn(`[${modName}][WARN] Game state API not available for widget management, retrying in 2s... (attempt ${retryCount + 1}/10)`);
+                const timeoutId = setTimeout(() => {
+                    if (isCleaningUp) return;
+                    setupAutosellerWidgetObserver(retryCount + 1);
+                }, 2000);
+                timeoutIds.push(timeoutId);
+            } else {
+                console.error(`[${modName}][ERROR] Game state API not available after 10 retries, giving up on widget management`);
+            }
         }
     }
     
@@ -5990,9 +6015,13 @@
         return filteredMonsters;
     }
     
-    function setupGameEndListener() {
+    function setupGameEndListener(retryCount = 0) {
         if (globalThis.state?.board?.on) {
-            console.log('[Autoseller] Setting up game end listener');
+            if (retryCount > 0) {
+                console.log(`[${modName}] Game state now available, setting up game end listener (retry ${retryCount})`);
+            } else {
+                console.log('[Autoseller] Setting up game end listener');
+            }
             
             // Listen for new game events to access the world object
             // Use separate handler to avoid overwriting emitNewGameHandler1 from setupAutosellerWidgetObserver
@@ -6111,7 +6140,16 @@
             }
             
         } else {
-            console.warn(`[${modName}] Board state not available for game end listener`);
+            if (retryCount < 10) {
+                console.warn(`[${modName}] Board state not available for game end listener, retrying in 2s... (attempt ${retryCount + 1}/10)`);
+                const timeoutId = setTimeout(() => {
+                    if (isCleaningUp) return;
+                    setupGameEndListener(retryCount + 1);
+                }, 2000);
+                timeoutIds.push(timeoutId);
+            } else {
+                console.error(`[${modName}][ERROR] Board state not available after 10 retries, giving up on game end listener`);
+            }
         }
     }
     
@@ -6447,10 +6485,23 @@
         isCollecting = false;
     };
 
-    function setupDragonPlantAutocollect() {
+    function setupDragonPlantAutocollect(retryCount = 0) {
         if (!globalThis.state || !globalThis.state.player || !globalThis.state.player.subscribe) {
-            console.log('[Autoseller] Player state not available for autocollect setup');
+            if (retryCount < 10) {
+                console.log(`[Autoseller] Player state not available for autocollect setup, retrying in 2s... (attempt ${retryCount + 1}/10)`);
+                const timeoutId = setTimeout(() => {
+                    if (isCleaningUp) return;
+                    setupDragonPlantAutocollect(retryCount + 1);
+                }, 2000);
+                timeoutIds.push(timeoutId);
+            } else {
+                console.error(`[${modName}][ERROR] Player state not available after 10 retries, giving up on autocollect setup`);
+            }
             return;
+        }
+        
+        if (retryCount > 0) {
+            console.log(`[${modName}] Player state now available, setting up autocollect (retry ${retryCount})`);
         }
         
         // Subscribe to player state changes as a backup check (in case plant gold increases from other sources)
