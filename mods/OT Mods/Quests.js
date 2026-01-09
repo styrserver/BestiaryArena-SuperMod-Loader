@@ -882,23 +882,35 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       // The Light Shovel is obtained from completing Al Dee's fishing mission
       const isMissionActive = hasLightShovel;
 
+      // Determine if mining should be enabled
+      const shouldBeEnabled = miningState.enabled && hasLightShovel && isMissionActive;
+      
+      // Check if mining is currently active (has listeners/tiles)
+      const isCurrentlyActive = miningState.tiles.size > 0;
+
       // Digging state is controlled manually by the toggle button
-      if (miningState.enabled && hasLightShovel && isMissionActive) {
-        // Enable digging - add document listener and enable pointer events
-        document.addEventListener('contextmenu', handleMiningRightClickDocument, true); // Use capture phase on document
-        enableMiningTileRightClick();
-        console.log('[Quests Mod][Digging] Mining enabled - document listener added and pointer events enabled');
-      } else {
-        // Disable digging - remove document listener and restore tile pointer events
-        document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
-        disableMiningTileRightClick();
-
-        // Close any open context menu
-        if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
-          miningState.contextMenu.closeMenu();
+      if (shouldBeEnabled) {
+        // Only enable if not already enabled (avoid duplicate listeners)
+        if (!isCurrentlyActive) {
+          // Enable digging - add document listener and enable pointer events
+          document.addEventListener('contextmenu', handleMiningRightClickDocument, true); // Use capture phase on document
+          enableMiningTileRightClick();
+          console.log('[Quests Mod][Digging] Mining enabled - document listener added and pointer events enabled');
         }
+      } else {
+        // Only disable if currently enabled (avoid duplicate logs)
+        if (isCurrentlyActive) {
+          // Disable digging - remove document listener and restore tile pointer events
+          document.removeEventListener('contextmenu', handleMiningRightClickDocument, true);
+          disableMiningTileRightClick();
 
-        console.log('[Quests Mod][Digging] Mining disabled - document listener removed and pointer events disabled');
+          // Close any open context menu
+          if (miningState.contextMenu && miningState.contextMenu.closeMenu) {
+            miningState.contextMenu.closeMenu();
+          }
+
+          console.log('[Quests Mod][Digging] Mining disabled - document listener removed and pointer events disabled');
+        }
       }
     } catch (error) {
       console.error('[Quests Mod][Digging] Error in updateMiningState:', error);

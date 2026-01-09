@@ -32,7 +32,10 @@ const defaultConfig = {
   vipListInterface: 'modal', // 'modal' or 'panel'
   enableVipListChat: false, // Enable messaging/chat feature in VIP List (controls both VIP List chat and Global Chat)
   vipListMessageFilter: 'all', // 'all' or 'friends' - who can send messages
-  betterHighscoresBackgroundOpacity: 1.0 // Opacity for Better Highscores background (0.0 to 1.0)
+  betterHighscoresBackgroundOpacity: 1.0, // Opacity for Better Highscores background (0.0 to 1.0)
+  enableFirebaseRunsUpload: false, // Enable uploading best runs to Firebase
+  firebaseRunsPassword: '', // Encryption password for Firebase runs (stored encrypted)
+  autoUploadRuns: false // Automatically upload when new best run is recorded
 };
 
 // Storage key for this mod
@@ -614,6 +617,1343 @@ function saveConfig() {
   } catch (error) {
     console.error('[Mod Settings] Error saving config:', error);
   }
+}
+
+// =======================
+// 4.5. Firebase Best Runs Upload Functions
+// =======================
+
+// Firebase configuration
+const FIREBASE_RUNS_CONFIG = {
+  firebaseUrl: 'https://vip-list-messages-default-rtdb.europe-west1.firebasedatabase.app'
+};
+
+// Get current player name
+function getCurrentPlayerName() {
+  try {
+    const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+    if (playerState?.name) {
+      return playerState.name;
+    }
+    // Fallback methods
+    if (window.gameState && window.gameState.player && window.gameState.player.name) {
+      return window.gameState.player.name;
+    }
+    if (window.api && window.api.gameState && window.api.gameState.getPlayerName) {
+      return window.api.gameState.getPlayerName();
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error getting current player name:', error);
+  }
+  return null;
+}
+
+// Hash username for Firebase key
+async function hashUsername(username) {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(username.toLowerCase());
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (error) {
+    console.error('[Mod Settings] Error hashing username:', error);
+    throw error;
+  }
+}
+
+// Derive encryption key from password
+async function deriveEncryptionKey(password) {
+  try {
+    const encoder = new TextEncoder();
+    const passwordData = encoder.encode(password);
+    
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      passwordData,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits', 'deriveKey']
+    );
+    
+    const salt = encoder.encode('firebase-runs-salt');
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    
+    return key;
+  } catch (error) {
+    console.error('[Mod Settings] Error deriving encryption key:', error);
+    throw error;
+  }
+}
+
+// Sanitize data to remove circular references and limit depth
+function sanitizeRunsData(data, maxDepth = 10, currentDepth = 0) {
+  if (currentDepth > maxDepth) {
+    return null;
+  }
+  
+  if (data === null || data === undefined) {
+    return data;
+  }
+  
+  if (typeof data !== 'object') {
+    return data;
+  }
+  
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeRunsData(item, maxDepth, currentDepth + 1));
+  }
+  
+  const sanitized = {};
+  for (const [key, value] of Object.entries(data)) {
+    // Skip functions and undefined values
+    if (typeof value === 'function' || value === undefined) {
+      continue;
+    }
+    
+    // Recursively sanitize nested objects
+    sanitized[key] = sanitizeRunsData(value, maxDepth, currentDepth + 1);
+  }
+  
+  return sanitized;
+}
+
+// Encrypt runs data
+async function encryptRunsData(data, password) {
+  try {
+    // Sanitize data to remove circular references
+    const sanitizedData = sanitizeRunsData(data);
+    
+    // Stringify with error handling
+    let jsonString;
+    try {
+      jsonString = JSON.stringify(sanitizedData);
+    } catch (stringifyError) {
+      console.error('[Mod Settings] Error stringifying data:', stringifyError);
+      throw new Error('Failed to serialize run data. Data may contain circular references or be too large.');
+    }
+    
+    const key = await deriveEncryptionKey(password);
+    const encoder = new TextEncoder();
+    const dataBytes = encoder.encode(jsonString);
+    
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      dataBytes
+    );
+    
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    
+    // Use a safer base64 encoding method for large arrays
+    // Convert Uint8Array to base64 without spreading
+    let binary = '';
+    const len = combined.length;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(combined[i]);
+    }
+    
+    return btoa(binary);
+  } catch (error) {
+    console.error('[Mod Settings] Error encrypting runs data:', error);
+    throw error;
+  }
+}
+
+// Decrypt runs data
+async function decryptRunsData(encryptedText, password) {
+  try {
+    if (!encryptedText || typeof encryptedText !== 'string') {
+      return null;
+    }
+    
+    let combined;
+    try {
+      combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
+    } catch (e) {
+      console.error('[Mod Settings] Error decoding base64:', e);
+      return null;
+    }
+    
+    if (combined.length < 13) {
+      console.error('[Mod Settings] Encrypted data too short');
+      return null;
+    }
+    
+    const key = await deriveEncryptionKey(password);
+    
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      encrypted
+    );
+    
+    const decoder = new TextDecoder();
+    const jsonStr = decoder.decode(decrypted);
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error('[Mod Settings] Error decrypting runs data:', error);
+    return null;
+  }
+}
+
+// Firebase service functions
+const FirebaseRunsService = {
+  async get(path, errorContext, defaultReturn = null) {
+    try {
+      const response = await fetch(`${path}.json`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          return defaultReturn;
+        }
+        throw new Error(`Failed to ${errorContext}: ${response.status}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`[Mod Settings] Error ${errorContext}:`, error);
+      return defaultReturn;
+    }
+  },
+
+  async put(path, data, errorContext) {
+    const options = {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    };
+    const response = await fetch(`${path}.json`, options);
+    if (!response.ok) {
+      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  async delete(path, errorContext) {
+    const options = {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    };
+    const response = await fetch(`${path}.json`, options);
+    if (!response.ok) {
+      throw new Error(`Failed to ${errorContext}: ${response.status}`);
+    }
+    return true;
+  }
+};
+
+// Get Firebase path for best runs
+async function getBestRunsFirebasePath(playerName) {
+  const hashedName = await hashUsername(playerName);
+  return `${FIREBASE_RUNS_CONFIG.firebaseUrl}/best-runs/${hashedName}`;
+}
+
+// Upload runs to Firebase
+async function uploadRunsToFirebase(playerName, encryptedData, password) {
+  try {
+    const path = await getBestRunsFirebasePath(playerName);
+    const data = {
+      encrypted: encryptedData,
+      lastUpdated: Date.now(),
+      version: '1.0'
+    };
+    await FirebaseRunsService.put(path, data, 'upload runs to Firebase');
+    console.log('[Mod Settings] Successfully uploaded runs to Firebase');
+    return true;
+  } catch (error) {
+    console.error('[Mod Settings] Error uploading runs to Firebase:', error);
+    return false;
+  }
+}
+
+// Fetch runs from Firebase
+async function fetchRunsFromFirebase(playerName) {
+  try {
+    const path = await getBestRunsFirebasePath(playerName);
+    const data = await FirebaseRunsService.get(path, 'fetch runs from Firebase', null);
+    return data;
+  } catch (error) {
+    console.error('[Mod Settings] Error fetching runs from Firebase:', error);
+    return null;
+  }
+}
+
+// Delete runs from Firebase
+async function deleteRunsFromFirebase(playerName) {
+  try {
+    const path = await getBestRunsFirebasePath(playerName);
+    await FirebaseRunsService.delete(path, 'delete runs from Firebase');
+    console.log('[Mod Settings] Successfully deleted runs from Firebase');
+    return true;
+  } catch (error) {
+    console.error('[Mod Settings] Error deleting runs from Firebase:', error);
+    return false;
+  }
+}
+
+// Extract seed from replayLink string
+function extractSeedFromReplayLink(replayLink) {
+  if (!replayLink) return 'N/A';
+  try {
+    const replayMatch = replayLink.match(/"seed":(-?\d+)/);
+    return replayMatch ? replayMatch[1] : 'N/A';
+  } catch (e) {
+    return 'N/A';
+  }
+}
+
+// Helper function to build temp run object for replayLink generation
+function buildTempRunForReplayLink(run, contextRegionName) {
+  return {
+    seed: run.seed,
+    mapName: run.mapName,
+    mapId: run.mapId,
+    regionName: contextRegionName || run.regionName,
+    floor: run.floor !== undefined && run.floor !== null ? run.floor : 0,
+    setup: run.setup ? {
+      pieces: (run.setup.pieces || []).map(piece => ({
+        tile: piece.tile,
+        monsterName: piece.monsterName,
+        monsterId: piece.monsterId,
+        equipmentName: piece.equipmentName,
+        equipId: piece.equipId,
+        level: piece.level
+      }))
+    } : null
+  };
+}
+
+// Helper function to clean and prepare a run for upload
+function cleanRunForUpload(bestRun, contextRegionName, baseFields) {
+  const tempRun = buildTempRunForReplayLink(bestRun, contextRegionName);
+  const replayLink = generateReplayLink(tempRun);
+  
+  const cleanRun = {
+    ...baseFields,
+    date: bestRun.date,
+    mapName: bestRun.mapName,
+    replayLink: replayLink
+  };
+  
+  // Add floorTicks if available
+  if (bestRun.floorTicks !== undefined && bestRun.floorTicks !== null) {
+    cleanRun.floorTicks = bestRun.floorTicks;
+  }
+  
+  return cleanRun;
+}
+
+// Helper function to update Firebase status display
+function updateFirebaseStatus(statusDiv, message, color = '#7f8fa4') {
+  if (statusDiv) {
+    statusDiv.textContent = message;
+    statusDiv.style.color = color;
+  }
+}
+
+// Generate $replay link from run data
+function generateReplayLink(runData) {
+  try {
+    if (!runData || !runData.seed) {
+      return null;
+    }
+    
+    const board = [];
+    if (runData.setup && runData.setup.pieces) {
+      runData.setup.pieces.forEach(piece => {
+        const boardPiece = {
+          tile: piece.tile || 0
+        };
+        
+        // Add monster as object with name and stats
+        const monsterName = piece.monsterName || piece.monsterId || 'unknown monster';
+        boardPiece.monster = {
+          name: monsterName.toLowerCase(),
+          level: piece.level || 1,
+          hp: piece.monsterStats?.hp || 20,
+          ad: piece.monsterStats?.ad || 20,
+          ap: piece.monsterStats?.ap || 20,
+          armor: piece.monsterStats?.armor || 20,
+          magicResist: piece.monsterStats?.magicResist || 20
+        };
+        
+        // Add equipment as object if available
+        if (piece.equipmentName || piece.equipId) {
+          const equipmentName = piece.equipmentName || piece.equipId || 'unknown equipment';
+          boardPiece.equipment = {
+            name: equipmentName.toLowerCase(),
+            stat: piece.equipmentStat || 'ap',
+            tier: piece.equipmentTier || 5
+          };
+        }
+        
+        board.push(boardPiece);
+      });
+    }
+    
+    // Build replayData in the correct order: region, map, floor, board, seed
+    const replayData = {};
+    
+    // Add region if available
+    if (runData.regionName) {
+      replayData.region = runData.regionName;
+    }
+    
+    // Add map
+    replayData.map = runData.mapName || runData.mapId || '';
+    
+    // Add floor (default to 0 if not specified)
+    if (runData.floor !== undefined && runData.floor !== null) {
+      replayData.floor = runData.floor;
+    } else {
+      replayData.floor = 0; // Default to 0 if floor not specified
+    }
+    
+    // Add board
+    replayData.board = board;
+    
+    // Add seed (last)
+    replayData.seed = runData.seed;
+    
+    return `$replay(${JSON.stringify(replayData)})`;
+  } catch (error) {
+    console.error('[Mod Settings] Error generating replay link:', error);
+    return null;
+  }
+}
+
+// Format runs as text with $replay links
+// Helper function to format date in EU format: YYYY/M/D HH:mm
+function formatEUDateTime(timestamp) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  return `${year}/${month}/${day} ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+}
+
+function formatRunsAsText(runsData) {
+  try {
+    const playerName = runsData.playerName || 'Unknown Player';
+    const timestamp = formatEUDateTime(Date.now());
+    
+    let text = `========================================\n`;
+    text += `Best Runs - ${playerName}\n`;
+    text += `Generated: ${timestamp}\n`;
+    text += `========================================\n\n`;
+    
+    if (!runsData.runs || Object.keys(runsData.runs).length === 0) {
+      text += `No runs available.\n`;
+      return text;
+    }
+    
+    // Runs are already sorted by region when uploaded, so just iterate through them in order
+    // Group by region for display (if we can determine regions)
+    const regionGroups = {};
+    let lastRegionName = null;
+    
+    try {
+      const regions = globalThis.state?.utils?.REGIONS;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      
+      if (regions && Array.isArray(regions) && roomNames) {
+        // Map region IDs to proper region names
+        const regionNameMap = {
+          'rook': 'Rookgaard',
+          'carlin': 'Carlin',
+          'folda': 'Folda',
+          'abdendriel': 'Ab\'Dendriel',
+          'kazordoon': 'Kazordoon',
+          'venore': 'Venore'
+        };
+        
+        // Create a map of mapKey -> region name
+        const mapKeyToRegion = {};
+        
+        regions.forEach(region => {
+          if (!region.rooms) return;
+          
+          const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+          
+          region.rooms.forEach(room => {
+            const roomId = room.id;
+            const roomName = roomNames[roomId] || roomId;
+            const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+            mapKeyToRegion[mapKey] = regionName;
+            
+            // Also check by mapId
+            for (const [key, mapData] of Object.entries(runsData.runs)) {
+              if (mapKeyToRegion[key]) continue;
+              
+              const allRunsInMap = [
+                ...(mapData.speedrun || []),
+                ...(mapData.rank || []),
+                ...(mapData.floor || [])
+              ];
+              
+              const hasMatchingRoomId = allRunsInMap.some(run => {
+                return run.mapId === roomId || run.mapId === room.id;
+              });
+              
+              if (hasMatchingRoomId) {
+                mapKeyToRegion[key] = regionName;
+              }
+            }
+          });
+        });
+        
+        // Create maps with region and room order for sorting
+        const mapKeyToRegionOrder = {};
+        const mapKeyToRoomOrder = {};
+        
+        regions.forEach((region, regionIndex) => {
+          if (!region.rooms) return;
+          
+          region.rooms.forEach((room, roomIndex) => {
+            const roomId = room.id;
+            const roomName = roomNames[roomId] || roomId;
+            const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+            
+            // Check if this mapKey exists in runs
+            if (runsData.runs[mapKey]) {
+              mapKeyToRegionOrder[mapKey] = regionIndex;
+              mapKeyToRoomOrder[mapKey] = roomIndex;
+            } else {
+              // Also check by mapId
+              for (const [key, mapData] of Object.entries(runsData.runs)) {
+                if (mapKeyToRegionOrder[key] !== undefined) continue; // Already assigned
+                
+                const allRunsInMap = [
+                  ...(mapData.speedrun || []),
+                  ...(mapData.rank || []),
+                  ...(mapData.floor || [])
+                ];
+                
+                const hasMatchingRoomId = allRunsInMap.some(run => {
+                  return run.mapId === roomId || run.mapId === room.id;
+                });
+                
+                if (hasMatchingRoomId) {
+                  mapKeyToRegionOrder[key] = regionIndex;
+                  mapKeyToRoomOrder[key] = roomIndex;
+                  break;
+                }
+              }
+            }
+          });
+        });
+        
+        // Iterate through runs and group by region
+        for (const [mapKey, mapData] of Object.entries(runsData.runs)) {
+          const regionName = mapKeyToRegion[mapKey] || 'Other Maps';
+          
+          if (!regionGroups[regionName]) {
+            regionGroups[regionName] = [];
+          }
+          
+          // Get map name
+          const allRuns = [
+            ...(mapData.speedrun || []),
+            ...(mapData.rank || []),
+            ...(mapData.floor || [])
+          ];
+          
+          let mapName = mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          if (allRuns.length > 0 && allRuns[0].mapName) {
+            mapName = allRuns[0].mapName;
+          } else if (allRuns.length > 0 && allRuns[0].mapId && roomNames) {
+            mapName = roomNames[allRuns[0].mapId] || mapName;
+          }
+          
+          regionGroups[regionName].push({
+            mapKey: mapKey,
+            mapName: mapName,
+            data: mapData,
+            regionOrder: mapKeyToRegionOrder[mapKey] !== undefined ? mapKeyToRegionOrder[mapKey] : 9999,
+            roomOrder: mapKeyToRoomOrder[mapKey] !== undefined ? mapKeyToRoomOrder[mapKey] : 9999
+          });
+        }
+        
+        // Sort maps within each region by room order
+        for (const regionName of Object.keys(regionGroups)) {
+          regionGroups[regionName].sort((a, b) => {
+            if (a.regionOrder !== b.regionOrder) {
+              return a.regionOrder - b.regionOrder;
+            }
+            return a.roomOrder - b.roomOrder;
+          });
+        }
+      } else {
+        // Fallback: no region grouping, just iterate
+        for (const [mapKey, mapData] of Object.entries(runsData.runs)) {
+          const allRuns = [
+            ...(mapData.speedrun || []),
+            ...(mapData.rank || []),
+            ...(mapData.floor || [])
+          ];
+          
+          let mapName = mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          if (allRuns.length > 0 && allRuns[0].mapName) {
+            mapName = allRuns[0].mapName;
+          }
+          
+          if (!regionGroups['All Maps']) {
+            regionGroups['All Maps'] = [];
+          }
+          
+          regionGroups['All Maps'].push({
+            mapKey: mapKey,
+            mapName: mapName,
+            data: mapData
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('[Mod Settings] Error grouping maps by region, using simple iteration:', error);
+      // Fallback: just iterate through runs
+      for (const [mapKey, mapData] of Object.entries(runsData.runs)) {
+        const allRuns = [
+          ...(mapData.speedrun || []),
+          ...(mapData.rank || []),
+          ...(mapData.floor || [])
+        ];
+        
+        let mapName = mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        if (allRuns.length > 0 && allRuns[0].mapName) {
+          mapName = allRuns[0].mapName;
+        }
+        
+        if (!regionGroups['All Maps']) {
+          regionGroups['All Maps'] = [];
+        }
+        
+        regionGroups['All Maps'].push({
+          mapKey: mapKey,
+          mapName: mapName,
+          data: mapData
+        });
+      }
+    }
+    
+    // Sort regions by their order in REGIONS, then display
+    const sortedRegionEntries = Object.entries(regionGroups).sort((a, b) => {
+      const regionNameA = a[0];
+      const regionNameB = b[0];
+      
+      // Get region order from REGIONS
+      let regionOrderA = 9999;
+      let regionOrderB = 9999;
+      
+      try {
+        const regions = globalThis.state?.utils?.REGIONS;
+        if (regions && Array.isArray(regions)) {
+        // Map region IDs to proper region names
+        const regionNameMap = {
+          'rook': 'Rookgaard',
+          'carlin': 'Carlin',
+          'folda': 'Folda',
+          'abdendriel': 'Ab\'Dendriel',
+          'kazordoon': 'Kazordoon',
+          'venore': 'Venore'
+        };
+        
+        regions.forEach((region, index) => {
+          const regionId = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : null;
+            if (regionId === regionNameA) {
+              regionOrderA = index;
+            }
+            if (regionId === regionNameB) {
+              regionOrderB = index;
+            }
+          });
+        }
+      } catch (error) {
+        // Silently fail
+      }
+      
+      return regionOrderA - regionOrderB;
+    });
+    
+    // Display by region (maps are sorted within each region)
+    for (const [regionName, maps] of sortedRegionEntries) {
+      if (Object.keys(regionGroups).length > 1) {
+        text += `REGION: ${regionName}\n`;
+        text += `========================================\n\n`;
+      }
+      
+      for (const map of maps) {
+        const mapData = map.data;
+        const mapName = map.mapName;
+      
+      text += `MAP: ${mapName}\n`;
+      text += `----------------------------------------\n`;
+      
+      // Speedrun category
+      if (mapData.speedrun && mapData.speedrun.length > 0) {
+        const bestSpeedrun = mapData.speedrun[0];
+        text += `SPEEDRUN:\n`;
+        text += `  Time: ${bestSpeedrun.time || 'N/A'} ticks\n`;
+        text += `  Seed: ${extractSeedFromReplayLink(bestSpeedrun.replayLink)}\n`;
+        text += `  Date: ${bestSpeedrun.date || 'N/A'}\n`;
+        if (bestSpeedrun.replayLink) {
+          text += `  ${bestSpeedrun.replayLink}\n`;
+        }
+        text += `\n`;
+      }
+      
+      // Rank category
+      if (mapData.rank && mapData.rank.length > 0) {
+        const bestRank = mapData.rank[0];
+        text += `RANK:\n`;
+        text += `  Points: ${bestRank.points || 'N/A'}\n`;
+        text += `  Time: ${bestRank.time || 'N/A'} ticks\n`;
+        text += `  Seed: ${extractSeedFromReplayLink(bestRank.replayLink)}\n`;
+        text += `  Date: ${bestRank.date || 'N/A'}\n`;
+        if (bestRank.replayLink) {
+          text += `  ${bestRank.replayLink}\n`;
+        }
+        text += `\n`;
+      }
+      
+      // Floor category
+      if (mapData.floor && mapData.floor.length > 0) {
+        const bestFloor = mapData.floor[0];
+        text += `FLOOR:\n`;
+        text += `  Floor: ${bestFloor.floor || 'N/A'}\n`;
+        if (bestFloor.floorTicks) {
+          text += `  Floor Ticks: ${bestFloor.floorTicks} ticks\n`;
+        }
+        text += `  Seed: ${extractSeedFromReplayLink(bestFloor.replayLink)}\n`;
+        text += `  Date: ${bestFloor.date || 'N/A'}\n`;
+        if (bestFloor.replayLink) {
+          text += `  ${bestFloor.replayLink}\n`;
+        }
+        text += `\n`;
+      }
+      
+        text += `========================================\n\n`;
+      }
+      
+      text += `\n`;
+    }
+    
+    return text;
+  } catch (error) {
+    console.error('[Mod Settings] Error formatting runs as text:', error);
+    return 'Error formatting runs data.';
+  }
+}
+
+// Upload best runs to Firebase
+async function uploadBestRuns() {
+  try {
+    // Rate limiting: prevent uploads more than once every 3 seconds
+    const now = Date.now();
+    const lastUpload = config.lastFirebaseRunsUpload || 0;
+    const timeSinceLastUpload = now - lastUpload;
+    const minUploadInterval = 3000; // 3 seconds in milliseconds
+    
+    if (timeSinceLastUpload < minUploadInterval) {
+      const remainingSeconds = ((minUploadInterval - timeSinceLastUpload) / 1000).toFixed(1);
+      return { success: false, error: `Please wait ${remainingSeconds} seconds before uploading again` };
+    }
+    
+    const playerName = getCurrentPlayerName();
+    if (!playerName) {
+      console.error('[Mod Settings] Cannot upload runs: Player name not found');
+      return { success: false, error: 'Player name not found' };
+    }
+    
+    if (!config.firebaseRunsPassword) {
+      console.error('[Mod Settings] Cannot upload runs: Password not set');
+      return { success: false, error: 'Password not set' };
+    }
+    
+    if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
+      console.error('[Mod Settings] Cannot upload runs: RunTracker not available');
+      return { success: false, error: 'RunTracker not available' };
+    }
+    
+    // Get all runs from RunTracker
+    const allRuns = window.RunTrackerAPI.getAllRuns();
+    
+    // Filter to best runs only (top run per map/category)
+    // Sort by region and map order before storing
+    const bestRuns = {
+      runs: {},
+      metadata: allRuns.metadata || {},
+      playerName: playerName,
+      uploadedAt: Date.now()
+    };
+    
+    // First, collect all best runs with their region info
+    const runsWithRegion = [];
+    const processedMapKeys = new Set();
+    
+    try {
+      const regions = globalThis.state?.utils?.REGIONS;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      
+      if (regions && Array.isArray(regions) && roomNames) {
+        // Create a reverse lookup: mapKey -> roomId
+        const mapKeyToRoomId = {};
+        Object.keys(roomNames).forEach(roomId => {
+          const roomName = roomNames[roomId];
+          const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+          mapKeyToRoomId[mapKey] = roomId;
+        });
+        
+        // Map region IDs to proper region names
+        const regionNameMap = {
+          'rook': 'Rookgaard',
+          'carlin': 'Carlin',
+          'folda': 'Folda',
+          'abdendriel': 'Ab\'Dendriel',
+          'kazordoon': 'Kazordoon',
+          'venore': 'Venore'
+        };
+        
+        // Iterate through regions in order
+        regions.forEach(region => {
+          if (!region.rooms) return;
+          
+          const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+          
+          region.rooms.forEach(room => {
+            const roomId = room.id;
+            const roomName = roomNames[roomId] || roomId;
+            const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+            
+            if (allRuns.runs[mapKey]) {
+              runsWithRegion.push({
+                mapKey: mapKey,
+                mapName: roomName,
+                regionName: regionName,
+                regionOrder: regions.indexOf(region),
+                roomOrder: region.rooms.indexOf(room),
+                mapData: allRuns.runs[mapKey]
+              });
+              processedMapKeys.add(mapKey);
+            } else {
+              // Also try matching by roomId if we have mapId in run data
+              for (const [key, mapData] of Object.entries(allRuns.runs || {})) {
+                if (processedMapKeys.has(key)) continue;
+                
+                const allRunsInMap = [
+                  ...(mapData.speedrun || []),
+                  ...(mapData.rank || []),
+                  ...(mapData.floor || [])
+                ];
+                
+                const hasMatchingRoomId = allRunsInMap.some(run => {
+                  return run.mapId === roomId || run.mapId === room.id;
+                });
+                
+                if (hasMatchingRoomId) {
+                  runsWithRegion.push({
+                    mapKey: key,
+                    mapName: roomName,
+                    regionName: regionName,
+                    regionOrder: regions.indexOf(region),
+                    roomOrder: region.rooms.indexOf(room),
+                    mapData: mapData
+                  });
+                  processedMapKeys.add(key);
+                  break;
+                }
+              }
+            }
+          });
+        });
+        
+        // Add any maps that weren't found in regions
+        for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+          if (!processedMapKeys.has(mapKey)) {
+            const allRunsInMap = [
+              ...(mapData.speedrun || []),
+              ...(mapData.rank || []),
+              ...(mapData.floor || [])
+            ];
+            
+            let mapName = mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            if (allRunsInMap.length > 0 && allRunsInMap[0].mapName) {
+              mapName = allRunsInMap[0].mapName;
+            } else if (allRunsInMap.length > 0 && allRunsInMap[0].mapId && roomNames) {
+              mapName = roomNames[allRunsInMap[0].mapId] || mapName;
+            }
+            
+            runsWithRegion.push({
+              mapKey: mapKey,
+              mapName: mapName,
+              regionName: 'Other Maps',
+              regionOrder: 9999, // Put at the end
+              roomOrder: 9999,
+              mapData: mapData
+            });
+          }
+        }
+        
+        // Sort by region order, then by room order
+        runsWithRegion.sort((a, b) => {
+          if (a.regionOrder !== b.regionOrder) {
+            return a.regionOrder - b.regionOrder;
+          }
+          return a.roomOrder - b.roomOrder;
+        });
+      } else {
+        // Fallback: just use all runs in original order
+        for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+          runsWithRegion.push({
+            mapKey: mapKey,
+            mapName: mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            regionName: 'Unknown Region',
+            regionOrder: 0,
+            roomOrder: 0,
+            mapData: mapData
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('[Mod Settings] Error sorting runs by region, using original order:', error);
+      // Fallback: just use all runs in original order
+      for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+        runsWithRegion.push({
+          mapKey: mapKey,
+          mapName: mapKey.replace('map_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          regionName: 'Unknown Region',
+          regionOrder: 0,
+          roomOrder: 0,
+          mapData: mapData
+        });
+      }
+    }
+    
+    // Extract best run from each category for each map (now in sorted order)
+    for (const { mapKey, mapData, regionName: contextRegionName } of runsWithRegion) {
+      const cleanMapData = {
+        speedrun: [],
+        rank: [],
+        floor: []
+      };
+      
+      // Clean speedrun runs - simplified: generate replayLink and store only essentials
+      if (mapData.speedrun && mapData.speedrun.length > 0) {
+        const bestSpeedrun = mapData.speedrun[0];
+        const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
+          time: bestSpeedrun.time
+        });
+        cleanMapData.speedrun = [cleanSpeedrun];
+      }
+      
+      // Clean rank runs - simplified: generate replayLink and store only essentials
+      if (mapData.rank && mapData.rank.length > 0) {
+        const bestRank = mapData.rank[0];
+        const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
+          points: bestRank.points,
+          time: bestRank.time
+        });
+        cleanMapData.rank = [cleanRank];
+      }
+      
+      // Clean floor runs - simplified: generate replayLink and store only essentials
+      if (mapData.floor && mapData.floor.length > 0) {
+        const bestFloor = mapData.floor[0];
+        const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {
+          floor: bestFloor.floor,
+          floorTicks: bestFloor.floorTicks
+        });
+        cleanMapData.floor = [cleanFloor];
+      }
+      
+      bestRuns.runs[mapKey] = cleanMapData;
+    }
+    
+    // Sort runs by region order before storing
+    // JavaScript objects maintain insertion order, so we'll create a new ordered object
+    let orderedRuns = {};
+    
+    try {
+      const regions = globalThis.state?.utils?.REGIONS;
+      const roomNames = globalThis.state?.utils?.ROOM_NAME;
+      
+      if (regions && Array.isArray(regions) && roomNames) {
+        // Create a map of mapKey -> region order for sorting
+        const mapKeyToRegionOrder = {};
+        const mapKeyToRoomOrder = {};
+        
+        regions.forEach((region, regionIndex) => {
+          if (!region.rooms) return;
+          
+          region.rooms.forEach((room, roomIndex) => {
+            const roomId = room.id;
+            const roomName = roomNames[roomId] || roomId;
+            const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+            
+            if (bestRuns.runs[mapKey]) {
+              mapKeyToRegionOrder[mapKey] = regionIndex;
+              mapKeyToRoomOrder[mapKey] = roomIndex;
+            } else {
+              // Also check by mapId
+              for (const [key, mapData] of Object.entries(bestRuns.runs)) {
+                if (mapKeyToRegionOrder[key] !== undefined) continue; // Already assigned
+                
+                const allRunsInMap = [
+                  ...(mapData.speedrun || []),
+                  ...(mapData.rank || []),
+                  ...(mapData.floor || [])
+                ];
+                
+                const hasMatchingRoomId = allRunsInMap.some(run => {
+                  return run.mapId === roomId || run.mapId === room.id;
+                });
+                
+                if (hasMatchingRoomId) {
+                  mapKeyToRegionOrder[key] = regionIndex;
+                  mapKeyToRoomOrder[key] = roomIndex;
+                  break;
+                }
+              }
+            }
+          });
+        });
+        
+        // Sort map keys by region order, then by room order
+        const sortedMapKeys = Object.keys(bestRuns.runs).sort((a, b) => {
+          const regionOrderA = mapKeyToRegionOrder[a] !== undefined ? mapKeyToRegionOrder[a] : 9999;
+          const regionOrderB = mapKeyToRegionOrder[b] !== undefined ? mapKeyToRegionOrder[b] : 9999;
+          
+          if (regionOrderA !== regionOrderB) {
+            return regionOrderA - regionOrderB;
+          }
+          
+          const roomOrderA = mapKeyToRoomOrder[a] !== undefined ? mapKeyToRoomOrder[a] : 9999;
+          const roomOrderB = mapKeyToRoomOrder[b] !== undefined ? mapKeyToRoomOrder[b] : 9999;
+          
+          return roomOrderA - roomOrderB;
+        });
+        
+        // Build ordered runs object (maintains insertion order in modern JS)
+        sortedMapKeys.forEach(mapKey => {
+          orderedRuns[mapKey] = bestRuns.runs[mapKey];
+        });
+      } else {
+        // Fallback: keep original order
+        orderedRuns = bestRuns.runs;
+      }
+    } catch (error) {
+      console.warn('[Mod Settings] Error sorting runs by region during upload, using original order:', error);
+      orderedRuns = bestRuns.runs;
+    }
+    
+    // Replace runs with ordered version
+    bestRuns.runs = orderedRuns;
+    
+    // Encrypt the data
+    const encryptedData = await encryptRunsData(bestRuns, config.firebaseRunsPassword);
+    
+    // Upload to Firebase
+    const success = await uploadRunsToFirebase(playerName, encryptedData, config.firebaseRunsPassword);
+    
+    if (success) {
+      // Update last upload time
+      config.lastFirebaseRunsUpload = Date.now();
+      saveConfig();
+      return { success: true };
+    } else {
+      return { success: false, error: 'Upload failed' };
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error uploading best runs:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Fetch player runs from Firebase
+async function fetchPlayerRuns(playerName, password) {
+  try {
+    if (!playerName || !password) {
+      return null;
+    }
+    
+    const encryptedData = await fetchRunsFromFirebase(playerName);
+    if (!encryptedData || !encryptedData.encrypted) {
+      return null;
+    }
+    
+    const decryptedData = await decryptRunsData(encryptedData.encrypted, password);
+    return decryptedData;
+  } catch (error) {
+    console.error('[Mod Settings] Error fetching player runs:', error);
+    return null;
+  }
+}
+
+// Download runs as .txt file
+async function downloadRunsAsTxt(playerName, password, source = 'local') {
+  try {
+    let runsData = null;
+    
+    if (source === 'firebase') {
+      if (!playerName || !password) {
+        console.error('[Mod Settings] Player name and password required for Firebase source');
+        return { success: false, error: 'Player name and password required' };
+      }
+      runsData = await fetchPlayerRuns(playerName, password);
+      if (!runsData) {
+        return { success: false, error: 'Failed to fetch or decrypt runs' };
+      }
+    } else {
+      // Local source - filter to best runs (same as upload logic)
+      if (!window.RunTrackerAPI || !window.RunTrackerAPI.getAllRuns) {
+        return { success: false, error: 'RunTracker not available' };
+      }
+      const allRuns = window.RunTrackerAPI.getAllRuns();
+      
+      // Filter to best runs only (top run per map/category) - same logic as upload
+      const bestRuns = {
+        runs: {},
+        metadata: allRuns.metadata || {},
+        playerName: 'local', // Use 'local' for local downloads since it's the user's own data
+        uploadedAt: Date.now()
+      };
+      
+      // Extract best run from each category for each map (same logic as upload)
+      // First, build a map of mapKey -> regionName (same as upload logic)
+      const mapKeyToRegionName = {};
+      
+      try {
+        const regions = globalThis.state?.utils?.REGIONS;
+        const roomNames = globalThis.state?.utils?.ROOM_NAME;
+        
+        if (regions && Array.isArray(regions) && roomNames) {
+          // Map region IDs to proper region names
+          const regionNameMap = {
+            'rook': 'Rookgaard',
+            'carlin': 'Carlin',
+            'folda': 'Folda',
+            'abdendriel': 'Ab\'Dendriel',
+            'kazordoon': 'Kazordoon',
+            'venore': 'Venore'
+          };
+          
+          // Create a reverse lookup: mapKey -> roomId
+          const mapKeyToRoomId = {};
+          Object.keys(roomNames).forEach(roomId => {
+            const roomName = roomNames[roomId];
+            const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+            mapKeyToRoomId[mapKey] = roomId;
+          });
+          
+          // Iterate through regions to find which region each map belongs to
+          regions.forEach(region => {
+            if (!region.rooms) return;
+            
+            const regionName = region.id ? (regionNameMap[region.id] || region.id.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase())) : 'Unknown Region';
+            
+            region.rooms.forEach(room => {
+              const roomId = room.id;
+              const roomName = roomNames[roomId] || roomId;
+              const mapKey = `map_${roomName.toLowerCase().replace(/\s+/g, '_')}`;
+              
+              if (allRuns.runs[mapKey]) {
+                mapKeyToRegionName[mapKey] = regionName;
+              } else {
+                // Also try matching by roomId if we have mapId in run data
+                for (const [key, mapData] of Object.entries(allRuns.runs || {})) {
+                  if (mapKeyToRegionName[key]) continue; // Already assigned
+                  
+                  const allRunsInMap = [
+                    ...(mapData.speedrun || []),
+                    ...(mapData.rank || []),
+                    ...(mapData.floor || [])
+                  ];
+                  
+                  const hasMatchingRoomId = allRunsInMap.some(run => {
+                    return run.mapId === roomId || run.mapId === room.id;
+                  });
+                  
+                  if (hasMatchingRoomId) {
+                    mapKeyToRegionName[key] = regionName;
+                    break;
+                  }
+                }
+              }
+            });
+          });
+        }
+      } catch (error) {
+        console.warn('[Mod Settings] Error determining regions for local download:', error);
+      }
+      
+      for (const [mapKey, mapData] of Object.entries(allRuns.runs || {})) {
+        const cleanMapData = {
+          speedrun: [],
+          rank: [],
+          floor: []
+        };
+        
+        // Get the correct region name for this map
+        const contextRegionName = mapKeyToRegionName[mapKey] || null;
+        
+        // Get best speedrun (first in sorted array) - clean it like upload does
+        if (mapData.speedrun && mapData.speedrun.length > 0) {
+          const bestSpeedrun = mapData.speedrun[0];
+          // Ensure required fields are present
+          if (bestSpeedrun.time !== undefined && bestSpeedrun.time !== null) {
+            const cleanSpeedrun = cleanRunForUpload(bestSpeedrun, contextRegionName, {
+              time: bestSpeedrun.time
+            });
+            cleanMapData.speedrun = [cleanSpeedrun];
+          }
+        }
+        
+        // Get best rank (first in sorted array) - clean it like upload does
+        if (mapData.rank && mapData.rank.length > 0) {
+          const bestRank = mapData.rank[0];
+          // Ensure required fields are present
+          if (bestRank.points !== undefined && bestRank.points !== null) {
+            const cleanRank = cleanRunForUpload(bestRank, contextRegionName, {
+              points: bestRank.points,
+              time: bestRank.time
+            });
+            cleanMapData.rank = [cleanRank];
+          }
+        }
+        
+        // Get best floor (first in sorted array) - clean it like upload does
+        if (mapData.floor && mapData.floor.length > 0) {
+          const bestFloor = mapData.floor[0];
+          // Ensure required fields are present
+          if (bestFloor.floor !== undefined && bestFloor.floor !== null && bestFloor.floor > 0) {
+            const cleanFloor = cleanRunForUpload(bestFloor, contextRegionName, {
+              floor: bestFloor.floor,
+              floorTicks: bestFloor.floorTicks
+            });
+            cleanMapData.floor = [cleanFloor];
+          }
+        }
+        
+        // Only add map if it has at least one run
+        if (cleanMapData.speedrun.length > 0 || cleanMapData.rank.length > 0 || cleanMapData.floor.length > 0) {
+          bestRuns.runs[mapKey] = cleanMapData;
+        }
+      }
+      
+      runsData = bestRuns;
+    }
+    
+    // Format as text
+    const textContent = formatRunsAsText(runsData);
+    
+    // Create blob and download
+    const blob = new Blob([textContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // For local downloads, use 'local' as filename; for Firebase, use the actual player name
+    const safePlayerName = (source === 'local') 
+      ? 'local'
+      : ((runsData.playerName && typeof runsData.playerName === 'string' && runsData.playerName.trim()) 
+          ? runsData.playerName.trim().replace(/[^a-zA-Z0-9_-]/g, '_') 
+          : 'unknown');
+    a.download = `best-runs-${safePlayerName}-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    console.log('[Mod Settings] Successfully downloaded runs as .txt');
+    return { success: true };
+  } catch (error) {
+    console.error('[Mod Settings] Error downloading runs as .txt:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Expose fetch function globally
+if (typeof window !== 'undefined') {
+  window.fetchPlayerRuns = fetchPlayerRuns;
+  window.downloadRunsAsTxt = downloadRunsAsTxt;
+}
+
+// Auto-upload hook for RunTracker
+let lastUploadedRunCount = 0;
+let autoUploadCheckInterval = null;
+
+function startAutoUploadMonitor() {
+  if (autoUploadCheckInterval) {
+    clearInterval(autoUploadCheckInterval);
+  }
+  
+  if (!config.autoUploadRuns || !config.enableFirebaseRunsUpload) {
+    return;
+  }
+  
+  // Initialize last count
+  if (window.RunTrackerAPI && window.RunTrackerAPI.getRunStats) {
+    const stats = window.RunTrackerAPI.getRunStats();
+    lastUploadedRunCount = stats.totalRuns || 0;
+  }
+  
+  // Check every 10 seconds for new runs
+  autoUploadCheckInterval = setInterval(async () => {
+    if (!config.autoUploadRuns || !config.enableFirebaseRunsUpload || !config.firebaseRunsPassword) {
+      return;
+    }
+    
+    if (!window.RunTrackerAPI || !window.RunTrackerAPI.getRunStats) {
+      return;
+    }
+    
+    const stats = window.RunTrackerAPI.getRunStats();
+    const currentRunCount = stats.totalRuns || 0;
+    
+    // If run count increased, upload
+    if (currentRunCount > lastUploadedRunCount) {
+      console.log('[Mod Settings] New runs detected, auto-uploading...');
+      const result = await uploadBestRuns();
+      if (result.success) {
+        lastUploadedRunCount = currentRunCount;
+        console.log('[Mod Settings] Auto-upload successful');
+      } else {
+        console.error('[Mod Settings] Auto-upload failed:', result.error);
+      }
+    }
+  }, 10000); // Check every 10 seconds
+}
+
+function stopAutoUploadMonitor() {
+  if (autoUploadCheckInterval) {
+    clearInterval(autoUploadCheckInterval);
+    autoUploadCheckInterval = null;
+  }
+}
+
+// Start monitor if enabled
+if (config.autoUploadRuns && config.enableFirebaseRunsUpload) {
+  // Wait a bit for RunTracker to initialize
+  setTimeout(() => {
+    startAutoUploadMonitor();
+  }, 5000);
 }
 
 // =======================
@@ -2052,6 +3392,42 @@ function showSettingsModal() {
               <span style="cursor: help; font-size: 16px; color: #ffaa00;" title="${t('mods.betterUI.disableRunTrackerWarning')}">${t('mods.betterUI.disableRunTracker')}</span>
             </label>
           </div>
+          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+            <div style="margin-bottom: 15px;">
+              <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help;" title="Upload your best runs to Firebase with password encryption. Other players can fetch and download your runs using your player name and password. Runs are encrypted client-side before upload, ensuring privacy. You can also download runs as .txt files with $replay links for easy sharing.">⚠️ Firebase Best Runs Upload</h4>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="firebase-runs-upload-toggle" style="transform: scale(1.2);">
+                <span style="color: #ccc;">Upload best runs to Firebase</span>
+              </label>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="auto-upload-runs-toggle" style="transform: scale(1.2);">
+                <span style="color: #ccc;">Auto-upload when new best run is recorded</span>
+              </label>
+            </div>
+            <div style="margin-bottom: 15px;">
+              <label style="display: flex; flex-direction: column; gap: 5px;">
+                <span style="color: #ccc; font-size: 13px;">Encryption Password (5-20 characters):</span>
+                <input type="password" id="firebase-runs-password" placeholder="Enter password (5-20 characters)" maxlength="20" style="width: 100%; padding: 6px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; pointer-events: auto;" onclick="event.stopPropagation();">
+              </label>
+            </div>
+            <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+              <button id="upload-runs-btn" class="btn btn-primary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto; opacity: 0.5; cursor: not-allowed;" disabled onclick="event.stopPropagation();">
+                Upload Now
+              </button>
+              <button id="download-runs-btn" class="btn btn-secondary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto;" onclick="event.stopPropagation();">
+                Download as .txt
+              </button>
+              <button id="delete-runs-btn" class="btn btn-secondary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto; background: #dc3545; border-color: #dc3545;" onclick="event.stopPropagation();">
+                Delete Runs
+              </button>
+            </div>
+            <div id="firebase-runs-status" style="margin-top: 10px; font-size: 12px; color: #7f8fa4; min-height: 20px;">
+            </div>
+          </div>
         `;
         rightColumn.appendChild(advancedContent);
       } else if (categoryId === 'hunt-analyzer') {
@@ -2602,6 +3978,321 @@ function showSettingsModal() {
             console.warn('[Mod Settings] RunTracker API not available');
           }
         });
+      }
+      
+      // Firebase Best Runs Upload handlers
+      const firebaseRunsUploadToggle = content.querySelector('#firebase-runs-upload-toggle');
+      if (firebaseRunsUploadToggle) {
+        firebaseRunsUploadToggle.checked = config.enableFirebaseRunsUpload || false;
+        
+        firebaseRunsUploadToggle.addEventListener('change', () => {
+          config.enableFirebaseRunsUpload = firebaseRunsUploadToggle.checked;
+          saveConfig();
+          console.log('[Mod Settings] Firebase runs upload:', firebaseRunsUploadToggle.checked ? 'enabled' : 'disabled');
+          
+          // Start/stop auto-upload monitor
+          if (firebaseRunsUploadToggle.checked && config.autoUploadRuns) {
+            startAutoUploadMonitor();
+          } else {
+            stopAutoUploadMonitor();
+          }
+        });
+      }
+      
+      const autoUploadRunsToggle = content.querySelector('#auto-upload-runs-toggle');
+      if (autoUploadRunsToggle) {
+        autoUploadRunsToggle.checked = config.autoUploadRuns || false;
+        
+        autoUploadRunsToggle.addEventListener('change', () => {
+          config.autoUploadRuns = autoUploadRunsToggle.checked;
+          saveConfig();
+          console.log('[Mod Settings] Auto-upload runs:', autoUploadRunsToggle.checked ? 'enabled' : 'disabled');
+          
+          // Start/stop auto-upload monitor
+          if (autoUploadRunsToggle.checked && config.enableFirebaseRunsUpload) {
+            startAutoUploadMonitor();
+          } else {
+            stopAutoUploadMonitor();
+          }
+        });
+      }
+      
+      const firebaseRunsPasswordInput = content.querySelector('#firebase-runs-password');
+      const uploadRunsBtn = content.querySelector('#upload-runs-btn');
+      const statusDiv = content.querySelector('#firebase-runs-status');
+      
+      // Function to update upload button and checkbox states
+      const updateUploadButtonState = () => {
+        const hasPassword = config.firebaseRunsPassword && config.firebaseRunsPassword.length >= 5;
+        
+        if (uploadRunsBtn) {
+          uploadRunsBtn.disabled = !hasPassword;
+          uploadRunsBtn.style.opacity = hasPassword ? '1' : '0.5';
+          uploadRunsBtn.style.cursor = hasPassword ? 'pointer' : 'not-allowed';
+          uploadRunsBtn.title = hasPassword ? '' : 'Please set a password (5-20 characters) first';
+        }
+        
+        // Update checkbox states
+        if (firebaseRunsUploadToggle) {
+          firebaseRunsUploadToggle.disabled = !hasPassword;
+          const label = firebaseRunsUploadToggle.closest('label');
+          if (label) {
+            label.style.opacity = hasPassword ? '1' : '0.5';
+            label.style.cursor = hasPassword ? 'pointer' : 'not-allowed';
+          }
+          if (!hasPassword && firebaseRunsUploadToggle.checked) {
+            firebaseRunsUploadToggle.checked = false;
+            config.enableFirebaseRunsUpload = false;
+            saveConfig();
+            stopAutoUploadMonitor();
+          }
+        }
+        
+        if (autoUploadRunsToggle) {
+          autoUploadRunsToggle.disabled = !hasPassword;
+          const label = autoUploadRunsToggle.closest('label');
+          if (label) {
+            label.style.opacity = hasPassword ? '1' : '0.5';
+            label.style.cursor = hasPassword ? 'pointer' : 'not-allowed';
+          }
+          if (!hasPassword && autoUploadRunsToggle.checked) {
+            autoUploadRunsToggle.checked = false;
+            config.autoUploadRuns = false;
+            saveConfig();
+            stopAutoUploadMonitor();
+          }
+        }
+      };
+      
+      if (firebaseRunsPasswordInput) {
+        // Don't show the actual password, but show if one is set
+        if (config.firebaseRunsPassword) {
+          firebaseRunsPasswordInput.placeholder = 'Password set (enter new to change)';
+        } else {
+          firebaseRunsPasswordInput.placeholder = 'Enter password (5-20 characters)';
+        }
+        
+        // Track if password was just saved to prevent double-saving on blur
+        let passwordJustSaved = false;
+        
+        // Function to save password with validation
+        const savePassword = () => {
+          // Skip if we just saved (prevents double-saving when Enter triggers blur)
+          if (passwordJustSaved) {
+            passwordJustSaved = false;
+            return;
+          }
+          
+          const password = firebaseRunsPasswordInput.value.trim();
+          
+          // Don't save if password is empty (user just clicked away without entering anything)
+          if (!password) {
+            return;
+          }
+          
+          // Validate password length
+          if (password.length < 5) {
+            updateFirebaseStatus(statusDiv, 'Password must be at least 5 characters', '#dc3545');
+            firebaseRunsPasswordInput.focus();
+            return;
+          }
+          
+          if (password.length > 20) {
+            updateFirebaseStatus(statusDiv, 'Password must be at most 20 characters', '#dc3545');
+            firebaseRunsPasswordInput.focus();
+            return;
+          }
+          
+          // Check if password is changing (not first time setting)
+          const passwordChanged = config.firebaseRunsPassword && config.firebaseRunsPassword !== password;
+          
+          // Password is valid, save it
+          config.firebaseRunsPassword = password;
+          saveConfig();
+          firebaseRunsPasswordInput.placeholder = 'Password set (enter new to change)';
+          firebaseRunsPasswordInput.value = '';
+          
+          // Update upload button state
+          updateUploadButtonState();
+          
+          // If password changed and upload is enabled, re-upload to Firebase with new password
+          if (passwordChanged && config.enableFirebaseRunsUpload) {
+            updateFirebaseStatus(statusDiv, 'Password changed. Re-uploading to Firebase...', '#7f8fa4');
+            
+            // Re-upload with new password
+            uploadBestRuns().then(result => {
+              if (result.success) {
+                const date = formatEUDateTime(config.lastFirebaseRunsUpload);
+                updateFirebaseStatus(statusDiv, `Password changed and re-uploaded: ${date}`, '#4ade80');
+              } else {
+                updateFirebaseStatus(statusDiv, `Password saved, but re-upload failed: ${result.error || 'Unknown error'}`, '#ffaa00');
+              }
+            }).catch(error => {
+              console.error('[Mod Settings] Error re-uploading after password change:', error);
+              updateFirebaseStatus(statusDiv, 'Password saved, but re-upload failed', '#ffaa00');
+            });
+          } else {
+            // Clear status or show success
+            updateFirebaseStatus(statusDiv, 'Password saved', '#4ade80');
+            setTimeout(() => {
+              if (statusDiv && statusDiv.textContent === 'Password saved') {
+                statusDiv.textContent = '';
+              }
+            }, 2000);
+          }
+          
+          console.log('[Mod Settings] Firebase runs password updated' + (passwordChanged ? ' (password changed, re-uploading)' : ''));
+        };
+        
+        // Save on blur
+        firebaseRunsPasswordInput.addEventListener('blur', savePassword);
+        
+        // Save on Enter key press
+        firebaseRunsPasswordInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            passwordJustSaved = true; // Mark that we're about to save
+            savePassword();
+            firebaseRunsPasswordInput.blur(); // Remove focus after saving
+          }
+        });
+      }
+      
+      // Initialize upload button state
+      updateUploadButtonState();
+      
+      // uploadRunsBtn is already defined above, just add the click handler
+      if (uploadRunsBtn) {
+        uploadRunsBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Double-check password before uploading
+          if (!config.firebaseRunsPassword || config.firebaseRunsPassword.length < 5) {
+            updateFirebaseStatus(statusDiv, 'Error: Password not set or invalid', '#dc3545');
+            return;
+          }
+          
+          updateFirebaseStatus(statusDiv, 'Uploading...', '#7f8fa4');
+          
+          const result = await uploadBestRuns();
+          if (result.success) {
+            const date = formatEUDateTime(config.lastFirebaseRunsUpload);
+            updateFirebaseStatus(statusDiv, `Last uploaded: ${date}`, '#4ade80');
+          } else {
+            updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Upload failed'}`, '#dc3545');
+          }
+        });
+      }
+      
+      const downloadRunsBtn = content.querySelector('#download-runs-btn');
+      if (downloadRunsBtn) {
+        downloadRunsBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Ask user for source
+          const source = confirm('Download from Firebase? (Cancel for local)') ? 'firebase' : 'local';
+          
+          if (source === 'firebase') {
+            // Single prompt for both username and password
+            const input = prompt('Enter player name and password:\nFormat: PlayerName:Password\n\nExample: MyPlayer:test123');
+            
+            if (!input) {
+              updateFirebaseStatus(statusDiv, 'Download cancelled', '#7f8fa4');
+              return;
+            }
+            
+            // Parse input (format: PlayerName:Password)
+            const parts = input.split(':');
+            if (parts.length !== 2) {
+              updateFirebaseStatus(statusDiv, 'Error: Invalid format. Use PlayerName:Password', '#dc3545');
+              return;
+            }
+            
+            const playerName = parts[0].trim();
+            const password = parts[1].trim();
+            
+            if (!playerName || !password) {
+              updateFirebaseStatus(statusDiv, 'Error: Player name and password are required', '#dc3545');
+              return;
+            }
+            
+            updateFirebaseStatus(statusDiv, 'Downloading from Firebase...', '#7f8fa4');
+            
+            const result = await downloadRunsAsTxt(playerName, password, 'firebase');
+            if (result.success) {
+              updateFirebaseStatus(statusDiv, 'Downloaded successfully', '#4ade80');
+            } else {
+              updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Download failed'}`, '#dc3545');
+            }
+          } else {
+            updateFirebaseStatus(statusDiv, 'Downloading local runs...', '#7f8fa4');
+            
+            const result = await downloadRunsAsTxt(null, null, 'local');
+            if (result.success) {
+              updateFirebaseStatus(statusDiv, 'Downloaded successfully', '#4ade80');
+            } else {
+              updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Download failed'}`, '#dc3545');
+            }
+          }
+        });
+      }
+      
+      const deleteRunsBtn = content.querySelector('#delete-runs-btn');
+      if (deleteRunsBtn) {
+        deleteRunsBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          const playerName = getCurrentPlayerName();
+          if (!playerName) {
+            updateFirebaseStatus(statusDiv, 'Error: Player name not found', '#dc3545');
+            return;
+          }
+          
+          updateFirebaseStatus(statusDiv, 'Deleting...', '#7f8fa4');
+          
+          const success = await deleteRunsFromFirebase(playerName);
+          if (success) {
+            // Clear last upload time
+            config.lastFirebaseRunsUpload = null;
+            
+            // Disable checkboxes and clear password
+            config.enableFirebaseRunsUpload = false;
+            config.autoUploadRuns = false;
+            config.firebaseRunsPassword = '';
+            saveConfig();
+            
+            // Stop auto-upload monitor
+            stopAutoUploadMonitor();
+            
+            // Update UI elements
+            if (firebaseRunsUploadToggle) {
+              firebaseRunsUploadToggle.checked = false;
+            }
+            if (autoUploadRunsToggle) {
+              autoUploadRunsToggle.checked = false;
+            }
+            if (firebaseRunsPasswordInput) {
+              firebaseRunsPasswordInput.placeholder = 'Enter password (5-20 characters)';
+              firebaseRunsPasswordInput.value = '';
+            }
+            
+            // Update button states
+            updateUploadButtonState();
+            
+            updateFirebaseStatus(statusDiv, 'Runs deleted successfully. Settings reset.', '#4ade80');
+          } else {
+            updateFirebaseStatus(statusDiv, 'Error: Failed to delete runs', '#dc3545');
+          }
+        });
+      }
+      
+      // Update status on load
+      if (statusDiv && config.lastFirebaseRunsUpload) {
+        const date = formatEUDateTime(config.lastFirebaseRunsUpload);
+        updateFirebaseStatus(statusDiv, `Last uploaded: ${date}`, '#4ade80');
       }
       
       const playercountCheckbox = content.querySelector('#playercount-toggle');
@@ -5053,13 +6744,23 @@ function parseAutoplayTime(textContent) {
   // Build regex pattern using translation strings for both languages
   const enText = "Autoplay session";
   const ptText = "Sessão autoplay";
-  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)\\)`);
+  // Match both mm:ss and hh:mm:ss formats
+  const pattern = new RegExp(`(?:${enText}|${ptText}) \\((\\d+):(\\d+)(?::(\\d+))?\\)`);
   
   const match = textContent.match(pattern);
   if (match) {
-    const minutes = parseInt(match[1]);
-    const seconds = parseInt(match[2]);
-    return minutes + (seconds / 60);
+    // If third group exists, it's hh:mm:ss format
+    if (match[3] !== undefined) {
+      const hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const seconds = parseInt(match[3]);
+      return (hours * 60) + minutes + (seconds / 60);
+    } else {
+      // Otherwise it's mm:ss format
+      const minutes = parseInt(match[1]);
+      const seconds = parseInt(match[2]);
+      return minutes + (seconds / 60);
+    }
   }
   return null;
 }

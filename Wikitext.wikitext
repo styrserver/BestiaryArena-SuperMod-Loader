@@ -145,7 +145,7 @@ Mods have access to the game's state through <code>globalThis.state</code>, whic
 The extension comes with several powerful mods that demonstrate different features:
 
 === Super Mods ===
-These are advanced mods that provide comprehensive game enhancement features. All 22 Super Mods listed below are included by default in this loader:
+These are advanced mods that provide comprehensive game enhancement features. All 23 Super Mods listed below are included by default in this loader:
 
 ==== Autoscroller ====
 Automates summon scroll usage to collect specific creatures:
@@ -219,6 +219,14 @@ Enhances the Hy'genie fusion interface with quantity inputs, smart fusion ratios
 * Automatically refreshes inventory counts and UI after fusion
 * Smart fusion ratio calculations for optimal resource usage
 
+==== Better Rune Recycler ====
+Automates rune recycling with batch processing and comprehensive statistics (by [https://bestiaryarena.com/profile/btlucas btlucas]):
+* Automated recycling with configurable cycles and rune selection
+* Select exactly 3 runes to sacrifice per cycle with real-time validation
+* Real-time inventory tracking and statistics display during recycling
+* Batch processing with progress tracking and automatic inventory updates
+* Comprehensive statistics tracking (consumed runes, created runes, gold spent)
+
 ==== Better Yasir ====
 Enhances Yasir's traveling merchant shop with bulk transaction capabilities and smart pricing:
 * Adds quantity input fields for bulk buying and selling items
@@ -282,6 +290,7 @@ Centralized mod configuration and backup system with UI enhancements:
 * Favorites system to mark creatures with custom symbols (heart or stat icons) and Shiny Enemies feature for battles
 * Live player count display in header with 30-second updates and setup labels visibility toggle
 * Backup/restore configuration including active mods, settings, and game data with integrated settings panel
+* Firebase best runs upload: Upload your best runs to Firebase with password encryption, auto-upload when new best runs are recorded, and download runs as .txt files with $replay links
 
 ==== Outfiter ====
 Comprehensive outfit management system:

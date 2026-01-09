@@ -121,6 +121,100 @@ function getRaidPriority(raidName) {
     }
 }
 
+/**
+ * Get a per-raid setting, falling back to global setting if not set
+ * @param {string} raidName - Name of the raid
+ * @param {string} settingKey - Key of the setting to retrieve
+ * @returns {*} The setting value or undefined if not found
+ */
+function getRaidSetting(raidName, settingKey) {
+    try {
+        const settings = loadSettings();
+        const raidSettings = settings.raidSettings || {};
+        const raidSetting = raidSettings[raidName];
+        if (raidSetting && raidSetting.hasOwnProperty(settingKey)) {
+            return raidSetting[settingKey];
+        }
+        // Fall back to global setting
+        return settings[settingKey];
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting raid setting:', error);
+        const settings = loadSettings();
+        return settings[settingKey];
+    }
+}
+
+/**
+ * Get the setup method for a specific raid
+ * If per-raid setting is "default", uses global setupMethod
+ * @param {string} raidName - Name of the raid
+ * @returns {string} The setup method to use
+ */
+function getRaidSetupMethod(raidName) {
+    try {
+        const settings = loadSettings();
+        const raidSettings = settings.raidSettings || {};
+        const raidSetting = raidSettings[raidName];
+        if (raidSetting && raidSetting.setupMethod) {
+            // If "default" is set, use global setting
+            if (raidSetting.setupMethod === 'default') {
+                return settings.setupMethod || 'Auto-setup';
+            }
+            return raidSetting.setupMethod;
+        }
+        // Fall back to global setting
+        return settings.setupMethod || 'Auto-setup';
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting raid setup method:', error);
+        const settings = loadSettings();
+        return settings.setupMethod || 'Auto-setup';
+    }
+}
+
+/**
+ * Get the autoRefillStamina setting for a specific raid (per-raid boolean)
+ * @param {string} raidName - Name of the raid
+ * @returns {boolean} True if autoRefillStamina is enabled for this raid
+ */
+function getRaidAutoRefillStamina(raidName) {
+    try {
+        const settings = loadSettings();
+        const raidSettings = settings.raidSettings || {};
+        const raidSetting = raidSettings[raidName];
+        if (raidSetting && raidSetting.hasOwnProperty('autoRefillStamina')) {
+            return raidSetting.autoRefillStamina === true;
+        }
+        // Per-raid setting: default to true if not set
+        return true;
+    } catch (error) {
+        console.error('[Raid Hunter] Error getting raid autoRefillStamina:', error);
+        return true;
+    }
+}
+
+/**
+ * Check if a raid has custom per-raid settings
+ * @param {string} raidName - Name of the raid
+ * @returns {boolean} True if the raid has custom settings
+ */
+function hasRaidCustomSettings(raidName) {
+    try {
+        const settings = loadSettings();
+        const raidSettings = settings.raidSettings || {};
+        const raidSetting = raidSettings[raidName];
+        if (!raidSetting) {
+            return false;
+        }
+        // Check if autoRefillStamina is explicitly set (not default)
+        // or if setupMethod is set and not 'default'
+        return raidSetting.hasOwnProperty('autoRefillStamina') || 
+               (raidSetting.setupMethod && raidSetting.setupMethod !== 'default');
+    } catch (error) {
+        console.error('[Raid Hunter] Error checking raid custom settings:', error);
+        return false;
+    }
+}
+
 // Track if all mods have finished loading
 let allModsLoaded = false;
 
@@ -1568,6 +1662,9 @@ let autoFloorGameEndHandler = null;
 let autoFloorGameEndSubscription = null;
 let autoFloorBoardSubscription = null;
 let autoFloorLastProcessedSeed = null;
+
+// Track currently open context menu { overlay, menu, closeMenu }
+let openContextMenu = null;
 
 // Page visibility handling for foreground/background transitions
 let pageVisibilityHandler = null;
@@ -3890,8 +3987,8 @@ async function handleEventOrRaid(roomId) {
         return;
     }
     
-    // Get user's selected setup method (settings already loaded above)
-    const setupMethod = settings.setupMethod || 'Auto-setup';
+    // Get user's selected setup method (per-raid or global)
+    const setupMethod = getRaidSetupMethod(raidName);
     
     // Find and click the appropriate setup button
     console.log(`[Raid Hunter] Looking for ${setupMethod} button...`);
@@ -3954,9 +4051,10 @@ async function handleEventOrRaid(roomId) {
         console.error('[Raid Hunter] Error calculating sleep duration:', error);
     }
 
-    // Enable Bestiary Automator's autorefill stamina if Raid Hunter setting is enabled
-    if (settings.autoRefillStamina) {
-        console.log('[Raid Hunter] Auto-refill stamina enabled - enabling Bestiary Automator autorefill...');
+    // Enable Bestiary Automator's autorefill stamina if per-raid or global setting is enabled
+    const autoRefillStamina = getRaidAutoRefillStamina(raidName);
+    if (autoRefillStamina) {
+        console.log(`[Raid Hunter] Auto-refill stamina enabled for ${raidName} - enabling Bestiary Automator autorefill...`);
         // Add a small delay to ensure Bestiary Automator is fully initialized in Chrome
         setTimeout(() => {
             const success = enableBestiaryAutomatorStaminaRefill();
@@ -5424,6 +5522,19 @@ function createRaidMapSelection() {
             raidDiv.appendChild(checkbox);
             raidDiv.appendChild(label);
             
+            // Add right-click context menu for per-raid settings
+            raidDiv.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                createRaidContextMenu(raidName, e.clientX, e.clientY, () => {
+                    // Refresh custom settings indicator after menu closes
+                    updateRaidCustomSettingsIndicator(raidDiv, raidName);
+                });
+            });
+            
+            // Add custom settings indicator if raid has custom settings
+            updateRaidCustomSettingsIndicator(raidDiv, raidName);
+            
             // Add "Event" badge only for raids NOT in the hardcoded EVENT_TEXTS list
             // These are truly dynamic events that are not statically defined
             if (!EVENT_TEXTS.includes(raidName)) {
@@ -5616,6 +5727,431 @@ function stylePrioritySelect(selectEl) {
     }
 }
 
+/**
+ * Update or create the custom settings indicator for a raid
+ * @param {HTMLElement} raidDiv - The raid div element
+ * @param {string} raidName - Name of the raid
+ */
+function updateRaidCustomSettingsIndicator(raidDiv, raidName) {
+    // Remove existing indicator if present
+    const existingIndicator = raidDiv.querySelector('.raid-custom-settings-indicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+    
+    // Add indicator if raid has custom settings
+    if (hasRaidCustomSettings(raidName)) {
+        const indicator = document.createElement('span');
+        indicator.className = 'raid-custom-settings-indicator pixel-font-16';
+        indicator.textContent = '⚙';
+        indicator.title = 'Custom settings configured';
+        indicator.style.cssText = `
+            font-size: 14px;
+            color: #ff4444;
+            margin-right: 6px;
+            cursor: help;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        
+        // Insert after the label, before Event badge or priority dropdown
+        const label = raidDiv.querySelector('label');
+        if (label) {
+            // Find the next element after label (could be Event badge, priority select, or floor select)
+            let insertBefore = null;
+            let current = label.nextSibling;
+            while (current) {
+                // Insert before first select element or Event badge
+                if (current.tagName === 'SELECT' || 
+                    (current.classList && current.classList.contains('pixel-font-16') && current.textContent === t('mods.raidHunter.event'))) {
+                    insertBefore = current;
+                    break;
+                }
+                current = current.nextSibling;
+            }
+            
+            if (insertBefore) {
+                raidDiv.insertBefore(indicator, insertBefore);
+            } else {
+                // If no suitable position found, append after label
+                label.parentNode.insertBefore(indicator, label.nextSibling);
+            }
+        } else {
+            // Fallback: append to raidDiv
+            raidDiv.appendChild(indicator);
+        }
+    }
+}
+
+/**
+ * Creates a context menu for setting per-raid options (Autorefill Stamina and Setup Method)
+ * @param {string} raidName - Name of the raid
+ * @param {number} x - X position for the menu
+ * @param {number} y - Y position for the menu
+ * @param {Function} onClose - Callback when menu is closed
+ * @returns {HTMLElement} The context menu element
+ */
+function createRaidContextMenu(raidName, x, y, onClose) {
+    // Close any existing context menu before opening a new one
+    if (openContextMenu && openContextMenu.closeMenu) {
+        openContextMenu.closeMenu();
+    }
+    
+    const settings = loadSettings();
+    const raidSettings = settings.raidSettings || {};
+    const raidSetting = raidSettings[raidName] || {};
+    
+    // Get current values
+    const currentAutoRefillStamina = raidSetting.hasOwnProperty('autoRefillStamina') 
+        ? raidSetting.autoRefillStamina 
+        : true; // Default to true
+    const currentSetupMethod = raidSetting.setupMethod || 'default';
+    
+    // Create overlay to close menu on outside click
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9998';
+    overlay.style.backgroundColor = 'transparent';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.cursor = 'default';
+    
+    // Create menu container
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = '9999';
+    menu.style.minWidth = '250px';
+    menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+    menu.style.border = '4px solid transparent';
+    menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+    menu.style.borderRadius = '6px';
+    menu.style.padding = '12px';
+    menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+    
+    // Title
+    const title = document.createElement('div');
+    title.className = 'pixel-font-16';
+    title.textContent = raidName;
+    title.style.color = COLOR_ACCENT;
+    title.style.fontWeight = 'bold';
+    title.style.marginBottom = '12px';
+    title.style.textAlign = 'center';
+    menu.appendChild(title);
+    
+    // Autorefill Stamina checkbox container
+    const staminaContainer = document.createElement('div');
+    staminaContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+    `;
+    
+    const staminaCheckbox = document.createElement('input');
+    staminaCheckbox.type = 'checkbox';
+    staminaCheckbox.checked = currentAutoRefillStamina;
+    staminaCheckbox.style.cssText = `
+        width: 18px;
+        height: 18px;
+        accent-color: ${COLOR_ACCENT};
+        cursor: pointer;
+    `;
+    
+    const staminaLabel = document.createElement('label');
+    staminaLabel.textContent = t('mods.raidHunter.autoRefillStamina') || 'Autorefill Stamina';
+    staminaLabel.className = 'pixel-font-14';
+    staminaLabel.style.cssText = `
+        color: ${COLOR_WHITE};
+        font-size: 13px;
+        cursor: pointer;
+        flex: 1;
+    `;
+    staminaLabel.setAttribute('for', `raid-stamina-${raidName.replace(/[^a-zA-Z0-9]/g, '-')}`);
+    staminaCheckbox.id = `raid-stamina-${raidName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+    
+    staminaContainer.appendChild(staminaCheckbox);
+    staminaContainer.appendChild(staminaLabel);
+    menu.appendChild(staminaContainer);
+    
+    // Setup Method dropdown container
+    const setupContainer = document.createElement('div');
+    setupContainer.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 12px;
+    `;
+    
+    const setupLabel = document.createElement('label');
+    setupLabel.textContent = 'Setup Method';
+    setupLabel.className = 'pixel-font-14';
+    setupLabel.style.cssText = `
+        color: ${COLOR_WHITE};
+        font-size: 13px;
+        font-weight: bold;
+    `;
+    setupContainer.appendChild(setupLabel);
+    
+    const setupSelect = document.createElement('select');
+    setupSelect.className = 'pixel-font-14';
+    setupSelect.style.cssText = `
+        width: 100%;
+        padding: 6px;
+        background: ${COLOR_DARK_GRAY};
+        border: 1px solid ${COLOR_ACCENT};
+        color: ${COLOR_WHITE};
+        border-radius: 3px;
+        font-size: 13px;
+        cursor: pointer;
+        box-sizing: border-box;
+    `;
+    
+    // Add "default" as first option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = 'default';
+    defaultOption.textContent = 'default';
+    setupSelect.appendChild(defaultOption);
+    
+    // Add all available setup options
+    const availableOptions = getAvailableSetupOptions();
+    availableOptions.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        setupSelect.appendChild(optionElement);
+    });
+    
+    setupSelect.value = currentSetupMethod;
+    setupContainer.appendChild(setupSelect);
+    menu.appendChild(setupContainer);
+    
+    // Button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.style.display = 'flex';
+    buttonContainer.style.gap = '6px';
+    buttonContainer.style.justifyContent = 'center';
+    
+    // Save button
+    const saveButton = document.createElement('button');
+    saveButton.className = 'pixel-font-14';
+    saveButton.textContent = 'Save';
+    saveButton.style.cssText = `
+        width: 70px;
+        height: 28px;
+        background: #1a3a1a;
+        color: #4CAF50;
+        border: 1px solid #555;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+    `;
+    
+    saveButton.addEventListener('mouseenter', () => {
+        saveButton.style.backgroundColor = '#2a4a2a';
+        saveButton.style.borderColor = '#4CAF50';
+    });
+    saveButton.addEventListener('mouseleave', () => {
+        saveButton.style.backgroundColor = '#1a3a1a';
+        saveButton.style.borderColor = '#555';
+    });
+    
+    saveButton.addEventListener('click', () => {
+        // Save per-raid settings
+        const settings = loadSettings();
+        if (!settings.raidSettings) {
+            settings.raidSettings = {};
+        }
+        if (!settings.raidSettings[raidName]) {
+            settings.raidSettings[raidName] = {};
+        }
+        
+        settings.raidSettings[raidName].autoRefillStamina = staminaCheckbox.checked;
+        settings.raidSettings[raidName].setupMethod = setupSelect.value;
+        
+        // Save to localStorage
+        localStorage.setItem('raidHunterSettings', JSON.stringify(settings));
+        console.log(`[Raid Hunter] Saved per-raid settings for ${raidName}:`, settings.raidSettings[raidName]);
+        
+        closeMenu();
+    });
+    
+    // Clear button (only show if custom settings exist)
+    let clearButton = null;
+    if (hasRaidCustomSettings(raidName)) {
+        clearButton = document.createElement('button');
+        clearButton.className = 'pixel-font-14';
+        clearButton.textContent = 'Clear';
+        clearButton.style.cssText = `
+            width: 70px;
+            height: 28px;
+            background: #1a1a1a;
+            color: #888888;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        `;
+        
+        clearButton.addEventListener('mouseenter', () => {
+            clearButton.style.backgroundColor = '#2a2a2a';
+            clearButton.style.color = '#ff6b6b';
+        });
+        clearButton.addEventListener('mouseleave', () => {
+            clearButton.style.backgroundColor = '#1a1a1a';
+            clearButton.style.color = '#888888';
+        });
+        
+        clearButton.addEventListener('click', () => {
+            // Clear per-raid settings
+            const settings = loadSettings();
+            if (settings.raidSettings && settings.raidSettings[raidName]) {
+                delete settings.raidSettings[raidName];
+                // Clean up empty raidSettings object
+                if (Object.keys(settings.raidSettings).length === 0) {
+                    delete settings.raidSettings;
+                }
+                // Save to localStorage
+                localStorage.setItem('raidHunterSettings', JSON.stringify(settings));
+                console.log(`[Raid Hunter] Cleared per-raid settings for ${raidName}`);
+            }
+            // Refresh the indicator after clearing
+            if (onClose) {
+                onClose();
+            }
+            closeMenu();
+        });
+    }
+    
+    // Cancel button
+    const cancelButton = document.createElement('button');
+    cancelButton.className = 'pixel-font-14';
+    cancelButton.textContent = 'Cancel';
+    cancelButton.style.cssText = `
+        width: 70px;
+        height: 28px;
+        background: #1a1a1a;
+        color: #888888;
+        border: 1px solid #555;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+    `;
+    
+    cancelButton.addEventListener('mouseenter', () => {
+        cancelButton.style.backgroundColor = '#2a2a2a';
+        cancelButton.style.color = '#4CAF50';
+    });
+    cancelButton.addEventListener('mouseleave', () => {
+        cancelButton.style.backgroundColor = '#1a1a1a';
+        cancelButton.style.color = '#888888';
+    });
+    
+    cancelButton.addEventListener('click', closeMenu);
+    
+    buttonContainer.appendChild(saveButton);
+    if (clearButton) {
+        buttonContainer.appendChild(clearButton);
+    }
+    buttonContainer.appendChild(cancelButton);
+    menu.appendChild(buttonContainer);
+    
+    // Close menu function
+    function closeMenu() {
+        // Remove event listeners before removing from DOM
+        overlay.removeEventListener('mousedown', overlayClickHandler);
+        overlay.removeEventListener('click', overlayClickHandler);
+        document.removeEventListener('keydown', escHandler);
+        
+        // Remove modal click handlers if they exist
+        if (openContextMenu && openContextMenu.modalClickHandler && openContextMenu.modalContent) {
+            openContextMenu.modalContent.removeEventListener('mousedown', openContextMenu.modalClickHandler);
+            openContextMenu.modalContent.removeEventListener('click', openContextMenu.modalClickHandler);
+        }
+        
+        if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+        if (menu.parentNode) {
+            menu.parentNode.removeChild(menu);
+        }
+        // Clear the global reference
+        if (openContextMenu && (openContextMenu.overlay === overlay || openContextMenu.menu === menu)) {
+            openContextMenu = null;
+        }
+        if (onClose) {
+            onClose();
+        }
+    }
+    
+    // Store reference to this menu
+    openContextMenu = {
+        overlay: overlay,
+        menu: menu,
+        closeMenu: closeMenu
+    };
+    
+    // Close on overlay click/mousedown (use mousedown for better reliability)
+    const overlayClickHandler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenu();
+    };
+    
+    // Close on ESC key
+    const escHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeMenu();
+        }
+    };
+    
+    // Append to document first (overlay first, then menu on top)
+    document.body.appendChild(overlay);
+    document.body.appendChild(menu);
+    
+    // Attach event listeners after elements are in DOM
+    overlay.addEventListener('mousedown', overlayClickHandler);
+    overlay.addEventListener('click', overlayClickHandler);
+    document.addEventListener('keydown', escHandler);
+    
+    // Also close menu when clicking inside the settings modal (but outside the menu)
+    const modalContent = document.querySelector('[role="dialog"][data-state="open"]');
+    if (modalContent) {
+        const modalClickHandler = (e) => {
+            // Only close if click is not on the menu itself
+            if (!menu.contains(e.target)) {
+                closeMenu();
+                modalContent.removeEventListener('mousedown', modalClickHandler);
+                modalContent.removeEventListener('click', modalClickHandler);
+            }
+        };
+        modalContent.addEventListener('mousedown', modalClickHandler);
+        modalContent.addEventListener('click', modalClickHandler);
+        
+        // Store handler for cleanup
+        openContextMenu.modalClickHandler = modalClickHandler;
+        openContextMenu.modalContent = modalContent;
+    }
+    
+    // Prevent clicks on menu from closing it (stop propagation to overlay)
+    menu.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+    });
+    menu.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    return menu;
+}
+
 // Default settings with validation
 const DEFAULT_SETTINGS = {
     raidDelay: DEFAULT_RAID_START_DELAY,
@@ -5625,7 +6161,8 @@ const DEFAULT_SETTINGS = {
     setupMethod: 'Auto-setup',  // Default to Auto-setup (translation applied at display time)
     enabledRaidMaps: [],
     raidPriorities: {}, // raidName -> 'low' | 'medium' | 'high'
-    raidFloors: {} // raidName -> 0-15
+    raidFloors: {}, // raidName -> 0-15
+    raidSettings: {} // raidName -> { autoRefillStamina: boolean, setupMethod: string }
 };
 
 // Settings validation functions
@@ -5718,6 +6255,28 @@ function sanitizeSettings(settings) {
         });
     } else {
         sanitized.raidFloors = {};
+    }
+    
+    // Validate raid settings (per-raid autoRefillStamina and setupMethod)
+    if (settings.raidSettings && typeof settings.raidSettings === 'object') {
+        sanitized.raidSettings = {};
+        Object.entries(settings.raidSettings).forEach(([raidName, raidSetting]) => {
+            if (raidSetting && typeof raidSetting === 'object') {
+                sanitized.raidSettings[raidName] = {};
+                // Validate autoRefillStamina
+                if (raidSetting.hasOwnProperty('autoRefillStamina')) {
+                    sanitized.raidSettings[raidName].autoRefillStamina = validateBoolean(raidSetting.autoRefillStamina) 
+                        ? raidSetting.autoRefillStamina 
+                        : false;
+                }
+                // Validate setupMethod (must be string, can be "default" or any setup option)
+                if (raidSetting.setupMethod && typeof raidSetting.setupMethod === 'string') {
+                    sanitized.raidSettings[raidName].setupMethod = raidSetting.setupMethod;
+                }
+            }
+        });
+    } else {
+        sanitized.raidSettings = {};
     }
     
     return sanitized;

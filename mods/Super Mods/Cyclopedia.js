@@ -8608,13 +8608,20 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Speedrun run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
               
-              // Check if this run is lower than "Your Best" and add warning icon
+              // Check if this run is invalid (lower than "Your Best" OR has level 1 creatures)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
-              if (yourTicks > 0 && run.time < yourTicks) {
+              const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
+              
+              // Check if any creature in the setup has level 1
+              const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
+              
+              if (isTimeInvalid || hasLevel1Creature) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
-                warningIcon.title = 'This run might be invalid';
+                warningIcon.title = isTimeInvalid && hasLevel1Creature ? 'This run might be invalid (faster than your best time and has level 1 creatures)' : 
+                                   isTimeInvalid ? 'This run might be invalid (faster than your best time)' : 
+                                   'This run might be invalid (has level 1 creatures)';
                 warningIcon.style.cursor = 'help';
                 warningIcon.style.position = 'absolute';
                 warningIcon.style.left = '1px';
@@ -8632,7 +8639,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: ${run.time} < ${yourTicks}`);
+                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), hasLevel1=${hasLevel1Creature}`);
               } else {
                 timeText.textContent = formatLocalRunTime(run.time);
                 timeCell.appendChild(timeText);
@@ -9125,9 +9132,41 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             floorCell.style.alignItems = 'center';
             floorCell.style.justifyContent = 'center';
             floorCell.style.gap = '4px';
+            floorCell.style.position = 'relative';
+            
+            // Check if any creature in the setup has level 1
+            const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
+            
             if (run.floor !== undefined && run.floor !== null) {
-              floorCell.textContent = run.floor;
+              const floorText = document.createElement('span');
+              floorText.textContent = run.floor;
               console.log(`[Cyclopedia] Floor run ${i + 1} floor: ${run.floor}`);
+              
+              if (hasLevel1Creature) {
+                // Create warning icon separately for left alignment
+                const warningIcon = document.createElement('span');
+                warningIcon.innerHTML = '⚠️';
+                warningIcon.title = 'This run might be invalid (has level 1 creatures)';
+                warningIcon.style.cursor = 'help';
+                warningIcon.style.position = 'absolute';
+                warningIcon.style.left = '1px';
+                warningIcon.style.fontSize = '10px';
+                warningIcon.style.zIndex = '1';
+                
+                // Create floor text centered with left margin to avoid overlap
+                floorText.style.textAlign = 'center';
+                floorText.style.flex = '1';
+                floorText.style.marginLeft = '12px';
+                
+                floorCell.appendChild(warningIcon);
+                floorCell.appendChild(floorText);
+                
+                // Make the entire row red
+                row.style.color = '#ff6b6b';
+                console.log(`[Cyclopedia] Added warning icon for floor run ${i + 1}: hasLevel1=${hasLevel1Creature}`);
+              } else {
+                floorCell.appendChild(floorText);
+              }
             } else {
               floorCell.textContent = 'N/A';
               console.log(`[Cyclopedia] Floor run ${i + 1} has no floor property`);
@@ -9647,19 +9686,24 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Rank run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
               
-              // Check if this run is invalid (either faster than your best time OR worse rank than your best)
+              // Check if this run is invalid (either faster than your best time OR worse rank than your best OR has level 1 creatures)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const yourBestRank = currentYourRooms?.[selectedMap]?.rank || 0;
               const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
               const isRankInvalid = yourBestRank > 0 && run.points > yourBestRank;
               
-              if (isTimeInvalid || isRankInvalid) {
+              // Check if any creature in the setup has level 1
+              const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
+              
+              if (isTimeInvalid || isRankInvalid || hasLevel1Creature) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
-                warningIcon.title = isTimeInvalid && isRankInvalid ? 'This run might be invalid (both time and rank)' : 
-                                   isTimeInvalid ? 'This run might be invalid (faster than your best time)' : 
-                                   'This run might be invalid (worse rank than your best)';
+                const reasons = [];
+                if (isTimeInvalid) reasons.push('faster than your best time');
+                if (isRankInvalid) reasons.push('worse rank than your best');
+                if (hasLevel1Creature) reasons.push('has level 1 creatures');
+                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
                 warningIcon.style.cursor = 'help';
                 warningIcon.style.position = 'absolute';
                 warningIcon.style.left = '1px';
@@ -9678,7 +9722,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank})`);
+                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank}), hasLevel1=${hasLevel1Creature}`);
               } else {
                 const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
                 timeText.textContent = timeValue;

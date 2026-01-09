@@ -1025,6 +1025,7 @@ const superModNames = [
   'Better Forge.js',
   'Better Highscores.js',
   'Better Hy\'genie.js',
+  'Better Rune Recycler.js',
   'Better Setups.js',
   'Better Tasker.js',
   'Better Yasir.js',
