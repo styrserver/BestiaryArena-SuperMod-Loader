@@ -54,6 +54,7 @@ export const SUPER_MODS = [
   'Better Forge.js',
   'Better Highscores.js',
   'Better Hy\'genie.js',
+  'Better Rune Recycler.js',
   'Better Setups.js',
   'Better Tasker.js',
   'Better Yasir.js',
@@ -64,6 +65,7 @@ export const SUPER_MODS = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
+  'Rank Pointer.js',
   'RunTracker.js',
   'Stamina Optimizer.js'
 ];

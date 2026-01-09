@@ -989,6 +989,7 @@ const modDescriptions = {
   'Better Forge': 'Enhanced forge interface and functionality.',
   'Better Highscores': 'Improved highscores display and features.',
   'Better Hy\'genie': 'Enhanced Hy\'genie interaction features.',
+  'Better Rune Recycler': 'Automates rune recycling - use multiple Recycle Runes automatically.',
   'Better Setups': 'Improved setup management and organization.',
   'Better Tasker': 'Enhanced task automation features.',
   'Better Yasir': 'Improved Yasir interaction and features.',
@@ -997,6 +998,7 @@ const modDescriptions = {
   'Hunt Analyzer': 'Analyze and optimize hunting strategies.',
   'Raid Hunter': 'Enhanced raid hunting features and tracking.',
   'Manual Runner': 'Run manual mode until victory with automatic floor progression.',
+  'Rank Pointer': 'Track and display your ranking position in leaderboards.',
   'Stamina Optimizer': 'Optimize stamina usage and management.'
 };
 
@@ -1011,6 +1013,7 @@ const superModNames = [
   'Better Forge.js',
   'Better Highscores.js',
   'Better Hy\'genie.js',
+  'Better Rune Recycler.js',
   'Better Setups.js',
   'Better Tasker.js',
   'Better Yasir.js',
@@ -1021,6 +1024,7 @@ const superModNames = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
+  'Rank Pointer.js',
   'RunTracker.js',
   'Stamina Optimizer.js'
 ];
