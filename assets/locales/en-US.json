@@ -891,7 +891,7 @@
       "remove": "Remove",
       "confirm": "Confirm",
       "raidStartDelay": "Raid Start Delay (seconds)",
-      "raidMapSelection": "Select which raid maps to hunt:",
+      "raidMapSelection": "Raid map list",
       "autoRefillStamina": "Auto-refill Stamina",
       "fasterAutoplay": "Faster Autoplay",
       "enableAutoplant": "Enable Autoplant",

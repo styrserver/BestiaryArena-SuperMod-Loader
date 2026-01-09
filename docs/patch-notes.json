@@ -4,6 +4,17 @@
   },
   "notes": [
     {
+      "version": "3.3.0",
+      "changes": [
+        { "type": "added", "mod": "Better Rune Recycler", "text": "NEW MOD: Better Rune Recycler! Automated rune recycling with batch processing and statistics tracking." },
+        { "type": "added", "mod": "Mod Settings", "text": "Created Firebase uploading of best runs." },
+        { "type": "added", "mod": "Raid Hunter", "text": "Added right-click context menu for per-raid settings." },
+        { "type": "fixed", "mod": "Better Forge", "text": "Fixed dust being set to 0 after auto-upgrading equipment due to race condition in state updates." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Browser refresh now correctly handles hh:mm:ss time format." },
+        { "type": "fixed", "mod": "Quests", "text": "Small fix." }
+      ]
+    },
+    {
       "version": "3.2.12",
       "changes": [
         { "type": "fixed", "mod": "Autoseller", "text": "New creatures now default to Keep column instead of Sell/Squeeze." },
