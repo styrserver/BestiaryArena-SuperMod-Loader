@@ -998,7 +998,6 @@ const modDescriptions = {
   'Hunt Analyzer': 'Analyze and optimize hunting strategies.',
   'Raid Hunter': 'Enhanced raid hunting features and tracking.',
   'Manual Runner': 'Run manual mode until victory with automatic floor progression.',
-  'Rank Pointer': 'Track and display your ranking position in leaderboards.',
   'Stamina Optimizer': 'Optimize stamina usage and management.'
 };
 
@@ -1024,7 +1023,6 @@ const superModNames = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
-  'Rank Pointer.js',
   'RunTracker.js',
   'Stamina Optimizer.js'
 ];

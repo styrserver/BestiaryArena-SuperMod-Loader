@@ -65,7 +65,6 @@ export const SUPER_MODS = [
   'Outfiter.js',
   'Raid_Hunter.js',
   'Manual Runner.js',
-  'Rank Pointer.js',
   'RunTracker.js',
   'Stamina Optimizer.js'
 ];
