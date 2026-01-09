@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.1",
+      "changes": [
+        { "type": "fixed", "mod": "Mod Settings", "text": "Translations and bug fixes." },
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.3.0",
       "changes": [
         { "type": "added", "mod": "Better Rune Recycler", "text": "NEW MOD: Better Rune Recycler! Automated rune recycling with batch processing and statistics tracking." },
