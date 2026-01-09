@@ -3393,36 +3393,36 @@ function showSettingsModal() {
             </label>
           </div>
           <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
-            <div style="margin-bottom: 15px;">
-              <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help;" title="Upload your best runs to Firebase with password encryption. Other players can fetch and download your runs using your player name and password. Runs are encrypted client-side before upload, ensuring privacy. You can also download runs as .txt files with $replay links for easy sharing.">⚠️ Firebase Best Runs Upload</h4>
+            <div style="margin-bottom: 15px; text-align: center;">
+              <h4 style="margin: 0 0 15px 0; color: #ffaa00; font-size: 14px; cursor: help;" title="${t('mods.betterUI.firebaseBestRunsUploadTooltip')}">${t('mods.betterUI.firebaseBestRunsUploadTitle')}</h4>
             </div>
             <div style="margin-bottom: 15px;">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                 <input type="checkbox" id="firebase-runs-upload-toggle" style="transform: scale(1.2);">
-                <span style="color: #ccc;">Upload best runs to Firebase</span>
+                <span style="color: #ccc;">${t('mods.betterUI.firebaseBestRunsUploadLabel')}</span>
               </label>
             </div>
             <div style="margin-bottom: 15px;">
               <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
                 <input type="checkbox" id="auto-upload-runs-toggle" style="transform: scale(1.2);">
-                <span style="color: #ccc;">Auto-upload when new best run is recorded</span>
+                <span style="color: #ccc;">${t('mods.betterUI.firebaseAutoUploadRunsLabel')}</span>
               </label>
             </div>
             <div style="margin-bottom: 15px;">
               <label style="display: flex; flex-direction: column; gap: 5px;">
-                <span style="color: #ccc; font-size: 13px;">Encryption Password (5-20 characters):</span>
-                <input type="password" id="firebase-runs-password" placeholder="Enter password (5-20 characters)" maxlength="20" style="width: 100%; padding: 6px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; pointer-events: auto;" onclick="event.stopPropagation();">
+                <span style="color: #ccc; font-size: 13px;">${t('mods.betterUI.firebaseRunsPasswordLabel')}</span>
+                <input type="password" id="firebase-runs-password" placeholder="${t('mods.betterUI.firebaseRunsPasswordPlaceholder')}" maxlength="20" style="width: 100%; padding: 6px; border: 1px solid #555; background: #2a2a2a; color: #fff; border-radius: 4px; pointer-events: auto;" onclick="event.stopPropagation();">
               </label>
             </div>
-            <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-              <button id="upload-runs-btn" class="btn btn-primary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto; opacity: 0.5; cursor: not-allowed;" disabled onclick="event.stopPropagation();">
-                Upload Now
+            <div style="margin-bottom: 15px; display: flex; gap: 8px; flex-wrap: nowrap;">
+              <button id="upload-runs-btn" class="btn btn-primary" style="flex: 1; min-width: 0; pointer-events: auto; opacity: 0.5; cursor: not-allowed; padding: 8px 12px; background: #4a90e2; border: 1px solid #4a90e2; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" disabled onclick="event.stopPropagation();">
+                ${t('mods.betterUI.firebaseRunsUploadButton')}
               </button>
-              <button id="download-runs-btn" class="btn btn-secondary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto;" onclick="event.stopPropagation();">
-                Download as .txt
+              <button id="download-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto; padding: 8px 12px; background: #28a745; border: 1px solid #28a745; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" onmouseover="this.style.background='#218838'; this.style.borderColor='#218838';" onmouseout="this.style.background='#28a745'; this.style.borderColor='#28a745';" onclick="event.stopPropagation();">
+                ${t('mods.betterUI.firebaseRunsDownloadButton')}
               </button>
-              <button id="delete-runs-btn" class="btn btn-secondary" style="flex: 1 1 0%; min-width: 100px; pointer-events: auto; background: #dc3545; border-color: #dc3545;" onclick="event.stopPropagation();">
-                Delete Runs
+              <button id="delete-runs-btn" class="btn btn-secondary" style="flex: 1; min-width: 0; pointer-events: auto; padding: 8px 12px; background: #dc3545; border: 1px solid #dc3545; border-radius: 4px; color: #fff; font-weight: 500; transition: all 0.2s ease; font-size: 13px;" onmouseover="this.style.background='#c82333'; this.style.borderColor='#c82333';" onmouseout="this.style.background='#dc3545'; this.style.borderColor='#dc3545';" onclick="event.stopPropagation();">
+                ${t('mods.betterUI.firebaseRunsDeleteButton')}
               </button>
             </div>
             <div id="firebase-runs-status" style="margin-top: 10px; font-size: 12px; color: #7f8fa4; min-height: 20px;">
@@ -4029,7 +4029,14 @@ function showSettingsModal() {
           uploadRunsBtn.disabled = !hasPassword;
           uploadRunsBtn.style.opacity = hasPassword ? '1' : '0.5';
           uploadRunsBtn.style.cursor = hasPassword ? 'pointer' : 'not-allowed';
-          uploadRunsBtn.title = hasPassword ? '' : 'Please set a password (5-20 characters) first';
+          uploadRunsBtn.title = hasPassword ? '' : t('mods.betterUI.firebaseRunsPasswordRequiredTooltip');
+          if (hasPassword) {
+            uploadRunsBtn.onmouseover = function() { this.style.background = '#357abd'; this.style.borderColor = '#357abd'; };
+            uploadRunsBtn.onmouseout = function() { this.style.background = '#4a90e2'; this.style.borderColor = '#4a90e2'; };
+          } else {
+            uploadRunsBtn.onmouseover = null;
+            uploadRunsBtn.onmouseout = null;
+          }
         }
         
         // Update checkbox states
@@ -4067,9 +4074,9 @@ function showSettingsModal() {
       if (firebaseRunsPasswordInput) {
         // Don't show the actual password, but show if one is set
         if (config.firebaseRunsPassword) {
-          firebaseRunsPasswordInput.placeholder = 'Password set (enter new to change)';
+          firebaseRunsPasswordInput.placeholder = t('mods.betterUI.firebaseRunsPasswordSetPlaceholder');
         } else {
-          firebaseRunsPasswordInput.placeholder = 'Enter password (5-20 characters)';
+          firebaseRunsPasswordInput.placeholder = t('mods.betterUI.firebaseRunsPasswordPlaceholder');
         }
         
         // Track if password was just saved to prevent double-saving on blur
@@ -4092,13 +4099,13 @@ function showSettingsModal() {
           
           // Validate password length
           if (password.length < 5) {
-            updateFirebaseStatus(statusDiv, 'Password must be at least 5 characters', '#dc3545');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordMinLength'), '#dc3545');
             firebaseRunsPasswordInput.focus();
             return;
           }
           
           if (password.length > 20) {
-            updateFirebaseStatus(statusDiv, 'Password must be at most 20 characters', '#dc3545');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordMaxLength'), '#dc3545');
             firebaseRunsPasswordInput.focus();
             return;
           }
@@ -4109,7 +4116,7 @@ function showSettingsModal() {
           // Password is valid, save it
           config.firebaseRunsPassword = password;
           saveConfig();
-          firebaseRunsPasswordInput.placeholder = 'Password set (enter new to change)';
+          firebaseRunsPasswordInput.placeholder = t('mods.betterUI.firebaseRunsPasswordSetPlaceholder');
           firebaseRunsPasswordInput.value = '';
           
           // Update upload button state
@@ -4117,25 +4124,25 @@ function showSettingsModal() {
           
           // If password changed and upload is enabled, re-upload to Firebase with new password
           if (passwordChanged && config.enableFirebaseRunsUpload) {
-            updateFirebaseStatus(statusDiv, 'Password changed. Re-uploading to Firebase...', '#7f8fa4');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordChanged'), '#7f8fa4');
             
             // Re-upload with new password
             uploadBestRuns().then(result => {
               if (result.success) {
                 const date = formatEUDateTime(config.lastFirebaseRunsUpload);
-                updateFirebaseStatus(statusDiv, `Password changed and re-uploaded: ${date}`, '#4ade80');
+                updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsPasswordChangedReuploaded', { date }), '#4ade80');
               } else {
-                updateFirebaseStatus(statusDiv, `Password saved, but re-upload failed: ${result.error || 'Unknown error'}`, '#ffaa00');
+                updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsPasswordSavedReuploadFailed', { error: result.error || t('mods.betterUI.firebaseRunsUploadFailed') }), '#ffaa00');
               }
             }).catch(error => {
               console.error('[Mod Settings] Error re-uploading after password change:', error);
-              updateFirebaseStatus(statusDiv, 'Password saved, but re-upload failed', '#ffaa00');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordSavedReuploadFailedUnknown'), '#ffaa00');
             });
           } else {
             // Clear status or show success
-            updateFirebaseStatus(statusDiv, 'Password saved', '#4ade80');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordSaved'), '#4ade80');
             setTimeout(() => {
-              if (statusDiv && statusDiv.textContent === 'Password saved') {
+              if (statusDiv && statusDiv.textContent === t('mods.betterUI.firebaseRunsPasswordSaved')) {
                 statusDiv.textContent = '';
               }
             }, 2000);
@@ -4169,18 +4176,18 @@ function showSettingsModal() {
           
           // Double-check password before uploading
           if (!config.firebaseRunsPassword || config.firebaseRunsPassword.length < 5) {
-            updateFirebaseStatus(statusDiv, 'Error: Password not set or invalid', '#dc3545');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPasswordNotSet'), '#dc3545');
             return;
           }
           
-          updateFirebaseStatus(statusDiv, 'Uploading...', '#7f8fa4');
+          updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsUploading'), '#7f8fa4');
           
           const result = await uploadBestRuns();
           if (result.success) {
             const date = formatEUDateTime(config.lastFirebaseRunsUpload);
-            updateFirebaseStatus(statusDiv, `Last uploaded: ${date}`, '#4ade80');
+            updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsLastUploaded', { date }), '#4ade80');
           } else {
-            updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Upload failed'}`, '#dc3545');
+            updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsUploadError', { error: result.error || t('mods.betterUI.firebaseRunsUploadFailed') }), '#dc3545');
           }
         });
       }
@@ -4192,21 +4199,21 @@ function showSettingsModal() {
           e.stopPropagation();
           
           // Ask user for source
-          const source = confirm('Download from Firebase? (Cancel for local)') ? 'firebase' : 'local';
+          const source = confirm(t('mods.betterUI.firebaseRunsDownloadFromFirebase')) ? 'firebase' : 'local';
           
           if (source === 'firebase') {
             // Single prompt for both username and password
-            const input = prompt('Enter player name and password:\nFormat: PlayerName:Password\n\nExample: MyPlayer:test123');
+            const input = prompt(t('mods.betterUI.firebaseRunsEnterPlayerPassword'));
             
             if (!input) {
-              updateFirebaseStatus(statusDiv, 'Download cancelled', '#7f8fa4');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDownloadCancelled'), '#7f8fa4');
               return;
             }
             
             // Parse input (format: PlayerName:Password)
             const parts = input.split(':');
             if (parts.length !== 2) {
-              updateFirebaseStatus(statusDiv, 'Error: Invalid format. Use PlayerName:Password', '#dc3545');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsInvalidFormat'), '#dc3545');
               return;
             }
             
@@ -4214,26 +4221,26 @@ function showSettingsModal() {
             const password = parts[1].trim();
             
             if (!playerName || !password) {
-              updateFirebaseStatus(statusDiv, 'Error: Player name and password are required', '#dc3545');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPlayerPasswordRequired'), '#dc3545');
               return;
             }
             
-            updateFirebaseStatus(statusDiv, 'Downloading from Firebase...', '#7f8fa4');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDownloadingFromFirebase'), '#7f8fa4');
             
             const result = await downloadRunsAsTxt(playerName, password, 'firebase');
             if (result.success) {
-              updateFirebaseStatus(statusDiv, 'Downloaded successfully', '#4ade80');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDownloadedSuccessfully'), '#4ade80');
             } else {
-              updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Download failed'}`, '#dc3545');
+              updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsDownloadError', { error: result.error || t('mods.betterUI.firebaseRunsDownloadFailed') }), '#dc3545');
             }
           } else {
-            updateFirebaseStatus(statusDiv, 'Downloading local runs...', '#7f8fa4');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDownloadingLocal'), '#7f8fa4');
             
             const result = await downloadRunsAsTxt(null, null, 'local');
             if (result.success) {
-              updateFirebaseStatus(statusDiv, 'Downloaded successfully', '#4ade80');
+              updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDownloadedSuccessfully'), '#4ade80');
             } else {
-              updateFirebaseStatus(statusDiv, `Error: ${result.error || 'Download failed'}`, '#dc3545');
+              updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsDownloadError', { error: result.error || t('mods.betterUI.firebaseRunsDownloadFailed') }), '#dc3545');
             }
           }
         });
@@ -4247,11 +4254,11 @@ function showSettingsModal() {
           
           const playerName = getCurrentPlayerName();
           if (!playerName) {
-            updateFirebaseStatus(statusDiv, 'Error: Player name not found', '#dc3545');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsPlayerNameNotFound'), '#dc3545');
             return;
           }
           
-          updateFirebaseStatus(statusDiv, 'Deleting...', '#7f8fa4');
+          updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDeleting'), '#7f8fa4');
           
           const success = await deleteRunsFromFirebase(playerName);
           if (success) {
@@ -4275,16 +4282,16 @@ function showSettingsModal() {
               autoUploadRunsToggle.checked = false;
             }
             if (firebaseRunsPasswordInput) {
-              firebaseRunsPasswordInput.placeholder = 'Enter password (5-20 characters)';
+              firebaseRunsPasswordInput.placeholder = t('mods.betterUI.firebaseRunsPasswordPlaceholder');
               firebaseRunsPasswordInput.value = '';
             }
             
             // Update button states
             updateUploadButtonState();
             
-            updateFirebaseStatus(statusDiv, 'Runs deleted successfully. Settings reset.', '#4ade80');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDeletedSuccessfully'), '#4ade80');
           } else {
-            updateFirebaseStatus(statusDiv, 'Error: Failed to delete runs', '#dc3545');
+            updateFirebaseStatus(statusDiv, t('mods.betterUI.firebaseRunsDeleteFailed'), '#dc3545');
           }
         });
       }
@@ -4292,7 +4299,7 @@ function showSettingsModal() {
       // Update status on load
       if (statusDiv && config.lastFirebaseRunsUpload) {
         const date = formatEUDateTime(config.lastFirebaseRunsUpload);
-        updateFirebaseStatus(statusDiv, `Last uploaded: ${date}`, '#4ade80');
+        updateFirebaseStatus(statusDiv, tReplace('mods.betterUI.firebaseRunsLastUploaded', { date }), '#4ade80');
       }
       
       const playercountCheckbox = content.querySelector('#playercount-toggle');

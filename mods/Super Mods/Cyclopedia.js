@@ -8608,20 +8608,25 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Speedrun run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
               
-              // Check if this run is invalid (lower than "Your Best" OR has level 1 creatures)
+              // Check if this run is invalid (lower than "Your Best" OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
               
               // Check if any creature in the setup has level 1
               const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
               
-              if (isTimeInvalid || hasLevel1Creature) {
+              // Check if run has setup but no pieces (invalid run)
+              const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
+              
+              if (isTimeInvalid || hasLevel1Creature || hasEmptyPieces) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
-                warningIcon.title = isTimeInvalid && hasLevel1Creature ? 'This run might be invalid (faster than your best time and has level 1 creatures)' : 
-                                   isTimeInvalid ? 'This run might be invalid (faster than your best time)' : 
-                                   'This run might be invalid (has level 1 creatures)';
+                const reasons = [];
+                if (isTimeInvalid) reasons.push('faster than your best time');
+                if (hasLevel1Creature) reasons.push('has level 1 creatures');
+                if (hasEmptyPieces) reasons.push('no board pieces');
+                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
                 warningIcon.style.cursor = 'help';
                 warningIcon.style.position = 'absolute';
                 warningIcon.style.left = '1px';
@@ -8639,7 +8644,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), hasLevel1=${hasLevel1Creature}`);
+                console.log(`[Cyclopedia] Added warning icon for speedrun run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
               } else {
                 timeText.textContent = formatLocalRunTime(run.time);
                 timeCell.appendChild(timeText);
@@ -8660,6 +8665,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             copyCell.style.fontSize = '14px';
             copyCell.innerHTML = '🔗';
             copyCell.title = 'Copy $replay command';
+            
             if (run.seed) {
               // Add click animation styles
               copyCell.style.transition = 'all 0.1s ease';
@@ -9137,16 +9143,22 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             // Check if any creature in the setup has level 1
             const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
             
+            // Check if run has setup but no pieces (invalid run)
+            const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
+            
             if (run.floor !== undefined && run.floor !== null) {
               const floorText = document.createElement('span');
               floorText.textContent = run.floor;
               console.log(`[Cyclopedia] Floor run ${i + 1} floor: ${run.floor}`);
               
-              if (hasLevel1Creature) {
+              if (hasLevel1Creature || hasEmptyPieces) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
-                warningIcon.title = 'This run might be invalid (has level 1 creatures)';
+                const reasons = [];
+                if (hasLevel1Creature) reasons.push('has level 1 creatures');
+                if (hasEmptyPieces) reasons.push('no board pieces');
+                warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
                 warningIcon.style.cursor = 'help';
                 warningIcon.style.position = 'absolute';
                 warningIcon.style.left = '1px';
@@ -9163,7 +9175,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for floor run ${i + 1}: hasLevel1=${hasLevel1Creature}`);
+                console.log(`[Cyclopedia] Added warning icon for floor run ${i + 1}: hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
               } else {
                 floorCell.appendChild(floorText);
               }
@@ -9199,6 +9211,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             copyCell.style.fontSize = '14px';
             copyCell.innerHTML = '🔗';
             copyCell.title = 'Copy $replay command';
+            
             if (run.seed) {
               // Add click animation styles
               copyCell.style.transition = 'all 0.1s ease';
@@ -9686,7 +9699,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               const timeText = document.createElement('span');
               console.log(`[Cyclopedia] Rank run ${i + 1} ticks: ${run.time} -> ${formatLocalRunTime(run.time)}`);
               
-              // Check if this run is invalid (either faster than your best time OR worse rank than your best OR has level 1 creatures)
+              // Check if this run is invalid (either faster than your best time OR worse rank than your best OR has level 1 creatures OR has empty pieces)
               const yourTicks = currentYourRooms?.[selectedMap]?.ticks || 0;
               const yourBestRank = currentYourRooms?.[selectedMap]?.rank || 0;
               const isTimeInvalid = yourTicks > 0 && run.time < yourTicks;
@@ -9695,7 +9708,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               // Check if any creature in the setup has level 1
               const hasLevel1Creature = run.setup && run.setup.pieces && run.setup.pieces.some(piece => piece.level === 1);
               
-              if (isTimeInvalid || isRankInvalid || hasLevel1Creature) {
+              // Check if run has setup but no pieces (invalid run)
+              const hasEmptyPieces = run.setup && run.setup.pieces && run.setup.pieces.length === 0;
+              
+              if (isTimeInvalid || isRankInvalid || hasLevel1Creature || hasEmptyPieces) {
                 // Create warning icon separately for left alignment
                 const warningIcon = document.createElement('span');
                 warningIcon.innerHTML = '⚠️';
@@ -9703,6 +9719,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 if (isTimeInvalid) reasons.push('faster than your best time');
                 if (isRankInvalid) reasons.push('worse rank than your best');
                 if (hasLevel1Creature) reasons.push('has level 1 creatures');
+                if (hasEmptyPieces) reasons.push('no board pieces');
                 warningIcon.title = `This run might be invalid (${reasons.join(', ')})`;
                 warningIcon.style.cursor = 'help';
                 warningIcon.style.position = 'absolute';
@@ -9722,7 +9739,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 // Make the entire row red
                 row.style.color = '#ff6b6b';
-                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank}), hasLevel1=${hasLevel1Creature}`);
+                console.log(`[Cyclopedia] Added warning icon for rank run ${i + 1}: time invalid=${isTimeInvalid} (${run.time} < ${yourTicks}), rank invalid=${isRankInvalid} (${run.points} > ${yourBestRank}), hasLevel1=${hasLevel1Creature}, hasEmptyPieces=${hasEmptyPieces}`);
               } else {
                 const timeValue = formatLocalRunTime(run.time).replace(/\s*ticks?\s*/i, '');
                 timeText.textContent = timeValue;
@@ -9744,6 +9761,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             copyCell.style.fontSize = '14px';
             copyCell.innerHTML = '🔗';
             copyCell.title = 'Copy $replay command';
+            
             if (run.seed) {
               // Add click animation styles
               copyCell.style.transition = 'all 0.1s ease';
