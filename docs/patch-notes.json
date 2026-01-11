@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.3.2",
+      "changes": [
+        { "type": "added", "mod": "Autoseller", "text": "Added Rainbow effect if everything is set to be sold, squeezed and disenchanted." },
+        { "type": "fixed", "mod": "Core", "text": "Minor Fixes" },
+        { "type": "changed", "mod": "Dice Roller", "text": "Improved searching." }
+      ]
+    },
+    {
       "version": "3.3.1",
       "changes": [
         { "type": "fixed", "mod": "Mod Settings", "text": "Translations and bug fixes." },
