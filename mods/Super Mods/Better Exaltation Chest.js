@@ -34,6 +34,7 @@
     'Earthborn Titan Armor',
     'Fireborn Giant Armor',
     'Hailstorm Rod',
+    'Orclops Santa',
     'Paladin Armor',
     'Windborn Colossus Armor',
     'Witch Hat'

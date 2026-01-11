@@ -86,7 +86,7 @@ const PANEL_DIMENSIONS = {
   MIN_WIDTH: 300,
   MAX_WIDTH: 700,
   MIN_HEIGHT: 250,
-  MAX_HEIGHT: 500
+  MAX_HEIGHT: 600
 };
 
 const PANEL_ID = 'vip-list-panel';

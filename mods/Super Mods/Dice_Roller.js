@@ -628,6 +628,19 @@
 
   // Module-level search functions to eliminate code duplication
   const SearchMatcher = {
+    // Helper function to detect and extract quoted strings for exact matching
+    extractQuotedString: (condition) => {
+      // Check if condition starts and ends with quotes
+      if ((condition.startsWith('"') && condition.endsWith('"')) || 
+          (condition.startsWith("'") && condition.endsWith("'"))) {
+        // Extract the content between quotes
+        const quoteChar = condition[0];
+        const extracted = condition.slice(1, -1);
+        return { isExact: true, value: extracted };
+      }
+      return { isExact: false, value: condition };
+    },
+    
     // Main search function that handles AND/OR operators
     matchesSearch: (creature, searchTerm) => {
       if (!searchTerm) return true; // No search term means match all
@@ -692,17 +705,20 @@
         return SearchMatcher.matchesStatsSearch(creature, condition);
       }
       
-      // Check for shiny search
-      if (condition === 'shiny') {
-        return creature.shiny === true;
-      }
-      
-      // Regular name search (partial matching)
+      // Regular name search (partial or exact matching based on quotes)
       const creatureName = creature.creatureName || creature.name || creature.gameId || '';
       const name = creatureName.toLowerCase();
       
-      // Always do partial matching (case-insensitive)
-      return name.includes(condition);
+      // Check if condition is wrapped in quotes for exact matching
+      const { isExact, value } = SearchMatcher.extractQuotedString(condition);
+      
+      if (isExact) {
+        // Exact match (case-insensitive)
+        return name === value;
+      } else {
+        // Partial match (case-insensitive)
+        return name.includes(value);
+      }
     },
     
     // Helper function to handle stats search patterns
@@ -821,7 +837,18 @@
       }
       
       // Single condition - only name search for fallback
-      return !expression.startsWith('/') && creatureName.includes(expression);
+      if (expression.startsWith('/')) return false;
+      
+      // Check if condition is wrapped in quotes for exact matching
+      const { isExact, value } = SearchMatcher.extractQuotedString(expression);
+      
+      if (isExact) {
+        // Exact match (case-insensitive)
+        return creatureName === value;
+      } else {
+        // Partial match (case-insensitive)
+        return creatureName.includes(value);
+      }
     }
   };
 
@@ -1226,7 +1253,7 @@
 • Stat search: /HP 20, /AD >15, /AP <=10, /ARM >=5, /MR <8
 • Any stat: /20 (any stat equals 20), />15 (any stat > 15)
 • Count stats: /3x20 (exactly 3 stats = 20), />3x20 (more than 3 stats = 20), /<2x>15 (less than 2 stats > 15)
-• Shiny: show only shiny creatures
+• Exact match: "Spider" (matches only "Spider", not "Giant Spider")
 • Combined: dragon AND /HP >15, /AD 20 OR /AP 20
 • Operators: AND, OR (case insensitive)`;
     searchInput.style.cssText = `

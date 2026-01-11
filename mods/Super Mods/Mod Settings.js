@@ -207,7 +207,8 @@ let antiIdleAudioElement = null;
 const playercountState = {
   currentPlayerCount: null,
   lastUpdateTime: null,
-  updateInterval: null
+  updateInterval: null,
+  relativeTimeInterval: null
 };
 
 // Global update tracking
@@ -4320,6 +4321,11 @@ function showSettingsModal() {
               activeTimeouts.delete(playercountState.updateInterval);
               playercountState.updateInterval = null;
             }
+            if (playercountState.relativeTimeInterval) {
+              clearInterval(playercountState.relativeTimeInterval);
+              activeTimeouts.delete(playercountState.relativeTimeInterval);
+              playercountState.relativeTimeInterval = null;
+            }
             // Remove button
             const btn = document.querySelector('.playercount-header-btn');
             if (btn && btn.parentNode) {
@@ -7177,6 +7183,34 @@ async function fetchPlayerCount() {
   }
 }
 
+// Format relative time (e.g., "less than 1 minute ago", "5 minutes ago")
+function formatRelativeTime(date) {
+  if (!date) return 'Never';
+  
+  const now = new Date();
+  const diffMs = now - date;
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  
+  if (diffSeconds < 60) {
+    return 'less than 1 minute ago';
+  } else if (diffMinutes === 1) {
+    return '1 minute ago';
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes} minutes ago`;
+  } else if (diffHours === 1) {
+    return '1 hour ago';
+  } else if (diffHours < 24) {
+    return `${diffHours} hours ago`;
+  } else if (diffDays === 1) {
+    return '1 day ago';
+  } else {
+    return `${diffDays} days ago`;
+  }
+}
+
 // Update the player count display
 function updatePlayerCountDisplay(count) {
   const playerCountBtn = document.querySelector('.playercount-header-btn');
@@ -7184,13 +7218,21 @@ function updatePlayerCountDisplay(count) {
   
   if (count !== null) {
     playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-ally/80">${count}</span></span>`;
-    playerCountBtn.title = `Online: ${count} (Last updated: ${playercountState.lastUpdateTime ? playercountState.lastUpdateTime.toLocaleTimeString() : 'Never'})`;
+    playerCountBtn.title = `Online: ${count} (Last updated: ${formatRelativeTime(playercountState.lastUpdateTime)})`;
     playerCountBtn.style.color = 'inherit';
   } else {
     playerCountBtn.innerHTML = `<span class="pixel-font-16 text-white animate-in fade-in">Online: <span class="text-error">?</span></span>`;
     playerCountBtn.title = 'Player count unavailable';
     playerCountBtn.style.color = 'inherit';
   }
+}
+
+// Update just the relative time in the title (for periodic refresh)
+function updatePlayerCountRelativeTime() {
+  const playerCountBtn = document.querySelector('.playercount-header-btn');
+  if (!playerCountBtn || playercountState.currentPlayerCount === null) return;
+  
+  playerCountBtn.title = `Online: ${playercountState.currentPlayerCount} (Last updated: ${formatRelativeTime(playercountState.lastUpdateTime)})`;
 }
 
 // Start periodic updates
@@ -7200,14 +7242,21 @@ function startPlayerCountUpdates() {
     updatePlayerCountDisplay(count);
   });
   
-  // Set up periodic updates (30 seconds)
+  // Set up periodic updates (1 minute)
   const updateInterval = setInterval(async () => {
     const count = await fetchPlayerCount();
     updatePlayerCountDisplay(count);
-  }, 30000);
+  }, 60000);
+  
+  // Set up relative time updates (every minute)
+  const relativeTimeInterval = setInterval(() => {
+    updatePlayerCountRelativeTime();
+  }, 60000);
   
   playercountState.updateInterval = updateInterval;
+  playercountState.relativeTimeInterval = relativeTimeInterval;
   activeTimeouts.add(updateInterval);
+  activeTimeouts.add(relativeTimeInterval);
 }
 
 // Remove Wiki and Discord links from header
@@ -7729,6 +7778,11 @@ function cleanupBetterUI() {
       activeTimeouts.delete(playercountState.updateInterval);
       playercountState.updateInterval = null;
     }
+    if (playercountState.relativeTimeInterval) {
+      clearInterval(playercountState.relativeTimeInterval);
+      activeTimeouts.delete(playercountState.relativeTimeInterval);
+      playercountState.relativeTimeInterval = null;
+    }
     const playercountBtn = document.querySelector('.playercount-header-btn');
     if (playercountBtn && playercountBtn.parentNode) {
       try {
@@ -7883,6 +7937,7 @@ function cleanupBetterUI() {
     playercountState.currentPlayerCount = null;
     playercountState.lastUpdateTime = null;
     playercountState.updateInterval = null;
+    playercountState.relativeTimeInterval = null;
     
     // Reset global update tracking
     lastGlobalUpdate = 0;

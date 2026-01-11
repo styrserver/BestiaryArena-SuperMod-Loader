@@ -5116,6 +5116,8 @@
             li.appendChild(btn);
             ul.appendChild(li);
             
+            // Ensure styles are injected before updating color
+            injectAutosellerWidgetStyles();
             updateAutosellerNavButtonColor();
         }
         tryInsert();
@@ -5129,7 +5131,38 @@
         // Green if ANY tabs are enabled (autosell, autoplant, autosqueeze, or autoduster)
         const isActive = settings.autoMode === 'autoplant' || settings.autoMode === 'autosell' || settings.autosqueezeChecked || settings.autodusterChecked;
         
-        btn.style.color = isActive ? '#22c55e' : '#ef4444';
+        // Check if selling, squeezing, AND disenchanting everything
+        // If the "keep" (ignore) list is empty for all three, everything is being processed
+        const isSellingEverything = (settings.autoMode === 'autosell' || settings.autoMode === 'autoplant') &&
+            Array.isArray(settings.autoplantIgnoreList) && settings.autoplantIgnoreList.length === 0;
+        
+        const isSqueezingEverything = settings.autosqueezeChecked &&
+            Array.isArray(settings.autosqueezeIgnoreList) && settings.autosqueezeIgnoreList.length === 0;
+        
+        const isDisenchantingEverything = settings.autodusterChecked &&
+            Array.isArray(settings.autodusterIgnoreList) && settings.autodusterIgnoreList.length === 0;
+        
+        // Apply rainbow animation if all three conditions are met
+        const shouldRainbow = isSellingEverything && isSqueezingEverything && isDisenchantingEverything;
+        // Find the text span (it has classes "hidden sm:inline")
+        const textSpan = Array.from(btn.querySelectorAll('span')).find(span => 
+            span.classList.contains('hidden') && span.classList.contains('sm:inline')
+        );
+        
+        if (shouldRainbow) {
+            // Add rainbow animation class
+            if (textSpan) {
+                textSpan.classList.add('autoseller-rainbow-text');
+            }
+            btn.classList.add('autoseller-rainbow-active');
+        } else {
+            // Remove rainbow animation class
+            if (textSpan) {
+                textSpan.classList.remove('autoseller-rainbow-text');
+            }
+            btn.classList.remove('autoseller-rainbow-active');
+            btn.style.color = isActive ? '#22c55e' : '#ef4444';
+        }
     }
 
     // =======================
@@ -5195,6 +5228,31 @@
             }
             `;
             document.head.appendChild(style);
+        }
+        
+        // Inject rainbow animation styles for nav button
+        if (!document.getElementById('autoseller-rainbow-css')) {
+            const rainbowStyle = document.createElement('style');
+            rainbowStyle.id = 'autoseller-rainbow-css';
+            rainbowStyle.textContent = `
+            @keyframes autoseller-rainbow-gradient {
+                0% {
+                    background-position: 0% 50%;
+                }
+                100% {
+                    background-position: 200% 50%;
+                }
+            }
+            .autoseller-rainbow-text {
+                background: linear-gradient(90deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3, #ff0000, #ff7f00, #ffff00);
+                background-size: 200% 100%;
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                animation: autoseller-rainbow-gradient 3s linear infinite;
+            }
+            `;
+            document.head.appendChild(rainbowStyle);
         }
     }
 
