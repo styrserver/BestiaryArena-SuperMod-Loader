@@ -2168,10 +2168,20 @@ async function exportConfiguration(modal) {
     
     // Get local mods from background script with fallback to page context
     const localModsData = await new Promise(resolve => {
-      if (window.browserAPI && window.browserAPI.runtime) {
-        window.browserAPI.runtime.sendMessage({ action: 'getLocalMods' }, response => {
-          if (response && response.success && response.mods && response.mods.length > 0) {
-            resolve(response.mods);
+      // Use postMessage bridge to avoid chrome.runtime.sendMessage() error from webpage context
+      const messageId = 'getLocalMods_' + Date.now() + '_' + Math.random();
+      let responseHandler = null;
+      let timeoutId = null;
+      
+      // Set up response listener
+      responseHandler = (event) => {
+        if (event.source !== window) return;
+        if (event.data && event.data.from === 'BESTIARY_EXTENSION' && event.data.id === messageId) {
+          clearTimeout(timeoutId);
+          window.removeEventListener('message', responseHandler);
+          
+          if (event.data.response && event.data.response.success && event.data.response.mods && event.data.response.mods.length > 0) {
+            resolve(event.data.response.mods);
           } else {
             // Fallback: try to get mods from current page context
             if (window.localMods && Array.isArray(window.localMods) && window.localMods.length > 0) {
@@ -2180,15 +2190,30 @@ async function exportConfiguration(modal) {
               resolve([]);
             }
           }
-        });
-      } else {
+        }
+      };
+      
+      // Set up timeout fallback
+      timeoutId = setTimeout(() => {
+        window.removeEventListener('message', responseHandler);
         // Fallback: try to get mods from current page context
         if (window.localMods && Array.isArray(window.localMods) && window.localMods.length > 0) {
           resolve(window.localMods);
         } else {
           resolve([]);
         }
-      }
+      }, 5000);
+      
+      window.addEventListener('message', responseHandler);
+      
+      // Send request via postMessage bridge
+      window.postMessage({
+        from: 'BESTIARY_CLIENT',
+        id: messageId,
+        message: {
+          action: 'getLocalMods'
+        }
+      }, '*');
     });
     
     // Get all storage data in one batch operation
@@ -2495,15 +2520,41 @@ async function importConfiguration(modal) {
             });
           }
           
-          // Save localMods using background script
-          if (window.browserAPI.runtime) {
+          // Save localMods using background script via postMessage bridge
+          if (importData.localMods && importData.localMods.length > 0) {
             await new Promise(resolve => {
-              window.browserAPI.runtime.sendMessage({ 
-                action: 'registerLocalMods', 
-                mods: importData.localMods 
-              }, response => {
-                resolve();
-              });
+              const messageId = 'registerLocalMods_' + Date.now() + '_' + Math.random();
+              let responseHandler = null;
+              let timeoutId = null;
+              
+              // Set up response listener
+              responseHandler = (event) => {
+                if (event.source !== window) return;
+                if (event.data && event.data.from === 'BESTIARY_EXTENSION' && 
+                    event.data.message && event.data.message.action === 'registerLocalMods') {
+                  clearTimeout(timeoutId);
+                  window.removeEventListener('message', responseHandler);
+                  resolve();
+                }
+              };
+              
+              // Set up timeout fallback
+              timeoutId = setTimeout(() => {
+                window.removeEventListener('message', responseHandler);
+                resolve(); // Resolve anyway to continue import
+              }, 5000);
+              
+              window.addEventListener('message', responseHandler);
+              
+              // Send request via postMessage bridge
+              window.postMessage({
+                from: 'BESTIARY_CLIENT',
+                id: messageId,
+                message: {
+                  action: 'registerLocalMods',
+                  mods: importData.localMods
+                }
+              }, '*');
             });
           }
           

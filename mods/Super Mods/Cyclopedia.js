@@ -8735,6 +8735,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 replayData.region = regionName;
                 replayData.map = mapName;
                 
+                // Always add floor (default to 0 if not available)
+                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
+                
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
                   console.log('[Cyclopedia] Found stored board setup, generating complete replay command');
@@ -9280,6 +9284,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 replayData.region = regionName;
                 replayData.map = mapName;
+                
+                // Always add floor (default to 0 if not available)
+                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
                 
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
@@ -9830,6 +9838,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 
                 replayData.region = regionName;
                 replayData.map = mapName;
+                
+                // Always add floor (default to 0 if not available)
+                replayData.floor = (run.floor !== undefined && run.floor !== null) ? run.floor : 0;
+                console.log('[Cyclopedia] Added floor to replay data:', replayData.floor);
                 
                 // Check if we have stored board setup data
                 if (run.setup && run.setup.pieces && run.setup.pieces.length > 0) {
