@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.3",
+      "changes": [
+        { "type": "fixed", "mod": "Mod Settings", "text": "Export fix" },
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Added floor property to $replay commands in Maps section." }
+      ]
+    },
+    {
       "version": "3.3.2",
       "changes": [
         { "type": "added", "mod": "Autoseller", "text": "Added Rainbow effect if everything is set to be sold, squeezed and disenchanted." },

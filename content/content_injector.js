@@ -255,6 +255,30 @@ window.addEventListener('message', function(event) {
       });
     }
     
+    if (event.data.message && event.data.message.action === 'getLocalMods') {
+      if (window.DEBUG) console.log('Content injector: Processing getLocalMods request');
+      
+      // Wake up service worker first (for Chrome)
+      browserAPI.runtime.sendMessage({ action: 'ping' }, (pingResponse) => {
+        if (window.DEBUG) console.log('Content injector: Ping response:', pingResponse);
+        
+        // Then get local mods from background script
+        browserAPI.runtime.sendMessage(event.data.message, response => {
+          if (window.DEBUG) console.log('Content injector: Get local mods response:', response);
+          
+          // Forward local mods to page
+          window.postMessage({
+            from: 'BESTIARY_EXTENSION',
+            id: event.data.id,
+            response: {
+              success: !!response?.success,
+              mods: response?.mods || []
+            }
+          }, '*');
+        });
+      });
+    }
+    
     if (event.data.message && event.data.message.action === 'getManualMods') {
       console.log('Content injector: Processing getManualMods request');
       
