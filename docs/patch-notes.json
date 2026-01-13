@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.4",
+      "changes": [
+        { "type": "fixed", "mod": "RunTracker", "text": "Fixed failed floor runs being saved." },
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Added Awakened to creatures and other small fixes." }
+      ]
+    },
+    {
       "version": "3.3.3",
       "changes": [
         { "type": "fixed", "mod": "Mod Settings", "text": "Export fix" },
