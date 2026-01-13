@@ -8359,7 +8359,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Column 3: Floors
       const floorsCol = document.createElement('div');
       floorsCol.style.flex = '1 1 0';
-      floorsCol.style.maxWidth = '160px';
+      floorsCol.style.maxWidth = '180px';
       floorsCol.style.display = 'flex';
       floorsCol.style.flexDirection = 'column';
       floorsCol.style.padding = '10px';
@@ -8953,7 +8953,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       const floorsTableCol = document.createElement('div');
       floorsTableCol.setAttribute('data-table-type', 'floors');
       floorsTableCol.style.flex = '1 1 0';
-      floorsTableCol.style.maxWidth = '160px';
+      floorsTableCol.style.maxWidth = '180px';
       floorsTableCol.style.display = 'flex';
       floorsTableCol.style.flexDirection = 'column';
       floorsTableCol.style.padding = '10px';
@@ -11782,31 +11782,156 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   abilitySection.style.marginTop = '0';
   abilitySection.style.width = '100%';
 
+  // Store references for the click handler (declared early so they're in scope)
+  let currentTooltipComponent = null;
+  let currentAbilityContainer = null;
+  let normalTooltipComponent = null;
+  let awakenTooltipComponent = null;
+  let showAwakenedAbility = false;
+
+  // Create a flex container for title and button (matching Creatures title style)
+  const abilityTitleContainer = document.createElement('div');
+  abilityTitleContainer.style.cssText = `
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0;
+    gap: 1px;
+  `;
+  
+  // Create "Ability" title (83% width)
   const abilityTitle = document.createElement('h2');
   abilityTitle.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
-  abilityTitle.style.margin = '0';
-  abilityTitle.style.padding = '2px 0';
-  abilityTitle.style.textAlign = 'center';
-  abilityTitle.style.color = COLOR_CONSTANTS.TEXT;
-  abilityTitle.style.width = '100%';
-  abilityTitle.style.boxSizing = 'border-box';
-  abilityTitle.style.display = 'block';
-  abilityTitle.style.position = 'relative';
-  abilityTitle.style.top = '0';
-  abilityTitle.style.left = '0';
-  abilityTitle.style.right = '0';
-  abilityTitle.style.marginLeft = '0';
-  abilityTitle.style.width = '100%';
+  abilityTitle.style.cssText = `
+    margin: 0px;
+    padding: 2px 8px;
+    text-align: center;
+    color: rgb(255, 255, 255);
+    width: 83%;
+    flex: 0 0 83%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 16px;
+    height: 100%;
+    align-self: stretch;
+  `;
+  abilityTitle.textContent = 'Ability';
+  abilityTitleContainer.appendChild(abilityTitle);
 
-  const abilityTitleP = document.createElement('p');
-  abilityTitleP.textContent = 'Ability';
-  abilityTitleP.className = FONT_CONSTANTS.SIZES.TITLE;
-  abilityTitleP.style.margin = '0';
-  abilityTitleP.style.padding = '0';
-  abilityTitleP.style.textAlign = 'center';
-  abilityTitleP.style.color = COLOR_CONSTANTS.TEXT;
-  abilityTitle.appendChild(abilityTitleP);
-  abilitySection.appendChild(abilityTitle);
+  // Create the toggle button (15% width, matching shiny button style)
+  const awakenIconButton = document.createElement('button');
+  awakenIconButton.className = 'widget-top widget-top-text ' + FONT_CONSTANTS.SIZES.TITLE;
+  awakenIconButton.title = 'Normal Mode';
+  awakenIconButton.style.cssText = `
+    margin: 0px;
+    padding: 2px 8px;
+    text-align: center;
+    color: rgb(255, 255, 255);
+    cursor: pointer;
+    width: 15%;
+    flex: 0 0 15%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 23px;
+    outline: none;
+  `;
+  
+  const awakenIconImg = document.createElement('img');
+  awakenIconImg.src = 'https://bestiaryarena.com/assets/icons/star-tier-awaken.png';
+  awakenIconImg.alt = 'Awakened Ability';
+  awakenIconImg.style.cssText = 'width: 10px; height: 10px;';
+  awakenIconButton.appendChild(awakenIconImg);
+  
+  // Add click handler to toggle between normal and awakened ability
+  awakenIconButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showAwakenedAbility = !showAwakenedAbility;
+    awakenIconButton.title = showAwakenedAbility ? 'Awakened Mode' : 'Normal Mode';
+    
+    // Update background and border color to show toggle state
+    if (showAwakenedAbility) {
+      awakenIconButton.style.background = 'url("https://bestiaryarena.com/_next/static/media/background-green.be515334.png") repeat';
+      awakenIconButton.style.border = '1px solid #4CAF50';
+    } else {
+      // Reset to default widget-top styling
+      awakenIconButton.style.background = '';
+      awakenIconButton.style.border = '';
+    }
+    
+    try {
+      const abilityMonsterData = monsterId ? safeGetMonsterData(monsterId) : null;
+      if (abilityMonsterData && abilityMonsterData.metadata && abilityMonsterData.metadata.skill && abilityMonsterData.metadata.skill.TooltipContent) {
+        // Unmount current tooltip component if it exists
+        if (currentTooltipComponent && typeof currentTooltipComponent.unmount === 'function') {
+          currentTooltipComponent.unmount();
+        }
+        
+        // Clear the ability container - must create fresh DOM elements for React
+        if (currentAbilityContainer) {
+          currentAbilityContainer.innerHTML = '';
+        }
+        
+        // Always create a fresh root element and component to avoid React mounting issues
+        // React components are tied to their DOM root, so we must create fresh ones each time
+        const rootElement = document.createElement('div');
+        rootElement.classList.add('tooltip-prose');
+        rootElement.classList.add(FONT_CONSTANTS.SIZES.SMALL);
+        rootElement.style.width = '100%';
+        rootElement.style.height = '100%';
+        rootElement.style.color = COLOR_CONSTANTS.TEXT;
+        rootElement.style.lineHeight = '1.1';
+        
+        const AbilityTooltip = abilityMonsterData.metadata.skill.TooltipContent;
+        
+        if (typeof globalThis.state.utils.createUIComponent === 'function') {
+          // Create a fresh component each time - React components can't be reused with new DOM
+          const tooltipComponent = showAwakenedAbility 
+            ? globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip, { awaken: true })
+            : globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip);
+          
+          // Store references for potential cleanup
+          if (showAwakenedAbility) {
+            awakenTooltipComponent = tooltipComponent;
+          } else {
+            normalTooltipComponent = tooltipComponent;
+          }
+          
+          if (tooltipComponent && typeof tooltipComponent.mount === 'function') {
+            tooltipComponent.mount();
+            currentAbilityContainer.appendChild(rootElement);
+            currentTooltipComponent = tooltipComponent;
+            
+            const blockquotes = rootElement.querySelectorAll('blockquote');
+            blockquotes.forEach(bq => {
+              bq.style.setProperty('font-size', '10px', 'important');
+            });
+            
+            setTimeout(() => {
+              let fontSize = 12;
+              const minFontSize = 9;
+              while ((rootElement.scrollHeight > rootElement.clientHeight || rootElement.scrollWidth > rootElement.clientWidth) && fontSize > minFontSize) {
+                fontSize--;
+                rootElement.style.fontSize = fontSize + 'px';
+              }
+            }, 0);
+          }
+          
+          // Update stored tooltip component in ability section
+          if (abilitySection) {
+            abilitySection._tooltipComponent = tooltipComponent;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Cyclopedia] Error toggling awakened ability:', error);
+    }
+  });
+  
+  abilityTitleContainer.appendChild(awakenIconButton);
+  abilitySection.appendChild(abilityTitleContainer);
 
   // Create scrollable container for ability content
   const abilityScrollContainer = document.createElement('div');
@@ -11826,6 +11951,7 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
   abilityContainer.style.margin = '0';
   abilityContainer.style.width = '100%';
   abilityContainer.style.boxSizing = 'border-box';
+  currentAbilityContainer = abilityContainer; // Store reference
   
   let tooltipComponent = null;
   try {
@@ -11843,6 +11969,9 @@ function renderCreatureTemplate(name, showShinyPortraits = false) {
       
       if (typeof globalThis.state.utils.createUIComponent === 'function') {
         tooltipComponent = globalThis.state.utils.createUIComponent(rootElement, AbilityTooltip);
+        currentTooltipComponent = tooltipComponent; // Store reference
+        normalTooltipComponent = tooltipComponent; // Store normal reference for toggling
+        normalRootElement = rootElement; // Store normal root element for toggling
         
         if (tooltipComponent && typeof tooltipComponent.mount === 'function') {
           tooltipComponent.mount();

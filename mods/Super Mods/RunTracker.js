@@ -1053,13 +1053,9 @@ async function addRun(runData) {
     
     // Skip failed runs entirely - only track victories
     // Check both victory flag and points (0 points = defeat)
-    // Note: Floor runs can still be tracked even if defeated, as they represent progress
     if (runData.victory === false || runData.points === 0) {
-      // Only skip if we don't have floor data (floor runs can be tracked even on defeat)
-      if (!runData.floor) {
-        console.log(`[RunTracker] Skipping failed run for ${runData.mapName} (victory: ${runData.victory}, points: ${runData.points})`);
-        return false;
-      }
+      console.log(`[RunTracker] Skipping failed run for ${runData.mapName} (victory: ${runData.victory}, points: ${runData.points})`);
+      return false;
     }
     
     // Check both categories independently - a run can qualify for both speedrun and rank
@@ -1076,11 +1072,15 @@ async function addRun(runData) {
     }
     
     // Check floor category independently - tracks highest floor reached
-    // Only track floor runs if floor > 0 (floor: 0 is just a fallback for missing data)
-    if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0) {
+    // Only track floor runs if floor > 0 and run was victorious (floor: 0 is just a fallback for missing data)
+    if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0 && runData.victory !== false) {
       floorUpdated = await checkAndUpdateFloorRuns(runData);
     } else {
-      console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} (must be > 0 to track)`);
+      if (runData.floor !== undefined && runData.floor !== null && runData.floor > 0) {
+        console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} but run was not victorious`);
+      } else {
+        console.log(`[RunTracker] Skipping floor tracking for ${runData.mapName} - floor is ${runData.floor} (must be > 0 to track)`);
+      }
     }
     
     // Update metadata only if there were changes
