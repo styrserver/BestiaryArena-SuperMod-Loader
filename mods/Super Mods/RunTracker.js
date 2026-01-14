@@ -1265,7 +1265,7 @@ async function checkAndUpdateFloorRuns(runData) {
   });
   
   if (sameSetupRun) {
-    // Same setup found - update if new floor is higher, or same floor with better floorTicks
+    // Same setup found - update if new floor is higher, or same floor with better floorTicks or time
     let shouldUpdate = false;
     if (runData.floor > sameSetupRun.floor) {
       shouldUpdate = true;
@@ -1275,6 +1275,11 @@ async function checkAndUpdateFloorRuns(runData) {
       }
     } else if (runData.floor === sameSetupRun.floor && runData.floorTicks && !sameSetupRun.floorTicks) {
       shouldUpdate = true;
+    } else if (runData.floor === sameSetupRun.floor && !runData.floorTicks && !sameSetupRun.floorTicks) {
+      // Same floor, neither has floorTicks - use time as tiebreaker (faster time = better)
+      if (runData.time && sameSetupRun.time && runData.time < sameSetupRun.time) {
+        shouldUpdate = true;
+      }
     }
     
     if (shouldUpdate) {
@@ -1282,7 +1287,7 @@ async function checkAndUpdateFloorRuns(runData) {
       const updatedRun = { ...sameSetupRun, ...runData };
       floorRuns[existingIndex] = updatedRun;
       
-      console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}`);
+      console.log(`[RunTracker] Updated floor run for ${runData.mapName} with same setup: floor ${runData.floor} (was ${sameSetupRun.floor})${runData.floorTicks ? `, floorTicks ${runData.floorTicks}` : ''}${!runData.floorTicks && runData.time ? `, time ${runData.time}` : ''}`);
     } else {
       console.log(`[RunTracker] New floor run is not better than existing run for same setup`);
       return false;
@@ -1302,6 +1307,10 @@ async function checkAndUpdateFloorRuns(runData) {
       }
       if (a.floorTicks && !b.floorTicks) return -1;
       if (!a.floorTicks && b.floorTicks) return 1;
+      // Neither has floorTicks - use time as tiebreaker (faster time = better)
+      if (a.time && b.time) {
+        return (a.time || Infinity) - (b.time || Infinity);
+      }
       return 0;
     });
     

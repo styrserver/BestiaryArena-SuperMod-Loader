@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.5",
+      "changes": [
+        { "type": "fixed", "mod": "RunTracker", "text": "Fixed floor runs not being saved when they had the same floor and better time." },
+        { "type": "fixed", "mod": "Board Analyzer", "text": "Fixed Board Analyzer not preserving floor after analyzing." }
+      ]
+    },
+    {
       "version": "3.3.4",
       "changes": [
         { "type": "fixed", "mod": "RunTracker", "text": "Fixed failed floor runs being saved." },

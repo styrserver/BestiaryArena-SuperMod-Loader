@@ -1267,13 +1267,40 @@ function restoreBoardState() {
         });
         console.log('[Board Analyzer] Restored original map:', currentRoomId);
         
-        // Also restore the original board configuration if we have it
-        if (boardSetup && boardSetup.length > 0) {
-          console.log('[Board Analyzer] Restoring original board configuration with', boardSetup.length, 'pieces');
-          console.log('[Board Analyzer] Board setup to restore:', boardSetup);
+        // Small delay to ensure map is loaded before restoring floor and board
+        setTimeout(() => {
+          // Restore the original floor that was active before analysis
+          if (currentFloor !== null && currentFloor !== undefined) {
+            try {
+              if (globalThis.state.board.trigger && globalThis.state.board.trigger.setState) {
+                globalThis.state.board.trigger.setState({
+                  fn: (prev) => ({
+                    ...prev,
+                    floor: currentFloor,
+                  }),
+                });
+                console.log('[Board Analyzer] Restored original floor:', currentFloor);
+              } else if (globalThis.state.board.send) {
+                // Fallback to using send if trigger.setState is not available
+                globalThis.state.board.send({
+                  type: 'setState',
+                  fn: (prev) => ({
+                    ...prev,
+                    floor: currentFloor,
+                  }),
+                });
+                console.log('[Board Analyzer] Restored original floor:', currentFloor);
+              }
+            } catch (error) {
+              console.warn('[Board Analyzer] Error restoring floor:', error);
+            }
+          }
           
-          // Small delay to ensure map is loaded before setting board
-          setTimeout(() => {
+          // Also restore the original board configuration if we have it
+          if (boardSetup && boardSetup.length > 0) {
+            console.log('[Board Analyzer] Restoring original board configuration with', boardSetup.length, 'pieces');
+            console.log('[Board Analyzer] Board setup to restore:', boardSetup);
+            
             try {
               // Set the board configuration back to what it was before analysis
               globalThis.state.board.send({
@@ -1301,10 +1328,10 @@ function restoreBoardState() {
             } catch (error) {
               console.warn('[Board Analyzer] Error restoring board configuration:', error);
             }
-          }, BOARD_RESTORE_DELAY_MS); // Reduced delay for faster restoration
-        } else {
-          console.log('[Board Analyzer] No board configuration to restore');
-        }
+          } else {
+            console.log('[Board Analyzer] No board configuration to restore');
+          }
+        }, BOARD_RESTORE_DELAY_MS); // Reduced delay for faster restoration
       } catch (error) {
         console.warn('[Board Analyzer] Error restoring original map:', error);
       }
@@ -1909,12 +1936,13 @@ function initializeAnalysisEnvironment() {
     console.log('[Board Analyzer] Turbo Mode button disabled');
   }
   
-  // Reset tracking variables
+  // Reset tracking variables (but preserve floor if it was already captured)
+  const preservedFloor = currentFloor;
   currentSeed = null;
   currentRegionId = null;
   currentRoomId = null;
   currentRoomName = null;
-  currentFloor = null;
+  currentFloor = preservedFloor; // Restore preserved floor
   boardSetup = [];
 }
 
@@ -2319,6 +2347,17 @@ async function analyzeBoard(runs = config.runs, statusCallback = null) {
   if (!thisAnalysisId) {
     await sleep(ANALYSIS_STOP_DELAY_MS);
     return null;
+  }
+  
+  // Capture floor BEFORE initializeAnalysisEnvironment() resets it
+  try {
+    const boardContext = globalThis.state.board.getSnapshot().context;
+    if (typeof boardContext.floor !== 'undefined') {
+      currentFloor = boardContext.floor;
+      console.log('[Board Analyzer] Captured floor before analysis:', currentFloor);
+    }
+  } catch (error) {
+    console.warn('[Board Analyzer] Error capturing floor before analysis:', error);
   }
   
   try {
