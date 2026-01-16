@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.3.6",
+      "changes": [
+        { "type": "changed", "mod": "Raid Hunter", "text": "Replaced single \"Auto\" floor option with \"Auto-10\" (climbs to floor 10) and \"Auto-15\" (climbs to floor 15) options." }
+      ]
+    },
+    {
       "version": "3.3.5",
       "changes": [
         { "type": "fixed", "mod": "RunTracker", "text": "Fixed floor runs not being saved when they had the same floor and better time." },
