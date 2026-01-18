@@ -2563,6 +2563,61 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     };
   }
 
+  // Dev helper to complete all quests and grant all reward items (exposed to console)
+  function registerDevCompleteAllQuestsHelper() {
+    globalThis.questsDevCompleteAll = async function() {
+      try {
+        const currentPlayer = getCurrentPlayerName();
+        if (!currentPlayer) {
+          console.error('[Quests Mod][Dev] No player name found');
+          return;
+        }
+
+        // Get current progress
+        const currentProgress = await getKingTibianusProgress(currentPlayer);
+        
+        // Mark all missions as accepted and completed
+        const allCompleted = {
+          copper: { accepted: true, completed: true },
+          dragon: { accepted: true, completed: true },
+          letter: { accepted: true, completed: true },
+          alDeeFishing: { accepted: true, completed: true },
+          alDeeGoldenRope: { accepted: true, completed: true },
+          ironOre: {
+            active: false,
+            startTime: null,
+            completed: true
+          },
+          mornenion: {
+            defeated: true
+          }
+        };
+
+        // Save to Firebase
+        await saveKingTibianusProgress(currentPlayer, allCompleted);
+        
+        console.log('[Quests Mod][Dev] All quests completed!');
+        console.log('[Quests Mod][Dev] Completed missions:', Object.keys(allCompleted));
+
+        // Grant all quest reward items
+        const rewardItems = {
+          'Light Shovel': 1,      // From Al Dee Fishing mission
+          'The Holy Tible': 1,    // From Al Dee Golden Rope mission
+        };
+
+        const granted = [];
+        for (const [itemName, count] of Object.entries(rewardItems)) {
+          await addQuestItem(itemName, count);
+          granted.push(`${itemName} (${count})`);
+        }
+
+        console.log('[Quests Mod][Dev] All quest reward items granted:', granted.join(', '));
+      } catch (err) {
+        console.error('[Quests Mod][Dev] Failed to complete all quests:', err);
+      }
+    };
+  }
+
   // =======================
   // Firebase Service
   // =======================
@@ -11034,6 +11089,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
   // Load mission progress from Firebase on initialization and then setup systems
   loadMissionProgressOnInit().then(async () => {
+    // Register dev helpers for console commands
+    registerDevGrantHelper();
+    registerDevCompleteAllQuestsHelper();
+    
     // Migrate any existing Dwarven Pickaxe items to Light Shovel
     await migrateDwarvenPickaxeToLightShovel();
     // Always start with fishing disabled after reload
@@ -11056,6 +11115,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     // Note: Stop button disabler and victory/defeat detection are now handled by CustomBattle system
   }).catch(async error => {
     console.error('[Quests Mod] Failed to load mission progress, setting up systems anyway:', error);
+
+    // Register dev helpers for console commands (even if mission progress failed to load)
+    registerDevGrantHelper();
+    registerDevCompleteAllQuestsHelper();
 
     // Migrate any existing Dwarven Pickaxe items to Light Shovel (even if mission progress failed to load)
     await migrateDwarvenPickaxeToLightShovel();

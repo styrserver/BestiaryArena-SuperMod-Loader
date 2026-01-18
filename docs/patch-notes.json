@@ -4,6 +4,15 @@
   },
   "notes": [
     {
+      "version": "3.3.7",
+      "changes": [
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Fixed playtime incorrectly adding 5 minutes on page reload when in autoplay mode." },
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Fixed manual timing state inconsistency between save and load operations." },
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Added validation to prevent negative time calculations and improved baseline handling." },
+        { "type": "fixed", "mod": "Hunt Analyzer", "text": "Removed dead code from playtime formatting function." }
+      ]
+    },
+    {
       "version": "3.3.6",
       "changes": [
         { "type": "changed", "mod": "Raid Hunter", "text": "Replaced single \"Auto\" floor option with \"Auto-10\" (climbs to floor 10) and \"Auto-15\" (climbs to floor 15) options." }

@@ -840,14 +840,18 @@ function getLiveSessionMs() {
   if (mode === 'autoplay') {
     const currentAutoplayTime = getAutoplaySessionTime(); // minutes
     if (currentAutoplayTime && currentAutoplayTime > 0) {
-      const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - (HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0));
+      const baseline = HuntAnalyzerState.timeTracking.autoplayBaselineMinutes || 0;
+      // Validate: baseline should not exceed current time (prevents negative calculations)
+      const adjustedAutoplayMinutes = Math.max(0, currentAutoplayTime - Math.min(baseline, currentAutoplayTime));
       return adjustedAutoplayMinutes * 60 * 1000;
     }
     return 0;
   }
   if (mode === 'manual') {
     if (HuntAnalyzerState.timeTracking.manualActive && HuntAnalyzerState.timeTracking.manualSessionStartMs > 0) {
-      return Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
+      const elapsed = Date.now() - HuntAnalyzerState.timeTracking.manualSessionStartMs;
+      // Validate: ensure non-negative time
+      return Math.max(0, elapsed);
     }
     return 0;
   }
@@ -1062,17 +1066,23 @@ function updateInternalClock() {
       HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
       console.log('[Hunt Analyzer] Internal clock: autoplay reset detected but suppressed to avoid double count');
     } else {
-      const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
-      
-      // Add to accumulated time
-      HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
-      
-      // Add to current map time if we have one
-      if (HuntAnalyzerState.timeTracking.currentMap) {
-        const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
-        HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
+      // Validate: ensure lastAutoplayTime is positive before calculating
+      if (HuntAnalyzerState.timeTracking.lastAutoplayTime > 0) {
+        const timeToAccumulate = HuntAnalyzerState.timeTracking.lastAutoplayTime * 60 * 1000; // Convert minutes to ms
+        
+        // Validate: ensure timeToAccumulate is positive
+        if (timeToAccumulate > 0) {
+          // Add to accumulated time
+          HuntAnalyzerState.timeTracking.accumulatedTimeMs += timeToAccumulate;
+          
+          // Add to current map time if we have one
+          if (HuntAnalyzerState.timeTracking.currentMap) {
+            const currentMapTime = HuntAnalyzerState.timeTracking.mapTimeMs.get(HuntAnalyzerState.timeTracking.currentMap) || 0;
+            HuntAnalyzerState.timeTracking.mapTimeMs.set(HuntAnalyzerState.timeTracking.currentMap, currentMapTime + timeToAccumulate);
+          }
+          console.log('[Hunt Analyzer] Internal clock: autoplay reset detected, accumulated previous autoplay (ms):', timeToAccumulate);
+        }
       }
-      console.log('[Hunt Analyzer] Internal clock: autoplay reset detected, accumulated previous autoplay (ms):', timeToAccumulate);
     }
   }
   
@@ -1128,7 +1138,6 @@ function getFilteredTimeHours() {
 
 // Format playtime for display
 function formatPlaytime(hours) {
-  const totalMinutes = Math.floor(hours * 60);
   const totalSeconds = Math.floor(hours * 3600);
   
   const displayHours = Math.floor(totalSeconds / 3600);
@@ -1777,13 +1786,52 @@ function loadHuntAnalyzerData() {
                 HuntAnalyzerState.timeTracking.mapStartTime = parsedData.timeTracking.mapStartTime || 0;
                 HuntAnalyzerState.timeTracking.accumulatedTimeMs = parsedData.timeTracking.accumulatedTimeMs || 0;
                 HuntAnalyzerState.timeTracking.lastAutoplayTime = parsedData.timeTracking.lastAutoplayTime || 0;
-                HuntAnalyzerState.timeTracking.manualActive = parsedData.timeTracking.manualActive || false;
-                HuntAnalyzerState.timeTracking.manualSessionStartMs = parsedData.timeTracking.manualSessionStartMs || 0;
-                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = parsedData.timeTracking.autoplayBaselineMinutes || 0;
+                // Force manual timing to false on reload (consistent with save behavior)
+                HuntAnalyzerState.timeTracking.manualActive = false;
+                HuntAnalyzerState.timeTracking.manualSessionStartMs = 0;
                 
                 // Convert array back to Map for mapTimeMs
                 if (parsedData.timeTracking.mapTimeMs && Array.isArray(parsedData.timeTracking.mapTimeMs)) {
                     HuntAnalyzerState.timeTracking.mapTimeMs = new Map(parsedData.timeTracking.mapTimeMs);
+                }
+                
+                // Fix for reload bugs: Reset autoplay tracking state to match current DOM state
+                // This prevents counting time that passed while page was closed or incorrect accumulation
+                const mode = getCurrentMode();
+                if (mode === 'autoplay') {
+                    // Immediately suppress autoplay reset detection to prevent race condition
+                    // The mode subscription might fire before setTimeout completes
+                    HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = true;
+                    
+                    // Try to get current DOM timer immediately (might not be ready yet)
+                    const immediateAutoplayTime = getAutoplaySessionTime();
+                    if (immediateAutoplayTime && immediateAutoplayTime > 0) {
+                        // DOM is ready, sync immediately
+                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = immediateAutoplayTime;
+                        HuntAnalyzerState.timeTracking.lastAutoplayTime = immediateAutoplayTime;
+                        console.log('[Hunt Analyzer] Reload: Synced autoplay tracking immediately:', immediateAutoplayTime, 'minutes');
+                    } else {
+                        // DOM not ready yet, wait a bit then sync
+                        setTimeout(() => {
+                            const currentAutoplayTime = getAutoplaySessionTime();
+                            if (currentAutoplayTime && currentAutoplayTime > 0) {
+                                // Sync baseline and lastAutoplayTime to current DOM timer
+                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
+                                HuntAnalyzerState.timeTracking.lastAutoplayTime = currentAutoplayTime;
+                                console.log('[Hunt Analyzer] Reload: Synced autoplay tracking after delay:', currentAutoplayTime, 'minutes');
+                            } else {
+                                // If DOM timer still not available, reset everything to 0 (fresh start)
+                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = 0;
+                                HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
+                                HuntAnalyzerState.timeTracking.suppressNextAutoplayReset = false;
+                            }
+                        }, 100);
+                    }
+                } else {
+                    // Not in autoplay mode, restore saved baseline (will be reset when autoplay starts)
+                    HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = parsedData.timeTracking.autoplayBaselineMinutes || 0;
+                    // Reset lastAutoplayTime to 0 since we're not in autoplay mode
+                    HuntAnalyzerState.timeTracking.lastAutoplayTime = 0;
                 }
             }
             
@@ -6569,8 +6617,17 @@ if (typeof globalThis !== 'undefined' && globalThis.state && globalThis.state.bo
 
                     // Prepare new mode
                     if (mode === 'autoplay') {
-                        // Set baseline to current DOM time
-                        HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = getAutoplaySessionTime() || 0;
+                        // Set baseline to current DOM time, with validation
+                        const currentAutoplayTime = getAutoplaySessionTime();
+                        if (currentAutoplayTime && currentAutoplayTime > 0) {
+                            HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = currentAutoplayTime;
+                        } else {
+                            // If DOM timer not ready, try again after a short delay
+                            setTimeout(() => {
+                                const retryTime = getAutoplaySessionTime();
+                                HuntAnalyzerState.timeTracking.autoplayBaselineMinutes = retryTime || 0;
+                            }, 100);
+                        }
                         // Ensure internal clock runs for UI updates
                         if (!HuntAnalyzerState.timeTracking.clockIntervalId) {
                             startInternalClock('modeChange:autoplay');
