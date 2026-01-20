@@ -1070,9 +1070,22 @@ function showHeroEditorModal() {
               console.log('About to call configureBoard with data:', updatedBoardData);
 
               // Create a custom board configuration directly (test solution)
+              // Get current floor from board data or board context as fallback
+              let currentFloor = updatedBoardData.floor;
+              if (currentFloor === undefined || currentFloor === null) {
+                // Fallback to getting floor from current board context
+                try {
+                  const currentBoardContext = getBoardSnapshot();
+                  currentFloor = currentBoardContext.floor ?? 0;
+                } catch (e) {
+                  console.warn('Could not get floor from board context, defaulting to 0:', e);
+                  currentFloor = 0;
+                }
+              }
               const testData = {
                 region: updatedBoardData.region,
                 map: updatedBoardData.map,
+                floor: currentFloor, // Preserve the current floor
                 board: updatedBoardData.board.map(piece => {
                   // Ensure level is properly set and force it to be a number
                   if (piece.monster && piece.monster.level) {

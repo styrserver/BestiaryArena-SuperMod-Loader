@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.3.8",
+      "changes": [
+        { "type": "fixed", "mod": "Hero Editor", "text": "Fixed floor resetting to 0 when editing heroes." }
+      ]
+    },
+    {
       "version": "3.3.7",
       "changes": [
         { "type": "fixed", "mod": "Hunt Analyzer", "text": "Fixed playtime incorrectly adding 5 minutes on page reload when in autoplay mode." },
