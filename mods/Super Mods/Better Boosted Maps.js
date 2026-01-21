@@ -2699,14 +2699,40 @@ function init() {
         // Subscribe to mod state changes instead of polling
         window.ModCoordination.on('modActiveChanged', (data) => {
             if (data.modName === 'Raid Hunter') {
+                const wasActive = modState.coordination.isRaidHunterActive;
                 modState.coordination.isRaidHunterActive = data.active;
                 updateExposedState();
+                
+                // If Raid Hunter just became inactive and we're enabled, check if we should start farming
+                if (wasActive && !data.active && modState.enabled && !modState.farming.isActive) {
+                    console.log('[Better Boosted Maps] Raid Hunter became inactive - checking if we should start boosted map farming');
+                    setTimeout(() => {
+                        checkAndStartBoostedMapFarming();
+                    }, 1000); // Small delay to ensure Raid Hunter has fully cleaned up
+                }
             } else if (data.modName === 'Better Tasker') {
+                const wasActive = modState.coordination.isBetterTaskerActive;
                 modState.coordination.isBetterTaskerActive = data.active;
                 updateExposedState();
+                
+                // If Better Tasker just became inactive and we're enabled, check if we should start farming
+                if (wasActive && !data.active && modState.enabled && !modState.farming.isActive) {
+                    console.log('[Better Boosted Maps] Better Tasker became inactive - checking if we should start boosted map farming');
+                    setTimeout(() => {
+                        checkAndStartBoostedMapFarming();
+                    }, 1000); // Small delay to ensure Better Tasker has fully cleaned up
+                }
             } else if (data.modName === 'Board Analyzer' || data.modName === 'Manual Runner') {
                 // Check if we can run when these mods change state
                 updateExposedState();
+                
+                // If these blocking mods just became inactive and we're enabled, check if we should start farming
+                if (!data.active && modState.enabled && !modState.farming.isActive) {
+                    console.log(`[Better Boosted Maps] ${data.modName} became inactive - checking if we should start boosted map farming`);
+                    setTimeout(() => {
+                        checkAndStartBoostedMapFarming();
+                    }, 1000); // Small delay to ensure the mod has fully cleaned up
+                }
             }
         });
     }

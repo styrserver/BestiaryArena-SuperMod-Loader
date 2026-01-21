@@ -6422,13 +6422,22 @@
     
     function initAutoseller() {
         // Defer cleanup until databases are available
+        let cleanupRetryCount = 0;
+        const MAX_CLEANUP_RETRIES = 30; // 30 seconds max wait
+
         function cleanupIgnoreListsWhenReady() {
             // Check if databases are loaded
             const availableCreatures = window.creatureDatabase?.ALL_CREATURES;
             const availableEquipment = window.equipmentDatabase?.ALL_EQUIPMENT;
 
-            if (!availableCreatures || !availableEquipment) {
-                // Databases not ready yet, try again in 1 second
+            if (!availableCreatures || !availableEquipment || availableCreatures.length === 0 || availableEquipment.length === 0) {
+                cleanupRetryCount++;
+                if (cleanupRetryCount >= MAX_CLEANUP_RETRIES) {
+                    console.warn('[Autoseller] Database cleanup timed out after 30 seconds - skipping cleanup to prevent data loss');
+                    return;
+                }
+                // Databases not ready yet or empty, try again in 1 second
+                console.log('[Autoseller] Databases not ready or empty, waiting...');
                 setTimeout(cleanupIgnoreListsWhenReady, 1000);
                 return;
             }

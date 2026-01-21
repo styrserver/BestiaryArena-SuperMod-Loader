@@ -24,6 +24,9 @@ const defaultConfig = {
   disableAutoReload: false,
   enableAntiIdleSounds: false,
   removeWebsiteFooter: false,
+  compactNavBar: false,
+  showBetterHighscoresButton: false,
+  showLastVisitedMapButton: false,
   alwaysOpenHuntAnalyzer: false,
   enablePlayercount: true,
   includeRunDataByDefault: true,
@@ -57,6 +60,13 @@ try {
   console.error('[Mod Settings] Error loading config from localStorage:', error);
   config = Object.assign({}, defaultConfig);
 }
+
+// Last visited map feature globals
+const LAST_MAP_STORAGE_KEY = 'mod-settings-map-history';
+let mapHistory = []; // Array of {roomId, roomName} objects, most recent first
+let lastMapButton = null;
+let mapChangeUnsubscribe = null;
+let isNavigatingViaButton = false;
 
 // =======================
 // 2. Helper Functions
@@ -170,7 +180,8 @@ const observers = {
   contextMenu: null,
   creature: null,
   setupLabels: null,
-  scrollLock: null
+  scrollLock: null,
+  compactNavBar: null
 };
 
 // Timer state
@@ -3289,22 +3300,21 @@ function showSettingsModal() {
       if (categoryId === 'ui') {
         const uiContent = document.createElement('div');
         uiContent.innerHTML = `
+          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
+            <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
+            <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
+          </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="stamina-timer-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showStaminaTimer')}</span>
+              <input type="checkbox" id="better-highscores-button-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showBetterHighscoresButton')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="setup-labels-toggle" checked="" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showSetupLabels')}</span>
-            </label>
-          </div>
-          <div style="margin-bottom: 15px;">
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-              <input type="checkbox" id="playercount-toggle" style="transform: scale(1.2);">
-              <span>${t('mods.betterUI.showPlayersOnline')}</span>
+              <input type="checkbox" id="compact-nav-bar-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.compactNavBar')}</span>
             </label>
           </div>
           <div style="margin-bottom: 15px;">
@@ -3325,10 +3335,32 @@ function showSettingsModal() {
               <option value="Prismatic">Prismatic</option>
             </select>
           </div>
-          <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span style="color: #ccc; min-width: 200px;">${t('mods.betterUI.betterHighscoresBackgroundOpacity')}</span>
-            <input type="range" id="better-highscores-opacity-slider" min="0" max="100" value="100" step="1" style="flex: 1; min-width: 150px; max-width: 300px; cursor: pointer;" onclick="event.stopPropagation();">
-            <span id="better-highscores-opacity-value" style="color: #ccc; min-width: 40px; text-align: right;">100%</span>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="playercount-toggle" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showPlayersOnline')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="setup-labels-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showSetupLabels')}</span>
+            </label>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
+              <span>Show Return to Map Button <div class="relative flex" style="display: inline-flex;"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"></div></span>
+            </label>
+            <p style="color: #888; font-size: 11px; margin-top: 5px; margin-left: 30px; font-style: italic;">
+              Adds a return button to the navigation bar that takes you to the previous map in your navigation history (excluding sewers)
+            </p>
+          </div>
+          <div style="margin-bottom: 15px;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="stamina-timer-toggle" checked="" style="transform: scale(1.2);">
+              <span>${t('mods.betterUI.showStaminaTimer')}</span>
+            </label>
           </div>
         `;
         rightColumn.appendChild(uiContent);
@@ -3731,6 +3763,39 @@ function showSettingsModal() {
           },
           removeShinyEnemies
         )(shinyEnemiesCheckbox);
+      }
+      
+      const betterHighscoresButtonCheckbox = content.querySelector('#better-highscores-button-toggle');
+      if (betterHighscoresButtonCheckbox) {
+        createSettingsCheckboxHandler('showBetterHighscoresButton',
+          addBetterHighscoresNavButton,
+          removeBetterHighscoresNavButton
+        )(betterHighscoresButtonCheckbox);
+      }
+
+      const lastVisitedMapCheckbox = content.querySelector('#last-visited-map-toggle');
+      if (lastVisitedMapCheckbox) {
+        createSettingsCheckboxHandler('showLastVisitedMapButton',
+          () => {
+            console.log('[Mod Settings] Last visited map button enabled');
+            loadLastVisitedMap();
+            subscribeToMapChanges();
+            addLastMapNavButton();
+          },
+          () => {
+            console.log('[Mod Settings] Last visited map button disabled');
+            unsubscribeFromMapChanges();
+            removeLastMapNavButton();
+          }
+        )(lastVisitedMapCheckbox);
+      }
+      
+      const compactNavBarCheckbox = content.querySelector('#compact-nav-bar-toggle');
+      if (compactNavBarCheckbox) {
+        createSettingsCheckboxHandler('compactNavBar',
+          applyCompactNavBar,
+          removeCompactNavBar
+        )(compactNavBarCheckbox);
       }
       
       const removeFooterCheckbox = content.querySelector('#remove-footer-toggle');
@@ -6047,7 +6112,115 @@ function startSetupLabelsObserver() {
 }
 
 // =======================
-// 11. Website Footer Functions
+// 11. Better Highscores Button Functions
+// =======================
+
+// Toggle Better Highscores container visibility
+function toggleBetterHighscoresContainer(event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  const container = document.querySelector('.better-highscores-container');
+  if (!container) {
+    console.log('[Mod Settings] Better Highscores container not found');
+    return;
+  }
+  
+  const isVisible = container.style.display !== 'none';
+  container.style.display = isVisible ? 'none' : '';
+  
+  // Update button selected state
+  const btn = document.querySelector('.better-highscores-nav-btn');
+  if (btn) {
+    btn.setAttribute('data-selected', isVisible ? 'false' : 'true');
+  }
+  
+  console.log('[Mod Settings] Better Highscores container', isVisible ? 'hidden' : 'shown');
+}
+
+// Add Better Highscores nav button after Autoseller
+function addBetterHighscoresNavButton() {
+  const tryInsert = () => {
+    const nav = document.querySelector('nav.shrink-0');
+    if (!nav) {
+      const timeoutId = scheduleTimeout(tryInsert, 500);
+      return;
+    }
+    
+    const ul = nav.querySelector('ul.flex.items-center');
+    if (!ul) {
+      const timeoutId = scheduleTimeout(tryInsert, 500);
+      return;
+    }
+    
+    // Prevent duplicate button
+    if (ul.querySelector('.better-highscores-nav-btn')) {
+      console.log('[Mod Settings] Better Highscores nav button already exists, skipping insert.');
+      return;
+    }
+    
+    // Find Autoseller button
+    const autosellerBtn = ul.querySelector('.autoseller-nav-btn');
+    if (!autosellerBtn) {
+      const timeoutId = scheduleTimeout(tryInsert, 500);
+      return;
+    }
+    
+    const autosellerLi = autosellerBtn.closest('li');
+    if (!autosellerLi) {
+      const timeoutId = scheduleTimeout(tryInsert, 500);
+      return;
+    }
+    
+    // Create the button
+    const li = document.createElement('li');
+    li.className = 'hover:text-whiteExp';
+    
+    const btn = document.createElement('button');
+    btn.className = 'better-highscores-nav-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5';
+    btn.setAttribute('data-selected', 'false');
+    btn.innerHTML = `<img src="https://bestiaryarena.com/assets/icons/achievement.png" alt="${t('mods.betterUI.betterHighscoresButton')}" width="12" height="12" class="pixelated"><span class="hidden sm:inline">${t('mods.betterUI.betterHighscoresButton')}</span>`;
+    btn.onclick = toggleBetterHighscoresContainer;
+    
+    li.appendChild(btn);
+    
+    // Insert after Autoseller
+    if (autosellerLi.nextSibling) {
+      ul.insertBefore(li, autosellerLi.nextSibling);
+    } else {
+      ul.appendChild(li);
+    }
+    
+    console.log('[Mod Settings] Better Highscores nav button inserted after Autoseller.');
+  };
+  tryInsert();
+}
+
+// Remove Better Highscores nav button
+function removeBetterHighscoresNavButton() {
+  const nav = document.querySelector('nav.shrink-0');
+  if (!nav) {
+    return;
+  }
+  
+  const ul = nav.querySelector('ul.flex.items-center');
+  if (!ul) {
+    return;
+  }
+  
+  const btn = ul.querySelector('.better-highscores-nav-btn');
+  if (btn) {
+    const li = btn.closest('li');
+    if (li) {
+      li.remove();
+      console.log('[Mod Settings] Better Highscores nav button removed.');
+    }
+  }
+}
+
+// =======================
+// 12. Website Footer Functions
 // =======================
 
 // Hide website footer
@@ -6066,6 +6239,115 @@ function showWebsiteFooter() {
     footer.style.display = '';
     console.log('[Mod Settings] Website footer shown');
   }
+}
+
+// =======================
+// 11. Compact Nav Bar Functions
+// =======================
+
+// Apply compact nav bar (hide text, show only icons)
+function applyCompactNavBar() {
+  const headerSlot = document.querySelector('#header-slot');
+  if (!headerSlot) {
+    console.log('[Mod Settings] Header slot not found');
+    return;
+  }
+  
+  // Find all nav text spans - they have class "hidden sm:inline" which means they're hidden on mobile but shown on larger screens
+  const nav = headerSlot.querySelector('nav');
+  if (!nav) {
+    console.log('[Mod Settings] Nav element not found');
+    return;
+  }
+  
+  // Find all spans within nav buttons that contain text labels
+  // The spans we want to hide have classes "hidden sm:inline" (Tailwind CSS responsive classes)
+  const navButtons = nav.querySelectorAll('button');
+  navButtons.forEach(button => {
+    // Find spans that are text labels (they have "hidden sm:inline" classes)
+    const spans = button.querySelectorAll('span');
+    spans.forEach(span => {
+      // Check if this span has the "hidden" class and "sm:inline" in className
+      // Tailwind uses "sm:inline" as a class name, so we check the className string
+      if (span.classList.contains('hidden') && span.className.includes('sm:inline')) {
+        span.style.display = 'none';
+        span.setAttribute('data-compact-nav-hidden', 'true');
+      }
+    });
+  });
+  
+  console.log('[Mod Settings] Compact nav bar applied - text hidden');
+}
+
+// Remove compact nav bar (show text again)
+function removeCompactNavBar() {
+  const headerSlot = document.querySelector('#header-slot');
+  if (!headerSlot) {
+    console.log('[Mod Settings] Header slot not found');
+    return;
+  }
+  
+  const nav = headerSlot.querySelector('nav');
+  if (!nav) {
+    console.log('[Mod Settings] Nav element not found');
+    return;
+  }
+  
+  // Find all spans that were hidden by compact nav bar and restore their display
+  const navButtons = nav.querySelectorAll('button');
+  navButtons.forEach(button => {
+    const spans = button.querySelectorAll('span');
+    spans.forEach(span => {
+      // Check if this span was hidden by our compact nav bar feature
+      if (span.classList.contains('hidden') && span.className.includes('sm:inline') && span.getAttribute('data-compact-nav-hidden') === 'true') {
+        span.style.display = '';
+        span.removeAttribute('data-compact-nav-hidden');
+      }
+    });
+  });
+  
+  console.log('[Mod Settings] Compact nav bar removed - text shown');
+}
+
+// Start observer for compact nav bar
+function startCompactNavBarObserver() {
+  console.log('[Mod Settings] Starting compact nav bar observer');
+  
+  const observer = new MutationObserver(() => {
+    // Reapply compact nav bar whenever DOM changes
+    if (config.compactNavBar) {
+      const headerSlot = document.querySelector('#header-slot');
+      if (headerSlot) {
+        const nav = headerSlot.querySelector('nav');
+        if (nav) {
+          // Check if any text spans are visible when they shouldn't be
+          const navButtons = nav.querySelectorAll('button');
+          let needsUpdate = false;
+          navButtons.forEach(button => {
+            const spans = button.querySelectorAll('span');
+            spans.forEach(span => {
+              if (span.classList.contains('hidden') && span.className.includes('sm:inline')) {
+                if (span.style.display !== 'none') {
+                  needsUpdate = true;
+                }
+              }
+            });
+          });
+          
+          if (needsUpdate) {
+            applyCompactNavBar();
+          }
+        }
+      }
+    }
+  });
+  
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  
+  return observer;
 }
 
 // =======================
@@ -7734,6 +8016,38 @@ function initBetterUI() {
       console.log('[Mod Settings] Setup labels visibility applied:', config.showSetupLabels);
     }, 1000); // Delay to ensure DOM is ready
     
+    // Add Better Highscores nav button if enabled
+    if (config.showBetterHighscoresButton) {
+      scheduleTimeout(() => {
+        addBetterHighscoresNavButton();
+        console.log('[Mod Settings] Better Highscores nav button added:', config.showBetterHighscoresButton);
+      }, 1500); // Delay to ensure Autoseller button is loaded
+    }
+
+    // Add Last Visited Map nav button if enabled
+    if (config.showLastVisitedMapButton) {
+      scheduleTimeout(() => {
+        loadLastVisitedMap();
+        subscribeToMapChanges();
+        addLastMapNavButton();
+        console.log('[Mod Settings] Last visited map button enabled');
+      }, 2000); // Delay to ensure navigation bar is loaded
+    }
+    
+    // Apply compact nav bar if enabled and start observer
+    if (config.compactNavBar) {
+      scheduleTimeout(() => {
+        applyCompactNavBar();
+        observers.compactNavBar = startCompactNavBarObserver();
+        console.log('[Mod Settings] Compact nav bar applied:', config.compactNavBar);
+      }, 1000); // Delay to ensure DOM is ready
+    } else {
+      // Start observer even if disabled, so it can react if enabled later
+      scheduleTimeout(() => {
+        observers.compactNavBar = startCompactNavBarObserver();
+      }, 1000);
+    }
+    
     // Hide website footer if enabled
     if (config.removeWebsiteFooter) {
       scheduleTimeout(() => {
@@ -7807,6 +8121,7 @@ function cleanupBetterUI() {
     observers.creature = disconnectObserver(observers.creature, 'Creature container');
     observers.setupLabels = disconnectObserver(observers.setupLabels, 'Setup labels');
     observers.scrollLock = disconnectObserver(observers.scrollLock, 'Scroll lock');
+    observers.compactNavBar = disconnectObserver(observers.compactNavBar, 'Compact nav bar');
     battleBoardObserver = disconnectObserver(battleBoardObserver, 'Battle board');
     
     // Unsubscribe from board state events
@@ -8004,6 +8319,371 @@ function cleanupBetterUI() {
     console.error('[Mod Settings] Cleanup error:', error);
   }
 }
+
+// =======================
+// Last Visited Map Functions
+// =======================
+
+// Load map history from localStorage
+const loadLastVisitedMap = () => {
+  try {
+    const saved = localStorage.getItem(LAST_MAP_STORAGE_KEY);
+    if (saved) {
+      mapHistory = JSON.parse(saved);
+      console.log('[Mod Settings] Loaded map history:', mapHistory);
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error loading map history:', error);
+  }
+};
+
+// Save map to history
+const saveLastVisitedMap = (roomId, roomName) => {
+  try {
+    // Remove this map if it already exists in history
+    mapHistory = mapHistory.filter(map => map.roomId !== roomId);
+
+    // Add to beginning of history
+    mapHistory.unshift({ roomId, roomName });
+
+    // Keep only last 5 maps to avoid excessive storage
+    if (mapHistory.length > 5) {
+      mapHistory = mapHistory.slice(0, 5);
+    }
+
+    localStorage.setItem(LAST_MAP_STORAGE_KEY, JSON.stringify(mapHistory));
+    console.log('[Mod Settings] Saved map to history:', { roomId, roomName }, 'History:', mapHistory);
+    updateLastMapButton();
+  } catch (error) {
+    console.error('[Mod Settings] Error saving map to history:', error);
+  }
+};
+
+// Navigate to previous map in history
+const navigateToLastMap = () => {
+  if (!mapHistory || mapHistory.length === 0) {
+    createToast({
+      message: 'No maps in history. Visit some maps first!',
+      type: 'info',
+      duration: 3000
+    });
+    return;
+  }
+
+  // Get current map
+  let currentMapId = null;
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    if (boardContext?.selectedMap?.selectedRoom?.id) {
+      currentMapId = boardContext.selectedMap.selectedRoom.id;
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error getting current map:', error);
+  }
+
+  // Find the current map's index in history
+  let currentIndex = -1;
+  for (let i = 0; i < mapHistory.length; i++) {
+    if (mapHistory[i].roomId === currentMapId) {
+      currentIndex = i;
+      break;
+    }
+  }
+
+  // Determine next map to navigate to
+  let targetMap = null;
+  if (currentIndex >= 0) {
+    // Current map is in history - go to next one (wrap around)
+    const nextIndex = (currentIndex + 1) % mapHistory.length;
+    targetMap = mapHistory[nextIndex];
+  } else {
+    // Current map not in history - go to first map
+    targetMap = mapHistory[0];
+  }
+
+  // If somehow we still don't have a target (shouldn't happen), use first map
+  if (!targetMap) {
+    targetMap = mapHistory[0];
+  }
+
+  // Don't navigate if target is the same as current (only one map in history)
+  if (targetMap.roomId === currentMapId) {
+    createToast({
+      message: 'No other maps in history. Visit a different map first!',
+      type: 'info',
+      duration: 3000
+    });
+    return;
+  }
+
+  try {
+    console.log('[Mod Settings] Navigating to previous map:', targetMap, 'Current:', currentMapId);
+    isNavigatingViaButton = true; // Set flag to prevent saving this navigation
+    globalThis.state.board.send({
+      type: 'selectRoomById',
+      roomId: targetMap.roomId
+    });
+    // Reset flag after a short delay to allow navigation to complete
+    setTimeout(() => { isNavigatingViaButton = false; }, 1000);
+  } catch (error) {
+    console.error('[Mod Settings] Error navigating to previous map:', error);
+    isNavigatingViaButton = false; // Reset flag on error
+    createToast({
+      message: 'Failed to navigate to map',
+      type: 'error',
+      duration: 2000
+    });
+  }
+};
+
+// Update the last map button appearance
+const updateLastMapButton = () => {
+  if (!lastMapButton) return;
+
+  // Get current map
+  let currentMapId = null;
+  try {
+    const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+    if (boardContext?.selectedMap?.selectedRoom?.id) {
+      currentMapId = boardContext.selectedMap.selectedRoom.id;
+    }
+  } catch (error) {
+    // Ignore errors when getting current map
+  }
+
+  // Find the current map's index in history
+  let currentIndex = -1;
+  for (let i = 0; i < mapHistory.length; i++) {
+    if (mapHistory[i].roomId === currentMapId) {
+      currentIndex = i;
+      break;
+    }
+  }
+
+  // Determine next map to navigate to (same logic as navigateToLastMap)
+  let targetMap = null;
+  if (currentIndex >= 0) {
+    // Current map is in history - go to next one (wrap around)
+    const nextIndex = (currentIndex + 1) % mapHistory.length;
+    targetMap = mapHistory[nextIndex];
+  } else {
+    // Current map not in history - go to first map
+    targetMap = mapHistory[0];
+  }
+
+  if (targetMap && targetMap.roomId !== currentMapId) {
+    // Get room name from utils if not stored
+    let roomName = targetMap.roomName;
+    if (!roomName) {
+      const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+      roomName = roomNames[targetMap.roomId] || targetMap.roomId;
+    }
+    lastMapButton.title = `Return to ${roomName}`;
+    lastMapButton.style.opacity = '1';
+  } else {
+    lastMapButton.title = 'No other maps in history';
+    lastMapButton.style.opacity = '0.5'; // Dim the button but keep it visible
+  }
+};
+
+// Add last map button to navigation bar
+const addLastMapNavButton = () => {
+  if (!config.showLastVisitedMapButton) {
+    console.log('[Mod Settings] Last map button disabled in config');
+    return;
+  }
+
+  function tryInsert() {
+    const nav = document.querySelector('nav.shrink-0');
+    if (!nav) {
+      setTimeout(tryInsert, 500);
+      return;
+    }
+
+    const ul = nav.querySelector('ul.flex.items-center');
+    if (!ul) {
+      setTimeout(tryInsert, 500);
+      return;
+    }
+
+    // Check if button already exists
+    if (ul.querySelector('.last-map-nav-btn')) {
+      console.log('[Mod Settings] Last map button already exists');
+      return;
+    }
+
+    const li = document.createElement('li');
+    li.className = 'hover:text-whiteExp';
+
+    const btn = document.createElement('button');
+    btn.className = 'last-map-nav-btn focus-style-visible pixel-font-16 relative my-px flex items-center gap-1.5 border border-solid border-transparent px-1 py-0.5 active:frame-pressed-1 data-[selected="true"]:frame-pressed-1 hover:text-whiteExp data-[selected="true"]:text-whiteExp sm:px-2 sm:py-0.5';
+    btn.setAttribute('data-selected', 'false');
+    btn.innerHTML = '<div class="relative flex"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"></div>';
+
+    // Get proper tooltip text
+    let tooltipText = 'No maps in history';
+    if (mapHistory && mapHistory.length > 0) {
+      // Get current map
+      let currentMapId = null;
+      try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        if (boardContext?.selectedMap?.selectedRoom?.id) {
+          currentMapId = boardContext.selectedMap.selectedRoom.id;
+        }
+      } catch (error) {
+        // Ignore errors
+      }
+
+      // Find the current map's index in history
+      let currentIndex = -1;
+      for (let i = 0; i < mapHistory.length; i++) {
+        if (mapHistory[i].roomId === currentMapId) {
+          currentIndex = i;
+          break;
+        }
+      }
+
+      // Determine next map to navigate to (same logic as navigateToLastMap)
+      let targetMap = null;
+      if (currentIndex >= 0) {
+        // Current map is in history - go to next one (wrap around)
+        const nextIndex = (currentIndex + 1) % mapHistory.length;
+        targetMap = mapHistory[nextIndex];
+      } else {
+        // Current map not in history - go to first map
+        targetMap = mapHistory[0];
+      }
+
+      if (targetMap && targetMap.roomId !== currentMapId) {
+        let roomName = targetMap.roomName;
+        if (!roomName) {
+          const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+          roomName = roomNames[targetMap.roomId] || targetMap.roomId;
+        }
+        tooltipText = `Return to ${roomName}`;
+      } else {
+        tooltipText = 'No other maps in history';
+      }
+    }
+    btn.title = tooltipText;
+
+    btn.style.color = '#3b82f6'; // Blue color
+
+    // Check if there are any maps in history besides current
+    let hasTargetMap = false;
+    if (mapHistory && mapHistory.length > 0) {
+      let currentMapId = null;
+      try {
+        const boardContext = globalThis.state?.board?.getSnapshot()?.context;
+        if (boardContext?.selectedMap?.selectedRoom?.id) {
+          currentMapId = boardContext.selectedMap.selectedRoom.id;
+        }
+      } catch (error) {
+        // Ignore errors
+      }
+
+      // Find the current map's index in history
+      let currentIndex = -1;
+      for (let i = 0; i < mapHistory.length; i++) {
+        if (mapHistory[i].roomId === currentMapId) {
+          currentIndex = i;
+          break;
+        }
+      }
+
+      // Determine next map to navigate to
+      let targetMap = null;
+      if (currentIndex >= 0) {
+        const nextIndex = (currentIndex + 1) % mapHistory.length;
+        targetMap = mapHistory[nextIndex];
+      } else {
+        targetMap = mapHistory[0];
+      }
+
+      hasTargetMap = targetMap && targetMap.roomId !== currentMapId;
+    }
+    btn.style.opacity = hasTargetMap ? '1' : '0.5'; // Dim if no target map available
+    btn.onclick = navigateToLastMap;
+
+    lastMapButton = btn;
+
+    li.appendChild(btn);
+    ul.appendChild(li);
+
+    // Update button state
+    updateLastMapButton();
+
+    console.log('[Mod Settings] Last map navigation button added');
+  }
+  tryInsert();
+};
+
+// Remove last map button
+const removeLastMapNavButton = () => {
+  const existingButton = document.querySelector('.last-map-nav-btn');
+  if (existingButton) {
+    existingButton.parentElement?.remove();
+    lastMapButton = null;
+    console.log('[Mod Settings] Last map button removed');
+  }
+};
+
+// Subscribe to map changes
+const subscribeToMapChanges = () => {
+  try {
+    if (globalThis.state && globalThis.state.board) {
+      const handleBoardChange = (state) => {
+        try {
+          const boardContext = state.context;
+          const selectedMap = boardContext?.selectedMap;
+
+          if (selectedMap && selectedMap.selectedRoom) {
+            const roomId = selectedMap.selectedRoom.id;
+
+            // Skip saving if we're navigating via the button
+            if (isNavigatingViaButton) {
+              console.log('[Mod Settings] Skipping map save - navigating via button');
+              return;
+            }
+
+            // Get room name from utils if not in selectedRoom
+            let roomName = selectedMap.selectedRoom.name;
+            if (!roomName) {
+              const roomNames = globalThis.state?.utils?.ROOM_NAME || {};
+              roomName = roomNames[roomId] || roomId;
+            }
+
+            // Skip sewers (default map) and save any other map
+            if (roomId && roomId !== 'rkswrs') {
+              // Only save if it's not already the most recent in history
+              if (mapHistory.length === 0 || mapHistory[0].roomId !== roomId) {
+                console.log('[Mod Settings] Saving new map:', roomId, roomName);
+                saveLastVisitedMap(roomId, roomName);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('[Mod Settings] Error in map tracking:', error);
+        }
+      };
+
+      // Subscribe using .subscribe()
+      mapChangeUnsubscribe = globalThis.state.board.subscribe(handleBoardChange);
+      console.log('[Mod Settings] Subscribed to map changes');
+    }
+  } catch (error) {
+    console.error('[Mod Settings] Error subscribing to map changes:', error);
+  }
+};
+
+// Unsubscribe from map changes
+const unsubscribeFromMapChanges = () => {
+  if (mapChangeUnsubscribe && typeof mapChangeUnsubscribe === 'function') {
+    mapChangeUnsubscribe();
+    mapChangeUnsubscribe = null;
+    console.log('[Mod Settings] Unsubscribed from map changes');
+  }
+};
 
 // =======================
 // 18. Exports & Lifecycle Management

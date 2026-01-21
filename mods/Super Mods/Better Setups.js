@@ -34,6 +34,13 @@ const DEFAULT_LABELS = ["Farm", "Speedrun", "Rank Points", "Boosted Map", "Other
 // Global observer for setup interface changes
 let setupInterfaceObserver = null;
 
+// Track trash buttons in confirmation mode (pending deletion)
+const trashButtonsInConfirmation = new WeakSet();
+const trashButtonTimeouts = new WeakMap();
+
+// Global click handler to cancel confirmation when clicking outside
+let globalClickHandler = null;
+
 // Media URLs from media.txt
 const MEDIA_URLS = {
   BACKGROUND_BLUE: 'https://bestiaryarena.com/_next/static/media/background-blue.7259c4ed.png',
@@ -258,6 +265,157 @@ function activateSetups() {
 
 // Function to inject edit buttons into existing setup labels
 
+// Function to cancel all pending confirmations
+function cancelAllConfirmations() {
+  const setupContainer = document.querySelector('.mb-2.flex.items-center.gap-2');
+  if (setupContainer) {
+    const trashButtons = setupContainer.querySelectorAll('button svg.lucide-trash2');
+    trashButtons.forEach(trashIcon => {
+      const trashButton = trashIcon.closest('button');
+      if (trashButton && trashButtonsInConfirmation.has(trashButton)) {
+        trashButtonsInConfirmation.delete(trashButton);
+        trashButton.classList.remove('trash-button-confirming');
+        if (trashButtonTimeouts.has(trashButton)) {
+          clearTimeout(trashButtonTimeouts.get(trashButton));
+          trashButtonTimeouts.delete(trashButton);
+        }
+      }
+    });
+  }
+}
+
+// Function to add confirmation handler to trash button
+function addTrashButtonConfirmation(trashButton) {
+  // Skip if already has confirmation handler
+  if (trashButton.dataset.confirmationHandler === 'true') {
+    return;
+  }
+  
+  // Mark as having confirmation handler
+  trashButton.dataset.confirmationHandler = 'true';
+  
+  // Add blinking animation style if not already added
+  if (!document.getElementById('trash-button-blink-style')) {
+    const style = document.createElement('style');
+    style.id = 'trash-button-blink-style';
+    style.textContent = `
+      .trash-button-confirming {
+        position: relative !important;
+      }
+      .trash-button-confirming::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: white;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 1;
+        animation: trash-button-blink 0.3s linear infinite;
+      }
+      @keyframes trash-button-blink {
+        0%, 100% { 
+          opacity: 0;
+        }
+        50% { 
+          opacity: 0.8;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  // Set up global click handler if not already set
+  if (!globalClickHandler) {
+    globalClickHandler = function(e) {
+      // If clicking outside any trash button, cancel all confirmations
+      const clickedTrashButton = e.target.closest('button svg.lucide-trash2')?.closest('button');
+      if (!clickedTrashButton) {
+        cancelAllConfirmations();
+      }
+    };
+    document.addEventListener('click', globalClickHandler, true);
+  }
+  
+  // Store the handler function
+  const clickHandler = function(e) {
+    // Check if this button is in confirmation mode
+    if (trashButtonsInConfirmation.has(trashButton)) {
+      // Second click - proceed with deletion
+      console.log('[Better Setups] Trash button confirmed, proceeding with deletion');
+      
+      // Remove from confirmation mode FIRST
+      trashButtonsInConfirmation.delete(trashButton);
+      trashButton.classList.remove('trash-button-confirming');
+      
+      // Clear timeout if exists
+      if (trashButtonTimeouts.has(trashButton)) {
+        clearTimeout(trashButtonTimeouts.get(trashButton));
+        trashButtonTimeouts.delete(trashButton);
+      }
+      
+      // Prevent the original event first
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      
+      // Remove our handler temporarily
+      trashButton.removeEventListener('click', clickHandler, true);
+      
+      // Use setTimeout to ensure handler removal is complete, then trigger native click
+      setTimeout(() => {
+        // Try native click() method first - this should work with most frameworks
+        try {
+          trashButton.click();
+          console.log('[Better Setups] Triggered native click() method');
+        } catch (err) {
+          console.warn('[Better Setups] Error with click():', err);
+          // Fallback: dispatch synthetic event
+          const newEvent = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            detail: 1
+          });
+          trashButton.dispatchEvent(newEvent);
+        }
+        
+        // Re-add our handler after a delay
+        setTimeout(() => {
+          trashButton.addEventListener('click', clickHandler, true);
+        }, 100);
+      }, 10);
+    } else {
+      // First click - start blinking confirmation
+      console.log('[Better Setups] Trash button clicked, starting confirmation');
+      
+      // Prevent default deletion
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      
+      // Add to confirmation mode
+      trashButtonsInConfirmation.add(trashButton);
+      trashButton.classList.add('trash-button-confirming');
+      
+      // Set timeout to reset confirmation after 3 seconds
+      const timeout = setTimeout(() => {
+        console.log('[Better Setups] Trash button confirmation timeout, resetting');
+        trashButtonsInConfirmation.delete(trashButton);
+        trashButton.classList.remove('trash-button-confirming');
+        trashButtonTimeouts.delete(trashButton);
+      }, 3000);
+      
+      trashButtonTimeouts.set(trashButton, timeout);
+    }
+  };
+  
+  // Add click handler with capture phase to intercept early
+  trashButton.addEventListener('click', clickHandler, true);
+}
+
 // Function to inject edit buttons into a specific setup button
 function injectEditButton(setupButton) {
   const buttonText = setupButton.textContent.trim();
@@ -277,6 +435,9 @@ function injectEditButton(setupButton) {
     const trashButton = parent.querySelector('button svg.lucide-trash2')?.closest('button');
     
     if (trashButton) {
+      // Add confirmation handler to trash button
+      addTrashButtonConfirmation(trashButton);
+      
       // Insert edit button after trash button
       parent.insertBefore(editButton, trashButton.nextSibling);
     } else {
@@ -328,7 +489,16 @@ function processSetupInterface() {
   
   console.log('[Better Setups] Processing setup interface...');
   
-  // First, inject edit buttons for all setup labels
+  // First, add confirmation handlers to all existing trash buttons
+  const allTrashButtons = setupContainer.querySelectorAll('button svg.lucide-trash2');
+  allTrashButtons.forEach(trashIcon => {
+    const trashButton = trashIcon.closest('button');
+    if (trashButton) {
+      addTrashButtonConfirmation(trashButton);
+    }
+  });
+  
+  // Then, inject edit buttons for all setup labels
   const setupButtons = setupContainer.querySelectorAll('button');
   let injectedCount = 0;
   
@@ -397,35 +567,45 @@ function startSetupInterfaceObserver() {
     
     mutations.forEach((mutation) => {
       if (mutation.type === 'childList') {
-        // Check if any added nodes contain setup buttons
-        const addedNodes = Array.from(mutation.addedNodes);
-        addedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            // Check if this node is a setup button or contains setup buttons
-            if (node.matches && node.matches('button')) {
-              const buttonText = node.textContent.trim();
-              if (buttonText.includes('Setup (') || buttonText.includes('Save (')) {
-                shouldProcess = true;
-              }
-            }
-            
-            // Check if this node contains setup buttons
-            if (node.querySelectorAll) {
-              const setupButtons = node.querySelectorAll('button');
-              setupButtons.forEach(button => {
-                const buttonText = button.textContent.trim();
-                if (buttonText.includes('Setup (') || buttonText.includes('Save (')) {
+            // Check if any added nodes contain setup buttons
+            const addedNodes = Array.from(mutation.addedNodes);
+            addedNodes.forEach(node => {
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                // Check if this node is a setup button or contains setup buttons
+                if (node.matches && node.matches('button')) {
+                  const buttonText = node.textContent.trim();
+                  if (buttonText.includes('Setup (') || buttonText.includes('Save (')) {
+                    shouldProcess = true;
+                  }
+                  // Also check if it's a trash button
+                  if (node.querySelector && node.querySelector('svg.lucide-trash2')) {
+                    shouldProcess = true;
+                  }
+                }
+                
+                // Check if this node contains setup buttons
+                if (node.querySelectorAll) {
+                  const setupButtons = node.querySelectorAll('button');
+                  setupButtons.forEach(button => {
+                    const buttonText = button.textContent.trim();
+                    if (buttonText.includes('Setup (') || buttonText.includes('Save (')) {
+                      shouldProcess = true;
+                    }
+                  });
+                  
+                  // Also check for trash buttons
+                  const trashButtons = node.querySelectorAll('button svg.lucide-trash2');
+                  if (trashButtons.length > 0) {
+                    shouldProcess = true;
+                  }
+                }
+                
+                // Check if this is the setup container itself
+                if (node.matches && node.matches('.mb-2.flex.items-center.gap-2')) {
                   shouldProcess = true;
                 }
-              });
-            }
-            
-            // Check if this is the setup container itself
-            if (node.matches && node.matches('.mb-2.flex.items-center.gap-2')) {
-              shouldProcess = true;
-            }
-          }
-        });
+              }
+            });
         
         // Check if any removed nodes might affect our buttons
         const removedNodes = Array.from(mutation.removedNodes);
@@ -480,6 +660,15 @@ function stopSetupInterfaceObserver() {
     setupInterfaceObserver.disconnect();
     setupInterfaceObserver = null;
   }
+  
+  // Clean up global click handler
+  if (globalClickHandler) {
+    document.removeEventListener('click', globalClickHandler, true);
+    globalClickHandler = null;
+  }
+  
+  // Cancel all pending confirmations
+  cancelAllConfirmations();
 }
 
 // =======================

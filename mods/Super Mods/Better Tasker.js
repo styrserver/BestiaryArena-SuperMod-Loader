@@ -715,14 +715,25 @@ function showToast(message, duration = 5000) {
     }
 }
 
+// Helper function to check if there's an active task
+function hasActiveTask() {
+    try {
+        const task = globalThis.state?.player?.get()?.context?.questLog?.task;
+        return task && task.gameId && !task.ready;
+    } catch (error) {
+        console.error('[Better Tasker] Error checking for active task:', error);
+        return false;
+    }
+}
+
 // Create continuous stamina monitoring callback
 function createStaminaMonitoringCallback(logPrefix, successMessage) {
     return () => {
         console.log(`[Better Tasker] ${logPrefix}`);
 
-        // Check if still valid to continue
-        if (!taskHuntingOngoing) {
-            console.log('[Better Tasker] Task no longer active during stamina recovery');
+        // Check if there's still an active task (not just if task hunting is ongoing)
+        if (!hasActiveTask()) {
+            console.log('[Better Tasker] No active task found during stamina recovery');
             stopStaminaTooltipMonitoring();
             return;
         }
@@ -2229,7 +2240,7 @@ function getRoomIdForMapName(mapName) {
 
 // Function to check if user is on the correct tasking map
 function isOnCorrectTaskingMap() {
-    if (!taskOperationInProgress && !taskHuntingOngoing) {
+    if (!taskOperationInProgress && !taskHuntingOngoing && !hasActiveTask()) {
         return false;
     }
     
@@ -3870,14 +3881,14 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     // Don't return - continue to check stamina and try clicking Start button
                 } else {
                     await sleep(AUTOPLAY_SETUP_DELAY);
-                    
-                    // Enable Bestiary Automator settings if configured
-                    enableBestiaryAutomatorSettings();
-                    
-                    // Wait for Bestiary Automator to initialize
-                    console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
-                    await sleep(BESTIARY_INIT_WAIT);
                 }
+
+                // Enable Bestiary Automator settings if configured (moved outside autoplay condition)
+                enableBestiaryAutomatorSettings();
+
+                // Wait for Bestiary Automator to initialize
+                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
                 console.log('[Better Tasker] Validating settings after navigation...');
@@ -5361,6 +5372,16 @@ async function findAndClickFinishButton() {
 // Handle task completion when task.ready = true (API state)
 async function handleTaskReadyCompletion() {
     try {
+        // Check if autocomplete is enabled before claiming rewards
+        const settings = loadSettings();
+        if (!settings.autoCompleteTasks) {
+            console.log('[Better Tasker] Autocomplete tasks disabled, skipping reward claim');
+            // Clear flags since we're not completing the task
+            taskOperationInProgress = false;
+            updateExposedState();
+            return;
+        }
+        
         console.log('[Better Tasker] Handling task ready completion via API state...');
         
         // Set task operation in progress flag to prevent duplicate operations
@@ -5465,6 +5486,16 @@ async function handlePostGameTaskCompletion() {
         const task = playerContext?.questLog?.task;
         
         if (task && task.ready) {
+            // Check if autocomplete is enabled before claiming rewards
+            const settings = loadSettings();
+            if (!settings.autoCompleteTasks) {
+                console.log('[Better Tasker] Autocomplete tasks disabled, skipping reward claim');
+                // Clear flags since we're not completing the task
+                taskOperationInProgress = false;
+                updateExposedState();
+                return;
+            }
+            
             // Task is ready - open quest log and look for Finish button
             console.log('[Better Tasker] Task is ready, opening quest log for Finish button...');
             
@@ -5558,12 +5589,8 @@ async function handleTaskFinishing() {
         return;
     }
     
-    // Load settings to check if autocomplete is enabled
+    // Load settings (autocomplete check moved to reward claiming functions only)
     const settings = loadSettings();
-    if (!settings.autoCompleteTasks) {
-        console.log('[Better Tasker] Autocomplete tasks disabled, skipping');
-        return;
-    }
     
     // Check if current task should be removed due to creature filtering
     const taskRemoved = await removeCurrentTaskIfNotAllowed();
@@ -5676,6 +5703,44 @@ async function handleTaskFinishing() {
             
             // Only attempt quest log access when necessary
             if (isTaskReady) {
+                // Open quest log to check for finish button
+                console.log('[Better Tasker] Task is ready, opening quest log to check for finish button...');
+                const questLogOpened = await openQuestLogWithRetry();
+
+                if (questLogOpened) {
+                    // Wait a moment for the UI to render
+                    await sleep(500);
+
+                    // Check if finish button is present and autocomplete is disabled
+                    const finishButton = document.querySelector('button:has(svg.lucide-check)');
+                    const settings = loadSettings();
+                    if (finishButton && !settings.autoCompleteTasks) {
+                        console.log('[Better Tasker] Task is ready with finish button present but autocomplete disabled - disabling mod in quest log to let other mods handle task completion');
+                        // Disable the mod in quest log
+                        taskerState = TASKER_STATES.DISABLED;
+                        // Clear scheduler when disabling
+                        if (taskCheckTimeout) {
+                            clearTimeout(taskCheckTimeout);
+                            taskCheckTimeout = null;
+                        }
+                        resetState('navigation');
+                        updateExposedState();
+                        // Update coordination system state
+                        if (window.ModCoordination) {
+                            window.ModCoordination.updateModState('Better Tasker', { enabled: false });
+                        }
+                    saveTaskerState();
+                    updateToggleButton();
+                    console.log('[Better Tasker] Tasker disabled in quest log due to ready task with finish button and autocomplete disabled');
+                    console.log('[Better Tasker] Refreshing page to allow other mods to handle task completion...');
+                    // Refresh the page to reset mod states and allow other mods to handle completion
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000); // Small delay to ensure state is saved
+                    return;
+                    }
+                }
+
                 console.log('[Better Tasker] Task is ready - proceeding with completion');
                 await triggerFailsafe('Task is ready');
                 return;
@@ -5871,9 +5936,16 @@ async function handleTaskFinishing() {
                 // 4. Find Finish button (100ms fast polling, 5 attempts, no fallback selectors)
                 const finishButton = await findFinishButton(100, 5, false);
                 
-                // 5. Click Finish and verify completion
-                if (finishButton) {
+                // 5. Check if autocomplete is enabled before claiming rewards
+                const settings = loadSettings();
+                if (finishButton && settings.autoCompleteTasks) {
                     await clickFinishAndVerify(finishButton);
+                } else if (finishButton && !settings.autoCompleteTasks) {
+                    console.log('[Better Tasker] Autocomplete tasks disabled, skipping reward claim');
+                    // Clear flags since we're not completing the task
+                    taskOperationInProgress = false;
+                    updateExposedState();
+                    clickAllCloseButtons();
                 } else {
                     // If we were checking during autoplay and no finish button appeared, just close the quest log
                     if (isAutoplayActive && !isTaskReady) {
