@@ -204,6 +204,7 @@
         autodusterGenesMax: UI_CONSTANTS.SQUEEZE_GENE_MAX,
         autodusterIgnoreList: [],
         autodusterSellList: [],
+        autodusterKeepStats: {}, // Per-equipment stat types to keep: { "EquipmentName": { ad: true, ap: true, hp: true } }
         // Shared ignore list for both autoplant and autosell
         autoplantIgnoreList: [],
         autoplantSellList: [],
@@ -422,6 +423,58 @@
         const ranges = { ...(settings.creatureKeepRanges || {}) };
         delete ranges[creatureName];
         setSettings({ creatureKeepRanges: ranges });
+    }
+    
+    /**
+     * Get autoduster stat settings for a specific equipment
+     * @param {string} equipmentName - Name of the equipment
+     * @returns {Object} Stat settings for the equipment
+     */
+    function getAutodusterKeepStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = settings.autodusterKeepStats || {};
+        return equipmentName && allKeepStats[equipmentName] 
+            ? allKeepStats[equipmentName] 
+            : { ad: true, ap: true, hp: true };
+    }
+    
+    /**
+     * Set autoduster stat settings for a specific equipment
+     * @param {string} equipmentName - Name of the equipment
+     * @param {Object} keepStats - Stat settings { ad: boolean, ap: boolean, hp: boolean }
+     */
+    function setAutodusterKeepStats(equipmentName, keepStats) {
+        const settings = getSettings();
+        const allKeepStats = { ...(settings.autodusterKeepStats || {}) };
+        allKeepStats[equipmentName] = keepStats;
+        setSettings({ autodusterKeepStats: allKeepStats });
+    }
+    
+    /**
+     * Clear autoduster stat settings for a specific equipment (reset to defaults)
+     * @param {string} equipmentName - Name of the equipment
+     */
+    function clearAutodusterKeepStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = { ...(settings.autodusterKeepStats || {}) };
+        delete allKeepStats[equipmentName];
+        setSettings({ autodusterKeepStats: allKeepStats });
+    }
+    
+    /**
+     * Check if autoduster stat settings are custom for a specific equipment (not all default)
+     * @param {string} equipmentName - Name of the equipment
+     * @returns {boolean} True if settings are custom
+     */
+    function hasCustomAutodusterStats(equipmentName) {
+        const settings = getSettings();
+        const allKeepStats = settings.autodusterKeepStats || {};
+        if (!equipmentName || !allKeepStats[equipmentName]) {
+            return false; // No custom settings for this equipment
+        }
+        const keepStats = allKeepStats[equipmentName];
+        // Check if any stat is not at default (all should be true by default)
+        return keepStats.ad !== true || keepStats.ap !== true || keepStats.hp !== true;
     }
     
     /**
@@ -731,8 +784,71 @@
             return false;
         }
         
-        // Equipment should be dusted (no gene checking for equipment)
+        // Check if equipment stat type should be kept (per-equipment settings)
+        const equipmentStat = equipment.stat || 'unknown';
+        const allKeepStats = settings.autodusterKeepStats || {};
+        
+        // Get settings for this specific equipment, or use defaults (all checked)
+        const keepStats = equipment.name && allKeepStats[equipment.name] 
+            ? allKeepStats[equipment.name] 
+            : { ad: true, ap: true, hp: true };
+        
+        // Map stat types: 'ad' -> 'ad', 'ap' -> 'ap', 'hp' -> 'hp'
+        // Only check AD, AP, HP (ignore armor and magicResist)
+        if (equipmentStat === 'ad' || equipmentStat === 'ap' || equipmentStat === 'hp') {
+            if (keepStats[equipmentStat] === true) {
+                return false; // Keep this equipment
+            }
+        }
+        
+        // Equipment should be dusted
         return true;
+    }
+    
+    /**
+     * Get reason why equipment is kept or dusted (for logging)
+     * @param {Object} equipment - Equipment details
+     * @param {Object} settings - Autoseller settings
+     * @returns {Object} { shouldDust: boolean, reason: string }
+     */
+    function getEquipmentDecisionReason(equipment, settings) {
+        if (!equipment) {
+            return { shouldDust: false, reason: 'Equipment details unavailable' };
+        }
+        
+        const ignoreList = settings.autodusterIgnoreList || [];
+        
+        // Check if equipment is in ignore list
+        if (equipment.name && ignoreList.includes(equipment.name)) {
+            return { shouldDust: false, reason: 'In ignore list' };
+        }
+        
+        // Check if equipment stat type should be kept (per-equipment settings)
+        const equipmentStat = equipment.stat || 'unknown';
+        const allKeepStats = settings.autodusterKeepStats || {};
+        
+        // Get settings for this specific equipment, or use defaults (all checked)
+        const keepStats = equipment.name && allKeepStats[equipment.name] 
+            ? allKeepStats[equipment.name] 
+            : { ad: true, ap: true, hp: true };
+        
+        const hasCustomSettings = equipment.name && allKeepStats[equipment.name];
+        
+        // Map stat types: 'ad' -> 'ad', 'ap' -> 'ap', 'hp' -> 'hp'
+        // Only check AD, AP, HP (ignore armor and magicResist)
+        if (equipmentStat === 'ad' || equipmentStat === 'ap' || equipmentStat === 'hp') {
+            if (keepStats[equipmentStat] === true) {
+                const statName = equipmentStat.toUpperCase();
+                const settingsNote = hasCustomSettings ? ' (custom settings)' : ' (default)';
+                return { shouldDust: false, reason: `Keep ${statName} stat${settingsNote}` };
+            } else {
+                const statName = equipmentStat.toUpperCase();
+                return { shouldDust: true, reason: `Dust ${statName} stat (not kept)` };
+            }
+        }
+        
+        // Equipment stat type not AD/AP/HP - always dust
+        return { shouldDust: true, reason: `Dust ${equipmentStat} stat (not AD/AP/HP)` };
     }
     
     /**
@@ -2420,7 +2536,7 @@
     }
 
     // Helper function to create creature boxes for Autoplant
-    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false}) {
+    function createAutoplantCreaturesBox({title, items, selectedCreature, onSelectCreature, isIgnoreList = false, enableContextMenu = false, showKeepRangeLock = false, contextMenuType = 'creature', showAutodusterIndicator = false}) {
         const box = document.createElement('div');
         box.style.display = 'flex';
         box.style.flexDirection = 'column';
@@ -2505,6 +2621,25 @@
                 }
             }
             
+            // Add visual indicator if autoduster has custom stat settings for this equipment
+            // Show grey lock when in Keep list (inactive), colored when in Disenchant list (active)
+            if (showAutodusterIndicator) {
+                if (hasCustomAutodusterStats(name)) {
+                    const indicator = document.createElement('span');
+                    indicator.textContent = '🔒';
+                    const statusText = isIgnoreList ? 'Inactive' : 'Active';
+                    indicator.title = `Custom stat type settings (${statusText})`;
+                    indicator.style.fontSize = '10px';
+                    indicator.style.flexShrink = '0';
+                    // Grey when inactive (in Keep list), colored when active (in Disenchant list)
+                    if (isIgnoreList) {
+                        indicator.style.opacity = '0.5';
+                        indicator.style.filter = 'grayscale(100%)';
+                    }
+                    item.appendChild(indicator);
+                }
+            }
+            
             // Add creature name text
             const nameText = document.createElement('span');
             nameText.textContent = name;
@@ -2539,33 +2674,58 @@
             item.addEventListener('mouseup', handleMouseUp);
             item.addEventListener('click', handleClick);
             
-            // Only add context menu for autoseller (autoplant/autosell), not for autosqueeze/autoduster
+            // Add context menu based on type (creature for autoseller, autoduster for equipment)
             if (enableContextMenu) {
                 const handleContextMenu = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     
-                    // Show context menu at cursor position
-                    createCreatureContextMenu(name, e.clientX, e.clientY, () => {
-                        // Refresh the creature columns to show updated indicators
-                        // Find the columns container by traversing up the DOM tree
-                        let currentElement = item;
-                        let columnsContainer = null;
-                        while (currentElement && !columnsContainer) {
-                            currentElement = currentElement.parentElement;
-                            if (currentElement && currentElement.classList && currentElement.classList.contains('creature-columns-container')) {
-                                columnsContainer = currentElement;
+                    if (contextMenuType === 'autoduster') {
+                        // Show autoduster context menu for stat type selection
+                        createAutodusterContextMenu(name, e.clientX, e.clientY, () => {
+                            // Refresh the equipment columns to show updated indicators
+                            // Find the columns container by traversing up the DOM tree
+                            let currentElement = item;
+                            let columnsContainer = null;
+                            while (currentElement && !columnsContainer) {
+                                currentElement = currentElement.parentElement;
+                                if (currentElement && currentElement.classList && currentElement.classList.contains('equipment-columns-container')) {
+                                    columnsContainer = currentElement;
+                                }
                             }
-                        }
-                        
-                        if (columnsContainer) {
-                            // Trigger a custom event that the parent can listen to
-                            const refreshEvent = new CustomEvent('creatureKeepRangeUpdated', {
-                                detail: { creatureName: name }
-                            });
-                            columnsContainer.dispatchEvent(refreshEvent);
-                        }
-                    });
+                            
+                            if (columnsContainer) {
+                                // Find the parent function scope to call renderEquipmentColumns
+                                // We'll trigger a re-render by dispatching a custom event
+                                const refreshEvent = new CustomEvent('autodusterStatsUpdated', {
+                                    detail: { equipmentName: name }
+                                });
+                                columnsContainer.dispatchEvent(refreshEvent);
+                            }
+                        });
+                    } else {
+                        // Show creature context menu for gene keep ranges
+                        createCreatureContextMenu(name, e.clientX, e.clientY, () => {
+                            // Refresh the creature columns to show updated indicators
+                            // Find the columns container by traversing up the DOM tree
+                            let currentElement = item;
+                            let columnsContainer = null;
+                            while (currentElement && !columnsContainer) {
+                                currentElement = currentElement.parentElement;
+                                if (currentElement && currentElement.classList && currentElement.classList.contains('creature-columns-container')) {
+                                    columnsContainer = currentElement;
+                                }
+                            }
+                            
+                            if (columnsContainer) {
+                                // Trigger a custom event that the parent can listen to
+                                const refreshEvent = new CustomEvent('creatureKeepRangeUpdated', {
+                                    detail: { creatureName: name }
+                                });
+                                columnsContainer.dispatchEvent(refreshEvent);
+                            }
+                        });
+                    }
                 };
                 
                 item.addEventListener('contextmenu', handleContextMenu);
@@ -2902,6 +3062,319 @@
         
         return menu;
     }
+    
+    /**
+     * Creates a context menu for autoduster stat type selection
+     * @param {string} equipmentName - Equipment name
+     * @param {number} x - X position for menu
+     * @param {number} y - Y position for menu
+     * @param {Function} onClose - Callback when menu closes
+     * @returns {HTMLElement} The context menu element
+     */
+    function createAutodusterContextMenu(equipmentName, x, y, onClose) {
+        // Close any existing context menu before opening a new one
+        if (openContextMenu && openContextMenu.closeMenu) {
+            openContextMenu.closeMenu();
+        }
+        
+        // Get settings for this specific equipment
+        const keepStats = getAutodusterKeepStats(equipmentName);
+        
+        // Create overlay to close menu on outside click
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.zIndex = '9998';
+        overlay.style.backgroundColor = 'transparent';
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.cursor = 'default';
+        
+        // Create menu container
+        const menu = document.createElement('div');
+        menu.style.position = 'fixed';
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.style.zIndex = '9999';
+        menu.style.minWidth = '200px';
+        menu.style.background = "url('https://bestiaryarena.com/_next/static/media/background-dark.95edca67.png') repeat";
+        menu.style.border = '4px solid transparent';
+        menu.style.borderImage = `url("https://bestiaryarena.com/_next/static/media/4-frame.a58d0c39.png") 6 fill stretch`;
+        menu.style.borderRadius = '6px';
+        menu.style.padding = '12px';
+        menu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)';
+        
+        // Title with equipment name
+        const title = document.createElement('div');
+        title.className = 'pixel-font-16';
+        title.textContent = equipmentName || 'Autoduster Settings';
+        title.style.color = '#ffe066';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '4px';
+        title.style.textAlign = 'center';
+        menu.appendChild(title);
+        
+        // Subtitle
+        const subtitle = document.createElement('div');
+        subtitle.className = 'pixel-font-14';
+        subtitle.textContent = 'Keep stat types:';
+        subtitle.style.color = '#cccccc';
+        subtitle.style.fontSize = '11px';
+        subtitle.style.marginBottom = '12px';
+        subtitle.style.textAlign = 'center';
+        menu.appendChild(subtitle);
+        
+        // Stat checkboxes container
+        const checkboxesContainer = document.createElement('div');
+        checkboxesContainer.style.display = 'flex';
+        checkboxesContainer.style.flexDirection = 'column';
+        checkboxesContainer.style.gap = '8px';
+        checkboxesContainer.style.marginBottom = '12px';
+        
+        // Stat types to show
+        const statTypes = [
+            { key: 'ad', label: 'Attack Damage', icon: 'https://bestiaryarena.com/assets/icons/attackdamage.png' },
+            { key: 'ap', label: 'Ability Power', icon: 'https://bestiaryarena.com/assets/icons/abilitypower.png' },
+            { key: 'hp', label: 'Health Points', icon: 'https://bestiaryarena.com/assets/icons/heal.png' }
+        ];
+        
+        const checkboxStates = {};
+        
+        statTypes.forEach(statType => {
+            const checkboxRow = document.createElement('div');
+            checkboxRow.style.display = 'flex';
+            checkboxRow.style.alignItems = 'center';
+            checkboxRow.style.gap = '8px';
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `autoduster-stat-${statType.key}`;
+            checkbox.checked = keepStats[statType.key] !== false; // Default to true if not set
+            checkboxStates[statType.key] = checkbox.checked;
+            
+            checkbox.style.width = '16px';
+            checkbox.style.height = '16px';
+            checkbox.style.cursor = 'pointer';
+            
+            checkbox.addEventListener('change', () => {
+                checkboxStates[statType.key] = checkbox.checked;
+            });
+            
+            // Create icon
+            const icon = document.createElement('img');
+            icon.src = statType.icon;
+            icon.style.width = '11px';
+            icon.style.height = '11px';
+            icon.style.flexShrink = '0';
+            
+            const label = document.createElement('label');
+            label.htmlFor = `autoduster-stat-${statType.key}`;
+            label.className = 'pixel-font-14';
+            label.style.display = 'flex';
+            label.style.alignItems = 'center';
+            label.style.gap = '6px';
+            label.style.color = '#cccccc';
+            label.style.cursor = 'pointer';
+            label.style.userSelect = 'none';
+            
+            // Add icon and text to label
+            label.appendChild(icon);
+            const labelText = document.createElement('span');
+            labelText.textContent = statType.label;
+            label.appendChild(labelText);
+            
+            checkboxRow.appendChild(checkbox);
+            checkboxRow.appendChild(label);
+            checkboxesContainer.appendChild(checkboxRow);
+        });
+        
+        menu.appendChild(checkboxesContainer);
+        
+        // Button container
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '6px';
+        buttonContainer.style.justifyContent = 'center';
+        
+        // Save button
+        const saveButton = document.createElement('button');
+        saveButton.className = 'pixel-font-14';
+        saveButton.textContent = t('mods.autoseller.save') || 'Save';
+        applyButtonStyles(saveButton, true, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        saveButton.addEventListener('mouseenter', () => {
+            saveButton.style.backgroundColor = '#2a4a2a';
+            saveButton.style.borderColor = '#4CAF50';
+        });
+        saveButton.addEventListener('mouseleave', () => {
+            saveButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.ACTIVE_GREEN_BG;
+            saveButton.style.borderColor = UI_CONSTANTS.BUTTON_COLORS.BORDER;
+        });
+        
+        saveButton.addEventListener('click', () => {
+            // Save the checkbox states for this specific equipment
+            setAutodusterKeepStats(equipmentName, {
+                ad: checkboxStates.ad,
+                ap: checkboxStates.ap,
+                hp: checkboxStates.hp
+            });
+            closeMenu();
+        });
+        
+        // Reset button (only show if this equipment has custom settings)
+        const resetButton = document.createElement('button');
+        resetButton.className = 'pixel-font-14';
+        resetButton.textContent = t('mods.autoseller.reset') || 'Reset';
+        applyButtonStyles(resetButton, false, 'red', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        resetButton.addEventListener('mouseenter', () => {
+            resetButton.style.backgroundColor = '#2a2a2a';
+            resetButton.style.color = '#ff6b6b';
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.RED;
+        });
+        resetButton.addEventListener('mouseleave', () => {
+            resetButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            resetButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            resetButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        resetButton.addEventListener('click', () => {
+            // Reset to default values (all checked) by clearing custom settings
+            clearAutodusterKeepStats(equipmentName);
+            closeMenu();
+        });
+        
+        // Cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'pixel-font-14';
+        cancelButton.textContent = t('mods.autoseller.cancel') || 'Cancel';
+        applyButtonStyles(cancelButton, false, 'green', {
+            width: '70px',
+            height: '24px',
+            fontSize: '11px'
+        });
+        cancelButton.addEventListener('mouseenter', () => {
+            cancelButton.style.backgroundColor = '#2a2a2a';
+            cancelButton.style.color = '#4CAF50';
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.GREEN;
+        });
+        cancelButton.addEventListener('mouseleave', () => {
+            cancelButton.style.backgroundColor = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_BG;
+            cancelButton.style.color = UI_CONSTANTS.BUTTON_COLORS.INACTIVE_TEXT;
+            cancelButton.style.textShadow = UI_CONSTANTS.TEXT_SHADOW.NONE;
+        });
+        
+        cancelButton.addEventListener('click', closeMenu);
+        
+        buttonContainer.appendChild(saveButton);
+        if (hasCustomAutodusterStats(equipmentName)) {
+            buttonContainer.appendChild(resetButton);
+        }
+        buttonContainer.appendChild(cancelButton);
+        menu.appendChild(buttonContainer);
+        
+        // Close menu function
+        function closeMenu() {
+            // Remove event listeners before removing from DOM
+            overlay.removeEventListener('mousedown', overlayClickHandler);
+            overlay.removeEventListener('click', overlayClickHandler);
+            document.removeEventListener('keydown', escHandler);
+            
+            // Remove modal click handlers if they exist
+            if (openContextMenu && openContextMenu.modalClickHandler && openContextMenu.modalContent) {
+                openContextMenu.modalContent.removeEventListener('mousedown', openContextMenu.modalClickHandler);
+                openContextMenu.modalContent.removeEventListener('click', openContextMenu.modalClickHandler);
+            }
+            
+            if (overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+            if (menu.parentNode) {
+                menu.parentNode.removeChild(menu);
+            }
+            // Clear the global reference
+            if (openContextMenu && (openContextMenu.overlay === overlay || openContextMenu.menu === menu)) {
+                openContextMenu = null;
+            }
+            if (onClose) {
+                onClose();
+            }
+        }
+        
+        // Store reference to this menu
+        openContextMenu = {
+            overlay: overlay,
+            menu: menu,
+            closeMenu: closeMenu
+        };
+        
+        // Close on overlay click/mousedown
+        const overlayClickHandler = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeMenu();
+        };
+        
+        // Close on ESC key
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeMenu();
+            }
+        };
+        
+        // Append to document first (overlay first, then menu on top)
+        document.body.appendChild(overlay);
+        document.body.appendChild(menu);
+        
+        // Attach event listeners after elements are in DOM
+        overlay.addEventListener('mousedown', overlayClickHandler);
+        overlay.addEventListener('click', overlayClickHandler);
+        document.addEventListener('keydown', escHandler);
+        
+        // Also close menu when clicking inside the autoseller modal (but outside the menu)
+        const modalContent = document.querySelector('[role="dialog"][data-state="open"]');
+        if (modalContent) {
+            const modalClickHandler = (e) => {
+                // Only close if click is not on the menu itself
+                if (!menu.contains(e.target)) {
+                    closeMenu();
+                    modalContent.removeEventListener('mousedown', modalClickHandler);
+                    modalContent.removeEventListener('click', modalClickHandler);
+                }
+            };
+            modalContent.addEventListener('mousedown', modalClickHandler);
+            modalContent.addEventListener('click', modalClickHandler);
+            openContextMenu.modalClickHandler = modalClickHandler;
+            openContextMenu.modalContent = modalContent;
+        }
+        
+        // Prevent clicks on menu from closing it (stop propagation to overlay)
+        menu.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        menu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Adjust position if menu goes off screen
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+        }
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = `${window.innerHeight - rect.height - 10}px`;
+        }
+        
+        return menu;
+    }
 
     // =======================
     // Shared Creature Filter Functions (for both autoplant and autosqueeze)
@@ -3153,6 +3626,11 @@
                 } else {
                     container.appendChild(columnsContainer);
                 }
+                
+                // Listen for autoduster stat settings updates to refresh the display
+                columnsContainer.addEventListener('autodusterStatsUpdated', () => {
+                    renderEquipmentColumns();
+                });
             } else {
                 columnsContainer.innerHTML = '';
             }
@@ -3164,6 +3642,8 @@
                 selectedCreature: null,
                 isIgnoreList: false,
                 enableContextMenu: enableContextMenu,
+                contextMenuType: 'autoduster',
+                showAutodusterIndicator: true,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Added to ignore list (${settingKey}):`, equipmentName);
                     availableEquipment = availableEquipment.filter(e => e !== equipmentName);
@@ -3184,6 +3664,8 @@
                 selectedCreature: null,
                 isIgnoreList: true,
                 enableContextMenu: enableContextMenu,
+                contextMenuType: 'autoduster',
+                showAutodusterIndicator: true,
                 onSelectCreature: (equipmentName) => {
                     console.log(`[Autoseller] Removed from ignore list (${settingKey}):`, equipmentName);
                     selectedEquipment = selectedEquipment.filter(e => e !== equipmentName);
@@ -3586,6 +4068,7 @@
                     settingKey: ignoreListKey,
                     insertBefore: statusArea,
                     actionTitle: t('mods.autoseller.actionTitleDisenchant'),
+                    enableContextMenu: true, // Enable context menu for autoduster stat selection
                     onUpdate: () => {
                         // Ignore list is applied during processing
                         // Update summary to show ignore count
@@ -4412,6 +4895,8 @@
                     
                     // Check ignore list
                     if (ignoreList.includes(equipment.name)) {
+                        const decision = getEquipmentDecisionReason(equipment, settings);
+                        console.log(`[Autoseller] 🔒 KEEP: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
                         if (isPending) {
                             stateManager.removePendingEquipment(equipmentId);
                         }
@@ -4419,13 +4904,17 @@
                     }
                     
                     // Check if equipment should be disenchanted
+                    const decision = getEquipmentDecisionReason(equipment, settings);
                     if (!shouldDisenchantEquipment(equipment, settings)) {
+                        console.log(`[Autoseller] 🔒 KEEP: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
                         if (isPending) {
                             stateManager.removePendingEquipment(equipmentId);
                         }
                         continue;
                     }
                     
+                    // Equipment will be dusted
+                    console.log(`[Autoseller] 💨 DUST: ${equipment.name} (T${equipment.tier || '?'} ${equipment.stat || 'unknown'}) - ${decision.reason}`);
                     toDisenchant.push(equipment);
                 }
                 

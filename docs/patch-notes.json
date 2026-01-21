@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.3.10",
+      "changes": [
+        { "type": "added", "mod": "Autoseller", "text": "Added right-click context menu for Autoduster to select which stat types (AD, AP, HP) to keep." }
+      ]
+    },
+    {
       "version": "3.3.9",
       "changes": [
         { "type": "added", "mod": "Better Setups", "text": "Added two-click confirmation for deleting setups." },

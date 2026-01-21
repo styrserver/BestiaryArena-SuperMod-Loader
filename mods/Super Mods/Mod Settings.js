@@ -3350,11 +3350,8 @@ function showSettingsModal() {
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
               <input type="checkbox" id="last-visited-map-toggle" style="transform: scale(1.2);">
-              <span>Show Return to Map Button <div class="relative flex" style="display: inline-flex;"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"><img alt="into" src="/assets/icons/into.png" width="5" height="7" class="pixelated"></div></span>
+              <span>Show Return to Map Button</span>
             </label>
-            <p style="color: #888; font-size: 11px; margin-top: 5px; margin-left: 30px; font-style: italic;">
-              Adds a return button to the navigation bar that takes you to the previous map in your navigation history (excluding sewers)
-            </p>
           </div>
           <div style="margin-bottom: 15px;">
             <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
