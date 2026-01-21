@@ -435,7 +435,7 @@
         const allKeepStats = settings.autodusterKeepStats || {};
         return equipmentName && allKeepStats[equipmentName] 
             ? allKeepStats[equipmentName] 
-            : { ad: true, ap: true, hp: true };
+            : { ad: false, ap: false, hp: false }; // Default: disenchant all (all checkboxes checked)
     }
     
     /**
@@ -473,8 +473,8 @@
             return false; // No custom settings for this equipment
         }
         const keepStats = allKeepStats[equipmentName];
-        // Check if any stat is not at default (all should be true by default)
-        return keepStats.ad !== true || keepStats.ap !== true || keepStats.hp !== true;
+        // Check if any stat is not at default (all should be false by default - disenchant all)
+        return keepStats.ad !== false || keepStats.ap !== false || keepStats.hp !== false;
     }
     
     /**
@@ -788,10 +788,10 @@
         const equipmentStat = equipment.stat || 'unknown';
         const allKeepStats = settings.autodusterKeepStats || {};
         
-        // Get settings for this specific equipment, or use defaults (all checked)
+        // Get settings for this specific equipment, or use defaults (disenchant all)
         const keepStats = equipment.name && allKeepStats[equipment.name] 
             ? allKeepStats[equipment.name] 
-            : { ad: true, ap: true, hp: true };
+            : { ad: false, ap: false, hp: false };
         
         // Map stat types: 'ad' -> 'ad', 'ap' -> 'ap', 'hp' -> 'hp'
         // Only check AD, AP, HP (ignore armor and magicResist)
@@ -827,10 +827,10 @@
         const equipmentStat = equipment.stat || 'unknown';
         const allKeepStats = settings.autodusterKeepStats || {};
         
-        // Get settings for this specific equipment, or use defaults (all checked)
+        // Get settings for this specific equipment, or use defaults (disenchant all)
         const keepStats = equipment.name && allKeepStats[equipment.name] 
             ? allKeepStats[equipment.name] 
-            : { ad: true, ap: true, hp: true };
+            : { ad: false, ap: false, hp: false };
         
         const hasCustomSettings = equipment.name && allKeepStats[equipment.name];
         
@@ -3119,7 +3119,7 @@
         // Subtitle
         const subtitle = document.createElement('div');
         subtitle.className = 'pixel-font-14';
-        subtitle.textContent = 'Keep stat types:';
+        subtitle.textContent = 'Disenchant stat types:';
         subtitle.style.color = '#cccccc';
         subtitle.style.fontSize = '11px';
         subtitle.style.marginBottom = '12px';
@@ -3151,15 +3151,36 @@
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.id = `autoduster-stat-${statType.key}`;
-            checkbox.checked = keepStats[statType.key] !== false; // Default to true if not set
+            // Inverted logic: checked = disenchant (keepStats[statType.key] === false), unchecked = keep (keepStats[statType.key] === true)
+            checkbox.checked = keepStats[statType.key] === false; // Default to false (unchecked = keep) if not set
             checkboxStates[statType.key] = checkbox.checked;
             
             checkbox.style.width = '16px';
             checkbox.style.height = '16px';
             checkbox.style.cursor = 'pointer';
             
+            // Create status indicator span
+            const statusIndicator = document.createElement('span');
+            statusIndicator.className = 'pixel-font-14';
+            statusIndicator.style.marginLeft = '4px';
+            
+            // Function to update status indicator
+            const updateStatusIndicator = (isChecked) => {
+                if (isChecked) {
+                    statusIndicator.textContent = '(Disenchant)';
+                    statusIndicator.style.color = '#ff6b6b'; // Red
+                } else {
+                    statusIndicator.textContent = '(Keep)';
+                    statusIndicator.style.color = '#4CAF50'; // Green
+                }
+            };
+            
+            // Initialize status indicator
+            updateStatusIndicator(checkbox.checked);
+            
             checkbox.addEventListener('change', () => {
                 checkboxStates[statType.key] = checkbox.checked;
+                updateStatusIndicator(checkbox.checked);
             });
             
             // Create icon
@@ -3184,6 +3205,7 @@
             const labelText = document.createElement('span');
             labelText.textContent = statType.label;
             label.appendChild(labelText);
+            label.appendChild(statusIndicator);
             
             checkboxRow.appendChild(checkbox);
             checkboxRow.appendChild(label);
@@ -3218,10 +3240,11 @@
         
         saveButton.addEventListener('click', () => {
             // Save the checkbox states for this specific equipment
+            // Inverted logic: checked = disenchant (false), unchecked = keep (true)
             setAutodusterKeepStats(equipmentName, {
-                ad: checkboxStates.ad,
-                ap: checkboxStates.ap,
-                hp: checkboxStates.hp
+                ad: !checkboxStates.ad,
+                ap: !checkboxStates.ap,
+                hp: !checkboxStates.hp
             });
             closeMenu();
         });
@@ -3247,7 +3270,7 @@
         });
         
         resetButton.addEventListener('click', () => {
-            // Reset to default values (all checked) by clearing custom settings
+            // Reset to default values (all checked = disenchant all) by clearing custom settings
             clearAutodusterKeepStats(equipmentName);
             closeMenu();
         });
