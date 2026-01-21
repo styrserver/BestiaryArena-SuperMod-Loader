@@ -4,6 +4,17 @@
   },
   "notes": [
     {
+      "version": "3.3.9",
+      "changes": [
+        { "type": "added", "mod": "Better Setups", "text": "Added two-click confirmation for deleting setups." },
+        { "type": "added", "mod": "Mod Settings", "text": "Added new mod settings options." },
+        { "type": "changed", "mod": "Stamina Optimizer", "text": "Various Improvements" },
+        { "type": "fixed", "mod": "Autoseller", "text": "Fixed race condition that was emptying creature and equipment lists during initialization." },
+        { "type": "fixed", "mod": "Better Boosted Maps", "text": "Fixed boosted map farming not automatically starting after tasks or raids complete." },
+        { "type": "fixed", "mod": "Better Tasker", "text": "Fixed \"Autocomplete Tasks\" to only control reward claiming.." }
+      ]
+    },
+    {
       "version": "3.3.8",
       "changes": [
         { "type": "fixed", "mod": "Hero Editor", "text": "Fixed floor resetting to 0 when editing heroes." }
