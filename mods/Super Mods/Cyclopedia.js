@@ -2231,6 +2231,47 @@ function isMapRaid(mapId) {
   return false;
 }
 
+// Static raid list from Raid_Hunter.js (maps that should be included in statistics)
+// Dynamic events (raids not in this list) should be excluded from statistics
+const STATIC_RAID_EVENTS = [
+  'Rat Plague',
+  'Buzzing Madness', 
+  'Monastery Catacombs',
+  'Ghostlands Boneyard',
+  'Permafrosted Hole',
+  'Jammed Mailbox',
+  'Frosted Bunker',
+  'Hedge Maze Trap',
+  'Tower of Whitewatch (Shield)',
+  'Tower of Whitewatch (Helmet)',
+  'Tower of Whitewatch (Armor)',
+  'Orcish Barricade',
+  'Poacher Cave (Bear)',
+  'Poacher Cave (Wolf)',
+  'Dwarven Bank Heist',
+  'An Arcanist Ritual'
+];
+
+// Helper function to check if a map is a dynamic event (raid but not in static list)
+// Dynamic events should be excluded from statistics
+function isDynamicEventMap(mapId) {
+  if (!mapId) return false;
+  
+  // First check if it's a raid
+  if (!isMapRaid(mapId)) {
+    return false;
+  }
+  
+  // Get the map name
+  const mapName = globalThis.state?.utils?.ROOM_NAME?.[mapId];
+  if (!mapName) {
+    return false;
+  }
+  
+  // If it's a raid but NOT in the static list, it's a dynamic event
+  return !STATIC_RAID_EVENTS.includes(mapName);
+}
+
 function createBox({
   title, items, extraBoxStyles = {}, type = 'creature', selectedCreature, selectedEquipment, selectedInventory,
   setSelectedCreature, setSelectedEquipment, setSelectedInventory, updateRightCol, clearAllSelections = null, mapIds = null, regionIds = null
@@ -2298,7 +2339,7 @@ function createBox({
       
       const item = DOMUtils.createListItem(name, FONT_CONSTANTS.SIZES.BODY, isOwned, isPerfect, isT5, hasShiny);
       
-      // Add raid icon for maps if it's a raid
+      // Add raid icon for static raids, or event icon for dynamic event maps
       if (type === 'map') {
         const mapIndex = items.indexOf(name);
         const mapId = mapIds?.[mapIndex];
@@ -2306,20 +2347,31 @@ function createBox({
           // Find the contentContainer (first child div created by createListItem)
           const contentContainer = item.firstElementChild;
           if (contentContainer && contentContainer.tagName === 'DIV') {
-            // Create raid icon
-            const raidIcon = document.createElement('img');
-            raidIcon.src = 'https://bestiaryarena.com/assets/icons/raid.png';
-            raidIcon.alt = 'raid';
-            raidIcon.title = 'Raid map';
-            raidIcon.style.width = '11px';
-            raidIcon.style.height = '11px';
-            raidIcon.style.flexShrink = '0';
+            // Check if it's a dynamic event or static raid
+            const isDynamicEvent = isDynamicEventMap(mapId);
+            
+            // Create icon
+            const icon = document.createElement('img');
+            if (isDynamicEvent) {
+              // Use plinko icon for dynamic event maps
+              icon.src = 'https://bestiaryarena.com/assets/icons/plinko.png';
+              icon.alt = 'event';
+              icon.title = 'Event map';
+            } else {
+              // Use raid icon for static raids
+              icon.src = 'https://bestiaryarena.com/assets/icons/raid.png';
+              icon.alt = 'raid';
+              icon.title = 'Raid map';
+            }
+            icon.style.width = '11px';
+            icon.style.height = '11px';
+            icon.style.flexShrink = '0';
             // Insert before the text span (or any existing icons)
             const textSpan = contentContainer.querySelector('span');
             if (textSpan) {
-              contentContainer.insertBefore(raidIcon, textSpan);
+              contentContainer.insertBefore(icon, textSpan);
             } else {
-              contentContainer.appendChild(raidIcon);
+              contentContainer.appendChild(icon);
             }
           }
         }
@@ -10515,6 +10567,668 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       return creaturesContainer;
     }
 
+    // Helper function to create a compact stat column (like Statistics section)
+    function createCompactStatColumn(iconSrc, iconAlt, mapId, mapData, leaderboardData) {
+      const statCol = document.createElement('div');
+      statCol.style.display = 'flex';
+      statCol.style.flexDirection = 'column';
+      statCol.style.alignItems = 'center';
+      statCol.style.justifyContent = 'center';
+      statCol.style.padding = '4px';
+      statCol.style.minWidth = '80px';
+      statCol.style.maxWidth = '100px';
+      statCol.style.fontSize = '9px';
+      statCol.style.fontFamily = "'Trebuchet MS', 'Arial Black', Arial, sans-serif";
+      statCol.style.textAlign = 'center';
+      
+      // Icon
+      const icon = document.createElement('img');
+      icon.src = iconSrc;
+      icon.alt = iconAlt;
+      icon.style.width = '12px';
+      icon.style.height = '12px';
+      icon.style.marginBottom = '4px';
+      statCol.appendChild(icon);
+      
+      // Content container
+      const content = document.createElement('div');
+      content.style.display = 'flex';
+      content.style.flexDirection = 'column';
+      content.style.gap = '2px';
+      content.style.width = '100%';
+      
+      // Determine stat type and get data
+      const isSpeedrun = iconAlt === 'Speed';
+      const isRankPoints = iconAlt === 'Grade';
+      const isFloors = iconAlt === 'Floors';
+      
+      if (isSpeedrun) {
+        const yourTicks = mapData?.ticks || 0;
+        const bestTicks = leaderboardData?.best?.[mapId]?.ticks || 0;
+        const bestPlayer = leaderboardData?.best?.[mapId]?.userName || '';
+        
+        // Check if personal equals world record
+        const isPersonalWR = yourTicks > 0 && bestTicks > 0 && yourTicks === bestTicks;
+        
+        if (bestTicks > 0) {
+          const wrDiv = document.createElement('div');
+          wrDiv.style.color = '#ff8';
+          wrDiv.style.fontWeight = 'bold';
+          wrDiv.style.fontSize = '8px';
+          wrDiv.textContent = 'WR';
+          content.appendChild(wrDiv);
+          
+          const wrValue = document.createElement('div');
+          wrValue.style.color = '#fff';
+          wrValue.style.fontSize = '9px';
+          wrValue.textContent = `${bestTicks}`;
+          content.appendChild(wrValue);
+        }
+        
+        if (yourTicks > 0) {
+          const yourDiv = document.createElement('div');
+          yourDiv.style.color = '#8f8';
+          yourDiv.style.fontWeight = 'bold';
+          yourDiv.style.fontSize = '8px';
+          yourDiv.textContent = 'You';
+          content.appendChild(yourDiv);
+          
+          const yourValue = document.createElement('div');
+          yourValue.style.color = isPersonalWR ? '#8f8' : '#ccc';
+          yourValue.style.fontSize = '9px';
+          yourValue.style.fontWeight = isPersonalWR ? 'bold' : 'normal';
+          yourValue.style.textDecoration = isPersonalWR ? 'underline' : 'none';
+          yourValue.textContent = `${yourTicks}`;
+          content.appendChild(yourValue);
+        }
+        
+        if (bestTicks === 0 && yourTicks === 0) {
+          const noData = document.createElement('div');
+          noData.style.color = '#666';
+          noData.style.fontSize = '8px';
+          noData.textContent = '—';
+          content.appendChild(noData);
+        }
+      } else if (isRankPoints) {
+        const yourRank = mapData?.rank || 0;
+        const yourRankTicks = mapData?.rankTicks;
+        const bestRank = leaderboardData?.roomsHighscores?.rank?.[mapId]?.rank || 0;
+        const bestRankTicks = leaderboardData?.roomsHighscores?.rank?.[mapId]?.ticks;
+        const bestPlayer = leaderboardData?.roomsHighscores?.rank?.[mapId]?.userName || '';
+        
+        // Check if personal rank equals world record (excluding ticks)
+        const isPersonalWR = yourRank > 0 && bestRank > 0 && yourRank === bestRank;
+        
+        if (bestRank > 0) {
+          const wrDiv = document.createElement('div');
+          wrDiv.style.color = '#ff8';
+          wrDiv.style.fontWeight = 'bold';
+          wrDiv.style.fontSize = '8px';
+          wrDiv.textContent = 'WR';
+          content.appendChild(wrDiv);
+          
+          const wrValue = document.createElement('div');
+          wrValue.style.color = '#fff';
+          wrValue.style.fontSize = '9px';
+          wrValue.innerHTML = `${bestRank}${bestRankTicks !== undefined && bestRankTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${bestRankTicks})</i>` : ''}`;
+          content.appendChild(wrValue);
+        }
+        
+        if (yourRank > 0) {
+          const yourDiv = document.createElement('div');
+          yourDiv.style.color = '#8f8';
+          yourDiv.style.fontWeight = 'bold';
+          yourDiv.style.fontSize = '8px';
+          yourDiv.textContent = 'You';
+          content.appendChild(yourDiv);
+          
+          const yourValue = document.createElement('div');
+          yourValue.style.color = isPersonalWR ? '#8f8' : '#ccc';
+          yourValue.style.fontSize = '9px';
+          yourValue.style.fontWeight = isPersonalWR ? 'bold' : 'normal';
+          yourValue.style.textDecoration = isPersonalWR ? 'underline' : 'none';
+          yourValue.innerHTML = `${yourRank}${yourRankTicks !== undefined && yourRankTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${yourRankTicks})</i>` : ''}`;
+          content.appendChild(yourValue);
+        }
+        
+        if (bestRank === 0 && yourRank === 0) {
+          const noData = document.createElement('div');
+          noData.style.color = '#666';
+          noData.style.fontSize = '8px';
+          noData.textContent = '—';
+          content.appendChild(noData);
+        }
+      } else if (isFloors) {
+        const yourRoom = mapData;
+        const { floor: yourFloor, floorTicks: yourFloorTicks } = normalizeUserFloorData(yourRoom);
+        
+        // Get best floor data using normalizeBestFloorData
+        let bestFloor = 0;
+        let bestFloorTicks = null;
+        if (leaderboardData) {
+          const bestFloorData = normalizeBestFloorData(mapId, leaderboardData.roomsHighscores, leaderboardData.best);
+          bestFloor = bestFloorData.floor !== undefined && bestFloorData.floor !== null ? bestFloorData.floor : 0;
+          bestFloorTicks = bestFloorData.floorTicks;
+        }
+        
+        if (bestFloorTicks > 0 || bestFloor > 0) {
+          const wrDiv = document.createElement('div');
+          wrDiv.style.color = '#ff8';
+          wrDiv.style.fontWeight = 'bold';
+          wrDiv.style.fontSize = '8px';
+          wrDiv.textContent = 'WR';
+          content.appendChild(wrDiv);
+          
+          const wrValue = document.createElement('div');
+          wrValue.style.color = '#fff';
+          wrValue.style.fontSize = '9px';
+          wrValue.innerHTML = `Floor ${bestFloor}${bestFloorTicks !== undefined && bestFloorTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${bestFloorTicks})</i>` : ''}`;
+          content.appendChild(wrValue);
+        }
+        
+        if (yourFloor !== undefined && yourFloor !== null) {
+          const yourDiv = document.createElement('div');
+          yourDiv.style.color = '#8f8';
+          yourDiv.style.fontWeight = 'bold';
+          yourDiv.style.fontSize = '8px';
+          yourDiv.textContent = 'You';
+          content.appendChild(yourDiv);
+          
+          // Check if floor is 15 (max floor)
+          const isMaxFloor = yourFloor === 15;
+          
+          const yourValue = document.createElement('div');
+          yourValue.style.color = isMaxFloor ? '#8f8' : '#ccc';
+          yourValue.style.fontSize = '9px';
+          yourValue.style.fontWeight = isMaxFloor ? 'bold' : 'normal';
+          yourValue.style.textDecoration = isMaxFloor ? 'underline' : 'none';
+          yourValue.innerHTML = `Floor ${yourFloor}${yourFloorTicks !== undefined && yourFloorTicks !== null ? ` <i style="color: #aaa; font-size: 7px;">(${yourFloorTicks})</i>` : ''}`;
+          content.appendChild(yourValue);
+        }
+        
+        if ((bestFloorTicks === 0 || bestFloor === 0) && (yourFloor === undefined || yourFloor === null)) {
+          const noData = document.createElement('div');
+          noData.style.color = '#666';
+          noData.style.fontSize = '8px';
+          noData.textContent = '—';
+          content.appendChild(noData);
+        }
+      }
+      
+      statCol.appendChild(content);
+      return statCol;
+    }
+
+    // Helper function to create region maps section (shows all maps in a region)
+    function createRegionMapsSection(mapsInRegion, regionId, onMapSelect) {
+      const regionMapsDiv = document.createElement('div');
+      regionMapsDiv.style.padding = '0 20px 20px 20px';
+      regionMapsDiv.style.color = COLOR_CONSTANTS.TEXT;
+      regionMapsDiv.style.width = '100%';
+      regionMapsDiv.style.boxSizing = 'border-box';
+      regionMapsDiv.style.marginBottom = '0';
+      
+      // Region title
+      const regionTitle = document.createElement('h3');
+      const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
+      regionTitle.textContent = regionName;
+      regionTitle.style.margin = '0 0 15px 0';
+      regionTitle.style.fontSize = '18px';
+      regionTitle.style.fontWeight = 'bold';
+      regionTitle.style.textAlign = 'center';
+      regionMapsDiv.appendChild(regionTitle);
+      
+      // Maps container (no scroll - parent handles scrolling)
+      const mapsContainer = document.createElement('div');
+      mapsContainer.style.display = 'flex';
+      mapsContainer.style.flexDirection = 'column';
+      mapsContainer.style.gap = '10px';
+      mapsContainer.style.paddingRight = '8px';
+      
+      const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+      const playerRooms = playerState?.rooms || {};
+      
+      // Filter out dynamic event maps from display
+      const mapsToDisplay = mapsInRegion.filter(map => !isDynamicEventMap(map.id));
+      
+      // Fetch leaderboard data for all maps
+      fetchMapsLeaderboardData().then(leaderboardData => {
+        mapsToDisplay.forEach(map => {
+          const mapItem = document.createElement('div');
+          mapItem.style.display = 'grid';
+          mapItem.style.gridTemplateColumns = '64px 1fr auto auto auto';
+          mapItem.style.alignItems = 'center';
+          mapItem.style.gap = '8px';
+          mapItem.style.padding = '8px';
+          mapItem.style.border = '2px solid #666';
+          mapItem.style.borderRadius = '4px';
+          mapItem.style.cursor = 'pointer';
+          mapItem.style.transition = 'background-color 0.2s';
+          
+          // Check if map is explored
+          const isExplored = playerRooms[map.id] !== undefined;
+          if (!isExplored) {
+            mapItem.style.opacity = '0.6';
+            mapItem.style.filter = 'grayscale(0.7)';
+          }
+          
+          // Thumbnail (Column 1)
+          const thumbnail = document.createElement('img');
+          thumbnail.src = `/assets/room-thumbnails/${map.id}.png`;
+          thumbnail.alt = map.name;
+          thumbnail.className = 'pixelated';
+          thumbnail.style.width = '64px';
+          thumbnail.style.height = '64px';
+          thumbnail.style.objectFit = 'cover';
+          thumbnail.style.border = '1px solid #666';
+          thumbnail.style.borderRadius = '4px';
+          mapItem.appendChild(thumbnail);
+          
+          // Map name (Column 2)
+          const mapName = document.createElement('div');
+          mapName.textContent = map.name;
+          mapName.style.fontSize = '14px';
+          mapName.style.fontWeight = 'bold';
+          mapItem.appendChild(mapName);
+          
+          // Get map data
+          const mapData = isExplored ? playerRooms[map.id] : null;
+          
+          // Speedrun column (Column 3)
+          const speedrunCol = createCompactStatColumn(
+            'https://bestiaryarena.com/assets/icons/speed.png',
+            'Speed',
+            map.id,
+            mapData,
+            leaderboardData
+          );
+          mapItem.appendChild(speedrunCol);
+          
+          // Rank Points column (Column 4)
+          const rankPointsCol = createCompactStatColumn(
+            'https://bestiaryarena.com/assets/icons/grade.png',
+            'Grade',
+            map.id,
+            mapData,
+            leaderboardData
+          );
+          mapItem.appendChild(rankPointsCol);
+          
+          // Floors column (Column 5)
+          const floorsCol = createCompactStatColumn(
+            'https://bestiaryarena.com/assets/icons/floors.png',
+            'Floors',
+            map.id,
+            mapData,
+            leaderboardData
+          );
+          mapItem.appendChild(floorsCol);
+          
+          // Hover effect
+          mapItem.addEventListener('mouseenter', () => {
+            mapItem.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+          });
+          mapItem.addEventListener('mouseleave', () => {
+            mapItem.style.backgroundColor = 'transparent';
+          });
+          
+          // Click to select map
+          mapItem.addEventListener('click', () => {
+            if (onMapSelect) {
+              onMapSelect(map.id);
+            }
+          });
+          
+          mapsContainer.appendChild(mapItem);
+        });
+      }).catch(error => {
+        console.error('[Cyclopedia] Error fetching leaderboard data for region maps:', error);
+        // Still show maps without leaderboard data
+        mapsToDisplay.forEach(map => {
+          const mapItem = document.createElement('div');
+          mapItem.style.display = 'grid';
+          mapItem.style.gridTemplateColumns = '64px 1fr auto auto auto';
+          mapItem.style.alignItems = 'center';
+          mapItem.style.gap = '8px';
+          mapItem.style.padding = '8px';
+          mapItem.style.border = '2px solid #666';
+          mapItem.style.borderRadius = '4px';
+          mapItem.style.cursor = 'pointer';
+          
+          const isExplored = playerRooms[map.id] !== undefined;
+          if (!isExplored) {
+            mapItem.style.opacity = '0.6';
+            mapItem.style.filter = 'grayscale(0.7)';
+          }
+          
+          const thumbnail = document.createElement('img');
+          thumbnail.src = `/assets/room-thumbnails/${map.id}.png`;
+          thumbnail.alt = map.name;
+          thumbnail.className = 'pixelated';
+          thumbnail.style.width = '64px';
+          thumbnail.style.height = '64px';
+          thumbnail.style.objectFit = 'cover';
+          thumbnail.style.border = '1px solid #666';
+          thumbnail.style.borderRadius = '4px';
+          mapItem.appendChild(thumbnail);
+          
+          const mapName = document.createElement('div');
+          mapName.textContent = map.name;
+          mapName.style.fontSize = '14px';
+          mapName.style.fontWeight = 'bold';
+          mapItem.appendChild(mapName);
+          
+          const mapData = isExplored ? playerRooms[map.id] : null;
+          const speedrunCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/speed.png', 'Speed', map.id, mapData, null);
+          const rankPointsCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/grade.png', 'Grade', map.id, mapData, null);
+          const floorsCol = createCompactStatColumn('https://bestiaryarena.com/assets/icons/floors.png', 'Floors', map.id, mapData, null);
+          mapItem.appendChild(speedrunCol);
+          mapItem.appendChild(rankPointsCol);
+          mapItem.appendChild(floorsCol);
+          
+          mapItem.addEventListener('click', () => {
+            if (onMapSelect) {
+              onMapSelect(map.id);
+            }
+          });
+          
+          mapsContainer.appendChild(mapItem);
+        });
+      });
+      
+      regionMapsDiv.appendChild(mapsContainer);
+      return regionMapsDiv;
+    }
+
+    // Helper function to create region statistics section
+    function createRegionStatisticsSection(regionId, mapsInRegion) {
+      const statsContainer = document.createElement('div');
+      statsContainer.style.display = 'flex';
+      statsContainer.style.flexDirection = 'column';
+      statsContainer.style.width = '100%';
+      statsContainer.style.height = '100%';
+      statsContainer.style.boxSizing = 'border-box';
+      statsContainer.style.padding = '15px';
+      
+      // Get player state
+      const playerState = globalThis.state?.player?.getSnapshot?.()?.context;
+      const playerRooms = playerState?.rooms || {};
+      const roomsArray = globalThis.state?.utils?.ROOMS || [];
+      
+      // Calculate statistics
+      // Filter out raid maps and dynamic event maps from the count
+      // Dynamic events (raids not in STATIC_RAID_EVENTS) should be excluded from statistics
+      const nonRaidMaps = mapsInRegion.filter(map => !isMapRaid(map.id));
+      const staticRaidMaps = mapsInRegion.filter(map => isMapRaid(map.id) && !isDynamicEventMap(map.id));
+      const dynamicEventMaps = mapsInRegion.filter(map => isDynamicEventMap(map.id));
+      const raidMaps = mapsInRegion.filter(map => isMapRaid(map.id)); // All raids (static + dynamic) for display
+      const totalNonRaidMaps = nonRaidMaps.length;
+      const totalRaidMaps = staticRaidMaps.length; // Only count static raids for statistics
+      
+      let exploredCount = 0;
+      let exploredRaidsCount = 0;
+      let totalRankPoints = 0;
+      let totalRaidRankPoints = 0;
+      let maxRankPoints = 0;
+      let maxRaidRankPoints = 0;
+      let totalFloors = 0;
+      let totalRaidFloors = 0;
+      let maxFloors = 0;
+      let maxRaidFloors = 0;
+      let totalTicks = 0; // Personal total ticks
+      let totalWRTicks = 0; // World record total ticks
+      
+      // Only count non-raid maps for explored count and rank points/floors
+      nonRaidMaps.forEach(map => {
+        const isExplored = playerRooms[map.id] !== undefined;
+        if (isExplored) {
+          exploredCount++;
+          
+          const mapData = playerRooms[map.id];
+          if (mapData.rank !== undefined && mapData.rank !== null) {
+            totalRankPoints += mapData.rank;
+          }
+          if (mapData.floor !== undefined && mapData.floor !== null) {
+            totalFloors += mapData.floor;
+          }
+          if (mapData.ticks !== undefined && mapData.ticks !== null) {
+            totalTicks += mapData.ticks;
+          }
+        }
+      });
+      
+      // Count explored static raids and their rank points/floors (exclude dynamic events)
+      staticRaidMaps.forEach(map => {
+        const isExplored = playerRooms[map.id] !== undefined;
+        if (isExplored) {
+          exploredRaidsCount++;
+          
+          const mapData = playerRooms[map.id];
+          if (mapData.rank !== undefined && mapData.rank !== null) {
+            totalRaidRankPoints += mapData.rank;
+          }
+          if (mapData.floor !== undefined && mapData.floor !== null) {
+            totalRaidFloors += mapData.floor;
+          }
+          if (mapData.ticks !== undefined && mapData.ticks !== null) {
+            totalTicks += mapData.ticks;
+          }
+        }
+      });
+      
+      // Calculate max possible values for non-raid maps
+      nonRaidMaps.forEach(map => {
+        // Find room data from ROOMS array (ROOMS is an array, not an object)
+        const roomData = roomsArray.find(room => room.id === map.id);
+        if (roomData && roomData.maxTeamSize) {
+          // Calculate max rank points = (2 * maxTeamSize) - 1 per map
+          const mapMaxRankPoints = (2 * roomData.maxTeamSize) - 1;
+          maxRankPoints += mapMaxRankPoints;
+        } else {
+          // Fallback: if no room data found, assume maxTeamSize of 1
+          maxRankPoints += 1; // (2 * 1) - 1 = 1
+        }
+        
+        // Max floor is always 15 per map
+        maxFloors += 15;
+      });
+      
+      // Calculate max possible values for static raid maps (exclude dynamic events)
+      staticRaidMaps.forEach(map => {
+        // Find room data from ROOMS array (ROOMS is an array, not an object)
+        const roomData = roomsArray.find(room => room.id === map.id);
+        if (roomData && roomData.maxTeamSize) {
+          // Calculate max rank points = (2 * maxTeamSize) - 1 per map
+          const mapMaxRankPoints = (2 * roomData.maxTeamSize) - 1;
+          maxRaidRankPoints += mapMaxRankPoints;
+        } else {
+          // Fallback: if no room data found, assume maxTeamSize of 1
+          maxRaidRankPoints += 1; // (2 * 1) - 1 = 1
+        }
+        
+        // Max floor is always 15 per map (for raids too)
+        maxRaidFloors += 15;
+      });
+      
+      // Fetch leaderboard data to calculate WR total ticks
+      fetchMapsLeaderboardData().then(leaderboardData => {
+        // Calculate WR total ticks for all maps in region (non-raid + static raids)
+        const allMapsForTicks = [...nonRaidMaps, ...staticRaidMaps];
+        allMapsForTicks.forEach(map => {
+          const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
+          if (bestTicks > 0) {
+            totalWRTicks += bestTicks;
+          }
+        });
+        
+        // Update Speedrun display with calculated values
+        updateSpeedrunDisplay();
+      }).catch(error => {
+        console.error('[Cyclopedia] Error fetching leaderboard data for region statistics:', error);
+        // Still show stats without WR data
+        updateSpeedrunDisplay();
+      });
+      
+      // Function to update speedrun display (called after leaderboard data is fetched)
+      function updateSpeedrunDisplay() {
+        const speedrunValue = statsContainer.querySelector('.speedrun-total-ticks');
+        if (speedrunValue) {
+          speedrunValue.textContent = `${totalTicks.toLocaleString()} / ${totalWRTicks > 0 ? totalWRTicks.toLocaleString() : '—'}`;
+          speedrunValue.style.color = totalWRTicks > 0 && totalTicks <= totalWRTicks ? '#8f8' : '#ff8';
+        }
+      }
+      
+      // Title
+      const title = document.createElement('h3');
+      const regionName = GAME_DATA.REGION_NAME_MAP[regionId] || regionId;
+      title.textContent = `${regionName} Statistics`;
+      title.style.margin = '0 0 12px 0';
+      title.style.fontSize = '16px';
+      title.style.fontWeight = 'bold';
+      title.style.textAlign = 'center';
+      title.style.color = COLOR_CONSTANTS.TEXT;
+      statsContainer.appendChild(title);
+      
+      // Statistics grid
+      const statsGrid = document.createElement('div');
+      statsGrid.style.display = 'flex';
+      statsGrid.style.flexDirection = 'column';
+      statsGrid.style.gap = '12px';
+      
+      // Explored maps
+      const exploredDiv = document.createElement('div');
+      exploredDiv.style.padding = '10px';
+      exploredDiv.style.border = '2px solid #666';
+      exploredDiv.style.borderRadius = '4px';
+      exploredDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      
+      const exploredLabel = document.createElement('div');
+      exploredLabel.textContent = 'Explored Maps';
+      exploredLabel.style.fontSize = '13px';
+      exploredLabel.style.fontWeight = 'bold';
+      exploredLabel.style.marginBottom = '6px';
+      exploredLabel.style.color = COLOR_CONSTANTS.TEXT;
+      exploredDiv.appendChild(exploredLabel);
+      
+      const exploredValue = document.createElement('div');
+      exploredValue.textContent = `${exploredCount} / ${totalNonRaidMaps}`;
+      exploredValue.style.fontSize = '18px';
+      exploredValue.style.fontWeight = 'bold';
+      exploredValue.style.color = exploredCount === totalNonRaidMaps ? '#8f8' : '#ff8';
+      exploredDiv.appendChild(exploredValue);
+      
+      // Show explored raids if there are any raids in the region
+      if (totalRaidMaps > 0) {
+        const exploredRaidsValue = document.createElement('div');
+        exploredRaidsValue.textContent = `Raids: ${exploredRaidsCount} / ${totalRaidMaps}`;
+        exploredRaidsValue.style.fontSize = '12px';
+        exploredRaidsValue.style.fontWeight = 'normal';
+        exploredRaidsValue.style.color = exploredRaidsCount === totalRaidMaps ? '#8f8' : '#ff8';
+        exploredRaidsValue.style.marginTop = '6px';
+        exploredDiv.appendChild(exploredRaidsValue);
+      }
+      
+      statsGrid.appendChild(exploredDiv);
+      
+      // Speedrun
+      const speedrunDiv = document.createElement('div');
+      speedrunDiv.style.padding = '10px';
+      speedrunDiv.style.border = '2px solid #666';
+      speedrunDiv.style.borderRadius = '4px';
+      speedrunDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      
+      const speedrunLabel = document.createElement('div');
+      speedrunLabel.textContent = 'Speedrun';
+      speedrunLabel.style.fontSize = '13px';
+      speedrunLabel.style.fontWeight = 'bold';
+      speedrunLabel.style.marginBottom = '6px';
+      speedrunLabel.style.color = COLOR_CONSTANTS.TEXT;
+      speedrunDiv.appendChild(speedrunLabel);
+      
+      const speedrunValue = document.createElement('div');
+      speedrunValue.className = 'speedrun-total-ticks';
+      speedrunValue.textContent = `${totalTicks.toLocaleString()} / —`;
+      speedrunValue.style.fontSize = '18px';
+      speedrunValue.style.fontWeight = 'bold';
+      speedrunValue.style.color = '#ff8';
+      speedrunDiv.appendChild(speedrunValue);
+      
+      statsGrid.appendChild(speedrunDiv);
+      
+      // Rank Points
+      const rankPointsDiv = document.createElement('div');
+      rankPointsDiv.style.padding = '10px';
+      rankPointsDiv.style.border = '2px solid #666';
+      rankPointsDiv.style.borderRadius = '4px';
+      rankPointsDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      
+      const rankPointsLabel = document.createElement('div');
+      rankPointsLabel.textContent = 'Rank Points';
+      rankPointsLabel.style.fontSize = '13px';
+      rankPointsLabel.style.fontWeight = 'bold';
+      rankPointsLabel.style.marginBottom = '6px';
+      rankPointsLabel.style.color = COLOR_CONSTANTS.TEXT;
+      rankPointsDiv.appendChild(rankPointsLabel);
+      
+      const rankPointsValue = document.createElement('div');
+      rankPointsValue.textContent = `${totalRankPoints.toLocaleString()} / ${maxRankPoints.toLocaleString()}`;
+      rankPointsValue.style.fontSize = '18px';
+      rankPointsValue.style.fontWeight = 'bold';
+      rankPointsValue.style.color = totalRankPoints === maxRankPoints ? '#8f8' : '#ff8';
+      rankPointsDiv.appendChild(rankPointsValue);
+      
+      // Show raid rank points if there are any raids in the region
+      if (totalRaidMaps > 0) {
+        const raidRankPointsValue = document.createElement('div');
+        raidRankPointsValue.textContent = `Raids: ${totalRaidRankPoints.toLocaleString()} / ${maxRaidRankPoints.toLocaleString()}`;
+        raidRankPointsValue.style.fontSize = '12px';
+        raidRankPointsValue.style.fontWeight = 'normal';
+        raidRankPointsValue.style.color = totalRaidRankPoints === maxRaidRankPoints ? '#8f8' : '#ff8';
+        raidRankPointsValue.style.marginTop = '6px';
+        rankPointsDiv.appendChild(raidRankPointsValue);
+      }
+      
+      statsGrid.appendChild(rankPointsDiv);
+      
+      // Floors
+      const floorsDiv = document.createElement('div');
+      floorsDiv.style.padding = '10px';
+      floorsDiv.style.border = '2px solid #666';
+      floorsDiv.style.borderRadius = '4px';
+      floorsDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.3)';
+      
+      const floorsLabel = document.createElement('div');
+      floorsLabel.textContent = 'Floors';
+      floorsLabel.style.fontSize = '13px';
+      floorsLabel.style.fontWeight = 'bold';
+      floorsLabel.style.marginBottom = '6px';
+      floorsLabel.style.color = COLOR_CONSTANTS.TEXT;
+      floorsDiv.appendChild(floorsLabel);
+      
+      const floorsValue = document.createElement('div');
+      floorsValue.textContent = `${totalFloors.toLocaleString()} / ${maxFloors.toLocaleString()}`;
+      floorsValue.style.fontSize = '18px';
+      floorsValue.style.fontWeight = 'bold';
+      floorsValue.style.color = totalFloors === maxFloors ? '#8f8' : '#ff8';
+      floorsDiv.appendChild(floorsValue);
+      
+      // Show raid floors if there are any raids in the region
+      if (totalRaidMaps > 0) {
+        const raidFloorsValue = document.createElement('div');
+        raidFloorsValue.textContent = `Raids: ${totalRaidFloors.toLocaleString()} / ${maxRaidFloors.toLocaleString()}`;
+        raidFloorsValue.style.fontSize = '12px';
+        raidFloorsValue.style.fontWeight = 'normal';
+        raidFloorsValue.style.color = totalRaidFloors === maxRaidFloors ? '#8f8' : '#ff8';
+        raidFloorsValue.style.marginTop = '6px';
+        floorsDiv.appendChild(raidFloorsValue);
+      }
+      
+      statsGrid.appendChild(floorsDiv);
+      
+      statsContainer.appendChild(statsGrid);
+      return statsContainer;
+    }
+
     // Helper function to create map information section
     function createMapInfoSection(selectedMap, roomName) {
       const mapInfoDiv = document.createElement('div');
@@ -10661,6 +11375,13 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             }
           }
           
+          // Find the map name for selectedMap (if selectedMap is an ID, convert to name)
+          let selectedMapName = null;
+          if (selectedMap) {
+            const selectedMapData = mapsInRegion.find(map => map.id === selectedMap);
+            selectedMapName = selectedMapData ? selectedMapData.name : selectedMap;
+          }
+          
           const box = createBox({
             title: 'Maps',
             items: mapsInRegion.map(map => map.name),
@@ -10668,7 +11389,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             type: 'map',
             selectedCreature: null,
             selectedEquipment: null,
-            selectedInventory: selectedMap,
+            selectedInventory: selectedMapName,
             setSelectedCreature: () => {},
             setSelectedEquipment: () => {},
             setSelectedInventory: (mapName) => {
@@ -10813,6 +11534,36 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       col3.appendChild(col3Title);
       col3.appendChild(col3Content);
       
+      // Function to update column layout based on selection
+      function updateColumnLayout(isRegionSelected) {
+        if (isRegionSelected) {
+          // Region selected: Statistics (small) on left (col2), Map Information (large) on right (col3)
+          // col2 = Statistics (small, left)
+          Object.assign(col2.style, {
+            width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px'
+          });
+          col2TitleP.textContent = 'Statistics';
+          
+          // col3 = Map Information (large, right)
+          Object.assign(col3.style, {
+            flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
+          });
+          col3TitleP.textContent = 'Map Information';
+        } else {
+          // Map selected: Map Information (small) on left (col2), Statistics (large) on right (col3)
+          // col2 = Map Information (small, left)
+          Object.assign(col2.style, {
+            width: '250px', minWidth: '250px', maxWidth: '250px', flex: '0 0 250px'
+          });
+          col2TitleP.textContent = 'Map Information';
+          
+          // col3 = Statistics (large, right)
+          Object.assign(col3.style, {
+            flex: '1 1 0', width: 'auto', minWidth: '0', maxWidth: 'none'
+          });
+          col3TitleP.textContent = 'Statistics';
+        }
+      }
 
       
       function updateRightCol() {
@@ -10823,6 +11574,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           // Only update if state actually changed
           if (MapsTabDOMOptimizer.currentState.selectedMap === selectedMap && 
+              MapsTabDOMOptimizer.currentState.selectedCategory === selectedCategory &&
               MapsTabDOMOptimizer.currentState.roomData === roomData &&
               MapsTabDOMOptimizer.currentState.roomName === roomName) {
             return; // No change needed
@@ -10830,6 +11582,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           // Update current state
           MapsTabDOMOptimizer.currentState.selectedMap = selectedMap;
+          MapsTabDOMOptimizer.currentState.selectedCategory = selectedCategory;
           MapsTabDOMOptimizer.currentState.roomData = roomData;
           MapsTabDOMOptimizer.currentState.roomName = roomName;
           
@@ -10839,6 +11592,37 @@ async function fetchWithDeduplication(url, key, priority = 0) {
           
           if (col2Content) col2Content.innerHTML = '';
           if (col3Content) col3Content.innerHTML = '';
+          
+          // Check if region is selected but no map is selected
+          if (selectedCategory && !selectedMap && globalThis.state?.utils?.REGIONS) {
+            const region = globalThis.state.utils.REGIONS.find(r => r.id === selectedCategory);
+            if (region && region.rooms) {
+              // Update column layout for region view
+              updateColumnLayout(true);
+              
+              // Show all maps for the region in Map Information (col3 = right column, large)
+              const mapsInRegion = region.rooms.map(room => ({
+                id: room.id,
+                name: globalThis.state.utils.ROOM_NAME[room.id] || room.id
+              }));
+              
+              const regionMapsDiv = createRegionMapsSection(mapsInRegion, selectedCategory, (mapId) => {
+                selectedMap = mapId;
+                updateBottomBox();
+                updateRightCol();
+              });
+              col3Content.appendChild(regionMapsDiv);
+              
+              // Show region statistics (col2 = left column, small)
+              const statsContainer = createRegionStatisticsSection(selectedCategory, mapsInRegion);
+              col2Content.appendChild(statsContainer);
+              
+              return;
+            }
+          }
+          
+          // Update column layout for map view
+          updateColumnLayout(false);
           
           if (selectedMap) {
             // Column 2: Two separate divs - Map Information and Creature Information
@@ -10964,7 +11748,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
               contentContainer.appendChild(creaturesContainer);
             }
             
-            // Add both divs to col2 content area
+            // Add both divs to col2 content area (Map Information - left column, small)
             col2Content.appendChild(mapInfoDiv);
             col2Content.appendChild(creatureInfoDiv);
             
@@ -10980,7 +11764,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
                 // If no overflow, keep overflowY: 'hidden' (no scrollbar)
             }, 0);
             
-            // Column 3: Statistics
+            // Column 3: Statistics (right column, large)
             const statsContainer = createStatisticsSection(selectedMap);
             col3Content.appendChild(statsContainer);
             
@@ -11018,6 +11802,9 @@ async function fetchWithDeduplication(url, key, priority = 0) {
         }
       }
 
+      // Set initial column layout (map view by default)
+      updateColumnLayout(false);
+      
       updateRightCol();
 
       d.appendChild(leftCol);

@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.12",
+      "changes": [
+        { "type": "changed", "mod": "Cyclopedia", "text": "Improved Region Page in Maps Tab." },
+        { "type": "fixed", "mod": "Mod Settings", "text": "Fixed incorrect equipment stat in replay links when downloading Firebase best runs." }
+      ]
+    },
+    {
       "version": "3.3.11",
       "changes": [
         { "type": "changed", "mod": "Autoseller", "text": "Improved Autoduster context menu." }

@@ -946,7 +946,10 @@ function buildTempRunForReplayLink(run, contextRegionName) {
         monsterId: piece.monsterId,
         equipmentName: piece.equipmentName,
         equipId: piece.equipId,
-        level: piece.level
+        level: piece.level,
+        equipmentStat: piece.equipmentStat,
+        equipmentTier: piece.equipmentTier,
+        monsterStats: piece.monsterStats
       }))
     } : null
   };
