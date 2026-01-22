@@ -3290,6 +3290,11 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       // Update cache
       cachedQuestItems = updatedProducts;
       
+      // Update tile 79 right-click state if function is available (quest items affect tile 79 access)
+      if (typeof updateTile79RightClickState === 'function') {
+        updateTile79RightClickState();
+      }
+      
       // Quest item added to inventory
       return updatedProducts;
     } catch (error) {
@@ -3333,6 +3338,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       );
 
       cachedQuestItems = updatedProducts;
+      
+      // Update tile 79 right-click state if function is available (quest items affect tile 79 access)
+      if (typeof updateTile79RightClickState === 'function') {
+        updateTile79RightClickState();
+      }
+      
       return true;
     } catch (error) {
       console.error('[Quests Mod][Quest Items] Error consuming quest item:', error);
@@ -6387,18 +6398,27 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                 showStampedLetterReceivedToast();
                 console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter');
 
-                // Check if player is in sewers and enable Tile 79 immediately
-                setTimeout(() => {
-                  if (shouldEnableTile79RightClick()) {
-                    updateTile79RightClickState();
-                    console.log('[Quests Mod][King Tibianus] Tile 79 enabled immediately after letter exchange (player in sewers)');
-                  }
-                }, 500); // Small delay to ensure UI updates
+                // Update tile 79 right-click state (will enable if player is in sewers)
+                // Always call this to ensure state is updated regardless of current location
+                if (typeof updateTile79RightClickState === 'function') {
+                  updateTile79RightClickState();
+                  console.log('[Quests Mod][King Tibianus] Tile 79 state updated after letter exchange');
+                }
               } else {
                 console.warn('[Quests Mod][King Tibianus] Player has no Letter from Al Dee to exchange');
+                // Still update tile 79 state even without letter exchange (mission is now accepted)
+                if (typeof updateTile79RightClickState === 'function') {
+                  updateTile79RightClickState();
+                  console.log('[Quests Mod][King Tibianus] Tile 79 state updated after mission acceptance (no letter to exchange)');
+                }
               }
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error exchanging letter:', err);
+            }
+          } else {
+            // Mission accepted but not KING_LETTER_MISSION - still update tile 79 state in case it's relevant
+            if (typeof updateTile79RightClickState === 'function') {
+              updateTile79RightClickState();
             }
           }
 
@@ -7374,6 +7394,12 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                   letter: kingChatState.progressLetter
                 });
                 console.log('[Quests Mod][Al Dee] Letter mission progress saved to Firebase');
+              }
+
+              // Update tile 79 right-click state (mission completed, tile 79 should work even without Stamped Letter)
+              if (typeof updateTile79RightClickState === 'function') {
+                updateTile79RightClickState();
+                console.log('[Quests Mod][Al Dee] Tile 79 state updated after mission completion');
               }
 
               // Update guild coin display

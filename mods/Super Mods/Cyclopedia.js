@@ -10975,8 +10975,10 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       let totalRaidFloors = 0;
       let maxFloors = 0;
       let maxRaidFloors = 0;
-      let totalTicks = 0; // Personal total ticks
-      let totalWRTicks = 0; // World record total ticks
+      let totalTicks = 0; // Personal total ticks (non-raid)
+      let totalRaidTicks = 0; // Personal total ticks (raids)
+      let totalWRTicks = 0; // World record total ticks (non-raid)
+      let totalWRRaidTicks = 0; // World record total ticks (raids)
       
       // Only count non-raid maps for explored count and rank points/floors
       nonRaidMaps.forEach(map => {
@@ -11011,7 +11013,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
             totalRaidFloors += mapData.floor;
           }
           if (mapData.ticks !== undefined && mapData.ticks !== null) {
-            totalTicks += mapData.ticks;
+            totalRaidTicks += mapData.ticks;
           }
         }
       });
@@ -11052,12 +11054,19 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       // Fetch leaderboard data to calculate WR total ticks
       fetchMapsLeaderboardData().then(leaderboardData => {
-        // Calculate WR total ticks for all maps in region (non-raid + static raids)
-        const allMapsForTicks = [...nonRaidMaps, ...staticRaidMaps];
-        allMapsForTicks.forEach(map => {
+        // Calculate WR total ticks for non-raid maps
+        nonRaidMaps.forEach(map => {
           const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
           if (bestTicks > 0) {
             totalWRTicks += bestTicks;
+          }
+        });
+        
+        // Calculate WR total ticks for static raid maps
+        staticRaidMaps.forEach(map => {
+          const bestTicks = leaderboardData?.best?.[map.id]?.ticks || 0;
+          if (bestTicks > 0) {
+            totalWRRaidTicks += bestTicks;
           }
         });
         
@@ -11073,8 +11082,15 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       function updateSpeedrunDisplay() {
         const speedrunValue = statsContainer.querySelector('.speedrun-total-ticks');
         if (speedrunValue) {
-          speedrunValue.textContent = `${totalTicks.toLocaleString()} / ${totalWRTicks > 0 ? totalWRTicks.toLocaleString() : '—'}`;
+          speedrunValue.textContent = `${totalTicks.toLocaleString()} / ${totalWRTicks > 0 ? totalWRTicks.toLocaleString() : '—'} ticks`;
           speedrunValue.style.color = totalWRTicks > 0 && totalTicks <= totalWRTicks ? '#8f8' : '#ff8';
+        }
+        
+        // Update raid speedrun display if it exists
+        const raidSpeedrunValue = statsContainer.querySelector('.speedrun-raid-ticks');
+        if (raidSpeedrunValue) {
+          raidSpeedrunValue.textContent = `Raids: ${totalRaidTicks.toLocaleString()} / ${totalWRRaidTicks > 0 ? totalWRRaidTicks.toLocaleString() : '—'} ticks`;
+          raidSpeedrunValue.style.color = totalWRRaidTicks > 0 && totalRaidTicks <= totalWRRaidTicks ? '#8f8' : '#ff8';
         }
       }
       
@@ -11111,7 +11127,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       exploredDiv.appendChild(exploredLabel);
       
       const exploredValue = document.createElement('div');
-      exploredValue.textContent = `${exploredCount} / ${totalNonRaidMaps}`;
+      exploredValue.textContent = `${exploredCount} / ${totalNonRaidMaps} maps`;
       exploredValue.style.fontSize = '18px';
       exploredValue.style.fontWeight = 'bold';
       exploredValue.style.color = exploredCount === totalNonRaidMaps ? '#8f8' : '#ff8';
@@ -11120,7 +11136,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Show explored raids if there are any raids in the region
       if (totalRaidMaps > 0) {
         const exploredRaidsValue = document.createElement('div');
-        exploredRaidsValue.textContent = `Raids: ${exploredRaidsCount} / ${totalRaidMaps}`;
+        exploredRaidsValue.textContent = `Raids: ${exploredRaidsCount} / ${totalRaidMaps} maps`;
         exploredRaidsValue.style.fontSize = '12px';
         exploredRaidsValue.style.fontWeight = 'normal';
         exploredRaidsValue.style.color = exploredRaidsCount === totalRaidMaps ? '#8f8' : '#ff8';
@@ -11147,11 +11163,23 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       
       const speedrunValue = document.createElement('div');
       speedrunValue.className = 'speedrun-total-ticks';
-      speedrunValue.textContent = `${totalTicks.toLocaleString()} / —`;
+      speedrunValue.textContent = `${totalTicks.toLocaleString()} / — ticks`;
       speedrunValue.style.fontSize = '18px';
       speedrunValue.style.fontWeight = 'bold';
       speedrunValue.style.color = '#ff8';
       speedrunDiv.appendChild(speedrunValue);
+      
+      // Show raid speedrun if there are any raids in the region
+      if (totalRaidMaps > 0) {
+        const raidSpeedrunValue = document.createElement('div');
+        raidSpeedrunValue.className = 'speedrun-raid-ticks';
+        raidSpeedrunValue.textContent = `Raids: ${totalRaidTicks.toLocaleString()} / — ticks`;
+        raidSpeedrunValue.style.fontSize = '12px';
+        raidSpeedrunValue.style.fontWeight = 'normal';
+        raidSpeedrunValue.style.color = '#ff8';
+        raidSpeedrunValue.style.marginTop = '6px';
+        speedrunDiv.appendChild(raidSpeedrunValue);
+      }
       
       statsGrid.appendChild(speedrunDiv);
       
@@ -11171,7 +11199,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       rankPointsDiv.appendChild(rankPointsLabel);
       
       const rankPointsValue = document.createElement('div');
-      rankPointsValue.textContent = `${totalRankPoints.toLocaleString()} / ${maxRankPoints.toLocaleString()}`;
+      rankPointsValue.textContent = `${totalRankPoints.toLocaleString()} / ${maxRankPoints.toLocaleString()} points`;
       rankPointsValue.style.fontSize = '18px';
       rankPointsValue.style.fontWeight = 'bold';
       rankPointsValue.style.color = totalRankPoints === maxRankPoints ? '#8f8' : '#ff8';
@@ -11180,7 +11208,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Show raid rank points if there are any raids in the region
       if (totalRaidMaps > 0) {
         const raidRankPointsValue = document.createElement('div');
-        raidRankPointsValue.textContent = `Raids: ${totalRaidRankPoints.toLocaleString()} / ${maxRaidRankPoints.toLocaleString()}`;
+        raidRankPointsValue.textContent = `Raids: ${totalRaidRankPoints.toLocaleString()} / ${maxRaidRankPoints.toLocaleString()} points`;
         raidRankPointsValue.style.fontSize = '12px';
         raidRankPointsValue.style.fontWeight = 'normal';
         raidRankPointsValue.style.color = totalRaidRankPoints === maxRaidRankPoints ? '#8f8' : '#ff8';
@@ -11206,7 +11234,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       floorsDiv.appendChild(floorsLabel);
       
       const floorsValue = document.createElement('div');
-      floorsValue.textContent = `${totalFloors.toLocaleString()} / ${maxFloors.toLocaleString()}`;
+      floorsValue.textContent = `${totalFloors.toLocaleString()} / ${maxFloors.toLocaleString()} floors`;
       floorsValue.style.fontSize = '18px';
       floorsValue.style.fontWeight = 'bold';
       floorsValue.style.color = totalFloors === maxFloors ? '#8f8' : '#ff8';
@@ -11215,7 +11243,7 @@ async function fetchWithDeduplication(url, key, priority = 0) {
       // Show raid floors if there are any raids in the region
       if (totalRaidMaps > 0) {
         const raidFloorsValue = document.createElement('div');
-        raidFloorsValue.textContent = `Raids: ${totalRaidFloors.toLocaleString()} / ${maxRaidFloors.toLocaleString()}`;
+        raidFloorsValue.textContent = `Raids: ${totalRaidFloors.toLocaleString()} / ${maxRaidFloors.toLocaleString()} floors`;
         raidFloorsValue.style.fontSize = '12px';
         raidFloorsValue.style.fontWeight = 'normal';
         raidFloorsValue.style.color = totalRaidFloors === maxRaidFloors ? '#8f8' : '#ff8';

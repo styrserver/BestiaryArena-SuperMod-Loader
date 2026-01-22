@@ -4,6 +4,14 @@
   },
   "notes": [
     {
+      "version": "3.3.14",
+      "changes": [
+        { "type": "fixed", "mod": "Quests", "text": "Bugfix Stamped Letter questline." },
+        { "type": "changed", "mod": "Cyclopedia", "text": "Split speedrun statistics to separate non-raid and raid values in Maps Tab for Regions." },
+        { "type": "changed", "mod": "Cyclopedia", "text": "Added descriptive labels (Maps, ticks, Points, Floors) to all statistics values in Region statistics." }
+      ]
+    },
+    {
       "version": "3.3.13",
       "changes": [
         { "type": "fixed", "mod": "Manual Runner", "text": "Fixed Manual Runner conflict while new raid appears." },
