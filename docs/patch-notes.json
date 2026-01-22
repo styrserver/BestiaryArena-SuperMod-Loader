@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.13",
+      "changes": [
+        { "type": "fixed", "mod": "Manual Runner", "text": "Fixed Manual Runner conflict while new raid appears." },
+        { "type": "fixed", "mod": "Manual Runner", "text": "Added force-stop functionality." }
+      ]
+    },
+    {
       "version": "3.3.12",
       "changes": [
         { "type": "changed", "mod": "Cyclopedia", "text": "Improved Region Page in Maps Tab." },

@@ -324,6 +324,13 @@ class AnalysisState {
     this.forceStop = true;
   }
   
+  forceStop() {
+    this.state = ANALYSIS_STATES.STOPPING;
+    this.forceStop = true;
+    // Force stop immediately - don't wait for current run to finish
+    console.log('[Manual Runner] Force stop requested - aborting immediately');
+  }
+  
   reset() {
     this.state = ANALYSIS_STATES.IDLE;
     this.currentId = null;
@@ -737,9 +744,26 @@ async function waitForGameCompletion(analysisId) {
         return;
       }
       
+      // Check for force-stop - abort immediately
+      if (analysisState.forceStop && analysisState.isStopping()) {
+        console.log('[Manual Runner] Force stop detected during wait - aborting immediately');
+        clearInterval(intervalId);
+        rewardScreenOpenedCallback = null;
+        reject('force_stopped');
+        return;
+      }
+      
       if (!analysisState.isRunning()) {
         // Don't abort - let the current run finish (reward screen will still be captured)
         // The main loop will check this after the run completes
+        // UNLESS force-stop was requested
+        if (analysisState.forceStop) {
+          console.log('[Manual Runner] Force stop requested - aborting wait immediately');
+          clearInterval(intervalId);
+          rewardScreenOpenedCallback = null;
+          reject('force_stopped');
+          return;
+        }
         if (checkCount === 1) {
           console.log('[Manual Runner] Stop requested - letting current run finish naturally');
         }
@@ -782,7 +806,7 @@ async function waitForGameCompletion(analysisId) {
     const triggerSource = await completionPromise;
     console.log(`[Manual Runner] Game completed (triggered by: ${triggerSource})`);
   } catch (reason) {
-    if (reason === 'invalid_id' || reason === 'stopped') {
+    if (reason === 'invalid_id' || reason === 'stopped' || reason === 'force_stopped') {
       return createForceStopResult();
     } else if (reason === 'skip') {
       return createSkipResult();
@@ -2566,6 +2590,36 @@ function showRunningAnalysisModal(
   stopBtn.className = 'manual-runner-button';
   stopBtn.addEventListener('click', (e) => {
     console.log('[Manual Runner] Stop button clicked, current state:', analysisState.state);
+    
+      // If already stopping, force-stop everything immediately
+      if (analysisState.isStopping()) {
+        console.log('[Manual Runner] Already stopping - force-stopping everything now');
+        analysisState.forceStop();
+        
+        // Force cleanup immediately
+        if (window.ModCoordination) {
+          window.ModCoordination.updateModState('Manual Runner', { active: false });
+        }
+        
+        // Cleanup all subscriptions
+        cleanupBoardSubscription();
+        cleanupRewardsScreenSubscription();
+        cleanupGameTimerSubscription();
+        
+        // Close modal immediately
+        if (activeRunningModal && activeRunningModal.close) {
+          activeRunningModal.close();
+        }
+        activeRunningModal = null;
+        
+        // Reset state
+        analysisState.reset();
+        
+        stopBtn.disabled = true;
+        stopBtn.textContent = t('mods.manualRunner.stopped') || 'Stopped';
+        return;
+      }
+    
     analysisState.stop();
     console.log('[Manual Runner] After stop(), state:', analysisState.state);
     stopBtn.disabled = true;
