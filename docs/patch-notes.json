@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.3.15",
+      "changes": [
+        { "type": "fixed", "mod": "Quests", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.3.14",
       "changes": [
         { "type": "fixed", "mod": "Quests", "text": "Bugfix Stamped Letter questline." },

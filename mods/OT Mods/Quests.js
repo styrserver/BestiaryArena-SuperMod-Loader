@@ -94,6 +94,7 @@ const KING_LETTER_MISSION = {
   title: 'Letter from Al Dee',
   prompt: 'Ah, a letter from Al Dee! That old rope merchant has been trying to get my attention for weeks. Can you return this letter to him when you visit him?',
   accept: 'Take this letter back to Al Dee. He usually hangs around somewhere in Rookgaard. Good luck on your adventure!',
+  acceptNoLetter: 'I\'m afraid the letter has been stolen by monsters in Rookgaard! You\'ll need to defeat them to find it. Once you have the letter, bring it to me and I\'ll stamp it for you to deliver to Al Dee.',
   askForLetter: 'Have you returned the letter to Al Dee?',
   complete: 'Well done! Al Dee was most pleased. Perhaps you\'ll find him useful in your future adventures.',
   missingLetter: 'You claim to have returned it but I see no proof. Find Al Dee and complete his task!',
@@ -101,9 +102,9 @@ const KING_LETTER_MISSION = {
   answerYesNo: 'Answer yes or no: have you returned the letter to Al Dee?',
   alreadyCompleted: 'You already helped Al Dee. Perhaps you should visit his shop again.',
   alreadyActive: 'You are already on this task. Find Al Dee and return his letter!',
-  objectiveLine1: 'Find Al Dee in Rookgaard.',
-  objectiveLine2: 'Return the letter to Al Dee.',
-  hint: 'Al Dee is a rope merchant. Search Rookgaard for his shop.',
+  objectiveLine1: 'Find the Letter from Al Dee.',
+  objectiveLine2: 'Return the stamped letter to Al Dee.',
+  hint: 'Defeat monsters in Rookgaard to find the letter, then bring it to King Tibianus to get it stamped.',
   rewardCoins: KING_GUILD_COIN_REWARD
 };
 
@@ -2601,6 +2602,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
 
         // Grant all quest reward items
         const rewardItems = {
+          'Dragon Claw': 1,       // From Red Dragon mission
           'Light Shovel': 1,      // From Al Dee Fishing mission
           'The Holy Tible': 1,    // From Al Dee Golden Rope mission
         };
@@ -2949,6 +2951,16 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     console.log('[Quests Mod][Letter from Al Dee] Letter from Al Dee received status deleted for player:', playerName);
   }
 
+  async function deleteIronOreReceived(playerName) {
+    if (!playerName) return;
+    const hashedPlayer = await hashUsername(playerName);
+    await FirebaseService.delete(
+      `${getIronOreFirebasePath()}/${hashedPlayer}`,
+      'delete Iron Ore received status'
+    );
+    console.log('[Quests Mod][Iron Ore] Iron Ore received status deleted for player:', playerName);
+  }
+
   async function getAlDeeShopPurchases(playerName) {
     if (!playerName) return {};
     const hashedPlayer = await hashUsername(playerName);
@@ -2970,9 +2982,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
     const hashedPlayer = await hashUsername(playerName);
     const purchases = await getAlDeeShopPurchases(playerName);
     purchases[itemId] = purchased;
-    await firebaseRequest(
+    await FirebaseService.put(
       `${getAlDeeShopPurchasesPath()}/${hashedPlayer}`,
-      'PUT',
       purchases,
       'save Al Dee shop purchase'
     );
@@ -5837,7 +5848,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
 
       // kingChatState is now defined globally
-      // King Tibianus missions and Al Dee missions
+      // All missions (Al Dee missions are shown but can only be accepted through Al Dee)
       const MISSIONS = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION, AL_DEE_FISHING_MISSION, AL_DEE_GOLDEN_ROPE_MISSION];
 
       // Mission Registry: Maps mission IDs to their state property names in kingChatState
@@ -5879,17 +5890,21 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       // getMissionProgress and setMissionProgress are defined globally for Tile 79 functionality
 
       function areAllMissionsCompleted() {
-        return MISSIONS.every(mission => getMissionProgress(mission).completed);
+        // Only check King Tibianus missions for completion status
+        const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
+        return kingMissions.every(mission => getMissionProgress(mission).completed);
       }
 
       function currentMission() {
-        // Return the first incomplete mission, or null if all are completed
-        for (const mission of MISSIONS) {
+        // Return the first incomplete King Tibianus mission, or null if all are completed
+        // Note: Al Dee missions are shown in UI but handled separately
+        const kingMissions = [KING_COPPER_KEY_MISSION, KING_RED_DRAGON_MISSION, KING_LETTER_MISSION];
+        for (const mission of kingMissions) {
           if (!getMissionProgress(mission).completed) {
             return mission;
           }
         }
-        // All missions completed, no more missions available
+        // All King Tibianus missions completed, no more missions available
         return null;
       }
 
@@ -5924,6 +5939,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         return {
           missionPrompt: mission.prompt,
           thankYou: mission.accept,
+          thankYouNoLetter: mission.acceptNoLetter || mission.accept,
           keyQuestion: mission.askForKey || mission.askForItems || 'Have you found what I asked for?',
           keyComplete: mission.complete,
           keyScoldNoKey: mission.missingKey || mission.missingItems || 'You claim yes but lack what I asked for.',
@@ -6200,19 +6216,87 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           descBlock.appendChild(line2);
           // Hide hint on completion
         } else {
-          const line1 = document.createElement('p');
-          line1.textContent = selectedMission.objectiveLine1;
-          const line2 = document.createElement('p');
-          line2.textContent = selectedMission.objectiveLine2;
-          descBlock.appendChild(line1);
-          descBlock.appendChild(line2);
+          // For letter mission, check if player has Stamped Letter to adjust objectives
+          if (selectedMission.id === KING_LETTER_MISSION.id) {
+            // Check cached items first (synchronous), then async if needed
+            let hasStampedLetter = false;
+            if (cachedQuestItems !== null) {
+              hasStampedLetter = (cachedQuestItems['Stamped Letter'] || 0) > 0;
+            }
+            
+            if (hasStampedLetter) {
+              // Player has Stamped Letter - only show delivery objective
+              const line1 = document.createElement('p');
+              line1.textContent = selectedMission.objectiveLine2;
+              descBlock.appendChild(line1);
+              
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = 'Take the stamped letter to Al Dee in Rookgaard to complete the mission.';
+              hintBlock.appendChild(line3);
+            } else {
+              // Player doesn't have Stamped Letter - show both objectives
+              const line1 = document.createElement('p');
+              line1.textContent = selectedMission.objectiveLine1;
+              descBlock.appendChild(line1);
+              
+              // If cache not available, check async and update if needed
+              (async () => {
+                try {
+                  const currentProducts = await getQuestItems(false);
+                  const hasStampedLetterAsync = (currentProducts['Stamped Letter'] || 0) > 0;
+                  
+                  if (hasStampedLetterAsync) {
+                    // Update objectives dynamically
+                    const existingLine1 = descBlock.querySelector('p:first-child');
+                    if (existingLine1) {
+                      existingLine1.textContent = selectedMission.objectiveLine2;
+                    }
+                    
+                    const existingHint = hintBlock.querySelector('p');
+                    if (existingHint) {
+                      existingHint.textContent = 'Take the stamped letter to Al Dee in Rookgaard to complete the mission.';
+                    }
+                  } else {
+                    // Add second objective if not present
+                    const existingLine2 = descBlock.querySelector('p:nth-child(2)');
+                    if (!existingLine2) {
+                      const line2 = document.createElement('p');
+                      line2.textContent = selectedMission.objectiveLine2;
+                      descBlock.appendChild(line2);
+                    }
+                  }
+                } catch (error) {
+                  console.error('[Quests Mod][King Tibianus] Error checking for Stamped Letter in objectives:', error);
+                }
+              })();
+              
+              const line3 = document.createElement('p');
+              line3.style.color = '#b0b0b0';
+              line3.style.fontStyle = 'italic';
+              line3.style.marginTop = '6px';
+              line3.textContent = selectedMission.hint;
+              hintBlock.appendChild(line3);
+            }
+          } else {
+            // For other missions, always show both objectives
+            const line1 = document.createElement('p');
+            line1.textContent = selectedMission.objectiveLine1;
+            descBlock.appendChild(line1);
+            
+            const line2 = document.createElement('p');
+            line2.textContent = selectedMission.objectiveLine2;
+            descBlock.appendChild(line2);
 
-          const line3 = document.createElement('p');
-          line3.style.color = '#b0b0b0';
-          line3.style.fontStyle = 'italic';
-          line3.style.marginTop = '6px';
-          line3.textContent = selectedMission.hint;
-          hintBlock.appendChild(line3);
+            const line3 = document.createElement('p');
+            line3.style.color = '#b0b0b0';
+            line3.style.fontStyle = 'italic';
+            line3.style.marginTop = '6px';
+            line3.textContent = selectedMission.hint;
+            hintBlock.appendChild(line3);
+          }
         }
 
         const descBodyWrapper = document.createElement('div');
@@ -6347,6 +6431,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
               await addQuestItem(MAP_COLOUR_CONFIG.productName, 1);
               showMapReceivedToast();
               console.log('[Quests Mod][King Tibianus] Awarded Map (Colour) for copper key mission');
+              // Set up Copper Key system now that mission is accepted
+              setupCopperKeySystem();
             } catch (err) {
               console.error('[Quests Mod][King Tibianus] Error awarding Map (Colour):', err);
             }
@@ -6385,9 +6471,8 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                 const encrypted = await encryptQuestItems(updatedProducts, playerName);
                 const hashedPlayer = await hashUsername(playerName);
 
-                await firebaseRequest(
+                await FirebaseService.put(
                   `${getQuestItemsApiUrl()}/${hashedPlayer}`,
-                  'PUT',
                   { encrypted },
                   'exchange Letter from Al Dee for Stamped Letter'
                 );
@@ -6404,6 +6489,9 @@ function createNPCCooldownManager(cooldownMs = 1000) {
                   updateTile79RightClickState();
                   console.log('[Quests Mod][King Tibianus] Tile 79 state updated after letter exchange');
                 }
+                
+                // Refresh mission UI to show second objective
+                renderKingQuestUI();
               } else {
                 console.warn('[Quests Mod][King Tibianus] Player has no Letter from Al Dee to exchange');
                 // Still update tile 79 state even without letter exchange (mission is now accepted)
@@ -6696,7 +6784,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
 
       // Helper: Handle mission acceptance
-      function handleMissionAcceptance(lowerText) {
+      async function handleMissionAcceptance(lowerText) {
         if (!kingChatState.missionOffered || !kingChatState.offeredMission || !lowerText.includes('yes')) {
           return false;
         }
@@ -6706,10 +6794,37 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           return false;
         }
 
-        kingChatState.missionOffered = false;
+        // Prevent King Tibianus from accepting Al Dee missions
         const offeredMissionToStart = kingChatState.offeredMission;
+        if (offeredMissionToStart.id === AL_DEE_FISHING_MISSION.id || offeredMissionToStart.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+          kingChatState.missionOffered = false;
+          kingChatState.offeredMission = null;
+          queueKingReply('That mission belongs to Al Dee, the rope merchant in Rookgaard. You must speak with him to accept it.', { onDone: () => {
+            clearTextarea();
+          } });
+          tibianusCooldown.reset();
+          return true;
+        }
+
+        kingChatState.missionOffered = false;
         const offeredStrings = buildStrings(offeredMissionToStart);
-        queueKingReply(offeredStrings.thankYou, { onDone: async () => {
+        
+        // Check if this is the letter mission and player doesn't have the letter
+        let acceptanceMessage = offeredStrings.thankYou;
+        if (offeredMissionToStart.id === KING_LETTER_MISSION.id) {
+          try {
+            const currentProducts = await getQuestItems(false);
+            const currentLetterCount = currentProducts['Letter from Al Dee'] || 0;
+            if (currentLetterCount === 0) {
+              acceptanceMessage = offeredStrings.thankYouNoLetter;
+            }
+          } catch (error) {
+            console.error('[Quests Mod][King Tibianus] Error checking for letter:', error);
+            // Fall back to default message if check fails
+          }
+        }
+        
+        queueKingReply(acceptanceMessage, { onDone: async () => {
           await startKingTibianusQuestForMission(offeredMissionToStart);
           kingChatState.offeredMission = null;
         } });
@@ -6765,7 +6880,7 @@ function createNPCCooldownManager(cooldownMs = 1000) {
         }
 
         // Mission acceptance handler
-        if (handleMissionAcceptance(lowerText)) {
+        if (await handleMissionAcceptance(lowerText)) {
           return;
         }
 
@@ -6784,12 +6899,63 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
         } else if (mentionsKey || mentionsDragon || mentionsLetter) {
-          if (targetProgress.completed) {
+          // Prevent King Tibianus from offering Al Dee missions
+          if (targetMission.id === AL_DEE_FISHING_MISSION.id || targetMission.id === AL_DEE_GOLDEN_ROPE_MISSION.id) {
+            kingResponse = 'That mission belongs to Al Dee, the rope merchant in Rookgaard. You must speak with him to accept it.';
+            kingChatState.missionOffered = false;
+            kingChatState.offeredMission = null;
+          } else if (targetProgress.completed) {
             kingResponse = targetStrings.missionCompleted;
             kingChatState.missionOffered = false;
           kingChatState.offeredMission = null;
             kingChatState.offeredMission = null;
           } else if (targetProgress.accepted) {
+            // Check if this is the letter mission and player has the letter but not the stamped letter
+            if (targetMission.id === KING_LETTER_MISSION.id) {
+              try {
+                const currentProducts = await getQuestItems(false);
+                const currentLetterCount = currentProducts['Letter from Al Dee'] || 0;
+                const currentStampedLetterCount = currentProducts['Stamped Letter'] || 0;
+                
+                // If player has the letter but not the stamped letter, exchange it
+                if (currentLetterCount > 0 && currentStampedLetterCount === 0) {
+                  const updatedProducts = {
+                    ...currentProducts,
+                    'Letter from Al Dee': Math.max(0, currentLetterCount - 1),
+                    'Stamped Letter': 1
+                  };
+                  
+                  const encrypted = await encryptQuestItems(updatedProducts, playerName);
+                  const hashedPlayer = await hashUsername(playerName);
+                  
+                  await FirebaseService.put(
+                    `${getQuestItemsApiUrl()}/${hashedPlayer}`,
+                    { encrypted },
+                    'exchange Letter from Al Dee for Stamped Letter (return visit)'
+                  );
+                  
+                  cachedQuestItems = updatedProducts;
+                  showStampedLetterReceivedToast();
+                  console.log('[Quests Mod][King Tibianus] Exchanged Letter from Al Dee for Stamped Letter (return visit)');
+                  
+                  // Update tile 79 right-click state
+                  if (typeof updateTile79RightClickState === 'function') {
+                    updateTile79RightClickState();
+                  }
+                  
+                  // Refresh mission UI to show second objective
+                  renderKingQuestUI();
+                  
+                  queueKingReply('Ah, you found the letter! I\'ve stamped it for you. Now take it to Al Dee in Rookgaard.', { onDone: () => {
+                    clearTextarea();
+                  } });
+                  return;
+                }
+              } catch (error) {
+                console.error('[Quests Mod][King Tibianus] Error checking/exchanging letter:', error);
+              }
+            }
+            
             kingChatState.awaitingKeyConfirm = true;
             kingChatState.offeredMission = targetMission;
             queueKingReply(targetStrings.keyQuestion);
@@ -8734,6 +8900,10 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       await deleteLetterFromAlDeeReceived(playerName);
       console.log('[Quests Mod][Dev] Letter from Al Dee received status deleted from Firebase');
 
+      // Delete Iron Ore received status from Firebase
+      await deleteIronOreReceived(playerName);
+      console.log('[Quests Mod][Dev] Iron Ore received status deleted from Firebase');
+
       // Clear local quest items cache
       clearQuestItemsCache();
       console.log('[Quests Mod][Dev] Local quest items cache cleared');
@@ -8749,6 +8919,38 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       console.log('[Quests Mod][Dev] All quests and quest items reset complete');
     } catch (error) {
       console.error('[Quests Mod][Dev] Error resetting all quests and quest items:', error);
+    }
+  };
+
+  // Debug function to manually update tile 79 right-click state
+  window.updateTile79 = function() {
+    console.log('[Quests Mod][Dev] Manually updating Tile 79 right-click state');
+    updateTile79RightClickState();
+    const missionActive = isTile79MissionActive();
+    const shouldBeEnabled = shouldEnableTile79RightClick();
+    console.log('[Quests Mod][Dev] Tile 79 status:', {
+      missionActive,
+      shouldBeEnabled,
+      tile79RightClickEnabled,
+      hasSubscription: !!tile79BoardSubscription
+    });
+  };
+
+  // Debug function to reset only Iron Ore received status
+  window.resetIronOreReceived = async function() {
+    console.log('[Quests Mod][Dev] Resetting Iron Ore received status');
+    try {
+      const playerName = getCurrentPlayerName();
+      if (!playerName) {
+        console.error('[Quests Mod][Dev] No player name found');
+        return;
+      }
+
+      await deleteIronOreReceived(playerName);
+      console.log('[Quests Mod][Dev] Iron Ore received status deleted from Firebase');
+      console.log('[Quests Mod][Dev] You can now receive Iron Ore again from defeating creatures in Rookgaard');
+    } catch (error) {
+      console.error('[Quests Mod][Dev] Error resetting Iron Ore received status:', error);
     }
   };
 
@@ -8770,14 +8972,17 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       console.log('[Quests Mod][Tile 79] Player subscription set up');
     }
 
-    // Initial check when subscriptions are set up
-    setTimeout(() => {
+      // Initial check when subscriptions are set up
+      setTimeout(() => {
+        updateTile79RightClickState();
+      }, 500);
+      
+      // Also check immediately to catch current state
       updateTile79RightClickState();
-    }, 500);
 
-    console.log('[Quests Mod][Tile 79] Event-driven subscriptions set up');
-    console.log('[Quests Mod][Tile 79] Will respond to: room changes (board state) and inventory changes (player state)');
-  }
+      console.log('[Quests Mod][Tile 79] Event-driven subscriptions set up');
+      console.log('[Quests Mod][Tile 79] Will respond to: room changes (board state) and inventory changes (player state)');
+    }
 
   // Start MutationObserver for continuous cleanup in Ab'Dendriel area
   function startAbDendrielMutationObserver() {
@@ -9932,8 +10137,14 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       });
     }
 
-    // Initial state check
-    updateTile79RightClickState();
+    // Initial state check - use a small delay to ensure board context is available
+    setTimeout(() => {
+      updateTile79RightClickState();
+      // Also check again after a longer delay to catch any late state changes
+      setTimeout(() => {
+        updateTile79RightClickState();
+      }, 500);
+    }, 100);
   }
 
   // Update Tile 79 right-click state based on current conditions
