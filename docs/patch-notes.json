@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.16",
+      "changes": [
+        { "type": "fixed", "mod": "Better Tasker", "text": "Autorefill fix." },
+        { "type": "fixed", "mod": "Quests", "text": "Bug fixes." }
+      ]
+    },
+    {
       "version": "3.3.15",
       "changes": [
         { "type": "fixed", "mod": "Quests", "text": "Bug fixes." }

@@ -4094,14 +4094,14 @@ async function navigateToSuggestedMapAndStartAutoplay(suggestedMapElement = null
                     // Don't return - continue to check stamina and try clicking Start button
                 } else {
                     await sleep(AUTOPLAY_SETUP_DELAY);
-                    
-                    // Enable Bestiary Automator settings if configured
-                    enableBestiaryAutomatorSettings();
-                    
-                    // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
-                    console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
-                    await sleep(BESTIARY_INIT_WAIT);
                 }
+                
+                // Enable Bestiary Automator settings if configured (moved outside autoplay condition)
+                enableBestiaryAutomatorSettings();
+                
+                // CRITICAL FIX: Wait for Bestiary Automator to initialize (standardized timing)
+                console.log('[Better Tasker] Waiting for Bestiary Automator to initialize...');
+                await sleep(BESTIARY_INIT_WAIT);
                 
                 // Post-navigation settings validation
                 console.log('[Better Tasker] Validating settings after navigation...');
@@ -7314,6 +7314,10 @@ async function openQuestLogAndAcceptTask() {
             if (isNewTaskMode || isRaiding) {
                 const mode = isNewTaskMode ? 'New Task+ mode' : 'raid active';
                 console.log(`[Better Tasker] Task accepted (${mode}) - closing quest log, no navigation`);
+                
+                // Ensure Bestiary Automator settings are enabled even when not navigating
+                enableBestiaryAutomatorSettings();
+                
                 await clearModalsWithEsc(3); // Close quest log
                 taskOperationInProgress = false;
                 updateExposedState();

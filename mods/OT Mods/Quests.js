@@ -7551,6 +7551,18 @@ function createNPCCooldownManager(cooldownMs = 1000) {
               setMissionProgress(KING_LETTER_MISSION, { accepted: true, completed: true });
               console.log('[Quests Mod][Al Dee] Letter delivery mission completed');
 
+              // Remove Letter from Al Dee from inventory if it still exists (unique item, shouldn't remain after quest completion)
+              try {
+                const currentProducts = await getQuestItems(false);
+                const letterCount = currentProducts['Letter from Al Dee'] || 0;
+                if (letterCount > 0) {
+                  await consumeQuestItem('Letter from Al Dee', letterCount);
+                  console.log('[Quests Mod][Al Dee] Removed Letter from Al Dee from inventory (unique item, quest completed)');
+                }
+              } catch (error) {
+                console.error('[Quests Mod][Al Dee] Error removing Letter from Al Dee:', error);
+              }
+
               // Save progress to Firebase
               const playerName = getCurrentPlayerName();
               if (playerName) {
@@ -11117,17 +11129,19 @@ function createNPCCooldownManager(cooldownMs = 1000) {
       }
 
       // Map items to their required mission completion status
-      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed' } }
+      // Format: { itemName: { missionId, requiredStatus: 'accepted' | 'completed', removeWhenCompleted?: boolean } }
+      // removeWhenCompleted: if true, item is removed when quest is completed (for unique items)
       const itemMissionMap = {
         'Map to the Mines': { missionId: KING_COPPER_KEY_MISSION.id, requiredStatus: 'accepted' },
         'Obsidian Knife': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'accepted' },
         'Stamped Letter': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted' },
+        'Letter from Al Dee': { missionId: KING_LETTER_MISSION.id, requiredStatus: 'accepted', removeWhenCompleted: true },
         'Dragon Claw': { missionId: KING_RED_DRAGON_MISSION.id, requiredStatus: 'completed' },
         'Light Shovel': { missionId: AL_DEE_FISHING_MISSION.id, requiredStatus: 'completed' },
         'The Holy Tible': { missionId: AL_DEE_GOLDEN_ROPE_MISSION.id, requiredStatus: 'completed' }
       };
 
-      for (const [itemName, { missionId, requiredStatus }] of Object.entries(itemMissionMap)) {
+      for (const [itemName, { missionId, requiredStatus, removeWhenCompleted }] of Object.entries(itemMissionMap)) {
         const itemCount = questItems[itemName] || 0;
         if (itemCount > 0) {
           // Get mission progress from registry
@@ -11138,6 +11152,14 @@ function createNPCCooldownManager(cooldownMs = 1000) {
           }
 
           const missionProgress = progress?.[firebaseKey];
+          
+          // Special handling for items that should be removed when quest is completed (unique items)
+          if (removeWhenCompleted && missionProgress?.completed) {
+            console.log(`[Quests Mod] Removing ${itemName} (unique item, quest completed)`);
+            await consumeQuestItem(itemName, itemCount);
+            continue;
+          }
+          
           if (!missionProgress) {
             // Mission not started - remove item
             console.log(`[Quests Mod] Removing ${itemName} (mission not started)`);
