@@ -4,6 +4,13 @@
   },
   "notes": [
     {
+      "version": "3.3.17",
+      "changes": [
+        { "type": "fixed", "mod": "Better Forge", "text": "Fixed dust being reset to 0 after forging." },
+        { "type": "added", "mod": "Cyclopedia", "text": "Added search engine to Home tab." }
+      ]
+    },
+    {
       "version": "3.3.16",
       "changes": [
         { "type": "fixed", "mod": "Better Tasker", "text": "Autorefill fix." },

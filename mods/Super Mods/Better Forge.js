@@ -2674,8 +2674,9 @@
   
   function getUserCurrentDust() {
     try {
-      const playerContext = globalThis.state?.player?.getSnapshot()?.context;
-      const dust = Number(playerContext?.dust) || 0;
+      const snapshot = globalThis.state?.player?.getSnapshot();
+      // Try multiple locations for dust, matching the update function's read pattern
+      const dust = Number(snapshot?.context?.dust ?? snapshot?.inventory?.dust ?? snapshot?.dust ?? 0);
       return dust;
     } catch (error) {
       console.error('[Better Forge] Error getting user dust:', error);
@@ -5313,9 +5314,11 @@
         fn: (prev) => {
           const newState = { ...prev };
           newState.inventory = { ...prev.inventory };
+          // Ensure context exists for dust updates
+          newState.context = { ...prev.context };
           
           const currentGold = Number(prev.inventory?.gold ?? prev.gold ?? 0);
-          const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? 0);
+          const currentDust = Number(prev.inventory?.dust ?? prev.dust ?? prev.context?.dust ?? 0);
           
           if (goldChange !== 0) {
             const newGold = currentGold + goldChange;
@@ -5329,6 +5332,7 @@
             const safeDust = Math.max(0, newDust);
             newState.inventory.dust = safeDust;
             newState.dust = safeDust;
+            newState.context.dust = safeDust; // Also update context.dust for getUserCurrentDust()
           }
           
           return newState;
