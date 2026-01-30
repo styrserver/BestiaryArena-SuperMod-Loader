@@ -4,6 +4,12 @@
   },
   "notes": [
     {
+      "version": "3.3.18",
+      "changes": [
+        { "type": "fixed", "mod": "Cyclopedia", "text": "Fixed HomeSearch clicks getting stuck while ability indexing was running." }
+      ]
+    },
+    {
       "version": "3.3.17",
       "changes": [
         { "type": "fixed", "mod": "Better Forge", "text": "Fixed dust being reset to 0 after forging." },

@@ -344,6 +344,7 @@ const CyclopediaHomeSearch = (() => {
   let roomCreatureIndex = null; // Map<roomId, Set<creatureName>>
   let creatureAbilityTextCache = null; // Map<creatureNameLower, { v: number, text: string } | string>
   let abilityIndexState = {
+    abortToken: 0,
     running: false,
     done: 0,
     total: 0,
@@ -470,6 +471,20 @@ const CyclopediaHomeSearch = (() => {
     };
   }
 
+  function abortAbilityIndexing() {
+    try {
+      abilityIndexState.abortToken = (Number(abilityIndexState.abortToken) || 0) + 1;
+      abilityIndexState.running = false;
+      abilityIndexState.queue = [];
+      if (abilityIndexState.tickTimer) clearTimeout(abilityIndexState.tickTimer);
+      abilityIndexState.tickTimer = null;
+      notifyAbilityIndexUpdate();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function subscribeAbilityIndex(listener) {
     if (typeof listener !== 'function') return () => {};
     abilityIndexState.listeners.add(listener);
@@ -512,6 +527,7 @@ const CyclopediaHomeSearch = (() => {
       abilityIndexPromise = new Promise((resolve) => {
         let resolved = false;
         let timeoutId = null;
+        const abortTokenAtStart = Number(abilityIndexState.abortToken) || 0;
 
         const cleanupAndResolve = (value) => {
           if (resolved) return;
@@ -522,6 +538,12 @@ const CyclopediaHomeSearch = (() => {
         };
 
         const unsubscribe = subscribeAbilityIndex((progress) => {
+          // If something (like a priority navigation) aborts indexing, resolve quickly.
+          if ((Number(abilityIndexState.abortToken) || 0) !== abortTokenAtStart) {
+            try { unsubscribe(); } catch { /* ignore */ }
+            cleanupAndResolve(false);
+            return;
+          }
           const done = !progress?.running && (progress?.total || 0) > 0 && (progress?.done || 0) >= (progress?.total || 0);
           if (done || isAbilityIndexReady()) {
             try { unsubscribe(); } catch { /* ignore */ }
@@ -1132,6 +1154,7 @@ const CyclopediaHomeSearch = (() => {
     creatureAbilityTextCache = null;
     abilityIndexPromise = null;
     try {
+      abilityIndexState.abortToken = (Number(abilityIndexState.abortToken) || 0) + 1;
       abilityIndexState.running = false;
       abilityIndexState.queue = [];
       abilityIndexState.done = 0;
@@ -1150,6 +1173,7 @@ const CyclopediaHomeSearch = (() => {
     // Ability text indexing helpers (used by Home search UI)
     ensureAbilityIndexReady,
     isAbilityIndexReady,
+    abortAbilityIndexing,
     // Existing exports (kept for compatibility/debug)
     startAbilityIndexing,
     getAbilityIndexProgress,
@@ -3960,12 +3984,13 @@ function createStartPage() {
 function openCyclopediaModal(options) {
   try {
     const now = Date.now();
+    options = options || {};
+    const forceOpen = options.force === true || options.priority === true || options.fromHomeSearch === true;
     if (cyclopediaModalInProgress) return;
-    if (now - lastModalCall < 1000) return;
+    if (!forceOpen && now - lastModalCall < 1000) return;
     
     lastModalCall = now;
     cyclopediaModalInProgress = true;
-    options = options || {};
     const creatureToSelect = options.creature;
     const equipmentToSelect = options.equipment;
     const isFromHeader = options.fromHeader === true;
@@ -14455,7 +14480,7 @@ function renderCyclopediaSearchColumn() {
 
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Search creatures, equipment, maps, inventory...';
+  input.placeholder = 'Search Cyclopedia';
   input.autocomplete = 'off';
   input.spellcheck = false;
   inputWrap.appendChild(input);
@@ -14537,6 +14562,8 @@ function renderCyclopediaSearchColumn() {
   }
 
   let abilityRefreshToken = 0;
+  let pendingNavigateTarget = null;
+  let pendingNavigatePollId = null;
 
   function renderResults(query) {
     const { results } = CyclopediaHomeSearch.search(query);
@@ -14619,14 +14646,65 @@ function renderCyclopediaSearchColumn() {
         row.appendChild(sub);
       }
 
+      function abortBackgroundWorkForPriorityNavigation() {
+        try { abilityRefreshToken++; } catch { /* ignore */ }
+        try {
+          if (debounceId) clearTimeout(debounceId);
+          debounceId = null;
+        } catch { /* ignore */ }
+        try {
+          if (CyclopediaHomeSearch && typeof CyclopediaHomeSearch.abortAbilityIndexing === 'function') {
+            CyclopediaHomeSearch.abortAbilityIndexing();
+          }
+        } catch { /* ignore */ }
+      }
+
+      function requestPriorityNavigate(target) {
+        abortBackgroundWorkForPriorityNavigation();
+        pendingNavigateTarget = target;
+
+        // Fast path: if the bridge already exists, navigate immediately.
+        try {
+          const navNow = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null;
+          if (typeof navNow === 'function') {
+            pendingNavigateTarget = null;
+            navNow(target);
+            return;
+          }
+        } catch { /* ignore */ }
+
+        // Otherwise, force-open Cyclopedia (bypasses the 1s throttle) and poll briefly until ready.
+        try { openCyclopediaModal({ fromHomeSearch: true, force: true }); } catch { /* ignore */ }
+
+        if (pendingNavigatePollId) return;
+        const startedAt = Date.now();
+        const poll = () => {
+          pendingNavigatePollId = null;
+          if (!pendingNavigateTarget) return;
+
+          let nav = null;
+          try { nav = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null; } catch { nav = null; }
+          if (typeof nav === 'function') {
+            const t = pendingNavigateTarget;
+            pendingNavigateTarget = null;
+            try { nav(t); } catch (e) { console.warn('[Cyclopedia] HomeSearch: error navigating:', e); }
+            return;
+          }
+
+          if (Date.now() - startedAt > 5000) {
+            pendingNavigateTarget = null;
+            console.warn('[Cyclopedia] HomeSearch: navigation bridge still unavailable; giving up.');
+            return;
+          }
+
+          pendingNavigatePollId = setTimeout(poll, 50);
+        };
+        pendingNavigatePollId = setTimeout(poll, 50);
+      }
+
       const onClick = () => {
         try {
-          const nav = typeof window !== 'undefined' ? window.cyclopediaHomeSearchNavigate : null;
-          if (typeof nav === 'function') {
-            nav(r.target);
-          } else {
-            console.warn('[Cyclopedia] HomeSearch: navigation bridge not available yet.');
-          }
+          requestPriorityNavigate(r.target);
         } catch (e) {
           console.warn('[Cyclopedia] HomeSearch: error navigating:', e);
         }
